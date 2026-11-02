@@ -81,6 +81,12 @@ test('normal physical workers recover original cap holds through real Lua and fi
   const sent=await runShipmentMail(clock+30000,async(message,barrier)=>{assert.equal(JSON.stringify(message),JSON.stringify(input.message));assert.equal(await barrier(),true);posts++;return 'accepted';},renewed);
   assert.equal(sent.accepted,1);assert.equal(posts,1);
   assert.equal((await pipeline([['GET',rk]]))[0],null);
+  // Finish this snapshot's acknowledged missing confirmation-family position
+  // before creating a DIFFERENT source for the next independent scenario.
+  // A new grant no longer discards the previous active list or cursor.
+  await runOrderConfirmationMail(clock+30000,async()=>{throw Error('No confirmation source exists yet');},renewed);
+  const [finishedSnapshot]=await pipeline([['HGET',pool,'pendingRecovery']]);
+  assert.equal(JSON.parse(String(finishedSnapshot)).phase,'done');
 
   // Create the genuine original source73h in the past using the production
   // checkout with only its explicit fixture provider/ACK boundaries synthetic.

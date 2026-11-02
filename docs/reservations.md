@@ -40,7 +40,7 @@ Generated from the GitHub API; refresh before relying on it. Every file below is
 
 ## Reservations before code
 
-Add a row before the first commit of a unit; remove it when the unit is merged.
+Add a row before the first commit of a unit; remove it when the unit is merged. `tests/reservation-check.test.ts`, run by `npm test` in the product checks of every pull request (`scripts/reservation-check.mjs`), fails any pull request whose changed files include a path another agent reserved here, read from the base branch so a PR cannot clear another agent's row for itself; the agent is taken from the branch prefix in the Lanes table. Write each reserved file as an exact path in backticks; `docs/codex-queue.md` and this file are shared and never block.
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
@@ -51,3 +51,6 @@ Add a row before the first commit of a unit; remove it when the unit is merged.
 | Claude 3 | 631 [AA1] unit 4 (check of AI-generated code before publishing, step (d); pure rules, nothing published) | claude3/aa1-code-check | `lib/generated-code-check.ts`, `tests/generated-code-check.test.ts`, `lib/form-sensitive.ts` (one exported helper, same rules) | 02/11/2026 13h58 |
 | Claude 3 | 631 [AA1] unit 5 (/llms.txt generated from the MCP tool list, steps (b) and 614 [WP13]) | claude3/aa1-llms | `lib/mcp-catalog.ts`, `lib/llms-text.ts`, `app/llms.txt/route.ts`, `app/api/mcp/route.ts`, `tests/llms-txt.test.ts`, `tests/agent-coverage.test.ts`, `docs/accessibility-inventory.json` | 02/11/2026 14h07 |
 | Claude 3 | 632 [AA2] unit 1 (study of the ad platforms' APIs, step (a); not confirmed until the official pages can be read) | claude3/aa2-study | `docs/ad-platforms-study.md` | 02/11/2026 14h21 |
+| Claude 3 | 631 [AA1] unit 6 (command line for agents and developers over the MCP server, 616 [WP15](24)) | claude3/aa1-cli | `cli/marktmorgen.mjs`, `cli/package.json`, `cli/README.md`, `tests/cli.test.ts` | 02/11/2026 14h09 |
+| Claude 3 | 631 [AA1] unit 7 (isolation rules for AI-generated apps: their Content-Security-Policy, headers and the frame that shows them, step (d); pure rules) | claude3/aa1-app-policy | `lib/generated-app-policy.ts`, `tests/generated-app-policy.test.ts` | 02/11/2026 14h12 |
+| Claude 3 | 631 [AA1] unit 8 (MCP tools get_live and get_numbers_for_days, a title on every tool; stacked on unit 5) | claude3/aa1-read-tools | `lib/mcp-tools.ts`, `lib/mcp-catalog.ts`, `app/api/mcp/route.ts`, `app/developers/page.tsx`, `tests/mcp-read-tools.test.ts`, `tests/mcp-dispatch.test.ts`, `lib/agent-coverage.ts` | 02/11/2026 14h19 |

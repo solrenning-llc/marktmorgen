@@ -17,6 +17,9 @@
 import { NO_NARROW, buyerLedger, isNarrowed, keeps, ledgerChannels, listSegments, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { audience, leadsKey } from "@/lib/contacts";
 import type { Store } from "@/lib/store";
+import { readDraftAudience } from "@/lib/mail-draft-audience";
+import { rfmGroup } from "@/lib/rfm-rules";
+import { sameNarrow } from "@/lib/segments-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -121,6 +124,13 @@ async function main(): Promise<void> {
   is("first found you directly, eve among them", keep({ channel: "direct" }), ["cy@example.com", "eve@example.com"]);
   is("has not bought in 90 days, but has bought: not eve, who bought three days ago", keep({ quietDays: 90 }), ["ben@example.com"]);
   is("all three at once", keep({ minSpent: 1, channel: "tiktok", quietDays: 30 }), ["ben@example.com"]);
+  // One group of buyers (270 [GR1], unit 3b): ana bought twice, the last 10 days ago; ben once, 120 days ago; cy and eve once, days ago.
+  is("one group of buyers: loyal, bought once, new", [keep({ group: "loyal" }), keep({ group: "once" }), keep({ group: "new" })], [["ana@example.com"], ["ben@example.com"], ["cy@example.com", "eve@example.com"]]);
+  is("a group nobody is in keeps nobody, and never someone who is not a buyer", keep({ group: "best" }), []);
+  const base = { who: "all", notProductId: null, narrow: { minSpent: 0, channel: "", quietDays: 0, group: "loyal" } };
+  is("a draft keeps its group; one that is not a group is refused, never read as everyone", [readDraftAudience(base)?.narrow?.group, readDraftAudience({ ...base, narrow: { ...base.narrow, group: "vip" } })], ["loyal", null]);
+  is("a narrowing with a field this version does not know is refused, never read as a broader group; a null group is none", [sameNarrow({ minSpent: 0, channel: "", quietDays: 0, tier: "gold" }, readNarrow({})), sameNarrow({ minSpent: 0, channel: "", quietDays: 0, group: null }, readNarrow({})), sameNarrow({ minSpent: 0, channel: "", quietDays: 0 }, readNarrow({ group: "new" }))], [false, true, false]);
+  is("a group is read from a request only when it is one of the groups", [readNarrow({ group: "loyal" }).group, "group" in readNarrow({ group: "vip" }), isNarrowed(readNarrow({ group: "new" }))], ["loyal", false, true]);
 
   part("A list narrowed that way");
   await redis.pipeline([
@@ -167,8 +177,8 @@ async function main(): Promise<void> {
   ];
   const fresh = await buyerLedger({ ...store, statsId: "t".repeat(32) } as Store);
   const at = (email: string) => fresh.buyers.get(email);
-  is("a member's renewal moves their last purchase and adds what it paid, but is not a new order", [at("gil@example.com")?.cents, at("gil@example.com")?.orders, Math.round(((at("gil@example.com")?.last ?? 0) / 1000 - now) / DAY)], [4000, 1, -5]);
-  is("a renewal with no checkout read is still a buyer, with no order", [at("kim@example.com")?.cents, at("kim@example.com")?.orders], [1500, 0]);
+  is("a member's renewal moves their last purchase and adds what it paid, and is one more time they bought", [at("gil@example.com")?.cents, at("gil@example.com")?.orders, Math.round(((at("gil@example.com")?.last ?? 0) / 1000 - now) / DAY)], [4000, 2, -5]);
+  is("a renewal with no checkout read is still a buyer, its payment one time they bought", [at("kim@example.com")?.cents, at("kim@example.com")?.orders], [1500, 1]);
   is("another store's renewal is not", at("lou@example.com"), undefined);
   is("refunded in full is not a purchase; in part, what was kept counts", [at("hal@example.com"), at("ian@example.com")?.cents], [undefined, 5000]);
   is("a dispute the buyer won, or one still open, is not a purchase either", [at("jo@example.com"), at("max@example.com")], [undefined, undefined]);
@@ -207,6 +217,15 @@ async function main(): Promise<void> {
   ];
   const parts = await buyerLedger({ ...store, statsId: "v".repeat(32) } as Store);
   is("an invoice paid in parts: each part's refund is taken off", parts.buyers.get("rae@example.com")?.cents, 1500);
+
+  // A member of a year: one checkout and eleven monthly payments, the last ten days ago, is a best customer, not a new one.
+  sessions.push(session("sam1", "sam@example.com", 340, 1000));
+  invoices = Array.from({ length: 11 }, (_, i) => ({ ...renewal(`sam${String(i).padStart(2, "0")}`, "sam@example.com", 10 + i * 30, 1000), payments: undefined, payment_intent: `pi_sam${i}` }));
+  refunds = [];
+  invoicePayments = [];
+  const year = await buyerLedger({ ...store, statsId: "x".repeat(32) } as Store);
+  const sam = year.buyers.get("sam@example.com");
+  is("a member of a year counts every payment, and is a best customer", [sam?.orders, sam ? rfmGroup(sam, NOW) : null], [12, "best"]);
 
   // The account's invoice payments could not be read: a renewal needing one is unmatched, so the reading is partial.
   invoicePaymentsFail = true;

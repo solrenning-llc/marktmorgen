@@ -141,13 +141,15 @@ export function SaleNote({ store, product }: { store: Store; product: Listing })
 /** What a card says about a call: one person, a group, or dated live sessions. */
 function callLine(store: Store, call: NonNullable<Listing["call"]>, now = Date.now()): string {
   const { w } = speech(store);
+  // In person (lib/call-place.ts): no call and nothing online; the address is on its booking page.
+  const inPerson = Boolean(call.place);
   if (call.kind === "live") {
     const coming = call.sessions.filter((s) => s.start > now).length;
-    if (coming === 0) return w.callLiveNone;
-    return w.callLive(coming);
+    if (coming === 0) return inPerson ? w.inPersonLiveNone : w.callLiveNone;
+    return inPerson ? w.inPersonLive(coming) : w.callLive(coming);
   }
-  if (call.seats > 1) return w.callGroup(call.minutes, call.seats);
-  return w.callOne(call.minutes);
+  if (call.seats > 1) return inPerson ? w.inPersonGroup(call.minutes, call.seats) : w.callGroup(call.minutes, call.seats);
+  return inPerson ? w.inPersonOne(call.minutes) : w.callOne(call.minutes);
 }
 
 /** Whether a call can still be booked: always for weekly hours, and for dated sessions while one is before its notice. */

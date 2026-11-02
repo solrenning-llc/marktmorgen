@@ -7,9 +7,10 @@
  * Reviewed: how buyers pay (once, every day, week, month or year, or they
  * choose); the price, or the lowest price they may choose; the price their
  * box starts at; a membership's introductory price and its yearly price,
- * also when a change of schedule takes them away. Not reviewed yet: a
- * membership's free trial and its number of payments; products with several
- * price options, each priced in its own editor; drafts, which no buyer sees.
+ * also when a change of schedule takes them away; and, in its own editor, the
+ * price of one of several price options (optionPriceReview). Not reviewed
+ * yet: a membership's free trial and its number of payments; drafts, which
+ * no buyer sees.
  *
  * What it says about members is what the code does: a membership's checkout
  * makes the member's subscription at the price and schedule of that moment
@@ -93,4 +94,45 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
       ? "New members pay this once you save; a checkout already open keeps what it opened with. Members who already joined keep the price and schedule they joined at."
       : "Members who already joined keep being charged the price and schedule they joined at until they or you cancel: saving this does not cancel them. To stop them, cancel their memberships in your Stripe dashboard. New buyers pay what this summary shows once you save.";
   return { rows, note };
+}
+
+/**
+ * The review for saving one of several price options of a product buyers
+ * can see with a new price, or null when the price is the same, cannot be
+ * read or is out of range (the save says why), the product is a draft, or the
+ * option is not offered (`shown` false: it has nothing to hand over yet).
+ * `label` is the name as typed. On a membership, members who joined at that
+ * price keep it, as for the product's own price. With a payment plan offered
+ * on the product, what the new price does to it is said: a price above what
+ * the option's payments add up to stops the plan for the whole product (lib/
+ * product-extras.ts, uncoveredOption), and below it buyers who pay in parts
+ * still pay what the payments add up to.
+ *
+ * Not reviewed yet: adding or removing an option, and changing which is
+ * recommended.
+ */
+export function optionPriceReview(
+  option: { label: string; priceCents: number },
+  typed: string,
+  product: { hidden: boolean; interval: Interval | null; shown: boolean; plan: { payments: number; cents: number } | null },
+  read: (typed: string) => number | null,
+  money: (cents: number) => string,
+): PriceReview | null {
+  if (product.hidden || !product.shown) return null;
+  const price = read(typed.trim());
+  if (price === null || price === option.priceCents) return null;
+  const notes = [
+    product.interval
+      ? "New members who pick it pay this once you save; a checkout already open keeps what it opened with. Members who already joined keep the price they joined at."
+      : "Your store shows this as soon as you save.",
+  ];
+  if (product.plan) {
+    const total = product.plan.payments * product.plan.cents;
+    if (total < price) notes.push(`Your payment plan stops being offered on this product: its ${product.plan.payments} payments of ${money(product.plan.cents)} for this price add up to ${money(total)}, less than ${money(price)}. Raise that payment in the plan to offer it again.`);
+    else if (total > price) notes.push(`Buyers who pay in ${product.plan.payments} payments still pay ${money(product.plan.cents)} each, ${money(total)} in all, until you change that payment in the plan.`);
+  }
+  return {
+    rows: [{ key: "option", label: `“${option.label}”`, now: money(option.priceCents), then: money(price), field: "price" }],
+    note: notes.join(" "),
+  };
 }

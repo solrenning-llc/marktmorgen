@@ -216,7 +216,12 @@ The choice is one function, `profileKeyboard`, held by `tests/socials-keyboards.
   - a membership's introductory and yearly prices, also when a change of schedule takes them away.
 
   For a membership that stays one, it says new members pay the new price once it is saved, and members who already joined keep the price and schedule they joined at. For a membership that stops being one, it says members who already joined keep being charged until they or the creator cancel, and that this is done in the Stripe dashboard. That is what the code does: each membership is made at checkout at that moment's price and schedule, and saving the product changes and cancels no subscription.
-- still to do: a membership's free trial and number of payments, and products with several price options, each priced in its own editor;
+- one of several price options: **tested in a PR (2 November 2026).** Saving an option with a new price, on a product buyers can see and an option that is offered, shows "Check what buyers pay" in the option's own editor. It has one row for the option, named as typed, with "Now: …", "Once you save: …" and a "Change" back to its price. It also says:
+  - for a membership, that members who joined at it keep that price;
+  - with a payment plan offered, either that a price above what its payments add up to stops the plan for the whole product (and how to bring it back), or that buyers who pay in parts still pay what the payments add up to.
+
+  Only a price the save can take is reviewed, and the price is sent without spaces around it.
+- still to do: a membership's free trial and number of payments; adding or removing a price option, and changing which is recommended;
 - the community announcement email. Its composer is on the community page, in the buyer's language, with its words in `lib/buyer-words` in seven languages. A review there needs its new sentences written in each of them, so it gets a unit of its own, under the rules for buyer languages.
 
 ## Pattern 7: a live preview at phone width beside each editor (1 November 2026, first pass)

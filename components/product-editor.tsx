@@ -1,6 +1,6 @@
 "use client";
 
-import { priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
+import { optionPriceReview, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
@@ -40,7 +40,7 @@ import {
   isFree,
   type Product,
 } from "@/lib/store-field-rules";
-import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, priceBounds, rangeWords, readMoney } from "@/lib/money";
+import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, priceBounds, priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { StoreCurrency, useStoreCurrency } from "@/components/store-currency";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import {
@@ -56,7 +56,10 @@ import {
   MAX_OPTION_DETAIL_LENGTH,
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
+  optionDelivers,
 } from "@/lib/product-option";
+import { activePlan } from "@/lib/product-extras";
+import type { Listing } from "@/lib/store";
 import { LINK_PROBLEMS, type LinkProblem, linkHost } from "@/lib/product-link";
 import {
   INTERVALS,
@@ -879,6 +882,8 @@ function OptionsBlock({
   const [sku, setSku] = useState("");
   const [best, setBest] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The option whose new price is being checked before saving (487 [IT4], item 8; lib/price-review.ts).
+  const [optionReview, setOptionReview] = useState<string | null>(null);
   const inFlight = useRef(false);
   // A course or private podcast is its own delivery: every price opens it,
   // and a file or link on one is something extra that price includes.
@@ -972,7 +977,10 @@ function OptionsBlock({
             inputMode={currency === "jpy" ? "numeric" : "decimal"}
             required
             value={price}
-            onChange={(event) => setPrice(event.target.value)}
+            onChange={(event) => {
+              setPrice(event.target.value);
+              setOptionReview(null);
+            }}
             placeholder={currency === "jpy" ? "3900" : "39"}
             className="field mt-1"
           />
@@ -1081,21 +1089,69 @@ function OptionsBlock({
       <ul className="mt-3 space-y-2">
         {product.options.map((option, index) => (
           <li key={option.id} className="rounded-2xl bg-sand p-3">
-            {editingId === option.id ? (
-              form(
-                "Save",
-                () =>
-                  run(
-                    { action: "edit", id: option.id, label, price, details, best, ...(shipped ? { sku } : {}) },
-                    () => setEditingId(null),
-                    "Price saved.",
-                  ),
-                () => {
-                  setEditingId(null);
-                  setError(null);
+            {editingId === option.id ? (() => {
+              // The plan as buyers are offered it now, with this price's own payment (lib/product-extras.ts).
+              const plan = activePlan(product as Listing);
+              const review = optionPriceReview(
+                { label: label.trim() || option.label, priceCents: option.priceCents },
+                price,
+                { hidden: product.hidden, interval: product.recurring?.interval ?? null, shown: optionDelivers(option, opens), plan: plan?.options?.[option.id] ? { payments: plan.payments, cents: plan.options[option.id] } : null },
+                // Only a price the save can take is reviewed; anything else the save itself explains.
+                (typed) => {
+                  const cents = readMoney(typed, currency);
+                  return cents !== null && priceInRange(cents, currency) ? cents : null;
                 },
-              )
-            ) : (
+                (cents) => formatMoney(cents, currency),
+              );
+              const save = () =>
+                run(
+                  { action: "edit", id: option.id, label, price: price.trim(), details, best, ...(shipped ? { sku } : {}) },
+                  () => {
+                    setEditingId(null);
+                    setOptionReview(null);
+                  },
+                  "Price saved.",
+                );
+              return (
+                <>
+                  {form(
+                    "Save",
+                    () => {
+                      // A new price buyers meet at once is checked first (487 [IT4], item 8).
+                      if (review && optionReview !== option.id) {
+                        setOptionReview(option.id);
+                        requestAnimationFrame(() => document.getElementById(`option-${option.id}-price-review-title`)?.focus());
+                        return;
+                      }
+                      save();
+                    },
+                    () => {
+                      setEditingId(null);
+                      setOptionReview(null);
+                      setError(null);
+                    },
+                  )}
+                  {optionReview === option.id && review ? (
+                    <div className="mt-3 rounded-[var(--r-md)] bg-white p-4 text-sm text-ink">
+                      <h3 id={`option-${option.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check what buyers pay</h3>
+                      <dl className="mt-2 divide-y divide-line">
+                        {review.rows.map((row) => (
+                          <div key={row.key} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                            <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">{row.label}</dt>
+                            <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1"><span className="block">{`Now: ${row.now}`}</span><span className="block font-semibold">{`Once you save: ${row.then}`}</span></dd>
+                            <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => { setOptionReview(null); requestAnimationFrame(() => document.getElementById(`option-price-${product.id}`)?.focus()); }}>Change<span className="sr-only">{` the price of ${row.label}`}</span></button></dd>
+                          </div>
+                        ))}
+                      </dl>
+                      <p className="mt-2">{review.note}</p>
+                      <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={save}>
+                        Yes, save what buyers pay
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              );
+            })() : (
               <>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="font-bold text-ink">

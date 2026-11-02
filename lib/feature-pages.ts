@@ -8,6 +8,7 @@ import { deliveryBeginnerQuestions } from "@/lib/delivery-faq";
 import { checkoutBeginnerQuestions } from "@/lib/checkout-faq";
 import { stripeBeginnerQuestions } from "@/lib/your-stripe-faq";
 import { salesPageBeginnerQuestions } from "@/lib/sales-page-faq";
+import { optionsBeginnerQuestions } from "@/lib/price-options-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -263,6 +264,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about price options",
         items: [
+          // 534 [FQ1], unit 10: what someone starting out asks, answered by the code (lib/price-options-faq.ts).
+          ...optionsBeginnerQuestions(),
           { q: "Can I change a price after people have bought?", a: "Yes. What changes is what the next buyer pays. Whoever already bought keeps what they paid for, and the file of the option they chose." },
           { q: "Do discount codes and the box at checkout work with options?", a: "Yes. A code comes off the option the buyer picked, and the box at checkout adds its product to whichever option they chose." },
           { q: "Can an option be a membership?", a: "Yes. A membership can have options too — monthly members choosing between two levels, for example — each charged on your own Stripe account." },

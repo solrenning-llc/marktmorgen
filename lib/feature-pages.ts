@@ -31,6 +31,7 @@ import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
 import { emailBeginnerQuestions } from "@/lib/email-faq";
 import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
 import { switchingBeginnerQuestions } from "@/lib/switching-faq";
+import { clickFunnelsBeginnerQuestions } from "@/lib/clickfunnels-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -2508,6 +2509,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about moving from ClickFunnels",
         items: [
+          // 534 [FQ1], unit 37: what someone starting out asks, answered by the code (lib/clickfunnels-faq.ts).
+          ...clickFunnelsBeginnerQuestions(),
           { q: "In what order should I import?", a: "Products first, because your Orders file and your funnel name them. Then your contacts, your past buyers, and last your funnel's pages." },
           { q: "Which contacts can I email after the move?", a: "Only those ClickFunnels marks Subscribed, and only after you check the box confirming those people agreed to receive your emails. Nobody is emailed because of the import." },
           { q: "Is anything saved during the dry run?", a: "No. The dry run checks every row and every page and lists what would happen. Nothing is added to your store until you press import." },

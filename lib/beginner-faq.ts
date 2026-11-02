@@ -16,8 +16,20 @@ export function uploadsWait(scope: "setup" | "trial"): string {
   return AUTOMATIC_UPLOAD_CAPS[scope].opens === 0 ? "Files and lesson videos can be uploaded once a paid plan starts." : "";
 }
 
+/**
+ * What every store without a paid plan meets, a trial included: a smaller
+ * figure for each kind of work a month (NON_PAYING_ALLOWANCES,
+ * lib/store-allowance-rules.ts) and a place among the month's stores without
+ * a paid plan (admitNonPaying, lib/free-pool.ts), counted by calendar month
+ * (UTC); the limits are counted over the whole trial in a trial
+ * (allowanceWindow, lib/allowance-window.ts) and by calendar month without a
+ * plan. Past either, the work that needs it pauses. Not every refusal says
+ * which of the two it was yet (recorded in docs/codex-queue.md, FQ1 unit 28).
+ */
+export const UNPAID_ROOM = "Until a plan is paid, your store has smaller limits, for the whole trial or each month without a plan, and only so many stores without a paid plan can run each month, so some of its work can pause for a while.";
+
 export function tryBeforePaying(thing: string, setUp: string, onSale = PLANS_ON_SALE, trialDays = TRIAL_DAYS): string {
   return onSale
-    ? `Yes. An eligible first store can start a ${trialDays}-day trial when it picks a plan: your card is taken when the trial starts and first charged when it ends, and canceling inside it means it is never charged. ${thing} can be set up during the trial, and the trial leaves out paid AI writing. ${uploadsWait("trial")}`.trim()
-    : `Yes. Paid plans are not on sale yet, so there is nothing to pay for now, and you can set up ${setUp} in your own store's studio with no card. ${uploadsWait("setup")} To see a store working, open the live demo store from the link at the end of this page: a made-up store, marked as a demo.`.replace(/ {2,}/g, " ");
+    ? `Yes. An eligible first store can start a ${trialDays}-day trial when it picks a plan: your card is taken when the trial starts and first charged when it ends, and canceling inside it means it is never charged. ${thing} can be set up during the trial, and the trial leaves out paid AI writing. ${uploadsWait("trial")} ${UNPAID_ROOM}`.replace(/ {2,}/g, " ").trim()
+    : `Yes. Paid plans are not on sale yet, so there is nothing to pay for now, and you can set up ${setUp} in your own store's studio with no card. ${uploadsWait("setup")} ${UNPAID_ROOM} To see a store working, open the live demo store from the link at the end of this page: a made-up store, marked as a demo.`.replace(/ {2,}/g, " ");
 }

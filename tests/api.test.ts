@@ -29,7 +29,18 @@ async function main(): Promise<void> {
   if (!made.ok) throw new Error("no key made");
   is("it looks like a key, so one pasted in the wrong place is recognisable", /^nl_live_[0-9a-f]{40}$/.test(made.key), true);
   is("it needs a name", (await makeKey(A, "   ")).ok, false);
-  const stored = JSON.stringify(redis.keys().map((k) => redis.run(["GET", k]) ?? redis.run(["HGETALL", k])));
+  // Read each value by its Redis type; a hash is not a missing string.
+  const stored = JSON.stringify(redis.keys().map((key) => {
+    switch (redis.run(["TYPE", key])) {
+      case "string": return redis.run(["GET", key]);
+      case "hash": return redis.run(["HGETALL", key]);
+      case "set": return redis.run(["SMEMBERS", key]);
+      case "zset": return redis.run(["ZRANGEBYSCORE", key, "-inf", "+inf"]);
+      case "list": return redis.run(["LRANGE", key, 0, -1]);
+      case "none": return null;
+      default: throw new Error("Unrecognized synthetic API value type");
+    }
+  }));
   is("the key itself is stored nowhere", stored.includes(made.key), false);
   is("the list shows its start and never the whole", (await listKeys(A)).map((k) => k.hint), [made.key.slice(8, 14)]);
 

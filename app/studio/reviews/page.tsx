@@ -8,7 +8,8 @@ import { can } from "@/lib/team-roles";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { canWrite } from "@/lib/mail";
-import { HIDDEN_RULE, type StudioRow, averageText, showsRating, studioReviews, summaries } from "@/lib/reviews";
+import { HIDDEN_RULE, OVERVIEW_READ_MAX, type StudioRow, averageText, reviewsSince, showsRating, studioReviews, summaries } from "@/lib/reviews";
+import { OVERVIEW_MONTHS, byMonth, monthAverage, monthStart } from "@/lib/review-overview";
 import { ReviewAskEditor, ReviewRow, SeenAllButton, type StudioReview } from "@/components/review-studio";
 import { AiOn } from "@/components/ai-assist";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
@@ -47,10 +48,14 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   const queue = query.view !== "all";
   const asked = Number(typeof query.page === "string" ? query.page : "1");
   const page = Number.isInteger(asked) && asked >= 1 ? asked : 1;
-  const [list, numbers] = await Promise.all([
+  // The request's own time, read once on the server, for the months below (636 [GL4](c)).
+  const now = new Date().getTime();
+  const [list, numbers, recent] = await Promise.all([
     studioReviews(store.statsId, { queue, offset: (page - 1) * PAGE_SIZE, limit: PAGE_SIZE }).catch(() => null),
     summaries(store.statsId),
+    reviewsSince(store.statsId, monthStart(now, OVERVIEW_MONTHS - 1)).catch(() => null),
   ]);
+  const months = recent ? byMonth(recent.reviews, now) : null;
   const listKnown = list !== null;
   const current = list ?? { rows: [], total: 0, unseen: 0 };
   // Only the products that have reviews, or are on this page of them, are
@@ -214,6 +219,47 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 </ul>
               )}
             </div>
+
+            <section aria-labelledby="by-month-title" className="card p-5 sm:p-6">
+              <h2 id="by-month-title" className="font-semibold text-ink">By month</h2>
+              {!months ? (
+                <p className="mt-2 text-sm text-ink-soft" role="status">The months could not be read just now. Reload to try again; this does not mean there were no reviews.</p>
+              ) : months.every((m) => m.count === 0 && m.refunded === 0) ? (
+                <p className="mt-2 text-sm text-ink-soft">No reviews in the last {OVERVIEW_MONTHS} months.</p>
+              ) : (
+                <>
+                  <table className="mt-3 w-full text-left text-sm">
+                    <caption className="sr-only">Reviews and their average stars in each of the last {OVERVIEW_MONTHS} months, newest first</caption>
+                    <thead>
+                      <tr className="text-ink-soft">
+                        <th scope="col" className="py-1 pr-2 font-semibold">Month</th>
+                        <th scope="col" className="py-1 pr-2 text-right font-semibold">Reviews</th>
+                        <th scope="col" className="py-1 text-right font-semibold">Average</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {months.map((m) => {
+                        const avg = monthAverage(m);
+                        return (
+                          <tr key={m.month} className="border-t border-line">
+                            <th scope="row" className="py-1.5 pr-2 font-normal text-ink">{m.label}</th>
+                            <td className="py-1.5 pr-2 text-right tabular-nums text-ink">
+                              {m.count}
+                              {m.refunded ? <span className="text-ink-soft">{` + ${m.refunded} refunded`}</span> : null}
+                            </td>
+                            <td className="py-1.5 text-right tabular-nums text-ink">{avg === null ? <span aria-label="none">–</span> : `${avg.toFixed(1)} of 5`}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <p className="mt-2 text-xs text-ink-soft">
+                    Every review counts the same, one star as much as five; a hidden review still counts, and a refunded one is shown apart and left out of the average, as on your product pages. Months in UTC.
+                    {recent && !recent.complete ? ` Only the newest ${OVERVIEW_READ_MAX.toLocaleString("en-US")} reviews are counted here, so the oldest months may show fewer.` : ""}
+                  </p>
+                </>
+              )}
+            </section>
 
             <div className="card p-5 sm:p-6">
               <h2 id="asking-for-reviews" tabIndex={-1} className="font-semibold text-ink">Asking for reviews</h2>

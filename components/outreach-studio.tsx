@@ -43,6 +43,7 @@ const MESSAGES: Record<string, string> = {
   room: STUDIO_MESSAGES.store_full,
   busy: "This can't be saved right now. Nothing was counted. Try again in a minute.",
   slow: "That was a lot in a short time. Wait a minute, then try again.",
+  day: "That is today's limit of site reads. Try again tomorrow.",
   signed_out: "Your session ended. Log in again.",
   unknown: "That pitch is no longer here. Reload the page.",
   server_error: "Something went wrong on our side. Nothing was changed. Try again in a moment.",
@@ -61,6 +62,8 @@ async function post(payload: Record<string, unknown>): Promise<{ ok: true; data:
     const response = await fetch("/api/store/outreach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (data.ok === true) return { ok: true, data };
+    // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
+    if (typeof data.message === "string" && data.message) return { ok: false, error: data.message };
     return { ok: false, error: MESSAGES[typeof data.error === "string" ? data.error : ""] ?? MESSAGES.server_error };
   } catch {
     return { ok: false, error: MESSAGES.server_error };

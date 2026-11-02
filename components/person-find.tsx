@@ -24,13 +24,14 @@ export function PersonFind({ initial = "" }: { initial?: string }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: "find", email }),
           });
-          const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; href?: string; error?: string };
+          const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; href?: string; error?: string; message?: string };
           if (answer.ok && answer.href) {
             window.location.assign(answer.href);
             return;
           }
           toast(
-            answer.error === "email"
+            // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
+            answer.message ? answer.message : answer.error === "email"
               ? "That is not an email address. Check it and try again."
               : answer.error === "limited"
                 ? "That is a lot of lookups in one hour. Try again a little later."

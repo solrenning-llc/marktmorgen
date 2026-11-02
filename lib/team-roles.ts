@@ -36,6 +36,9 @@
 /** The four roles. The owner is not invited; the other three are. */
 export type Role = "owner" | "admin" | "editor" | "support";
 export type TeamRole = Exclude<Role, "owner">;
+/** How long an invitation works, in days (lib/team.ts). */
+export const INVITE_DAYS = 7;
+
 export const TEAM_ROLES: TeamRole[] = ["admin", "editor", "support"];
 
 export function parseTeamRole(raw: unknown): TeamRole | null {

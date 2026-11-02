@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { ensureStatsId } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -47,9 +47,8 @@ export async function POST(request: NextRequest) {
   const paused = integrationPauseWord(store);
   const reaches = action === "check" || action === "calendars" || action === "ics-add" || (action === "source" && (body.source === "google" || body.source === "ics"));
   if (paused && reaches) return Response.json({ ok: false, error: paused, message: TOOLS_PAUSED_WORDS[paused] }, { status: 409 });
-  if (!removing && !(await withinService("host-calendar", `${store.statsId}|${email}`, PER_TEN_MINUTES, 600, store))) {
-    return Response.json({ ok: false, error: "limited" }, { status: 429 });
-  }
+  const refused = removing ? null : await withinServiceWhy("host-calendar", `${store.statsId}|${email}`, PER_TEN_MINUTES, 600, store);
+  if (refused) return serviceRefusedJson(refused, "limited");
   const tz = isTimeZone(body.tz) ? (body.tz as string) : "UTC";
   const view = () => hostCalendarView(store, email, tz);
   try {

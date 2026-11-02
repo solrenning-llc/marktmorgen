@@ -37,12 +37,12 @@ import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
-import { type Role, type TeamRole, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
+import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
 export const MAX_TEAM = 5;
-/** How long an invitation works. */
-export const INVITE_DAYS = 7;
+/** How long an invitation works (kept in lib/team-roles.ts, so a page can say it). */
+export { INVITE_DAYS };
 /** How many lines of the activity log are kept. */
 export const LOG_LINES = 500;
 /** Invitations one store may send in a day, so an inbox is never flooded from here. */

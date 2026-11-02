@@ -25,6 +25,7 @@
  */
 import type { Store } from "@/lib/store";
 import { canUse, hasPro } from "@/lib/plan";
+import { PLANS_ON_SALE } from "@/lib/opening";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import type { Permission } from "@/lib/team-roles";
 import { readAccount } from "@/lib/stripe-connect";
@@ -125,13 +126,19 @@ export function forRole(check: Check, can: (permission: Permission) => boolean):
   return { ...check, fix: { kind: "outside", where: `This is fixed in a part of the studio your role cannot open ("${fix.label}"). Ask the store's owner.` } };
 }
 
-/** Where billing is not set up here, the plan card (and its #billing anchor) is not drawn: the way to a plan is said, not linked. */
-export function forBilling(check: Check, billingReady: boolean): Check {
-  if (billingReady || check.fix?.kind !== "studio" || check.fix.href !== "/studio#billing") return check;
+/**
+ * Where billing is not set up here, the plan card (and its #billing anchor) is not drawn: the way to a plan is said,
+ * not linked. While no plan is on sale, the card draws no way to start or change one (app/api/billing/checkout and
+ * switch refuse), so that is said instead.
+ */
+export function forBilling(check: Check, billingReady: boolean, plansOnSale = true): Check {
+  if (check.fix?.kind !== "studio" || check.fix.href !== "/studio#billing") return check;
+  if (!plansOnSale) return { ...check, fix: { kind: "outside", where: "Plans are not on sale yet, so no plan can be started or changed for now." } };
+  if (billingReady) return check;
   return { ...check, fix: { kind: "outside", where: "Plans cannot be started or changed on this site just now." } };
 }
 
-export async function runCheckup(store: CheckedStore, can: (permission: Permission) => boolean, now = Date.now(), ms = CHECK_WAIT_MS, billingReady = true): Promise<Check[]> {
+export async function runCheckup(store: CheckedStore, can: (permission: Permission) => boolean, now = Date.now(), ms = CHECK_WAIT_MS, billingReady = true, plansOnSale = PLANS_ON_SALE): Promise<Check[]> {
   const account = store.stripeAccountId;
   const domain = store.domain?.name ?? null;
   const resting = domain !== null && !canUse(store, "domain");
@@ -150,9 +157,9 @@ export async function runCheckup(store: CheckedStore, can: (permission: Permissi
     domainCheck(domain, resting ? "resting" : site),
     stopped === "left-out" ? null : stopped ?? emailCheck(pause, now),
     account ? checkoutCheck(trouble) : null,
-    limitsCheck(limits, resetWords(store, now), standingOf(store, now / 1000) === "paid"),
+    limitsCheck(limits, resetWords(store, now), standingOf(store, now / 1000) === "paid", plansOnSale),
     // With no Stripe account there is nothing a dispute could be opened on; the payments line says so.
     account ? disputesCheck(disputes, now) : null,
   ]);
-  return checks.map((check) => forRole(forBilling(check, billingReady), can));
+  return checks.map((check) => forRole(forBilling(check, billingReady, plansOnSale), can));
 }

@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { isMeetProvider } from "@/lib/call-setup";
@@ -47,9 +47,8 @@ export async function POST(request: NextRequest) {
   // are paused; deleting one (untest) and disconnecting stay open.
   const paused = action === "test" || action === "movetest" ? integrationPauseWord(store) : null;
   if (paused) return Response.json({ ok: false, error: paused, message: MEETING_TEST_PAUSED_WORDS[paused] }, { status: 409 });
-  if (!(await withinService("meet-manage", store.statsId, PER_MINUTE, 60, store))) {
-    return Response.json({ ok: false, error: "limited" }, { status: 429 });
-  }
+  const refused = await withinServiceWhy("meet-manage", store.statsId, PER_MINUTE, 60, store);
+  if (refused) return serviceRefusedJson(refused, "limited");
   if (action === "test" || action === "movetest" || action === "untest") {
     try {
       if (action === "test") return Response.json({ ok: true, test: await makeTest(store, provider) });

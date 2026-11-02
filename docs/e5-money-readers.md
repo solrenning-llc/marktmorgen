@@ -60,7 +60,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `app/studio/requests/page.tsx` | NEW-CHARGE | 47–48: a request's amount prefilled in the store's currency; 73 the list labelled with it | partly: each record carries a currency the list ignores |
 | `lib/call-packages.ts` | NEW-CHARGE | 124: a package's checkout line in the store's currency; 212 the session's | partly |
 | `lib/calls.ts` | NEW-CHARGE | 670: a call's checkout line; 1341 the phone alert of what was paid, in the store's currency | no: 1341 ignores the paid currency |
-| `lib/checkout-recovery.ts` | SETTING | 446: a call's deposit read against its price in the store's currency, for the reminder of an abandoned checkout (520 [LB1], unit 5b-1) | no |
+| `lib/checkout-recovery.ts` | SETTING | 444: a call's deposit read against its price in the store's currency, for the reminder of an abandoned checkout (520 [LB1], unit 5b-1) | no |
 | `lib/cart-checkout.ts` | NEW-CHARGE | 143: each cart line's price_data in the store's currency | no |
 | `lib/pay-what-you-want.ts` | NEW-CHARGE | 123–137: the Price with a custom amount, in the store's currency | no |
 | `lib/payment-request-store.ts` | NEW-CHARGE | 92: a payment request saved with the store's currency | partly: kept per request |

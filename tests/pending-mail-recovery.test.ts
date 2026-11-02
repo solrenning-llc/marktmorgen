@@ -31,6 +31,20 @@ test('explicit recovery origin coverage admits a bounded hundred without changin
  assert.equal(Object.getOwnPropertyDescriptor(larger.recovery,'maximumOrigins')?.value,100);
 });
 
+test('paged recovery requires explicit total checkpoint capacity for a thousand origins', () => {
+ const legacy={...shipmentPolicy(now),recovery:recovery()};
+ for(const maximumOrigins of [101,1000]){
+  const grant={...recovery(),maximumOrigins,checkpointTotalBytes:100000};
+  const captured=shipmentMailPolicy({...legacy,recovery:grant},now,false);
+  assert.ok(captured?.recovery,'an explicitly bounded paged grant must be captured');
+  assert.equal(JSON.stringify(captured.recovery),JSON.stringify(grant));
+ }
+ for(const change of [{maximumOrigins:1001,checkpointTotalBytes:100000},{maximumOrigins:1000},
+  {maximumOrigins:1000,checkpointTotalBytes:90431},{maximumOrigins:1000,checkpointTotalBytes:100001},
+  {maximumOrigins:100,checkpointTotalBytes:100000},{maximumOrigins:1000,checkpointTotalBytes:undefined}])
+  assert.equal(shipmentMailPolicy({...legacy,recovery:{...recovery(),...change}},now,false),null);
+});
+
 test('the omitted origin cap preserves the published grant JSON and fingerprint', async () => {
  let captured:unknown[]|undefined;
  await recoverPendingMail('shipment',now+1000,{lifecycle:'active',policy:{...shipmentPolicy(now),recovery:recovery()},now:()=>now,

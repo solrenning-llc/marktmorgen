@@ -84,7 +84,8 @@ export type PurchaseLine = {
 export type PurchaseItems = { lines: PurchaseLine[]; missing: number };
 
 /** A product ticked at checkout, on a purchase. */
-export type AddedPurchase = { key: BumpKey; id: string; title: string; delivery: Delivery | null; items: PurchaseItems | null };
+/** `courseProduct`: a course anywhere in a cart opens on its own page, as the first one does (lib/order-courses.ts). */
+export type AddedPurchase = { key: BumpKey; id: string; title: string; delivery: Delivery | null; items: PurchaseItems | null; courseProduct: string | null };
 
 export type Purchase = {
   /**
@@ -380,7 +381,8 @@ export async function purchasesFor(store: Store, email: string): Promise<Purchas
         if (!listing) continue;
         const delivery = listing.file || listing.link ? { title: listing.title, file: listing.file, link: listing.link } : null;
         const inside = await linesOf(find, bundleFromMeta(meta, `${key}_bundle`));
-        if (delivery || inside) added.push({ key, id: listing.id, title: listing.title, delivery, items: inside });
+        const course = listing.course ? listing.id : null;
+        if (delivery || inside || course) added.push({ key, id: listing.id, title: listing.title, delivery, items: inside, courseProduct: course });
       }
       if (!delivery && !added.length && !courseProduct && !podcastProduct && !items) continue;
 

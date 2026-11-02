@@ -297,3 +297,21 @@ export function steepestDrop(
   }
   return best;
 }
+
+/**
+ * The three kinds of buyer a page review reads the page as (624 [SZ8](9)):
+ * named here, by the code, never by the model, so the studio always shows the
+ * same three. Each gives an objection in words and what the page could add;
+ * no conversion rate, lift or number of sales is ever predicted.
+ */
+export const BUYER_LENSES = [
+  { id: "first", label: "Someone buying from you for the first time", ask: "has never bought from this creator and needs to trust them" },
+  { id: "comparing", label: "Someone comparing it with other options", ask: "is weighing this against other ways to get the same result" },
+  { id: "doubtful", label: "Someone who doubts it will work for them", ask: "wonders whether it will work in their own situation" },
+] as const;
+
+export type BuyerLens = (typeof BUYER_LENSES)[number]["id"];
+
+/** An objection that predicts a result is not kept: a percent, a conversion, a lift or a number of sales. */
+export const PREDICTS = /\d\s*%|percent|\bconver(?:sion|t)|\blift\b|\b\d+\s*(?:more\s+)?(?:sales|buyers|customers|orders|sign-?ups)\b/i;
+

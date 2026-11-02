@@ -220,7 +220,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
               <div className="mt-3">
                 {/* The email is a store setting (lib/team-roles.ts): the owner and Admins switch it. */}
                 {can(view.role, "settings") ? (
-                  <ReviewAskEditor days={store.reviewAsk.days} canEmail={canWrite(store)} elsewhere={store.reviewAsk.elsewhere?.url ?? ""} />
+                  <ReviewAskEditor days={store.reviewAsk.days} canEmail={canWrite(store)} elsewhere={store.reviewAsk.elsewhere?.url ?? ""} again={store.reviewAsk.again ?? 0} />
                 ) : (
                   <p className="text-sm text-ink-soft">
                     {store.reviewAsk.days > 0

@@ -136,3 +136,24 @@ export function noticeLines(current: NoticeTerms, pending: PendingTerms, product
 function copy(terms: NoticeTerms): NoticeTerms {
   return { percent: terms.percent, rates: { ...terms.rates }, days: terms.days };
 }
+
+/**
+ * What an announced cut means for one affiliate (unit 3, their panel): an
+ * affiliate with a share of their own keeps it on every product except one
+ * taken out of the program (lib/affiliate-setting.ts commissionRate), so for
+ * them only that and the window change. The lines and the day, or null when
+ * nothing gets worse for them.
+ */
+export function noticeFor(
+  current: NoticeTerms,
+  pending: PendingTerms | null | undefined,
+  ownRate: number | null,
+  productName: (id: string) => string | null,
+): { day: string; lines: string[] } | null {
+  if (!pending) return null;
+  const mine = (t: NoticeTerms): NoticeTerms =>
+    ownRate === null ? t : { ...t, percent: ownRate, rates: Object.fromEntries(Object.entries(t.rates).map(([id, r]) => [id, r === 0 ? 0 : ownRate])) };
+  const lines = noticeLines(mine(current), { ...mine(pending), from: pending.from }, productName);
+  if (!lines.length) return null;
+  return { day: new Date(pending.from * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }), lines };
+}

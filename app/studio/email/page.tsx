@@ -270,6 +270,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               who: b.who,
               notProductId: b.notProductId,
               narrow: b.narrow,
+              label: b.label ?? null,
               tagged: b.tagged,
               money: broadcastMoney(revenue, b.id),
               visits: visits?.[b.id] ?? null,

@@ -27,7 +27,7 @@ import { IMPORTED_CHANNEL } from "@/lib/channel-names";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
-import { WHO, type Who } from "@/lib/contacts";
+import { WHO, type Who, readTags } from "@/lib/contacts";
 import { ALL_TIME_PAGES, readsSales, readPaidSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -147,6 +147,7 @@ function parseSegment(raw: unknown): Segment | null {
       who: WHO.includes(value.who as Who) ? (value.who as Who) : "all",
       productId: typeof value.productId === "string" ? value.productId : "",
       notProductId: typeof value.notProductId === "string" ? value.notProductId : "",
+      label: typeof value.label === "string" ? readTags([value.label])[0] ?? "" : "",
       ...readNarrow(value),
     };
   } catch {
@@ -173,11 +174,12 @@ export async function saveSegment(store: Store, raw: Record<string, unknown>): P
   const notProductId = typeof raw.notProductId === "string" && raw.notProductId ? raw.notProductId : "";
   if ((productId && !hasProduct(store, productId)) || (notProductId && !hasProduct(store, notProductId))) return { ok: false, reason: "product" };
   const narrow = readNarrow(raw.narrow);
-  if (who === "all" && !productId && !notProductId && !isNarrowed(narrow)) return { ok: false, reason: "empty" };
+  const label = typeof raw.label === "string" ? readTags([raw.label])[0] ?? "" : "";
+  if (who === "all" && !productId && !notProductId && !label && !isNarrowed(narrow)) return { ok: false, reason: "empty" };
   const existing = await listSegments(store.listId);
   const same = existing.find((s) => s.name.toLowerCase() === name.toLowerCase());
   if (!same && existing.length >= MAX_SEGMENTS) return { ok: false, reason: "full" };
-  const segment: Segment = { id: same?.id ?? randomBytes(6).toString("hex"), name, who, productId, notProductId, ...narrow };
+  const segment: Segment = { id: same?.id ?? randomBytes(6).toString("hex"), name, who, productId, notProductId, label, ...narrow };
   await redisPipeline([["HSET", segmentsKey(store.listId), segment.id, JSON.stringify(segment)]]);
   return { ok: true, segments: await listSegments(store.listId) };
 }

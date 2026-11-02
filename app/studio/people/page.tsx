@@ -372,7 +372,7 @@ function Profile({ store, profile, fields, values, eraseToken }: { store: Store;
           <p className="mt-2 text-sm text-ink-soft">{`Started on ${profile.sequences.length === 1 ? "the sequence" : "the sequences"}: ${profile.sequences.join(", ")}.`}</p>
         ) : null}
         {contact && contact.tags.length ? (
-          <p className="mt-2 text-sm text-ink-soft">{`Labels, from your import or a sequence: ${contact.tags.join(", ")}.`}</p>
+          <p className="mt-2 text-sm text-ink-soft">{`Labels, from your import, a sequence or the API: ${contact.tags.join(", ")}.`}</p>
         ) : null}
       </section>
 

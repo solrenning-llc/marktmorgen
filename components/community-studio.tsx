@@ -178,7 +178,7 @@ export function CommunityStudio({
         <h2 id="cm-start-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Set up your community</h2>
         <p className="mt-2 text-ink-soft">
           It starts switched off, with one space called General, and nobody let in. Choose which products open it,
-          add spaces, write a first post, then switch it on. Only you can see it until then.
+          add spaces, write a first post, then switch it on. Only the store&apos;s owner can see it until then.
         </p>
         <button
           type="button"
@@ -256,7 +256,7 @@ function Basics({
       <p className="mt-2 text-ink-soft">
         {on
           ? "Open to everyone who holds one of the products you chose below. Your store page shows the way in."
-          : "Switched off: only you can open it, and your store page does not mention it."}
+          : "Switched off: only the store's owner can open it, and your store page does not mention it."}
       </p>
       <div className="mt-4 grid grid-cols-3 gap-3 text-center">
         <div className="rounded-[var(--r-sm)] bg-sand p-3">

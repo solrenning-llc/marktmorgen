@@ -66,12 +66,12 @@ import { normaliseEmail } from "@/lib/auth";
 import { type Permission, type Role, can } from "@/lib/team-roles";
 import { memberStores, readTeam } from "@/lib/team";
 import { type PushFetchHooks, type Subscription, readSubscription, sendPush, vapidKeys, vapidKeysFor } from "@/lib/web-push";
+import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 
 export const PHONE_EVENTS = ["sale", "booking", "report", "affiliate", "live", "comment", "alert", "path"] as const;
 export type PhoneEvent = (typeof PHONE_EVENTS)[number];
 
-/** Devices one person may have on one store. */
-export const MAX_DEVICES = 10;
+export { MAX_DEVICES };
 /** Devices one store may keep in all: its owner's and those of a full team of five. */
 const MAX_STORE_DEVICES = MAX_DEVICES * 6;
 

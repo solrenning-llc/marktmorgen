@@ -209,7 +209,14 @@ The choice is one function, `profileKeyboard`, held by `tests/socials-keyboards.
 - A payment request and an agreement (or a new version of one) are reviewed before their email goes, each with a "Change" on every answer and its own "Yes, send …" button. The review opens only when the server's own reading (`readDraft`) takes the form, and shows what it read: the email as it will be kept, and each line with its quantity, amount and subtotal. Whatever the reading refuses is said, with the focus on that field. The review holds only while the form is what was reviewed: any edit closes it. A failed send is said beside its button, and nothing can be changed while it sends.
 
 **Still to do, in this order, since a mistake there is public or costs money:**
-- the prices of memberships, pay what you want and products with several options;
+- the prices of memberships and pay what you want: **tested in a PR (2 November 2026).** "Check what buyers pay" (`lib/price-review.ts`) now reviews a save of a product buyers can see, one row per change, each with "Now: …" and "Once you save: …" and a "Change" that goes back to its own field:
+  - how buyers pay (once, every day, week, month or year, or they choose), with the price shown whenever that changes;
+  - the price, or the lowest price when they choose, a free one said as given for an email address;
+  - the price their box starts at;
+  - a membership's introductory and yearly prices, also when a change of schedule takes them away.
+
+  For a membership that stays one, it says new members pay the new price once it is saved, and members who already joined keep the price and schedule they joined at. For a membership that stops being one, it says members who already joined keep being charged until they or the creator cancel, and that this is done in the Stripe dashboard. That is what the code does: each membership is made at checkout at that moment's price and schedule, and saving the product changes and cancels no subscription.
+- still to do: a membership's free trial and number of payments, and products with several price options, each priced in its own editor;
 - the community announcement email. Its composer is on the community page, in the buyer's language, with its words in `lib/buyer-words` in seven languages. A review there needs its new sentences written in each of them, so it gets a unit of its own, under the rules for buyer languages.
 
 ## Pattern 7: a live preview at phone width beside each editor (1 November 2026, first pass)

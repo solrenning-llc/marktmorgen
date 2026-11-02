@@ -117,7 +117,15 @@ async function main(): Promise<void> {
   });
   const locks = await redis.pipeline([["GET", `nl:stock:lock:${creator.statsId}:print4`], ["GET", `nl:stock:lock:${creator.statsId}:print5`]]);
   is("a checkout that fails to open holds nothing and lets every lock go", [failed, locks, await stockLeft(creator, limited("print4", 5))], ["Stripe said no", [null, null], 5]);
-  is("a count that cannot be read opens nothing", await withCartStockHolds({ statsId: null } as unknown as Store, [a], async () => ({ id: "x" })), { ok: false, reason: "busy" });
+  is("a store whose counts have nowhere to be read opens nothing", await withCartStockHolds({ statsId: null } as unknown as Store, [a], async () => ({ id: "x" })), { ok: false, reason: "busy" });
+  await redis.pipeline([["HSET", `nl:stock:${creator.statsId}:print13`, "cs_test_cartstockjunk0002", "not a hold"]]);
+  let unreadOpened = 0;
+  const unreadable = await withCartStockHolds(creator, [limited("print14", 3), limited("print13", 3)], async () => {
+    unreadOpened += 1;
+    return { id: "cs_test_cartstockunread01" };
+  }).then(() => "opened", (error: Error) => error.message);
+  const unreadLocks = await redis.pipeline([["GET", `nl:stock:lock:${creator.statsId}:print13`], ["GET", `nl:stock:lock:${creator.statsId}:print14`]]);
+  is("a count that cannot be read opens nothing, holds nothing and lets every lock go", [unreadable, unreadOpened, unreadLocks, await stockLeft(creator, limited("print14", 3))], ["Stock reading unavailable", 0, [null, null], 3]);
   told = null;
   const free = await withCartStockHolds({ statsId: null } as unknown as Store, [plain("guide1"), plain("guide2")], async (held) => {
     told = held;
@@ -154,7 +162,7 @@ async function main(): Promise<void> {
   redis.pipeline = async (commands) => (commands.some((command) => command[0] === "HSET" && command[2] === "cs_test_cartstockbad00001") ? [] : original(commands));
   const unwritten = await withCartStockHolds(creator, [limited("print9", 3)], async () => ({ id: "cs_test_cartstockbad00001" }));
   redis.pipeline = original;
-  is("a checkout whose hold cannot be written is closed at Stripe, and nobody is sent to it", [unwritten, expired.includes("cs_test_cartstockbad00001")], [{ ok: false, reason: "busy" }, true]);
+  is("a checkout whose hold cannot be written is closed at Stripe, nobody is sent to it, and once closed its unit is let go", [unwritten, expired.includes("cs_test_cartstockbad00001"), await stockLeft(creator, limited("print9", 3))], [{ ok: false, reason: "busy" }, true, 3]);
   let sparseOpened = 0;
   redis.pipeline = async (commands) => (commands.length === 2 && commands[0][0] === "HSET" && commands[1][0] === "HSET" ? new Array(2) : original(commands));
   const sparse = await withCartStockHolds(creator, [limited("print11", 3), limited("print12", 3)], async () => {

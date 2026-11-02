@@ -111,7 +111,7 @@ async function main() {
   is("the heading counts the questions of a try", open.includes("2 questions"), true);
   is("the form names the questions it showed", open.includes(`name="shown" value="${ids(ready.quiz).join(",")}"`), true);
   is("a drawn bank does not point at the last try's marks", open.includes("Not quite” and try again"), false);
-  is("a stale form is explained", page({ quiz: ready.quiz, stale: true }).includes(w.staleTry.replace("'", "&#x27;")), true);
+  is("a stale form is explained", page({ quiz: ready.quiz, stale: true }).includes(w.staleTry.replace(/'/g, "&#x27;")), true);
   const owner = page({ quiz: bank({ draw: 4, shuffle: true, waitMinutes: 90 }), mode: "owner", attempt: null });
   is("the creator reads the draw", owner.includes(w.bankDraw(4, 6)), true);
   is("…the shuffle", owner.includes(w.bankShuffle), true);

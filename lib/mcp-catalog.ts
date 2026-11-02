@@ -39,6 +39,8 @@ const TITLES: Readonly<Record<string, string>> = {
   get_numbers_for_days: "Numbers for any days",
   get_product_description: "Product description",
   get_sales_page: "Sales page",
+  get_course_outline: "Course outline",
+  get_lesson: "Course lesson",
   get_store: "Which store",
 };
 
@@ -124,6 +126,25 @@ const DRAFTS: readonly ToolDraft[] = [
     name: "get_sales_page",
     description: "One product's sales page as saved, block by block in page order (hero, benefits, FAQ, guarantee and the rest), with its search title and description. Testimonials are counted, never quoted.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_course_outline",
+    description: "A course's modules and lessons in order, with each lesson's title, whether it is a free preview, whether it has text, its video and files by name, and when each module opens.",
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The course's product id, from list_products." } }, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_lesson",
+    description: "One lesson of a course as the creator wrote it: its text, its quiz with the right answers, and its task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "The course's product id, from list_products." },
+        lesson: { type: "string", description: "The lesson's id, from get_course_outline." },
+      },
+      additionalProperties: false,
+    },
     annotations: { readOnlyHint: true },
   },
   {

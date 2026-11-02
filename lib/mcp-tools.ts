@@ -23,6 +23,9 @@ import type { Store } from "@/lib/store";
 import { type Live, type RangeData, type StatsData, type Today, KEPT_DAYS, LIVE_MINUTES, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
 import { readListing, readListings, readTitles } from "@/lib/catalog";
 import { readAbout } from "@/lib/product-about";
+import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
+import { readQuizFor } from "@/lib/quiz";
+import { readTaskFor } from "@/lib/assignment";
 import { readPage } from "@/lib/sales-page-store";
 import type { SalesPage } from "@/lib/sales-page";
 import { membershipNumbers } from "@/lib/membership-numbers";
@@ -395,4 +398,50 @@ export async function readSalesPageTool(store: Store, id: string) {
   const listing = await readListing(store, id);
   if (!listing) return null;
   return salesPageTool(listing.id, listing.title, await readPage(store.statsId, listing.id));
+}
+
+/**
+ * A course's outline as the studio edits it (631 [AA1] (a), unit 10): modules
+ * and lessons in order, with what each lesson holds. Files and videos by
+ * their names only, never where they are kept: a paid course's files are
+ * private, and their place in the store is the only handle to them.
+ */
+export function courseOutlineTool(productId: string, title: string, course: Course) {
+  return {
+    product: productId,
+    title,
+    certificate: course.certificate,
+    note: "Modules and lessons in order. drip_days counts from the course's start. Files and videos are named, never located. Read a lesson's text, quiz and task with get_lesson.",
+    modules: course.modules.map((unit) => ({
+      id: unit.id,
+      title: unit.title,
+      drip_days: unit.dripDays,
+      lessons: unit.lessons.map((lesson) => ({
+        id: lesson.id,
+        title: lesson.title,
+        preview: lesson.preview,
+        has_text: lesson.hasBody,
+        video: lesson.video ? lesson.video.name : null,
+        files: lesson.files.map((file) => file.name),
+        link: lesson.link,
+      })),
+    })),
+  };
+}
+
+/** The course of one of this store's products, or null. */
+export async function readCourseTool(store: Store, id: string) {
+  const listing = await readListing(store, id);
+  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  return listing && course ? courseOutlineTool(listing.id, listing.title, course) : null;
+}
+
+/** One lesson's text, its quiz with the right answers and its task, as the studio edits them; null when there is no such lesson. */
+export async function readLessonTool(store: Store, id: string, lessonId: string) {
+  const listing = await readListing(store, id);
+  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  const found = course ? findLesson(course, lessonId) : null;
+  if (!listing || !course || !found) return null;
+  const [text, quiz, task] = await Promise.all([readBody(course.id, lessonId), readQuizFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);
+  return { product: listing.id, module: found.unit.title, lesson: found.lesson.id, title: found.lesson.title, text, quiz, task };
 }

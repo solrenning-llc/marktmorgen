@@ -17,6 +17,8 @@ import {
   productTextTool,
   productsTool,
   rangeTool,
+  readCourseTool,
+  readLessonTool,
   readSalesPageTool,
   readFullNumbers,
   windowOf,
@@ -134,6 +136,12 @@ export async function POST(request: Request) {
       const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
       const found = product ? await (params.name === "get_sales_page" ? readSalesPageTool(store, product) : productTextTool(store, product)) : null;
       return result(id, found ? said(found) : said({ error: "There is no product with that id in this store. Use list_products for the ids." }, true));
+    }
+    if (params.name === "get_course_outline" || params.name === "get_lesson") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
+      const found = !product ? null : params.name === "get_lesson" ? (lesson ? await readLessonTool(store, product, lesson) : null) : await readCourseTool(store, product);
+      return result(id, found ? said(found) : said({ error: params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids." }, true));
     }
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));

@@ -3,6 +3,8 @@ import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { readNumbers, summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
+import { readTitles } from "@/lib/catalog";
+import { rangeProblem, readLive, readRange, readToday } from "@/lib/stats";
 import {
   affiliatesTool,
   buyersTool,
@@ -10,8 +12,14 @@ import {
   emailsTool,
   funnelTool,
   insightsTool,
+  liveTool,
   membershipsTool,
+  productTextTool,
   productsTool,
+  rangeTool,
+  readCourseTool,
+  readLessonTool,
+  readSalesPageTool,
   readFullNumbers,
   windowOf,
 } from "@/lib/mcp-tools";
@@ -36,61 +44,7 @@ import {
  * whoever runs the assistant, and the people on a creator's list never agreed
  * to be read there. The API is where a creator's own tools read those.
  */
-const PROTOCOL = "2025-06-18";
-
-const TOOLS = [
-  {
-    name: "get_numbers",
-    description:
-      "The store's numbers for the last 7, 30 and 90 days: visitors, checkouts, sales and revenue; each channel (instagram, tiktok, newsletter…) from visit to sale; and page views by country and device, each window with the same stretch of days just before it under previous. Money is in the smallest unit of the store's currency (cents for USD), before Stripe's fee.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "list_products",
-    description: "The store's products in the order the store shows them, drafts included, 50 at a time. Pass the returned `next` as `cursor` for more.",
-    inputSchema: { type: "object", properties: { cursor: { type: "string" } }, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  ...(
-    [
-      ["get_revenue_by_channel", "Revenue by channel for the last 7, 30 or 90 days: each channel's visits, checkouts, free sign-ups, sales and revenue; the same money credited three ways (last visit, first visit, what buyers said after paying); and money by ad and by post."],
-      ["get_funnel", "From visit to sale for the last 7, 30 or 90 days, with the same stretch of days before, the rates between each step, and how far down the store page visitors read and what they clicked."],
-      ["get_product_numbers", "Each product for the last 7, 30 or 90 days: page views, checkouts, sales, revenue and sales per view; and, from all sales, which product is bought first and what buyers buy next, how many and how many days later."],
-      ["get_buyers", "Who bought in the last 7, 30 or 90 days, in numbers only: people, orders, revenue, how many had bought before and how many bought more than once. No names or addresses."],
-      ["get_worth_knowing", "What changed in the last 7, 30 or 90 days that is worth acting on, by the studio's own fixed rules, with the arithmetic behind any money at stake."],
-    ] as const
-  ).map(([name, description]) => ({
-    name,
-    description,
-    inputSchema: { type: "object", properties: { days: { type: "number", enum: [7, 30, 90], description: "The window; 30 when left out." } }, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  })),
-  {
-    name: "get_memberships",
-    description: "Memberships as the Membership numbers page shows them: MRR and ARR, paying and trialing members, churn, trials that converted, each membership, each channel's members and how long they stay, why members left (counted), MRR month by month by what moved it, ARPU, net revenue retention and a three-month forecast.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "get_emails",
-    description: "The store's list (how many people, how many agreed to hear) and what each email and each sequence did: how many it went to, and the sales and revenue its links brought, in the store's currency, with sales_in_another_currency counted apart and never added to revenue.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "get_affiliates",
-    description: "The affiliate program's terms and each affiliate by their link's code: clicks, sales, earned, paid, owed, payable now, and anything held for review and why. No addresses.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-  {
-    name: "get_store",
-    description: "Which store this key reads: its handle, name and currency.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true },
-  },
-];
+import { MCP_INSTRUCTIONS, MCP_PROTOCOL as PROTOCOL, MCP_SERVER, MCP_TOOLS as TOOLS } from "@/lib/mcp-catalog";
 
 type Rpc = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown };
 
@@ -125,9 +79,8 @@ export async function POST(request: Request) {
     return result(id, {
       protocolVersion: PROTOCOL,
       capabilities: { tools: {} },
-      serverInfo: { name: "marktmorgen", version: "1.1.0" },
-      instructions:
-        "Read a Marktmorgen store's numbers, products, memberships, emails and affiliate program, never anybody's name or address. Money fields are in the smallest unit of the store's currency. A channel named 'direct' is a visit or sale from nowhere the store could name. Tools that take `days` read the last 7, 30 or 90 days.",
+      serverInfo: MCP_SERVER,
+      instructions: MCP_INSTRUCTIONS,
     });
   }
   if (method === "ping") return result(id, {});
@@ -163,6 +116,32 @@ export async function POST(request: Request) {
     if (typeof tool === "function") {
       const data = await readFullNumbers(store);
       return result(id, data ? said(await tool(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+    }
+    if (params.name === "get_live") {
+      const [live, today] = await Promise.all([readLive(store), readToday(store).catch(() => null)]);
+      return result(id, said(liveTool(live, today)));
+    }
+    if (params.name === "get_numbers_for_days") {
+      const from = typeof params.arguments?.from === "string" ? params.arguments.from.slice(0, 10) : "";
+      const to = typeof params.arguments?.to === "string" ? params.arguments.to.slice(0, 10) : "";
+      const problem = rangeProblem(from, to);
+      if (problem) {
+        const words = { dates: "Send from and to as YYYY-MM-DD.", order: "from must not be after to.", future: "to must not be after today (UTC).", kept: "Days are kept for 400 days; start later." } as const;
+        return result(id, said({ error: words[problem] }, true));
+      }
+      const [range, titles] = await Promise.all([readRange(store, from, to), readTitles(store).catch(() => new Map<string, string>())]);
+      return result(id, range ? said(rangeTool(range, titles)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+    }
+    if (params.name === "get_product_description" || params.name === "get_sales_page") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const found = product ? await (params.name === "get_sales_page" ? readSalesPageTool(store, product) : productTextTool(store, product)) : null;
+      return result(id, found ? said(found) : said({ error: "There is no product with that id in this store. Use list_products for the ids." }, true));
+    }
+    if (params.name === "get_course_outline" || params.name === "get_lesson") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
+      const found = !product ? null : params.name === "get_lesson" ? (lesson ? await readLessonTool(store, product, lesson) : null) : await readCourseTool(store, product);
+      return result(id, found ? said(found) : said({ error: params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids." }, true));
     }
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));

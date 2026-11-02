@@ -31,8 +31,8 @@ async function main(): Promise<void> {
     part("Only advertised MCP tools can be dispatched");
     const listed = await call("tools/list", {});
     const names = listed.result.tools.map((tool: { name: string }) => tool.name);
-    is("the eleven advertised tools remain", names.length, 11);
-    is("advertised names stay unique", new Set(names).size, 11);
+    is("the seventeen advertised tools remain", names.length, 17);
+    is("advertised names stay unique", new Set(names).size, 17);
     is("prototype properties are not advertised", names.includes("constructor") || names.includes("toString"), false);
     for (const name of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__", "not_a_tool"]) {
       const answer = await call("tools/call", { name, arguments: { days: 7 } });

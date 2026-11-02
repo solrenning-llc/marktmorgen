@@ -20,8 +20,14 @@ import { paidFiguresComplete } from "@/lib/paid-coverage";
  * not quoted. Money is in the smallest unit of the store's currency.
  */
 import type { Store } from "@/lib/store";
-import { type StatsData, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
-import { readListings, readTitles } from "@/lib/catalog";
+import { type Live, type RangeData, type StatsData, type Today, KEPT_DAYS, LIVE_MINUTES, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
+import { readListing, readListings, readTitles } from "@/lib/catalog";
+import { readAbout } from "@/lib/product-about";
+import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
+import { readQuizFor } from "@/lib/quiz";
+import { readTaskFor } from "@/lib/assignment";
+import { readPage } from "@/lib/sales-page-store";
+import type { SalesPage } from "@/lib/sales-page";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { listBroadcasts } from "@/lib/broadcasts";
 import { broadcastMoney, flowMoney, readMailRevenue } from "@/lib/mail-revenue";
@@ -317,4 +323,125 @@ export function insightsTool(data: StatsData, w: Window) {
     window: NAMES[w],
     worth_knowing: insightsFrom(data, w, [], 6).map((i) => ({ text: i.text, tone: i.tone, arithmetic: i.math ?? null })),
   };
+}
+
+/**
+ * Who is on the store right now and today so far, as the studio's numbers
+ * show them every half minute (631 [AA1] (a), unit 8): visitors counted once
+ * each, by where they came from. No visitor is identified.
+ */
+export function liveTool(live: Live, today: Today | null) {
+  return {
+    note: `Visitors in the last ${LIVE_MINUTES} minutes, each once. Today is the UTC day so far. Today's sales are null when Stripe is not connected or did not answer, never zero.`,
+    last_minutes: LIVE_MINUTES,
+    visitors_now: live.visitors,
+    sources_now: live.sources.map((s) => ({ channel: s.source, visitors: s.visitors })),
+    today: today
+      ? { day: today.date, visitors: today.visitors, page_views: today.views, checkouts_started: today.checkouts, sales: today.sales?.sales ?? null, revenue: today.sales?.cents ?? null, sources: today.sources.map((s) => ({ channel: s.source, visits: s.visits })) }
+      : null,
+  };
+}
+
+/**
+ * Any stretch of days the creator names, as the studio's date picker reads it
+ * (lib/stats.ts readRange; 631 [AA1] (a), unit 8). Paid figures are null
+ * unless the sales reading was complete: unknown is never zero.
+ */
+export function rangeTool(range: RangeData, titles: ReadonlyMap<string, string>) {
+  const known = range.sales === "ok" && !range.partial;
+  const paid = <T>(value: T) => (known ? value : null);
+  return {
+    from: range.from,
+    to: range.to,
+    currency: range.currency,
+    paid_figures_complete: known,
+    coverage_note: `UTC days, up to ${KEPT_DAYS} days back. Paid totals need a complete sales reading; null is unavailable, not zero. Sales in another currency are counted apart and never added to revenue. Money is in the currency smallest unit.`,
+    sales_in_another_currency: range.elsewhere,
+    totals: { visitors: range.totals.visitors, page_views: range.totals.views, checkouts_started: range.totals.checkouts, sales: paid(range.totals.sales), revenue: paid(range.totals.cents) },
+    the_same_days_before: range.before
+      ? { visitors: range.before.visitors, page_views: range.before.views, checkouts_started: range.before.checkouts, sales: paid(range.before.sales), revenue: paid(range.before.cents) }
+      : null,
+    days: range.days.map((d) => ({ day: d.date, visitors: d.visitors, page_views: d.views, checkouts_started: d.checkouts, sales: paid(d.sales), revenue: paid(d.cents) })),
+    channels: range.channels.map((c) => ({ channel: c.source, visits: c.visits, sales: paid(c.sales), revenue: paid(c.cents) })),
+    channels_truncated: range.channelsTruncated === true,
+    products: range.products.map((p) => ({ id: p.id, title: titles.get(p.id) ?? "A product no longer in your store", page_views: p.views, checkouts_started: p.checkouts, sales: paid(p.sales), revenue: paid(p.cents) })),
+    products_truncated: range.productsTruncated === true,
+  };
+}
+
+/**
+ * A product's sales page as the creator saved it, block by block, so an agent
+ * sees what is there before it prepares any change (631 [AA1] (a), unit 9).
+ * Testimonials are counted, never quoted: a buyer's words stay out of an
+ * assistant's conversation, as everywhere on this server.
+ */
+export function salesPageTool(productId: string, title: string, page: SalesPage) {
+  return {
+    product: productId,
+    title,
+    note: "Blocks in page order, as saved. Testimonials (kind quotes) are counted, not quoted. Reviews blocks name review ids only. An empty list means the product has no sales page of its own yet.",
+    seo_title: page.seoTitle,
+    seo_description: page.seoDescription,
+    blocks: page.blocks.map((block) => (block.kind === "quotes" ? { id: block.id, kind: block.kind, heading: block.heading, testimonials: block.items.length } : block)),
+  };
+}
+
+/** One product's long description, or why there is none to read. */
+export async function productTextTool(store: Store, id: string): Promise<{ product: string; title: string; description: string } | null> {
+  const listing = await readListing(store, id);
+  if (!listing) return null;
+  return { product: listing.id, title: listing.title, description: listing.about ? await readAbout(store.statsId, listing.id) : "" };
+}
+
+/** A product's sales page, or null when the store has no such product. */
+export async function readSalesPageTool(store: Store, id: string) {
+  const listing = await readListing(store, id);
+  if (!listing) return null;
+  return salesPageTool(listing.id, listing.title, await readPage(store.statsId, listing.id));
+}
+
+/**
+ * A course's outline as the studio edits it (631 [AA1] (a), unit 10): modules
+ * and lessons in order, with what each lesson holds. Files and videos by
+ * their names only, never where they are kept: a paid course's files are
+ * private, and their place in the store is the only handle to them.
+ */
+export function courseOutlineTool(productId: string, title: string, course: Course) {
+  return {
+    product: productId,
+    title,
+    certificate: course.certificate,
+    note: "Modules and lessons in order. drip_days counts from the course's start. Files and videos are named, never located. Read a lesson's text, quiz and task with get_lesson.",
+    modules: course.modules.map((unit) => ({
+      id: unit.id,
+      title: unit.title,
+      drip_days: unit.dripDays,
+      lessons: unit.lessons.map((lesson) => ({
+        id: lesson.id,
+        title: lesson.title,
+        preview: lesson.preview,
+        has_text: lesson.hasBody,
+        video: lesson.video ? lesson.video.name : null,
+        files: lesson.files.map((file) => file.name),
+        link: lesson.link,
+      })),
+    })),
+  };
+}
+
+/** The course of one of this store's products, or null. */
+export async function readCourseTool(store: Store, id: string) {
+  const listing = await readListing(store, id);
+  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  return listing && course ? courseOutlineTool(listing.id, listing.title, course) : null;
+}
+
+/** One lesson's text, its quiz with the right answers and its task, as the studio edits them; null when there is no such lesson. */
+export async function readLessonTool(store: Store, id: string, lessonId: string) {
+  const listing = await readListing(store, id);
+  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  const found = course ? findLesson(course, lessonId) : null;
+  if (!listing || !course || !found) return null;
+  const [text, quiz, task] = await Promise.all([readBody(course.id, lessonId), readQuizFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);
+  return { product: listing.id, module: found.unit.title, lesson: found.lesson.id, title: found.lesson.title, text, quiz, task };
 }

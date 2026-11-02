@@ -38,7 +38,7 @@ def main():
     # A fixed original epoch25h earlier represents the restart boundary. Time
     # is not slept/forged in Lua; its actual TIME check is preserved.
     row = dict(kind="confirmation", originKind="single_digital", id=ident, statsId="SYNTHETIC",
-               nonce=ident, accountId="acct_SyntheticDigital01", bodyDigest="b"*64, intentFingerprint="c"*64,
+               nonce=ident, accountId="acct_TestDigital01", bodyDigest="b"*64, intentFingerprint="c"*64,
                bindingFingerprint="", session="", person="d"*64, sourceValue="SYNTHETIC_PROTECTED_SOURCE",
                sealed="s1.SYNTHETIC_ONLY", fingerprint="e"*64, bytes=160000, created=now-25*3600000,
                authorizedAt=now, next=now, expiresAt=now+400*86400000, state="queued", phase="awaiting_creation",

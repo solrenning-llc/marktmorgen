@@ -796,6 +796,13 @@ export type SalesStats = {
   /** Refunds by product over the 90 days. */
   refundsByProduct?: Record<string, { refunds: number; cents: number }>;
   /**
+   * Refunds and disputes of the last 90 days in a currency other than the
+   * store's (from before it changed its currency), left out of every amount
+   * above as sales in another one are, and counted here so the page can say
+   * so (22 [E5], unit 2b). A count is null when that list could not be read.
+   */
+  takenBackElsewhere?: { refunds: number | null; disputes: number | null };
+  /**
    * Disputes opened in each window that the bank holds or the buyer won, by
    * the channel of the sale disputed (added 18 October 2026); null when they
    * could not be read. "unrecorded" is a payment not among the sales read.
@@ -1503,6 +1510,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       if (refund.currency !== store.currency || day < cut90) continue;
       out.refundDays[day] = (out.refundDays[day] ?? 0) + refund.cents;
     }
+    out.takenBackElsewhere = { refunds: refundRows.filter((refund) => refund.currency !== store.currency && dayKey(refund.created) >= cut90).length, disputes: null };
     out.refundsByProduct = {};
     for (const refund of refundRows) {
       if (refund.currency !== store.currency) continue;
@@ -1543,6 +1551,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       return [...by.values()].sort((a, b) => b.cents - a.cents || a.source.localeCompare(b.source));
     };
     out.disputesIn = { d7: disputesFrom(cut7), d30: disputesFrom(cut30), d90: disputesFrom(cut90) };
+    out.takenBackElsewhere = { refunds: out.takenBackElsewhere?.refunds ?? null, disputes: disputeRead.rows.filter((dispute) => dispute.currency !== store.currency && dayKey(dispute.created) >= cut90).length };
   } else {
     out.disputesIn = null;
   }
@@ -1905,6 +1914,8 @@ export type StatsData = {
   refunds: Record<"d7" | "d30" | "d90", { source: string; refunds: number; cents: number }[]> | null;
   /** Refunds over the last 90 days, by product. */
   refundsByProduct: Record<string, { refunds: number; cents: number }>;
+  /** Refunds and disputes of the last 90 days in another currency, left out of the amounts (SalesStats.takenBackElsewhere). */
+  takenBackElsewhere?: { refunds: number | null; disputes: number | null } | null;
   /** Disputes opened in the window that took money, by the channel of the sale; null when they could not be read. */
   disputes?: Record<"d7" | "d30" | "d90", { source: string; disputes: number; cents: number }[]> | null;
   disputesComplete?: boolean;
@@ -2172,6 +2183,7 @@ export function studioStats(
     salesCountries: sales?.byCountryIn ?? { d7: [], d30: [], d90: [] },
     refunds: sales?.refundsIn ?? null,
     refundsByProduct: sales?.refundsByProduct ?? {},
+    takenBackElsewhere: sales?.takenBackElsewhere ?? null,
     disputes: sales?.disputesIn ?? null,
     disputesComplete: sales?.disputesComplete ?? false,
     kept: sales?.keptIn ?? null,

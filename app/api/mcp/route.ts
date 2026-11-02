@@ -14,8 +14,10 @@ import {
   insightsTool,
   liveTool,
   membershipsTool,
+  productTextTool,
   productsTool,
   rangeTool,
+  readSalesPageTool,
   readFullNumbers,
   windowOf,
 } from "@/lib/mcp-tools";
@@ -127,6 +129,11 @@ export async function POST(request: Request) {
       }
       const [range, titles] = await Promise.all([readRange(store, from, to), readTitles(store).catch(() => new Map<string, string>())]);
       return result(id, range ? said(rangeTool(range, titles)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+    }
+    if (params.name === "get_product_description" || params.name === "get_sales_page") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const found = product ? await (params.name === "get_sales_page" ? readSalesPageTool(store, product) : productTextTool(store, product)) : null;
+      return result(id, found ? said(found) : said({ error: "There is no product with that id in this store. Use list_products for the ids." }, true));
     }
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));

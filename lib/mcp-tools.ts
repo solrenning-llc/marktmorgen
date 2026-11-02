@@ -21,7 +21,10 @@ import { paidFiguresComplete } from "@/lib/paid-coverage";
  */
 import type { Store } from "@/lib/store";
 import { type Live, type RangeData, type StatsData, type Today, KEPT_DAYS, LIVE_MINUTES, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
-import { readListings, readTitles } from "@/lib/catalog";
+import { readListing, readListings, readTitles } from "@/lib/catalog";
+import { readAbout } from "@/lib/product-about";
+import { readPage } from "@/lib/sales-page-store";
+import type { SalesPage } from "@/lib/sales-page";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { listBroadcasts } from "@/lib/broadcasts";
 import { broadcastMoney, flowMoney, readMailRevenue } from "@/lib/mail-revenue";
@@ -361,4 +364,35 @@ export function rangeTool(range: RangeData, titles: ReadonlyMap<string, string>)
     products: range.products.map((p) => ({ id: p.id, title: titles.get(p.id) ?? "A product no longer in your store", page_views: p.views, checkouts_started: p.checkouts, sales: paid(p.sales), revenue: paid(p.cents) })),
     products_truncated: range.productsTruncated === true,
   };
+}
+
+/**
+ * A product's sales page as the creator saved it, block by block, so an agent
+ * sees what is there before it prepares any change (631 [AA1] (a), unit 9).
+ * Testimonials are counted, never quoted: a buyer's words stay out of an
+ * assistant's conversation, as everywhere on this server.
+ */
+export function salesPageTool(productId: string, title: string, page: SalesPage) {
+  return {
+    product: productId,
+    title,
+    note: "Blocks in page order, as saved. Testimonials (kind quotes) are counted, not quoted. Reviews blocks name review ids only. An empty list means the product has no sales page of its own yet.",
+    seo_title: page.seoTitle,
+    seo_description: page.seoDescription,
+    blocks: page.blocks.map((block) => (block.kind === "quotes" ? { id: block.id, kind: block.kind, heading: block.heading, testimonials: block.items.length } : block)),
+  };
+}
+
+/** One product's long description, or why there is none to read. */
+export async function productTextTool(store: Store, id: string): Promise<{ product: string; title: string; description: string } | null> {
+  const listing = await readListing(store, id);
+  if (!listing) return null;
+  return { product: listing.id, title: listing.title, description: listing.about ? await readAbout(store.statsId, listing.id) : "" };
+}
+
+/** A product's sales page, or null when the store has no such product. */
+export async function readSalesPageTool(store: Store, id: string) {
+  const listing = await readListing(store, id);
+  if (!listing) return null;
+  return salesPageTool(listing.id, listing.title, await readPage(store.statsId, listing.id));
 }

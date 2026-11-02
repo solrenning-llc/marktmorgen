@@ -37,6 +37,8 @@ const TITLES: Readonly<Record<string, string>> = {
   get_affiliates: "Affiliates",
   get_live: "Live and today",
   get_numbers_for_days: "Numbers for any days",
+  get_product_description: "Product description",
+  get_sales_page: "Sales page",
   get_store: "Which store",
 };
 
@@ -110,6 +112,18 @@ const DRAFTS: readonly ToolDraft[] = [
       },
       additionalProperties: false,
     },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_product_description",
+    description: "One product's long description, exactly as the creator wrote it, with its title. Use list_products for the ids.",
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_sales_page",
+    description: "One product's sales page as saved, block by block in page order (hero, benefits, FAQ, guarantee and the rest), with its search title and description. Testimonials are counted, never quoted.",
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {

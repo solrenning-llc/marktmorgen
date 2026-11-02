@@ -3,9 +3,20 @@
 import { useMemo, useState } from "react";
 import type { DirectoryNumbers, DirectoryRow } from "@/lib/affiliate-directory";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
-import { ordinal } from "@/lib/affiliate-setting";
+import { RECURRING_ALWAYS, ordinal } from "@/lib/affiliate-setting";
 import { formatMoney } from "@/lib/money";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
+
+const EVERY = { day: "daily", week: "weekly", month: "monthly", year: "yearly" } as const;
+
+/** What the amount is for, in a few words (397 [SL1]): a sale, or one payment of a membership for as long as it earns. */
+function earnWords(product: DirectoryRow["products"][number]): string {
+  const after = product.intro ? ", after the introductory price" : "";
+  if (product.months === undefined) return `${product.paidInFull ? "a sale paid in full" : "a sale"}${after}`;
+  const payment = `a ${product.interval ? EVERY[product.interval] : ""} payment`.replace("  ", " ");
+  if (product.months >= RECURRING_ALWAYS) return `${payment}, while they pay${after}`;
+  return `${payment}, for ${product.months} ${product.months === 1 ? "month" : "months"} from sign-up${product.trialDays ? ", free days included" : ""}${after}`;
+}
 
 type Sort = "share" | "conversion" | "products" | "name";
 
@@ -156,12 +167,15 @@ export function AffiliateDirectory({ rows }: { rows: DirectoryRow[] }) {
                     </span>
                     <span className="shrink-0 text-right text-sm font-semibold text-ink" data-earns>
                       {formatMoney(product.earnCents, row.currency)}
-                      <span className="block text-xs font-normal text-ink-soft">a sale</span>
+                      {/* 397 [SL1]: a membership earns on each payment, for as long as the store credits it. */}
+                      <span className="block text-xs font-normal text-ink-soft">
+                        {earnWords(product)}
+                      </span>
                     </span>
                   </li>
                 ))}
               </ul>
-              <p className="mt-3 text-xs text-ink-soft">What one sale earns at today&apos;s price, before any refund. A product with several prices is shown at its lowest.</p>
+              <p className="mt-3 text-xs text-ink-soft">What one sale, or one payment of a membership, earns at today&apos;s price, before any refund. A product with several prices is shown at its lowest.</p>
               <a href={`/@${row.handle}/affiliates`} className="btn btn-primary mt-5 self-start">
                 See the program and apply
               </a>

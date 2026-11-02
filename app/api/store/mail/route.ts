@@ -1,4 +1,5 @@
 import { type NextRequest, after } from "next/server";
+import { rfmSummary } from "@/lib/rfm-rules";
 import { StoreFullError } from "@/lib/store-full";
 import {
   MAX_MAIL_ADDRESS,
@@ -161,11 +162,15 @@ export async function POST(request: NextRequest) {
         return null;
       });
       if (!ledger) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
-      const keep = isNarrowed(narrow) ? keeps(narrow, ledger) : undefined;
+      // One moment for the kinds counted and the kind kept, so a buyer at a boundary is the same kind in both.
+      const now = Date.now();
+      const keep = isNarrowed(narrow) ? keeps(narrow, ledger, now) : undefined;
       return Response.json({
         ok: true,
         count: (await audience(store.listId, productId, notProductId, whoOf(store, who), keep, label)).length,
         channels: ledgerChannels(ledger),
+        // How many of the store's buyers are of each kind (270 [GR1], unit 3c), from the same ledger: no extra read.
+        kinds: Object.fromEntries(rfmSummary(ledger.buyers.values(), now).map((k) => [k.id, k.buyers])),
         partial: ledger.partial,
       });
     }

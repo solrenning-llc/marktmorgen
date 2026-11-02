@@ -33,8 +33,8 @@ const question = (id: string) => ({ id, text: `Q ${id}`, choices: ["Yes", "No"],
 const raw = { passPercent: 70, attempts: 3, questions: ["q1", "q2", "q3", "q4"].map(question) };
 const read = (extra: Record<string, unknown>) => { const r = readQuiz({ ...raw, ...extra }); return r.ok ? { draw: r.quiz.draw, shuffle: r.quiz.shuffle, waitMinutes: r.quiz.waitMinutes } : null; };
 is("draw, shuffle and wait kept", read({ draw: 2, shuffle: true, waitMinutes: 60 }), { draw: 2, shuffle: true, waitMinutes: 60 });
-is("draw of every question or more: not kept (it would be no bank)", read({ draw: 4 }).draw, undefined);
-is("a wait past one day: not kept", read({ waitMinutes: MAX_WAIT_MINUTES + 1 }).waitMinutes, undefined);
+is("draw of every question or more: not kept (it would be no bank)", read({ draw: 4 })?.draw, undefined);
+is("a wait past one day: not kept", read({ waitMinutes: MAX_WAIT_MINUTES + 1 })?.waitMinutes, undefined);
 is("none set: none kept", read({}), { draw: undefined, shuffle: undefined, waitMinutes: undefined });
 const saved = readQuiz({ ...raw, draw: 2, waitMinutes: 15 });
 is("read back from storage the same", saved.ok ? [parseQuiz(JSON.stringify(saved.quiz))?.draw, parseQuiz(JSON.stringify(saved.quiz))?.waitMinutes] : null, [2, 15]);

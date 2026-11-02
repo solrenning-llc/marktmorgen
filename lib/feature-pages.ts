@@ -9,6 +9,7 @@ import { checkoutBeginnerQuestions } from "@/lib/checkout-faq";
 import { stripeBeginnerQuestions } from "@/lib/your-stripe-faq";
 import { salesPageBeginnerQuestions } from "@/lib/sales-page-faq";
 import { optionsBeginnerQuestions } from "@/lib/price-options-faq";
+import { bundleBeginnerQuestions } from "@/lib/bundle-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -1307,7 +1308,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "What it does not do",
         intro: "Said here so nobody signs up expecting it.",
         items: [
-          "What goes in: one-off paid products with one price and a file, a link or a course with lessons. Not memberships, calls, free products, products with several prices or pay-what-you-want pricing, and not another bundle.",
+          "What goes in: one-off paid products with one price and a file, a link or a course with lessons. Not memberships, calls, free products, products with several prices or pay-what-you-want pricing, not a product with a limited number for sale, and not another bundle.",
           "A bundle has one price, charged once: no price options, no pay-what-you-want pricing, and it cannot be a membership or a call.",
           "A product you delete is gone from the bundles that held it, for their past buyers too, as it is for its own buyers; their pages say so.",
           "A bundle is not reviewed itself: its buyers review each product in it.",
@@ -1319,6 +1320,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about bundles",
         items: [
+          // 534 [FQ1], unit 11: what someone starting out asks, answered by the code (lib/bundle-faq.ts).
+          ...bundleBeginnerQuestions(),
           { q: "What happens when I change a product in a bundle?", a: "Its buyers get the product as it is now, its current file, link or lessons, exactly as the product's own buyers do. Which products they get is fixed when they pay." },
           { q: "Does Stan have bundles?", a: "Its help center, read on September 28, 2026, lists bundles among the files you can sell as one digital download, and we found no product type there that hands over other products. Here a bundle is its own product, and each product in it is delivered as itself." },
         ],

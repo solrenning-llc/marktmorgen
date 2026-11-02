@@ -328,13 +328,13 @@ if raw then
  for _,field in ipairs({'revision','maximumChecks','attempts','units','readBytes','index','leaseUntil'}) do
   local n=v[field];if type(n)~='number' or n<0 or n>9007199254740991 or n%1~=0 then return {'unknown'} end
  end
- if v.revision<1 or v.revision>1000000000 or v.maximumChecks<1 or v.maximumChecks>10000 or v.attempts>1000 or v.units~=v.attempts*64 or v.readBytes~=v.attempts*1048576 or v.index<1 or v.index>#v.ids+1 or type(v.fingerprint)~='string' or #v.fingerprint~=64 or string.find(v.fingerprint,'[^a-f0-9]') or type(v.reviewId)~='string' or #v.reviewId<1 or #v.reviewId>128 or (v.family~='shipment' and v.family~='confirmation') or (v.phase~='capturing' and v.phase~='active' and v.phase~='done' and v.phase~='unsupported') or type(v.owner)~='string' or (v.owner~='' and (#v.owner~=48 or string.find(v.owner,'[^a-f0-9]'))) or ((v.owner=='')~=(v.leaseUntil==0)) then return {'unknown'} end
+ if v.revision<1 or v.revision>1000000000 or v.maximumChecks<1 or v.maximumChecks>10000 or v.attempts>1000 or v.units~=v.attempts*64 or v.readBytes~=v.attempts*1048576 or v.index<1 or v.index>#v.ids+1 or type(v.fingerprint)~='string' or #v.fingerprint~=64 or string.find(v.fingerprint,'[^a-f0-9]') or type(v.reviewId)~='string' or #v.reviewId<1 or #v.reviewId>128 or (v.family~='shipment' and v.family~='confirmation') or (v.phase~='capturing' and v.phase~='active' and v.phase~='continuing' and v.phase~='done' and v.phase~='unsupported') or type(v.owner)~='string' or (v.owner~='' and (#v.owner~=48 or string.find(v.owner,'[^a-f0-9]'))) or ((v.owner=='')~=(v.leaseUntil==0)) then return {'unknown'} end
  local seen={};local size=0
  for key,id in pairs(v.ids) do
   if type(key)~='number' or key<1 or key>#v.ids or key%1~=0 or type(id)~='string' or #id~=64 or string.find(id,'[^a-f0-9]') or seen[id] then return {'unknown'} end
   seen[id]=true;size=size+1
  end
- if size~=#v.ids or (v.phase=='active' and (size==0 or v.index>size)) then return {'unknown'} end
+ if size~=#v.ids or ((v.phase=='active' or v.phase=='continuing') and (size==0 or v.index>size)) then return {'unknown'} end
  c=v
 end
 local function save()
@@ -351,17 +351,17 @@ if op=='next' then
   -- A new financed grant replaces its own budget, never completed snapshot
   -- work. Revalidate each retained position at finish under the new review.
   -- Old tickets lose authority through revision/fingerprint and owner checks.
-  local continuing=c and c.phase=='active'
+  local continuing=c and (c.phase=='active' or c.phase=='continuing')
   local ids=continuing and c.ids or {}
   local index=continuing and c.index or 1
   local currentFamily=continuing and c.family or 'shipment'
-  c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,readBytes=0,ids=ids,index=index,family=currentFamily,phase=continuing and 'active' or 'capturing',owner='',leaseUntil=0}
+  c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,readBytes=0,ids=ids,index=index,family=currentFamily,phase=continuing and 'continuing' or 'capturing',owner='',leaseUntil=0}
   replaced=true
  end
  -- A known other family does no variable source work. Fixed admission/guard
  -- reads still require the explicit external trigger/infra funding envelope.
  -- Commit a new accepted grant first, so no old ticket regains authority.
- if c.phase=='active' and c.family~=family then
+ if (c.phase=='active' or c.phase=='continuing') and c.family~=family then
   if replaced and not save() then return {'unknown'} end
   return {'held'}
  end
@@ -385,13 +385,13 @@ if op=='next' then
   table.sort(ids);c.ids=ids;c.index=1;c.family='shipment';c.phase=#ids==0 and 'done' or 'active'
   if not save() then return {'unknown'} end
  end
- if c.phase~='active' then return {c.phase} end
+ if c.phase~='active' and c.phase~='continuing' then return {c.phase} end
  if c.family~=family or (c.owner~='' and c.leaseUntil>now) then return {'held'} end
  c.owner=owner;c.leaseUntil=math.min(now+60000,r['until'])
  if not save() then return {'unknown'} end
  return {'ticket',c.ids[c.index],tostring(c.index)}
 end
-if op~='finish' or not c or c.revision~=r.revision or c.fingerprint~=fp or c.phase~='active' or c.family~=family or c.owner~=owner or c.leaseUntil<=now then return {'held'} end
+if op~='finish' or not c or c.revision~=r.revision or c.fingerprint~=fp or (c.phase~='active' and c.phase~='continuing') or c.family~=family or c.owner~=owner or c.leaseUntil<=now then return {'held'} end
 local id=c.ids[c.index]
 local prefix=family=='shipment' and 'nl:ship:mail:row:' or 'nl:order-confirmation:row:'
 local sourcePrefix=family=='shipment' and 'nl:ship:done:' or 'nl:order-confirmation:source:'
@@ -442,7 +442,12 @@ end
 -- idempotent membership effect; a lost/failed progress ACK keeps this item.
 c.index=c.index+1;c.owner='';c.leaseUntil=0
 if c.index>#c.ids then
- if c.family=='shipment' then c.family='confirmation';c.index=1 else c.phase='done';c.ids={};c.index=1 end
+ if c.family=='shipment' then c.family='confirmation';c.index=1
+ elseif c.phase=='continuing' then
+  -- Finish the retained list first. Exactly one fresh funded capture may
+  -- follow in THIS grant; do not reset any of its consumed capacity.
+  c.phase='capturing';c.ids={};c.index=1;c.family='shipment'
+ else c.phase='done';c.ids={};c.index=1 end
 end
 if not save() then return {'unknown'} end
 return {result}

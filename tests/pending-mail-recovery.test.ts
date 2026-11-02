@@ -318,11 +318,21 @@ test('small funded successor grants compose both normal workers through an unsup
    assert.equal(results[0].accepted,0);
    const [checkpoint]=await pipeline([['HGET',pool,'pendingRecovery']]);const progress=JSON.parse(String(checkpoint));observed.push(progress);passes++;
    assert.ok(progress.attempts<=1);assert.equal(progress.units,progress.attempts*64);assert.equal(progress.readBytes,progress.attempts*1048576);
-   if(progress.phase==='done')break;
+   if(accepted===1)break;
   }
   assert.equal(accepted,1,'finite newly funded small grants must reach and send the original paid confirmation');
-  assert.ok(passes<=6);assert.equal(observed.at(-1)!.phase,'done');
+  assert.ok(passes<=6);
   for(const checkpoint of observed.slice(0,-1))assert.deepEqual(checkpoint.ids,[firstId,id],'snapshot IDs remain original, even after row membership changes');
+  // The final one-ticket grant has spent its capacity finishing the retained
+  // list. Another explicitly financed grant may complete the pending refresh;
+  // neither the original check quota nor any old grant is replenished.
+  const drain={...physical,policy:{...physical.policy,reviewId:'SYNTHETIC_PROGRESS_DRAIN',continuedReviewIds:[physical.policy.reviewId],maximumChecks:2,
+   recovery:{...recovery(),revision:100,startsAt:started-1000,until:started+3600000}}};
+  for(let pass=0;pass<3;pass++)await Promise.all([
+   runShipmentMail(clock()+30000,async()=>{throw Error('Uncovered origin may not send');},drain),
+   runOrderConfirmationMail(clock()+30000,async()=>{throw Error('An accepted origin may not send again');},drain),
+  ]);
+  const [complete]=await pipeline([['HGET',pool,'pendingRecovery']]);assert.equal(JSON.parse(String(complete)).phase,'done');
   assert.equal((await pipeline([['GET','nl:ship:mail:row:'+firstId]]))[0],firstRaw,'unsupported source remains intact');
   assert.equal((await pipeline([['GET',keys[0]]]))[0],null);
   assert.equal(f.calls.filter(call=>call.method==='POST').length,1,'only the original checkout was created');

@@ -190,8 +190,26 @@ def pending_recovery_cases(redis, source, made):
     assert run('next',g=successor,proof=next_fp,family='confirmation')==['ticket',id,'1']
     charged=checkpoint();assert charged['attempts']==1 and charged['units']==64 and charged['readBytes']==1048576
     assert run('finish',g=successor,proof=next_fp,keys=keys,raw=raw,valid='valid',family='confirmation')==['rearmed']
-    assert checkpoint()['phase']=='done' and redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id)=='0'
-    print('PASS: persisted successor high-water rejects old grants and known wrong family cannot starve the next useful confirmation ticket')
+    pending=checkpoint();assert pending['phase']=='capturing' and pending['ids']==[] and pending['family']=='shipment'
+    assert pending['attempts']==1 and pending['units']==64 and pending['readBytes']==1048576
+    before=command_counts(redis.command('INFO','COMMANDSTATS'))
+    assert run('next',g=successor,proof=next_fp)==['exhausted']
+    after=command_counts(redis.command('INFO','COMMANDSTATS'))
+    for name in ['scard','sscan','getrange']:assert after.get(name,0)==before.get(name,0), 'an exhausted grant must not perform fresh variable work'
+    assert checkpoint()==pending and redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id)=='0'
+    refresh={**grant,'reviewId':'REFRESH_FINANCED','recovery':{**grant['recovery'],'revision':3}}
+    refresh_fp='9'*64
+    assert run('next',g=refresh,proof=refresh_fp)==['ticket',id,'1']
+    assert checkpoint()['phase']=='active', 'a funded fresh capture must not request another refresh'
+    assert run('finish',g=refresh,proof=refresh_fp,keys=[pool,all_key,'nl:ship:mail:row:'+id])==['skipped']
+    assert run('next',g=refresh,proof=refresh_fp,family='confirmation')==['ticket',id,'1']
+    assert run('finish',g=refresh,proof=refresh_fp,keys=keys,raw=raw,valid='valid',family='confirmation')==['already']
+    complete=checkpoint();assert complete['phase']=='done' and complete['attempts']==2
+    before=command_counts(redis.command('INFO','COMMANDSTATS'))
+    assert run('next',g=refresh,proof=refresh_fp)==['done']
+    after=command_counts(redis.command('INFO','COMMANDSTATS'))
+    assert after.get('sscan',0)==before.get('sscan',0) and checkpoint()==complete
+    print('PASS: persisted successor high-water rejects old tickets; exhausted retained work cannot recapture and one funded fresh snapshot terminates')
     # The next synthetic grant sees a full bounded snapshot, including first
     # unsupported reviews; each known refusal advances rather than hot-polling.
     redis.command("DEL",pool,all_key)

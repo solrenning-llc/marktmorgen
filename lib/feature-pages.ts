@@ -29,6 +29,7 @@ import { emailPlatformBeginnerQuestions } from "@/lib/email-platform-faq";
 import { communityBeginnerQuestions } from "@/lib/community-faq";
 import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
 import { emailBeginnerQuestions } from "@/lib/email-faq";
+import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -2227,6 +2228,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about Outreach",
         items: [
+          // 534 [FQ1], unit 35: what someone starting out asks, answered by the code (lib/outreach-faq.ts).
+          ...outreachBeginnerQuestions(),
           { q: "Does it cost extra?", a: `No. It is part of the writing help, included on ${AI_PLANS_WORDS}. Each email written uses one of the month's writing jobs: ${aiAllowanceWords()}` },
           { q: "Will businesses answer?", a: EXPECTATION },
           { q: `Why only ${PITCHES_PER_DAY} a day?`, a: "A mailbox that writes to many strangers in a day gets marked as spam, and then stops reaching the people who asked to hear from you. A few specific emails do better than many." },

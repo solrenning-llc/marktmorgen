@@ -15,6 +15,7 @@ import { quizBeginnerQuestions } from "@/lib/quiz-faq";
 import { stampBeginnerQuestions } from "@/lib/pdf-stamp-faq";
 import { calendarBeginnerQuestions } from "@/lib/calendar-faq";
 import { webhookBeginnerQuestions } from "@/lib/webhook-faq";
+import { discordBeginnerQuestions } from "@/lib/discord-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -1650,6 +1651,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about Discord access",
         items: [
+          // 534 [FQ1], unit 17: what someone starting out asks, answered by the code (lib/discord-faq.ts).
+          ...discordBeginnerQuestions(),
           { q: "Does it work with bundles and memberships?", a: "Yes. A product in a bundle gives its roles to the bundle's buyers, and a membership keeps them for as long as it is paid." },
           { q: "What does Discord learn about my buyers?", a: "Nothing from us. Discord tells us the buyer's Discord id and name when they agree on its page, and we keep those with the address that bought, as the privacy policy says." },
         ],

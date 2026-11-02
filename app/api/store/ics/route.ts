@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   if (order.state !== "paid" || !order.call || !order.product.call) {
     return new Response("Not found.", { status: 404, headers: { "Cache-Control": "no-store" } });
   }
-  const room = await roomOf(store.callsId, {
+  const room = order.product.call.place ? null : await roomOf(store.callsId, {
     product: order.product.id,
     setup: order.product.call,
     session: sessionId,
@@ -36,6 +36,8 @@ export async function GET(request: NextRequest) {
     end: order.call.end,
   });
   const words = bookingWords(store.language);
+  // In person (lib/call-place.ts): the address is where it is, and there is no link.
+  const place = order.product.call.place ?? null;
   const ics = callInvite({
     // A link replaced after a failure counts, like a move (lib/meet-links.ts).
     sequence: order.call.moves + (await linkUpdates(store.callsId, { session: sessionId, product: order.product.id, start: order.call.start })),
@@ -45,8 +47,9 @@ export async function GET(request: NextRequest) {
     title: order.product.title,
     storeName: store.name,
     room,
+    place,
     // A buyer's file, in the store's language (lib/buyer-words/booking.ts).
-    note: buyerNote(words, store, room),
+    note: buyerNote(words, store, room, place),
     words,
   });
   return new Response(ics, {

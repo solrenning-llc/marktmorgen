@@ -96,6 +96,10 @@ const en = {
   groupOnline: (seats: number, minutes: number) => `Group call, up to ${seats} people · ${minutes} minutes · online`,
   oneLine: (minutes: number, where: string) => `${minutes}-minute call · ${where}`,
   oneOnline: (minutes: number) => `${minutes}-minute call · online`,
+  /** An in-person booking (lib/call-place.ts): where, under its title. */
+  inPersonLine: (minutes: number, address: string) => `${minutes} minutes · in person, at ${address}`,
+  inPersonGroupLine: (seats: number, minutes: number, address: string) => `Up to ${seats} people · ${minutes} minutes · in person, at ${address}`,
+  inPersonLiveLine: (address: string) => `Live session · in person, at ${address}`,
 
   // ---- Picking a time (components/slot-picker.tsx) ---------------------------
   pickDay: "Pick a day",
@@ -213,6 +217,8 @@ const en = {
   icsAlarm: (title: string) => `${title} in 15 minutes`,
   icsJoin: (room: string) => `Join: ${room}`,
   icsWillSend: (store: string) => `${store} will send the link to join.`,
+  /** An in-person booking (lib/call-place.ts): where it is, in the email and the calendar file. */
+  whereAt: (address: string) => `Where: ${address}`,
 
   // ---- A package of sessions ---------------------------------------------------------
   /** On Stripe's page. */
@@ -292,6 +298,9 @@ const es: BookingWords = {
   groupOnline: (seats, minutes) => `Llamada en grupo, hasta ${seats} personas · ${minutes} minutos · en línea`,
   oneLine: (minutes, where) => `Llamada de ${minutes} minutos · ${where}`,
   oneOnline: (minutes) => `Llamada de ${minutes} minutos · en línea`,
+  inPersonLine: (minutes, address) => `${minutes} minutos · en persona, en ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Hasta ${seats} personas · ${minutes} minutos · en persona, en ${address}`,
+  inPersonLiveLine: (address) => `Sesión en vivo · en persona, en ${address}`,
 
   pickDay: "Elige un día",
   noTimes: "No hay horarios libres en este momento",
@@ -389,6 +398,7 @@ const es: BookingWords = {
   icsAlarm: (title) => `${title} en 15 minutos`,
   icsJoin: (room) => `Unirse: ${room}`,
   icsWillSend: (store) => `${store} enviará el enlace para unirse.`,
+  whereAt: (address) => `Dónde: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sesión", "sesiones")}`,
   packageDescription: (sessions, limit) =>
@@ -469,6 +479,9 @@ const fr: BookingWords = {
   groupOnline: (seats, minutes) => `Appel de groupe, jusqu'à ${seats}${S}personnes · ${minutes}${S}minutes · en ligne`,
   oneLine: (minutes, where) => `Appel de ${minutes}${S}minutes · ${where}`,
   oneOnline: (minutes) => `Appel de ${minutes}${S}minutes · en ligne`,
+  inPersonLine: (minutes, address) => `${minutes}${S}minutes · en personne, adresse${S}: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Jusqu'à ${seats}${S}personnes · ${minutes}${S}minutes · en personne, adresse${S}: ${address}`,
+  inPersonLiveLine: (address) => `Séance en personne, adresse${S}: ${address}`,
 
   pickDay: "Choisir un jour",
   noTimes: "Aucun créneau libre pour l'instant",
@@ -565,6 +578,7 @@ const fr: BookingWords = {
   icsAlarm: (title) => `${title} dans 15${S}minutes`,
   icsJoin: (room) => `Participer${S}: ${room}`,
   icsWillSend: (store) => `${store} enverra le lien pour participer.`,
+  whereAt: (address) => `Où${S}: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions}${S}${pluralFr(sessions, "séance", "séances")}`,
   packageDescription: (sessions, limit) =>
@@ -641,6 +655,9 @@ const de: BookingWords = {
   groupOnline: (seats, minutes) => `Gruppengespräch, bis zu ${seats} Personen · ${minutes} Minuten · online`,
   oneLine: (minutes, where) => `${minutes}-minütiges Gespräch · ${where}`,
   oneOnline: (minutes) => `${minutes}-minütiges Gespräch · online`,
+  inPersonLine: (minutes, address) => `${minutes} Minuten · vor Ort, Adresse: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Bis zu ${seats} Personen · ${minutes} Minuten · vor Ort, Adresse: ${address}`,
+  inPersonLiveLine: (address) => `Live-Session · vor Ort, Adresse: ${address}`,
 
   pickDay: "Tag wählen",
   noTimes: "Gerade sind keine Termine frei",
@@ -738,6 +755,7 @@ const de: BookingWords = {
   icsAlarm: (title) => `${title} in 15 Minuten`,
   icsJoin: (room) => `Teilnehmen: ${room}`,
   icsWillSend: (store) => `${store} schickt den Link zur Teilnahme.`,
+  whereAt: (address) => `Wo: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "Termin", "Termine")}`,
   packageDescription: (sessions, limit) =>
@@ -815,6 +833,9 @@ const it: BookingWords = {
   groupOnline: (seats, minutes) => `Chiamata di gruppo, fino a ${seats} persone · ${minutes} minuti · online`,
   oneLine: (minutes, where) => `Chiamata di ${minutes} minuti · ${where}`,
   oneOnline: (minutes) => `Chiamata di ${minutes} minuti · online`,
+  inPersonLine: (minutes, address) => `${minutes} minuti · di persona, indirizzo: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Fino a ${seats} persone · ${minutes} minuti · di persona, indirizzo: ${address}`,
+  inPersonLiveLine: (address) => `Sessione dal vivo · di persona, indirizzo: ${address}`,
 
   pickDay: "Scegli un giorno",
   noTimes: "Nessun orario libero al momento",
@@ -912,6 +933,7 @@ const it: BookingWords = {
   icsAlarm: (title) => `${title} tra 15 minuti`,
   icsJoin: (room) => `Partecipa: ${room}`,
   icsWillSend: (store) => `${store} invierà il link per partecipare.`,
+  whereAt: (address) => `Dove: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessione", "sessioni")}`,
   packageDescription: (sessions, limit) =>
@@ -989,6 +1011,9 @@ const nl: BookingWords = {
   groupOnline: (seats, minutes) => `Groepsgesprek, tot ${seats} personen · ${minutes} minuten · online`,
   oneLine: (minutes, where) => `Gesprek van ${minutes} minuten · ${where}`,
   oneOnline: (minutes) => `Gesprek van ${minutes} minuten · online`,
+  inPersonLine: (minutes, address) => `${minutes} minuten · ter plaatse, adres: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Tot ${seats} personen · ${minutes} minuten · ter plaatse, adres: ${address}`,
+  inPersonLiveLine: (address) => `Livesessie · ter plaatse, adres: ${address}`,
 
   pickDay: "Kies een dag",
   noTimes: "Er zijn nu geen vrije tijden",
@@ -1085,6 +1110,7 @@ const nl: BookingWords = {
   icsAlarm: (title) => `${title} over 15 minuten`,
   icsJoin: (room) => `Meedoen: ${room}`,
   icsWillSend: (store) => `${store} stuurt de link om mee te doen.`,
+  whereAt: (address) => `Waar: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessie", "sessies")}`,
   packageDescription: (sessions, limit) =>
@@ -1162,6 +1188,9 @@ const pt: BookingWords = {
   groupOnline: (seats, minutes) => `Chamada de grupo, até ${seats} pessoas · ${minutes} minutos · online`,
   oneLine: (minutes, where) => `Chamada de ${minutes} minutos · ${where}`,
   oneOnline: (minutes) => `Chamada de ${minutes} minutos · online`,
+  inPersonLine: (minutes, address) => `${minutes} minutos · presencial, morada: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Até ${seats} pessoas · ${minutes} minutos · presencial, morada: ${address}`,
+  inPersonLiveLine: (address) => `Sessão presencial, morada: ${address}`,
 
   pickDay: "Escolher um dia",
   noTimes: "Não há horários livres neste momento",
@@ -1259,6 +1288,7 @@ const pt: BookingWords = {
   icsAlarm: (title) => `${title} daqui a 15 minutos`,
   icsJoin: (room) => `Entrar: ${room}`,
   icsWillSend: (store) => `${store} vai enviar a ligação para entrar.`,
+  whereAt: (address) => `Onde: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessão", "sessões")}`,
   packageDescription: (sessions, limit) =>

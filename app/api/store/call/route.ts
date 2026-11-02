@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: read }, { status: 400 });
     }
     setup = read;
+    // In person chosen with no address (lib/call-place.ts): never saved as a call with no link.
+    const asked = (guarded.body.call as { place?: unknown } | null | undefined)?.place;
+    if (asked !== undefined && asked !== null && !setup.place) return Response.json({ ok: false, error: "place" }, { status: 400 });
     if (setup.meet && !(await usableProviders(guarded.store.statsId)).includes(setup.meet)) {
       return Response.json({ ok: false, error: `meet_${setup.meet}` }, { status: 400 });
     }

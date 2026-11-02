@@ -81,12 +81,6 @@ test('normal physical workers recover original cap holds through real Lua and fi
   const sent=await runShipmentMail(clock+30000,async(message,barrier)=>{assert.equal(JSON.stringify(message),JSON.stringify(input.message));assert.equal(await barrier(),true);posts++;return 'accepted';},renewed);
   assert.equal(sent.accepted,1);assert.equal(posts,1);
   assert.equal((await pipeline([['GET',rk]]))[0],null);
-  // Finish this snapshot's acknowledged missing confirmation-family position
-  // before creating a DIFFERENT source for the next independent scenario.
-  // A new grant no longer discards the previous active list or cursor.
-  await runOrderConfirmationMail(clock+30000,async()=>{throw Error('No confirmation source exists yet');},renewed);
-  const [finishedSnapshot]=await pipeline([['HGET',pool,'pendingRecovery']]);
-  assert.equal(JSON.parse(String(finishedSnapshot)).phase,'done');
 
   // Create the genuine original source73h in the past using the production
   // checkout with only its explicit fixture provider/ACK boundaries synthetic.
@@ -124,12 +118,22 @@ test('normal physical workers recover original cap holds through real Lua and fi
   const resumed={...physical,policy:newPolicy};
   // Both normal workers run on the same cron; shipment's acknowledged missing
   // family position advances before the confirmation pass can consume it.
-  await runShipmentMail(realNow()+30000,async()=>{throw Error('No shipment remains');},resumed);
-  let physicalPosts=0;
-  const outcome=await runOrderConfirmationMail(realNow()+30000,async(message,barrier)=>{
-   assert.equal(JSON.stringify(message),JSON.stringify(preserved.payload.message));assert.equal(await barrier(),true);physicalPosts++;return 'accepted';
-  },resumed);
-  assert.equal(outcome.accepted,1);assert.equal(physicalPosts,1);
+  let physicalPosts=0,accepted=0;
+  // This new source was already present when the funded review renewed the
+  // older active list. The SAME review must finish that list and capture one
+  // fresh snapshot, using only its remaining finite discovery budget.
+  for(let pass=0;pass<4;pass++){
+   const results=await Promise.all([
+    runShipmentMail(realNow()+30000,async()=>{throw Error('No shipment remains');},resumed),
+    runOrderConfirmationMail(realNow()+30000,async(message,barrier)=>{
+     assert.equal(JSON.stringify(message),JSON.stringify(preserved.payload.message));assert.equal(await barrier(),true);physicalPosts++;return 'accepted';
+    },resumed),
+   ]);
+   accepted+=results[1].accepted;
+  }
+  assert.equal(accepted,1);assert.equal(physicalPosts,1);
+  const [finishedSnapshot]=await pipeline([['HGET',pool,'pendingRecovery']]);
+  assert.equal(JSON.parse(String(finishedSnapshot)).phase,'done','the funded refresh is performed only once');
   assert.equal(f!.calls.filter(c=>c.method==='POST').length,1,'only the original synthetic checkout POST');
  }finally{
   await confirmationLocalPipeline([['DEL',...made]]);

@@ -211,7 +211,7 @@ const IMITATION = /\bmarkt\s*morgen\b|\bnimbus\s*labs\b|\b(?:secure\s+checkout|p
 const MOTION_CSS = /@keyframes\b|\banimation(?:-name)?\s*:|\btransition\s*:|\bscroll-behavior\s*:\s*smooth/i;
 const REDUCED = /prefers-reduced-motion/i;
 
-const textOf = (html: string) => decodeEntities(html.replace(/<script\b[\s\S]*?<\/script\s*>|<style\b[\s\S]*?<\/style\s*>/gi, " ").replace(/<[^>]+>/g, " "));
+const textOf = (html: string) => decodeEntities(html.replace(/<script\b[\s\S]*?(?:<\/script\b[^>]*>|$)|<style\b[\s\S]*?(?:<\/style\b[^>]*>|$)/gi, " ").replace(/<[^>]+>/g, " "));
 
 /** Checks generated code; `allowedHosts` are the only other addresses it may load from or talk to (none by default). */
 export function checkGeneratedCode(code: GeneratedCode, options: { allowedHosts?: readonly string[] } = {}): CodeCheck {
@@ -234,14 +234,14 @@ export function checkGeneratedCode(code: GeneratedCode, options: { allowedHosts?
 
   const html = code.html;
   const tags = tagsOf(html);
-  const inlineScripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
-  const inlineStyles = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi)].map((m) => m[1]);
+  const inlineScripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)(?:<\/script\b[^>]*>|$)/gi)];
+  const inlineStyles = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)(?:<\/style\b[^>]*>|$)/gi)].map((m) => m[1]);
   const handlers: string[] = [];
   const styleAttrs: string[] = [];
 
   // HTML: what loads, what runs, what is asked.
   const labelled = new Set(tags.filter((t) => t.name === "label" && t.attrs.get("for")).map((t) => t.attrs.get("for")!));
-  const insideLabels = [...html.matchAll(/<label\b[\s\S]*?<\/label\s*>/gi)].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length] as const);
+  const insideLabels = [...html.matchAll(/<label\b[\s\S]*?<\/label\b[^>]*>/gi)].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length] as const);
   for (const tag of tags) {
     const { name, attrs, index, raw } = tag;
     if (name === "script") {
@@ -297,11 +297,11 @@ export function checkGeneratedCode(code: GeneratedCode, options: { allowedHosts?
       }
     }
   }
-  for (const match of html.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label\s*>/gi)) {
+  for (const match of html.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label\b[^>]*>/gi)) {
     const what = sensitiveKindOf(textOf(match[1]));
     if (what) add("sensitive_field", html, match.index ?? 0, match[0].length, sensitiveWhy(what));
   }
-  for (const match of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button\s*>/gi)) {
+  for (const match of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button\b[^>]*>/gi)) {
     const attrs = tagsOf(`<button${match[1]}>`)[0]?.attrs ?? new Map<string, string>();
     const words = textOf(match[2]).trim() || [...match[2].matchAll(/<img\b[^>]*\balt\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]).join(" ").trim();
     if (!words && !attrs.has("aria-label") && !attrs.has("aria-labelledby") && !attrs.has("title")) add("button_name", html, match.index ?? 0, match[0].length);

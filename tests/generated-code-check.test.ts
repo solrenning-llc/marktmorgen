@@ -83,6 +83,10 @@ is("saved passwords", rules("", "", `navigator.credentials.get({ password: true 
 
 part("No code written from text, nothing hidden");
 is("eval", rules("", "", `eval("1+1")`), only("writes_code"));
+is("a script closed with an odd end tag is still read", rules(`<script>eval("1")</script\t\n bar>`), only("writes_code"));
+is("a script never closed is still read", rules(`<p>Hi</p><script>document.cookie`), only("storage"));
+is("a style never closed is still read", rules(`<style>p { text-align: justify }`), only("justified"));
+
 is("new Function", rules("", "", `new Function("return 1")`), only("writes_code"));
 is("a timer from a string", rules("", "", `setTimeout("go()", 10)`), only("writes_code"));
 is("innerHTML", rules("", "", `el.innerHTML = name;`), only("writes_code"));

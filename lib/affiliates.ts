@@ -1096,6 +1096,51 @@ export async function decide(store: Store, id: string, decision: Decision): Prom
   return next;
 }
 
+// ---- Several decisions at once, with undo (630 [HN6](4), unit 1) ----------
+
+/** The most applications one press decides, and how long its undo lasts. */
+export const MAX_BULK_DECISIONS = 100;
+export const BULK_UNDO_MS = 10 * 60_000;
+
+/** How one affiliate stood before a decision in bulk: what an undo puts back. */
+export type Before = { id: string; status: AffiliateStatus; decidedAt: number };
+
+/**
+ * Approves or declines several pending applications, one by one through
+ * decide (each approval emails its link, as one at a time). Only pending
+ * ones are touched; anybody already decided is left as they are. Returns how
+ * each stood before, for an undo.
+ */
+export async function decideMany(store: Store, ids: string[], decision: "approve" | "decline"): Promise<Before[]> {
+  const before: Before[] = [];
+  for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
+    const affiliate = await readAffiliate(store, id);
+    if (!affiliate || affiliate.status !== "pending") continue;
+    const done = await decide(store, id, decision);
+    if (done) before.push({ id, status: affiliate.status, decidedAt: affiliate.decidedAt });
+  }
+  return before;
+}
+
+/**
+ * Puts back how each affiliate stood before a decision in bulk, for those
+ * still exactly as that decision left them and within BULK_UNDO_MS of it: a
+ * later decision by hand is never overwritten. An approval email already
+ * sent is not taken back; the studio says so. Returns how many were put back.
+ */
+export async function undoMany(store: Store, before: Before[], decision: "approve" | "decline", now = Date.now()): Promise<number> {
+  const left: AffiliateStatus = decision === "approve" ? "approved" : "declined";
+  let undone = 0;
+  for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
+    if (entry.status !== "pending") continue;
+    const affiliate = await readAffiliate(store, entry.id);
+    if (!affiliate || affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt) continue;
+    await writeAffiliate(store, { ...affiliate, status: entry.status, decidedAt: entry.decidedAt });
+    undone += 1;
+  }
+  return undone;
+}
+
 export async function addPayout(
   store: Store,
   input: { aff: string; cents: number; currency: string; date: string; reference: string },

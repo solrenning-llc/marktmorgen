@@ -10,7 +10,10 @@ import {
   MAX_REFERENCE_LENGTH,
   acceptPartnership,
   addPayout,
+  MAX_BULK_DECISIONS,
   decide,
+  decideMany,
+  undoMany,
   invitePartner,
   listPartners,
   readAffiliate,
@@ -118,6 +121,27 @@ export async function POST(request: NextRequest) {
       // Another decision on this program's leads is being written this moment (MM-SA-09): the studio says to reload and try again.
       if (done.reason === "busy") return fail("busy", 409);
       return fail(done.reason === "reason" ? "lead_reason" : done.reason === "not_ready" ? "lead_not_ready" : "unknown");
+    }
+    // Several applications at once, and their undo (630 [HN6](4); lib/affiliates.ts decideMany, undoMany).
+    if (action === "bulk" || action === "bulk-undo") {
+      const decision = body.decision === "approve" || body.decision === "decline" ? body.decision : null;
+      if (!decision) return fail("unknown");
+      if (action === "bulk") {
+        const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
+        if (!ids.length) return fail("unknown");
+        const before = await decideMany(store, ids, decision);
+        return Response.json({ ok: true, before });
+      }
+      const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
+      const before = sent.flatMap((raw: unknown) => {
+        const v = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+        const id = text(v.id, 20);
+        const decidedAt = Number(v.decidedAt);
+        // Only a pending application goes back: nothing else was decided in bulk.
+        return id && v.status === "pending" && Number.isSafeInteger(decidedAt) && decidedAt >= 0 ? [{ id, status: "pending" as const, decidedAt }] : [];
+      });
+      const undone = await undoMany(store, before, decision);
+      return Response.json({ ok: true, undone });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
       const done = await decide(store, text(body.id, 20), action);

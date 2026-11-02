@@ -223,6 +223,40 @@ export function AffiliateStudio({
   const batchTotal = owedNow.reduce((sum, r) => sum + r.payable, 0);
   const waitingTotal = rows.reduce((sum, r) => sum + r.waiting, 0);
   const [batchOpen, setBatchOpen] = useState(false);
+  // Several applications at once (630 [HN6](4)): which are ticked, and the last press, for its undo.
+  const [picked, setPicked] = useState<string[]>([]);
+  const [lastBulk, setLastBulk] = useState<{ decision: "approve" | "decline"; before: { id: string; status: string; decidedAt: number }[] } | null>(null);
+  const pickedNow = picked.filter((id) => pending.some((row) => row.affiliate.id === id));
+
+  async function bulk(decision: "approve" | "decline") {
+    setBusy("bulk");
+    setError(null);
+    try {
+      const response = await fetch("/api/store/affiliates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk", decision, ids: pickedNow }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; before?: { id: string; status: string; decidedAt: number }[] };
+      if (!data.ok || !Array.isArray(data.before)) {
+        setError({ where: "bulk", text: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error });
+        return;
+      }
+      setPicked([]);
+      setLastBulk({ decision, before: data.before });
+      router.refresh();
+    } catch {
+      setError({ where: "bulk", text: MESSAGES.server_error });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function undoBulk() {
+    if (!lastBulk) return;
+    const done = await act("bulk", { action: "bulk-undo", decision: lastBulk.decision, before: lastBulk.before }, "Put back as they were.");
+    if (done) setLastBulk(null);
+  }
   const [batchDate, setBatchDate] = useState(today);
   const [batchReference, setBatchReference] = useState("");
 
@@ -403,14 +437,62 @@ export function AffiliateStudio({
       </div>
 
       <div className="min-w-0 space-y-6">
-        {pending.length ? (
+        {pending.length || lastBulk ? (
           <section aria-labelledby="apps-title" className="card p-6 sm:p-8">
             <h2 id="apps-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
               {`Applications (${pending.length})`}
             </h2>
+            {lastBulk ? (
+              <div className="notice mt-3 flex flex-wrap items-center justify-between gap-3 text-sm" role="status">
+                <span>
+                  {`${lastBulk.before.length} ${lastBulk.before.length === 1 ? "application" : "applications"} ${lastBulk.decision === "approve" ? "approved" : "declined"}.`}
+                  {lastBulk.decision === "approve" ? " Each was emailed their link; undoing puts them back as applications but cannot take that email back." : ""}
+                  {" You can undo this for 10 minutes."}
+                </span>
+                <span className="flex gap-2">
+                  <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} aria-busy={busy === "bulk"} onClick={undoBulk}>
+                    Undo
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLastBulk(null)}>
+                    Dismiss
+                  </button>
+                </span>
+              </div>
+            ) : null}
+            {pending.length > 1 ? (
+              <div className="mt-4 flex flex-wrap items-center gap-3" role="group" aria-label="Several applications at once">
+                <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold text-ink">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5"
+                    checked={pickedNow.length === pending.length}
+                    onChange={(e) => setPicked(e.target.checked ? pending.map((row) => row.affiliate.id) : [])}
+                  />
+                  Select all
+                </label>
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null || pickedNow.length === 0} aria-busy={busy === "bulk"} onClick={() => bulk("approve")}>
+                  {`Approve selected (${pickedNow.length})`}
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={busy !== null || pickedNow.length === 0} onClick={() => bulk("decline")}>
+                  {`Decline selected (${pickedNow.length})`}
+                </button>
+              </div>
+            ) : null}
+            {errorAt("bulk")}
             <ul className="mt-4 space-y-3">
               {pending.map((row) => (
                 <li key={row.affiliate.id} className="rounded-2xl border border-line bg-paper p-4">
+                  {pending.length > 1 ? (
+                    <label className="mb-1 flex min-h-11 cursor-pointer items-center gap-2 text-sm text-ink-soft">
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5"
+                        checked={pickedNow.includes(row.affiliate.id)}
+                        onChange={(e) => setPicked(e.target.checked ? [...pickedNow, row.affiliate.id] : pickedNow.filter((id) => id !== row.affiliate.id))}
+                      />
+                      {`Select ${row.affiliate.email}`}
+                    </label>
+                  ) : null}
                   <p className="font-semibold text-ink [overflow-wrap:anywhere]">{row.affiliate.email}</p>
                   <p className="mt-0.5 text-xs text-ink-soft">
                     {`Applied ${dayMs(row.affiliate.appliedAt)}`}

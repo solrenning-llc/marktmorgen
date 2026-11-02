@@ -10,6 +10,7 @@ import { stripeBeginnerQuestions } from "@/lib/your-stripe-faq";
 import { salesPageBeginnerQuestions } from "@/lib/sales-page-faq";
 import { optionsBeginnerQuestions } from "@/lib/price-options-faq";
 import { bundleBeginnerQuestions } from "@/lib/bundle-faq";
+import { keyBeginnerQuestions } from "@/lib/license-key-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -1686,7 +1687,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "limits",
         title: "What it does not do",
         items: [
-          "Paid one-off products only: not memberships, calls or courses.",
+          "Paid one-off products only: not memberships, calls, courses, shipped products or bundles (a bundle hands out its products' keys).",
           "No activation or seat counting. The check says whether a key is good; your software decides the rest.",
           "Revoking is a record your software has to ask about. Nothing here can switch off a copy that never checks.",
           "Up to 10,000 keys waiting in one product's pool.",
@@ -1696,6 +1697,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about license keys",
         items: [
+          // 534 [FQ1], unit 12: what someone starting out asks, answered by the code (lib/license-key-faq.ts).
+          ...keyBeginnerQuestions(),
           { q: "How does my software check a key?", a: "It asks /api/store/license with your store's address, the product and the key, and gets back valid, revoked or unknown. It can be called from a website or an app, up to 120 times a minute from one connection." },
           { q: "Can I use keys my own system already made?", a: "Yes. Upload them as a text or CSV file. A key that was already uploaded is skipped, so it can never go to two buyers." },
         ],

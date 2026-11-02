@@ -18,7 +18,7 @@ import { poolPlace } from "@/lib/free-pool";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { standingOf } from "@/lib/plan-standing";
 import { PRO_ON_SALE } from "@/lib/plan";
-import { POOL_FULL_WORDS } from "@/lib/free-pool-rules";
+import { poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type AllowanceKind, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
@@ -52,7 +52,7 @@ function hasLarger(tier: Tier | undefined): boolean {
  * to connected services used, in its own window; no place this month; or not counted just now. Null for any other code.
  */
 export function serviceAllowanceWords(store: AllowanceStore, code: string, now = Date.now()): string | null {
-  if (code === "allowance-pool") return POOL_FULL_WORDS;
+  if (code === "allowance-pool") return poolFullWords(PLANS_ON_SALE);
   if (code === "allowance-unknown") return "This can't be counted right now. Try again in a minute.";
   if (code !== "allowance-used") return null;
   return usedWords("integration", allowanceFor(store, "integration", now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended.integration === 0), standingOf(store, now / 1000), PLANS_ON_SALE, hasLarger(store.tier));
@@ -77,7 +77,7 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
   }
   // No place this month, or none could be counted: each is said as it is.
   const place = await poolPlace(store, now);
-  if (place === "full") return refuse("pool", POOL_FULL_WORDS);
+  if (place === "full") return refuse("pool", poolFullWords(PLANS_ON_SALE));
   if (place === "unknown") return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   try {
     const k = key(kind, id, window.id);

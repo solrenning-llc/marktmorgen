@@ -40,7 +40,7 @@ Generated from the GitHub API; refresh before relying on it. Every file below is
 
 ## Reservations before code
 
-Add a row before the first commit of a unit; remove it when the unit is merged.
+Add a row before the first commit of a unit; remove it when the unit is merged. The workflow `.github/workflows/reservations.yml` (`scripts/reservation-check.mjs`, held by `tests/reservation-check.test.ts`) fails any pull request whose changed files include a path another agent reserved here, read from the base branch so a PR cannot clear another agent's row for itself; the agent is taken from the branch prefix in the Lanes table. Write each reserved file as an exact path in backticks; `docs/codex-queue.md` and this file are shared and never block.
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |

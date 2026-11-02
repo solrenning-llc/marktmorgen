@@ -1,0 +1,26 @@
+# Reservations check (owner, 02/11/2026): a pull request fails when it changes
+# a file that another agent reserved in docs/reservations.md. It reads the
+# repository only; it changes nothing, merges nothing and needs no secret.
+name: Reservations
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: reservations-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  reservations:
+    name: Files reserved by another agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check changed files against the reservations table
+        env:
+          BRANCH: ${{ github.head_ref }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/reservation-check.mjs "$BRANCH" "$BASE"

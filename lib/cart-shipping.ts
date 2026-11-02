@@ -22,8 +22,15 @@
  *
  * Digital products in the cart ship nothing and change none of this.
  * Browser-safe: the cart shows the same answer the checkout acts on.
+ *
+ * Wired into the cart in unit 2b (2 November 2026): lib/cart-rules.ts lets a
+ * physical product in, lib/cart-checkout.ts asks Stripe for the address and
+ * the shipping from cartShipping, and the open cart says the same before the
+ * buyer pays (app/api/store/cart/route.ts).
  */
-import { MAX_SHIPPING_CENTS, type Shipping } from "@/lib/shipping";
+import { MAX_SHIPPING_CENTS, type ShipCandidate, type Shipping, activeShipping } from "@/lib/shipping";
+import { shippingWords } from "@/lib/buyer-words/shipping";
+import type { Store } from "@/lib/store";
 
 /**
  * A product as the cart has it. `physical` comes from the product itself, so
@@ -75,4 +82,80 @@ export function cartShipping(items: CartItem[], buyerCountry?: string): CartShip
   const best = order.filter((code) => reach.get(code) === most);
   const to = buyerCountry && best.includes(buyerCountry) ? buyerCountry : best[0];
   return { kind: "apart", to, apart: shipped.filter((item) => !item.countries.includes(to)).map(({ id, title }) => ({ id, title })) };
+}
+
+/** A product as the cart reads it: physical when it ships today, as on its own checkout (lib/shipping.ts, activeShipping). */
+export function cartItemOf(product: ShipCandidate & { id: string; title: string; shipping?: Shipping | null }): CartItem {
+  const shipping = activeShipping(product);
+  return { id: product.id, title: product.title, physical: shipping !== null, shipping };
+}
+
+/**
+ * Whether a cart holds both products the creator ships and products handed
+ * over online. Such a cart is not paid for yet (513 [PF1], unit 2b, 2
+ * November 2026): the order's own product is a shipped one (shippedFirst),
+ * and the confirmation email (lib/purchase-email.ts) then shows the address
+ * in place of the way to what was bought online. Until that email names both,
+ * the open cart says so and the checkout refuses it, so nobody pays for
+ * something whose way in is not sent to them.
+ */
+export function shipsWithOnline(products: (ShipCandidate & { shipping?: Shipping | null })[]): boolean {
+  const shipped = products.filter((p) => activeShipping(p) !== null).length;
+  return shipped > 0 && shipped < products.length;
+}
+
+/**
+ * The cart's products with the shipped ones first, each group in the cart's
+ * own order. The first product is the order's own (lib/cart-checkout.ts),
+ * and the thanks page and the confirmation email show where an order is
+ * going only under it; the others are handed over in their own boxes as
+ * before.
+ */
+export function shippedFirst<P extends ShipCandidate & { shipping?: Shipping | null }>(products: P[]): P[] {
+  return [...products.filter((p) => activeShipping(p) !== null), ...products.filter((p) => activeShipping(p) === null)];
+}
+
+/**
+ * When the shipping is shown on its own line: the creator's line about when
+ * it ships, when there is one physical product or they all say the same;
+ * otherwise none, since each product's page and its line in the cart say its
+ * own.
+ */
+export function sharedShipNote(notes: string[]): string {
+  const said = [...new Set(notes.map((note) => note.trim()))];
+  return said.length === 1 ? said[0] : "";
+}
+
+/**
+ * What a cart's checkout sends Stripe when something in it ships, as one
+ * product's checkout does (lib/store-checkout.ts): an address in one of the
+ * shared countries, and the shipping, each product's own amount added
+ * together, as its own line before paying. With Stripe Tax on, the shipping
+ * is taxed as shipping and each shipped line, by its own place in the cart, as
+ * goods rather than the account's default. Sent to Stripe's test mode every
+ * day (lib/verify-stripe.ts, verifyCartShipping).
+ */
+export function applyCartShipping(
+  body: URLSearchParams,
+  store: Pick<Store, "language" | "currency" | "tax">,
+  products: (ShipCandidate & { shipping?: Shipping | null })[],
+  shipping: Extract<CartShipping, { kind: "ships" }>,
+): void {
+  const sw = shippingWords(store.language);
+  shipping.countries.forEach((code, i) => body.set(`shipping_address_collection[allowed_countries][${i}]`, code));
+  const rate = "shipping_options[0][shipping_rate_data]";
+  body.set(`${rate}[type]`, "fixed_amount");
+  body.set(`${rate}[fixed_amount][amount]`, String(shipping.cents));
+  body.set(`${rate}[fixed_amount][currency]`, store.currency);
+  const note = sharedShipNote(products.flatMap((product) => activeShipping(product)?.note ?? []));
+  body.set(`${rate}[display_name]`, [shipping.cents > 0 ? sw.rate : sw.freeRate, note].filter(Boolean).join(" · ").slice(0, 100));
+  if (store.tax.enabled) {
+    body.set(`${rate}[tax_behavior]`, store.tax.included ? "inclusive" : "exclusive");
+    body.set(`${rate}[tax_code]`, "txcd_92010001");
+    products.forEach((product, i) => {
+      if (activeShipping(product)) body.set(`line_items[${i}][price_data][product_data][tax_code]`, "txcd_99999999");
+    });
+  }
+  body.set("metadata[ship]", "yes");
+  body.set("payment_intent_data[metadata][ship]", "yes");
 }

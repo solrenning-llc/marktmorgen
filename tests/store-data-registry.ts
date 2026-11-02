@@ -373,6 +373,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:recover:once:@lib/checkout-recovery.ts": short("An address told of a product this week", "own", 8, KEY, MAIL("reminder")),
   "nl:recover:sent:@lib/checkout-recovery.ts": short("A checkout's reminder sent, or found paid", "request", 15, MARK, REQ("checkout")),
   "nl:sweep:cursor@lib/checkout-sweep.ts": company("Where the checkout sweep stopped", "One key, the company's job."),
+  "nl:taxobs:v1:@lib/checkout-sweep.ts": room("Inactive diagnostic checkout observations: no production policy. A reviewed synthetic policy reserves its whole bounded document, index and byte count atomically in the existing room before one SET PXAT; at most 300 observations and an absolute expiry within 24 hours. Activation still needs reviewed scope, retention and full-lifetime cost funding.", "lib/checkout-sweep.ts"),
   "nl:wf:abandoned:@lib/checkout-sweep.ts": short("An abandoned checkout noticed", "request", 2, KEY, REQ("checkout")),
   "nl:cotrouble:@lib/checkout-trouble.ts": { what: "Checkouts refused by day, and the last reason", parts: [capped(40 * 64 + KB, "A field a day, 35 days, and the last one.")] },
   "nl:cotrouble:mail:@lib/checkout-trouble.ts": short("The day's email about it claimed", "day", 2, 128),

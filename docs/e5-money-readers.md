@@ -34,11 +34,11 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | --- | --- |
 | FOLLOW-UP-CHARGE | 8 |
 | NEW-CHARGE | 12 |
-| TOTALS | 33 |
+| TOTALS | 34 |
 | PAST-SALE | 9 |
 | SETTING | 40 |
 | OTHER | 1 |
-| All | 103 |
+| All | 104 |
 
 ## The files
 
@@ -59,6 +59,8 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/call-packages.ts` | NEW-CHARGE | 124: a package's checkout line in the store's currency; 212 the session's | partly |
 | `lib/calls.ts` | NEW-CHARGE | 670: a call's checkout line; 1341 the phone alert of what was paid, in the store's currency | no: 1341 ignores the paid currency |
 | `lib/cart-checkout.ts` | NEW-CHARGE | 143: each cart line's price_data in the store's currency | no |
+| `lib/cart-shipping.ts` | NEW-CHARGE | 149: a cart's shipping rate in the store's currency | no |
+| `lib/verify-stripe.ts` | NEW-CHARGE | 242: the daily Stripe check's test cart lines in the store's currency | no |
 | `lib/pay-what-you-want.ts` | NEW-CHARGE | 123–137: the Price with a custom amount, in the store's currency | no |
 | `lib/payment-request-store.ts` | NEW-CHARGE | 92: a payment request saved with the store's currency | partly: kept per request |
 | `lib/paypal-sales.ts` | NEW-CHARGE | 288: the PayPal order in the store's currency; 260 eligibility | no |
@@ -97,6 +99,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/segments.ts` | TOTALS | 79: the buyer ledger skips every sale not in the store's currency | partly: other-currency sales count as purchases (order, date, channel), their money is left out (fixed in unit 2c) |
 | `lib/stats.ts` | TOTALS | 1396–1460: sales, the rest in "elsewhere"; 1489–1535 refunds and disputes in another currency dropped | partly: refunds and disputes are not counted apart |
 | `lib/store-alerts.ts` | TOTALS | 205/209: daily alerts against the goal in the store's currency | partly |
+| `lib/tax-threshold.ts` | TOTALS | 119: the text scan also matches `s.currency` inside `totals.currency`; this is the supplied tax ledger's currency, not the store setting | yes: the ledger is totalled in its own currency, the threshold requires its rule currency, and incomplete or mismatched evidence stays unknown; no conversion or sales approval |
 | `app/studio/people/page.tsx` | PAST-SALE | 200: a buyer's sale in the sale's own currency | yes |
 | `lib/ad-events.ts` | PAST-SALE | 575/719: the session's or invoice's currency, else the store's | yes |
 | `lib/api-read.ts` | PAST-SALE | 189: the bookings API labels a paid call with the store's currency; 44/59 settings | no (189) |

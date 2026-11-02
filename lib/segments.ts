@@ -29,6 +29,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
 import { WHO, type Who, readTags } from "@/lib/contacts";
 import { paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
+import { rfmGroup } from "@/lib/rfm-rules";
 import { ALL_TIME_PAGES, readInvoicePayments, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -51,8 +52,8 @@ export type LedgerEntry = { cents: number; last: number; channel: string; orders
 export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean };
 
 type Row = [string, number, number, string, number];
-/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes; 5: invoices' payments). */
-const LEDGER_SHAPE = 5;
+/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes; 5: invoices' payments; 6: each renewal counted as a time they bought). */
+const LEDGER_SHAPE = 6;
 /** Pages of a hundred refunds read for the ledger; `partial` when there were more. */
 const TAKEN_BACK_PAGES = 10;
 /** How long the renewals are read for one ledger before the reading stops, partial: inside the email route's minute. */
@@ -139,7 +140,7 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
     }
     buyers.set(email, row);
   }
-  // A renewal is a payment, not a new order: it moves the last purchase and adds what was kept, in the store's currency.
+  // A renewal is a payment: it moves the last purchase, adds what was kept in the store's currency, and counts as one more time they bought.
   for (const renewal of renewals.rows) {
     const left = kept(renewal.paymentIntent ? [renewal.paymentIntent] : paymentsOfInvoice(renewal.invoice), renewal.cents);
     if (left === 0) continue;
@@ -147,6 +148,8 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
     // A buyer known only by a renewal came from the channel the subscription was sold through.
     const row = buyers.get(email) ?? { cents: 0, last: 0, channel: renewal.channel || "direct", orders: 0, firstAt: Infinity };
     if (renewal.currency === store.currency) row.cents += left;
+    // Each payment kept is one more time they bought, for how often (lib/rfm-rules.ts): a member of a year is not "new".
+    row.orders += 1;
     row.last = Math.max(row.last, renewal.created);
     buyers.set(email, row);
   }
@@ -173,6 +176,8 @@ export function keeps(narrow: Narrow, ledger: Ledger, now = Date.now()): (email:
     if (narrow.channel && (!row || row.channel !== narrow.channel)) return false;
     // Has bought, and not in these days: the ones who went quiet, not the ones who never bought.
     if (narrow.quietDays > 0 && (!row || row.last >= now - narrow.quietDays * 86_400_000)) return false;
+    // One group of the store's buyers (lib/rfm-rules.ts, 270 [GR1], unit 3b), worked out from the same row.
+    if (narrow.group && (!row || rfmGroup(row, now) !== narrow.group)) return false;
     return true;
   };
 }

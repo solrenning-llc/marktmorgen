@@ -29,7 +29,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
 import { WHO, type Who, readTags } from "@/lib/contacts";
 import { paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
-import { ALL_TIME_PAGES, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
+import { ALL_TIME_PAGES, readInvoicePayments, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { MAX_SEGMENTS, MAX_SEGMENT_NAME, type Narrow, type Segment, isNarrowed, readNarrow } from "@/lib/segments-rules";
@@ -51,8 +51,8 @@ export type LedgerEntry = { cents: number; last: number; channel: string; orders
 export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean };
 
 type Row = [string, number, number, string, number];
-/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes). */
-const LEDGER_SHAPE = 4;
+/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes; 5: invoices' payments). */
+const LEDGER_SHAPE = 5;
 /** Pages of a hundred refunds read for the ledger; `partial` when there were more. */
 const TAKEN_BACK_PAGES = 10;
 /** How long the renewals are read for one ledger before the reading stops, partial: inside the email route's minute. */
@@ -88,22 +88,34 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
   // joined, and a purchase given back is not a purchase.
   const stripe = Boolean(store.stripeAccountId);
   const none = { rows: [], partial: false };
-  const [paid, renewals, refunds, disputes, paypalBack] = await Promise.all([
+  const until = Date.now() + RENEWALS_SECONDS * 1000;
+  const [paid, renewals, refunds, disputes, paypalBack, invoicePayments] = await Promise.all([
     readPaidSales(store, 0, ALL_TIME_PAGES),
     // Renewals stop reading after RENEWALS_SECONDS, partial, so a store with years of them is not a timeout.
-    stripe ? readRenewalPayments(store, 0, ALL_TIME_PAGES, Date.now() + RENEWALS_SECONDS * 1000) : Promise.resolve(none),
+    stripe ? readRenewalPayments(store, 0, ALL_TIME_PAGES, until) : Promise.resolve(none),
     stripe ? readStoreRefunds(store, 0, TAKEN_BACK_PAGES) : Promise.resolve(none),
     stripe ? readStoreDisputes(store, 0) : Promise.resolve(none),
     // PayPal's refunds, as the numbers read them (lib/stats.ts): unread is partial, never none.
     store.paypalSeller ? readPayPalRefundsWithCoverage(store.statsId, 0).catch(() => null) : Promise.resolve(none),
+    // Each invoice's payment (270 [GR1], unit 3a): a membership's payment, or its first through checkout, is refunded by that payment.
+    stripe ? readInvoicePayments(store, 0, ALL_TIME_PAGES, until).catch(() => null) : Promise.resolve({ byInvoice: new Map<string, string[]>(), partial: false }),
   ]);
   const { sales } = paid;
-  const partial = paid.partial || renewals.partial || refunds.partial || disputes.partial || !paypalBack || paypalBack.partial;
+  const readPartial = paid.partial || renewals.partial || refunds.partial || disputes.partial || !paypalBack || paypalBack.partial;
+  // An invoice whose payment had to be looked up and was not found (the list unread, cut short, or a charge with no payment
+  // intent) leaves its refunds unmatched: the reading is then partial, never "none refunded".
+  let missed = false;
+  const paymentsOfInvoice = (invoice: unknown): string[] => {
+    if (typeof invoice !== "string" || !invoice) return [];
+    const found = invoicePayments?.byInvoice.get(invoice) ?? [];
+    if (!found.length || found.some((intent) => !intent)) missed = true;
+    return found.filter(Boolean);
+  };
   // What was given back of each payment, by the payment: refunds (Stripe's and PayPal's), and disputes that took or hold the money.
   const takenBack = new Map<string, number>();
   const backs = [...refunds.rows, ...disputes.rows, ...(paypalBack?.rows ?? []).map((r) => ({ cents: r.cents, paymentIntent: paypalPaymentId(r.capture) }))];
   for (const back of backs) if (back.paymentIntent) takenBack.set(back.paymentIntent, (takenBack.get(back.paymentIntent) ?? 0) + back.cents);
-  const kept = (paymentIntent: string, cents: number) => Math.max(0, cents - (paymentIntent ? takenBack.get(paymentIntent) ?? 0 : 0));
+  const kept = (paymentIntents: string[], cents: number) => Math.max(0, cents - paymentIntents.reduce((sum, intent) => sum + (takenBack.get(intent) ?? 0), 0));
   const buyers = new Map<string, LedgerEntry & { firstAt: number }>();
   for (const sale of sales) {
     if ((sale.row.metadata as Record<string, string> | null | undefined)?.kind === "tip") continue;
@@ -111,7 +123,9 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
     const raw = sale.upsell ? sale.row.receipt_email : details?.email;
     if (typeof raw !== "string" || !raw.trim()) continue;
     // Given back in full: not a purchase (a free copy, which cost nothing, still is).
-    const left = kept(sale.paymentIntent, sale.cents);
+    // A checkout that started a subscription carries no payment of its own: its first invoice's is the one refunded.
+    const sessionInvoice = sale.row.invoice && typeof sale.row.invoice === "object" ? (sale.row.invoice as { id?: unknown }).id : sale.row.invoice;
+    const left = kept(sale.paymentIntent ? [sale.paymentIntent] : paymentsOfInvoice(sessionInvoice), sale.cents);
     if (sale.cents > 0 && left === 0) continue;
     const email = normaliseEmail(raw);
     const row = buyers.get(email) ?? { cents: 0, last: 0, channel: "direct", orders: 0, firstAt: Infinity };
@@ -127,7 +141,7 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
   }
   // A renewal is a payment, not a new order: it moves the last purchase and adds what was kept, in the store's currency.
   for (const renewal of renewals.rows) {
-    const left = kept(renewal.paymentIntent, renewal.cents);
+    const left = kept(renewal.paymentIntent ? [renewal.paymentIntent] : paymentsOfInvoice(renewal.invoice), renewal.cents);
     if (left === 0) continue;
     const email = normaliseEmail(renewal.email);
     // A buyer known only by a renewal came from the channel the subscription was sold through.
@@ -136,6 +150,8 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
     row.last = Math.max(row.last, renewal.created);
     buyers.set(email, row);
   }
+  // Partial when any list was cut short or unread, or when an invoice's payment was needed and not found.
+  const partial = readPartial || missed;
   const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial };
   // Buyers brought over from another platform (lib/imported-purchases.ts): history, never a sale.
   // Nothing spent here and no purchase date here; they first came "imported".

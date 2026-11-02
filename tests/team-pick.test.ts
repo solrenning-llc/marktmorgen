@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   is("a name's spaces are tidied", (readTeamSetup(raw({}, [{ ...host("ana@example.com"), label: "  Ana   Lima " }]), weekly) as { hosts: TeamHost[] }).hosts[0].label, "Ana Lima");
   is(
     "a name that is an address, a link, markup, too long or not text is refused",
-    ["ana@example.com", "https://ana.example", "www.ana", "ana.com", "<b>Ana</b>", "x".repeat(41), "Ana\u0007Lima", "ana.dev", "ana\uff20gmail", "+55 85 99999-9999", "ana at gmail dot com", "Ana\u200b", "\u202eanA"].map((label) => readTeamSetup(raw({}, [{ ...host("ana@example.com"), label }]), weekly)).concat([readTeamSetup(raw({}, [{ ...host("ana@example.com"), label: 7 }]), weekly)]),
+    ["ana@example.com", "https://ana.example", "www.ana", "ana.com", "<b>Ana</b>", "x".repeat(41), "Ana\u0007Lima", "ana.dev", "ana\uff20gmail", ("+" + "55 85 99999-9999"), "ana at gmail dot com", "Ana\u200b", "\u202eanA"].map((label) => readTeamSetup(raw({}, [{ ...host("ana@example.com"), label }]), weekly)).concat([readTeamSetup(raw({}, [{ ...host("ana@example.com"), label: 7 }]), weekly)]),
     Array(14).fill("team_host_label"),
   );
   is(

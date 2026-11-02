@@ -14,6 +14,7 @@
  * Pure rules at the top, storage at the bottom.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { readShelf } from "@/lib/course-shelf-rules";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -95,6 +96,12 @@ export type Course = {
    * (lib/certificate.ts). Off until the creator switches it on.
    */
   certificate: boolean;
+  /**
+   * The products shown to students on the course's home page under "More
+   * from <store>" (628 [HN4](b), lib/course-shelf-rules.ts), in the creator's
+   * order. Absent is none.
+   */
+  shelf?: string[];
   /**
    * The day the course begins, in seconds, or null for a course with no
    * fixed start. This is the one thing that decides whether a course is a
@@ -182,7 +189,8 @@ export function parseCourse(raw: unknown): Course | null {
       : [];
     const startsAt =
       typeof value.startsAt === "number" && Number.isFinite(value.startsAt) ? Math.floor(value.startsAt) : null;
-    return { id: value.id, modules, certificate: value.certificate === true, startsAt };
+    const shelf = readShelf(value.shelf);
+    return { id: value.id, modules, certificate: value.certificate === true, startsAt, ...(shelf.length ? { shelf } : {}) };
   } catch {
     return null;
   }
@@ -275,6 +283,8 @@ export type CourseEdit =
   | { op: "quiz"; lessonId: string; quiz: QuizSetup | null }
   | { op: "task"; lessonId: string; task: TaskSetup | null }
   | { op: "certificate"; on: boolean }
+  /** The "More from" shelf (628 [HN4](b)): product ids, the course's own product left out. */
+  | { op: "shelf"; products: unknown; courseProductId: string }
   | { op: "start"; at: unknown }
   /** Several modules at once, each with its lessons by title: an outline taken from the writing help (lib/ai.ts). */
   | { op: "outline"; modules: { title: unknown; lessons: unknown[] }[] };
@@ -471,6 +481,12 @@ export function editCourse(course: Course, edit: CourseEdit): EditResult {
     }
     case "certificate":
       return { ok: true, course: { ...course, certificate: edit.on }, removed: [] };
+    case "shelf": {
+      const shelf = readShelf(edit.products, edit.courseProductId);
+      const { shelf: _was, ...rest } = course;
+      void _was;
+      return { ok: true, course: shelf.length ? { ...rest, shelf } : rest, removed: [] };
+    }
     case "start": {
       if (edit.at === null) return { ok: true, course: { ...course, startsAt: null }, removed: [] };
       const at = typeof edit.at === "number" ? Math.floor(edit.at) : Number.NaN;

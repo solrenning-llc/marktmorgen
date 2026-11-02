@@ -34,6 +34,7 @@ import { switchingBeginnerQuestions } from "@/lib/switching-faq";
 import { clickFunnelsBeginnerQuestions } from "@/lib/clickfunnels-faq";
 import { crmBeginnerQuestions } from "@/lib/crm-faq";
 import { aiWritingBeginnerQuestions } from "@/lib/ai-writing-faq";
+import { audienceBeginnerQuestions } from "@/lib/audience-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -2678,6 +2679,8 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions coaches ask",
         items: [
+          // 534 [FQ1], unit 40: what someone starting out asks, answered by the code (lib/audience-faq.ts).
+          ...audienceBeginnerQuestions(),
           { q: "Can I sell a package of several calls?", a: "Yes, for a call with weekly hours: 2 to 20 sessions at one price, with a time limit you choose or none. The buyer pays once and books each session from their own link whenever they like, with the reminders and the meeting link every booking gets." },
           { q: "Where does the video call happen?", a: "In a Google Meet made for each booking once you connect your Google Calendar, on the service whose link you give — Zoom or any other — or in a private Jitsi Meet room made for each booking. The link goes into every invitation." },
           { q: "Can I see who finished the program?", a: "Yes. Your studio shows each student and how many lessons they marked done." },
@@ -2744,6 +2747,8 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions cooks ask",
         items: [
+          // 534 [FQ1], unit 40: what someone starting out asks, answered by the code (lib/audience-faq.ts).
+          ...audienceBeginnerQuestions(),
           { q: "Can I try buying from a cook's store before signing up?", a: "Yes. Open the demo store, pick a size and pay with the Stripe test card 4242 4242 4242 4242. The PDF of the size you chose arrives on screen." },
           { q: "Can I give the recipe away without an email?", a: "Yes: put it on your page as a link with no price. A free product is the one that asks for an email." },
           { q: "Is sales tax added to a meal plan?", a: "Only when you switch Stripe Tax on in your studio, once your Stripe tax setup is done." },
@@ -2811,6 +2816,8 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions trainers ask",
         items: [
+          // 534 [FQ1], unit 40: what someone starting out asks, answered by the code (lib/audience-faq.ts).
+          ...audienceBeginnerQuestions(),
           { q: "Can my program have videos I already host on YouTube?", a: "Yes. A lesson can hold a link as well as a video, so unlisted videos can stay where they are." },
           { q: "Can a form check be a video they send me?", a: "Not yet: a product that asks the buyer to upload a video is not built. Sell it as a call, booked and paid." },
         ],
@@ -2879,6 +2886,8 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions designers ask",
         items: [
+          // 534 [FQ1], unit 40: what someone starting out asks, answered by the code (lib/audience-faq.ts).
+          ...audienceBeginnerQuestions(),
           { q: "Can each license deliver different files?", a: "Yes. Each price option carries its own file or link, and the buyer receives only the one they paid for." },
           { q: "What if my pack is bigger than 5 GB?", a: "Sell it as a link to where you keep it — a Drive or Dropbox folder — and the buyer is sent there the moment they pay." },
         ],

@@ -1,4 +1,5 @@
 import { serviceAllowanceWords } from "@/lib/store-allowance";
+import { placeLine } from "@/lib/call-place";
 import { planAboveSold } from "@/lib/larger-plan";
 import { SalesLevers } from "@/components/sales-levers";
 import { costsPaused } from "@/lib/plan-standing";
@@ -1685,6 +1686,10 @@ export default async function StudioPage({
                                 >
                                   Start in Zoom
                                 <NewTab /></a>
+                              ) : null}
+                              {/* In person (lib/call-place.ts): where, as text, and no link. */}
+                              {product?.call?.place ? (
+                                <span className="break-words text-sm text-ink-soft">{`In person, at: ${placeLine(product.call.place)}`}</span>
                               ) : null}
                               {room ? (
                                 <a href={room} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 -my-2.5 items-center text-sm font-semibold text-violet-deep underline underline-offset-4">

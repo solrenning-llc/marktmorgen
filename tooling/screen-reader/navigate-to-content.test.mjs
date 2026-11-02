@@ -97,3 +97,25 @@ test("an empty page title cannot establish native browser identity",async()=>{
  assert.equal(state.documentResets,0);
  assert.equal(state.headingReads,0);
 });
+
+
+test("native snapshots locate observed loss without adding reader commands",async(t)=>{
+ const logs=[];t.mock.method(console,"log",line=>logs.push(JSON.parse(line.slice(line.indexOf(":")+1))));
+ const {reader,page,state}=fixture({afterPreparationSwitches:Infinity});
+ const commands=[],perform=reader.perform;reader.perform=async command=>{commands.push(command);return perform(command);};
+ const locator=page.locator;page.locator=selector=>({...locator(selector),async blur(){state.windowTitle="Search";state.switchesNeeded=Infinity;}});
+ let reads=0;const foreground={async read(){reads++;return state.windowTitle;}};
+ await assert.rejects(()=>navigateToContent(reader,page,"nvda",foreground),/foreground window did not match/);
+ const snapshots=logs.filter(row=>Object.hasOwn(row,"title"));
+ assert.equal(reads,8);assert.equal(snapshots.find(row=>row.title==="Search")?.stage,"after body blur");
+ assert.equal(commands.filter(command=>command===NVDAKeyCodeCommands.reportTitle).length,12,"Only original initial and final/bounded recovery title reports remain");
+ assert.equal(state.switches,10);assert.equal(state.documentResets,1);assert.equal(state.headingReads,0);
+});
+
+test("unknown native snapshots stay explicit and cannot replace the reader gate",async(t)=>{
+ const errors=[];t.mock.method(console,"error",line=>errors.push(line));
+ const {reader,page,state}=fixture();
+ await navigateToContent(reader,page,"nvda",{async read(){throw Error("synthetic native deadline");}});
+ assert.equal(errors.length,8);assert.ok(errors.every(line=>line.startsWith("AX2_NVDA_NATIVE_FOREGROUND_UNKNOWN:")));
+ assert.equal(state.reports.length,2,"Real NVDA gates are unchanged by diagnostic failure");
+});

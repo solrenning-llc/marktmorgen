@@ -9,7 +9,7 @@ import { INDEX_DIRECTORY_AT } from "@/lib/directory-index";
 
 const TITLE = "Affiliate programs to promote — Marktmorgen";
 const DESCRIPTION =
-  "Creators' own affiliate programs, each with its share of a sale, how long a click counts, the day the creator pays and what one sale of each product earns. Apply to the ones you would recommend anyway.";
+  "Creators' own affiliate programs, each with its share of a sale, how long a click counts, the day the creator pays and what one sale of each product, or one payment of a membership, earns. Apply to the ones you would recommend anyway.";
 
 export async function generateMetadata(): Promise<Metadata> {
   await connection();
@@ -54,7 +54,7 @@ export default async function AffiliateProgramsPage() {
             </h1>
             <p className="t-lead mt-6 max-w-2xl text-white/80">
               Creators who sell on Marktmorgen list their own programs here: the share of each sale, how long a click counts, when they pay, and what one sale of
-              each product earns at today&apos;s price. Read from their stores, never typed for this page.
+              each product, or one payment of a membership, earns at today&apos;s price. Read from their stores, never typed for this page.
             </p>
             <p className="mt-4 text-sm text-white/80">
               Already promoting creators here?{" "}

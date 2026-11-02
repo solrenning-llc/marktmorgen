@@ -190,7 +190,7 @@ def pending_recovery_cases(redis, source, made):
     assert run('next',g=successor,proof=next_fp,family='confirmation')==['ticket',id,'1']
     charged=checkpoint();assert charged['attempts']==1 and charged['units']==64 and charged['readBytes']==1048576
     assert run('finish',g=successor,proof=next_fp,keys=keys,raw=raw,valid='valid',family='confirmation')==['rearmed']
-    pending=checkpoint();assert pending['phase']=='capturing' and pending['ids']==[] and pending['family']=='shipment'
+    pending=checkpoint();assert pending['phase']=='capturing' and len(pending['ids'])==0 and pending['family']=='shipment'
     assert pending['attempts']==1 and pending['units']==64 and pending['readBytes']==1048576
     before=command_counts(redis.command('INFO','COMMANDSTATS'))
     assert run('next',g=successor,proof=next_fp)==['exhausted']

@@ -126,6 +126,13 @@ export type CallSetup = {
    * every setup saved before it existed.
    */
   place?: CallPlace;
+  /**
+   * In person only: the part of the price paid on the site, in the store
+   * currency's smallest unit; the rest is paid in person (lib/call-deposit.ts,
+   * 520 [LB1] unit 5a). Checked against the price where it is saved and again
+   * when paying. Absent for every setup without one.
+   */
+  deposit?: number;
 };
 
 export const MAX_ROOM_LENGTH = 500;
@@ -174,6 +181,7 @@ export type SetupProblem =
   | "buffer"
   | "room"
   | "place"
+  | "deposit"
   | "seats"
   | "sessions"
   | "session_time"
@@ -248,7 +256,9 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
     }
     const ids = new Set(sessions.map((s) => s.id));
     if (ids.size !== sessions.length) return "sessions";
-    if (livePlace.place) return { ...inPerson(sessions), tz: value.tz as string, noticeHours, minutes: sessions[0].minutes, place: livePlace.place };
+    const liveDeposit = readDepositShape(value.deposit, livePlace.place !== null);
+    if (liveDeposit === "deposit") return "deposit";
+    if (livePlace.place) return { ...inPerson(sessions), tz: value.tz as string, noticeHours, minutes: sessions[0].minutes, place: livePlace.place, ...(liveDeposit ? { deposit: liveDeposit } : {}) };
     return {
       kind: "live",
       minutes: sessions[0].minutes,
@@ -302,6 +312,8 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
   // In person: no link, so one left over in the form is not read at all.
   const room = place.place ? null : cleanRoom(value.room);
   if (room === "bad") return "room";
+  const deposit = readDepositShape(value.deposit, place.place !== null);
+  if (deposit === "deposit") return "deposit";
 
   // A setup saved before group calls existed is a one-to-one call.
   const seats = Number(value.seats ?? 1);
@@ -322,7 +334,20 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
     seats,
     sessions: [],
     ...(place.place ? { place: place.place } : {}),
+    ...(deposit ? { deposit } : {}),
   };
+}
+
+/**
+ * A deposit's shape, before the price is known (lib/call-deposit.ts checks it
+ * against the price): a whole positive amount, only in person. None is null;
+ * a deposit on a call, or one that is not a whole amount, refuses the setup.
+ */
+function readDepositShape(raw: unknown, inPersonHere: boolean): number | null | "deposit" {
+  if (raw === undefined || raw === null || raw === 0) return null;
+  const cents = typeof raw === "number" ? raw : Number.NaN;
+  if (!Number.isSafeInteger(cents) || cents <= 0 || !inPersonHere) return "deposit";
+  return cents;
 }
 
 /** Dated sessions held in person: no link, no video room, no meeting, for any of them. */

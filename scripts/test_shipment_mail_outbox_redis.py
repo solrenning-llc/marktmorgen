@@ -157,6 +157,38 @@ def pending_recovery_cases(redis, source, made):
     assert json.loads(redis.command('HGET',pool,'pendingRecovery'))['attempts']==0
     redis.command('HSET',pool,'pendingRecovery',saved)
     print('PASS: malformed or inconsistent checkpoint counters remain unknown rather than replenished')
+    # Reviewed causal regressions: an expired preparation is only returned
+    # to its ordinary claim; recovery never clears its row/lease or dispatches.
+    redis.command('DEL',pool,all_key)
+    id,raw,keys=setup('review-expired-preparation',state='preparing')
+    row=json.loads(raw);row.update(owner='e'*48,leaseUntil=now-1000,next=now-1000)
+    raw=json.dumps(row);redis.command('SET',keys[2],raw)
+    assert run('next')==['ticket',id,'1']
+    assert run('finish',keys=keys,raw=raw,valid='valid')==['rearmed'], 'expired preparation must not pin the snapshot forever'
+    assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id)=='0'
+    assert checkpoint()['family']=='confirmation'
+    for closed in [False,True]:
+        redis.command('DEL',pool,all_key)
+        id,raw,keys=setup('review-active-preparation-'+str(closed),state='preparing')
+        row=json.loads(raw);row.update(owner='e'*48,leaseUntil=now+30000,next=now+30000)
+        raw=json.dumps(row);redis.command('SET',keys[2],raw)
+        if closed:redis.command('SET',keys[5],'synthetic-close')
+        assert run('next')==['ticket',id,'1']
+        assert run('finish',keys=keys,raw=raw,valid='valid')==(['skipped'] if closed else ['busy'])
+        assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id) is None
+        if closed:redis.command('DEL',keys[5])
+    print('PASS: expired preparation can rejoin ordinary claims, active preparation stays busy and closure advances without permission')
+    for phase in ['awaiting_creation','creating','creation_unknown']:
+        redis.command('DEL',pool,all_key)
+        id,raw,keys=setup('review-lost-create-'+phase,phase=phase)
+        row=json.loads(raw);row.update(session='',erasedPeople='',erasureSaturated=False)
+        raw=json.dumps(row);redis.command('SET',keys[2],raw)
+        assert run('next')==['ticket',id,'1']
+        assert run('finish',keys=[pool,all_key,'nl:ship:mail:row:'+id])==['skipped']
+        assert run('next',family='confirmation')==['ticket',id,'1']
+        assert run('finish',family='confirmation',keys=keys,raw=raw,valid='valid')==['rearmed'], 'lost creation ACK must remain discoverable by the read-only worker'
+        assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id)=='0'
+    print('PASS: all pre-session creation phases rejoin read-only original-account recovery without source replacement')
     assert max(profiles['next'])+3+max(profiles['finish'])<=64
     print(json.dumps({'recovery_eval_and_internal_max':{key:max(values) for key,values in profiles.items()},
                       'confirmation_observation_commands':3,'reserved_variable_command_units':64,

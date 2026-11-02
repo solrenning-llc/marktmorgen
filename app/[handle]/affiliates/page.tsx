@@ -136,7 +136,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
       : [];
   const promotionProducts = affiliate ? kitProducts.map(product => ({ ...product, url: productAffiliateLink(store, product, affiliate.code) })) : [];
   const different = (await readListings(store, Object.keys(terms.rates)))
-    .filter((p) => !p.hidden && p.priceCents > 0 && p.recurring === null && commissionRate(terms, p.id) !== terms.percent)
+    .filter((p) => !p.hidden && p.priceCents > 0 && (p.recurring === null || terms.recurring > 0) && commissionRate(terms, p.id) !== terms.percent)
     .map((p) => ({ title: p.title, rate: commissionRate(terms, p.id) }));
 
   const form = (

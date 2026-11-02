@@ -105,3 +105,57 @@ test("unterminated oversized stdout fails its bounded parser without leaking byt
  assert.equal(events.find(e=>e.event==="failed")?.reason,"stdout_budget");
  assert.ok(!JSON.stringify(events).includes("SECRET_STDOUT_SENTINEL"));
 });
+
+test("UTF8 split chunks and CRLF preserve the exact observed title",async()=>{
+ const f=fixture(),probe=await startWindowsForegroundProbe({...f.options,onDiagnostic:()=>{}});
+ const answer=probe.read(),title="Janela — 漢字 😀";
+ const bytes=Buffer.from(JSON.stringify({id:"0",title})+"\r\n");
+ for(const byte of bytes)f.child.stdout.write(Buffer.from([byte]));
+ assert.equal(await answer,title);await probe.close();
+});
+test("4096bytes are accepted and4097bytes fail before frame allocation",async()=>{
+ const f=fixture(),events=[],probe=await startWindowsForegroundProbe({...f.options,onDiagnostic:e=>events.push(e)});
+ let title="\0".repeat(670);
+ title+="a".repeat(4096-Buffer.byteLength(JSON.stringify({id:"0",title})));
+ const exact=JSON.stringify({id:"0",title});assert.equal(Buffer.byteLength(exact),4096);
+ const answer=probe.read();f.child.stdout.write(exact+"\n");assert.equal(await answer,title);
+ const oversized=probe.read();f.child.stdout.write(JSON.stringify({id:"1",title:title+"a"})+"\n");
+ await assert.rejects(oversized,/reply budget/);
+ assert.equal(events.find(e=>e.event==="failed")?.reason,"stdout_budget");await probe.close();
+});
+test("metadata cap never limits native queries or the optional ninth observation",async()=>{
+ const f=fixture(),events=[],probe=await startWindowsForegroundProbe({...f.options,onDiagnostic:e=>events.push(e)});
+ for(let n=0;n<20;n++){
+  const answer=probe.read();f.reply(String(n),"Window "+n);assert.equal(await answer,"Window "+n);
+ }
+ assert.equal(f.requests.length,20);await probe.close();assert.ok(events.length<=12);
+});
+test("multiple correlated frames in one chunk preserve out of order replies",async()=>{
+ const f=fixture(),probe=await startWindowsForegroundProbe({...f.options,onDiagnostic:()=>{}});
+ const one=probe.read(),two=probe.read();
+ f.child.stdout.write('{"id":"1","title":"Two"}\n{"id":"0","title":"One"}\n');
+ assert.equal(await one,"One");assert.equal(await two,"Two");await probe.close();
+});
+test("duplicate or out of order readiness never renews or authorizes a query",async()=>{
+ for(const frame of ['{"ready":true}', '{"stage":"interop_ready"}']){
+  const f=fixture({handshake:false}),events=[];
+  const starting=startWindowsForegroundProbe({...f.options,onDiagnostic:e=>events.push(e)});
+  if(frame==='{"ready":true}'){f.child.stdout.write(frame+"\n");const probe=await starting;
+   f.child.stdout.write(frame+"\n");await assert.rejects(probe.read(),/Uncorrelated/);await probe.close();
+  }else{f.child.stdout.write(frame+"\n");await assert.rejects(starting,/milestone/);}
+  assert.equal(events.find(e=>e.event==="failed")?.reason,"reply_protocol");
+ }
+});
+test("malformed stdout and unknown exit signals cannot leak arbitrary values",async()=>{
+ const f=fixture({handshake:false}),events=[];
+ const starting=startWindowsForegroundProbe({...f.options,onDiagnostic:e=>events.push(e)});
+ f.child.stdout.write('SECRET_STDOUT_SENTINEL not JSON\n');
+ await assert.rejects(starting,error=>error.message==="Malformed native foreground reply");
+ f.child.emit("exit",NaN,"SECRET_SIGNAL_SENTINEL");
+ const exit=events.find(e=>e.event==="exit"&&e.exitSignal==="UNKNOWN");assert.ok(exit);
+ assert.equal(exit.exitCode,null);assert.ok(!JSON.stringify(events).includes("SENTINEL"));
+});
+test("diagnostic sink failure cannot replace a valid native reply",async()=>{
+ const f=fixture(),probe=await startWindowsForegroundProbe({...f.options,onDiagnostic:()=>{throw Error("sink unavailable");}});
+ const answer=probe.read();f.reply("0","Observed title");assert.equal(await answer,"Observed title");await probe.close();
+});

@@ -347,7 +347,14 @@ if op=='next' then
  if c and (r.revision<c.revision or (r.revision==c.revision and fp~=c.fingerprint)) then return {'held'} end
  if not c or r.revision>c.revision then
   if c and (g.reviewId==c.reviewId or g.maximumChecks<c.maximumChecks) then return {'held'} end
-  c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,readBytes=0,ids={},index=1,family='shipment',phase='capturing',owner='',leaseUntil=0}
+  -- A new financed grant replaces its own budget, never completed snapshot
+  -- work. Revalidate each retained position at finish under the new review.
+  -- Old tickets lose authority through revision/fingerprint and owner checks.
+  local continuing=c and c.phase=='active'
+  local ids=continuing and c.ids or {}
+  local index=continuing and c.index or 1
+  local currentFamily=continuing and c.family or 'shipment'
+  c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,readBytes=0,ids=ids,index=index,family=currentFamily,phase=continuing and 'active' or 'capturing',owner='',leaseUntil=0}
  end
  if c.phase=='done' or c.phase=='unsupported' then return {c.phase} end
  if c.attempts>=r.maximumAttempts or c.attempts>=r.maximumTriggerInvocations or c.units+64>r.maximumCommandUnits or c.readBytes+1048576>r.maximumReadBytes then return {'exhausted'} end

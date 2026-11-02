@@ -144,6 +144,29 @@ def pending_recovery_cases(redis, source, made):
     assert redis.command('GET',target_keys[2])==target_raw
     progress=checkpoint();assert progress['family']=='confirmation' and progress['index']==1
     print('PASS: newly financed grants compose snapshot progress through an unsupported prefix without resetting original sources')
+    # Membership may change while a ticket is unknown. Only a completed
+    # snapshot is recaptured: a successor continues its acknowledged old IDs.
+    redis.command('DEL',pool,all_key)
+    original=sorted([setup('membership-original-one'),setup('membership-original-two')],key=lambda row:row[0])
+    first_id,first_raw,first_keys=original[0];second_id,second_raw,second_keys=original[1]
+    assert run('next')==['ticket',first_id,'1']
+    old_checkpoint=checkpoint()
+    redis.command('DEL',first_keys[2]);redis.command('SREM',all_key,first_id)
+    redis.command('HINCRBY',pool,'items',-1);redis.command('HINCRBY',pool,'bytes',-12000)
+    added_id,added_raw,added_keys=setup('membership-added-after-snapshot')
+    assert added_id not in old_checkpoint['ids']
+    renewed={**grant,'reviewId':'MEMBERSHIP_SUCCESSOR','recovery':{**grant['recovery'],'revision':2}}
+    renewed_fp='8'*64
+    assert run('next',g=renewed,proof=renewed_fp)==['ticket',first_id,'1']
+    retained=checkpoint()
+    assert retained['ids']==old_checkpoint['ids'] and retained['family']==old_checkpoint['family']
+    assert run('finish',g=grant,keys=first_keys,raw=first_raw,valid='valid')==['held']
+    assert run('finish',g=renewed,proof=renewed_fp,keys=[pool,all_key,first_keys[2]])==['skipped']
+    assert run('next',g=renewed,proof=renewed_fp)==['ticket',second_id,'2']
+    assert run('finish',g=renewed,proof=renewed_fp,keys=second_keys,raw=second_raw,valid='valid')==['rearmed']
+    assert redis.command('GET',second_keys[2])==second_raw and redis.command('GET',added_keys[2])==added_raw
+    assert checkpoint()['ids']==old_checkpoint['ids']
+    print('PASS: a funded successor keeps its original snapshot across deletion/new membership and rejects the old in-flight finish')
     # Both ordinary cron workers call next. A known other family is a fixed
     # guard, not a useful ticket, and cannot starve a one-ticket successor.
     redis.command('DEL',pool,all_key)

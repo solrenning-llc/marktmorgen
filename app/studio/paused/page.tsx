@@ -10,6 +10,8 @@ import { resetWords } from "@/lib/allowance-window";
 import { POOL_FULL_WORDS } from "@/lib/free-pool-rules";
 import { PLAN_TITLES, PRO_ON_SALE, type Tier } from "@/lib/plan";
 import { standingOf } from "@/lib/plan-standing";
+import { PLANS_ON_SALE } from "@/lib/opening";
+import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
 
 export const metadata: Metadata = {
@@ -74,7 +76,8 @@ export default async function StudioPausedPage({ searchParams }: Params) {
                     : `Your plan includes ${limit.toLocaleString("en-US")} studio requests a month: every page of the studio you open, every save, and the studio's own refreshing. They are used, so the studio is paused until they open again. Your store stays open to buyers, and nothing you made or sold is touched.`}
               </p>
               {why === "used" ? <p className="mt-3 font-semibold text-ink">{resetWords(store)}</p> : null}
-              {larger && PRO_ON_SALE && mayChange ? (
+              {/* app/api/billing/switch refuses while no plan is on sale, without billing or without a subscription. */}
+              {larger && PLANS_ON_SALE && PRO_ON_SALE && isBillingConfigured() && store.subscriptionId && mayChange ? (
                 <form action={`/api/billing/switch${pin}`} method="post" className="mt-6">
                   <input type="hidden" name="tier" value={larger} />
                   <input type="hidden" name="cycle" value={store.cycle} />
@@ -88,7 +91,7 @@ export default async function StudioPausedPage({ searchParams }: Params) {
               ) : null}
               <div className="mt-8 border-t border-line pt-6">
                 <p className="text-sm font-bold text-ink">Never paused</p>
-                <p className="mt-1 text-sm text-ink-soft">Changing your plan, canceling it and taking your sales with you always work.</p>
+                <p className="mt-1 text-sm text-ink-soft">{PLANS_ON_SALE ? "Changing your plan, canceling it and taking your sales with you always work." : "Canceling your plan and taking your sales with you always work."}</p>
                 <div className="mt-4 flex flex-wrap items-end gap-3">
                   {can(view.role, "export") ? (
                     <form action="/api/store/export" method="get">
@@ -100,7 +103,7 @@ export default async function StudioPausedPage({ searchParams }: Params) {
                       </button>
                     </form>
                   ) : null}
-                  {paying && mayChange ? (
+                  {paying && mayChange && isBillingConfigured() && store.subscriptionId ? (
                     <details>
                       <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">Cancel the subscription</summary>
                       <p className="mt-2 text-sm text-ink-soft">Your store keeps taking payments until the end of the period you already paid for, and nothing more is charged.</p>

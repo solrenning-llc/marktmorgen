@@ -582,7 +582,8 @@ export async function recoverPendingMail(family: "shipment" | "confirmation", de
  if (!p?.recovery || !integer(deadline) || now() >= deadline) return;
  const started = performance.now(), monotonicDeadline = started + Math.min(250, deadline - now());
  const expired = () => now() >= deadline || performance.now() >= monotonicDeadline;
- const grant = { recovery: p.recovery, reviewId: p.reviewId, maximumChecks: p.maximumChecks, globalItems: p.globalItems, globalBytes: p.globalBytes, continuedReviewIds: p.continuedReviewIds ?? [], coveredOrigins: p.coveredOrigins ?? [] };
+ // Omitted coverage must keep the existing grant bytes and fingerprint.
+ const grant = { recovery: p.recovery, reviewId: p.reviewId, maximumChecks: p.maximumChecks, globalItems: p.globalItems, globalBytes: p.globalBytes, continuedReviewIds: p.continuedReviewIds ?? [], ...(p.coveredOrigins === undefined ? {} : { coveredOrigins: p.coveredOrigins }) };
  const proof = JSON.stringify(grant), fp = digest(proof), owner = randomBytes(24).toString("hex"), pipeline = runtime.pipeline ?? redisPipeline;
  try {
   const response = ownArray(await pipeline([["EVAL", PENDING_MAIL_RECOVERY_SCRIPT, 2, POOL, ALL, "next", proof, fp, owner, family, now(), "", ""]]));

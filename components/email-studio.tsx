@@ -722,6 +722,8 @@ function Compose(props: {
   const [buyerGroup, setBuyerGroup] = useState<RfmGroup | "">(props.restore ? props.restore.buyerGroup ?? "" : props.draft?.narrow?.group ?? "");
   const [more, setMore] = useState(props.restore ? props.restore.more : Boolean(props.draft?.narrow && (props.draft.narrow.minSpent || props.draft.narrow.channel || props.draft.narrow.quietDays || props.draft.narrow.group)));
   const [channels, setChannels] = useState<string[] | null>(null);
+  // How many buyers are of each kind, from the ledger the choices below read (270 [GR1], unit 3c); null until read.
+  const [kinds, setKinds] = useState<Partial<Record<RfmGroup, number>> | null>(null);
   const [partial, setPartial] = useState(false);
   const [segments, setSegments] = useState<Segment[]>(props.segments);
   const [groupName, setGroupName] = useState("");
@@ -768,6 +770,10 @@ function Compose(props: {
       setConfirming(false);
       if (count !== null) {
         if (Array.isArray(a.channels)) setChannels(a.channels.filter((c): c is string => typeof c === "string"));
+        if (a.kinds && typeof a.kinds === "object" && !Array.isArray(a.kinds)) {
+          const read = a.kinds as Record<string, unknown>;
+          setKinds(Object.fromEntries(RFM_GROUPS.flatMap((g) => (Number.isSafeInteger(read[g.id]) && (read[g.id] as number) >= 0 ? [[g.id, read[g.id] as number]] : []))));
+        }
         if (typeof a.partial === "boolean") setPartial(a.partial);
       } else if (a.error === "stripe") setError(message(a));
     });
@@ -1127,11 +1133,11 @@ function Compose(props: {
               <select id="mail-group" className="field mt-2" value={buyerGroup} aria-describedby="mail-group-hint" onChange={(e) => setBuyerGroup(e.target.value as RfmGroup | "")}>
                 <option value="">No kind: everyone chosen above</option>
                 {RFM_GROUPS.map((g) => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
+                  <option key={g.id} value={g.id}>{kinds && kinds[g.id] !== undefined ? `${g.name} (${n(kinds[g.id] as number)} ${kinds[g.id] === 1 ? "buyer" : "buyers"})` : g.name}</option>
                 ))}
               </select>
               <span id="mail-group-hint" className="field-hint mt-1 block">
-                {buyerGroup ? RFM_GROUPS.find((g) => g.id === buyerGroup)?.rule : "Each kind is one rule about how recently and how often someone bought, and nobody is two kinds at once. Choose one to see its rule."}
+                {`${buyerGroup ? RFM_GROUPS.find((g) => g.id === buyerGroup)?.rule ?? "" : "Each kind is one rule about how recently and how often someone bought, and nobody is two kinds at once. Choose one to see its rule."}${kinds ? " The number beside each kind is all your buyers of that kind, on your list or not, before the choices above." : ""}`}
               </span>
             </div>
             <p className="text-xs text-ink-soft">

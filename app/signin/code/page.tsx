@@ -19,6 +19,7 @@ const NOTICES: Record<string, string> = {
     "Your app's codes cannot be checked right now, after a security change on our side. Use one of your recovery codes, or log in with a passkey, then turn two-step login off and on again.",
   "rescue-limited": "A link has gone to your recovery address three times this hour. Use the newest one, or try again later.",
   "rescue-unsent": "The email to your recovery address could not be sent just now. Try again in a moment.",
+  "rescue-none": "There is no recovery address to send a link to for this login. Use a recovery code or a passkey, or the choice below.",
 };
 
 /**

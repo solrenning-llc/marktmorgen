@@ -40,11 +40,11 @@ Generated from the GitHub API; refresh before relying on it. Every file below is
 
 ## Reservations before code
 
-Add a row before the first commit of a unit; remove it when the unit is merged.
+Add a row before the first commit of a unit; remove it when the unit is merged. `tests/reservation-check.test.ts`, run by `npm test` in the product checks of every pull request (`scripts/reservation-check.mjs`), fails any pull request whose changed files include a path another agent reserved here, read from the base branch so a PR cannot clear another agent's row for itself; the agent is taken from the branch prefix in the Lanes table. Write each reserved file as an exact path in backticks; `docs/codex-queue.md` and this file are shared and never block.
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Codex | 473 [TX3], #1491: current-main integration and conflict resolution | codex/tx3-sales-counter | `docs/reservations.md`, `docs/codex-queue.md`, `docs/e5-money-readers.md`, `tests/plan-cost-registry.ts`, `tests/store-data-registry.ts` | 02/11/2026 |
+| Codex | 473 [TX3], #1491: current-main 9aa762fc integration and conflict resolution | codex/tx3-sales-counter | `docs/reservations.md`, `docs/codex-queue.md`, `docs/e5-money-readers.md`, `tests/plan-cost-registry.ts`, `tests/store-data-registry.ts` | 02/11/2026 |
 | Claude 3 | 631 [AA1] unit 1 (coverage of every studio action by an agent tool, step (a)) | claude3/aa1-coverage | `lib/agent-coverage.ts`, `tests/agent-coverage.test.ts`, `docs/ai-agent-store.md` | 02/11/2026 13h45 |
 | Claude 3 | 631 [AA1] unit 2 (proposals, confirmation and undo as pure rules, step (c); no storage yet) | claude3/aa1-proposal-rules | `lib/agent-proposal-rules.ts`, `tests/agent-proposal-rules.test.ts` | 02/11/2026 14h05 |
 | Claude 3 | 631 [AA1] unit 3 (agent keys by scope: read, draft, execute; step (c); no studio screen yet) | claude3/aa1-agent-keys | `lib/api-keys.ts`, `lib/api-key-rules.ts`, `lib/api-guard.ts`, `tests/agent-keys.test.ts` | 02/11/2026 14h20 |

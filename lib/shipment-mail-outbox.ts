@@ -397,17 +397,23 @@ if current~='' and ARGV[8]=='valid' then
   if KEYS[6]~=fencePrefix..'closed:'..row.statsId or KEYS[7]~=fencePrefix..'erased:'..row.statsId..':'..row.person then return {'unknown'} end
   local supported=row.reviewId==g.reviewId
   for _,review in ipairs(g.continuedReviewIds) do if row.reviewId==review then supported=true end end
-  -- A supported in-flight preparation may later become an eligible parked
-  -- hold. Do not permanently skip it from this finite snapshot while its
-  -- original bounded lease/ordinary worker can still settle the transition.
-  if supported and row.state=='preparing' then return {'busy'} end
-  local phaseOk=family=='shipment' or row.phase=='queued' or row.phase=='awaiting_payment'
+  local fenced=redis.call('EXISTS',KEYS[6],KEYS[7])~=0
+  -- Only a live unfenced preparation owns this position. A stale preparation
+  -- can rejoin the ordinary claim without rewriting its original lease/row;
+  -- a closure is a known refusal, never a reason to pin later positions.
+  if supported and not fenced and row.state=='preparing' and row.leaseUntil>now then return {'busy'} end
+  -- The cron never creates a session. Missing creation ACKs rejoin its
+  -- original-account read-only recovery even after the23h POST window.
+  local phaseOk=family=='shipment' or row.phase=='queued' or row.phase=='awaiting_payment' or
+   (row.session=='' and (row.phase=='awaiting_creation' or row.phase=='creating' or row.phase=='creation_unknown'))
+  local eligible=(row.state=='queued' and row.next==0) or
+   (row.state=='preparing' and row.leaseUntil<=now and row.next<=now)
   local erased=false
   if family=='confirmation' then
    if row.erasureSaturated~=false or type(row.erasedPeople)~='string' or #row.erasedPeople>4096 or #row.erasedPeople%64~=0 then erased=true
    else for i=1,#row.erasedPeople,64 do if string.sub(row.erasedPeople,i,i+63)==row.person then erased=true end end end
   end
-  if supported and phaseOk and not erased and row.state=='queued' and row.next==0 and type(row.checks)=='number' and row.checks>=0 and row.checks%1==0 and row.checks<g.maximumChecks and redis.call('EXISTS',KEYS[6],KEYS[7])==0 then
+  if supported and phaseOk and not erased and not fenced and eligible and type(row.checks)=='number' and row.checks>=0 and row.checks%1==0 and row.checks<g.maximumChecks then
    local score=redis.call('ZSCORE',KEYS[5],id)
    -- Zero means immediately eligible without copying a new timestamp into
    -- the original row or depending on the caller clock's millisecond edge.

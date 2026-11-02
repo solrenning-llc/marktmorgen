@@ -277,7 +277,7 @@ export const WRITE_ERRORS: Record<WriteError, [number, string]> = {
   // Said with the store's own words when the write has them (refusedFigure); these are only the fallback.
   monthly_limit: [429, `Your store's API requests are used (each contact added or product given counts as ${API_WRITE_UNITS}).`],
   no_place: [429, "Stores without a paid plan are full for this month, so this can't run right now."],
-  store_full: [409, "Your store's data room is full, so nothing was added. Delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan."],
+  store_full: [409, "Your store's data room is full, so nothing was added. Delete something you no longer need, such as old posts, drafts, pages or contacts."],
 };
 
 /** A write the store's data room did not fit (lib/store-data.ts) is said as one, not as a failure to try again. */

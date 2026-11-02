@@ -85,7 +85,7 @@ const MESSAGES: Record<string, string> = {
   auto_unavailable: "The video service could not take this just now. Nothing was charged; try again in a moment.",
   auto_unknown: "That video is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include charging the plan's card. Ask the owner to do this.",
-  store_full: "Your store's data room is full. Delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan.",
+  store_full: "Your store's data room is full. Delete something you no longer need, such as old posts, drafts, pages or contacts.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

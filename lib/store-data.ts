@@ -27,6 +27,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StoreFullError } from "@/lib/store-full";
+import { largerPlanFor } from "@/lib/larger-plan";
 import { type DataFields, contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
 
 /** What a store is kept under, and what its room is measured by. */
@@ -181,7 +182,7 @@ async function run(store: DataStore, changes: DataChange[], always: boolean, now
     const [state, total] = Array.isArray(reply) ? reply.map(Number) : [NaN, NaN];
     const used = Number.isFinite(total) ? total : 0;
     if (state === 1) return { ok: true, used };
-    if (state === 0) return { ok: false, reason: "full", used, room, message: dataFullWords(used, room) };
+    if (state === 0) return { ok: false, reason: "full", used, room, message: dataFullWords(used, room, largerPlanFor(store, nowSeconds)) };
     return unknown(used);
   } catch (error) {
     console.error("could not count a store's data", error);

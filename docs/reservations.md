@@ -44,6 +44,7 @@ Add a row before the first commit of a unit; remove it when the unit is merged. 
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Codex | AV10: owner-reported usage and renewal status only | codex/av10-usage-20261102 | `docs/codex-queue.md`, `docs/reservations.md` | 02/11/2026 |
 | Claude 3 | 631 [AA1] unit 1 (coverage of every studio action by an agent tool, step (a)) | claude3/aa1-coverage | `lib/agent-coverage.ts`, `tests/agent-coverage.test.ts`, `docs/ai-agent-store.md` | 02/11/2026 13h45 |
 | Claude 3 | 631 [AA1] unit 2 (proposals, confirmation and undo as pure rules, step (c); no storage yet) | claude3/aa1-proposal-rules | `lib/agent-proposal-rules.ts`, `tests/agent-proposal-rules.test.ts` | 02/11/2026 13h52 |
 | Claude 3 | 631 [AA1] unit 3 (agent keys by scope: read, draft, execute; step (c); no studio screen yet) | claude3/aa1-agent-keys | `lib/api-keys.ts`, `lib/api-key-rules.ts`, `lib/api-guard.ts`, `tests/agent-keys.test.ts` | 02/11/2026 13h55 |

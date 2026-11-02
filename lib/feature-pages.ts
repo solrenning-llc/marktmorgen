@@ -25,6 +25,7 @@ import { domainBeginnerQuestions } from "@/lib/domain-faq";
 import { insightsBeginnerQuestions } from "@/lib/insights-faq";
 import { reviewsBeginnerQuestions } from "@/lib/reviews-faq";
 import { currencyBeginnerQuestions } from "@/lib/currency-faq";
+import { emailPlatformBeginnerQuestions } from "@/lib/email-platform-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -2145,6 +2146,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about email platforms",
         items: [
+          // 534 [FQ1], unit 26: what someone starting out asks, answered by the code (lib/email-platform-faq.ts).
+          ...emailPlatformBeginnerQuestions(),
           { q: "Do I still need Studio?", a: "No. Connecting a platform is on every plan. Studio is for writing to your list from Marktmorgen itself." },
           { q: "What starts on the platform?", a: "Whatever you set up there. On Kit, people are added to the form you pick, which starts what you attached to it." },
         ],

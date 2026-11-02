@@ -238,3 +238,15 @@ test('newly funded discovery at cap10000 recovers a lost ticket without resettin
   assert.equal(outcome.accepted,1);assert.equal(posts,1);assert.equal((await pipeline([['GET',key]]))[0],null);
  });
 });
+
+test('recovery descriptors preserve the original closing fallback for unknown suffixes', async()=>{
+ const {closingFamilyOf,closingOf,countedInRoom}=await import('@/lib/data-families');
+ for(const key of ['nl:order-confirmation:','nl:order-confirmation:unregistered:synthetic','nl:ship:mail:','nl:ship:mail:unregistered:synthetic']){
+  assert.equal(closingFamilyOf(key),'nl:','an undeclared suffix must retain its original fallback');
+  assert.deepEqual(closingOf(key),{how:'erase'});assert.equal(countedInRoom(key),false);
+ }
+ for(const prefix of ['nl:order-confirmation:row:','nl:order-confirmation:source:','nl:order-confirmation:closed:','nl:order-confirmation:erased:',
+  'nl:ship:mail:row:','nl:ship:mail:closed:','nl:ship:mail:erased:','nl:ship:mail:pool:']){
+  const key=prefix+'SyntheticStableId1234567890';assert.equal(closingFamilyOf(key),prefix);assert.deepEqual(closingOf(key),{how:'company'});assert.equal(countedInRoom(key),false);
+ }
+});

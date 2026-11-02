@@ -77,7 +77,7 @@ jobs:
         run: node node_modules/playwright-core/cli.js install ${{ runner.os == 'Windows' && 'chromium' || 'webkit' }}
       - name: Check owned preparation recovery and refusal cases
         working-directory: tooling/screen-reader
-        run: node --test setup-owned-reader.test.mjs navigate-to-content.test.mjs
+        run: node --test setup-owned-reader.test.mjs navigate-to-content.test.mjs windows-foreground.test.mjs
       - name: Configure real screen reader on disposable standard runner
         working-directory: tooling/screen-reader
         run: node setup-owned-reader.mjs

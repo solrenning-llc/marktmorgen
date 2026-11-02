@@ -1,7 +1,7 @@
 import { readDraftSubjectTest, sameDraftSubjectTest } from "@/lib/mail-draft-test";
 import { sameDraftAudience } from "@/lib/mail-draft-audience";
 import { readTags } from "@/lib/contact-rules";
-import { readNarrow, type Narrow } from "@/lib/segments-rules";
+import { readNarrow, type Narrow, sameNarrow } from "@/lib/segments-rules";
 import { MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 export type MailAnswer = Record<string, unknown> & { ok?: boolean; error?: string };
 /** A malformed response or failed HTTP request never confirms a mail operation. */
@@ -32,7 +32,7 @@ export function confirmedMailCopy(answer: MailAnswer): MailCopy | null {
     if (!copy.narrow || typeof copy.narrow !== "object" || Array.isArray(copy.narrow)) return null;
     const raw = copy.narrow as Record<string, unknown>;
     narrow = readNarrow(raw);
-    if (raw.minSpent !== narrow.minSpent || raw.channel !== narrow.channel || raw.quietDays !== narrow.quietDays) return null;
+    if (!sameNarrow(raw, narrow)) return null;
   }
   // A label, when the sent email had one (99 [E2-TAG-BROADCAST]); absent on a copy of an older email.
   if (!(copy.label === undefined || copy.label === null || typeof copy.label === "string" && readTags([copy.label])[0] === copy.label)) return null;

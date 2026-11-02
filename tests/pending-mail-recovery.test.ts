@@ -31,7 +31,7 @@ test('recovery periods, finite budgets and own data are required before new IO',
  for (const change of [
   { maximumAttempts: 0 }, { maximumAttempts: Infinity }, { maximumCommandUnits: 0 },
   { checkpointBytes: 1 }, { startsAt: now + 1 }, { until: now },
-  { revision: 0 }, { maximumTriggerInvocations: 0 }, { triggerEvidence: '' },
+  { revision: 0 }, { revision: Number.MAX_SAFE_INTEGER }, { maximumTriggerInvocations: 0 }, { triggerEvidence: '' },
  ]) assert.equal(shipmentMailPolicy({ ...shipmentPolicy(now), recovery: { ...recovery(), ...change } }, now, false), null);
  let reads = 0;
  const executable = Object.defineProperty(recovery(), 'maximumAttempts', { get() { reads++; return 100; } });

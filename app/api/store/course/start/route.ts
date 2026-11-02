@@ -14,6 +14,7 @@ import {
   touchStudent,
 } from "@/lib/learn";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { courseToStart } from "@/lib/order-courses";
 
 /**
  * The thanks page's "Start the course" button.
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest) {
     const form = await (await limited(request, 8_000)).formData();
     handle = normaliseHandle(String(form.get("handle") ?? ""));
     sessionId = String(form.get("session_id") ?? "");
-    // A course inside a bundle, named by its id: only one this order's own list holds.
+    // A course named by its id: only one this order hands over (lib/order-courses.ts).
     asked = String(form.get("product") ?? "").slice(0, 64);
   } catch {
     return new Response("Bad request", { status: 400 });
@@ -58,10 +59,8 @@ export async function POST(request: NextRequest) {
 
   const order = await readOrder(store, sessionId);
   if (order.state !== "paid" || order.gift || order.group || order.preorder) return away(`/@${store.handle}`);
-  const inside = asked
-    ? [...(order.items?.items ?? []), ...order.bumps.flatMap((added) => added.items?.items ?? [])].find((p) => p.id === asked && p.course) ?? null
-    : null;
-  const product = inside ?? (order.product.course ? order.product : null);
+  // The course named, when this order hands it over (lib/order-courses.ts): in a bundle, or a cart's product after its first.
+  const product = courseToStart(order, asked);
   if (!product?.course) return away(`/@${store.handle}`);
   const course = product.course!;
   const path = `/@${store.handle}/course/${product.id}`;

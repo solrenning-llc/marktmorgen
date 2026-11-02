@@ -13,6 +13,7 @@ import { useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore,
 import { useRouter } from "next/navigation";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { isAiEmailCopy, isAiSequenceDraft } from "@/lib/ai-response";
+import { RFM_GROUPS, type RfmGroup } from "@/lib/rfm-rules";
 import { MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
 import { confirmedRecipientCount, confirmedDraftId, draftRemovalAnswer, confirmedMailCopy, keptWaitHours, mailAnswer, type MailAnswer } from "@/lib/mail-response";
 import { toast } from "@/components/toast";
@@ -95,10 +96,10 @@ const MESSAGES: Record<string, string> = {
     "This email was narrowed two ways at once, and an email in a sequence keeps one condition. Write it again instead, and choose who it goes to.",
   goal: "That ending would stop the sequence before its first email, or the trigger needs one. A workflow about an abandoned checkout must end once they buy. Choose another ending.",
   keep_money:
-    "This email was sent to people chosen by what they spent, where they came from or when they last bought, and a sequence cannot choose that way. Write it again instead.",
+    "This email was sent to people chosen by what they spent, where they came from, when they last bought or the kind of buyer they are, and a sequence cannot choose that way. Write it again instead.",
   stripe: "Your Stripe account could not be read just now, so spending, channels and last purchases cannot be counted. Try again in a moment.",
   segment_name: "Give the group a name.",
-  segment_empty: "Choose who the group is first: a kind of reader, a product, someone to leave out, a label, or one of the three ways below.",
+  segment_empty: "Choose who the group is first: a kind of reader, a product, someone to leave out, a label, or one of the four ways below.",
   segment_product: "That product is not in your store anymore.",
   segment_full: "A store keeps 20 saved groups at most. Remove one first.",
   keep_already: "This email is already going to new people by itself. It is under Sequences.",
@@ -217,6 +218,7 @@ function narrowWords(narrow: Narrow, currency: string): string {
     narrow.minSpent ? `spent at least ${formatMoney(narrow.minSpent, currency)}` : "",
     narrow.channel ? `first came through ${channelName(narrow.channel)}` : "",
     narrow.quietDays ? `had not bought in ${narrow.quietDays} days` : "",
+    narrow.group ? `are among your \u201c${RFM_GROUPS.find((g) => g.id === narrow.group)?.name ?? narrow.group}\u201d` : "",
   ].filter(Boolean);
   return `Only those who ${parts.join(", ")}.`;
 }
@@ -228,7 +230,7 @@ function AudienceSummary({ audience, products, currency }: {
   currency: string;
 }) {
   const narrow = audience.narrow;
-  const narrowed = narrow && Boolean(narrow.minSpent || narrow.channel || narrow.quietDays);
+  const narrowed = narrow && Boolean(narrow.minSpent || narrow.channel || narrow.quietDays || narrow.group);
   return <div className="mt-1 break-words text-sm text-ink-soft">
     <p><span className="font-semibold">Audience criteria: </span>{mailAudienceWords(audience, products)}</p>
     {audience.label ? <p className="mt-1">{`Only people with the label “${audience.label}”.`}</p> : null}
@@ -629,7 +631,7 @@ function ListCard({
 type ComposerSnapshot = {
   subject: string; body: string; productId: string; notProductId: string; who: Who; draftId: string; draftSavedAt: string;
   later: boolean; at: string; testing: boolean; subjectB: string; share: number; hours: number; by: TestBy;
-  spentText: string; channel: string; quietDays: number; more: boolean; savedContent: string; label: string;
+  spentText: string; channel: string; quietDays: number; more: boolean; savedContent: string; label: string; buyerGroup?: RfmGroup | "";
   /** A draft save that could not be confirmed: saving stays blocked when brought back, so a draft is never made twice. */
   uncertain: boolean;
 };
@@ -716,16 +718,20 @@ function Compose(props: {
     const wait = setTimeout(() => setCountedLabel(cleanLabel), 400);
     return () => clearTimeout(wait);
   }, [cleanLabel, countedLabel]);
-  const [more, setMore] = useState(props.restore ? props.restore.more : Boolean(props.draft?.narrow && (props.draft.narrow.minSpent || props.draft.narrow.channel || props.draft.narrow.quietDays)));
+  // One group of the buyers, by how recently and how often they bought (270 [GR1], unit 3b); "" for none.
+  const [buyerGroup, setBuyerGroup] = useState<RfmGroup | "">(props.restore ? props.restore.buyerGroup ?? "" : props.draft?.narrow?.group ?? "");
+  const [more, setMore] = useState(props.restore ? props.restore.more : Boolean(props.draft?.narrow && (props.draft.narrow.minSpent || props.draft.narrow.channel || props.draft.narrow.quietDays || props.draft.narrow.group)));
   const [channels, setChannels] = useState<string[] | null>(null);
+  // How many buyers are of each kind, from the ledger the choices below read (270 [GR1], unit 3c); null until read.
+  const [kinds, setKinds] = useState<Partial<Record<RfmGroup, number>> | null>(null);
   const [partial, setPartial] = useState(false);
   const [segments, setSegments] = useState<Segment[]>(props.segments);
   const [groupName, setGroupName] = useState("");
   const parsedSpent = readSegmentSpend(spentText, props.currency as Currency);
   const invalidSpent = parsedSpent === null;
   const minSpent = parsedSpent ?? 0;
-  const narrow: Narrow = { minSpent, channel, quietDays };
-  const countKey = JSON.stringify([productId, notProductId, who, minSpent, channel, quietDays, more, countRevision, invalidSpent, countedLabel]);
+  const narrow: Narrow = { minSpent, channel, quietDays, ...(buyerGroup ? { group: buyerGroup } : {}) };
+  const countKey = JSON.stringify([productId, notProductId, who, minSpent, channel, quietDays, buyerGroup, more, countRevision, invalidSpent, countedLabel]);
   // A label still being typed is not counted yet: no count is shown for a label other than the one typed.
   const reach = !invalidSpent && cleanLabel === countedLabel && reachResult?.key === countKey ? reachResult.count : null;
   const monthCount = reach !== null && !later && props.month ? sendCount(reach, props.month.used, props.month.allowance) : null;
@@ -746,24 +752,28 @@ function Compose(props: {
   const [goal, setGoal] = useState<EmailGoal>("announce");
   const [about, setAbout] = useState("");
   const draftSubjectTest: DraftSubjectTest | null = testing ? { subjectB, share, hours, by } : null;
-  const content = JSON.stringify([subject, body, productId, who, notProductId, spentText, channel, quietDays, draftSubjectTest, label]);
+  const content = JSON.stringify([subject, body, productId, who, notProductId, spentText, channel, quietDays, buyerGroup, draftSubjectTest, label]);
   const [savedContent, setSavedContent] = useState(props.restore ? props.restore.savedContent : !props.draft && props.initialTemplate ? "" : content);
   const dirty = (!draftId && Boolean(props.draft)) || content !== savedContent || later || at !== "";
   useLeaveGuard(dirty || aiBusy);
   // What is set aside when another email is opened over unsaved changes, so they can be brought back (485 [IT2]).
-  const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, more, savedContent, uncertain: draftSaveBlocked, label });
+  const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, more, savedContent, uncertain: draftSaveBlocked, label, buyerGroup });
   useImperativeHandle(props.composerState, () => ({ dirty, busy: locked, snapshot }));
 
   useEffect(() => {
     if (invalidSpent) return;
     let live = true;
-    call({ action: "count", productId, notProductId, who, narrow: { minSpent, channel, quietDays }, label: countedLabel, channels: more && channels === null }).then((a) => {
+    call({ action: "count", productId, notProductId, who, narrow, label: countedLabel, channels: more && channels === null }).then((a) => {
       if (!live) return;
       const count = confirmedRecipientCount(a);
       setReachResult({ key: countKey, count });
       setConfirming(false);
       if (count !== null) {
         if (Array.isArray(a.channels)) setChannels(a.channels.filter((c): c is string => typeof c === "string"));
+        if (a.kinds && typeof a.kinds === "object" && !Array.isArray(a.kinds)) {
+          const read = a.kinds as Record<string, unknown>;
+          setKinds(Object.fromEntries(RFM_GROUPS.flatMap((g) => (Number.isSafeInteger(read[g.id]) && (read[g.id] as number) >= 0 ? [[g.id, read[g.id] as number]] : []))));
+        }
         if (typeof a.partial === "boolean") setPartial(a.partial);
       } else if (a.error === "stripe") setError(message(a));
     });
@@ -772,7 +782,7 @@ function Compose(props: {
     };
     // `channels` is asked for once, when the choices are first opened.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId, notProductId, who, minSpent, channel, quietDays, more, countRevision, invalidSpent, countedLabel]);
+  }, [productId, notProductId, who, minSpent, channel, quietDays, buyerGroup, more, countRevision, invalidSpent, countedLabel]);
 
   async function group(payload: Record<string, unknown>, done: string) {
     if (locked || (payload.action === "segment-save" && invalidSpent)) return;
@@ -796,8 +806,9 @@ function Compose(props: {
     setSpentText(segment.minSpent ? plainAmount(segment.minSpent, props.currency) : "");
     setChannel(segment.channel);
     setQuietDays(segment.quietDays);
+    setBuyerGroup(segment.group ?? "");
     setGroupName(segment.name);
-    if (segment.minSpent || segment.channel || segment.quietDays) setMore(true);
+    if (segment.minSpent || segment.channel || segment.quietDays || segment.group) setMore(true);
   }
 
   async function send(payload: Record<string, unknown>, success: string) {
@@ -831,7 +842,7 @@ function Compose(props: {
     if (locked || draftSaveBlocked || invalidSpent) return;
     setBusy(true);
     setError(null);
-    const audience = { who, notProductId: notProductId || null, narrow: minSpent || channel || quietDays ? narrow : null, ...(cleanLabel ? { label: cleanLabel } : {}) };
+    const audience = { who, notProductId: notProductId || null, narrow: minSpent || channel || quietDays || buyerGroup ? narrow : null, ...(cleanLabel ? { label: cleanLabel } : {}) };
     const a = await call({ action: "draft-save", id: draftId || undefined, subject, body, productId, audience, subjectTest: draftSubjectTest, expectedSavedAt: draftId ? draftSavedAt : undefined });
     setBusy(false);
     if (!a.ok) {
@@ -1070,13 +1081,13 @@ function Compose(props: {
           </span>
         </div>
         {/*
-          And three ways no list can choose by itself: what they spent, where
+          And four ways no list can choose by itself: what they spent, where
           they first found the store, and how long since they last bought.
           Read from the creator's own Stripe account when the email goes out
           (lib/segments.ts); nothing is recorded about anybody to do it.
         */}
         <details className="rounded-[12px] bg-paper px-4 py-3 ring-1 ring-line" open={more} onToggle={(e) => setMore((e.currentTarget as HTMLDetailsElement).open)}>
-          <summary className="cursor-pointer text-sm font-semibold text-ink">More ways to choose: what they spent, where they came from, when they last bought</summary>
+          <summary className="cursor-pointer text-sm font-semibold text-ink">More ways to choose: what they spent, where they came from, when they last bought, what kind of buyer they are</summary>
           <div className="mt-3 space-y-4">
             <label className="block">
               <span className="field-label">Spent with you at least</span>
@@ -1114,8 +1125,23 @@ function Compose(props: {
                 ))}
               </select>
             </label>
+            {/* 270 [GR1], unit 3b: the groups of lib/rfm-rules.ts, each with its rule, from the same buyers' ledger as the three above. */}
+            <div>
+              <label className="block" htmlFor="mail-group">
+                <span className="field-label">Only one kind of buyer</span>
+              </label>
+              <select id="mail-group" className="field mt-2" value={buyerGroup} aria-describedby="mail-group-hint" onChange={(e) => setBuyerGroup(e.target.value as RfmGroup | "")}>
+                <option value="">No kind: everyone chosen above</option>
+                {RFM_GROUPS.map((g) => (
+                  <option key={g.id} value={g.id}>{kinds && kinds[g.id] !== undefined ? `${g.name} (${n(kinds[g.id] as number)} ${kinds[g.id] === 1 ? "buyer" : "buyers"})` : g.name}</option>
+                ))}
+              </select>
+              <span id="mail-group-hint" className="field-hint mt-1 block">
+                {`${buyerGroup ? RFM_GROUPS.find((g) => g.id === buyerGroup)?.rule ?? "" : "Each kind is one rule about how recently and how often someone bought, and nobody is two kinds at once. Choose one to see its rule."}${kinds ? " The number beside each kind is all your buyers of that kind, on your list or not, before the choices above." : ""}`}
+              </span>
+            </div>
             <p className="text-xs text-ink-soft">
-              Only buyers can match these three. They are read from your Stripe account and your PayPal sales when the email goes
+              Only buyers can match these four. They are read from your Stripe account and your PayPal sales when the email goes
               out; support for your work is not counted. Payments of memberships and payment plans count toward what someone spent
               and when they last paid. A purchase or a payment refunded, or held or lost in a dispute, does not count; for PayPal, only a sale refunded in full
               is taken off. A sale in another currency counts as a purchase for where
@@ -1132,7 +1158,7 @@ function Compose(props: {
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-0 flex-1">
             <span className="field-label">Save who this goes to as a group</span>
-            <input className="field mt-2" maxLength={60} placeholder="Best customers" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
+            <input className="field mt-2" maxLength={60} placeholder="Spring launch buyers" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
           </label>
           <button
             type="button"

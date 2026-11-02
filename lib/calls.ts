@@ -43,6 +43,8 @@
  * booking also takes its hosts' time on every store at once, atomically
  * (lib/host-claims.ts), under the same lock as everything here.
  */
+import { chargeNow } from "@/lib/call-deposit";
+import { type CallPlace, placeIcsLines, placeLine, whereOf } from "@/lib/call-place";
 import { admitOrders } from "@/lib/order-admission";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { countOrder } from "@/lib/orders";
@@ -561,7 +563,8 @@ export async function checkCallChange(
     setup = { ...next, sessions, minutes: sessions[0].minutes };
   }
 
-  const switching = before !== null && before.kind !== setup.kind;
+  // Online to in person, or back (lib/call-place.ts), is a change of kind too: whoever booked was told where, or given a link.
+  const switching = before !== null && (before.kind !== setup.kind || whereOf(before).kind !== whereOf(setup).kind);
   const touched = was.filter((old) => {
     if (old.start + old.minutes * 60_000 <= now) return false;
     const kept = setup.kind === "live" ? setup.sessions.find((s) => s.id === old.id) : undefined;
@@ -666,6 +669,8 @@ export function callCheckoutBody(input: {
   // on the sale, as what the buyer saw.
   const lang = LANGUAGES[parseLanguage(store.language)];
   const when = `${readableTime(start, buyerTz, lang.locale)} (${zoneName(start, buyerTz, lang.locale)})`;
+  // Never from a package: the package was the payment.
+  const due = pkg ? { cents: product.priceCents, rest: 0 } : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
   const name = `${product.title} \u2014 ${when}`;
   const body = new URLSearchParams({
     mode: "payment",
@@ -673,7 +678,8 @@ export function callCheckoutBody(input: {
     "line_items[0][quantity]": "1",
     // In the store's own currency (lib/money.ts), like every price it has.
     "line_items[0][price_data][currency]": store.currency,
-    "line_items[0][price_data][unit_amount]": String(product.priceCents),
+    // A deposit on an in-person booking (lib/call-deposit.ts): only it is charged here; the rest is paid in person.
+    "line_items[0][price_data][unit_amount]": String(due.cents),
     "line_items[0][price_data][product_data][name]": name.slice(0, 250),
     "metadata[store]": store.handle,
     "metadata[product]": product.id,
@@ -691,6 +697,17 @@ export function callCheckoutBody(input: {
     cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
+  if (due.rest > 0) {
+    // Said on Stripe's own page, before paying, and kept on the sale for the creator.
+    const said = formatMoney(due.rest, store.currency, lang.locale);
+    // The creator's own summary first, then the sentence, kept whole within Stripe's 500 characters.
+    const sentence = bookingWords(store.language).depositRest(said, store.name);
+    const summary = product.summary ? product.summary.slice(0, Math.max(0, 500 - sentence.length - 3)) : "";
+    body.set("line_items[0][price_data][product_data][description]", summary ? `${summary} \u2014 ${sentence}` : sentence.slice(0, 500));
+    body.set("metadata[deposit]", String(due.cents));
+    body.set("metadata[rest]", String(due.rest));
+    body.set("payment_intent_data[metadata][rest]", String(due.rest));
+  }
   if (input.team) {
     body.set("metadata[hosts]", input.team.hosts.join(","));
     body.set("metadata[claim]", input.team.claim);
@@ -702,7 +719,8 @@ export function callCheckoutBody(input: {
     body.set("cancel_url", pkg.back);
     // Nothing is paid, so Stripe makes no payment of it to carry these.
     for (const key of [...body.keys()]) if (key.startsWith("payment_intent_data")) body.delete(key);
-  } else if (store.hasDiscounts) body.set("allow_promotion_codes", "true");
+  } else if (store.hasDiscounts && due.rest === 0) body.set("allow_promotion_codes", "true");
+  // With a deposit, a code would come off the deposit alone, and its minimum be checked against it: no code box until that is decided (520 [LB1], 5b).
   // Sent by an affiliate: credited to them, at today's share (lib/affiliates.ts).
   // A booking is one product, with nothing else able to ride along, so a
   // share of nothing is a sale that earns nothing and is not written down.
@@ -1111,13 +1129,15 @@ async function tellMoved(input: {
   const buyerTz = isTimeZone(input.buyerTz) ? input.buyerTz : setup.tz;
   // A one-to-one booking keeps its video room when it moves; a seat in a
   // group moves into the room of its new time (lib/call-rooms.ts).
-  const room = await roomOf(store.callsId, { product: product.id, setup, session, start, end });
+  // In person (lib/call-place.ts): the address, and no link, not even a room kept from when it was online.
+  const place = whereOf(setup).kind === "place" ? setup.place! : null;
+  const room = place ? null : await roomOf(store.callsId, { product: product.id, setup, session, start, end });
   const video = isVideoRoom(room);
   // A link replaced after a failure counts too, so this file replaces every one sent before.
   const sequence = moves + (await linkUpdates(store.callsId, { session, product: product.id, start }));
   const invite = (note: string, words?: BookingWords) =>
     Buffer.from(
-      callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, note, sequence, words }),
+      callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, place, note, sequence, words }),
     ).toString("base64");
   const at = (ms: number, tz: string) => `${readableTime(ms, tz)} (${zoneName(ms, tz)})`;
 
@@ -1138,7 +1158,7 @@ async function tellMoved(input: {
         b.nowAt(buyerAt(start)),
         b.wasAt(buyerAt(from.start)),
         "",
-        room ? b.joinAtNewTime(room) : b.willSendLink(store.name),
+        place ? b.whereAt(placeLine(place)) : room ? b.joinAtNewTime(room) : b.willSendLink(store.name),
         ...(video ? [b.videoRoomNote] : []),
         "",
         b.newTimeAttached,
@@ -1146,7 +1166,7 @@ async function tellMoved(input: {
         b.toCancel(store.name),
       ].join("\n"),
       replyTo: store.email,
-      attachments: [{ filename: "call.ics", content: invite(buyerNote(b, store, room), b) }],
+      attachments: [{ filename: "call.ics", content: invite(buyerNote(b, store, room, place), b) }],
     });
   }
 
@@ -1162,11 +1182,11 @@ async function tellMoved(input: {
       `Was: ${at(from.start, setup.tz)}`,
       "",
       "The old time is free again for somebody else. The calendar file attached has the new time; delete the old event from your calendar if it is still there.",
-      ...(room ? ["", `${video ? "The video room" : "The meeting link"}: ${room}`, ...(video ? [VIDEO_ROOM_NOTE] : [])] : []),
+      ...(place ? ["", `In person, at: ${placeLine(place)}`] : room ? ["", `${video ? "The video room" : "The meeting link"}: ${room}`, ...(video ? [VIDEO_ROOM_NOTE] : [])] : []),
       "Every booking is also in your studio, under Upcoming calls.",
     ].join("\n"),
     ...(email ? { replyTo: email } : {}),
-    attachments: [{ filename: "call.ics", content: invite(`With ${email ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`) }],
+    attachments: [{ filename: "call.ics", content: invite(place ? `With ${email ?? "your buyer"}. In person, at: ${placeLine(place)}` : `With ${email ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`) }],
   });
 }
 
@@ -1206,6 +1226,8 @@ export function callInvite(input: {
   title: string;
   storeName: string;
   room: string | null;
+  /** In person (lib/call-place.ts): the address is the LOCATION, and there is no link. */
+  place?: CallPlace | null;
   note: string;
   sequence?: number;
   /** The buyer's file speaks the store's language (lib/buyer-words/booking.ts); the creator's, English. */
@@ -1226,7 +1248,7 @@ export function callInvite(input: {
     `DTEND:${icsTime(input.end)}`,
     `SUMMARY:${icsText(words.icsSummary(input.title, input.storeName))}`,
     `DESCRIPTION:${icsText(input.note)}`,
-    ...(input.room ? [`LOCATION:${icsText(input.room)}`, `URL:${input.room}`] : []),
+    ...(input.place ? placeIcsLines(input.place) : input.room ? [`LOCATION:${icsText(input.room)}`, `URL:${input.room}`] : []),
     "STATUS:CONFIRMED",
     "BEGIN:VALARM",
     "TRIGGER:-PT15M",
@@ -1243,7 +1265,8 @@ export function callInvite(input: {
  * What a buyer's calendar file says about joining, in the store's language:
  * the link, and the note on a video room made here, or that the link will come.
  */
-export function buyerNote(words: BookingWords, store: Store, room: string | null): string {
+export function buyerNote(words: BookingWords, store: Store, room: string | null, place: CallPlace | null = null): string {
+  if (place) return words.whereAt(placeLine(place));
   return room ? `${words.icsJoin(room)}${isVideoRoom(room) ? `\n\n${words.videoRoomNote}` : ""}` : words.icsWillSend(store.name);
 }
 
@@ -1369,11 +1392,13 @@ export async function confirmBooking(input: {
   const setup = product.call;
   const buyerTz = isTimeZone(input.buyerTz) ? input.buyerTz : setup.tz;
   // Made here, the first time it is needed, when the product makes rooms.
-  const room = await roomOf(store.callsId, { product: product.id, setup, session, start, end });
+  // In person (lib/call-place.ts): the address, and no link, not even a room kept from when it was online.
+  const place = whereOf(setup).kind === "place" ? setup.place! : null;
+  const room = place ? null : await roomOf(store.callsId, { product: product.id, setup, session, start, end });
   const video = isVideoRoom(room);
   const invite = (note: string, words?: BookingWords) =>
     Buffer.from(
-      callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, note, sequence: (input.moves ?? 0) + (meeting?.updates ?? 0), words }),
+      callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, place, note, sequence: (input.moves ?? 0) + (meeting?.updates ?? 0), words }),
     ).toString("base64");
   const minutes = Math.round((end - start) / 60_000);
 
@@ -1387,12 +1412,13 @@ export async function confirmBooking(input: {
       to: buyerEmail,
       subject: b.bookedSubject(product.title, store.name),
       text: [
-        setup.kind === "live" ? b.seatBooked(store.name) : setup.seats > 1 ? b.groupBooked(store.name) : b.callBooked(store.name),
+        // In person (lib/call-place.ts): a time at the address, never "a call".
+        setup.kind === "live" ? b.seatBooked(store.name) : place ? b.timeBooked(store.name) : setup.seats > 1 ? b.groupBooked(store.name) : b.callBooked(store.name),
         "",
         b.titleLength(product.title, minutes),
         `${readableTime(start, buyerTz, locale)} (${zoneName(start, buyerTz, locale)})`,
         "",
-        room ? b.joinAtThatTime(room) : b.willSendLink(store.name),
+        place ? b.whereAt(placeLine(place)) : room ? b.joinAtThatTime(room) : b.willSendLink(store.name),
         ...(video ? [b.videoRoomNote] : []),
         "",
         // The reminders planned above: each only while it is at least an hour away (lib/call-records.ts).
@@ -1407,7 +1433,7 @@ export async function confirmBooking(input: {
       // Replies reach the creator, which the studio tells them before they
       // offer a single call.
       replyTo: store.email,
-      attachments: [{ filename: "call.ics", content: invite(buyerNote(b, store, room), b) }],
+      attachments: [{ filename: "call.ics", content: invite(buyerNote(b, store, room, place), b) }],
     });
   }
 
@@ -1428,7 +1454,7 @@ export async function confirmBooking(input: {
         : []),
       `${readableTime(start, setup.tz)} (${zoneName(start, setup.tz)}, your time zone)`,
       "",
-      meeting ? meetingLine(meeting, setup.kind === "live" || setup.seats > 1) : room
+      place ? `In person, at: ${placeLine(place)}` : meeting ? meetingLine(meeting, setup.kind === "live" || setup.seats > 1) : room
         ? video
           ? `A private video room was made for ${setup.kind === "live" || setup.seats > 1 ? "this time" : "this booking"}, and they were given it: ${room}\n${VIDEO_ROOM_NOTE} Open it a few minutes early and sign in, so they are not left waiting.`
           : `They were given your meeting link: ${room}`
@@ -1454,7 +1480,7 @@ export async function confirmBooking(input: {
     // A booking already in this person's own Google Calendar is not sent to it twice.
     ...(theirs
       ? {}
-      : { attachments: [{ filename: "call.ics", content: invite(`With ${buyerEmail ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`) }] }),
+      : { attachments: [{ filename: "call.ics", content: invite(place ? `With ${buyerEmail ?? "your buyer"}. In person, at: ${placeLine(place)}` : `With ${buyerEmail ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`) }] }),
   });
 }
 

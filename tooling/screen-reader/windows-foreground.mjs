@@ -36,8 +36,13 @@ export async function startWindowsForegroundProbe(options={}){
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>3000||
     !Number.isSafeInteger(startupTimeoutMs)||startupTimeoutMs<1||startupTimeoutMs>10000)
   throw Error("Invalid native foreground timeout budget");
+ let previousClock=null;
  function clockValue(){
-  try{const value=performance.now();return Number.isFinite(value)&&value>=0?value:null;}catch{return null;}
+  try{
+   const value=performance.now();
+   if(!Number.isFinite(value)||value<0||previousClock!==null&&value<previousClock)return null;
+   previousClock=value;return value;
+  }catch{return null;}
  }
  const started=clockValue();
  let stage="launching",readySeen=false,stderrBytes=0,stderrBytesCapped=false,exitCode=null,exitSignal=null,diagnosticCount=0;

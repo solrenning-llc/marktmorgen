@@ -393,8 +393,9 @@ if current~='' and ARGV[8]=='valid' then
   if KEYS[4]~=sourcePrefix..(family=='shipment' and row.session or id) or type(row.statsId)~='string' or type(row.person)~='string' then return {'unknown'} end
   local dt,st=redis.call('TYPE',KEYS[5]).ok,redis.call('TYPE',KEYS[4]).ok
   if (dt~='none' and dt~='zset') or st~='string' or redis.call('GETRANGE',KEYS[4],0,8192)~=row.sourceValue then return {'unknown'} end
-  local fencePrefix=family=='shipment' and 'nl:ship:mail:' or 'nl:order-confirmation:'
-  if KEYS[6]~=fencePrefix..'closed:'..row.statsId or KEYS[7]~=fencePrefix..'erased:'..row.statsId..':'..row.person then return {'unknown'} end
+  local closedPrefix=family=='shipment' and 'nl:ship:mail:closed:' or 'nl:order-confirmation:closed:'
+  local erasedPrefix=family=='shipment' and 'nl:ship:mail:erased:' or 'nl:order-confirmation:erased:'
+  if KEYS[6]~=closedPrefix..row.statsId or KEYS[7]~=erasedPrefix..row.statsId..':'..row.person then return {'unknown'} end
   local supported=row.reviewId==g.reviewId
   for _,review in ipairs(g.continuedReviewIds) do if row.reviewId==review then supported=true end end
   local fenced=redis.call('EXISTS',KEYS[6],KEYS[7])~=0

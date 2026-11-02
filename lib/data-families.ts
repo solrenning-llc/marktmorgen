@@ -73,7 +73,6 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:meet:zoomseen:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:read:", "nl:metaads:reading:",
   "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
   "nl:monthly:sent:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
-  "nl:order-confirmation:",
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
@@ -97,7 +96,6 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:rl:phone:test:", "nl:rl:signin:", "nl:rl:team-invite:", "nl:rlm:", "nl:sale:told:", "nl:sblocks:",
   "nl:sender:", "nl:ses:did:", "nl:ses:h:", "nl:ses:once:", "nl:ses:rest:", "nl:ses:state", "nl:ses:told:",
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
-  "nl:ship:mail:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
   "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
@@ -299,8 +297,6 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // unresolved recipients with bounded row markers and dedicated fences.
   // Lifetime/copy/failure funding remains an activation blocker, not permission
   // to retain a closed store's payload without reviewed funding/cleanup.
-  // Existing company-owned recovery prefixes; specific longer families still win.
-  "nl:order-confirmation:": C,
   "nl:order-confirmation:closed:": C, "nl:order-confirmation:erased:": C, "nl:order-confirmation:due": C, "nl:order-confirmation:person:": C, "nl:order-confirmation:row:": C,
   "nl:order-confirmation:source:": C, "nl:order-confirmation:store:": C,
   "nl:orders:folders:": I, "nl:orders:link:": X(1), "nl:orders:n:": E, "nl:orders:open:": E,
@@ -364,9 +360,6 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // The direct legacy source has400days. A pending source has no TTL;
   // cleanup owns its transition, so the walk cannot promise400days for all.
   "nl:ship:done:": C,
-  // The same pool may retain bounded linked-ID/high-water recovery metadata
-  // without TTL. Registry funding remains unknown; this adds no deletion or expiry.
-  "nl:ship:mail:": C,
   "nl:ship:mail:all": C, "nl:ship:mail:closed:": C, "nl:ship:mail:due": C, "nl:ship:mail:erased:": C,
   "nl:ship:mail:person:": C, "nl:ship:mail:pool": C, "nl:ship:mail:pool:": C, "nl:ship:mail:row:": C, "nl:ship:mail:store:": C,
   "nl:slink:": T("nl:slink:store:"), "nl:slink:store:": E,

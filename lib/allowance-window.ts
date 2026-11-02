@@ -173,10 +173,15 @@ export function opensAgainWords(window: AllowanceWindow, now = Date.now()): stri
   return at.toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
-/** The sentence a refused use ends with: when the allowance opens again, or how to get it back when no window is known. */
-export function resetWords(store: WindowFields, now = Date.now()): string {
+/**
+ * The sentence a refused use ends with: when the allowance opens again, or how to get it back when no window is known.
+ * In a trial, a kind that a store whose plan ended has none of (`endedNone`, e.g. API requests) never opens again
+ * when the trial ends without a plan, so it says the trial's end and what comes after.
+ */
+export function resetWords(store: WindowFields, now = Date.now(), endedNone = false): string {
   const window = allowanceWindow(store, now);
   if (!window) return "Open your studio so we can read your plan's billing month from Stripe, then try again.";
+  if (endedNone && standingOf(store, now / 1000) === "trial") return `The trial ends on ${opensAgainWords(window, now)} (UTC); after that, these need a paid plan.`;
   return window.billing
     ? `This opens again with your next billing month, on ${opensAgainWords(window, now)} (UTC).`
     : `This opens again on ${opensAgainWords(window, now)} (UTC).`;

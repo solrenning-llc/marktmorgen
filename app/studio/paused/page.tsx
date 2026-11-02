@@ -6,7 +6,7 @@ import { Logo } from "@/components/logo";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { withinLimit } from "@/lib/request-guard";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { resetWords } from "@/lib/allowance-window";
+import { allowanceWindow, resetWords } from "@/lib/allowance-window";
 import { POOL_FULL_WORDS } from "@/lib/free-pool-rules";
 import { PLAN_TITLES, PRO_ON_SALE, type Tier } from "@/lib/plan";
 import { standingOf } from "@/lib/plan-standing";
@@ -43,13 +43,16 @@ export default async function StudioPausedPage({ searchParams }: Params) {
   const { store } = view;
   const shown = await withinLimit("studio-paused", store.sid || store.handle, SHOWN_PER_DAY, 86_400);
   const pin = store.sid ? `?store=${store.sid}` : "";
-  const paying = standingOf(store) === "paid";
+  const standing = standingOf(store);
+  const paying = standing === "paid";
   const larger = paying ? LARGER[store.tier] : null;
   const mayChange = can(view.role, "billing");
   const limit = allowanceFor(store, "studio");
   // Why the studio sent this here (lib/studio-route.ts, studioView): its figure used, no place for a store
   // that pays nothing (lib/free-pool-rules.ts), or a billing month Stripe could not be asked for just now.
-  const why = query.why === "pool" ? "pool" : query.why === "unknown" ? "unknown" : "used";
+  const why = query.why === "pool" ? "pool" : query.why === "unknown" ? "unknown" : query.why === "daily" ? "daily" : "used";
+  // "Stripe could not be asked" only when the billing month is what is missing; otherwise the count itself.
+  const noMonth = allowanceWindow(store) === null;
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -64,20 +67,30 @@ export default async function StudioPausedPage({ searchParams }: Params) {
         <div className="card max-w-2xl p-6 sm:p-8">
           <p className="eyebrow">Studio paused</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-ink sm:text-3xl">
-            {why === "pool" ? "Stores without a paid plan are full for this month" : why === "unknown" ? "Your plan\u2019s billing month could not be read just now" : `${store.name}\u2019s studio requests for this month are used`}
+            {why === "pool"
+              ? "Stores without a paid plan are full for this month"
+              : why === "daily"
+                ? "Too many plan changes, cancellations or downloads today"
+              : why === "unknown"
+                ? noMonth ? "Your plan\u2019s billing month could not be read just now" : "Your studio\u2019s requests could not be counted just now"
+                : `${store.name}\u2019s studio requests ${standing === "trial" ? "for this trial" : "for this month"} are used`}
           </h1>
           {shown ? (
             <>
               <p className="mt-4 text-ink-soft">
                 {why === "pool"
                   ? POOL_FULL_WORDS
+                  : why === "daily"
+                    ? "They have a small daily limit of their own, so the month\u2019s studio requests never stop them. Try again tomorrow, or write to support."
                   : why === "unknown"
-                    ? "Your studio counts its requests in your plan\u2019s billing month, which we read from Stripe, and Stripe could not be asked just now. Nothing is lost: try again in a minute."
-                    : `Your plan includes ${limit.toLocaleString("en-US")} studio requests a month: every page of the studio you open, every save, and the studio's own refreshing. They are used, so the studio is paused until they open again. Your store stays open to buyers, and nothing you made or sold is touched.`}
+                    ? noMonth
+                      ? "Your studio counts its requests in your plan\u2019s billing month, which we read from Stripe, and Stripe could not be asked just now. Nothing is lost: try again in a minute."
+                      : "Your studio\u2019s requests could not be counted just now. Nothing is lost: try again in a minute."
+                    : `${paying ? `Your plan includes ${limit.toLocaleString("en-US")} studio requests a month` : standing === "trial" ? `The trial includes ${limit.toLocaleString("en-US")} studio requests in all` : `Without a paid plan, your store has ${limit.toLocaleString("en-US")} studio requests a month`}: every page of the studio you open, every save, and the studio's own refreshing. They are used, so the studio is paused until they open again. Pausing the studio does not close your store to buyers, and nothing you made or sold is touched.`}
               </p>
               {why === "used" ? <p className="mt-3 font-semibold text-ink">{resetWords(store)}</p> : null}
               {/* app/api/billing/switch refuses while no plan is on sale, without billing or without a subscription. */}
-              {larger && PLANS_ON_SALE && PRO_ON_SALE && isBillingConfigured() && store.subscriptionId && mayChange ? (
+              {why !== "daily" && larger && PLANS_ON_SALE && PRO_ON_SALE && isBillingConfigured() && store.subscriptionId && mayChange ? (
                 <form action={`/api/billing/switch${pin}`} method="post" className="mt-6">
                   <input type="hidden" name="tier" value={larger} />
                   <input type="hidden" name="cycle" value={store.cycle} />
@@ -89,6 +102,7 @@ export default async function StudioPausedPage({ searchParams }: Params) {
                   </p>
                 </form>
               ) : null}
+              {why === "daily" ? null : (
               <div className="mt-8 border-t border-line pt-6">
                 <p className="text-sm font-bold text-ink">Never paused</p>
                 <p className="mt-1 text-sm text-ink-soft">{PLANS_ON_SALE ? "Changing your plan, canceling it and taking your sales with you always work." : "Canceling your plan and taking your sales with you always work."}</p>
@@ -120,6 +134,7 @@ export default async function StudioPausedPage({ searchParams }: Params) {
                   </Link>
                 </div>
               </div>
+              )}
             </>
           ) : (
             <p className="mt-4 text-ink-soft">Your studio is paused for now. Please come back tomorrow.</p>

@@ -30,6 +30,7 @@ import { communityBeginnerQuestions } from "@/lib/community-faq";
 import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
 import { emailBeginnerQuestions } from "@/lib/email-faq";
 import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
+import { switchingBeginnerQuestions } from "@/lib/switching-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -2432,6 +2433,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about moving",
         items: [
+          // 534 [FQ1], unit 36: what someone starting out asks, answered by the code (lib/switching-faq.ts).
+          ...switchingBeginnerQuestions(),
           { q: "In what order should I import?", a: "Products first, because the buyers' file names them by their title or their ID here. Then add each product's file or lessons, then your list and your buyers." },
           { q: "Which plan is it on, and who can run it?", a: "Every plan. You and your Admins can import; Editors and Support cannot. The one email to past buyers, and the emails to members, are sent only while your plan or its trial is running." },
           { q: "How do my members move without paying twice?", a: "Make the membership here first, at the same price. Export your members with the date each would next renew, import them under Your members, and stop the renewals where they are now. Each member keeps theirs with their own link: the card is taken then and first charged on that date. A date less than two days away is charged when they keep it, and their page says so before they press." },

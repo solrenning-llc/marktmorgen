@@ -91,6 +91,36 @@ def pending_recovery_cases(redis, source, made):
     assert run("next",g=bad,proof="e"*64)==["held"]
     assert run("next",g=grant,proof="f"*64)==["held"]
     print("PASS: consumed grant cannot restart, mutate its fingerprint or replay the same review")
+    # Discovery capacity is separate from the original finite provider-check
+    # cap. Losing a ticket ACK at the technical ceiling must not require an
+    # impossible10001 checks just to admit a newly funded discovery revision.
+    redis.command('DEL',pool,all_key)
+    id,raw,keys=setup('successor-at-technical-check-cap')
+    row=json.loads(raw);row['checks']=9999;raw=json.dumps(row);redis.command('SET',keys[2],raw)
+    old={**grant,'maximumChecks':10000,'recovery':{**grant['recovery'],'maximumAttempts':1,'maximumCommandUnits':64,'maximumReadBytes':1048576,'maximumTriggerInvocations':1}}
+    newer={**grant,'reviewId':'DISCOVERY_SUCCESSOR','maximumChecks':10000,'recovery':{**grant['recovery'],'revision':2}}
+    old_fp='1'*64;new_fp='2'*64
+    assert run('next',g=old,proof=old_fp)==['ticket',id,'1']
+    assert run('next',g=old,proof=old_fp)==['exhausted']
+    saved=redis.command('HGET',pool,'pendingRecovery')
+    for denied in [{**newer,'reviewId':old['reviewId']},{**newer,'maximumChecks':9999}]:
+        assert run('next',g=denied,proof=new_fp)==['held']
+        assert redis.command('HGET',pool,'pendingRecovery')==saved
+    assert run('next',g=newer,proof=new_fp)==['ticket',id,'1'], 'a newly funded discovery revision may retain the original check cap'
+    charged=checkpoint();assert charged['attempts']==1 and charged['units']==64 and charged['readBytes']==1048576
+    assert run('finish',keys=keys,raw=raw,valid='valid',g=old,proof=old_fp)==['held']
+    assert run('next',g=old,proof=old_fp)==['held']
+    assert run('next',g={**newer,'recovery':{**newer['recovery'],'maximumAttempts':99}},proof='3'*64)==['held']
+    assert checkpoint()==charged
+    assert run('finish',keys=keys,raw=raw,valid='valid',g=newer,proof=new_fp)==['rearmed']
+    assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id)=='0'
+    redis.command('DEL',pool,all_key)
+    id,raw,keys=setup('successor-cannot-reset-spent-checks')
+    row=json.loads(raw);row['checks']=10000;raw=json.dumps(row);redis.command('SET',keys[2],raw)
+    assert run('next',g=newer,proof=new_fp)==['ticket',id,'1']
+    assert run('finish',keys=keys,raw=raw,valid='valid',g=newer,proof=new_fp)==['skipped']
+    assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id) is None
+    print('PASS: an explicitly renewed discovery grant may keep cap10000 without resetting checks or accepting old permissions')
     # The next synthetic grant sees a full bounded snapshot, including first
     # unsupported reviews; each known refusal advances rather than hot-polling.
     redis.command("DEL",pool,all_key)

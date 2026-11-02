@@ -33,6 +33,7 @@ import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
 import { switchingBeginnerQuestions } from "@/lib/switching-faq";
 import { clickFunnelsBeginnerQuestions } from "@/lib/clickfunnels-faq";
 import { crmBeginnerQuestions } from "@/lib/crm-faq";
+import { aiWritingBeginnerQuestions } from "@/lib/ai-writing-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -1968,6 +1969,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about the writing help",
         items: [
+          // 534 [FQ1], unit 39: what someone starting out asks, answered by the code (lib/ai-writing-faq.ts).
+          ...aiWritingBeginnerQuestions(),
           { q: "Which model writes it?", a: "Anthropic's Claude, through its API, with our key. It receives what you typed and what the product's page says, and nothing about your buyers, members or list." },
           { q: "Which language does it write in?", a: "Your store's: English, Spanish, French, German, Italian, Dutch or Portuguese. A reply to a review is written in the review's own language." },
           { q: "Can it make claims I would not make?", a: "It is told never to invent a result, a number, a testimonial or a deadline, and a rewrite that brings in a number your page did not have is thrown away rather than shown. Read every draft before you publish it: it goes out under your name." },

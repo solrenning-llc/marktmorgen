@@ -27,6 +27,7 @@ import { reviewsBeginnerQuestions } from "@/lib/reviews-faq";
 import { currencyBeginnerQuestions } from "@/lib/currency-faq";
 import { emailPlatformBeginnerQuestions } from "@/lib/email-platform-faq";
 import { communityBeginnerQuestions } from "@/lib/community-faq";
+import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -1192,6 +1193,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about live events",
         items: [
+          // 534 [FQ1], unit 29: what someone starting out asks, answered by the code (lib/live-events-faq.ts).
+          ...liveEventsBeginnerQuestions(),
           { q: "Which plan is it on?", a: `Every plan, the ${PLAN_AT.creator} one included, with the community. The reminders and the emails about a move or a cancellation are sent on every plan and are not counted in Studio's monthly emails.` },
           { q: "Can someone who is not a member get the link?", a: "Not from us. Emails, calendar files and the feed point to the event's page, and the page shows the way in only from 15 minutes before, only to a member who may come, checked again on every visit. A member whose membership lapsed, or who was refunded or taken out, loses it with the rest of the community." },
           { q: "How does this compare with Stan?", a: "Stan adds webinars to its community as a product members sign up for on its landing page, with Zoom or Google Meet links made automatically, according to its help center, read on September 27, 2026. Ours are events members RSVP to, with reminders, a cap, a room in the page or a Google Meet made on your Google Calendar, and replays, with no Zoom link made for you yet." },

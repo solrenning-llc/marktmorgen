@@ -27,16 +27,25 @@ while ($null -ne ($line = [Console]::ReadLine())) {
 
 export async function startWindowsForegroundProbe(options={}){
  const {env=process.env,platform=process.platform,launch=spawn,timeoutMs=3000,
+  startupTimeoutMs=options.timeoutMs===undefined?10000:timeoutMs,
   onDiagnostic=event=>console.error("AX2_NVDA_NATIVE_DIAGNOSTIC:"+JSON.stringify(event))}=options;
  if(platform!=="win32"||env.GITHUB_ACTIONS!=="true"||env.GITHUB_REPOSITORY!=="viniciussucupira/marktmorgen"||env.AX2_PUBLIC_DISPOSABLE_RUNNER!=="true")
   throw Error("Native foreground diagnostics require the owned disposable Windows runner");
- const started=performance.now();
+ if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>3000||
+    !Number.isSafeInteger(startupTimeoutMs)||startupTimeoutMs<1||startupTimeoutMs>10000)
+  throw Error("Invalid native foreground timeout budget");
+ function clockValue(){
+  try{const value=performance.now();return Number.isFinite(value)&&value>=0?value:null;}catch{return null;}
+ }
+ const started=clockValue();
  let stage="launching",readySeen=false,stderrBytes=0,stderrBytesCapped=false,exitCode=null,exitSignal=null,diagnosticCount=0;
  const stderrCategories=new Set();
  function diagnostic(event,reason){
   if(diagnosticCount>=12)return;diagnosticCount++;
-  const elapsed=Math.max(0,Math.floor(performance.now()-started));
-  const entry={event,stage,elapsedMs:Math.min(elapsed,60000),elapsedMsCapped:elapsed>60000,
+  const now=clockValue(),delta=now===null||started===null||now<started?null:now-started;
+  const elapsed=delta!==null&&Number.isFinite(delta)?Math.floor(delta):null;
+  const entry={event,stage,elapsedMs:elapsed===null?null:Math.min(elapsed,60000),elapsedMsCapped:elapsed!==null&&elapsed>60000,
+   elapsedUnknown:elapsed===null,startupBudgetMs:startupTimeoutMs,queryBudgetMs:timeoutMs,
    readySeen,stderrBytes,stderrBytesCapped,stderrCategories:[...stderrCategories].sort(),exitCode,exitSignal};
   if(reason)entry.reason=reason;
   // Never pass raw stdout/stderr, command arguments, environment or errors.
@@ -59,7 +68,8 @@ export async function startWindowsForegroundProbe(options={}){
  }
  function waiting(id){
   return new Promise((resolve,reject)=>{
-   const timer=setTimeout(()=>fail(Error("Native foreground diagnostic deadline exceeded"),"deadline"),timeoutMs);
+   const startup=id==="ready",budget=startup?startupTimeoutMs:timeoutMs;
+   const timer=setTimeout(()=>fail(Error("Native foreground "+(startup?"startup":"query")+" deadline exceeded"),startup?"startup_deadline":"query_deadline"),budget);
    pending.set(id,{resolve,reject,timer});
   });
  }

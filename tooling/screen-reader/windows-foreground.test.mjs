@@ -77,7 +77,7 @@ test("deadline identifies last startup stage and bounded stderr without exposing
  f.child.stderr.write('Add-Type CS1234 SECRET_DIAGNOSTIC_SENTINEL '+"x".repeat(100000));
  await assert.rejects(starting,/deadline/);
  const failure=events.find(e=>e.event==="failed");
- assert.equal(failure?.reason,"deadline");
+ assert.equal(failure?.reason,"startup_deadline");
  assert.equal(failure?.stage,"powershell_started");
  assert.equal(failure?.readySeen,false);
  assert.equal(failure?.stderrBytes,65536);
@@ -264,4 +264,16 @@ test("a regressing diagnostic clock is not reported as elapsed zero",async t=>{
   value=99;await probe.close();
   const closing=events.find(e=>e.event==="closing");assert.equal(closing?.elapsedMs,null);assert.equal(closing?.elapsedUnknown,true);
  }finally{await probe?.close();now.mock.restore();}
+});
+
+test("invalid diagnostic clocks cannot leak or replace observed replies",async t=>{
+ for(const value of [null,Infinity,-1,"SECRET_CLOCK_SENTINEL",Symbol("SECRET_CLOCK_SENTINEL"),()=>{throw Error("SECRET_CLOCK_SENTINEL");}]){
+  const now=t.mock.method(performance,"now",()=>typeof value==="function"?value():value),f=fixture(),events=[];let probe;
+  try{
+   probe=await startWindowsForegroundProbe({...f.options,onDiagnostic:e=>events.push(e)});
+   const answer=probe.read();f.reply("0","Observed window");assert.equal(await answer,"Observed window");
+   assert.ok(events.every(e=>e.elapsedMs===null&&e.elapsedUnknown===true));
+   assert.ok(!JSON.stringify(events).includes("SENTINEL"));
+  }finally{await probe?.close();now.mock.restore();}
+ }
 });

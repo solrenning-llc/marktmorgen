@@ -28,6 +28,7 @@ import { currencyBeginnerQuestions } from "@/lib/currency-faq";
 import { emailPlatformBeginnerQuestions } from "@/lib/email-platform-faq";
 import { communityBeginnerQuestions } from "@/lib/community-faq";
 import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
+import { emailBeginnerQuestions } from "@/lib/email-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -845,6 +846,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about email",
         items: [
+          // 534 [FQ1], unit 30: what someone starting out asks, answered by the code (lib/email-faq.ts).
+          ...emailBeginnerQuestions(),
           { q: `Why is email on Studio and not on the ${PLAN_AT.creator} plan?`, a: `Because every email sent costs us money, and the ${PLAN_AT.creator} plan is priced to cover a store, not a mailing list. Stan puts email on its $99 plan as well — read on its pricing page on September 20, 2026.` },
           { q: "Can I import the list I already have?", a: "Yes, on every plan, from a CSV file of up to 50,000 rows, as long as those people agreed to hear from you. You confirm that each time, a consent column in the file narrows it further, and anyone who unsubscribed here stays unsubscribed. Nobody is emailed because of the import." },
           { q: `What if my list needs more than ${PRO_EMAILS} emails a month?`, a: `Move up to Scale from your studio: the same plan with up to ${SCALE_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month, at $${PLAN_PRICES.scale.month / 100} a month or $${(PLAN_PRICES.scale.year / 100).toLocaleString("en-US")} a year. You are charged the difference for the rest of the period you already paid for, and you can go back to Studio whenever you like. Without it, an email that passes the month's number waits and goes out by itself when the month turns.` },

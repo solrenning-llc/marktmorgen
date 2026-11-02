@@ -144,6 +144,31 @@ def pending_recovery_cases(redis, source, made):
     assert redis.command('GET',target_keys[2])==target_raw
     progress=checkpoint();assert progress['family']=='confirmation' and progress['index']==1
     print('PASS: newly financed grants compose snapshot progress through an unsupported prefix without resetting original sources')
+    # Both ordinary cron workers call next. A known other family is a fixed
+    # guard, not a useful ticket, and cannot starve a one-ticket successor.
+    redis.command('DEL',pool,all_key)
+    id,raw,keys=setup('confirmation-continuation',phase='queued')
+    row=json.loads(raw);row.update(erasedPeople='',erasureSaturated=False);raw=json.dumps(row);redis.command('SET',keys[2],raw)
+    tiny={**grant,'reviewId':'CONFIRMATION_START','recovery':{**grant['recovery'],'maximumAttempts':1,
+        'maximumCommandUnits':640,'maximumReadBytes':10485760,'maximumTriggerInvocations':10}}
+    tiny_fp='6'*64
+    assert run('next',g=tiny,proof=tiny_fp)==['ticket',id,'1']
+    assert run('finish',keys=[pool,all_key,'nl:ship:mail:row:'+id],g=tiny,proof=tiny_fp)==['skipped']
+    assert checkpoint()['family']=='confirmation'
+    successor={**tiny,'reviewId':'CONFIRMATION_RENEWED','recovery':{**tiny['recovery'],'revision':2}}
+    next_fp='7'*64
+    assert run('next',g=successor,proof=next_fp)==['held']
+    revised=checkpoint()
+    assert revised['revision']==2 and revised['fingerprint']==next_fp and revised['reviewId']==successor['reviewId']
+    assert revised['attempts']==0 and revised['units']==0 and revised['readBytes']==0, 'known wrong family must not consume a variable-work ticket'
+    assert revised['family']=='confirmation' and revised['index']==1
+    assert run('finish',g=tiny,proof=tiny_fp,keys=keys,raw=raw,valid='valid',family='confirmation')==['held']
+    assert run('next',g=tiny,proof=tiny_fp,family='confirmation')==['held']
+    assert run('next',g=successor,proof=next_fp,family='confirmation')==['ticket',id,'1']
+    charged=checkpoint();assert charged['attempts']==1 and charged['units']==64 and charged['readBytes']==1048576
+    assert run('finish',g=successor,proof=next_fp,keys=keys,raw=raw,valid='valid',family='confirmation')==['rearmed']
+    assert checkpoint()['phase']=='done' and redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id)=='0'
+    print('PASS: persisted successor high-water rejects old grants and known wrong family cannot starve the next useful confirmation ticket')
     # The next synthetic grant sees a full bounded snapshot, including first
     # unsupported reviews; each known refusal advances rather than hot-polling.
     redis.command("DEL",pool,all_key)

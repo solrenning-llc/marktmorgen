@@ -253,6 +253,15 @@ def pending_recovery_cases(redis, source, made):
         assert len(checkpoint()['ids'])==count
         if count==100:
             saved_hundred=redis.command('HGET',pool,'pendingRecovery')
+            # A legacy fingerprint paired with an oversized/corrupt retained
+            # list cannot silently buy100 origins merely by replaying it.
+            legacy_checkpoint=json.loads(saved_hundred)
+            legacy_checkpoint.update(owner='',leaseUntil=0)
+            legacy_raw=json.dumps(legacy_checkpoint)
+            redis.command('HSET',pool,'pendingRecovery',legacy_raw)
+            assert run('next',g=grant)==['held']
+            assert redis.command('HGET',pool,'pendingRecovery')==legacy_raw
+            redis.command('HSET',pool,'pendingRecovery',saved_hundred)
             for replacement in [
                 {**grant,'reviewId':'DOWNGRADED_LEGACY','recovery':{**grant['recovery'],'revision':2}},
                 {**hundred,'reviewId':'DOWNGRADED_EXPLICIT','recovery':{**hundred['recovery'],'revision':2,'maximumOrigins':99}},

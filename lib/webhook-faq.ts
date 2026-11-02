@@ -33,7 +33,7 @@ export function webhookBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRI
     },
     {
       q: "Can I try it before paying?",
-      a: `${tryBeforePaying("A webhook", "a webhook address and its events", onSale, trialDays)}${onSale && trialSends ? " During the trial, messages are sent within the trial's own smaller monthly number of deliveries." : ""}${noneWithoutPlan ? " Without a plan, nothing is sent, not even a test: a store with no plan, or whose plan ended, has no webhook deliveries to use, and a test counts as one." : ""}`,
+      a: `${tryBeforePaying("A webhook", "a webhook address and its events", onSale, trialDays)}${onSale && trialSends ? " During the trial, messages are sent within the trial's own smaller number of deliveries." : ""}${noneWithoutPlan ? " Without a plan, nothing is sent, not even a test: a store with no plan, or whose plan ended, has no webhook deliveries to use, and a test counts as one." : ""}`,
     },
     {
       q: "Do webhooks work with Zapier?",

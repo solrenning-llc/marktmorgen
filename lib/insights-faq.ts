@@ -31,7 +31,7 @@ export function insightsBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
     },
     {
       q: "Can I try it before paying?",
-      a: `${tryBeforePaying("Your numbers", "your store and see its numbers", onSale, trialDays)} Without a paid plan, your store has a smaller allowance of visits each month; once it is used, its pages rest and no more visits are counted until they open again.`,
+      a: `${tryBeforePaying("Your numbers", "your store and see its numbers", onSale, trialDays)} Visits are one of those limits: once they are used, your store's pages rest and no more visits are counted until they open again.`,
     },
   ];
 }

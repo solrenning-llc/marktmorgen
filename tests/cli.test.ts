@@ -59,6 +59,8 @@ async function main(): Promise<void> {
     is("the default address", serverUrl({}), "https://marktmorgen.com/api/mcp");
     is("http elsewhere is refused", serverUrl({ MARKTMORGEN_URL: "http://example.com" }), null);
     is("a local server for a test", serverUrl({ MARKTMORGEN_URL: "http://localhost:3000/" }), "http://localhost:3000/api/mcp");
+    is("many trailing slashes are trimmed quickly", serverUrl({ MARKTMORGEN_URL: `https://marktmorgen.com${"/".repeat(150)}` }), "https://marktmorgen.com/api/mcp");
+    is("an address past 200 characters is refused", serverUrl({ MARKTMORGEN_URL: `https://marktmorgen.com${"/".repeat(5000)}` }), null);
     is("an address with a password in it is refused", serverUrl({ MARKTMORGEN_URL: "https://user:pass@marktmorgen.com" }), null);
     is("the command says so", (await cli(["tools"], { MARKTMORGEN_API_KEY: made.key, MARKTMORGEN_URL: "http://example.com" })).code, 2);
 

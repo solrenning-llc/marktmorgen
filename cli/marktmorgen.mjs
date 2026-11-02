@@ -49,7 +49,9 @@ Examples:
 
 /** The server's address, refused unless it is https (or a local server for a test). */
 export function serverUrl(env) {
-  const raw = (env.MARKTMORGEN_URL || DEFAULT_URL).replace(/\/+$/, "");
+  let raw = String(env.MARKTMORGEN_URL || DEFAULT_URL);
+  if (raw.length > 200) return null;
+  while (raw.endsWith("/")) raw = raw.slice(0, -1);
   let url;
   try {
     url = new URL(raw);

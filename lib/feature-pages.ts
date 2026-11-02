@@ -19,6 +19,8 @@ import { discordBeginnerQuestions } from "@/lib/discord-faq";
 import { affiliateBeginnerQuestions } from "@/lib/affiliate-faq";
 import { phoneBeginnerQuestions } from "@/lib/phone-faq";
 import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
+import { teamBeginnerQuestions } from "@/lib/team-faq";
+import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
@@ -207,7 +209,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "Can I use my own domain?", a: DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan. You add one record where you bought the domain, and the certificate is made for you. Your marktmorgen.com address keeps working as well.` : "Not yet. It is planned for the Studio plan, and this page will say so on the day it works." },
           { q: "How do I see what the page looks like before I save?", a: "The studio shows the page with your photo, theme, color and letters as you change them, before anything is saved." },
           { q: "Is there a limit on how many people can visit?", a: `Your plan covers a number of visits a month: ${countWords(VISITS_INCLUDED.creator)} on the ${PLAN_AT.creator} plan, ${countWords(VISITS_INCLUDED.pro)} on the ${PLAN_AT.pro} plan and ${countWords(VISITS_INCLUDED.scale)} on the ${PLAN_AT.scale} plan. A visit is one person opening your store on one day, however many pages they look at, and you are never counted. Visits are never billed: public pages pause at ${(10_000 - BUYER_RESERVE_BPS) / 100}% of the figure until the month turns or a plan change gives a larger one, and the last ${BUYER_RESERVE_BPS / 100}% are kept for your buyers' courses, community and podcasts. Your studio shows the count as it grows.` },
-          { q: "Can one account run more than one store?", a: "Yes, up to five, each with its own address, products, Stripe account and plan. You switch between them at the top of your studio." }
+          { q: "Can one account run more than one store?", a: "Yes, up to five, each with its own address, products and Stripe account, and a plan of its own to take payments. You switch between them at the top of your studio." }
         ],
       },
     ],
@@ -2228,7 +2230,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "how",
         title: "How someone joins",
         items: [
-          { title: "Invite them by email", body: "With a role. The link works once, for seven days." },
+          { title: "Invite them by email", body: `With a role. The link works once, for ${INVITE_DAYS} days.` },
           { title: "They tap it", body: "That proves the inbox is theirs. From then on they sign in the way you do, and find your store in their studio." },
           { title: "You are told", body: "An email when someone joins and when a role changes. Removing someone takes effect on their next click." },
         ],
@@ -2253,7 +2255,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "features",
         title: "Your account, and more than one store",
         items: [
-          { icon: "store", title: "Up to five stores", body: "Each with its own address, products, buyers, Stripe account and plan. You switch between them at the top of your studio." },
+          { icon: "store", title: "Up to five stores", body: "Each with its own address, products, buyers and Stripe account, and a plan of its own to take payments. You switch between them at the top of your studio." },
           { icon: "copy", title: "One store copied into another", body: "Open a new store with everything you made in another: its products, pages, forms and funnels arrive as drafts, and its store page's setup if you ask. You see what it makes and what it leaves out before anything is written, and a copy that does not fit as a whole is refused. Customers, orders, contacts, emails, answers, reviews, payments, files and pictures never come across." },
           { icon: "key", title: "Passkeys, if you want them", body: "Sign in with the face, fingerprint or PIN that unlocks your phone or laptop. Up to ten per account, and the emailed link keeps working." },
           { icon: "alert", title: "A new browser, an email", body: "After your first sign-in, signing in from a browser your account has not used before sends you an email saying when, how and in which browser." },
@@ -2265,7 +2267,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "What it does not do",
         items: [
           "Five people per store, invitations still waiting included. Roles are the three above: no custom roles, and no role for one product only.",
-          "Each extra store is a plan of its own, from its first day. The free trial is for an account's first store.",
+          "Each extra store needs a plan of its own to take payments, charged from the day its plan starts. The free trial is for an account's first store.",
           "A store can be deleted from the studio only while it has no products; your first store stays with your account.",
           "A booked call's confirmation cannot be sent again from the studio.",
           "Passkeys sign you in on marktmorgen.com, where the studio is, not on a store's own domain.",
@@ -2275,7 +2277,9 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about teams and stores",
         items: [
-          { q: "Does a team member need a plan?", a: "No. The store's plan covers its team." },
+          // 534 [FQ1], unit 20: what someone starting out asks, answered by the code (lib/team-faq.ts).
+          ...teamBeginnerQuestions(),
+          { q: "Does a team member need a plan?", a: "No. Someone you invite needs no plan or payment of their own." },
           { q: "Can Support see my buyers' addresses?", a: "Yes, in orders and bookings, because answering buyers is the job. Support cannot download your list or sales as files." },
         ],
       },

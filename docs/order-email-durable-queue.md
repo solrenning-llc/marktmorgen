@@ -1,8 +1,64 @@
 # EM1 — fila durável de e-mails de pedido
 
+## Estado atual conferido em 02/11/2026 — construído e inativo
+
+Esta seção descreve o código do [commit e042ea064f74c42cd26c100719af8b364a5c669e](https://github.com/viniciussucupira/marktmorgen/commit/e042ea064f74c42cd26c100719af8b364a5c669e), TREE `6b365c998da35dab86dc4b60f40c259909ae128a`, no mesmo PR #1502. As fatias de 01/11 abaixo são histórico: suas lacunas e perfis iniciais não descrevem automaticamente a versão atual. Esta reconciliação altera somente documentação; não ativa o recurso nem comprova disponibilidade ao cliente.
+
+### Ciclo operacional e caminho legado
+
+`CURRENT_SHIPMENT_MAIL_LIFECYCLE` permanece `never_activated`, `CURRENT_SHIPMENT_MAIL_POLICY` permanece `null` e `CURRENT_RESEND_FALLBACK_REVIEW` permanece `null`. Nenhuma revisão financeira privada é preenchida por testes, contadores ou por este documento.
+
+Em `lib/shipments.ts`, depois das verificações existentes do pedido pago na conta original, `markShipped` chama `markNeverActivated` enquanto o ciclo for `never_activated`. Esse caminho conserva a marca física legada e uma chamada ao sender existente, com as regras e o fallback legados desse sender. Uma marca já gravada não autoriza repetir a mensagem; uma falha de e-mail não transforma a marca em uma origem durável. Assim, a afirmação histórica de HTTP503 obrigatório antes de toda nova marca com destinatário válido foi superada pela preservação desse caminho legado. Não se pode apresentar o caminho legado como a fila durável construída neste PR.
+
+Fora de `never_activated`, nova admissão protegida exige ciclo `active` e política financeira válida; a ausência dessa cobertura pode devolver `mail_unavailable`. O estado `retired` conserva leitura/exclusão histórica, sem nova admissão ou POST. Nunca se deve voltar a `never_activated` para contornar pendências, reservas incertas ou a cauda histórica. Não há entrada HTTP ou variável de ambiente que forneça a política sintética dos testes.
+
+### Espera durável, confirmação física e limites
+
+| Situação atual | Comportamento conferido |
+| --- | --- |
+| Espera `queued` conhecida que esgota `maximumChecks` na Lua compartilhada do outbox | Conserva row, fonte e referência em ALL sem TTL, com `next=0` e marcador DUE de score negativo `-checks`; a busca ordinária usa apenas scores `>=0`. Não é um novo retry ordinário. |
+| Preparação sem POST | Somente lease expirada pode voltar ao claim normal, preservando identidade, fonte e contadores originais. Preparação ativa não perde seu lease. |
+| `dispatching` ou aceitação desconhecida | Não recebe autorização de reenvio pela expiração do lease nem pela recuperação da fila. |
+| Confirmação física já aceita, em reconciliação contábil | Mantém seu protocolo e limite próprios; `CONFIRMATION_PAID_SCRIPT` pode remover DUE quando o limite de settlement é esgotado. O marcador negativo acima não deve ser generalizado a esse estado, nem interpretado como permissão de reenviar. |
+| `course_reserved`, fechamento/exclusão ou origem recusada/não suportada | A recuperação não os converte em um envio autorizado. Os fences e as demais recusas continuam obrigatórios. |
+
+Os estágios físicos que ainda faltavam na primeira fatia préURL agora existem em `lib/order-confirmation-outbox.ts`: `runOrderConfirmationMail` lê a sessão original, confere pagamento físico conhecido (inclusive a condição explícita de conclusão sem pagamento quando o total é zero), valida a fonte imutável e o conteúdo original, liga o checkpoint contábil ao pagamento, prepara e despacha pelo outbox e reconcilia aceitação/contabilidade sem repetir o POST. A rota `app/api/cron/mail/route.ts` inclui esse worker; `forgetOrderConfirmationMail` integra exclusão de pessoa e fechamento de loja. Esses caminhos foram exercitados com código TypeScript/Lua real e dados/provedores sintéticos. Sua existência não muda o ciclo real inativo nem prova financiamento ou entrega real.
+
+Cursos continuam distintos: a reserva/readback de uma origem selecionada assinada exige cobertura expressa `course-confirmation` no mesmo review. A fase `course_reserved`, sem DUE de execução, não constitui um worker ativado de pagamento, criação de sessão, e-mail, matrícula ou concessão de acesso. O estado físico implementado não pode ser transferido por analogia aos cursos.
+
+A espera física protegida não ganha TTL de24/72h; 72h é apenas aviso de atraso. Isso preserva a evidência enquanto existir a pendência, mas não certifica serviço vitalício, financiamento infinito, retenção legal ou progresso sob qualquer falha do fornecedor. Fontes já ausentes de ALL não são reconstruídas automaticamente. Respostas perdidas e estado desconhecido nunca equivalem a confirmação de não envio.
+
+### Recuperação expressa, finita e paginada
+
+O grant opcional `recovery` pertence ao MESMO review da política de e-mail. Omitir `maximumOrigins` conserva exatamente a serialização/fingerprint legado e a capacidade de25; a declaração explícita anterior de até100 continua compatível. Até25, `checkpointBytes` pode estar na faixa4096–8192; acima25 ele deve ser8192. Acima100 e até1000, é obrigatório declarar também `checkpointTotalBytes`, no mínimo `8192 + ceil(maximumOrigins / 100) * 8224` e no máximo100000. Não existe suporte a10000 nesta recuperação; isso não reduz um limite comercial nem descarta origens excedentes.
+
+O cabeçalho e até dez páginas limitadas a8192bytes ficam em campos conhecidos do mesmo HASH POOL, sem novo ledger financeiro ou família de chaves. Antes do trabalho variável, cada ticket debita1tentativa,64unidades de comando e1MiB lógico de leitura; o grant limita tentativas e invocações declaradas a1000. A captura é uma única operação Lua atômica: cardinalidade previamente limitada, IDs hex64 únicos, SSCAN com cursor final zero e quantidade exata. COUNT é só indicação, não limite rígido; cursor parcial, membro inválido/gigante, capacidade excedida ou resposta inconsistente recusam a captura sem truncar o conjunto original. Cabeçalho e páginas são publicados no mesmo HSET. SHA1 nativo é apenas checksum de corrupção; não substitui fonte cifrada autenticada, revisão, identidade, fences ou comparação dos bytes no finish.
+
+Um grant sucessor exige revisão maior, reviewID diferente, capacidade expressa e `maximumChecks` igual ou maior, nunca menor. Ele conserva o snapshot ativo, posição e família, invalida tickets antigos e renova somente seu próprio orçamento novo; não zera checks ou orçamento antigo por inferência. Depois da lista retida, um refresh financiado pode ocorrer sob os contadores desse mesmo grant. Na representação paginada, a fase `cleaning` conserva o manifesto até HDEL limitado, pago e idempotente, inclusive após ACK perdido ou erro posterior ao delete. Nenhuma nova geração começa antes da limpeza. Downgrade incompatível mantém os bytes antigos em HOLD.
+
+A recuperação só pode rearmar a origem física elegível e explicitamente continuada, com a fonte imutável e as barreiras originais conferidas. Não recria intenção, checkout ou contabilidade; não restaura checks e não repete aceitação incerta. Os dois workers normais tentam no máximo uma posição por passagem em sua fatia monotônica de250ms para iniciar novas etapas; uma chamada Redis já iniciada mantém seu timeout existente. Isso não é uma promessa de latência ou SLA.
+
+Para1000origens e duas famílias são2000tickets úteis, além de cleanup, refresh e retries: um grant de1000tentativas não basta por si. Novas revisões/capacidades não são geradas automaticamente. Orçamento, janela, cursor parcial ou tipo/transporte desconhecidos mantêm a recusa/evidência, sem converter custo desconhecido em zero.
+
+### Evidência da fonte e lacunas de ativação
+
+A fonte e042 tem os mesmos blobs de recuperação paginada já revisados na fonte b245 e preserva os dois scripts de medição atômica do #1530. A integração exata foi conferida por hash/HEAD/TREE limpos, typegen/TSC serial/lint (zero erros; dois avisos herdados no lint), dirigidos e replay em Redis7.4.12 próprio:38grupos Lua de remessa,14de confirmação e54/54testes Node integrados, sem skips. O integral dessa fonte passou845arquivos,1541testes Node(1532PASS e9opt-in exercitados no replay separado),25721checks e245/245bundles; log SHA256 `e6d6f1c0422938a6d73356d17bf351ff0dc45a5024e56d6aa7d2af543c7a6b37`. Isso aprova o código exercitado, não uma conta privada ou uma nova árvore por herança.
+
+Os ensaios mistos de101/1000origens usam ambos os workers e fontes originais, incluindo uma confirmação de73h, e observam cada dispatch sintético uma vez, um único POST de checkout, ALL vazio e páginas removidas após grants explícitos. No ensaio distinto com ALL estável, a nova captura pode permanecer ACTIVE; não se afirma DONE ou progresso universal por esses dados.
+
+O perfil completo observado de captura/observação/finish foi49comandos; a contagem conservadora que pondera os campos do HSET foi59, dentro dos64reservados. O inventário lógico conservador de leitura foi664197bytes, abaixo de1MiB. Esses limites não são faturamento, heap, allocator, cópias, rede, CPU ou prova de que toda despesa do fornecedor está coberta. A admissão/recusa e falhas anteriores ao débito Redis também exigem cobertura externa real do trigger/infra no mesmo review.
+
+Continuam UNKNOWN a cobertura efetiva da conta/credenciais Resend, cota Pro paga e período/reset incluindo enviados+recebidos, bloqueio de excedentes/SMTP/outros emissores, preço/região/identidade e prova protegida de entrega real SES aplicáveis, armazenamento/cauda, guardas, exclusão, cópias e CPU. Referências e execuções históricas na fila não preenchem automaticamente esses vínculos/revisões. Esta unidade não consulta credenciais, dispara cron/POST/e-mail real ou modifica conta/configuração. Os recibos/protocolos de outras categorias e os chamadores ainda não reconciliados precisam de sua própria prova; não foram recertificados por esta correção documental.
+
+`PER_EMAIL`, `ORDER_COST`, preços, limites públicos, direitos, comissões, revisões financeiras e flags continuam inalterados. Novos43jobs/nove workflows, checkout/TREE realPV8, CodeQL nativo, threads, Vercel e igualdade da árvore prospectiva continuam necessários antes da incorporação da fonte correspondente. Nenhum teste sintético ou documento certifica lucro, conformidade jurídica, AAA ou disponibilidade ao cliente.
+
+## Histórico técnico de 01/11/2026 — fatias iniciais preservadas
+
+Os registros abaixo são o texto das fatias iniciais. Afirmações como503 no ciclo nunca ativado, índice removido ou ausência de worker/exclusão retratam aquele estágio e foram superadas nos pontos indicados acima. Seus números de ensaio e fontes oficiais conservam a data original; não são reconferência de preço, configuração ou runtime em02/11/2026.
+
 Registro técnico de 01/11/2026, mesmo ramo/PR #1502. Construção para revisão; não é ativação produtiva, comprovação de entrega, autorização de cobrança ou conclusão do complemento 309. `PER_EMAIL`, `ORDER_COST`, preços, direitos, comissões e flags não mudam.
 
-## Primeira fatia: atualização do envio físico
+### Primeira fatia: atualização do envio físico
 
 O chamador real é `markShipped`, usado por `POST /api/store/shipped`. A origem continua sendo um checkout pago da própria loja, lido na sua conta Stripe. O payload original completo fica cifrado com AES-GCM (`secret-box`), vinculado ao ID da mensagem, antes de qualquer POST ao provedor. Marca física, payload, índices e reserva de bytes/itens são gravados atomicamente na mesma Lua. O produtor só aceita ACK explícito; concorrência devolve a marca persistida vencedora, inclusive seu rastreio.
 
@@ -22,15 +78,15 @@ Pendências não expiram em 24/72 horas; 72 horas apenas acrescenta o aviso de a
 
 Os índices por loja/pessoa acompanham os payloads sem depender do índice genérico de 401 dias. Apagamento/fechamento grava primeiro um fence sem TTL, cancela os payloads e confirma a conclusão; só então o fence recebe dez minutos. Produtores têm validade de cinco minutos, evitando a volta de um produtor pausado antes da exclusão. Uma exclusão que vence antes da barreira impede o POST; um dispatch já iniciado ainda pode chegar. Falha conserva fence/reserva desconhecida. Pools locais comprovadamente zerados são apagados; contadores corrompidos nunca liberam uma reserva por suposição. Fences históricos não são limitados pelo número de mensagens pendentes.
 
-## Provas e custo ainda não aprovado
+### Provas e custo ainda não aprovado
 
 `scripts/test_shipment_mail_outbox_redis.py` executa a Lua real em Redis 7.2.7 descartável. Inclui concorrência de 16 produtores, ACK perdido, espera acima de 72 horas, fonte sem TTL, sucessão de revisão, lease final abandonado, exclusão concorrente, pool corrompido e formato inteiro não canônico. Os testes TypeScript exercitam cifra real, fronteira de ACK, chamada real `markShipped` e provedor SES HTTP sintético, mantendo conteúdo/rastreio/endereço.
 
 Máximos observados por mutação nessa prova: enqueue 27, claim 16, dispatch 16 e aceitação 27 comandos, contando **EVAL + cada redis.call**. Leituras externas, autenticação, cron, provedor, contagens, exclusão e retries acrescentam operações. A prova de memória compara os bytes reservados antes da gravação com `MEMORY USAGE`, incluindo ciphertext grande/chaves longas; não é preço nem financiamento. O envelope pago de armazenamento por tempo indeterminado, cópias, encerramento, fences, polling e reconciliação permanece desconhecido/rejeitado nos registros. Não tratar como room, cota grátis ou custo zero; não reduzir o custo dos e-mails com esta construção.
 
-## Continuação obrigatória
+### Continuação obrigatória
 
-### Integração do teto global em construção
+#### Integração do teto global em construção
 
 `lib/resend-fallback-transport.ts` passa a ser o único transporte dos POSTs transacionais do sender: single, batch e fallback da remessa. Probes e alertas que chamam o sender também passam pela guarda. A revisão e o vínculo de credenciais reais permanecem `null`, portanto não há novo GET de uso nem reserva/POST de fallback sem essas provas. O vínculo exige fingerprints SHA-256 das credenciais de envio e da credencial full access do GET/usage, todos associados à mesma identidade estável de conta. O uso recebido é validado pelo módulo real do orçamento, somando `sent + received` no período oficial.
 
@@ -46,7 +102,7 @@ Confirmação de compra ainda exige uma fonte durável de conteúdo/direitos/lin
 
 O teto Resend deve anteceder **todos** os POSTs `/emails` e `/emails/batch`, inclusive variantes sem tags, remetente alternativo, probes e alertas. Reserva não autoriza POST: é obrigatório ACK único `dispatch`, teste imediato de `sendBeforeMs` e `sendBeforeMonotonicMs`, identidade de conta vinculada às credenciais e attemptId ligado ao payload/chave finais. Resposta incerta mantém a reserva; `sendEmail(false)` não prova recusa. O ledger nunca é inicializado automaticamente quando ausente. Fallback bloqueado de pedido conserva espera durável na SES; outros chamadores devem propagar falha recuperável sem perder direito ou concluir antes do ACK.
 
-## Fatia préURL da confirmação física, construída e inativa
+### Fatia préURL da confirmação física, construída e inativa
 
 `createCheckout` usa a nova origem para o caso estrito de um único produto físico, sem opções, direitos digitais, licenças, nota posterior, bumps selecionados, grupo, presente, pré-venda, dados antecipados do comprador ou variantes que alterariam o corpo de criação. O lifecycle real continua `never_activated`: o caminho legado permanece como antes e esta origem não cria novas chaves. O runtime de prova é uma dependência interna, sem env ou entrada HTTP que o ligue. Mesmo lifecycle futuro ativo sem política financeira recusa antes do POST e de criar origem, sem inventar financiamento.
 
@@ -58,7 +114,7 @@ Provas locais:6 testes Node com chamador `createCheckout` real, hooks e cifra re
 
 Esta primeira fatia ainda não tem worker de pagamento/contabilidade/e-mail, cron de retomada da origem nem exclusão da origem. A confirmação legada não pode ser usada em paralelo ao novo checkpoint por uma mesma fonte. **Essas ausências bloqueiam qualquer ativação**, assim como a cobertura desconhecida de retenção, incerteza, cópias, exclusão, encerramento e direitos futuros reservados antes do pagamento. O inventário registra `open` para exclusão, company construída/inativa e cauda desconhecida; não certifica retenção legal, room, custo zero, entrega ou conclusão do ponto1. A próxima unidade deve ligar pagamento Stripe confirmado/conclusão zero legítima ao checkpoint original, independentemente do e-mail; preparar conteúdo original, espera/dispatch duráveis e exclusão segura antes de considerar as demais categorias e links vencíveis.
 
-## Fontes oficiais consultadas em 01/11/2026
+### Fontes oficiais consultadas em 01/11/2026
 
 - [Preços Resend](https://resend.com/pricing?product=transactional): e-mails recebidos também usam a cota transacional; excedentes opcionais ficam em `Transactional Overages`.
 - [Pay-as-you-go Pricing](https://resend.com/changelog/pay-as-you-go-pricing): descreve a ativação de excedentes em Settings e a cobrança por blocos adicionais. A existência da opção não comprova a configuração da conta do dono.

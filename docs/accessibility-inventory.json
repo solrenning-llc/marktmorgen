@@ -1504,6 +1504,7 @@
     "components/tier-editor.tsx",
     "components/tips-editor.tsx",
     "components/toast.tsx",
+    "components/today-panel.tsx",
     "components/tools-calculator.tsx",
     "components/topic-page.tsx",
     "components/translate-page.tsx",

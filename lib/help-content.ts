@@ -47,6 +47,16 @@ import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
 
+/**
+ * The help center's questions a feature page asks too, word for word, so
+ * renaming one here renames it there (lib/feature-pages.ts, helpAnswer).
+ */
+export const SHARED_QUESTIONS = {
+  address: "Can I change my store address later?",
+  domain: "Can I use my own domain?",
+  refunds: "Who handles refunds and disputes?",
+} as const;
+
 /** An anchor for one answer, from its question. */
 export function answerId(q: string): string {
   return q.toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -301,7 +311,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Who handles refunds and disputes?",
+        q: SHARED_QUESTIONS.refunds,
         a: [
           "You do, in your own Stripe dashboard, with the same tools any business has. Because the charge was made on your account, a refund is a refund you issue, not a request you file with us.",
         ],
@@ -520,7 +530,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           "Yes, on any paid product sold once that hands over nothing else, at one price or at several for sizes or versions (S, M, L; signed or not). Under the product, choose \u201cShip it: a physical product, sent by you\u201d, then set the shipping cost per order (0 for free shipping), where it ships (the United States, the United States and Canada, the EU, Europe, everywhere Stripe ships, or only the countries you list) and, if you like, when it ships.",
           "Its page says what shipping costs and where it goes before anybody pays. Stripe's own page asks the buyer for an address in one of those countries and adds the shipping as its own line; with sales tax on, the product is taxed as goods and the shipping as shipping. The address is on the page after paying, in the buyer's confirmation email, on the sale in your studio and in your Stripe dashboard.",
-          "You send it yourself. On the sale, \u201cMark as shipped\u201d emails the buyer that it is on its way, with a tracking link if you paste one, once. A limited quantity and the boxes at checkout work as on any product; a product you ship cannot also be a gift, part of a cart or bundle, have a payment plan or a price the buyer chooses.",
+          "You send it yourself. On the sale, \u201cMark as shipped\u201d emails the buyer that it is on its way, with a tracking link if you paste one, once. A limited quantity and the boxes at checkout work as on any product; a product you ship cannot also be a gift or part of a bundle, have a payment plan or a price the buyer chooses. At one price and not limited, it can go in a cart with other products you ship: the buyer gives one address, in a country everything in the cart ships to, and pays each product's shipping added together.",
         ],
       },
       {
@@ -577,7 +587,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         q: "Can buyers put several products in a cart?",
         a: [
           "Yes, on every plan, once two or more of your products could go in one. Each product's card and page then shows \u201cAdd to cart\u201d under its buy button, and the cart appears at the top of your store with each product at its price now \u2014 a sale or a fair price for the buyer's country already taken off \u2014 and the total. Buyers pay for up to four products in one payment, on your own Stripe account, and each is handed over exactly as if bought on its own: its download or link, its course, its license key, its place on their list of purchases.",
-          "What can go in a cart: a paid product at one price, sold once \u2014 a file, a link, a course with lessons or a bundle. Not memberships, calls, products with several prices, a limited number, a price the buyer chooses or questions asked at checkout, products coming soon, or a bundle the buyer builds. A discount code box is shown only when nothing in the cart is already on sale. The cart is kept only in the buyer's own browser, and emptied once paid. With checkout reminders on, a cart left at its checkout gets the same one reminder a product does, naming everything in it with a link that puts the cart back as it was.",
+          "What can go in a cart: a paid product at one price, sold once \u2014 a file, a link, a course with lessons, a bundle or a product you ship. With products you ship, the cart shows the shipping and where it can go before the buyer pays, asks for one address in a country they all ship to, and adds each one's shipping together; when they share no country, it names the ones to take out and buy on their own. A cart holds either products you ship or products handed over online, not both: it says so before the buyer pays. Not memberships, calls, products with several prices, a limited number, a price the buyer chooses or questions asked at checkout, products coming soon, or a bundle the buyer builds. A discount code box is shown only when nothing in the cart is already on sale. The cart is kept only in the buyer's own browser, and emptied once paid. With checkout reminders on, a cart left at its checkout gets the same one reminder a product does, naming everything in it with a link that puts the cart back as it was.",
           "\u201cBuy more, save more\u201d, in your studio next to your sale and fair prices, takes a percent you choose, from 5% to 50%, off every product in a cart once it holds 2 or more (or 3, or 4, as you choose), on top of any sale or fair price. Every \u201cAdd to cart\u201d then says so, the cart tells the buyer how many more it takes, and shows what the deal took off before they pay. It is off until you switch it on, and the order records the percent, so your numbers and any refund add up.",
         ],
       },
@@ -764,7 +774,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           "You can add up to three monthly bonuses, such as $50 when an affiliate's link brings 10 sales that earn in a calendar month; a refund that takes the month back under the goal takes the bonus back. Two checks hold commission before it is paid: two affiliates sharing an inbox or payout address, and, unless you allow it, an affiliate's link reached from a paid search ad on your name. What is held is left out of every payment until you look and release it. Visits and sales through affiliate links show as their own channel, Affiliates, in your numbers.",
           "You can also pay per lead: a fixed amount, from 0.50 to 100 in your store's currency, for each confirmed lead an affiliate brings. You choose one kind: an email sign-up to your list, counted once the person presses the button in the email they are sent and only for an address new to the list; a free product claimed, counted when its emailed link is opened, the first time that address gets it; or a booked call, counted once its time has passed, it was not refunded and you approve it as having taken place. A person is one lead in your program, ever, written any way, and never an affiliate's own address or yours. Each lead waits in a hold of 7 to 90 days that you set, then for your approval, before it can be paid; how many leads earn per affiliate a UTC day is yours to set, an hour holds a quarter of it, and a monthly budget caps them all. A lead past either is listed for you and your affiliate and earns nothing. You can reverse any lead that is not genuine, saying why, and your affiliate sees that reason; a reversed lead that was already paid comes off what you owe, as a refund does. Each lead keeps the terms of the day it came. A sign-up is credited while your store's monthly requests have room, and a lead takes a little of your store's data room, like any record.",
           "You can add a second tier of 2% to 20%. Each approved affiliate then has an invitation link on their page; somebody who applies through it and whom you approve is theirs, and on each sale that person brings the affiliate who invited them earns that share too, paid by you on top of the first share, never out of it. It goes one level only, everything promised on one sale, partners' shares included, never passes 90%, it follows refunds like any commission, and it waits while the person they brought is held. Each recruit keeps the share in force on the day they joined, so changing it later rewrites nobody's terms.",
-          "To be found by people looking for something to promote, check \u201cList my program in the affiliate directory\u201d and save. Your program is listed at marktmorgen.com/affiliate-programs while your store can take payments and has a product that earns: your share, how long a click counts, your payment day and up to four products, each with what one sale earns at today's price. A second box, \u201cShow my program's numbers there too,\u201d adds your program's own figures: how many affiliates you have and since when, the clicks they brought, the sales those clicks made, what they earned before refunds and what you recorded as paid, with the share of clicks that became a sale and what 100 clicks earned once there are 100 clicks. Programs are listed by the highest share, then by how many products earn, then by name; nobody pays to be placed higher. Uncheck it and save, and it leaves the page at once. Every affiliate is asked, on your program page, on their own page and in the email that approves them, to say they earn from the link wherever they share it and to promise only what the product does. On " + AI_PLANS_WORDS + ", approved affiliates can also have three posts drafted on their own page, for X, Instagram and LinkedIn, from the page of a product they pick, in your store's language; each ends with their link and a line saying they earn from it. Up to 3 a day each, each one of your writing jobs for the month and never more than a quarter of them together; switch it off under \u201cDraft posts for my affiliates.\u201d",
+          "To be found by people looking for something to promote, check \u201cList my program in the affiliate directory\u201d and save. Your program is listed at marktmorgen.com/affiliate-programs while your store can take payments and has a product that earns: your share, how long a click counts, your payment day and up to four products, each with what one sale, or one payment of a membership, earns at today's price. A second box, \u201cShow my program's numbers there too,\u201d adds your program's own figures: how many affiliates you have and since when, the clicks they brought, the sales those clicks made, what they earned before refunds and what you recorded as paid, with the share of clicks that became a sale and what 100 clicks earned once there are 100 clicks. Programs are listed by the highest share, then by how many products earn, then by name; nobody pays to be placed higher. Uncheck it and save, and it leaves the page at once. Every affiliate is asked, on your program page, on their own page and in the email that approves them, to say they earn from the link wherever they share it and to promise only what the product does. On " + AI_PLANS_WORDS + ", approved affiliates can also have three posts drafted on their own page, for X, Instagram and LinkedIn, from the page of a product they pick, in your store's language; each ends with their link and a line saying they earn from it. Up to 3 a day each, each one of your writing jobs for the month and never more than a quarter of them together; switch it off under \u201cDraft posts for my affiliates.\u201d",
           "Your affiliates keep every store they promote here in one place, at marktmorgen.com/affiliate: they type the address they joined with, and a link emailed to it shows each program with their link and where their application stands, opens each store's own page with their numbers, and leads to the directory to join more. What they see of your program there is what your own affiliate page shows them.",
         ],
       },
@@ -897,7 +907,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Can I use my own domain?",
+        q: SHARED_QUESTIONS.domain,
         a: [
           ...(isDomainsConfigured()
             ? [
@@ -907,7 +917,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Can I change my store address later?",
+        q: SHARED_QUESTIONS.address,
         a: [
           "Yes, whenever you want, from your studio. Nobody has to be asked and there is nothing to wait for.",
           "Your store does not move: same page, same name, same description, same products. Only the address changes.",
@@ -1035,3 +1045,14 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
 ];
 
+/**
+ * A help-center answer as one paragraph, for a feature page that asks the very
+ * same question (534 [FQ1] unit 44), so a question has one answer wherever it
+ * is asked (tests/distinct-questions.test.ts). Throws when the question is not
+ * in the help center, so a renamed one cannot slip by.
+ */
+export function helpAnswer(q: string): string {
+  const item = HELP_SECTIONS.flatMap((section) => section.items).find((x) => x.q === q);
+  if (!item) throw new Error(`No help answer for "${q}"`);
+  return item.a.join(" ");
+}

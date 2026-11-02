@@ -146,7 +146,7 @@ async function main(): Promise<void> {
   const made = await makeKey((await ensureStoreId(OWNER))!.sid, "Claude");
   if (!made.ok) throw new Error("no key made");
   const tools = (await answer({ jsonrpc: "2.0", id: 5, method: "tools/list" }, made.key)).result?.tools as { name: string; annotations: { readOnlyHint: boolean } }[];
-  is("with the key: eleven tools, all reading", tools.map((t) => [t.name, t.annotations.readOnlyHint]), [
+  is("with the key: thirteen tools, all reading", tools.map((t) => [t.name, t.annotations.readOnlyHint]), [
     ["get_numbers", true],
     ["list_products", true],
     ["get_revenue_by_channel", true],
@@ -157,6 +157,8 @@ async function main(): Promise<void> {
     ["get_memberships", true],
     ["get_emails", true],
     ["get_affiliates", true],
+    ["get_live", true],
+    ["get_numbers_for_days", true],
     ["get_store", true],
   ]);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -164,7 +166,9 @@ async function main(): Promise<void> {
     return { error: got.isError, data: JSON.parse(got.content[0].text) as Record<string, unknown>, text: got.content[0].text };
   };
   // Every tool, read: none answers with an address, the store owner's included.
-  const everything = await Promise.all(tools.map((t) => call(t.name)));
+  // A stretch of days needs its two ends (631 [AA1] unit 8); every other tool answers with no arguments.
+  const ends = { from: new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) };
+  const everything = await Promise.all(tools.map((t) => call(t.name, t.name === "get_numbers_for_days" ? ends : {})));
   is("each answers, and none of them hands out anybody's address", [everything.every((r) => !r.error), everything.some((r) => /@/.test(r.text))], [true, false]);
   const channels = await call("get_revenue_by_channel", { days: 7 });
   is("revenue by channel for the days asked for", [channels.data.window, (channels.data.channels as { channel: string }[])[0]?.channel], ["last_7_days", "tiktok"]);

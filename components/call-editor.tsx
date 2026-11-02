@@ -341,6 +341,8 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
     !product.file &&
     !product.link &&
     !product.course &&
+    // A podcast is refused by the server like a course (lib/store.ts, setProductCall), so it is never offered.
+    !product.podcast &&
     // A call is booked at a set price, never a chosen one.
     !product.pwyw;
 
@@ -658,7 +660,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         </fieldset>
 
         <p className="rounded-[10px] bg-paper px-3 py-2 text-sm text-ink-soft">
-          {`A session is on sale until it is full or sales close. Each buyer gets the session's link and a calendar file the moment they have paid, then a reminder a day and an hour before; you get one email per booking and reminders listing everyone. Buyers can move their seat to another session themselves, twice at most, until ${hoursLabel(Math.max(draft.noticeHours, 1))} before it starts. Replies to their emails go to ${email}.`}
+          {`A session is on sale until it is full or sales close. Each buyer gets the session's link, or a note that you will send it, and a calendar file the moment they have paid. You get one email per booking, without the file when the session is already in your Google Calendar. You and the buyers get reminders a day and an hour before, listing everyone in yours. A reminder that would come less than an hour after the booking is skipped. Buyers can move their seat to another session themselves, twice at most, until ${hoursLabel(Math.max(draft.noticeHours, 1))} before it starts. Replies to their emails go to ${email}.`}
         </p>
 
         {error ? <p className="notice notice-error" role="alert">{error}</p> : null}
@@ -883,7 +885,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
       </RoomChoice>
 
       <p className="rounded-[10px] bg-paper px-3 py-2 text-sm text-ink-soft">
-        {`When someone books, you both get an email with a calendar file, then a reminder a day and an hour before. Buyers can move their booking to another open time themselves, twice at most, up to your notice before it starts. A buyer can reply to their email to reach you, and the reply goes to ${email}.`}
+        {`When someone books, it shows under Upcoming calls in your studio. The buyer gets an email with a calendar file. You get one too, or the host does on a team call. If the call is already in that person's Google Calendar, their email has no file. You and the buyer get reminders a day and an hour before. A reminder that would come less than an hour after the booking is skipped. On a team call, your reminders still come to you. Buyers can move their booking to another open time themselves, twice at most, up to your notice before it starts. A buyer can reply to their email to reach you, and the reply goes to ${email}.`}
       </p>
 
       {error ? <p className="notice notice-error" role="alert">{error}</p> : null}

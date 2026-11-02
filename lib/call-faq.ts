@@ -27,7 +27,7 @@ export function callBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_
   return [
     {
       q: "What is a paid call here?",
-      a: `A time with you that the buyer picks and pays for as they book it, on your own Stripe account, or books later from a package of sessions they already paid for: one person at a time, a group of up to ${MAX_SEATS} at each time, or seats in live sessions on dates you set. The buyer gets an email with a calendar file, and so do you, or the host of a team call you do not host; when the call is already in your Google Calendar, your email comes without the file. The call itself happens on the meeting service you choose, or by a link you send yourself; nothing is streamed or recorded here.`,
+      a: `A time with you that the buyer picks and pays for as they book it, on your own Stripe account, or books later from a package of sessions they already paid for: one person at a time, a group of up to ${MAX_SEATS} at each time, or seats in live sessions on dates you set. The buyer gets an email with a calendar file. You get one too, or the host does on a team call you do not host. If the call is already in that person's Google Calendar, their email has no file. The call itself happens on the meeting service you choose, or by a link you send yourself; nothing is streamed or recorded here.`,
     },
     {
       q: "How do I start one?",

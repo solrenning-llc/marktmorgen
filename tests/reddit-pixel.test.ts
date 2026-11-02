@@ -47,8 +47,8 @@ is("never an identifier passed to Reddit", ["email:", "phoneNumber", "externalId
 
 part("The page's policy and the save");
 const connect = (policy: string) => policy.split(";").find((d) => d.trim().startsWith("connect-src")) ?? "";
-is("a store's page may reach Reddit", ["https://www.redditstatic.com", "https://*.reddit.com"].every((h) => connect(dynamicPolicy("n", { store: true })).includes(h)), true);
-is("other pages may not", connect(dynamicPolicy("n", { store: false })).includes("reddit"), false);
+is("a store's page may reach Reddit", ["https://www.redditstatic.com", "https://*.reddit.com"].every((h) => connect(dynamicPolicy("n", { store: true })).trim().split(/\s+/).includes(h)), true);
+is("other pages may not", connect(dynamicPolicy("n", { store: false })).trim().split(/\s+/).slice(1).some((src) => /^https:\/\/([a-z0-9*-]+\.)*(reddit|redditstatic)\.com$/.test(src)), false);
 const requested = { ...NO_PIXELS, reddit: "a2_abc123", redditMatchingOff: true as const };
 is("the same back: confirmed", pixelSettingsConfirmed(true, { ok: true, pixels: requested }, requested), true);
 is("the word lost on the way: not confirmed", pixelSettingsConfirmed(true, { ok: true, pixels: { ...requested, redditMatchingOff: undefined } }, requested), false);

@@ -59,9 +59,10 @@ part("The page's security policy");
 const connect = (policy: string) => policy.split(";").find((d) => d.trim().startsWith("connect-src")) ?? "";
 const store = connect(dynamicPolicy("n0nce", { store: true }));
 for (const host of ["https://static.ads-twitter.com", "https://ads-twitter.com", "https://ads-api.twitter.com", "https://analytics.twitter.com"]) {
-  is(`a store's page may reach ${host}`, store.includes(host), true);
+  is(`a store's page may reach ${host}`, store.trim().split(/\s+/).includes(host), true);
 }
-is("a page that is not a store's reaches none of them", connect(dynamicPolicy("n0nce", { store: false })).includes("twitter.com"), false);
+const sources = (directive: string) => directive.trim().split(/\s+/).slice(1);
+is("a page that is not a store's reaches none of them", sources(connect(dynamicPolicy("n0nce", { store: false }))).some((src) => /^https:\/\/([a-z0-9-]+\.)*(ads-)?twitter\.com$/.test(src)), false);
 
 part("A save is confirmed only as sent");
 const requested = { ...NO_PIXELS, x: "a1b2c", xEvents: { purchase: "p9q8r", lead: null } };

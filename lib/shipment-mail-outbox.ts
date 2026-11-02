@@ -401,7 +401,7 @@ if current~='' and ARGV[8]=='valid' then
    local score=redis.call('ZSCORE',KEYS[5],id)
    -- Zero means immediately eligible without copying a new timestamp into
    -- the original row or depending on the caller clock's millisecond edge.
-   if not score or tonumber(score)<0 then redis.call('ZADD',KEYS[5],0,id);result='rearmed' else result='already' end
+   if not score or tonumber(score)~=0 then redis.call('ZADD',KEYS[5],0,id);result='rearmed' else result='already' end
   end
  end
 end

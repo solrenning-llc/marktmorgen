@@ -340,6 +340,8 @@ export function EmailStudio(props: {
   segments?: Segment[];
   /** The products that are courses (lib/catalog.ts, "course"). */
   courses?: string[];
+  /** The products that are calls: a sequence that starts with one says "books" (548 [TR1]). */
+  calls?: string[];
   /** Paid products in the selected store catalog, for sequence ending checks. */
   paidProducts?: string[];
   /** The store's forms that ask for an address, its own fields and its deal stages, for the sequences (lib/flows.ts). */
@@ -447,7 +449,7 @@ export function EmailStudio(props: {
             <History readFailed={props.broadcastsReadFailed ?? false} writeUnconfirmed={writeUnconfirmed} onWriteUnconfirmed={onWriteUnconfirmed} flowsReadFailed={props.flowsReadFailed ?? false} broadcasts={props.broadcasts} products={props.products} canSend={props.canSend} onOpen={openDraft} currency={props.currency} />
             {props.canSend ? (
               <AiOn value={props.ai ?? { on: false, left: 0 }}>
-                <Flows initialSequence={props.initialSequence} writeUnconfirmed={writeUnconfirmed} onWriteUnconfirmed={onWriteUnconfirmed} flows={props.flows} readFailed={props.flowsReadFailed ?? false} products={props.products} currency={props.currency} sells={props.sells} courses={props.courses ?? []} paidProducts={props.paidProducts} automation={props.automation} limits={props.workflowLimits} assignees={props.assignees ?? []} />
+                <Flows initialSequence={props.initialSequence} writeUnconfirmed={writeUnconfirmed} onWriteUnconfirmed={onWriteUnconfirmed} flows={props.flows} readFailed={props.flowsReadFailed ?? false} products={props.products} currency={props.currency} sells={props.sells} courses={props.courses ?? []} calls={props.calls ?? []} paidProducts={props.paidProducts} automation={props.automation} limits={props.workflowLimits} assignees={props.assignees ?? []} />
               </AiOn>
             ) : null}
           </>
@@ -2008,6 +2010,7 @@ function Flows({
   currency,
   sells,
   courses = [],
+  calls = [],
   paidProducts,
   automation = { forms: [], fields: [], stages: [] },
   limits,
@@ -2025,6 +2028,8 @@ function Flows({
   automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[] };
   /** The products that are courses, for "finishes a course" and the conditions on one. */
   courses?: string[];
+  /** The products that are calls: a sequence that starts with one says "books" (548 [TR1]). */
+  calls?: string[];
   paidProducts?: string[];
   /** Whether the store sells anything for money, so a first purchase can happen at all. */
   sells: boolean;
@@ -2086,7 +2091,8 @@ function Flows({
         ? `Starts when a deal with someone on your list enters “${automation.stages.find((x) => x.id === f.stageId)?.name ?? "a stage no longer in your pipelines"}”`
       : f.trigger === "bought"
         ? "Starts the first time someone who agreed to hear from you buys anything"
-        : `Starts when someone who agreed to hear from you gets ${products.find((p) => p.id === f.productId)?.title ?? "a product"}`;
+        : // A paid call starts the sequences of its product (lib/buyer-list.ts): said as booking it.
+          `Starts when someone who agreed to hear from you ${f.productId && calls.includes(f.productId) ? "books" : "gets"} ${products.find((p) => p.id === f.productId)?.title ?? "a product"}`;
 
   function openDraft(flow: FlowRow | null) {
     if (locked || draft !== null) return;
@@ -2406,7 +2412,7 @@ function Flows({
             >
               <option value="joined">Someone joins your list</option>
               <option value="bought">Someone who agreed to hear from you buys anything, the first time</option>
-              {products.length ? <option value="product">Someone who agreed to hear from you gets a product</option> : null}
+              {products.length ? <option value="product">{calls.length ? "Someone who agreed to hear from you gets a product or books a call" : "Someone who agreed to hear from you gets a product"}</option> : null}
               <option value="tagged">A sequence gives someone a label</option>
               {courses.length ? <option value="finished">Someone who agreed to hear from you finishes a course</option> : null}
               {courses.length ? <option value="started">Someone who agreed to hear from you opens a course for the first time</option> : null}

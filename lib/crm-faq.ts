@@ -27,7 +27,7 @@ export function crmBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_D
       a: `On the same page, under “${w.fields}”, press “${w.firstField}”, then “${w.addField}”. Type its name, pick its “${w.kind}”, and press “${w.saveFields}”. To fill one in for someone, open “${w.buyers}”, find them by their email, and save it under “${w.fields}” on their page.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try deals and fields before paying?",
       a: `${tryBeforePaying("People and deals", "your fields, deals and a pipeline", onSale, trialDays)} Without a plan, you cannot add a pipeline to the one every store starts with; a plan${onSale ? " or its trial" : ""} has room for more.`,
     },
   ];

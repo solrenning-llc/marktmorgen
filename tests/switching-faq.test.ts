@@ -40,10 +40,10 @@ is("members also need an email sender, even where the store takes payments", go(
 part("The answers, in both states");
 const now = switchingBeginnerQuestions(false, TRIAL_DAYS);
 const later = switchingBeginnerQuestions(true, TRIAL_DAYS);
-is("two questions", now.map((x) => x.q), ["Where do I start?", "Can I try it before paying?"]);
-const start = answer(now, "Where do I start?");
+is("two questions", now.map((x) => x.q), ["Where do I start my move to Marktmorgen?", "Can I move my store to Marktmorgen before paying?"]);
+const start = answer(now, "Where do I start my move to Marktmorgen?");
 is("starting: the studio's words in order", (() => { const k = [w.tool, ...w.tabs, w.file, w.columns, w.rows, w.agreed, w.stopped, `${w.go} …`].map((x) => start.indexOf(`“${x}”`)); return k.every((x, i) => x >= 0 && (i === 0 || x > k[i - 1])); })(), true);
-is("trying: the shared answer, and members only once the store takes payments", [answer(now, "Can I try it before paying?").startsWith(tryBeforePaying("A move", "your list, products and past buyers", false, TRIAL_DAYS)), answer(later, "Can I try it before paying?").startsWith(tryBeforePaying("A move", "your list, products and past buyers", true, TRIAL_DAYS)), [now, later].every((l) => answer(l, "Can I try it before paying?").endsWith("Your members come over only while your store can take payments and send email, because each one is emailed their own link and keeps their membership by paying here."))], [true, true, true]);
+is("trying: the shared answer, and members only once the store takes payments", [answer(now, "Can I move my store to Marktmorgen before paying?").startsWith(tryBeforePaying("A move", "your list, products and past buyers", false, TRIAL_DAYS)), answer(later, "Can I move my store to Marktmorgen before paying?").startsWith(tryBeforePaying("A move", "your list, products and past buyers", true, TRIAL_DAYS)), [now, later].every((l) => answer(l, "Can I move my store to Marktmorgen before paying?").endsWith("Your members come over only while your store can take payments and send email, because each one is emailed their own link and keeps their membership by paying here."))], [true, true, true]);
 const all = [...now, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);
 is("no figure but the trial's days", /\d/.test(all.split(`${TRIAL_DAYS}-day`).join("")), false);

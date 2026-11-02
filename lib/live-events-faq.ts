@@ -24,11 +24,11 @@ export function liveEventsBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = 
       a: `Events live inside your community, so the owner or an ${ROLE_NAMES.admin} sets that up first: on the studio's “${w.tool}” page, press “${w.setUp}”. Then, under “${w.part}”, press “${w.schedule}”, type a “${w.title}”, check the date and time under “${w.when}” and the place under “${w.where}” (a private video room unless you pick another), and press “${w.confirm}”. Members see it once the community is switched on.`,
     },
     {
-      q: "Is anyone told when I schedule one?",
+      q: "Is anyone told when I schedule an event?",
       a: `Not by email. It shows in your community, and with “${w.announce}” checked, as a post there too. Only members who RSVP get reminders, and only if they asked for the community's emails.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try live events before paying?",
       a: `${tryBeforePaying("A live event", "a live event", onSale, trialDays)} Members come to an event through a product that opens your community: bought or claimed free, which needs your store's plan${onSale ? " or its trial" : ""}, or held by buyers you or an ${ROLE_NAMES.admin} bring over from another platform.`,
     },
   ];

@@ -5,7 +5,7 @@
  * (app/studio/bundles/page.tsx, components/bundle-editor.tsx), how many go
  * in and which (lib/bundle-rules.ts: MIN_BUNDLE_ITEMS, MAX_BUNDLE_ITEMS,
  * canBeInBundle, whyNotInBundle), the saving line (worthWords), and the
- * shared answer to "Can I try it before paying?" (lib/beginner-faq.ts). No
+ * shared answer to "Can I try bundles before paying?" (lib/beginner-faq.ts). No
  * number of sales. Shown first in the bundles page's own "Questions" block.
  */
 import { PLANS_ON_SALE } from "@/lib/opening";
@@ -24,11 +24,11 @@ export function bundleBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIA
       a: `A bundle is ${MIN_BUNDLE_ITEMS} to ${MAX_BUNDLE_ITEMS} of your products sold as one product, at one price you set. The buyer gets each product in it as if they had bought it on its own. You can also have each buyer choose a number of them that you set, and they get only those.`,
     },
     {
-      q: "How do I start one?",
+      q: "How do I make a bundle?",
       a: `In your studio, open “${w.page}” and press “${w.start}”. Fill in “${w.name}” and the price, search for your products under “${w.find}”, press “${w.pick}” beside at least ${MIN_BUNDLE_ITEMS} of them, and press “${w.add}”. What can go in: your one-off products with one set price (not pay what you want, not another bundle) that hand over a file, a link or a course with lessons, and that have no limited number for sale. Drafts can go in too.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try bundles before paying?",
       a: tryBeforePaying("A bundle", "a bundle of your products", onSale, trialDays),
     },
     {

@@ -162,17 +162,18 @@ test("diagnostic sink failure cannot replace a valid native reply",async()=>{
 
 test("inherited readiness is never a process handshake",async()=>{
  const descriptor=Object.getOwnPropertyDescriptor(Object.prototype,"ready");
- Object.defineProperty(Object.prototype,"ready",{value:true,configurable:true});
- const f=fixture({handshake:false});
+ Object.defineProperty(Object.prototype,"ready",{value:true,configurable:true,writable:true});
+ const f=fixture({handshake:false});let probe;
  try{
   const starting=startWindowsForegroundProbe({...f.options,onDiagnostic:()=>{}});
+  starting.then(value=>{probe=value;},()=>{});
   f.child.stdout.write('{"unrelated":true}\n');await assert.rejects(starting,/Malformed/);
- }finally{if(descriptor)Object.defineProperty(Object.prototype,"ready",descriptor);else delete Object.prototype.ready;}
+ }finally{if(descriptor)Object.defineProperty(Object.prototype,"ready",descriptor);else delete Object.prototype.ready;await probe?.close();}
 });
 test("inherited id and title cannot authorize a correlated snapshot",async()=>{
  const descriptors=["id","title"].map(key=>[key,Object.getOwnPropertyDescriptor(Object.prototype,key)]);
- Object.defineProperty(Object.prototype,"id",{value:"0",configurable:true});
- Object.defineProperty(Object.prototype,"title",{value:"FORGED_INHERITED_TITLE",configurable:true});
+ Object.defineProperty(Object.prototype,"id",{value:"0",configurable:true,writable:true});
+ Object.defineProperty(Object.prototype,"title",{value:"FORGED_INHERITED_TITLE",configurable:true,writable:true});
  const f=fixture();let probe;
  try{
   probe=await startWindowsForegroundProbe({...f.options,onDiagnostic:()=>{}});

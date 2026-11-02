@@ -1,6 +1,9 @@
 /**
- * The answer every feature page gives to "Can I try it before paying?"
- * (534 [FQ1]), in one place so the same question never gets two answers.
+ * The answer every feature page gives to its own "Can I try … before
+ * paying?" (534 [FQ1]), in one place so the pages never contradict each
+ * other. Each page names its own feature in the question ("Can I try
+ * bundles before paying?"), so no two pages ask the same question with
+ * different answers (tests/distinct-questions.test.ts).
  * It follows PLANS_ON_SALE (lib/opening.ts), the trial's length (lib/plan.ts)
  * and what a store not paying for a plan may upload (lib/upload-budget-policy.ts);
  * `setUp` is what the page's feature lets a store set up with no plan, in

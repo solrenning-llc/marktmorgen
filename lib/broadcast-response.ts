@@ -1,6 +1,7 @@
 import { MIN_TEST_REACH, newTest } from "@/lib/mail-test";
 import type { MailAnswer } from "@/lib/mail-response";
 import { readNarrow } from "@/lib/segments-rules";
+import { readTags } from "@/lib/contact-rules";
 const REFUSALS = new Set(["subject", "body", "when", "product", "empty", "allowance", "setup", "plan", "test_subject", "test_small", "test_links", "placeholder", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request"]);
 const positive = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
 const association = (value: unknown) => typeof value === "string" && value ? value : null;
@@ -24,6 +25,9 @@ export function broadcastAnswer(responseOk: boolean, raw: unknown, input: Record
     const actual = b.narrow as Record<string, unknown>;
     if (actual.minSpent !== narrow.minSpent || actual.channel !== narrow.channel || actual.quietDays !== narrow.quietDays) return unknown;
   } else if (b.narrow !== null) return unknown;
+  // The label as createBroadcast keeps it (99 [E2-TAG-BROADCAST]): a server that lost it would write to a broader group.
+  const expectedLabel = readTags([typeof input.label === "string" ? input.label : ""])[0] ?? null;
+  if ((typeof b.label === "string" ? b.label : null) !== expectedLabel) return unknown;
   const expectedTest = newTest(input.test, subject, 150);
   if (expectedTest === "subject") return unknown;
   if (expectedTest === "none") {

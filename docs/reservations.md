@@ -51,3 +51,4 @@ Add a row before the first commit of a unit; remove it when the unit is merged.
 | Claude 3 | 631 [AA1] unit 4 (check of AI-generated code before publishing, step (d); pure rules, nothing published) | claude3/aa1-code-check | `lib/generated-code-check.ts`, `tests/generated-code-check.test.ts`, `lib/form-sensitive.ts` (one exported helper, same rules) | 02/11/2026 14h40 |
 | Codex | 465 [MR2], #1489: align with current TX3 parent | codex/mr2-own-input-evidence | `lib/customer-base-rules.ts`, `tests/customer-base.test.ts`, `docs/reservations.md`, `docs/codex-queue.md` | 02/11/2026 |
 
+| Codex | 473 [TX3], #1491: current-main integration and conflict resolution | codex/tx3-sales-counter | `docs/reservations.md`, `docs/codex-queue.md`, `docs/e5-money-readers.md`, `tests/plan-cost-registry.ts`, `tests/store-data-registry.ts` | 02/11/2026 |

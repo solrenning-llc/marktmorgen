@@ -164,7 +164,7 @@ export async function studioAccess(
   request: NextRequest,
   need: Need,
   action = "",
-): Promise<{ ok: true; access: Access } | { ok: false; reason: Refusal; store?: Store; message?: string }> {
+): Promise<{ ok: true; access: Access } | { ok: false; reason: Refusal; store?: Store; message?: string; why?: "used" | "unknown" | "pool" | "daily" }> {
   const session = request.cookies.get(SESSION_COOKIE)?.value;
   const email = await emailForSession(session);
   if (!email) return { ok: false, reason: "signed_out" };
@@ -182,7 +182,8 @@ export async function studioAccess(
   // deleting the store, downloading its data and leaving a team are never
   // refused for it: they have a small daily bound of their own instead.
   const counted = await countStudio(access.store, need);
-  if (!counted.ok) return { ok: false, reason: "used", store: access.store, message: counted.message };
+  // Its message already says which: the figure used, no place this month, or no count just now.
+  if (!counted.ok) return { ok: false, reason: "used", store: access.store, message: counted.message, why: counted.reason };
   if (counted.store) result.access = { ...result.access, store: counted.store };
   const reading = request.method === "GET" || request.method === "HEAD";
   // The team's own route writes its lines itself, in words of its own.
@@ -212,11 +213,11 @@ export async function studioAccess(
  * a page drawn. What the owner needs to leave or pay is taken from a small
  * daily figure instead, so it is never shut out by the month's.
  */
-export async function countStudio(store: Store, need: Need | null, units = 1): Promise<{ ok: true; store?: Store } | { ok: false; reason: "used" | "unknown" | "pool"; message: string }> {
+export async function countStudio(store: Store, need: Need | null, units = 1): Promise<{ ok: true; store?: Store } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string }> {
   if (need && ESSENTIAL_NEEDS.includes(need)) {
     return (await withinEssentialLimit("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400))
       ? { ok: true }
-      : { ok: false, reason: "used", message: "Too many of these today. Try again tomorrow, or write to support." };
+      : { ok: false, reason: "daily", message: "Too many of these today. Try again tomorrow, or write to support." };
   }
   // A paying store whose billing month is not known has it read from Stripe first (lib/billing-sync.ts).
   const current = await refreshPeriod(store);
@@ -265,7 +266,7 @@ export async function creatorFrom(
     if (result.reason === "no_store") return away(origin, "/studio?stripe=nostore");
     if (result.reason === "gone") return away(origin, "/studio?team=gone");
     if (result.reason === "locked") return away(origin, "/studio?two-step=locked");
-    if (result.reason === "used") return away(origin, studioPath(result.store ?? { sid: "" }, "", "paused"));
+    if (result.reason === "used") return away(origin, studioPath(result.store ?? { sid: "" }, `why=${result.why ?? "used"}`, "paused"));
     return away(origin, studioPath(result.store ?? { sid: "" }, "team=forbidden"));
   }
   const { access } = result;

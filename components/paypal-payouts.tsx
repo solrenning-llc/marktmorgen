@@ -70,7 +70,8 @@ export function PayPalPayouts({
     setBusy(null);
     setSure(false);
     if (!data.ok) {
-      setError(MESSAGES[String(data.error)] ?? MESSAGES.error);
+      // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
+      setError((typeof (data as { message?: unknown }).message === "string" && (data as { message: string }).message) || (MESSAGES[String(data.error)] ?? MESSAGES.error));
       return null;
     }
     return data;

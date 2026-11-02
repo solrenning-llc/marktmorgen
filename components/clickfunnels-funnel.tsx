@@ -37,7 +37,7 @@ const MESSAGES: Record<string, string> = {
   empty: "That file has nothing in it.",
   too_big: "That page is too large to read, even without its scripts and styles.",
   slow: "That was a lot in a short time. Wait a while and try again.",
-  month: "Your plan's figure for this month is used: pages read, funnel checks or funnels made. It opens again when the month turns, or on a larger plan.",
+  month: "Your store has used its figure for this for now (pages read, funnel checks or funnels made). More can be done when it opens again.",
   role: "Only the store's owner and Admins can make pages and funnels.",
   plan: "The funnel has problems to fix first: see the list below.",
   busy: "This funnel is being imported in another tab. Wait a moment and check again.",

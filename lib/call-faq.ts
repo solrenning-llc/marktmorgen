@@ -4,7 +4,7 @@
  * call editor's own buttons and the products it takes
  * (components/call-editor.tsx), a group call's seats (lib/call-setup.ts,
  * MAX_SEATS), the studio's Upcoming calls (app/studio/page.tsx), and the
- * shared answer to "Can I try it before paying?" (lib/beginner-faq.ts). No
+ * shared answer to "Can I try paid calls before paying?" (lib/beginner-faq.ts). No
  * number of calls or bookings, no time promise. Shown first in the calls
  * page's own "Questions" block (components/topic-page.tsx).
  */
@@ -30,11 +30,11 @@ export function callBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_
       a: `A time with you that the buyer picks and pays for as they book it, on your own Stripe account, or books later from a package of sessions they already paid for: one person at a time, a group of up to ${MAX_SEATS} at each time, or seats in live sessions on dates you set. The buyer gets an email with a calendar file. You get one too, or the host does on a team call you do not host. If the call is already in that person's Google Calendar, their email has no file. The call itself happens on the meeting service you choose, or by a link you send yourself; nothing is streamed or recorded here.`,
     },
     {
-      q: "How do I start one?",
+      q: "How do I set up a paid call?",
       a: `In your studio, open a paid product with one set price that does not deliver a file or a link, and press “${CALL_EDITOR_WORDS.weekly}”. Set how long a call lasts, your time zone and your hours, then press “${CALL_EDITOR_WORDS.weeklySave}”. For seats on dates you set, press “${CALL_EDITOR_WORDS.live}” instead, then “${CALL_EDITOR_WORDS.liveSave}”. Something free, a membership, a course, a podcast, a bundle, something you ship, a product with several prices and one where the buyer names the price cannot be a call.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try paid calls before paying?",
       a: tryBeforePaying("A call", "a call, with its hours or its dates,", onSale, trialDays),
     },
     {

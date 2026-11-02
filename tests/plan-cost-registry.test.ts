@@ -51,7 +51,8 @@ function scopesInCode(): Map<string, string[]> {
   const add = (scope: string, file: string) => found.set(scope, [...(found.get(scope) ?? []), file]);
   for (const file of code) {
     const text = read(file);
-    for (const m of text.matchAll(/\bwithin(EssentialLimit|Limit|Month|Store|Service)\(([^,]+),/g)) {
+    // withinServiceWhy is withinService that also says why it refused (lib/metered-limits.ts): the same count.
+    for (const m of text.matchAll(/\bwithin(EssentialLimit|Limit|Month|Store|Service)(?:Why)?\(([^,]+),/g)) {
       const literals = [...m[2].matchAll(/"([^"]+)"/g)].map((l) => l[1]);
       if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1]])); }
       else add(`<dynamic:${m[2].trim()}>`, file);

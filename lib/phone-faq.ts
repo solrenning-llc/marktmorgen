@@ -24,11 +24,11 @@ export function phoneBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL
       a: `Your studio can notify your phone, tablet or computer the moment something happens, such as a sale, a booking, a report in your community, an affiliate application, a live event about to start or a comment under a lesson. You can use up to ${MAX_DEVICES} devices of your own, and choose for each one what it tells you. Each person on your team hears only what their role may see.`,
     },
     {
-      q: "How do I turn them on?",
+      q: "How do I turn on phone notifications?",
       a: `In your studio, open “${w.tool}”. On iPhone or iPad, first add the studio to your home screen from Safari's Share button, then open it from there and go back to “${w.tool}”. Choose what you want under “${w.choose}”, press “${w.on}”, then “${w.test}”. If the page says notifications are not set up yet, they cannot be turned on for now.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try phone notifications before paying?",
       a: `${tryBeforePaying("Phone notifications", "phone notifications on your devices", onSale, trialDays)} That holds once notifications are set up on our side.`,
     },
     {

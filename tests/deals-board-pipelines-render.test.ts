@@ -20,7 +20,7 @@ const html = renderToStaticMarkup(createElement(DealsBoard, props));
 is("a tab for each pipeline, the first chosen", html.includes('aria-pressed="true"') && html.includes("Sales") && html.includes("Coaching"), true);
 is("each pipeline's totals, open, won and lost, in the store's currency", html.includes("1 · $1,500") && html.includes("1 · $400") && html.includes("1 · $999"), true);
 is("totals say they are recorded values, nothing forecast", html.includes("Nothing is weighted or forecast"), true);
-is("the plan's number is shown", html.includes("You have 2 of the 5 pipelines your plan keeps"), true);
+is("the store's number is shown", html.includes("You have 2 of the 5 pipelines your store can keep"), true);
 is("a deal moves to a stage of any pipeline", html.includes('<optgroup label="Coaching">') && html.includes("Intro call"), true);
 is("only the chosen pipeline's deals are on its board", html.includes("Deal d000000001") && !html.includes("Deal d000000003"), true);
 is("a deal with a person still links to a payment request, filled in", html.includes("/studio/requests?store=s1&amp;email=dana%40example.com&amp;for=Deal+d000000001&amp;amount=1500"), true);

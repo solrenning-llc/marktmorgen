@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: read }, { status: 400 });
     }
     setup = read;
+    // A deposit (lib/call-deposit.ts; 520 [LB1] unit 5a) is not offered yet: the booking page, the page after paying
+    // and the emails do not say what is left to pay in person, and the editor does not keep it. Refused until they do (5b).
+    if (setup.deposit) return Response.json({ ok: false, error: "deposit" }, { status: 400 });
     // In person chosen with no address (lib/call-place.ts): never saved as a call with no link.
     const asked = (guarded.body.call as { place?: unknown } | null | undefined)?.place;
     if (asked !== undefined && asked !== null && !setup.place) return Response.json({ ok: false, error: "place" }, { status: 400 });

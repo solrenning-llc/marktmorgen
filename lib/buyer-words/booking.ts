@@ -221,6 +221,8 @@ const en = {
   icsWillSend: (store: string) => `${store} will send the link to join.`,
   /** An in-person booking (lib/call-place.ts): where it is, in the email and the calendar file. */
   whereAt: (address: string) => `Where: ${address}`,
+  /** A deposit on an in-person booking (lib/call-deposit.ts): what is paid now, and the rest in person. */
+  depositRest: (amount: string, store: string) => `A deposit to hold your time. The rest, ${amount}, is paid in person to ${store}.`,
 
   // ---- A package of sessions ---------------------------------------------------------
   /** On Stripe's page. */
@@ -405,6 +407,7 @@ const es: BookingWords = {
   icsJoin: (room) => `Unirse: ${room}`,
   icsWillSend: (store) => `${store} enviará el enlace para unirse.`,
   whereAt: (address) => `Dónde: ${address}`,
+  depositRest: (amount, store) => `Un depósito para reservar tu hora. El resto, ${amount}, se paga en persona a ${store}.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sesión", "sesiones")}`,
   packageDescription: (sessions, limit) =>
@@ -588,6 +591,7 @@ const fr: BookingWords = {
   icsJoin: (room) => `Participer${S}: ${room}`,
   icsWillSend: (store) => `${store} enverra le lien pour participer.`,
   whereAt: (address) => `Où${S}: ${address}`,
+  depositRest: (amount, store) => `Un acompte pour réserver votre créneau. Le reste, ${amount}, se paie en personne à ${store}.`,
 
   packageName: (title, sessions) => `${title} — ${sessions}${S}${pluralFr(sessions, "séance", "séances")}`,
   packageDescription: (sessions, limit) =>
@@ -767,6 +771,7 @@ const de: BookingWords = {
   icsJoin: (room) => `Teilnehmen: ${room}`,
   icsWillSend: (store) => `${store} schickt den Link zur Teilnahme.`,
   whereAt: (address) => `Wo: ${address}`,
+  depositRest: (amount, store) => `Eine Anzahlung, um Ihren Termin zu sichern. Den Rest, ${amount}, zahlen Sie vor Ort an ${store}.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "Termin", "Termine")}`,
   packageDescription: (sessions, limit) =>
@@ -948,6 +953,7 @@ const it: BookingWords = {
   icsJoin: (room) => `Partecipa: ${room}`,
   icsWillSend: (store) => `${store} invierà il link per partecipare.`,
   whereAt: (address) => `Dove: ${address}`,
+  depositRest: (amount, store) => `Un acconto per riservare il tuo orario. Il resto, ${amount}, si paga di persona a ${store}.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessione", "sessioni")}`,
   packageDescription: (sessions, limit) =>
@@ -1128,6 +1134,7 @@ const nl: BookingWords = {
   icsJoin: (room) => `Meedoen: ${room}`,
   icsWillSend: (store) => `${store} stuurt de link om mee te doen.`,
   whereAt: (address) => `Waar: ${address}`,
+  depositRest: (amount, store) => `Een aanbetaling om je tijd vast te leggen. De rest, ${amount}, betaal je ter plaatse aan ${store}.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessie", "sessies")}`,
   packageDescription: (sessions, limit) =>
@@ -1309,6 +1316,7 @@ const pt: BookingWords = {
   icsJoin: (room) => `Entrar: ${room}`,
   icsWillSend: (store) => `${store} vai enviar a ligação para entrar.`,
   whereAt: (address) => `Onde: ${address}`,
+  depositRest: (amount, store) => `Um sinal para reservar a sua hora. O resto, ${amount}, é pago presencialmente a ${store}.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessão", "sessões")}`,
   packageDescription: (sessions, limit) =>

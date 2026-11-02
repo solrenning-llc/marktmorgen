@@ -43,6 +43,7 @@
  * booking also takes its hosts' time on every store at once, atomically
  * (lib/host-claims.ts), under the same lock as everything here.
  */
+import { chargeNow } from "@/lib/call-deposit";
 import { type CallPlace, placeIcsLines, placeLine, whereOf } from "@/lib/call-place";
 import { admitOrders } from "@/lib/order-admission";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
@@ -668,6 +669,8 @@ export function callCheckoutBody(input: {
   // on the sale, as what the buyer saw.
   const lang = LANGUAGES[parseLanguage(store.language)];
   const when = `${readableTime(start, buyerTz, lang.locale)} (${zoneName(start, buyerTz, lang.locale)})`;
+  // Never from a package: the package was the payment.
+  const due = pkg ? { cents: product.priceCents, rest: 0 } : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
   const name = `${product.title} \u2014 ${when}`;
   const body = new URLSearchParams({
     mode: "payment",
@@ -675,7 +678,8 @@ export function callCheckoutBody(input: {
     "line_items[0][quantity]": "1",
     // In the store's own currency (lib/money.ts), like every price it has.
     "line_items[0][price_data][currency]": store.currency,
-    "line_items[0][price_data][unit_amount]": String(product.priceCents),
+    // A deposit on an in-person booking (lib/call-deposit.ts): only it is charged here; the rest is paid in person.
+    "line_items[0][price_data][unit_amount]": String(due.cents),
     "line_items[0][price_data][product_data][name]": name.slice(0, 250),
     "metadata[store]": store.handle,
     "metadata[product]": product.id,
@@ -693,6 +697,17 @@ export function callCheckoutBody(input: {
     cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
+  if (due.rest > 0) {
+    // Said on Stripe's own page, before paying, and kept on the sale for the creator.
+    const said = formatMoney(due.rest, store.currency, lang.locale);
+    // The creator's own summary first, then the sentence, kept whole within Stripe's 500 characters.
+    const sentence = bookingWords(store.language).depositRest(said, store.name);
+    const summary = product.summary ? product.summary.slice(0, Math.max(0, 500 - sentence.length - 3)) : "";
+    body.set("line_items[0][price_data][product_data][description]", summary ? `${summary} \u2014 ${sentence}` : sentence.slice(0, 500));
+    body.set("metadata[deposit]", String(due.cents));
+    body.set("metadata[rest]", String(due.rest));
+    body.set("payment_intent_data[metadata][rest]", String(due.rest));
+  }
   if (input.team) {
     body.set("metadata[hosts]", input.team.hosts.join(","));
     body.set("metadata[claim]", input.team.claim);
@@ -704,7 +719,8 @@ export function callCheckoutBody(input: {
     body.set("cancel_url", pkg.back);
     // Nothing is paid, so Stripe makes no payment of it to carry these.
     for (const key of [...body.keys()]) if (key.startsWith("payment_intent_data")) body.delete(key);
-  } else if (store.hasDiscounts) body.set("allow_promotion_codes", "true");
+  } else if (store.hasDiscounts && due.rest === 0) body.set("allow_promotion_codes", "true");
+  // With a deposit, a code would come off the deposit alone, and its minimum be checked against it: no code box until that is decided (520 [LB1], 5b).
   // Sent by an affiliate: credited to them, at today's share (lib/affiliates.ts).
   // A booking is one product, with nothing else able to ride along, so a
   // share of nothing is a sale that earns nothing and is not written down.

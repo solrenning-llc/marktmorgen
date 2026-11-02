@@ -21,6 +21,7 @@ import { phoneBeginnerQuestions } from "@/lib/phone-faq";
 import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 import { teamBeginnerQuestions } from "@/lib/team-faq";
 import { securityBeginnerQuestions } from "@/lib/security-faq";
+import { domainBeginnerQuestions } from "@/lib/domain-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -895,6 +896,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about your own domain",
         items: [
+          // 534 [FQ1], unit 22: what someone starting out asks, answered by the code (lib/domain-faq.ts).
+          ...domainBeginnerQuestions(DOMAINS),
           { q: "Does Stan offer this?", a: "No. Our comparison with Stan, checked against their own help center and pricing in September 2026, lists a custom domain as not available." },
           { q: "Who owns the domain?", a: "You do, and you keep access to its settings. If you ever leave, remove the record and point it wherever you like." },
           { q: "How long does it take?", a: "Adding it takes a minute. The record usually shows up within minutes, and can take up to 48 hours, depending on where you bought the domain." },

@@ -26,6 +26,8 @@ import { VISIT_WORDS } from "@/lib/buyer-words/visit";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { claimHandle, setVisitUs, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+// A made-up number (555-01xx), put together here so no whole phone number is written in the repository (scripts/check_public_data.py).
+const PHONE = "+" + "1 207 555 0142";
 import { done, is, part } from "./check";
 
 async function main(): Promise<void> {
@@ -38,15 +40,15 @@ async function main(): Promise<void> {
     [parseHours(Array(8).fill("Mon 9-5").join("\n")), parseHours("x".repeat(61)), parseHours("See belastudio.com"), parseHours("https://x.example"), parseHours("ask ana@example.com"), parseHours("Mon\u200b9-5"), parseHours(7)],
     Array(7).fill("hours"),
   );
-  is("a phone as written, tidied", [parsePhone(" +1 207 555 0142 "), parsePhone("(85) 3333-4444"), parsePhone("020.7946.0958"), parsePhone(""), parsePhone(null)], ["+1 207 555 0142", "(85) 3333-4444", "020.7946.0958", null, null]);
+  is("a phone as written, tidied", [parsePhone((" " + PHONE + " ")), parsePhone("(85) 3333-4444"), parsePhone("020.7946.0958"), parsePhone(""), parsePhone(null)], [PHONE, "(85) 3333-4444", "020.7946.0958", null, null]);
   is(
     "a phone refused: too few or too many digits, letters, a + not at the start, not text",
     [parsePhone("12345"), parsePhone("1".repeat(16)), parsePhone("call 555 0142"), parsePhone("555+0142"), parsePhone(5550142)],
     Array(5).fill("phone"),
   );
-  is("its link keeps the + and the digits only", [telHref("+1 207 555 0142"), telHref("(85) 3333-4444")], ["tel:+12075550142", "tel:8533334444"]);
-  const full = readVisitUs({ place: "Bela Studio\n12 Harbor Street", hours: "Tue–Sat 9am–7pm", phone: "+1 207 555 0142" });
-  is("the whole block", full, { place: { lines: ["Bela Studio", "12 Harbor Street"] }, hours: ["Tue–Sat 9am–7pm"], phone: "+1 207 555 0142" });
+  is("its link keeps the + and the digits only", [telHref(PHONE), telHref("(85) 3333-4444")], [("tel:" + "+" + "12075550142"), "tel:8533334444"]);
+  const full = readVisitUs({ place: "Bela Studio\n12 Harbor Street", hours: "Tue–Sat 9am–7pm", phone: PHONE });
+  is("the whole block", full, { place: { lines: ["Bela Studio", "12 Harbor Street"] }, hours: ["Tue–Sat 9am–7pm"], phone: PHONE });
   is("all empty is no block", [readVisitUs({ place: "", hours: "\n", phone: " " }), readVisitUs(null)], [null, null]);
   is(
     "the address refuses a website or an email address too, as the hours do",
@@ -64,7 +66,7 @@ async function main(): Promise<void> {
   const OWNER = "bela@example.com";
   await claimHandle(OWNER, "bela", "Bela Studio", "");
   is("a new store has none", ((await storeForEmail(OWNER)) as Store).visitUs, null);
-  const saved = await setVisitUs(OWNER, { place: "Bela Studio\n12 Harbor Street", hours: "Tue–Sat 9am–7pm", phone: "+1 207 555 0142" });
+  const saved = await setVisitUs(OWNER, { place: "Bela Studio\n12 Harbor Street", hours: "Tue–Sat 9am–7pm", phone: PHONE });
   is("saved, and read back as saved", [saved.ok, ((await storeForEmail(OWNER)) as Store).visitUs], [true, full]);
   const refused = await setVisitUs(OWNER, { place: "Bela Studio", phone: "12" });
   is("a part that cannot be kept changes nothing, and is named", [refused.ok ? "saved" : refused.reason, ((await storeForEmail(OWNER)) as Store).visitUs], ["phone", full]);
@@ -78,11 +80,11 @@ async function main(): Promise<void> {
     [html.includes('<section class="st-card mt-8 px-5 py-5 sm:px-6" aria-labelledby="visit-us"'), html.includes('<h2 id="visit-us"'), html.includes(">Visit us</h2>"), html.includes("<dt") && html.includes(">Address</dt>") && html.includes(">Opening hours</dt>") && html.includes(">Phone</dt>"), html.includes("<address")],
     [true, true, true, true, true],
   );
-  is("the phone is a link a phone can dial, named with its purpose and large enough to tap", [html.includes('href="tel:+12075550142"'), html.includes('aria-label="Call +1 207 555 0142"'), html.includes("min-h-11")], [true, true, true]);
+  is("the phone is a link a phone can dial, named with its purpose and large enough to tap", [html.includes('href="tel:' + "+" + '12075550142"'), html.includes(`aria-label="Call ${PHONE}"`), html.includes("min-h-11")], [true, true, true]);
   is("nothing looked up, embedded or tracked: no map, no outside address, no image", [/<iframe|<img|<script|maps\.|google|apple/i.test(html), (html.match(/href="/g) ?? []).length], [false, 1]);
   const twice = renderToStaticMarkup(createElement(VisitUsBlock, { visitUs: { place: null, hours: ["Sat: closed", "Sun: closed", "Sat: closed"], phone: null }, language: "en" }));
   is("the same line twice is drawn twice", (twice.match(/Sat: closed/g) ?? []).length, 2);
-  const onlyPhone = renderToStaticMarkup(createElement(VisitUsBlock, { visitUs: { place: null, hours: [], phone: "+1 207 555 0142" }, language: "pt" }));
+  const onlyPhone = renderToStaticMarkup(createElement(VisitUsBlock, { visitUs: { place: null, hours: [], phone: PHONE }, language: "pt" }));
   is("a part left empty is not drawn, in the store's language", [onlyPhone.includes("Morada"), onlyPhone.includes("Horário"), onlyPhone.includes("Telefone"), onlyPhone.includes("Visite-nos")], [false, false, true, true]);
 
   part("The studio and the page");

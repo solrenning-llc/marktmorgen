@@ -75,7 +75,7 @@ export function VisitUsEditor({ visitUs }: { visitUs: VisitUs | null }) {
       </p>
       <div className="mt-4 grid gap-4">
         <div>
-          <label htmlFor={`${id}-place`} className="field-label">Your address</label>
+          <label htmlFor={`${id}-place`} className="field-label">Your place&apos;s address</label>
           <textarea id={`${id}-place`} className="field mt-2" rows={MAX_PLACE_LINES} value={place} onChange={(e) => setPlace(e.target.value)} aria-describedby={`${id}-place-help`} autoComplete="street-address" />
           <p id={`${id}-place-help`} className="mt-1 text-sm text-ink-soft">{`Up to ${MAX_PLACE_LINES} lines, as a visitor reads it. For example: Bela Studio, 12 Harbor Street, Portland, ME 04101.`}</p>
         </div>
@@ -87,7 +87,7 @@ export function VisitUsEditor({ visitUs }: { visitUs: VisitUs | null }) {
         <div>
           <label htmlFor={`${id}-phone`} className="field-label">Phone</label>
           <input id={`${id}-phone`} type="tel" className="field mt-2" value={phone} onChange={(e) => setPhone(e.target.value)} aria-describedby={`${id}-phone-help`} autoComplete="tel" />
-          <p id={`${id}-phone-help`} className="mt-1 text-sm text-ink-soft">Visitors can tap it to call you. For example: +1 207 555 0142.</p>
+          <p id={`${id}-phone-help`} className="mt-1 text-sm text-ink-soft">Visitors can tap it to call you. For example: (207) 555-0142. Start with + and your country code if visitors may call from another country.</p>
         </div>
       </div>
       {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}

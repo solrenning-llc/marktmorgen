@@ -18,7 +18,8 @@ export const MAX_SPENT = 100_000_000;
 const CHANNEL = /^[a-z0-9][a-z0-9._-]{0,39}$/;
 
 /** A saved group: a name over the composer's choices. */
-export type Segment = { id: string; name: string; who: Who; productId: string; notProductId: string } & Narrow;
+/** `label`: only people who carry it (99 [E2-TAG-BROADCAST]); empty for none, as on every group saved before it. */
+export type Segment = { id: string; name: string; who: Who; productId: string; notProductId: string; label: string } & Narrow;
 
 /** The three narrowings from what a request sent; anything that is not one of them is left out. */
 export function readNarrow(raw: unknown): Narrow {

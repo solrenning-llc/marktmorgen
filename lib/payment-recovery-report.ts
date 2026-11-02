@@ -23,7 +23,8 @@ const DAY = 86_400;
 const MAX_PAGES = 10;
 const CACHE_SECONDS = 10 * 60;
 
-const cacheKey = (store: Store) => `nl:dun:report:${store.statsId}`;
+// v2: with the renewals in another currency counted (22 [E5], unit 2e).
+const cacheKey = (store: Store) => `nl:dun:report:${store.statsId}:v2`;
 
 export type RecoveryReport = {
   /** When Stripe was read, in seconds. */
@@ -35,6 +36,12 @@ export type RecoveryReport = {
   /** Of them, those paid after the member was emailed about it. */
   afterEmail: number;
   afterEmailCents: number;
+  /**
+   * Of the same renewals, those paid in another currency than the store's (a
+   * membership sold before it changed its currency renews in the old one):
+   * counted, never added to the amounts (22 [E5], unit 2e).
+   */
+  elsewhere: number;
   /** Emails the daily job sent this month: about failed payments, and about cards. */
   month: { failed: number; cards: number };
   /** False when there were more paid invoices than one reading takes. */
@@ -59,18 +66,22 @@ const storeOf = (invoice: Invoice) => invoice.parent?.subscription_details?.meta
 /** Pure: the recovered renewals among a store's paid invoices, given which were emailed about. */
 export function recoveredFrom(invoices: Invoice[], handles: Set<string>, currency: string, emailed: Set<string>, now: number) {
   const since = Math.floor(now / 1000) - 30 * DAY;
-  const out = { recovered: 0, cents: 0, afterEmail: 0, afterEmailCents: 0 };
+  const out = { recovered: 0, cents: 0, afterEmail: 0, afterEmailCents: 0, elsewhere: 0 };
   for (const invoice of invoices) {
     const id = typeof invoice.id === "string" ? invoice.id : "";
     const paidAt = typeof invoice.status_transitions?.paid_at === "number" ? invoice.status_transitions.paid_at : 0;
     const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
     if (!id || paidAt < since || cents <= 0 || invoice.paid_out_of_band === true) continue;
-    if (invoice.currency !== currency || !handles.has(storeOf(invoice))) continue;
+    if (!handles.has(storeOf(invoice))) continue;
     // A renewal, not the first payment of a membership (which is the checkout's).
     if (invoice.billing_reason === "subscription_create") continue;
     const told = emailed.has(id);
     const retried = typeof invoice.attempt_count === "number" && invoice.attempt_count >= 2;
     if (!told && !retried) continue;
+    if (invoice.currency !== currency) {
+      out.elsewhere += 1;
+      continue;
+    }
     out.recovered += 1;
     out.cents += cents;
     if (told) {

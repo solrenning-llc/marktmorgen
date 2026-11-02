@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   const body = writer.body;
   try {
     const done = await roomFor(() => giveAccess(writer.store, writer.keyId, body));
-    if (!done.ok) return apiError(WRITE_ERRORS[done.error][0], done.error, WRITE_ERRORS[done.error][1]);
+    if (!done.ok) return apiError(WRITE_ERRORS[done.error][0], done.error, done.message ?? WRITE_ERRORS[done.error][1]);
     return apiOk({ data: done.value });
   } catch (error) {
     console.error("api: giving a product failed", error);
@@ -29,7 +29,7 @@ export async function DELETE(request: Request) {
   if (body instanceof Response) return body;
   try {
     const done = await takeAccess(writer.store, body);
-    if (!done.ok) return apiError(WRITE_ERRORS[done.error][0], done.error, WRITE_ERRORS[done.error][1]);
+    if (!done.ok) return apiError(WRITE_ERRORS[done.error][0], done.error, done.message ?? WRITE_ERRORS[done.error][1]);
     return apiOk({ data: { ...done.value, status: "taken_back" } });
   } catch (error) {
     console.error("api: taking a product back failed", error);

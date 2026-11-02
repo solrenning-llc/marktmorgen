@@ -17,6 +17,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, setStoreTiers, 
 import { canTier, currentMeta, direction, dueNow, parseTiers, productOfSub } from "@/lib/tier-rules";
 import { choicesFor, liveTiers, previewSwitch, switchTier } from "@/lib/tier-switch";
 import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
+import { membershipWords } from "@/lib/buyer-words/membership";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -26,6 +27,8 @@ const calls: { method: string; path: string; body: URLSearchParams }[] = [];
 let declined = false;
 let tierA = "";
 let priceMeta: Record<string, string> = {};
+// The currency the member pays in: the store's, unless it changed its currency since (22 [E5], unit 2b).
+let paidIn = "usd";
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
@@ -48,7 +51,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
           customer: "cus_Member0001",
           created: 1,
           metadata: { store: "harbor", product: tierA },
-          items: { data: [{ id: "si_Member0001", price: { unit_amount: 1000, currency: "usd", metadata: priceMeta, recurring: { interval: "month", interval_count: 1 } } }] },
+          items: { data: [{ id: "si_Member0001", price: { unit_amount: 1000, currency: paidIn, metadata: priceMeta, recurring: { interval: "month", interval_count: 1 } } }] },
         },
       ],
     });
@@ -166,6 +169,19 @@ async function main(): Promise<void> {
   is("not to the tier it is on", same.ok ? "shown" : same.reason, "tier");
   const badLink = await previewSwitch(store, "0".repeat(64), "sub_Member0001", b.product.id);
   is("not without a live link", badLink.ok ? "shown" : badLink.reason, "expired");
+
+  part("A membership paid in another currency than the store's now");
+  // The store changed its currency after this member subscribed: every tier is priced in the new one.
+  paidIn = "eur";
+  const before = calls.length;
+  const other = (await membershipsFor(store, token))!;
+  is("no tier offered to it", [other[0].currency, choicesFor(store, other[0], tiers)], ["eur", []]);
+  const otherPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+  const otherSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, Math.floor(Date.now() / 1000));
+  is("a link to a switch says why and changes nothing", [otherPreview.ok ? "shown" : otherPreview.reason, otherSwitch.ok ? "switched" : otherSwitch.reason], ["currency", "currency"]);
+  is("no price made, no preview asked, no subscription touched", calls.slice(before).filter((c) => c.method === "POST").map((c) => c.path), []);
+  is("the member is told so in every language", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => membershipWords(l).switchProblems.currency?.body.length > 40 && membershipWords(l).manageNotices.currency?.title.length > 10), true);
+  paidIn = "usd";
 
   part("The switch");
   const old = await switchTier(store, token, "sub_Member0001", b.product.id, preview.preview.at - 16 * 60);

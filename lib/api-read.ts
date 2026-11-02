@@ -186,7 +186,8 @@ export async function bookings(store: Store): Promise<Record<string, unknown>[]>
     buyer_time_zone: c.buyerTz,
     moved: c.moves,
     amount: c.amount,
-    currency: store.currency,
+    // The currency it was paid in; the store's when the checkout said none.
+    currency: c.currency || store.currency,
     answers: c.answers,
   }));
 }

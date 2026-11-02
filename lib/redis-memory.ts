@@ -584,7 +584,9 @@ export class MemoryRedis {
       }
       case "GET": {
         const held = this.data.get(key);
-        return typeof held === "string" ? held : null;
+        if (held === undefined) return null;
+        if (typeof held !== "string") throw new Error("WRONGTYPE");
+        return held;
       }
       case "PERSIST":
         // Keeps a key for good: 1 when it had an expiry to take off.

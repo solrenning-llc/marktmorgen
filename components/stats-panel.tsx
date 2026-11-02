@@ -633,6 +633,18 @@ export function StatsPanel({
           {`${count(elsewhere)} ${elsewhere === 1 ? "sale was" : "sales were"} paid in another currency, from before your store charged in ${(data.currency ?? "usd").toUpperCase()}. ${elsewhere === 1 ? "It is" : "They are"} left out of these numbers, because amounts in two currencies do not add up, and ${elsewhere === 1 ? "it is" : "they are"} in the sales download with ${elsewhere === 1 ? "its" : "their"} own currency.`}
         </p>
       ) : null}
+      {salesHere && range === "d90" && ((data.takenBackElsewhere?.refunds ?? 0) > 0 || (data.takenBackElsewhere?.disputes ?? 0) > 0) ? (() => {
+        // 22 [E5], unit 2b: refunds and disputes in another currency were dropped without a word. Counted over the 90 days, so said there.
+        const refunds = data.takenBackElsewhere?.refunds ?? 0;
+        const disputes = data.takenBackElsewhere?.disputes ?? 0;
+        const what = [refunds > 0 ? `${count(refunds)} ${refunds === 1 ? "refund" : "refunds"}` : "", disputes > 0 ? `${count(disputes)} ${disputes === 1 ? "dispute" : "disputes"}` : ""].filter(Boolean).join(" and ");
+        const one = refunds + disputes === 1;
+        return (
+          <p className="mt-3 text-sm text-ink-soft">
+            {`${what} in the last 90 days ${one ? "was" : "were"} in a currency other than ${(data.currency ?? "usd").toUpperCase()}. ${one ? "It is" : "They are"} left out of these numbers${elsewhere > 0 ? " too" : ""}, and ${one ? "it is" : "they are"} in your Stripe account in ${one ? "its" : "their"} own currency.`}
+          </p>
+        );
+      })() : null}
 
       {range !== "all" && !beforeTraffic ? <p className="mt-3 text-sm text-ink-soft" role="status">Previous traffic figures are unavailable. Current visitors, page views and checkouts remain available.</p> : null}
 

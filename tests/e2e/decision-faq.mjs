@@ -22,7 +22,9 @@ export async function checkDecisionFaq({browser,LOCAL,axeSource,is}){
      const disclosure=control.locator("..");
      if(await disclosure.getAttribute("open")===null){await control.focus();await page.keyboard.press("Enter");}
      await page.waitForFunction(el=>el.hasAttribute("open"),await disclosure.elementHandle());
-     const answer=path==="/"?page.locator("#"+await control.getAttribute("aria-controls")):disclosure;
+     // The answer is read inside its own details, on both pages: the summary carries no ARIA over its own state (534 [FQ1] unit 43).
+     const answer=disclosure;
+     is("FAQ question has no ARIA over its own state "+path+"/"+width,await control.getAttribute("aria-controls"),null);
      is("FAQ answer visible "+path+"/"+item.q+"/"+width,await answer.isVisible(),true);
      for(const href of item.hrefs){const link=answer.locator('a[href="'+href+'"]');is("FAQ evidence link "+path+"/"+href+"/"+width,await link.count(),1);await link.focus();is("FAQ evidence keyboard focus "+href,await link.evaluate(el=>el===document.activeElement),true);}
     }

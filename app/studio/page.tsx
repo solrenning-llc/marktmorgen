@@ -1,4 +1,5 @@
 import { serviceAllowanceWords } from "@/lib/store-allowance";
+import { planAboveSold } from "@/lib/larger-plan";
 import { SalesLevers } from "@/components/sales-levers";
 import { costsPaused } from "@/lib/plan-standing";
 import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pause";
@@ -868,6 +869,8 @@ export default async function StudioPage({
   const breakDay = (seconds: number) =>
     new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
   const tier = current?.tier ?? "creator";
+  // Whether a larger plan can be had now (lib/larger-plan.ts): none above Scale, none while Pro is not sold, nothing while no plan is on sale.
+  const largerOnSale = PLANS_ON_SALE && planAboveSold(tier);
   // The store's own domain: shown where this deployment can add one, and its
   // records read from Vercel only while it is not yet live.
   const domainsOn = isDomainsConfigured();
@@ -2559,8 +2562,8 @@ export default async function StudioPage({
                     <p className="mt-4 notice notice-warn">
                       <strong>{visited >= visitLimit ? "Your store\u2019s pages, and your buyers\u2019 pages, are resting." : "Your store\u2019s public pages are resting."}</strong>
                       {visited >= visitLimit
-                        ? ` It has used all ${countWords(visitLimit)} counted visits this month, so courses, the community and podcasts rest too, with a page that tells your buyers their access is kept. Everything opens again ${standing === "paid" ? "with your next billing month, or on a larger plan" : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`
-                        : ` It has reached ${countWords(publicVisitLimit(visitLimit))} of its ${countWords(visitLimit)} counted visits this month. Your buyers\u2019 courses, community and podcasts stay open for the last ${countWords(visitLimit - publicVisitLimit(visitLimit))}. Public pages open again ${standing === "paid" ? "with your next billing month, or on a larger plan" : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`}
+                        ? ` It has used all ${countWords(visitLimit)} counted visits ${standing === "trial" ? "for the trial" : "this month"}, so courses, the community and podcasts rest too, with a page that tells your buyers their access is kept. Everything opens again ${standing === "paid" ? `with your next billing month${largerOnSale ? ", or on a larger plan" : ""}` : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`
+                        : ` It has reached ${countWords(publicVisitLimit(visitLimit))} of its ${countWords(visitLimit)} counted visits ${standing === "trial" ? "for the trial" : "this month"}. Your buyers\u2019 courses, community and podcasts stay open for the last ${countWords(visitLimit - publicVisitLimit(visitLimit))}. Public pages open again ${standing === "paid" ? `with your next billing month${largerOnSale ? ", or on a larger plan" : ""}` : standing === "trial" ? "as soon as your plan is paid" : "when the month turns"}.`}
                     </p>
                   ) : null}
                   <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
@@ -2595,7 +2598,7 @@ export default async function StudioPage({
                   {standing === "paid" && store && ordered >= orderRoom ? (
                     <p className="mt-4 notice notice-warn">
                       <strong>New orders are paused for the month.</strong>
-                      {` Your store has had the ${countWords(orderRoom)} orders your plan covers. A buyer who presses buy is told the store is not taking new orders right now, and nothing is charged; anybody already paying finishes. Orders open again with your next billing month, or on a larger plan.`}
+                      {` Your store has had the ${countWords(orderRoom)} orders your plan covers. A buyer who presses buy is told the store is not taking new orders right now, and nothing is charged; anybody already paying finishes. Orders open again with your next billing month${largerOnSale ? ", or on a larger plan" : ""}.`}
                     </p>
                   ) : null}
                   {standing === "trial" && ordered >= TRIAL_ORDERS ? (
@@ -2625,7 +2628,7 @@ export default async function StudioPage({
                       ))}
                     </dl>
                     <p className="mt-3 text-sm text-ink-soft">
-                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, and a contact added or a product given through the API as ${API_WRITE_UNITS} API requests. Past a figure, that use waits for the next month or a larger plan, with a plain message; nothing is billed. Changing or canceling your plan, deleting your store and downloading your sales always work.`}
+                      {`A page of the studio counts as ${STUDIO_PAGE_UNITS} studio requests, and a contact added or a product given through the API as ${API_WRITE_UNITS} API requests. Past a figure, that use waits until the figure opens again${standing === "paid" && largerOnSale ? ", or for a larger plan" : ""}, with a plain message that says when; nothing is billed. ${PLANS_ON_SALE ? "Changing or canceling your plan" : "Canceling your plan"}, deleting your store and downloading your sales always work.`}
                     </p>
                   </div>
                 ) : null}
@@ -2635,11 +2638,11 @@ export default async function StudioPage({
                     <p className="mt-2 text-sm text-ink-soft">{`${dataWords(data.used)} of ${dataWords(data.room)} used, ${dataWords(data.orders)} of it kept for your orders.`}</p>
                     {data.used >= data.room * 0.9 ? (
                       <p className="mt-3 notice notice-warn">
-                        {data.used >= data.room ? dataFullWords(data.used, data.room) : "Your data room is nearly full. Delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan, before it is."}
+                        {data.used >= data.room ? dataFullWords(data.used, data.room, standing === "paid" && largerOnSale) : `Your data room is nearly full. Delete something you no longer need, such as old posts, drafts, pages or contacts${standing === "paid" && largerOnSale ? ", or move to a larger plan" : ""}, before it is.`}
                       </p>
                     ) : null}
                     <p className="mt-3 text-sm text-ink-soft">
-                      {"It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps. When it is full, what you or your buyers would add is refused until you delete something or move to a larger plan; deleting is never refused, and an order already paid for is never refused."}
+                      {`It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps. When it is full, what you or your buyers would add is refused until you delete something${standing === "paid" && largerOnSale ? " or move to a larger plan" : ""}; deleting is never refused, and an order already paid for is never refused.`}
                     </p>
                   </div>
                 ) : null}

@@ -28,6 +28,7 @@
  *   nl:meet:rf:<callsId>:since   the time refunds were read up to, in seconds
  *   nl:meet:rf:<callsId>:seen    refunds already read
  */
+import { whereOf } from "@/lib/call-place";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured } from "@/lib/email";
@@ -125,7 +126,8 @@ export async function syncMeetings(
       const booked = list.filter((c) =>
         outcome.record.group ? c.product === outcome.record.product && c.start === outcome.record.start : c.session === outcome.record.session,
       );
-      if (product && isCallProduct(product) && booked.length) {
+      // In person now (lib/call-place.ts): no link is sent to anybody.
+      if (product && isCallProduct(product) && whereOf(product.call).kind !== "place" && booked.length) {
         run.told += await tellNewLink({ store, product, meeting: outcome.record, previous: outcome.previous, people: booked, origin }).catch(() => 0);
       }
     }

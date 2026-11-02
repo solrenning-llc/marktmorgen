@@ -8,8 +8,8 @@ import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { DeliveryView, WebhookEvent, WebhooksView } from "@/lib/webhooks";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 
-const MAX_ENDPOINTS = 5;
 
 /** Every event, in the order the studio lists them, with what each means. */
 const EVENTS: { key: WebhookEvent; label: string; hint: string }[] = [

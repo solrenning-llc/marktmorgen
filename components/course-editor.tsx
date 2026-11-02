@@ -33,6 +33,8 @@ import {
 import { LINK_PROBLEMS, type LinkProblem } from "@/lib/product-link";
 import { useStudioHref } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { CourseTemplatePicker } from "@/components/course-template-picker";
+import { FIT_WORDS, exampleTitlesLeft, exampleTitlesWords, quizLessonsWaiting, quizWaitingWords, templateFits } from "@/lib/course-templates";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { CAPTION_LANGUAGES, type CaptionTrack, MAX_CAPTION_BYTES, MAX_CAPTION_TRACKS } from "@/lib/captions";
@@ -53,6 +55,7 @@ const MESSAGES: Record<string, string> = {
   wrong_type: "That kind of file cannot be uploaded here.",
   unknown: "That is not there anymore. Reload the page.",
   not_course: "This product is no longer a course. Reload the page.",
+  not_new: FIT_WORDS["not-new"],
   busy: "Another change to this course is still saving. Try again in a moment.",
   invalid: "That upload could not be checked. Try again.",
   storage_full: "This file does not fit within your store's remaining storage. Delete a file you no longer sell to make room — nothing already bought is affected.",
@@ -258,6 +261,11 @@ export function CourseEditor({
   const [newModule, setNewModule] = useState("");
   // An outline the writing help proposed, waiting for the creator to add it or not.
   const [proposal, setProposal] = useState<Outline | null>(null);
+  // The ready structures (540 [CU1]): put away for this visit by "Keep an empty course".
+  const [skipTemplates, setSkipTemplates] = useState(false);
+  // After a structure is used, the focus goes to the line that says which titles are still examples.
+  const [focusExamples, setFocusExamples] = useState(0);
+  const examplesLine = useRef<HTMLParagraphElement>(null);
   const [streamStates, setStreamStates] = useState<Record<string, StreamState>>(streams);
   const learned = (path: string, state: StreamState) => setStreamStates((known) => ({ ...known, [path]: state }));
   const [captionTracks, setCaptionTracks] = useState<Record<string, CaptionTrack[]>>(captions);
@@ -276,6 +284,11 @@ export function CourseEditor({
   }
 
   const lessons = course.modules.reduce((n, m) => n + m.lessons.length, 0);
+  const examples = exampleTitlesLeft(course);
+  const quizzesWaiting = quizLessonsWaiting(course).length;
+  useEffect(() => {
+    if (focusExamples) examplesLine.current?.focus();
+  }, [focusExamples]);
 
   return (
     <Look.Provider value={look ? { look, language } : null}>
@@ -283,6 +296,43 @@ export function CourseEditor({
     <div className="mt-8 space-y-6">
       {error ? (
         <p className="notice notice-error" role="alert">{error}</p>
+      ) : null}
+
+      {/* Both the course as this page holds it and as the server last drew it: a certificate or a start date set further down changes only the second. */}
+      {!skipTemplates && templateFits(course).ok && templateFits(initial).ok ? (
+        <CourseTemplatePicker
+          course={course}
+          busy={busy}
+          save={async (payload) => {
+            const answer = await run(payload);
+            // The course already has the creator's changes: the structures go, with the course as kept.
+            if (answer.error === "not_new") {
+              setSkipTemplates(true);
+              router.refresh();
+            }
+            return answer;
+          }}
+          onSkip={() => {
+            setSkipTemplates(true);
+            // The picker goes away with the focus in it: the focus moves to the first module's name, where an empty course starts.
+            const first = course.modules[0];
+            requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`section[aria-labelledby="module-${first?.id}-heading"] input`)?.focus());
+          }}
+          onApplied={(kept) => {
+            toast("The structure is added. The course stays hidden from your store until you replace the example titles.");
+            // A quiz lesson the structure made opens, with its "Add a quiz" button.
+            const quiz = quizLessonsWaiting(kept)[0];
+            if (quiz) setOpenLesson(quiz);
+            setFocusExamples((n) => n + 1);
+            // The certificate and the sale line further down the page are drawn by the server.
+            router.refresh();
+          }}
+        />
+      ) : null}
+      {examples > 0 || quizzesWaiting > 0 ? (
+        <p id="course-example-titles" ref={examplesLine} tabIndex={-1} className="notice notice-warn">
+          {[exampleTitlesWords(examples), quizWaitingWords(quizzesWaiting)].filter(Boolean).join(" ")}
+        </p>
       ) : null}
 
       <AiOn value={ai}>

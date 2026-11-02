@@ -1,5 +1,12 @@
 import { PAGE_TEST_WORDS } from "@/lib/headline-test-words";
 import { funnelBeginnerQuestions } from "@/lib/funnel-faq";
+import { courseBeginnerQuestions } from "@/lib/course-faq";
+import { membershipBeginnerQuestions } from "@/lib/membership-faq";
+import { callBeginnerQuestions } from "@/lib/call-faq";
+import { storeBeginnerQuestions } from "@/lib/store-page-faq";
+import { deliveryBeginnerQuestions } from "@/lib/delivery-faq";
+import { checkoutBeginnerQuestions } from "@/lib/checkout-faq";
+import { stripeBeginnerQuestions } from "@/lib/your-stripe-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -58,6 +65,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "and pipelines",
     intro: "Keep contact facts, deal stages and the next conversation in the same studio as your products. Deal values are what your team records, not a forecast or a promise of revenue.",
     seo: { title: "People, deals and pipelines — Marktmorgen CRM", description: "Custom contact fields, deal stages and separate pipelines for a creator's store, with published limits and opt-in email workflows. Paid selling remains closed." },
+    visual: "crm",
     badge: WORKING,
     accent: "from-violet-brand to-pink-brand",
     plan: "creator",
@@ -180,6 +188,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about the store page",
         items: [
+          // 534 [FQ1], unit 5: what someone starting out asks, answered by the code (lib/store-page-faq.ts).
+          ...storeBeginnerQuestions(),
           { q: "Can I change my store address later?", a: "Yes, from your studio, whenever you want. The addresses your store holds keep working and send people to the current one, up to ten at once. An address you let go of stops working, and after 30 days anyone may take it." },
           { q: "Is the page up before I connect Stripe?", a: "Yes. The page, the editor and your address are free and stay free; without a plan, the page is shown for " + countWords(publicVisitLimit(SETUP_VISITS)) + " visits a month. Taking a card needs two things: Stripe has cleared your account, and your plan or its 14-day trial is running. Until then the page says plainly that it cannot take a payment." },
           { q: "Can I use my own domain?", a: DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan. You add one record where you bought the domain, and the certificate is made for you. Your marktmorgen.com address keeps working as well.` : "Not yet. It is planned for the Studio plan, and this page will say so on the day it works." },
@@ -334,6 +344,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about courses",
         items: [
+          // 534 [FQ1], unit 2: what someone starting out asks, answered by what the code does (lib/course-faq.ts).
+          ...courseBeginnerQuestions(),
           { q: "How long until a video I upload can be watched?", a: "It plays as soon as its first size is made, and the larger sizes follow by themselves. Your studio says when it is ready, and a student who opens the lesson before that is told the video is being prepared." },
           { q: "How does a student come back next week?", a: "On the device they paid on, the course simply opens. On any other, they ask for a link on the course page and it is emailed to the address they paid with. No account, no password." },
           { q: "Can I sell a course monthly?", a: "Yes. Sold as a membership, the course stays open while the member pays and closes when the membership ends." },
@@ -412,6 +424,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about memberships",
         items: [
+          // 534 [FQ1], unit 3: what someone starting out asks, answered by what the code does (lib/membership-faq.ts).
+          ...membershipBeginnerQuestions(),
           { q: "What does Marktmorgen take from a renewal?", a: feeWords().fromARenewal },
           { q: "What happens if my own Marktmorgen plan lapses?", a: "Your page stops selling, but members can still cancel on their own. Nobody is ever trapped in a charge they want to stop." },
           { q: "Do discount codes work on memberships?", a: "Yes, on the first charge. A code comes off the payment it is typed into, not every renewal after it." },
@@ -426,7 +440,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "Sell your time,",
     highlight: "booked and paid in one go",
     intro:
-      "One person at a time, a group of up to 50, or live sessions on dates you set. Buyers see the free times in their own time zone, pick one and pay on your Stripe account, and you both get the invitation, with a Google Meet link made on your Google Calendar, your own meeting link or a private video room made for the booking.",
+      "One person at a time, a group of up to 50, or live sessions on dates you set. Buyers see the free times in their own time zone, pick one and pay on your Stripe account. Then the buyer and you get an email; on a team call, the host gets yours. The link to meet is a Google Meet link made for the booking, your own link or a private video room. With none, the buyer is told you will send it.",
     badge: WORKING,
     accent: "from-mint-brand to-sky-brand",
     visual: "calls",
@@ -441,7 +455,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { title: "Set your hours once", body: "How long a call lasts, your time zone, and the hours you take calls each day — up to two stretches a day." },
           { title: "The buyer picks a time", body: "Free times are shown in the buyer's own time zone. The time is held for them for 30 minutes while they pay." },
-          { title: "Paid, then booked", body: "You both get an email with a calendar file and the link to meet. The call appears in your studio under Upcoming calls, and in the buyer's list of purchases." },
+          { title: "Paid, then booked", body: "The buyer gets an email with a calendar file and the link to meet, or a note that you will send it. You get one too, or the host does on a team call. If the call is already in that person's Google Calendar, their email has no file. The call appears in your studio under Upcoming calls, and in the buyer's list of purchases." },
         ],
       },
       {
@@ -460,7 +474,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "users", title: "Team event types", body: `One call booked with whoever on your team is free, shared out evenly (round robin), or only when all of them are (collective). Each host has their own hours in their own time zone, their own gap, notice and cap of team calls a day, and nobody is held twice for the same time, on any store. ${PLAN_AT.creator} plan: ${teamLimitWords(TEAM_LIMITS.creator)}; ${PLAN_AT.pro} plan: ${teamLimitWords(TEAM_LIMITS.pro)}; ${PLAN_AT.scale} plan: ${teamLimitWords(TEAM_LIMITS.scale)}.` },
           { icon: "gift", title: "Packages of sessions", body: "Sell 2 to 20 sessions at one price, with 30 days to a year to use them, or no limit. The buyer pays once and books each session from their own link whenever they like, with the reminders, meeting link and moves of any booking. Their purchases show how many are left." },
           { icon: "video", title: "Live sessions on dates", body: "Up to 50 dates per product, each with 1 to 500 seats, its own length and its own link. Sales close when you say, up to 72 hours before." },
-          { icon: "mail", title: "Reminders", body: "A day and an hour before, to every buyer in their time zone, with the link to join. You get one per time, listing everyone booked." },
+          { icon: "mail", title: "Reminders", body: "A day and an hour before, to every buyer in their time zone, with the link to join or a note that you will send it. You get one per time, listing everyone booked. A reminder that would come less than an hour after the booking is skipped." },
           { icon: "refresh", title: "Buyers move their own booking", body: "Up to twice, from the link in their email, until the notice you set before the call. Nothing is charged or refunded." },
           { icon: "calendar", title: "Your calendar's busy times", body: "Up to three Google, Outlook or iCloud calendars, read by their private address: when you are busy there, that time is not offered.", href: "/platform/calendar-sync" },
         ],
@@ -480,7 +494,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           "Your calendars are read for busy times, and only calls set to Google Meet, and team calls whose host connected their own Google Calendar, are written into Google Calendar. Other bookings reach your calendar as a feed you subscribe to, and a new busy time can take about ten minutes to close a slot.",
           "Two-way Google Calendar sync for team hosts is built and switches on once Google approves the added permissions for our app; until then, hosts add their calendar's private iCal address, which is read the same way but writes nothing.",
-          "A team call has one person per time, keeps its host when the buyer moves it, and sends its booking email and reminders to one address: yours when you host it, otherwise its host's. A host's daily cap counts team calls only.",
+          "A team call has one person per time, keeps its host when the buyer moves it, and sends its booking email to one address: yours when you host it, otherwise its first host's. Its reminders before the call come to you. A host's daily cap counts team calls only.",
           "Buyers move a booking themselves, but canceling is a reply to their confirmation email, which reaches you; a refund is made from your Stripe dashboard.",
           "Zoom links are not made for you yet. Connecting Zoom opens to every store once Zoom approves our app; until then, for Zoom, you type your own link. Stan creates Zoom links automatically.",
           "On a free personal Google account, Google ends meetings of three or more people after 60 minutes.",
@@ -492,6 +506,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about paid calls",
         items: [
+          // 534 [FQ1], unit 4: what someone starting out asks, answered by the code (lib/call-faq.ts).
+          ...callBeginnerQuestions(),
           { q: "What if two people try to book the same time?", a: "The first to reach payment holds it for 30 minutes. The second no longer sees it. If the first does not pay, the time comes back." },
           { q: "Can a call be paid in installments?", a: "No. A call is paid in full when it is booked. Installments are for products with one price." },
           { q: "Can I hold a free session for my members instead?", a: "Yes, as a live event in your community: members RSVP, get reminders and join from the event's page. Paid calls and live sessions are for selling seats; live events are for the people already let into your community." },
@@ -573,6 +589,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about the checkout tools",
         items: [
+          // 534 [FQ1], unit 7: what someone starting out asks, answered by the code (lib/checkout-faq.ts).
+          ...checkoutBeginnerQuestions(),
           { q: "Is the one-click offer safe for the buyer?", a: "The card is kept only for payments made while the buyer is there, never to charge them later. The offer works only in the browser that paid, for an hour, and once; if the bank asks the buyer to confirm, they confirm it." },
           { q: "Who files the tax that Stripe collects?", a: "You do, because you are the seller. Stripe Tax works it out and collects it on your account, and gives you reports of what was collected. Stripe charges for Stripe Tax at its own published price." },
           { q: "Can a buyer who chose a payment plan also take the box at checkout?", a: "Yes. The added product is charged with the first payment, and the button says the total due today." },
@@ -639,6 +657,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about your Stripe account",
         items: [
+          // 534 [FQ1], unit 8: what someone starting out asks, answered by the code (lib/your-stripe-faq.ts).
+          ...stripeBeginnerQuestions(),
           { q: "What do I pay Marktmorgen?", a: feeWords().whatYouPay },
           { q: "Who handles refunds and disputes?", a: "You do, in your own Stripe dashboard, with the same tools any business has. A refund is a refund you issue, not a request you file with us." },
           { q: "Can I charge in euros or pounds?", a: "Yes. Each store charges in one currency, which you choose in your studio from 15. The ways to pay are the ones you switch on in Stripe." },
@@ -710,6 +730,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about delivery",
         items: [
+          // 534 [FQ1], unit 6: what someone starting out asks, answered by the code (lib/delivery-faq.ts).
+          ...deliveryBeginnerQuestions(),
           { q: "How does a buyer get a file again after three days?", a: "At the bottom of your store page: “Bought something here? Get it again.” They type the address they paid with and receive a link to a page with everything that address bought from you, read from your Stripe account. No account and no password." },
           { q: "Can a buyer pass the download around?", a: "The download is tied to their order and to a short window, and the file is fetched through a link that expires in minutes. A leaked link does not become a free copy for everyone. With stamping on, a PDF also carries the buyer's email on every page." },
           { q: "What if a buyer was refunded?", a: "A sale you refunded in full stops downloading at once and no longer appears when they ask to get their purchases again, because both read your Stripe account each time. A partial refund keeps both. A file already saved cannot be taken back." },
@@ -994,6 +1016,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "who bought from you",
     intro:
       "One members' area on your store, with spaces, posts, comments, a live room, private messages, search and live events, open only to the buyers of the products you choose. Members come in with a link sent to their email: no account, no password.",
+    visual: "community",
     badge: WORKING,
     accent: "from-violet-brand to-mint-brand",
     plan: "creator",
@@ -1078,6 +1101,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "inside your community",
     intro:
       "A workshop, a Q&A or a coworking hour for your members. They RSVP in the community, get a reminder, and join from the event's page: in a private video room shown right in the page, at your own meeting link, or in a Google Meet made on your Google Calendar. The way in shows 15 minutes before the start, and only to members who may come.",
+    visual: "events",
     badge: WORKING,
     accent: "from-mint-brand to-violet-brand",
     plan: "creator",
@@ -1236,6 +1260,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "one price",
     intro:
       "Put 2 to 20 of your products in one bundle, at a price you set. The buyer gets every one of them exactly as if they had bought each on its own: the downloads, the links, the courses and the license keys.",
+    visual: "bundles",
     badge: WORKING,
     accent: "from-amber-brand to-violet-brand",
     plan: "creator",
@@ -1305,6 +1330,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "sell it for you",
     intro:
       "People apply and you approve, or everyone who buys takes a link at once. Each affiliate gets a page of their own with their clicks, sales and what they are owed. You pay them from your own PayPal in one press, or by itself on your payday: every sale lands in full in your own Stripe account, and nothing is held.",
+    visual: "affiliates",
     badge: WORKING,
     accent: "from-mint-brand to-sky-brand",
     plan: "creator",
@@ -1379,6 +1405,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "not bookable on your store",
     intro:
       "Paste the private address of up to three calendars, from Google, Outlook or iCloud, and the times you are busy there stop being offered as call times. Your bookings come back the other way, as a calendar you subscribe to.",
+    visual: "calendar",
     badge: WORKING,
     accent: "from-sky-brand to-violet-brand",
     plan: "creator",
@@ -1435,6 +1462,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "what just happened",
     intro:
       "Up to five addresses of your own, such as a Zapier Catch Hook, a Make scenario or your own server, told about sales, members, leads, bookings and refunds as they happen, in signed JSON.",
+    visual: "webhooks",
     badge: WORKING,
     accent: "from-violet-brand to-sky-brand",
     plan: "creator",
@@ -1496,6 +1524,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "a certificate that proves it",
     intro:
       "A quiz after any lesson, marked on our side, or an assignment students hand in and you read, and a certificate of completion with a page of its own that anyone can open to check it.",
+    visual: "quizzes",
     badge: WORKING,
     accent: "from-pink-brand to-violet-brand",
     plan: "creator",
@@ -1560,7 +1589,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "Your Discord server,",
     highlight: "opened by what people buy",
     intro:
-      "Choose which products give which roles in your own Discord server. A buyer joins in two presses after paying, keeps the roles while they hold what they bought, and loses them by themselves when a membership ends or a purchase is refunded.",
+      "Choose which products give which roles in your own Discord server. A buyer joins in two presses after paying, keeps the roles while they hold what they bought, and loses them by themselves when a membership ends or a purchase is refunded in full.",
+    visual: "discord",
     badge: WORKING,
     accent: "from-violet-brand to-pink-brand",
     plan: "creator",
@@ -1581,7 +1611,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "features",
         title: "What it takes care of",
         items: [
-          { icon: "refresh", title: "Taken back by itself", body: "Everyone who joined is checked again every six hours against your own Stripe account. A membership that ended or a purchase refunded loses its roles, with nothing for you to do." },
+          { icon: "refresh", title: "Taken back by itself", body: "Everyone who joined is checked again about every six hours against your own Stripe account. A membership that ended or a purchase refunded in full loses its roles, with nothing for you to do." },
           { icon: "shield", title: "Never taken on a guess", body: "When Stripe cannot be reached, nobody loses anything; the check simply runs again later. Roles you gave by hand are never touched." },
           { icon: "lock", title: "One Discord account per purchase", body: "A buyer who joins with a second account moves the roles to it, so one purchase cannot open the server for a friend too." },
           { icon: "door", title: "Out of the server, if you want", body: "By default a buyer whose access ended keeps your public channels and loses the paid ones. Switch it on and they are removed from the server instead." },
@@ -1593,9 +1623,9 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "limits",
         title: "What it does not do",
         items: [
-          "Roles are taken back at the next check, within six hours of a membership ending or a refund, not in the same second.",
+          "Roles are taken back at the next check, which comes about every six hours, not in the same second. While Stripe or Discord cannot be reached, or Discord will not let the bot remove a role, nothing is taken until it can be.",
           "One Discord server per store.",
-          "The bot can only give roles below its own in your server's list of roles; move the Marktmorgen role up to give higher ones.",
+          "The bot can only give, and take back, roles below its own in your server's list of roles; keep the Marktmorgen role above the roles it gives.",
           "A buyer has to press the button and say yes on Discord's page: nobody is added to a server without agreeing.",
         ],
       },
@@ -1617,6 +1647,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "with every sale",
     intro:
       "For software, plugins and anything that unlocks with a code. Upload the keys your own system made, or have them made here, and each buyer gets one nobody else has.",
+    visual: "keys",
     badge: WORKING,
     accent: "from-amber-brand to-mint-brand",
     plan: "creator",
@@ -1673,6 +1704,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "whose copy it is",
     intro:
       "Switch it on for an ebook or a workbook, and each page of the PDF a buyer downloads carries their email, the date and their order along the bottom.",
+    visual: "stamp",
     badge: WORKING,
     accent: "from-pink-brand to-amber-brand",
     plan: "creator",
@@ -1722,6 +1754,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "built from blocks",
     intro:
       "Any product's own page can be laid out by you: a headline with a picture or a video, your own pictures, what the buyer gets, what is inside, who it is for and who it is not for, how it works step by step, a comparison table, bonuses, numbers counted by your store, things said about it elsewhere with links to where, who made it, questions, your guarantee, a countdown to a real deadline, buttons and real buyers' reviews. Start from a template, from an AI draft (" + AI_PLANS_WORDS + ") or from nothing. For something free, the same page asks for an email.",
+    visual: "salesPage",
     badge: WORKING,
     accent: "from-pink-brand to-violet-brand",
     plan: "creator",
@@ -1820,6 +1853,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "your own words",
     intro:
       "Drafts for every part of a store — a product's description, a whole sales page, a course outline, an email — in your store's language, from what you typed and what your store already says, on " + AI_PLANS_WORDS + ". It never invents a review, a number, a result or a deadline, and nothing is saved, posted or sent until you press the button that does it.",
+    visual: "aiWriting",
     badge: WORKING,
     accent: "from-violet-brand to-pink-brand",
     plan: "pro",
@@ -1954,6 +1988,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "the ways your buyers pay",
     intro:
       "Each store charges in one of 15 currencies. At checkout, buyers meet the ways to pay you switched on in your own Stripe account: Apple Pay, Google Pay, Link, Klarna, Afterpay, Affirm, iDEAL, Bancontact and more, where they fit the buyer and the amount.",
+    visual: "ways",
     badge: WORKING,
     accent: "from-mint-brand to-sky-brand",
     plan: "creator",
@@ -2014,6 +2049,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "the email tool you use",
     intro:
       `Connect Mailchimp, Kit, beehiiv or MailerLite, and the people who agree to hear from you are added there as they come in: free sign-ups once they confirm, buyers once they have paid, with the tags you choose. On the ${PLAN_AT.creator} plan, with no Zapier in between.`,
+    visual: "emailPlatforms",
     badge: WORKING,
     accent: "from-violet-brand to-sky-brand",
     plan: "creator",
@@ -2074,6 +2110,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "that could pay you",
     intro:
       "Name a brand that could sponsor you, a partner who could sell your product for a share, or a company that could buy it. Your store finds the address that business published for being written to, writes a short email from what you tell it, and opens it as a draft in your own mailbox. You read it and send it yourself. On " + AI_PLANS_WORDS + ".",
+    visual: "outreach",
     badge: WORKING,
     accent: "from-violet-brand to-sky-brand",
     plan: "pro",
@@ -2149,6 +2186,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "without sharing your login",
     intro:
       "Up to five stores in one account, and up to five people on each store's team as Admin, Editor or Support, each signing in with their own email. What each role may do is checked on our server for every request.",
+    visual: "team",
     badge: WORKING,
     accent: "from-sky-brand to-violet-brand",
     plan: "creator",
@@ -2221,6 +2259,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "tells you",
     intro:
       "Turn notifications on in your studio, on your phone or your computer: every sale, every booking, a report in your community, a new affiliate application, a live event about to start, and a comment under a lesson.",
+    visual: "phone",
     badge: WORKING,
     accent: "from-pink-brand to-amber-brand",
     plan: "creator",
@@ -2281,6 +2320,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "with you",
     intro:
       "Four spreadsheets, from Stan, Gumroad, Kajabi, Patreon, Mailchimp or anywhere else: your list, your products, the people who already bought from you and your members. You say which column is which, and every row that is not brought in is listed with the reason.",
+    visual: "importDone",
     badge: WORKING,
     accent: "from-violet-brand to-sky-brand",
     plan: "creator",
@@ -2346,6 +2386,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "with you",
     intro:
       "Your contacts with their consent status, your products, the people who already bought from you and your funnel's pages, from the files ClickFunnels lets you export and the pages you save from your own browser. Each one is checked in a dry run that saves nothing and shows what every row and every page will become, then imported once.",
+    visual: "dryRun",
     badge: WORKING,
     accent: "from-violet-brand to-amber-brand",
     plan: "creator",
@@ -2416,6 +2457,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     highlight: "and your buyers are protected",
     intro:
       "What we do, written so you can check it: payments on your own Stripe account, sign-in without passwords, strict rules on what your pages may run, and a refund that closes what it paid for. And, at the end, what none of it does.",
+    visual: "security",
     badge: WORKING,
     accent: "from-violet-brand to-mint-brand",
     plan: "creator",
@@ -2535,7 +2577,7 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
         kind: "features",
         title: "What coaches use most",
         items: [
-          { icon: "calendar", title: "Calls in their time zone", body: "Set your hours once, in your own time zone; each client sees the free times in theirs, and both of you get the invitation.", href: "/platform/calls" },
+          { icon: "calendar", title: "Calls in their time zone", body: "Set your hours once, in your own time zone; each client sees the free times in theirs, and each of you gets an email about the booking.", href: "/platform/calls" },
           { icon: "calendar", title: "Programs in installments", body: "Two to twelve payments: the program opens after the first, and the plan ends by itself after the last.", href: "/platform/checkout" },
           { icon: "refresh", title: "A sequence after each sale", body: "On Studio, a few emails in the days after someone buys — what to do first, and when to book the call.", href: "/platform/email" },
           { icon: "users", title: "A monthly group", body: "A membership that hands over the meeting link, which members cancel themselves.", href: "/platform/memberships" },

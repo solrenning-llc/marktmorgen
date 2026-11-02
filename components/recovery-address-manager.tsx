@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { EmailInput } from "@/components/email-input";
 import Link from "next/link";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -110,10 +111,12 @@ export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
             void run({ action: "start", address }, () => setSent(true));
           }}
         >
-          <label className="block min-w-0 flex-1 basis-60 text-sm font-bold text-ink">
-            {shown ? "Change it to" : "Your recovery address"}
-            <input className="field mt-1" type="email" autoComplete="email" required maxLength={254} value={address} onChange={(e) => setAddress(e.target.value)} />
-          </label>
+          <div className="min-w-0 flex-1 basis-60">
+            <label htmlFor="account-recovery-email" className="block text-sm font-bold text-ink">
+              {shown ? "Change it to" : "Your recovery address"}
+            </label>
+            <EmailInput id="account-recovery-email" className="field mt-1" required autoComplete="email" value={address} onChange={setAddress} />
+          </div>
           <button type="submit" className="btn btn-secondary" disabled={busy}>
             {busy ? "Sending…" : "Send a code there"}
           </button>

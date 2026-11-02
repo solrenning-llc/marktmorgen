@@ -4,6 +4,7 @@ import { Icon } from "@/components/icons";
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
+import { EmailField } from "@/components/email-field";
 import {
   CONSENT_FOLLOWUP_TEXT,
   CONSENT_RESEARCH_TEXT,
@@ -139,15 +140,7 @@ export function CreatorResearchForm() {
           <label htmlFor="email" className={labelClass}>
             Email
           </label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            required
-            maxLength={LIMITS.email}
-            autoComplete="email"
-            className={fieldClass}
-          />
+          <EmailField id="email" name="email" required autoComplete="email" maxLength={LIMITS.email} className={fieldClass} store={false} />
         </div>
       </div>
 

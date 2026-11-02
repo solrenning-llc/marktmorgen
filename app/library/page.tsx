@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
@@ -128,7 +129,7 @@ export default async function LibraryPage({ searchParams }: Params) {
                 <label htmlFor="library-email" className="field-label">
                   The email address you paid with
                 </label>
-                <input id="library-email" type="email" name="email" required maxLength={254} autoComplete="email" className="field mt-2" placeholder="you@example.com" />
+                <EmailField id="library-email" name="email" required autoComplete="email" className="field mt-2" placeholder="you@example.com" store={false} />
                 <button type="submit" className="btn btn-primary mt-4">
                   Email me my library
                 </button>

@@ -58,7 +58,7 @@ export default async function StudioDiscordPage({ searchParams }: Params) {
           <p className="eyebrow">Discord</p>
           <h1 className="t-h2 mt-3">Your Discord server, opened by what people buy</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            {`Choose which products give which roles in your server. A buyer presses “Join the Discord” after paying, says yes on Discord's own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded, the roles are taken back within ${CHECK_HOURS} hours.`}
+            {`Choose which products give which roles in your server. A buyer presses “Join the Discord” after paying, says yes on Discord's own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded in full, the roles are taken back at the next check, which comes about every ${CHECK_HOURS} hours. While Stripe or Discord cannot be reached, or Discord will not let the bot remove a role, nothing is taken until it can be.`}
           </p>
           {notice ? (
             <p className={`notice ${notice.tone === "ok" ? "notice-success" : "notice-error"} mt-6`} role={notice.tone === "ok" ? "status" : "alert"}>

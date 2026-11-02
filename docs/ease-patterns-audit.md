@@ -83,6 +83,19 @@ The screen-by-screen audit that 487 [IT4] asks for: what was checked, what was f
 **Still to do.**
 - Saving by itself with "Saving…" and "Saved" shown. That writes to the server on its own, so it needs its own request ceiling per plan first.
 
+### Saving by itself: the rules first (1 November 2026)
+
+`lib/autosave-rules.ts` decides when an editor may save by itself. No editor uses it yet, and it writes nothing.
+
+- **Where it may.** Only where a save changes nothing anyone else sees and loses nothing: a draft or a hidden item, on a store that pays for its plan. Never where Save puts the change live (a page that is on, a published product or post), moves the five versions a sales page keeps to undo with, deletes a file, or restarts an A/B test. There the creator presses Save, as today. Each editor that takes it up says which of its saves are of the first kind.
+- **What it costs.** A save is one studio request, priced at its own shape (twenty commands and fifty kilobytes) and counted at every plan's full figure. A heavier save is not inside that price, so it never saves by itself. Examples are a sales page of hundreds of kilobytes, one that checks pictures in the file store, and one that reindexes a course. Only a draft of at most 20,000 bytes does.
+- **Its own ceiling, on the server.** Saves by itself may use at most a quarter of the window's studio figure, counted on the server. That count is not kept yet. It is the next unit, registered in `tests/store-data-registry.ts` first, which an open PR holds. Until then, nothing saves by itself: unknown is never room.
+- **What it does not promise.** When the whole window is used, the studio rests for every request, pressed saves included. Saves by itself never take more than their quarter of it.
+- **In the browser, besides.** It saves only after the typing has stopped for 4 seconds, at most once a minute, and at most 60 times while one editor stays open. A draft its route refused is not tried again until it changes. These bound one tab, not the store: reloading or a second tab starts them again, which is why the quarter is counted on the server. Run on a virtual clock for an hour of typing, it saves at most 60 times, never two within a minute.
+- **Unknown is never room.** Any input that is not a plain figure stops it.
+- **The words beside Save:** "Saving…", "Saved at 3:04 PM.", "Not saved yet.", and, where it does not save by itself, "Not saved yet: press Save.".
+- **Next:** the server count of saves by itself, kept with the window. Then `studioAccess` sends back the window's figure and that count (today `takeAllowance` returns what is left, and `countStudio` drops it). Then each editor, one by one, with its saves sorted into the two kinds.
+
 ## Pattern 1: checked when the person leaves the field (1 November 2026, first pass)
 
 **Method.** Every `onBlur` in `components/` was read, and every `type="url"` field was listed.
@@ -219,6 +232,6 @@ Numbered as in 487 [IT4]:
 3. The common value filled in, never the dearest: audited (see pattern 3). The "Recommended" price option waits on the owner.
 4. A label always visible: two passes done (see pattern 4). The home page field remains.
 5. Empty screens with a sentence, a button and a ready example: first pass done (see pattern 5). Four screens fixed; ready examples for five screens still to write.
-6. Drafts never lost: done for the editors read (see pattern 6). Saving by itself, with "Saving…" and "Saved", is not built yet, because it needs its own ceiling on saves per plan first.
+6. Drafts never lost: done for the editors read (see pattern 6). Saving by itself, with "Saving…" and "Saved", has its rules (`lib/autosave-rules.ts`, below); no editor uses them yet, and none can until its server count exists.
 7. A live phone preview beside each editor: first pass done (see pattern 7). The page, email, blog and lesson editors have it, and the product form for its own words; checkout and community are listed.
 8. A "Check answers" summary with "Change" on each item before publishing or sending: first pass done (see pattern 8); the email broadcast, the waitlist's sale, the update email and a published price change have it; the rest listed.

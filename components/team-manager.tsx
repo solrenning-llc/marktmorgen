@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { EmailInput } from "@/components/email-input";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -181,16 +182,14 @@ export function TeamManager({
             <label htmlFor="invite-email" className="field-label mt-4 block">
               Their email
             </label>
-            <input
+            <EmailInput
               id="invite-email"
-              type="email"
               required
-              maxLength={254}
               autoComplete="off"
               className="field mt-2"
               placeholder="name@example.com"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={setEmail}
             />
             <fieldset className="mt-5">
               <legend className="field-label">What they can do</legend>

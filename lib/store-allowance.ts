@@ -89,6 +89,33 @@ function acknowledgedAllowanceCount(reply: unknown, n: number): number | null {
  } catch { return null; }
 }
 
+/**
+ * What has been taken of every kind in the store's window, read strictly for
+ * the studio's checkup (491 [PP2]): one read for all of them, and null when
+ * the window or any count could not be read, so a missing answer is never
+ * taken for nothing used. Each figure is the store's own, beside its count.
+ */
+export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonly AllowanceKind[], now = Date.now()): Promise<{ kind: AllowanceKind; used: number; figure: number }[] | null> {
+  const window = allowanceWindow(store, now);
+  const id = idOf(store);
+  if (!window || !id || !isRedisConfigured() || !kinds.length) return null;
+  try {
+    const reply: unknown = await redisPipeline(kinds.map((kind) => ["GET", key(kind, id, window.id)]));
+    if (!Array.isArray(reply) || reply.length !== kinds.length) return null;
+    const out: { kind: AllowanceKind; used: number; figure: number }[] = [];
+    for (const [i, kind] of kinds.entries()) {
+      const raw: unknown = reply[i];
+      if (raw !== null && typeof raw !== "string" && typeof raw !== "number") return null;
+      const n = raw === null ? 0 : Number(raw);
+      if (!Number.isSafeInteger(n) || n < 0) return null;
+      out.push({ kind, used: n, figure: allowanceFor(store, kind, now / 1000) });
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 /** What has been taken of a kind in the store's window, for the studio; 0 when it cannot be read. */
 export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {
   const window = allowanceWindow(store, now);

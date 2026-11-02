@@ -12,7 +12,9 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { IMPORTS_PAUSED } from "@/lib/import-limits";
 import { type DateOrder, datesInFile, letteredDate, readRenewal } from "@/lib/move-rules";
 
-export type ImportKind = "contacts" | "products" | "purchases" | "members";
+import { IMPORT_LEFT_WORDS, IMPORT_WORDS as WORDS, OUTCOME_WORDS, type ImportKind, type Outcome } from "@/lib/import-words";
+
+export type { ImportKind } from "@/lib/import-words";
 
 /** An import as the server reports it (app/api/store/import). */
 export type ImportView = {
@@ -160,13 +162,6 @@ const MESSAGES: Record<string, string> = {
   plan_disputed: IMPORTS_PAUSED.plan_disputed,
 };
 
-const WORDS: Record<ImportKind, { added: string; already: string; noun: string }> = {
-  contacts: { added: "added to your list", already: "already on it", noun: "contacts" },
-  products: { added: "made as drafts", already: "already there", noun: "products" },
-  purchases: { added: "given to buyers", already: "already had it", noun: "rows" },
-  members: { added: "invited to move", already: "already invited", noun: "members" },
-};
-
 const running = (state: ImportView["state"]) => state === "receiving" || state === "queued" || state === "running" || state === "mailing";
 
 /** The progress of one import, and what came of it. */
@@ -228,11 +223,11 @@ export function ImportProgress({
           <dd className="font-bold tabular-nums text-ink">{job.counts.already.toLocaleString("en-US")}</dd>
         </div>
         <div className="rounded-xl bg-paper px-3 py-2">
-          <dt className="text-xs font-semibold text-ink-soft">left out</dt>
+          <dt className="text-xs font-semibold text-ink-soft">{IMPORT_LEFT_WORDS.skipped}</dt>
           <dd className="font-bold tabular-nums text-ink">{job.counts.skipped.toLocaleString("en-US")}</dd>
         </div>
         <div className={`rounded-xl px-3 py-2 ${job.counts.errors ? "bg-danger-soft" : "bg-paper"}`}>
-          <dt className={`text-xs font-semibold ${job.counts.errors ? "text-danger" : "text-ink-soft"}`}>could not be read</dt>
+          <dt className={`text-xs font-semibold ${job.counts.errors ? "text-danger" : "text-ink-soft"}`}>{IMPORT_LEFT_WORDS.errors}</dt>
           <dd className="font-bold tabular-nums text-ink">{job.counts.errors.toLocaleString("en-US")}</dd>
         </div>
         {job.kind === "contacts" && (job.counts.contacts || job.counts.stopped) ? (
@@ -857,7 +852,6 @@ export function ImportTool({
 
 /** One row of a dry run, as the server answers it (lib/imports.ts, PreviewRow). */
 type PreviewRow = [line: number, outcome: Outcome, column: string, note: string, value: string, key: string, fresh: 0 | 1];
-type Outcome = "added" | "contact" | "already" | "stopped" | "left" | "skipped" | "error";
 
 /** A whole file's dry run, added up here from the server's answers for each batch. */
 type DryRun = { signature: string; complete: boolean; rows: PreviewRow[]; counts: Record<Outcome, number> };
@@ -893,20 +887,6 @@ function tally(kind: ImportKind, collected: PreviewRow[], room: number | null, s
   for (const row of rows) counts[row[1]] += 1;
   return { signature, complete: true, rows, counts };
 }
-
-const OUTCOME_WORDS: Record<Exclude<ImportKind, "members">, Partial<Record<Outcome, string>>> = {
-  contacts: {
-    added: "can be emailed",
-    contact: "contacts you cannot email",
-    already: "already on your list",
-    stopped: "no longer emailed",
-    left: "unsubscribed here, left alone",
-    skipped: "left out",
-    error: "cannot be read",
-  },
-  products: { added: "made as drafts", already: "already in your store", skipped: "left out", error: "cannot be read" },
-  purchases: { added: "given what they bought", skipped: "left out", error: "cannot be read" },
-};
 
 const NO_WORDS: Partial<Record<Outcome, string>> = {};
 

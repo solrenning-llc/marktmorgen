@@ -5,6 +5,7 @@ import { AffiliateCommissionHistory } from "@/components/affiliate-commission-hi
 import type { AffiliateCommissionLine as LineView } from "@/lib/affiliate-commission-view";
 
 import { useState } from "react";
+import { EmailInput } from "@/components/email-input";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
@@ -1488,20 +1489,12 @@ function PartnerInvite({
         }}
       >
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
-          <label className="block" htmlFor="partner-email">
-            <span className="field-label">Their email</span>
-            <input
-              id="partner-email"
-              type="email"
-              required
-              maxLength={254}
-              autoComplete="off"
-              placeholder="partner@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="field"
-            />
-          </label>
+          <div className="min-w-0">
+            <label className="block" htmlFor="partner-email">
+              <span className="field-label">Their email</span>
+            </label>
+            <EmailInput id="partner-email" required autoComplete="off" placeholder="partner@example.com" value={email} onChange={setEmail} className="field" />
+          </div>
           <label className="block" htmlFor="partner-percent">
             <span className="field-label">Their share, %</span>
             <input

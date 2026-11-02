@@ -9,8 +9,8 @@ import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { CalendarView } from "@/lib/calendar-sync";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { LOOKAHEAD_DAYS, MAX_FEEDS } from "@/lib/calendar-limits";
 
-const MAX_FEEDS = 3;
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -129,7 +129,7 @@ export function CalendarEditor({ view: initial, weekly }: { view: CalendarView; 
                     <span className="block font-semibold text-ink">{feed.provider}</span>
                     <span className="block text-sm text-ink-soft">
                       {feed.state === "ok"
-                        ? `Read ${ago(feed.checkedAt, local)} · ${feed.busyTimes} busy ${feed.busyTimes === 1 ? "time" : "times"} in the next 120 days`
+                        ? `Read ${ago(feed.checkedAt, local)} · ${feed.busyTimes} busy ${feed.busyTimes === 1 ? "time" : "times"} in the next ${LOOKAHEAD_DAYS} days`
                         : feed.state === "error"
                           ? `Could not be read ${ago(feed.checkedAt, local)}`
                           : "Waiting for its first reading"}

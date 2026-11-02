@@ -86,6 +86,28 @@ export async function noteCheckoutTrouble(store: Store, error: unknown, now = Da
 export async function readTrouble(statsId: string | null, now = Date.now()): Promise<Trouble> {
   if (!statsId || !isRedisConfigured()) return { week: 0, last: null };
   const [raw] = await redisPipeline([["HGETALL", key(statsId)]]);
+  return troubleFrom(raw, now);
+}
+
+/**
+ * The same, read strictly for the studio's checkup (491 [PP2]): null when the
+ * refusals could not be read, or were never counted (no store stats id, no
+ * Redis), so "Stripe opened every checkout" is said only from a real count.
+ */
+export async function readTroubleStrict(statsId: string | null, now = Date.now()): Promise<Trouble | null> {
+  if (!statsId || !isRedisConfigured()) return null;
+  try {
+    const reply: unknown = await redisPipeline([["HGETALL", key(statsId)]]);
+    if (!Array.isArray(reply) || reply.length !== 1) return null;
+    const [raw] = reply as unknown[];
+    if (raw !== null && !Array.isArray(raw)) return null;
+    return troubleFrom(raw, now);
+  } catch {
+    return null;
+  }
+}
+
+function troubleFrom(raw: unknown, now: number): Trouble {
   const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
   const since = new Date(now - 6 * 86_400_000).toISOString().slice(0, 10);
   let week = 0;

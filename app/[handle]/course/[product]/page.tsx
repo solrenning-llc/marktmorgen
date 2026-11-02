@@ -28,6 +28,7 @@ import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { productSegment } from "@/lib/product-slug";
 import { noteIfOpened } from "@/lib/course-finish";
+import { exampleTitlesLeft } from "@/lib/course-templates";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -72,6 +73,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const open = access.state === "open";
   const start = open ? access.start : null;
   const studying = open && !access.learner.owner;
+  // A course still holding a ready structure's example titles is hidden and shown to its owner only (540 [CU1]).
+  if (product.hidden && exampleTitlesLeft(course) > 0 && !(open && access.learner.owner)) redirect(`/@${store.handle}`);
   const who = studying ? emailKey(access.learner.email) : "";
   const [done, passed, certificate] = studying
     ? await Promise.all([

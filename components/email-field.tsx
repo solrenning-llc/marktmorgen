@@ -36,6 +36,7 @@ export function EmailField({
   describedBy,
   defaultValue = "",
   store = true,
+  maxLength = 254,
 }: {
   id?: string;
   name: string;
@@ -49,6 +50,8 @@ export function EmailField({
   defaultValue?: string;
   /** The store's own look (st-*) rather than the site's. */
   store?: boolean;
+  /** The longest address the form's server keeps, when it is less than 254. */
+  maxLength?: number;
 }) {
   const made = useId();
   const field = id ?? `email-${made.replace(/[^A-Za-z0-9_-]/g, "")}`;
@@ -79,6 +82,10 @@ export function EmailField({
     window.addEventListener("submit", onSubmit, true);
     return () => window.removeEventListener("submit", onSubmit, true);
   }, []);
+  // A line the person has already seen (shown by leaving the field) is never held for again.
+  useEffect(() => {
+    if (left && suggestEmail(value) !== null) shown.current = value;
+  }, [left, value]);
   return (
     <div className={wrapClassName}>
       <input
@@ -87,12 +94,18 @@ export function EmailField({
         name={name}
         type="email"
         required={required}
-        maxLength={254}
+        maxLength={maxLength}
         autoComplete={autoComplete}
         placeholder={placeholder}
         defaultValue={defaultValue}
         onInput={(event) => setValue(event.currentTarget.value)}
-        onBlur={() => setLeft(true)}
+        onBlur={(event) => {
+          // Pressing the form's own send button: the send shows the line (held once below), so the button
+          // is not pushed down between the press and the release, which would lose the click.
+          const to = event.relatedTarget;
+          if (to instanceof HTMLButtonElement && to.type === "submit" && to.form === event.currentTarget.form) return;
+          setLeft(true);
+        }}
         onInvalid={() => setLeft(true)}
         aria-describedby={[describedBy ?? "", left && suggestEmail(value) !== null ? line : ""].filter(Boolean).join(" ") || undefined}
         className={className}

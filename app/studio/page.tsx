@@ -1244,6 +1244,10 @@ export default async function StudioPage({
             {may("products") && accessCheck(store) ? <StoreSearchCheck check={searchCheck(store)} /> : null}
             <StudioTools
               tools={[
+                // 491 [PP2]: payments, the domain, email and checkout, read now, each with where to fix it.
+                ...(may("settings")
+                  ? [{ href: studioPath(store, "", "checkup"), title: "Something not working?", text: "Check payments, your domain, email to your list and checkout, and see how to fix what is wrong.", icon: "target" as const, prefetch: false as const }]
+                  : []),
                 { href: studioPath(store, "", "growth")+"#template-library", title: "Template library", text: "Preview existing pages, funnels, email layouts and paused sequences.", icon: "layout" as const, prefetch: false },
                 { href: studioPath(store, "", "growth"), title: "Growth", text: "Choose a goal and connect the tools for your next action.", icon: "chart" as const, prefetch: false },
                 ...(may("products")
@@ -1616,7 +1620,7 @@ export default async function StudioPage({
                   </p>
                 ) : calls.length === 0 ? (
                   <p className="mt-2 text-ink-soft">
-                    Nothing booked yet. When someone books, it shows up here, and you both get an email with a calendar file, then a reminder a day and an hour before.
+                    Nothing booked yet. When someone books, it shows up here. The buyer gets an email with a calendar file. You get one too, or the host does on a team call. If the call is already in that person&apos;s Google Calendar, their email has no file. You and the buyer get reminders a day and an hour before. A reminder that would come less than an hour after the booking is skipped. On a team call, your reminders still come to you.
                   </p>
                 ) : (
                   <ul className="mt-4 divide-y divide-line">
@@ -2019,7 +2023,7 @@ export default async function StudioPage({
             ) : null}
 
             {domainsOn && may("settings") ? (
-              <div className="card mt-8 p-6 sm:p-8">
+              <div id="domain" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your own domain</p>
                   <span className="tag tag-brand">Pro</span>

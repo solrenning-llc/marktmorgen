@@ -192,10 +192,33 @@ function hostPart(name: string, apex: string): string {
 
 /** What Vercel sees for a domain, and what is still missing. */
 export async function domainStatus(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | null> {
+  const read = await readDomain(name, store, false);
+  return read === "gone" ? null : read;
+}
+
+/**
+ * The same, read strictly for the studio's checkup (491 [PP2]): "gone" when
+ * Vercel says the domain is not on the project any more (a problem to tell
+ * the creator, not a failure to read), and null whenever either answer did
+ * not come, so a missing answer is never taken for records that are wrong.
+ */
+export async function domainCheckup(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | "gone" | null> {
+  return readDomain(name, store, true);
+}
+
+async function readDomain(name: string, store: Pick<Store, "sid">, strict: boolean): Promise<DomainStatus | "gone" | null> {
   const project = await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`);
+  if (strict && project.status === 404) {
+    // "Not found" is also every answer while the project's own name is wrong (see vercelProject):
+    // the domain is gone only when the project itself is there.
+    const own = await vercel("GET", `/v9/projects/${vercelProject()}`);
+    return own.status === 200 ? "gone" : null;
+  }
   if (project.status !== 200) return null;
   const proved = await domainProved(name);
   const config = await vercel("GET", `/v6/domains/${name}/config?projectIdOrName=${vercelProject()}`);
+  // Strictly, an answer whose verdicts are not there is not read as records that are wrong.
+  if (strict && (config.status !== 200 || typeof config.body.misconfigured !== "boolean" || typeof project.body.verified !== "boolean")) return null;
   const apex = typeof project.body.apexName === "string" ? project.body.apexName : name;
   const verified = project.body.verified === true;
   const misconfigured = config.status !== 200 || config.body.misconfigured !== false;

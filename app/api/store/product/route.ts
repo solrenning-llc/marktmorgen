@@ -33,6 +33,7 @@ import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { dropCourse, filesInCourse, readCourse } from "@/lib/course";
+import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { idsOfKind, readAllListings, readListing, readProducts } from "@/lib/catalog";
@@ -340,6 +341,12 @@ export async function POST(request: NextRequest) {
           const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
           const refused = fastMoneyRefusal({ title: draft.title, summary: draft.summary, about: words }) ?? (shownPage ? fastMoneyOnPage(pageWords(shownPage)) : null);
           if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
+          // A course from a ready structure is published only once its example titles are replaced (540 [CU1]).
+          if (draft.course) {
+            const course = await readCourse(draft.course.id);
+            if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+            if (exampleTitlesLeft(course) > 0) return Response.json({ ok: false, error: "course_examples" }, { status: 409 });
+          }
         }
       }
       const done = await setProductHidden(ref, id, body.hidden);

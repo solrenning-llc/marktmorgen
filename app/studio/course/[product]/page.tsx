@@ -156,7 +156,9 @@ export default async function StudioCoursePage({
           <span className="text-ink-mute">
             {selling
               ? "On sale on your store."
-              : lessons === 0
+              : product.hidden
+                ? "Hidden from your store. Publish it from your products in the studio when it is ready."
+                : lessons === 0
                 ? "Add the first lesson and it can go on sale."
                 : "Not on sale yet: your store needs Stripe connected and a running subscription."}
           </span>

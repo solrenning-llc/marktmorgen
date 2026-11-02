@@ -6,7 +6,7 @@ import type { NextRequest } from "next/server";
 import { DataRoomError } from "@/lib/store-data";
 import { MAX_AI_LESSONS, MAX_AI_MODULES } from "@/lib/ai-rules";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
-import { setCourseLessons, setProductCourse, storeForEmail, storeFolder } from "@/lib/store";
+import { setCourseLessons, setProductCourse, setProductHidden, storeForEmail, storeFolder } from "@/lib/store";
 import { jsonAccess } from "@/lib/studio-route";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
@@ -42,6 +42,7 @@ import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { claimUpload, dropStream } from "@/lib/stream";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { noteIfFinished } from "@/lib/course-finish";
+import { applyTemplate, templateById } from "@/lib/course-templates";
 
 const OPS = new Set([
   "outline",
@@ -94,7 +95,10 @@ export async function GET(request: NextRequest) {
  * email }` gives a student their quiz tries back; `{ action: "task", id,
  * lessonId, task }` saves a lesson's assignment and `task: null` takes it off,
  * with the work handed in for it; `{ action: "review", id, lessonId, who,
- * verdict, feedback }` approves a student's work or asks for another try.
+ * verdict, feedback }` approves a student's work or asks for another try;
+ * `{ action: "template", id, template }` gives a new course one of the ready
+ * structures (lib/course-templates.ts) by its id, applied here to the course
+ * as it is kept, in one write.
  *
  * `id` is always the product's, and the course is found through the
  * creator's own store, so nothing here can reach anyone else's course.
@@ -300,6 +304,29 @@ export async function POST(request: NextRequest) {
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         return Response.json({ ok: true, course: result.course });
+      }
+
+      // A ready structure (540 [CU1]): only its id comes from the browser, and it
+      // is applied to the course as kept, under this lock, in one write. A course
+      // the creator has touched, or one a structure was already given, is refused.
+      if (action === "template") {
+        const template = templateById(text(body.template, 20));
+        if (!template) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+        const applied = applyTemplate(course, template);
+        if (!applied.ok) return Response.json({ ok: false, error: "not_new" }, { status: 409 });
+        if (applied.course === course) return Response.json({ ok: true, course });
+        // Off the store first: its example titles are never shown to a buyer or put in a module's email. A
+        // course a structure fits has no lesson, so nothing of it could be sold yet; publishing it again is
+        // refused until every example title is replaced (app/api/store/product/route.ts).
+        if (!product.hidden) {
+          const hidden = await setProductHidden(ref, id, true);
+          if (!hidden.ok) return Response.json({ ok: false, error: hidden.reason }, { status: 400 });
+        }
+        await save(applied.course);
+        const lessons = lessonCount(applied.course);
+        if (lessons !== courseInfo.lessons) await setCourseLessons(ref, id, lessons);
+        await registerDrip(store, product, applied.course);
+        return Response.json({ ok: true, course: applied.course, hidden: true });
       }
 
       if (action === "cert") {

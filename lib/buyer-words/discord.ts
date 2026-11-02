@@ -17,7 +17,7 @@ const en = {
   joinedTitle: "You are in",
   joinedBody: (store: string) => `You are in ${store}'s Discord server, with the roles that come with what you bought.`,
   openDiscord: "Open Discord",
-  keepNote: "The roles stay while what you bought is yours. When a membership ends or a purchase is refunded, they are taken back within a few hours.",
+  keepNote: "The roles stay while what you bought is yours. When a membership ends or a purchase is refunded in full, they are taken back at the next check.",
   backToStore: (store: string) => `Back to ${store}`,
   notices: {
     declined: { title: "Nothing was changed", body: "You said no on Discord's page. Press the button again whenever you want to join." },
@@ -43,7 +43,7 @@ const es: DiscordWords = {
   joinedTitle: "Ya estás dentro",
   joinedBody: (store) => `Ya estás en el servidor de Discord de ${store}, con los roles que vienen con lo que compraste.`,
   openDiscord: "Abrir Discord",
-  keepNote: "Los roles se mantienen mientras lo que compraste sea tuyo. Si una membresía termina o se reembolsa una compra, se retiran en pocas horas.",
+  keepNote: "Los roles se mantienen mientras lo que compraste sea tuyo. Si una membresía termina o se reembolsa una compra por completo, se retiran en la siguiente comprobación.",
   backToStore: (store) => `Volver a ${store}`,
   notices: {
     declined: { title: "No se cambió nada", body: "Dijiste que no en la página de Discord. Pulsa el botón de nuevo cuando quieras unirte." },
@@ -62,7 +62,7 @@ const fr: DiscordWords = {
   joinedTitle: "Vous y êtes",
   joinedBody: (store) => `Vous êtes sur le serveur Discord de ${store}, avec les rôles qui vont avec votre achat.`,
   openDiscord: "Ouvrir Discord",
-  keepNote: "Les rôles restent tant que votre achat vous appartient. Quand un abonnement prend fin ou qu'un achat est remboursé, ils sont retirés en quelques heures.",
+  keepNote: "Les rôles restent tant que votre achat vous appartient. Quand un abonnement prend fin ou qu'un achat est remboursé en totalité, ils sont retirés lors de la prochaine vérification.",
   backToStore: (store) => `Retour à ${store}`,
   notices: {
     declined: { title: "Rien n'a été modifié", body: "Vous avez refusé sur la page de Discord. Appuyez de nouveau sur le bouton quand vous voulez rejoindre le serveur." },
@@ -81,7 +81,7 @@ const de: DiscordWords = {
   joinedTitle: "Sie sind dabei",
   joinedBody: (store) => `Sie sind auf dem Discord-Server von ${store}, mit den Rollen, die zu Ihrem Kauf gehören.`,
   openDiscord: "Discord öffnen",
-  keepNote: "Die Rollen bleiben, solange Ihnen gehört, was Sie gekauft haben. Endet eine Mitgliedschaft oder wird ein Kauf erstattet, werden sie innerhalb weniger Stunden entzogen.",
+  keepNote: "Die Rollen bleiben, solange Ihnen gehört, was Sie gekauft haben. Endet eine Mitgliedschaft oder wird ein Kauf vollständig erstattet, werden sie bei der nächsten Prüfung entzogen.",
   backToStore: (store) => `Zurück zu ${store}`,
   notices: {
     declined: { title: "Nichts wurde geändert", body: "Sie haben auf der Seite von Discord abgelehnt. Tippen Sie erneut auf die Schaltfläche, wann immer Sie beitreten möchten." },
@@ -100,7 +100,7 @@ const it: DiscordWords = {
   joinedTitle: "Sei dentro",
   joinedBody: (store) => `Sei nel server Discord di ${store}, con i ruoli inclusi in ciò che hai acquistato.`,
   openDiscord: "Apri Discord",
-  keepNote: "I ruoli restano finché ciò che hai acquistato è tuo. Quando un abbonamento finisce o un acquisto viene rimborsato, vengono tolti entro poche ore.",
+  keepNote: "I ruoli restano finché ciò che hai acquistato è tuo. Quando un abbonamento finisce o un acquisto viene rimborsato per intero, vengono tolti al controllo successivo.",
   backToStore: (store) => `Torna a ${store}`,
   notices: {
     declined: { title: "Non è cambiato nulla", body: "Hai rifiutato sulla pagina di Discord. Premi di nuovo il pulsante quando vuoi entrare." },
@@ -119,7 +119,7 @@ const nl: DiscordWords = {
   joinedTitle: "Je bent binnen",
   joinedBody: (store) => `Je bent in de Discord-server van ${store}, met de rollen die horen bij wat je kocht.`,
   openDiscord: "Discord openen",
-  keepNote: "De rollen blijven zolang wat je kocht van jou is. Eindigt een lidmaatschap of wordt een aankoop terugbetaald, dan worden ze binnen een paar uur weggehaald.",
+  keepNote: "De rollen blijven zolang wat je kocht van jou is. Eindigt een lidmaatschap of wordt een aankoop volledig terugbetaald, dan worden ze bij de volgende controle weggehaald.",
   backToStore: (store) => `Terug naar ${store}`,
   notices: {
     declined: { title: "Er is niets veranderd", body: "Je zei nee op de pagina van Discord. Druk opnieuw op de knop wanneer je lid wilt worden." },
@@ -139,7 +139,7 @@ const pt: DiscordWords = {
   joinedTitle: "Já está lá dentro",
   joinedBody: (store) => `Já está no servidor de Discord de ${store}, com os cargos que acompanham o que comprou.`,
   openDiscord: "Abrir o Discord",
-  keepNote: "Os cargos mantêm-se enquanto o que comprou for seu. Quando uma assinatura termina ou uma compra é reembolsada, são retirados em poucas horas.",
+  keepNote: "Os cargos mantêm-se enquanto o que comprou for seu. Quando uma assinatura termina ou uma compra é reembolsada na totalidade, são retirados na verificação seguinte.",
   backToStore: (store) => `Voltar a ${store}`,
   notices: {
     declined: { title: "Nada foi alterado", body: "Recusou na página do Discord. Carregue de novo no botão quando quiser entrar." },

@@ -4,10 +4,12 @@
  * applied through the course's own edits to an empty course gives exactly
  * its modules, lessons, opening days and certificate; an existing course is
  * never written over; limits hold; example titles are neutral and marked as
- * examples; the challenge goes with the challenge funnel that exists.
+ * examples; the challenge is not tied to the challenge funnel while that
+ * funnel wants a free course and a course here is always sold (unit 2's review).
  */
 import { COURSE_TEMPLATES, FIT_WORDS, applyTemplate, exampleTitlesLeft, templateFits } from "@/lib/course-templates";
 import { emptyCourse, type Course } from "@/lib/course";
+import { readFileSync } from "node:fs";
 import { FUNNEL_TYPES } from "@/lib/funnel-types";
 import { done, is, part } from "./check";
 
@@ -53,6 +55,8 @@ is("every title says it is an example to replace", titles.every((t) => t.include
 const words = COURSE_TEMPLATES.flatMap((t) => [t.about, ...t.modules.flatMap((m) => [m.title, ...m.lessons])]).join(" ");
 is("no result, promise, money, percent or testimonial", /\$|%|guarantee|results?\b|earn|income|proven|transform|testimonial|best-selling|students say/i.test(words), false);
 
-part("Goes with the funnels that exist");
-is("the challenge with the challenge funnel", FUNNEL_TYPES.some((f) => f.id === "challenge") && COURSE_TEMPLATES.find((t) => t.id === "challenge")!.funnel === "challenge", true);
+part("Never pointed at a funnel it cannot fill");
+const challengeFunnel = FUNNEL_TYPES.find((f) => f.id === "challenge");
+is("the challenge funnel wants a free course", JSON.stringify(challengeFunnel).includes('"wants":"free"'), true);
+is("and a course is sold, so the challenge names no funnel until a course can be free", [readFileSync("lib/store.ts", "utf8").includes("A course is sold"), COURSE_TEMPLATES.find((t) => t.id === "challenge")!.funnel], [true, null]);
 done();

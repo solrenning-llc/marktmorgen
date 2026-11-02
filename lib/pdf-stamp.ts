@@ -25,6 +25,7 @@
  * password-protected, or damaged.
  */
 import { createHash } from "node:crypto";
+import { stampLine } from "@/lib/pdf-stamp-line";
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
@@ -47,12 +48,8 @@ export const problemKey = (pathname: string) => `nl:stamp:problem:${sha(pathname
 
 export type StampProblem = "too_big" | "unreadable";
 
-/** The line printed on every page. */
-export function stampLine(email: string, reference: string, at: Date = new Date()): string {
-  const day = at.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-  const order = reference.replace(/^(cs|pi)_(test|live)?_?/, "").slice(-6).toUpperCase();
-  return `Sold to ${email} on ${day} · order …${order} · for personal use`;
-}
+/** The line printed on every page (lib/pdf-stamp-line.ts, which pages that only show it read without the PDF library). */
+export { stampLine };
 
 /**
  * The standard PDF font writes only the Latin-1 letters, so anything else in

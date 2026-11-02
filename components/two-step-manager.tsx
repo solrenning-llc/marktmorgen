@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { EmailInput } from "@/components/email-input";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { toast } from "@/components/toast";
@@ -198,11 +199,13 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
           {recoveryShown ? (
             <p className="min-w-0 flex-1 basis-60 text-sm text-ink-soft">{`Your recovery address, ${recoveryShown}, is the way back in if you ever lose your phone.`}</p>
           ) : (
-            <label className="block min-w-0 flex-1 basis-60 text-sm font-bold text-ink">
-              Recovery address
-              <span className="block text-xs font-normal text-ink-soft">A second inbox you can open. If you ever lose your phone, a link sent there lets you straight back in.</span>
-              <input className="field mt-1" type="email" autoComplete="email" required maxLength={254} value={backup} onChange={(e) => setBackup(e.target.value)} />
-            </label>
+            <div className="min-w-0 flex-1 basis-60">
+              <label htmlFor="two-step-backup" className="block text-sm font-bold text-ink">
+                Recovery address
+              </label>
+              <span id="two-step-backup-hint" className="block text-xs font-normal text-ink-soft">A second inbox you can open. If you ever lose your phone, a link sent there lets you straight back in.</span>
+              <EmailInput id="two-step-backup" className="field mt-1" required autoComplete="email" value={backup} onChange={setBackup} describedBy="two-step-backup-hint" />
+            </div>
           )}
           <button type="submit" className="btn btn-secondary" disabled={busy}>
             <Icon name="lock" size={16} />

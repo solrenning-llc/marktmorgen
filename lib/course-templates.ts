@@ -16,6 +16,13 @@
  * Example titles are neutral: no result, promise, number of anything a
  * buyer gets, or testimonial (tests/course-templates.test.ts holds them to
  * that). Browser-safe: plain data and pure functions.
+ *
+ * Unit 2 (1 November 2026): the studio offers these on a new course
+ * (components/course-template-picker.tsx). A pick is shown first as a draft,
+ * built here in the browser with applyTemplate, and nothing is saved until
+ * the creator says so; the save sends only the structure's id, and the
+ * server applies it again to the course it keeps, under the course's lock,
+ * in one write (app/api/store/course/route.ts, action "template").
  */
 import { editCourse, type Course, type CourseEdit } from "@/lib/course";
 
@@ -53,10 +60,11 @@ export const COURSE_TEMPLATES: readonly CourseTemplate[] = [
   {
     id: "challenge",
     name: "5-day challenge",
-    about: "Five short lessons, one opening each day. Goes with the challenge funnel.",
+    about: "Five short lessons, one opening each day, with an email to each student the day a lesson opens.",
     modules: [0, 1, 2, 3, 4].map((day) => ({ title: `Day ${day + 1}: your title here`, lessons: [`Lesson ${day + 1}: your title here`], dripDays: day })),
     certificate: false,
-    funnel: "challenge",
+    // The challenge funnel (lib/funnel-types.ts) wants a free course, and a course here is always sold, so it is not offered with it.
+    funnel: null,
   },
   {
     id: "quizzes",
@@ -66,7 +74,7 @@ export const COURSE_TEMPLATES: readonly CourseTemplate[] = [
     certificate: true,
     funnel: null,
   },
-  { id: "scratch", name: "Start from scratch", about: "An empty course, as today.", modules: [], certificate: false, funnel: null },
+  { id: "scratch", name: "Start from scratch", about: "An empty course you build yourself, one module at a time.", modules: [], certificate: false, funnel: null },
 ];
 
 export type TemplateFit = { ok: true } | { ok: false; why: "not-new" };
@@ -116,14 +124,65 @@ export function applyTemplate(course: Course, template: CourseTemplate): { ok: t
   return { ok: true, course: draft.course };
 }
 
+/** A structure by its id, as the studio sends it; null for anything else. */
+export function templateById(id: unknown): CourseTemplate | null {
+  return COURSE_TEMPLATES.find((t) => t.id === id) ?? null;
+}
+
+/** When a module opens, in the words the course editor already uses beside each module. */
+export function opensWords(dripDays: number): string {
+  return dripDays === 0
+    ? "Opens as soon as a student joins."
+    : `Opens ${dripDays} ${dripDays === 1 ? "day" : "days"} after each student joins, with an email to them that day.`;
+}
+
+/** What a structure adds, in one sentence: said when it is picked, before anything is saved. */
+export function draftWords(template: CourseTemplate): string {
+  if (!template.modules.length) return "Nothing is added. You build the course yourself, one module at a time.";
+  const modules = template.modules.length;
+  const lessons = template.modules.reduce((n, m) => n + m.lessons.length, 0);
+  const counted = `${modules} ${modules === 1 ? "module" : "modules"} and ${lessons} ${lessons === 1 ? "lesson" : "lessons"}`;
+  return `Draft: ${counted}${template.certificate ? ", with a certificate when a student finishes" : ""}. Nothing is saved until you press "Use this structure". The course then stays hidden from your store until you replace every example title.`;
+}
+
+/**
+ * What the editor says while example titles are left. Module titles go into
+ * the email a student gets when a module opens, so they are named first.
+ */
+export function exampleTitlesWords(left: number): string {
+  if (left <= 0) return "";
+  const titles = left === 1 ? "1 title is still an example" : `${left} titles are still examples`;
+  return `${titles}. Replace each with your own: until then the course stays hidden from your store, because a module's title is in the email a student gets when it opens.`;
+}
+
 /** The marks an example title carries until the creator replaces it. */
 const EXAMPLE = /your title here|add your questions here/i;
 
 /**
  * Titles still as the structure wrote them. Module titles go into the email
  * a student gets when a module opens (lib/learn.ts, sendDripEmails), so the
- * course is not published while any is left (the next unit, with the screen).
+ * course is kept off the store while any is left: the route that applies a
+ * structure hides the product (it had no lesson, so nothing could be sold
+ * yet), and publishing it is refused until every example title is replaced
+ * (app/api/store/product/route.ts, "course_examples"). The editor says how
+ * many are left (exampleTitlesWords).
  */
 export function exampleTitlesLeft(course: Pick<Course, "modules">): number {
   return course.modules.reduce((n, m) => n + (EXAMPLE.test(m.title) ? 1 : 0) + m.lessons.filter((l) => EXAMPLE.test(l.title)).length, 0);
+}
+
+/**
+ * Lessons of the "Course with quizzes and a certificate" structure still
+ * waiting for their questions: its name promises quizzes, and a quiz lesson
+ * is an ordinary lesson until the creator writes them, so the editor says
+ * how many and opens the first one.
+ */
+export function quizLessonsWaiting(course: Pick<Course, "modules">): string[] {
+  // A lesson given an assignment instead cannot take a quiz too, so it is not counted.
+  return course.modules.flatMap((m) => m.lessons.filter((l) => /add your questions here/i.test(l.title) && !l.quiz && !l.task).map((l) => l.id));
+}
+
+export function quizWaitingWords(waiting: number): string {
+  if (waiting <= 0) return "";
+  return `${waiting === 1 ? "1 quiz lesson has" : `${waiting} quiz lessons have`} no questions yet. Open each one and press "Add a quiz": until then it is an ordinary lesson.`;
 }

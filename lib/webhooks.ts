@@ -68,6 +68,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { readListing } from "@/lib/catalog";
 import { SITE_URL } from "@/lib/site-url";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
+import { MAX_ENDPOINTS, shortAddress } from "@/lib/webhook-limits";
 
 export const WEBHOOK_EVENTS = [
   "sale.completed",
@@ -82,8 +83,8 @@ export const WEBHOOK_EVENTS = [
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
-/** Endpoints one store may have. */
-export const MAX_ENDPOINTS = 5;
+/** Endpoints one store may have, and how an address is shown (lib/webhook-limits.ts, which the studio and the feature page read too). */
+export { MAX_ENDPOINTS, shortAddress };
 /** Deliveries a store's studio keeps. */
 export const LOG_SIZE = 50;
 /** Minutes to wait before each try after the first. */
@@ -501,21 +502,6 @@ export type DeliveryView = Pick<Delivery, "id" | "eventId" | "type" | "state" | 
   endpoint: string;
 };
 export type WebhooksView = { endpoints: EndpointView[]; log: DeliveryView[] };
-
-/**
- * An endpoint's address as the studio shows it: the host and enough of the
- * path to tell two apart, never the whole of a secret-bearing path.
- */
-export function shortAddress(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const path = parsed.pathname.replace(/\/+$/, "");
-    const tail = path.length > 24 ? `${path.slice(0, 10)}…${path.slice(-6)}` : path;
-    return `${parsed.host}${tail}`;
-  } catch {
-    return "an endpoint";
-  }
-}
 
 export async function webhooksView(store: Store): Promise<WebhooksView> {
   if (!store.statsId || !isRedisConfigured()) return { endpoints: [], log: [] };

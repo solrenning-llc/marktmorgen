@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
@@ -172,7 +173,7 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                 <label htmlFor="hub-email" className="field-label">
                   The email address you joined with
                 </label>
-                <input id="hub-email" type="email" name="email" required maxLength={254} autoComplete="email" className="field mt-2" placeholder="you@example.com" />
+                <EmailField id="hub-email" name="email" required autoComplete="email" className="field mt-2" placeholder="you@example.com" store={false} />
                 <button type="submit" className="btn btn-primary mt-4">
                   Email me my programs
                 </button>

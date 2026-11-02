@@ -2,7 +2,7 @@
 
 ## Estado atual conferido em 02/11/2026 — construído e inativo
 
-Esta seção descreve o código do [commit e042ea064f74c42cd26c100719af8b364a5c669e](https://github.com/viniciussucupira/marktmorgen/commit/e042ea064f74c42cd26c100719af8b364a5c669e), TREE `6b365c998da35dab86dc4b60f40c259909ae128a`, no mesmo PR #1502. As fatias de 01/11 abaixo são histórico: suas lacunas e perfis iniciais não descrevem automaticamente a versão atual. A reconciliação original alterou somente documentação; o reparo mínimo do sender legado descrito abaixo é posterior ao commit-base e042. Nenhum dos dois ativa o recurso ou comprova disponibilidade ao cliente.
+Esta seção descreve o código do [commit e042ea064f74c42cd26c100719af8b364a5c669e](https://github.com/viniciussucupira/marktmorgen/commit/e042ea064f74c42cd26c100719af8b364a5c669e), TREE `6b365c998da35dab86dc4b60f40c259909ae128a`, no mesmo PR #1502. As fatias de 01/11 abaixo são histórico: suas lacunas e perfis iniciais não descrevem automaticamente a versão atual. A reconciliação original alterou somente documentação; o reparo mínimo do sender legado descrito nesta seção é posterior ao commit-base e042. Nenhum dos dois ativa o recurso ou comprova disponibilidade ao cliente.
 
 ### Ciclo operacional e caminho legado
 
@@ -42,9 +42,11 @@ Para 1.000 origens e duas famílias são 2.000 tickets úteis, além de cleanup,
 
 ### Claim SES legado: desconhecido não conclui a confirmação
 
-No reparo mínimo posterior ao commit-base e042, `viaAmazon` em `lib/email.ts` devolve desconhecido (`null`, convertido em `false` por `sendEmail`) quando SET NX encontra a claim legada já existente. O valor `1` registra apenas uma tentativa de claim: pode ter sido gravado antes de perder o ACK do próprio SET, sem que qualquer POST tenha ocorrido. Não é promovido a confirmação de aceitação nem autoriza outro POST SES ou fallback Resend.
+No reparo mínimo posterior ao commit-base e042, `viaAmazon` em `lib/email.ts` devolve desconhecido (`null`, convertido em `false` por `sendEmail`) quando SET NX encontra a claim legada já existente. O valor `1` registra apenas uma tentativa de claim: pode ter sido gravado antes de perder o ACK do próprio SET, sem que qualquer POST tenha ocorrido. No ramo em que SES ainda está configurado/elegível e SET NX encontra a claim, esse valor não é promovido a confirmação de aceitação nem autoriza outro POST SES ou fallback Resend.
 
 A regressão exercita o consumidor real `confirmPurchase`: ACK perdido do SET antes de qualquer envio e ACK perdido de SES depois de um possível envio. A primeira passagem devolve `failed`; a seguinte permanece `failed`, conserva a claim e não grava o marcador de confirmação `sent` de 40 dias. No primeiro caso há zero POST nos dois provedores; no segundo, somente a tentativa SES original. Isso corrige o encerramento indevido da confirmação, sem criar uma fila ou prometer progresso automático.
+
+Há uma limitação preexistente distinta, fora deste reparo: `viaAmazon` confere configuração/elegibilidade SES antes de derivar/consultar a claim. Se SES ficar indisponível entre as tentativas, o caminho legado pode devolver a decisão de fallback antes de encontrar a claim desconhecida. Uma contraprova separada, somente scratch e com review Resend sintético aprovado, observou um POST Resend depois de possível aceitação SES sem ACK, mesmo com a claim retida. Isso não foi demonstrado em conta real: `CURRENT_RESEND_FALLBACK_REVIEW=null` continua fechando o fallback real não revisado. O reparo mínimo não resolve esse guard anterior; ele exige uma unidade separada e análise do teto/custeio antes de ativar fallback real. Não se afirma bloqueio global de todas as rotas sob qualquer mudança de configuração/elegibilidade.
 
 A confirmação legada de `confirmPurchase` conserva também sua janela `CONFIRM_WITHIN_SECONDS` de 24 horas a partir da criação do checkout. No caso de ACK do SET perdido antes do POST, a claim pode impedir o envio até essa janela de confirmação expirar. O reparo não acrescenta uma fonte durável nem garante entrega posterior; apenas impede chamar de `sent` o que não tem aceitação confirmada. Os 40 dias mencionados acima são a retenção do marcador `sent`, não a janela de tentativa.
 

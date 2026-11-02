@@ -24,6 +24,7 @@ import { securityBeginnerQuestions } from "@/lib/security-faq";
 import { domainBeginnerQuestions } from "@/lib/domain-faq";
 import { insightsBeginnerQuestions } from "@/lib/insights-faq";
 import { reviewsBeginnerQuestions } from "@/lib/reviews-faq";
+import { currencyBeginnerQuestions } from "@/lib/currency-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -2080,6 +2081,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about currencies and ways to pay",
         items: [
+          // 534 [FQ1], unit 25: what someone starting out asks, answered by the code (lib/currency-faq.ts).
+          ...currencyBeginnerQuestions(),
           { q: "Does Marktmorgen take a cut of Klarna or other methods?", a: feeWords().fromAMethod },
           { q: "What does Stan offer?", a: "Stan offers Stripe and PayPal, and one currency per store chosen from ten, according to its help center, read on September 28, 2026. We offer 15, so we are ahead on currencies, and behind on PayPal." },
           { q: "Who can change the currency?", a: "You and an Admin. You are emailed whenever it changes." },

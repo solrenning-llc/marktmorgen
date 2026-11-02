@@ -193,3 +193,75 @@ test("a reply id called ready cannot impersonate the handshake",async()=>{
   await assert.rejects(starting,/Malformed/);
  }finally{await probe?.close();}
 });
+
+test("default startup can pass the query budget while each query remains three seconds",async t=>{
+ t.mock.timers.enable({apis:["setTimeout"]});
+ const f=fixture({handshake:false}),events=[],options={...f.options};delete options.timeoutMs;
+ let probe;
+ const starting=startWindowsForegroundProbe({...options,onDiagnostic:e=>events.push(e)});
+ starting.catch(()=>{});
+ try{
+  t.mock.timers.tick(2775);f.child.stdout.write('{"stage":"powershell_started"}\n');
+  t.mock.timers.tick(725);f.child.stdout.write('{"stage":"interop_ready"}\n{"ready":true}\n');
+  probe=await starting;
+  assert.equal(events.find(e=>e.event==="ready")?.startupBudgetMs,10000);
+  assert.equal(events.find(e=>e.event==="ready")?.queryBudgetMs,3000);
+  assert.equal(f.launches.length,1);
+  const answer=probe.read(),rejected=assert.rejects(answer,/query.*deadline/);
+  t.mock.timers.tick(2999);assert.ok(!events.some(e=>e.reason==="query_deadline"));
+  t.mock.timers.tick(1);await rejected;
+  assert.equal(events.find(e=>e.event==="failed")?.reason,"query_deadline");
+ }finally{await probe?.close();}
+});
+test("a hung default startup expires at ten seconds and still owns bounded cleanup",async t=>{
+ t.mock.timers.enable({apis:["setTimeout"]});
+ const f=fixture({handshake:false,exitOnEnd:false}),events=[],options={...f.options};delete options.timeoutMs;
+ const starting=startWindowsForegroundProbe({...options,onDiagnostic:e=>events.push(e)});
+ const rejected=assert.rejects(starting,/startup.*deadline/);
+ try{
+  t.mock.timers.tick(9999);assert.ok(!events.some(e=>e.event==="failed"));
+  t.mock.timers.tick(1);await Promise.resolve();
+  assert.equal(events.find(e=>e.event==="failed")?.reason,"startup_deadline");
+  assert.equal(f.child.stdin.writableEnded,true);
+  t.mock.timers.tick(249);assert.ok(!f.child.killed);
+  t.mock.timers.tick(1);await rejected;assert.equal(f.child.killed,true);
+ }finally{f.child.emit("exit",0);await starting.catch(()=>{});}
+});
+test("the existing explicit timeout override remains usable by both mock phases",async t=>{
+ t.mock.timers.enable({apis:["setTimeout"]});
+ const f=fixture({handshake:false}),events=[];
+ const starting=startWindowsForegroundProbe({...f.options,timeoutMs:25,onDiagnostic:e=>events.push(e)});
+ const rejected=assert.rejects(starting,/startup.*deadline/);
+ t.mock.timers.tick(24);assert.ok(!events.some(e=>e.event==="failed"));
+ t.mock.timers.tick(1);await rejected;
+ assert.equal(events.find(e=>e.event==="launch")?.startupBudgetMs,25);
+ assert.equal(events.find(e=>e.event==="launch")?.queryBudgetMs,25);
+});
+test("invalid or excessive timeout budgets refuse before launching any process",async()=>{
+ for(const budget of [
+  {timeoutMs:0},{timeoutMs:-1},{timeoutMs:1.5},{timeoutMs:NaN},{timeoutMs:Infinity},{timeoutMs:3001},{timeoutMs:"3000"},{timeoutMs:null},
+  {startupTimeoutMs:0},{startupTimeoutMs:-1},{startupTimeoutMs:1.5},{startupTimeoutMs:NaN},{startupTimeoutMs:Infinity},{startupTimeoutMs:10001},{startupTimeoutMs:"10000"},{startupTimeoutMs:null},
+ ]){
+  const f=fixture();await assert.rejects(startWindowsForegroundProbe({...f.options,...budget,onDiagnostic:()=>{}}),/Invalid native foreground timeout budget/);
+  assert.equal(f.launches.length,0);
+ }
+});
+test("nonfinite diagnostic clocks are unknown while finite query timers still expire",async t=>{
+ t.mock.timers.enable({apis:["setTimeout"]});
+ const now=t.mock.method(performance,"now",()=>NaN),f=fixture(),events=[];let probe;
+ try{
+  probe=await startWindowsForegroundProbe({...f.options,onDiagnostic:e=>events.push(e)});
+  const accepted=probe.read();f.reply("0","Window");assert.equal(await accepted,"Window");
+  const answer=probe.read(),rejected=assert.rejects(answer,/query.*deadline/);
+  t.mock.timers.tick(100);await rejected;
+  assert.ok(events.every(e=>e.elapsedUnknown===true&&e.elapsedMs===null));
+ }finally{await probe?.close();now.mock.restore();}
+});
+test("a regressing diagnostic clock is not reported as elapsed zero",async t=>{
+ let value=100;const now=t.mock.method(performance,"now",()=>value),f=fixture(),events=[];let probe;
+ try{
+  probe=await startWindowsForegroundProbe({...f.options,onDiagnostic:e=>events.push(e)});
+  value=99;await probe.close();
+  const closing=events.find(e=>e.event==="closing");assert.equal(closing?.elapsedMs,null);assert.equal(closing?.elapsedUnknown,true);
+ }finally{await probe?.close();now.mock.restore();}
+});

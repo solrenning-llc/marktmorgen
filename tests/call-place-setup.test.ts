@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   const ics = callInvite({ uid: "u1", start, end: start + 3_600_000, title: "Haircut", storeName: "Bela", room: "https://example.com/room", place: kept.place, note: buyerNote(b, { name: "Bela" } as Store, null, kept.place ?? null), words: b });
   is("its LOCATION is the address, with no URL and no link", [ics.includes("LOCATION:Bela Studio\\, 12 Harbor Street\\, Portland\\, ME 04101"), ics.includes("URL:"), ics.includes("example.com/room")], [true, false, false]);
   is("and its note says where", ics.includes("DESCRIPTION:Where: Bela Studio\\, 12 Harbor Street\\, Portland\\, ME 04101"), true);
-  is("in the store's language", buyerNote(bookingWords("pt"), { name: "Bela" } as Store, null, { lines: ["Rua Augusta, 900"] }), "Onde: Rua Augusta, 900");
+  is("in the store's language", buyerNote(bookingWords("pt"), { name: "Bela" } as Store, null, { lines: ["Praça do Exemplo, 12"] }), "Onde: Praça do Exemplo, 12");
 
   part("What the buyer and the creator are sent");
   const OWNER = "bela@example.com";

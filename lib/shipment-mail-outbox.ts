@@ -350,6 +350,9 @@ if raw then
  if size~=#v.ids or ((v.phase=='active' or v.phase=='continuing') and (size==0 or v.index>size)) then return {'unknown'} end
  c=v
 end
+-- A retained list cannot gain coverage from a legacy fingerprint or from a
+-- smaller successor. Hold the original bytes until a compatible review.
+if c and (c.phase=='active' or c.phase=='continuing') and (#c.ids>maximumOrigins or #raw>r.checkpointBytes) then return {'held'} end
 local function save()
  local text=cjson.encode(c)
  if #text>r.checkpointBytes then return false end
@@ -365,7 +368,6 @@ if op=='next' then
   -- work. Revalidate each retained position at finish under the new review.
   -- Old tickets lose authority through revision/fingerprint and owner checks.
   local continuing=c and (c.phase=='active' or c.phase=='continuing')
-  if continuing and (#c.ids>maximumOrigins or #raw>r.checkpointBytes) then return {'held'} end
   local ids=continuing and c.ids or {}
   local index=continuing and c.index or 1
   local currentFamily=continuing and c.family or 'shipment'

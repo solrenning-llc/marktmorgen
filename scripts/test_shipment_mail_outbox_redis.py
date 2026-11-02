@@ -418,6 +418,30 @@ def pending_recovery_cases(redis, source, made):
                       'checkpoint_stored_bytes':len(saved.encode()),'supplier_invoice':False}))
 
 
+def paged_recovery_cases(redis, source, made):
+    """Bounded paged recovery on the real Lua; no sender/account/provider."""
+    lua = re.search(r"export const PENDING_MAIL_RECOVERY_SCRIPT = `([^`]+)`;", source)[1]
+    pool, all_key = "nl:ship:mail:pool", "nl:ship:mail:all"
+    redis.command("DEL", pool, all_key)
+    made.update([pool, all_key])
+    clock = redis.command("TIME"); now = int(clock[0])*1000+int(clock[1])//1000
+    grant = dict(recovery=dict(version=1,revision=100,evidence="SYNTHETIC paged only",startsAt=now-1000,until=now+3600000,
+       maximumAttempts=1000,maximumCommandUnits=64000,maximumReadBytes=1048576000,checkpointBytes=8192,
+       maximumOrigins=1000,checkpointTotalBytes=100000,maximumTriggerInvocations=1000,triggerEvidence="SYNTHETIC fixed admission"),
+       reviewId="PAGED_100",maximumChecks=2,globalItems=1000,globalBytes=10000000,continuedReviewIds=["OLD"])
+    owner="b"*48; fp="c"*64
+    def run(op,family="shipment",id=None,page="",g=None,proof=fp):
+        keys=[pool,all_key] if op=="next" else [pool,all_key,("nl:ship:mail:row:" if family=="shipment" else "nl:order-confirmation:row:")+id]
+        t=redis.command("TIME"); at=int(t[0])*1000+int(t[1])//1000
+        return redis.command("EVAL",lua,len(keys),*keys,op,json.dumps(g or grant),proof,owner,family,at,"","skip",page)
+    ids=[hashlib.sha256(("paged"+str(i)).encode()).hexdigest() for i in range(101)]
+    redis.command("HSET",pool,"items",len(ids),"bytes",len(ids)*12000)
+    redis.command("SADD",all_key,*ids)
+    first=run("next")
+    assert first[:2]==["ticket",sorted(ids)[0]],first
+    assert json.loads(redis.command("HGET",pool,"pendingRecovery"))["version"]==2
+    print("PASS: explicit101 uses paged checkpoint without changing the original set")
+
 def main():
     if os.environ.get("MARKTMORGEN_REDIS_INTEGRATION") != "1":
         raise RuntimeError("Run only against disposable loopback CI Redis")
@@ -619,6 +643,7 @@ def main():
         assert redis.command("HGET", unknown_keys[5], "bytes") == "not-a-number"
         print("PASS: privacy erasure removes payload even if financial evidence is corrupt; unknown reserve is never released")
         pending_recovery_cases(redis, source, made)
+        paged_recovery_cases(redis, source, made)
     finally:
         if made:
             redis.command("DEL", *sorted(made))

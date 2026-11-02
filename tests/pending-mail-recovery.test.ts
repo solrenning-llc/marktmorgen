@@ -250,3 +250,71 @@ test('recovery descriptors preserve the original closing fallback for unknown su
   const key=prefix+'SyntheticStableId1234567890';assert.equal(closingFamilyOf(key),prefix);assert.deepEqual(closingOf(key),{how:'company'});assert.equal(countedInRoom(key),false);
  }
 });
+
+test('small funded successor grants compose both normal workers through an unsupported prefix to the original paid confirmation', {skip:redisOptIn}, async()=>{
+ await isolatedRecoveryProof(async(pipeline,pool,all)=>{
+  const clock=Date.now,started=clock(),descriptor=Object.getOwnPropertyDescriptor(Date,'now')!;
+  let f!:Awaited<ReturnType<typeof physicalPaidFixture>>,id!:string;
+  try{
+   Date.now=()=>started-73*3600000;
+   f=await physicalPaidFixture();
+   const checkout=await createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime);
+   const session=f.sessions.get(checkout.id)!;
+   Object.assign(session,{status:'complete',payment_status:'paid',amount_total:4000,customer_details:{email:'buyer@example.test'},
+    payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false}},
+    shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
+   id=originId();
+  }finally{Object.defineProperty(Date,'now',descriptor);assert.deepEqual(Object.getOwnPropertyDescriptor(Date,'now'),descriptor);}
+  const found=await readConfirmationOrigin(id,f.runtime);assert.ok(found);
+  const row=found.row,keys=[confirmationOriginRowKey(id),`nl:order-confirmation:source:${id}`,'nl:order-confirmation:due',
+   `nl:order-confirmation:store:${row.statsId}`,`nl:order-confirmation:person:${row.statsId}:${row.person}`,pool,`nl:ship:mail:pool:${row.statsId}`,all,
+   `nl:order-confirmation:closed:${row.statsId}`,`nl:order-confirmation:erased:${row.statsId}:${row.person}`];
+  await pipeline([['SET',keys[0],found.raw],['SET',keys[1],row.sourceValue],['ZADD',keys[2],row.next,id],
+   ...[3,4,7].map(i=>['SADD',keys[i],id]),['HSET',pool,'items',1,'bytes',row.bytes],['HSET',keys[6],'items',1,'bytes',row.bytes]]);
+  let settled=false;
+  const physical={...f.runtime,now:clock,policy:{...f.runtime.policy!,maximumChecks:1},pipeline:async(commands:(string|number)[][])=>{
+   for(const c of commands)if(c[0]==='EVAL'&&c[1]===COMMIT_ORDER_CONFIRMATION&&!settled){settled=true;
+    await pipeline([['HSET',String(c[5]),String(c[10]),2],['HSET',String(c[6]),String(c[10]),2*Number(c[11])]]);}
+   return pipeline(commands);
+  }};
+  assert.equal((await runOrderConfirmationMail(clock()+30000,async()=> 'waiting',physical,id)).waiting,1);
+  const original=await readConfirmationOrigin(id,physical);assert.ok(original?.payload.message);assert.equal(original.row.checks,1);
+  const unsupported={...shipmentPolicy(),reviewId:'SYNTHETIC_UNCOVERED_STAYS',maximumChecks:1};
+  let session='';
+  for(let i=0;i<1000;i++){const candidate='cs_test_uncoveredPrefix00000'+i;if(shipmentMailId('continuation_uncovered',candidate)<id){session=candidate;break;}}
+  assert.notEqual(session,'','the deterministic unsupported source must precede the original confirmation');
+  const input={statsId:'continuation_uncovered',session,authorizedAt:clock(),shipped:{at:Math.floor(clock()/1000),tracking:'https://example.test/track'},
+   message:{from:'Store <mail@example.test>',to:'other@example.test',subject:'Uncovered original',text:'Do not send under another review',replyTo:'owner@example.test'}};
+  const unsupportedRuntime={lifecycle:'active' as const,policy:unsupported,pipeline,now:clock};
+  assert.equal((await enqueueShipmentMail(input,unsupportedRuntime)).ok,true);
+  const firstId=shipmentMailId(input.statsId,input.session);
+  assert.equal((await runShipmentMail(clock()+30000,async()=> 'waiting',unsupportedRuntime,firstId)).waiting,1);
+  const [firstRaw]=await pipeline([['GET','nl:ship:mail:row:'+firstId]]);
+  let accepted=0,passes=0;const observed:{ids:string[];index:number;family:string;phase:string;attempts:number;units:number;readBytes:number}[]=[];
+  for(let revision=1;revision<=6;revision++){
+   const policy={...physical.policy,reviewId:'SYNTHETIC_PROGRESS_'+revision,continuedReviewIds:[physical.policy.reviewId],maximumChecks:2,
+    recovery:{...recovery(),revision,startsAt:started-1000,until:started+3600000,maximumAttempts:1,maximumCommandUnits:640,maximumReadBytes:10485760,maximumTriggerInvocations:10}};
+   const renewed={...physical,policy};
+   const results=await Promise.all([
+    runShipmentMail(clock()+30000,async()=>{throw Error('Unsupported shipping review must never send');},renewed),
+    runOrderConfirmationMail(clock()+30000,async(message,beforePost)=>{
+     assert.equal(JSON.stringify(message),JSON.stringify(original.payload.message));
+     const current=await readConfirmationOrigin(id,renewed);assert.ok(current);
+     assert.equal(current.row.created,original.row.created);assert.equal(current.row.intentFingerprint,original.row.intentFingerprint);
+     assert.equal(current.row.checks,2,'only the ordinary claim consumes the remaining provider check');
+     assert.equal(await beforePost(),true);accepted++;return 'accepted';
+    },renewed),
+   ]);
+   assert.equal(results[0].accepted,0);
+   const [checkpoint]=await pipeline([['HGET',pool,'pendingRecovery']]);const progress=JSON.parse(String(checkpoint));observed.push(progress);passes++;
+   assert.ok(progress.attempts<=1);assert.equal(progress.units,progress.attempts*64);assert.equal(progress.readBytes,progress.attempts*1048576);
+   if(progress.phase==='done')break;
+  }
+  assert.equal(accepted,1,'finite newly funded small grants must reach and send the original paid confirmation');
+  assert.ok(passes<=6);assert.equal(observed.at(-1)!.phase,'done');
+  for(const checkpoint of observed.slice(0,-1))assert.deepEqual(checkpoint.ids,[firstId,id],'snapshot IDs remain original, even after row membership changes');
+  assert.equal((await pipeline([['GET','nl:ship:mail:row:'+firstId]]))[0],firstRaw,'unsupported source remains intact');
+  assert.equal((await pipeline([['GET',keys[0]]]))[0],null);
+  assert.equal(f.calls.filter(call=>call.method==='POST').length,1,'only the original checkout was created');
+ });
+});

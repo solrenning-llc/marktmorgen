@@ -1115,11 +1115,13 @@ function Compose(props: {
               </select>
             </label>
             <p className="text-xs text-ink-soft">
-              Only buyers can match these three. They are read from your own Stripe account when the email goes out. Support for
-              your work and sales paid with PayPal are not counted. A sale in another currency counts as a purchase for where
+              Only buyers can match these three. They are read from your Stripe account and your PayPal sales when the email goes
+              out; support for your work is not counted. Payments of memberships and payment plans count toward what someone spent
+              and when they last paid. A purchase refunded, or held or lost in a dispute, does not count, except that a refunded payment of a
+              membership or payment plan may not be taken off yet. A sale in another currency counts as a purchase for where
               they came from and when they last bought, but its amount is not added to what they spent, which counts only your
               store&apos;s currency.
-              {partial ? " Your Stripe account holds more sales than one reading takes, so the oldest are not counted." : ""}
+              {partial ? " There is more to read than one reading takes, so the oldest sales, refunds or disputes may be left out and these counts may be a little off." : ""}
             </p>
           </div>
         </details>

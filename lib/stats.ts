@@ -1245,6 +1245,65 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
   return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries: renewalEntries(store, invoices) };
 }
 
+/** One paid renewal of this store's memberships and payment plans, for the buyer ledger (lib/segments.ts, 270 [GR1] unit 2). */
+export type RenewalPayment = {
+  email: string;
+  created: number;
+  cents: number;
+  currency: string;
+  /** The payment, when the invoice names it: on the invoice itself in older API versions, or among its payments when they come with it; empty otherwise, so a refund of it cannot be matched. */
+  paymentIntent: string;
+  /** The channel the subscription was sold through, by the same rule as renewalEntries: "" for direct, UNRECORDED when it says nothing. */
+  channel: string;
+};
+
+/**
+ * The paid renewals of this store since `since` (seconds), each with the
+ * buyer's address as the invoice has it: the same invoices renewalEntries
+ * counts (paid, billing_reason "subscription_cycle", this store's handles),
+ * at most `pages` pages of a hundred; `partial` when there were more.
+ */
+export async function readRenewalPayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{ rows: RenewalPayment[]; partial: boolean }> {
+  const handles = saleHandles(store);
+  const out: RenewalPayment[] = [];
+  let after = "";
+  const seen = new Set<string>();
+  let partial = false;
+  for (let page = 0; page < pages; page += 1) {
+    const list = (await onAccount(
+      "GET",
+      store.stripeAccountId as string,
+      `/invoices?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+    )) as { data?: unknown; has_more?: unknown };
+    const rows = financialPage(list, seen);
+    for (const invoice of rows) {
+      if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+      if (!handles.has(invoiceMeta(invoice).store ?? "")) continue;
+      const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
+      const email = typeof invoice.customer_email === "string" ? invoice.customer_email.trim() : "";
+      if (cents <= 0 || !email) continue;
+      const meta = invoiceMeta(invoice);
+      const listedPayment = ((invoice.payments as { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | null | undefined)?.data ?? []).find((p) => p.status === "paid")?.payment?.payment_intent;
+      const paymentIntent = typeof invoice.payment_intent === "string" ? invoice.payment_intent : typeof listedPayment === "string" ? listedPayment : "";
+      const channel = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
+      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency: currencyOf(invoice), paymentIntent, channel });
+    }
+    if (!list.has_more) break;
+    // Out of time: what was read is kept, and the reading says it is partial.
+    if (Date.now() > deadline) { partial = true; break; }
+    const last = rows[rows.length - 1];
+    after = typeof last.id === "string" ? last.id : "";
+    if (!after) { partial = true; break; }
+    if (page === pages - 1) partial = true;
+  }
+  return { rows: out, partial };
+}
+
+/** The disputes that took money since `since`, for a reader outside this file (lib/segments.ts); the same reading the numbers use. */
+export function readStoreDisputes(store: Store, since: number, pages = DISPUTE_PAGES): Promise<{ rows: DisputeRow[]; partial: boolean }> {
+  return readDisputes(store, since, pages);
+}
+
 /** One dispute as Stripe lists it, only in a state that takes the money (DISPUTE_TAKES). */
 export type DisputeRow = { created: number; cents: number; currency: string; paymentIntent: string };
 

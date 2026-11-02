@@ -1874,4 +1874,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    from test_contract_command_measurement import check_contract_profiles
+    check_contract_profiles(main)

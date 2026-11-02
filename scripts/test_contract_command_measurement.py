@@ -42,5 +42,30 @@ def main():
         noise.close()
 
 
+def check_contract_profiles(operation):
+    """Run the actual contract suite with another client's PING at every
+    observation boundary. This exercises each real caller, not a replica of
+    its accounting formula; an unprotected INFO window must fail its budget.
+    """
+    original = operation.__globals__['Redis']
+    noise = Redis()
+    observed = []
+    class BoundaryNoiseRedis(original):
+        def command(self, *parts):
+            reply = super().command(*parts)
+            if parts == ('INFO', 'commandstats'):
+                assert noise.command('PING') == 'PONG'
+                observed.append(1)
+            return reply
+    try:
+        operation.__globals__['Redis'] = BoundaryNoiseRedis
+        operation()
+        assert observed, 'The actual contract suite must exercise command accounting'
+        print('PASS: every actual contract profile survives deterministic external PING at ' + str(len(observed)) + ' INFO boundaries')
+    finally:
+        operation.__globals__['Redis'] = original
+        noise.close()
+
+
 if __name__ == '__main__':
     main()

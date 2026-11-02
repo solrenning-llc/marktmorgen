@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { toast } from "@/components/toast";
+import { EmailInput } from "@/components/email-input";
 import { formatMoney } from "@/lib/money";
 import type { MemberSub } from "@/lib/member-discount";
 
@@ -68,7 +69,7 @@ export function MemberDiscount({ titles }: { titles: Record<string, string> }) {
       <form onSubmit={find} className="mt-3 flex flex-wrap items-end gap-3">
         <label className="block min-w-0 flex-1" htmlFor={`${id}-email`}>
           <span className="field-label">The member&apos;s email</span>
-          <input id={`${id}-email`} type="email" autoComplete="off" className="field" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <EmailInput id={`${id}-email`} required autoComplete="off" value={email} onChange={setEmail} className="field" />
         </label>
         <button type="submit" className="btn btn-secondary" disabled={busy !== "" || !email.trim()} aria-busy={busy === "find"}>
           Find their memberships

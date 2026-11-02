@@ -7,7 +7,7 @@
  * already joined, which is what the code does.
  */
 import { readFileSync } from "node:fs";
-import { optionPriceReview, priceReview, type PricedProduct, type PriceDraft } from "@/lib/price-review";
+import { optionPriceReview, optionRemovalWords, priceReview, type PricedProduct, type PriceDraft } from "@/lib/price-review";
 import { formatMoney, readMoney } from "@/lib/money";
 import { done, is, part } from "./check";
 
@@ -72,6 +72,26 @@ is("on a membership: members who joined at it keep it", opt("45", false, "month"
 const optionsUi = readFileSync("components/product-editor.tsx", "utf8");
 is("the option's editor reviews only a price the save can take, from the plan buyers are offered now, and sends the price trimmed", [optionsUi.includes("return cents !== null && priceInRange(cents, currency) ? cents : null;"), optionsUi.includes("const plan = activePlan(product as Listing);"), optionsUi.includes("shown: optionDelivers(option, opens)"), optionsUi.includes('{ action: "edit", id: option.id, label, price: price.trim(),')], [true, true, true, true]);
 is("the option's editor asks first with it, ends on its own confirm button, and a new price typed closes the review", [optionsUi.includes("const review = optionPriceReview(\n                { label: label.trim() || option.label, priceCents: option.priceCents },\n                price,"), optionsUi.includes("if (review && optionReview !== option.id) {"), /onClick=\{save\}>\s*Yes, save what buyers pay/.test(optionsUi.slice(optionsUi.indexOf("option-${option.id}-price-review-title"))), optionsUi.includes("setPrice(event.target.value);\n              setOptionReview(null);")], [true, true, true, true]);
+
+part("Removing a price option");
+type Removal = Partial<{ hasFile: boolean; delivers: boolean; options: number; interval: "month" | null; hidden: boolean; missing: "lesson" | "episode" | "delivery" | null; ownDelivery: boolean; introStored: boolean; yearlyStored: boolean; planBefore: boolean; planAfter: boolean }>;
+const removal = (m: Removal = {}) =>
+  optionRemovalWords(
+    { hasFile: m.hasFile ?? false, delivers: m.delivers ?? false },
+    { options: m.options ?? 3, interval: m.interval ?? null, hidden: m.hidden ?? false, ownPriceCents: 2900, missing: m.missing ?? null, ownDelivery: m.ownDelivery ?? false, introStored: m.introStored ?? false, yearlyStored: m.yearlyStored ?? false, planBefore: m.planBefore ?? false, planAfter: m.planAfter ?? false },
+    money,
+  );
+is("one of several handing nothing over (a course's price): nothing else changes", removal(), "Nothing else on the product changes.");
+is("one with its own file: the file goes, and its buyers can no longer get it from their order", removal({ hasFile: true, delivers: true }), "The file on it is deleted with it. Anyone who bought at it can no longer get its file or link from their order.");
+is("the last one, with the product's own file or link: its buyers get that instead, and buyers then pay the product's own price", removal({ delivers: true, options: 1, ownDelivery: true }), "Anyone who bought at it gets the product's own file or link from their order instead. It is the last price, so buyers then pay its own price, $29.");
+is("the last one on a draft, with its introductory and yearly prices kept", removal({ options: 1, hidden: true, introStored: true, yearlyStored: true }), "It is the last price, so buyers will pay, once you publish it, its own price, $29, with its introductory and yearly prices.");
+is("the last one, nothing to hand over on its own: said by what it lacks", [removal({ options: 1, missing: "lesson" }), removal({ options: 1, missing: "episode" }), removal({ options: 1, missing: "delivery" })], ["It is the last price, so this cannot be bought until it has a lesson.", "It is the last price, so this cannot be bought until it has an episode.", "It is the last price, so this cannot be bought until it has its own file or link."]);
+is("on a membership: members who joined at it keep being charged", removal({ interval: "month" }), "Members who joined at it keep being charged what they joined at until they or you cancel.");
+is("a payment plan that stops, or is offered again", [removal({ planBefore: true }), removal({ planAfter: true }), removal({ planBefore: true, planAfter: true })], ["Your payment plan stops being offered.", "Your payment plan is offered again.", "Nothing else on the product changes."]);
+const sellable = readFileSync("lib/store-checkout.ts", "utf8");
+const orders = readFileSync("lib/buyer-orders.ts", "utf8");
+const optionsEditor = readFileSync("components/product-editor.tsx", "utf8");
+is("what it says rests on the code: what sells with no option, and an order's delivery read from its option", [sellable.includes("if (product.course) return product.course.lessons > 0;") && sellable.includes("if (product.podcast) return product.podcast.episodes > 0;") && sellable.includes("if (product.options.length > 0) return sellableOptions(product).length > 0;\n  return product.file !== null || product.link !== null;"), optionsEditor.includes('missing: product.course ? (product.course.lessons > 0 ? null : "lesson") : product.podcast ? (product.podcast.episodes > 0 ? null : "episode") : activeShipping(product) || product.file || product.link ? null : "delivery",'), optionsEditor.includes("planAfter: activePlan({ ...product, options: product.options.filter((o) => o.id !== option.id) } as Listing) !== null,"), /deliveryOf/.test(orders)], [true, true, true, true]);
 
 part("What the member notes rest on");
 const checkout = readFileSync("lib/store-checkout.ts", "utf8");

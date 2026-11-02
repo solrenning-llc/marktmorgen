@@ -1,6 +1,6 @@
 "use client";
 
-import { optionPriceReview, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
+import { optionPriceReview, optionRemovalWords, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
@@ -59,6 +59,7 @@ import {
   optionDelivers,
 } from "@/lib/product-option";
 import { activePlan } from "@/lib/product-extras";
+import { activeShipping } from "@/lib/shipping";
 import type { Listing } from "@/lib/store";
 import { LINK_PROBLEMS, type LinkProblem, linkHost } from "@/lib/product-link";
 import {
@@ -1263,9 +1264,23 @@ function OptionsBlock({
                   <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">
                     <p className="text-sm text-ink-soft">
                       Remove <strong className="text-ink">{option.label}</strong>
-                      {option.file
-                        ? ". The file on it is deleted with it."
-                        : ". Nothing else on the product changes."}
+                      {`. ${optionRemovalWords(
+                        { hasFile: Boolean(option.file), delivers: !product.course && !product.podcast && Boolean(option.file || option.link) },
+                        {
+                          options: product.options.length,
+                          interval: product.recurring?.interval ?? null,
+                          hidden: product.hidden,
+                          ownPriceCents: product.priceCents,
+                          // What sells it with no option left (lib/store-checkout.ts, canSellProduct).
+                          missing: product.course ? (product.course.lessons > 0 ? null : "lesson") : product.podcast ? (product.podcast.episodes > 0 ? null : "episode") : activeShipping(product) || product.file || product.link ? null : "delivery",
+                          ownDelivery: Boolean(product.file || product.link),
+                          introStored: Boolean(product.intro),
+                          yearlyStored: Boolean(product.yearly),
+                          planBefore: activePlan(product as Listing) !== null,
+                          planAfter: activePlan({ ...product, options: product.options.filter((o) => o.id !== option.id) } as Listing) !== null,
+                        },
+                        (cents) => formatMoney(cents, currency),
+                      )}`}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button

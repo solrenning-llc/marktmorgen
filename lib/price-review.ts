@@ -152,3 +152,67 @@ export function optionPriceReview(
     note: notes.join(" "),
   };
 }
+
+/**
+ * What removing one price option really changes, said after "Remove “…”."
+ * in its confirmation (VR: nothing said may be untrue):
+ *
+ *   - the file on it goes with it (app/api/store/option/route.ts);
+ *   - anyone who bought at it, when it handed over its own file or link,
+ *     can no longer get that from their order (lib/buyer-orders.ts,
+ *     deliveryOf: a removed option leaves the order's delivery empty), unless
+ *     it was the last and the product has its own file or link, which they
+ *     then get instead. A course or podcast is opened by the product, not the
+ *     option, so its buyers keep it;
+ *   - the last one: buyers then pay the product's own price, with its
+ *     introductory and yearly prices kept from before, or, when the product
+ *     hands nothing over on its own, it cannot be bought until it does, said
+ *     by what it lacks (lib/store-checkout.ts, canSellProduct);
+ *   - on a membership, members who joined at it keep being charged;
+ *   - a payment plan that starts or stops being offered without it
+ *     (lib/product-extras.ts, activePlan).
+ *
+ * "Nothing else on the product changes" only when none of that is so.
+ */
+export function optionRemovalWords(
+  option: { hasFile: boolean; delivers: boolean },
+  product: {
+    options: number;
+    interval: Interval | null;
+    hidden: boolean;
+    ownPriceCents: number;
+    /** What the product lacks to be sold on its own, or null when it hands something over by itself. */
+    missing: "lesson" | "episode" | "delivery" | null;
+    /** Whether it has a file or link of its own, which buyers of a removed last option then get. */
+    ownDelivery: boolean;
+    introStored: boolean;
+    yearlyStored: boolean;
+    planBefore: boolean;
+    planAfter: boolean;
+  },
+  money: (cents: number) => string,
+): string {
+  const said: string[] = [];
+  const last = product.options === 1;
+  if (option.hasFile) said.push("The file on it is deleted with it.");
+  if (option.delivers) {
+    said.push(
+      last && product.ownDelivery
+        ? "Anyone who bought at it gets the product's own file or link from their order instead."
+        : "Anyone who bought at it can no longer get its file or link from their order.",
+    );
+  }
+  if (last) {
+    if (product.missing) {
+      const lacks = product.missing === "lesson" ? "a lesson" : product.missing === "episode" ? "an episode" : "its own file or link";
+      said.push(`It is the last price, so this cannot be bought until it has ${lacks}.`);
+    } else {
+      const kept = product.introStored && product.yearlyStored ? ", with its introductory and yearly prices" : product.introStored ? ", with its introductory price" : product.yearlyStored ? ", with its yearly price" : "";
+      said.push(`It is the last price, so buyers ${product.hidden ? "will pay, once you publish it," : "then pay"} its own price, ${money(product.ownPriceCents)}${kept}.`);
+    }
+  }
+  if (product.interval) said.push("Members who joined at it keep being charged what they joined at until they or you cancel.");
+  if (product.planBefore && !product.planAfter) said.push("Your payment plan stops being offered.");
+  if (!product.planBefore && product.planAfter) said.push("Your payment plan is offered again.");
+  return said.length ? said.join(" ") : "Nothing else on the product changes.";
+}

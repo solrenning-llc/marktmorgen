@@ -5,7 +5,7 @@ import { API_PAGE } from "@/lib/api-read";
 import { API_RATE } from "@/lib/api-guard";
 import { MAX_KEYS } from "@/lib/api-key-rules";
 import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
-import { API_WRITE_UNITS, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { PLAN_TITLES } from "@/lib/plan";
 
 export const metadata: Metadata = {
@@ -86,15 +86,18 @@ export default function DevelopersPage() {
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
         <p>
-          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A contact added or a product given counts as ${API_WRITE_UNITS}. Past it, the answer is 429 `}
+          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Past it, the answer is 429 `}
           <code className="font-mono">monthly_limit</code>
-          {" until the next billing month, or at once on a larger plan. Nothing is billed for requests. A write that does not fit the store's data room (its words and records, by plan) is answered 409 "}
+          {", and its message says when the figure opens again, if it does. A trial or a store without a paid plan also needs one of the month's places for such stores; without one, the answer is 429 "}
+          <code className="font-mono">no_place</code>
+          {". Nothing is billed for requests. A write that does not fit the store's data room (its words and records, by plan) is answered 409 "}
           <code className="font-mono">store_full</code>
           {", and nothing is written."}
         </p>
         <Code>{`401  {"error": "unauthorized", "message": "Send your API key as: Authorization: Bearer nl_live_…"}
 429  {"error": "rate_limited", "message": "At most ${API_RATE} requests a minute per key. Try again in a minute."}
-429  {"error": "monthly_limit", "message": "Your store's API requests for this month are used: …"}
+429  {"error": "monthly_limit", "message": "Your store's API requests for this month are used: 2,000 API requests. This opens again with your next billing month, on …"}
+429  {"error": "no_place", "message": "Stores without a paid plan are full for this month, so this can't run right now. …"}
 409  {"error": "store_full", "message": "Your store's data room is full, so nothing was added. …"}
 409  {"error": "paused_unpaid", "message": "Nothing was read: your plan's renewal payment did not go through, …"}
 409  {"error": "paused_unpaid", "message": "Nothing was changed: your plan's renewal payment did not go through, …"}

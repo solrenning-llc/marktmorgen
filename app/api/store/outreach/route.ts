@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { withinLimit } from "@/lib/request-guard";
@@ -41,8 +41,10 @@ export async function POST(request: NextRequest) {
 
   try {
     if (action === "find") {
-      if (!(await withinService("outreach-find", who, FINDS_PER_MINUTE, 60, store))) return fail("slow", 429);
-      if (!(await withinLimit("outreach-find-day", who, FINDS_PER_DAY, 86_400))) return fail("slow", 429);
+      // The day's limit first, so a read refused for the day takes nothing from the store's month.
+      if (!(await withinLimit("outreach-find-day", who, FINDS_PER_DAY, 86_400))) return fail("day", 429);
+      const refused = await withinServiceWhy("outreach-find", who, FINDS_PER_MINUTE, 60, store);
+      if (refused) return serviceRefusedJson(refused, "slow");
       const read = await readStoreSite(store, text(body.site, 300));
       if (!read.ok) return fail(read.reason, read.reason === "unavailable" ? 503 : 400);
       return Response.json({ ok: true, site: read.site });

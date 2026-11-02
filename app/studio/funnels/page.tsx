@@ -1,4 +1,5 @@
 import {OfferPlanning} from "@/components/offer-planning";
+import { isBillingConfigured } from "@/lib/billing";
 import { cachedOfferListings, savedOfferIssues } from "@/lib/funnel-offer-review";
 import type { Metadata } from "next";
 import { BUMP_CHOICES, idsOfKind, readCards, readListings, readProduct } from "@/lib/catalog";
@@ -226,7 +227,8 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
             paymentReview={{
               available: canSell(store) || sellsThroughPayPal(store),
               paymentsHref: can(view.role, "payments") ? `${studioPath(store)}#stripe` : null,
-              billingHref: can(view.role, "billing") ? `${studioPath(store)}#billing` : null,
+              // #billing is drawn only where billing is set up (app/studio/page.tsx).
+              billingHref: can(view.role, "billing") && isBillingConfigured() ? `${studioPath(store)}#billing` : null,
             }}
           />
         </div>

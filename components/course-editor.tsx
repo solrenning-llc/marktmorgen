@@ -62,7 +62,8 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   video_unavailable: "Videos cannot be taken in just now. Try again in a few minutes.",
-  slow_down: "That is a lot of videos in one hour. Try again a little later.",
+  // Also the store's calls to connected services used, or no place this month (lib/metered-limits.ts): no reason is claimed.
+  slow_down: "Videos can't start uploading just now. Try again later.",
   upload_stopped: "The upload stopped before the end, and could not go on. Check your connection and upload the video again.",
   caption_format: "That file could not be read as captions. Upload a .vtt or .srt file with a time on every caption.",
   caption_empty: "That file is empty.",
@@ -84,7 +85,7 @@ const MESSAGES: Record<string, string> = {
   auto_unavailable: "The video service could not take this just now. Nothing was charged; try again in a moment.",
   auto_unknown: "That video is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include charging the plan's card. Ask the owner to do this.",
-  store_full: "Your store's data room is full. Delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan.",
+  store_full: "Your store's data room is full. Delete something you no longer need, such as old posts, drafts, pages or contacts.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

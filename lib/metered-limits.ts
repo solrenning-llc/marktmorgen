@@ -24,7 +24,28 @@ export async function withinStore(scope: string, who: string, limit: number, win
   return takePublicRequest(store, side);
 }
 
+/**
+ * Why a call to another service for a store is refused, or null when it may go: "tries" for the short window, or
+ * the store's "integration" figure's own reason with its words (used, no place this month, not counted just now).
+ */
+export type ServiceRefusal = { reason: "tries" } | { reason: "used" | "pool" | "unknown"; message: string };
+
+export async function withinServiceWhy(scope: string, who: string, limit: number, windowSeconds: number, store: Store): Promise<ServiceRefusal | null> {
+  if (!(await withinLimit(scope, who, limit, windowSeconds))) return { reason: "tries" };
+  const taken = await takeAllowance(store, "integration");
+  return taken.ok ? null : { reason: taken.reason, message: taken.message };
+}
+
 export async function withinService(scope: string, who: string, limit: number, windowSeconds: number, store: Store): Promise<boolean> {
-  if (!(await withinLimit(scope, who, limit, windowSeconds))) return false;
-  return (await takeAllowance(store, "integration")).ok;
+  return (await withinServiceWhy(scope, who, limit, windowSeconds, store)) === null;
+}
+
+/** A route that answers in JSON: the short window under its own code, the figure with its own words in `message`. */
+export function serviceRefusedJson(refusal: ServiceRefusal, code: string): Response {
+  return Response.json(refusal.reason === "tries" ? { ok: false, error: code } : { ok: false, error: code, message: refusal.message }, { status: 429 });
+}
+
+/** A route that sends the creator back to a page: the short window as `tries`, the figure as "allowance-<reason>". */
+export function serviceRefusalCode(refusal: ServiceRefusal, tries: string): string {
+  return refusal.reason === "tries" ? tries : `allowance-${refusal.reason}`;
 }

@@ -215,6 +215,7 @@ export async function sendCallReminders(
               moves: call.moves,
               answers: call.answers,
               amountCents: call.amount,
+              currency: call.currency,
               lead: call.lead,
               pi: call.pi,
               origin,

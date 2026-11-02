@@ -37,13 +37,13 @@ is("the marktmorgen.com address is never moved to the domain", read("app/[handle
 part("The answers, in every state");
 const states = [[true, false], [true, true], [false, false], [false, true]] as const;
 const lists = states.map(([on, sale]) => domainBeginnerQuestions(on, sale, TRIAL_DAYS));
-is("three questions in each", lists.map((l) => l.map((x) => x.q).join("|")), states.map(() => "What is a domain, and do I need one?|How do I add my domain?|Can I try it before paying?"));
+is("three questions in each", lists.map((l) => l.map((x) => x.q).join("|")), states.map(() => "What is a domain, and do I need one?|How do I add my domain?|Can I put my store on my own domain before paying?"));
 const [onNow, onLater, offNow, offLater] = lists;
 const how = answer(onNow, "How do I add my domain?");
 is("adding: both plans, the studio's label, owner or Admin, the studio's words in order, the three days", [how.includes(`part of the ${PLAN_TITLES.pro} and ${PLAN_TITLES.scale} plans`), how.includes(`${PLAN_TITLES.pro} is labeled “${w.studioPlan}”`), how.includes("the owner or an Admin"), how.indexOf(`“${w.field}”`) < how.indexOf(`“${w.add}”`), how.includes("held for your store for three days")], [true, true, true, true, true]);
-is("domains off: never told how to add or try one", [offNow, offLater].flatMap((l) => [answer(l, "How do I add my domain?"), answer(l, "Can I try it before paying?")]).map((a) => /“|types it|can be set up/.test(a)), [false, false, false, false]);
-is("try before paying, not on sale: not yet, both plans named", answer(onNow, "Can I try it before paying?").startsWith(`Not yet. Your own domain needs the ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan`), true);
-const trial = answer(onLater, "Can I try it before paying?");
+is("domains off: never told how to add or try one", [offNow, offLater].flatMap((l) => [answer(l, "How do I add my domain?"), answer(l, "Can I put my store on my own domain before paying?")]).map((a) => /“|types it|can be set up/.test(a)), [false, false, false, false]);
+is("try before paying, not on sale: not yet, both plans named", answer(onNow, "Can I put my store on my own domain before paying?").startsWith(`Not yet. Your own domain needs the ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan`), true);
+const trial = answer(onLater, "Can I put my store on my own domain before paying?");
 is("try before paying, on sale: the shared answer, the plans in the same sentence, the Store plan's trial said", [trial.startsWith(tryBeforePaying(`Your own domain, on ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale},`, "", true, TRIAL_DAYS)), trial.includes(`Your own domain, on ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale}, can be set up during the trial`), trial.endsWith(`On a trial of the ${PLAN_TITLES.creator} plan, the domain card only offers the upgrade.`)], [true, true, true]);
 const all = lists.flat().map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);

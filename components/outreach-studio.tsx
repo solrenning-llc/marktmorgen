@@ -1,5 +1,7 @@
 "use client";
 
+import type { AiOff } from "@/lib/ai";
+
 import { useState } from "react";
 import { toast } from "@/components/toast";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
@@ -43,6 +45,7 @@ const MESSAGES: Record<string, string> = {
   room: STUDIO_MESSAGES.store_full,
   busy: "This can't be saved right now. Nothing was counted. Try again in a minute.",
   slow: "That was a lot in a short time. Wait a minute, then try again.",
+  day: "That is today's limit of site reads. Try again tomorrow.",
   signed_out: "Your session ended. Log in again.",
   unknown: "That pitch is no longer here. Reload the page.",
   server_error: "Something went wrong on our side. Nothing was changed. Try again in a moment.",
@@ -61,6 +64,8 @@ async function post(payload: Record<string, unknown>): Promise<{ ok: true; data:
     const response = await fetch("/api/store/outreach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (data.ok === true) return { ok: true, data };
+    // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
+    if (typeof data.message === "string" && data.message) return { ok: false, error: data.message };
     return { ok: false, error: MESSAGES[typeof data.error === "string" ? data.error : ""] ?? MESSAGES.server_error };
   } catch {
     return { ok: false, error: MESSAGES.server_error };
@@ -208,7 +213,16 @@ function PitchCard({ pitch, onChange, onGone }: { pitch: Pitch; onChange: (next:
   );
 }
 
-export function OutreachStudio({ sender: saved, pitches: first, left, on, storeUrl }: { sender: Sender; pitches: Pitch[]; left: number; on: boolean; storeUrl: string }) {
+/** Why a pitch cannot be written here (lib/ai.ts, aiOffReason), in words true for that case only. */
+const OFF_WORDS: Record<AiOff, string> = {
+  plan: "Writing help comes with the Studio and Scale plans (Studio is labeled Pro in your studio) while the plan is paid up. This store is not on one of them now, so a pitch cannot be written here.",
+  trial: "Writing help is not part of the free trial. It needs the plan to be paid up, so a pitch cannot be written here yet.",
+  renewal_unpaid: "Your plan's renewal payment did not go through, so writing help is paused. Check the notice at the top of your studio to pay it.",
+  plan_disputed: "A payment for your plan is disputed with your bank, so writing help is paused. Check the notice at the top of your studio for what happens next.",
+  setup: "Writing help is not switched on for this store yet, so a pitch cannot be written here.",
+};
+
+export function OutreachStudio({ sender: saved, pitches: first, left, on, off = "setup", storeUrl }: { sender: Sender; pitches: Pitch[]; left: number; on: boolean; off?: AiOff | null; storeUrl: string }) {
   const [sender, setSender] = useState(saved);
   const [name, setName] = useState(saved.name);
   const [address, setAddress] = useState(saved.address);
@@ -309,7 +323,9 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, storeU
           Write to a business
         </h2>
         {!on ? (
-          <p className="notice notice-warn mt-4">Writing help is not switched on for this store yet, so a pitch cannot be written here.</p>
+          <p className="notice notice-warn mt-4">
+            {OFF_WORDS[off ?? "setup"]}
+          </p>
         ) : !senderReady ? (
           <p className="notice notice-info mt-4">Save your name and postal address above first.</p>
         ) : (

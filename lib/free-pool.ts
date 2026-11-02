@@ -29,22 +29,28 @@ function idOf(store: PoolStore): string | null {
   return raw ? createHash("sha256").update(`free-pool:${raw}`).digest("hex").slice(0, 32) : null;
 }
 
-/** Whether this store may do something that costs us now: always when it pays, and with a place this month when it does not. */
-export async function admitNonPaying(store: PoolStore, now = Date.now()): Promise<boolean> {
-  if (standingOf(store, now / 1000) === "paid") return true;
+/**
+ * This store's place this month: "in" when it pays or holds one, "full" when
+ * the places are taken, "unknown" when it could not be counted (no id, no
+ * database, or the database did not answer), so a refusal can say which.
+ */
+export async function poolPlace(store: PoolStore, now = Date.now()): Promise<"in" | "full" | "unknown"> {
+  if (standingOf(store, now / 1000) === "paid") return "in";
   const id = idOf(store);
-  if (!id || !isRedisConfigured()) return false;
+  if (!id || !isRedisConfigured()) return "unknown";
   const month = calendarWindow(now).id;
   try {
     const [held] = await redisPipeline([["GET", inKey(month, id)]]);
-    if (held === "1") return true;
-    if (held === "0") return false;
+    if (held === "1") return "in";
+    if (held === "0") return "full";
     const [taken, , paying] = await redisPipeline([
       ["INCR", countKey(month)],
       ["EXPIRE", countKey(month), KEEP_SECONDS],
       ["SCARD", PAYING_INDEX],
     ]);
     const n = Number(taken);
+    // A reply that is not a count says nothing about the places: unknown, and no refusal is written down.
+    if (!Number.isSafeInteger(n) || n < 1) return "unknown";
     const fits = Number.isSafeInteger(n) && n >= 1 && n <= freePoolSize(Number(paying) || 0);
     // A place not handed out is not counted, so a ceiling that grows later has it free.
     if (!fits && Number.isSafeInteger(n) && n >= 1) await redisPipeline([["DECR", countKey(month)]]);
@@ -54,12 +60,17 @@ export async function admitNonPaying(store: PoolStore, now = Date.now()): Promis
       // Decided a moment ago by another request: that answer stands, and the
       // place this one counted is not handed out again.
       const [again] = await redisPipeline([["GET", inKey(month, id)]]);
-      return again === "1";
+      return again === "1" ? "in" : "full";
     }
-    return fits;
+    return fits ? "in" : "full";
   } catch {
-    return false;
+    return "unknown";
   }
+}
+
+/** Whether this store may do something that costs us now: always when it pays, and with a place this month when it does not. */
+export async function admitNonPaying(store: PoolStore, now = Date.now()): Promise<boolean> {
+  return (await poolPlace(store, now)) === "in";
 }
 
 /** Places handed out this month, and how many there are, for the owner's own checks. */

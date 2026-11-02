@@ -565,8 +565,10 @@ function Terms({
     daily: String(setting.lead.daily),
     budget: moneyField(setting.lead.budget, storeCurrency),
   });
-  const credited = products.filter((p) => p.credited);
-  // Memberships and payment plans, whatever is chosen for them now.
+  // A membership earns, and so takes a share of its own, as soon as the months are chosen here (397 [SL1]), not only after saving.
+  const recurringOn = Number(recurringMonths) > 0;
+  const credited = products.filter((p) => (p.recurring ? recurringOn : p.credited));
+  // Memberships, whatever is chosen for them now.
   const left = products.filter((p) => p.recurring || !p.credited);
 
   return (

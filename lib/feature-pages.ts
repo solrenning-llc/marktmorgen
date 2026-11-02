@@ -6,6 +6,7 @@ import { callBeginnerQuestions } from "@/lib/call-faq";
 import { storeBeginnerQuestions } from "@/lib/store-page-faq";
 import { deliveryBeginnerQuestions } from "@/lib/delivery-faq";
 import { checkoutBeginnerQuestions } from "@/lib/checkout-faq";
+import { stripeBeginnerQuestions } from "@/lib/your-stripe-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -655,6 +656,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about your Stripe account",
         items: [
+          // 534 [FQ1], unit 8: what someone starting out asks, answered by the code (lib/your-stripe-faq.ts).
+          ...stripeBeginnerQuestions(),
           { q: "What do I pay Marktmorgen?", a: feeWords().whatYouPay },
           { q: "Who handles refunds and disputes?", a: "You do, in your own Stripe dashboard, with the same tools any business has. A refund is a refund you issue, not a request you file with us." },
           { q: "Can I charge in euros or pounds?", a: "Yes. Each store charges in one currency, which you choose in your studio from 15. The ways to pay are the ones you switch on in Stripe." },

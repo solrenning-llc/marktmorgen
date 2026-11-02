@@ -266,12 +266,16 @@ async function main(): Promise<void> {
   if (!auditMade.ok) throw new Error("Synthetic audit product unavailable");
   await setProductLink(auditOwner, auditMade.product.id, "https://example.test/audit-only");
   const auditStore = (await storeForEmail(auditOwner))!;
+  const auditPaid = (sessionId: string) => ({ id: sessionId, status: "complete", payment_status: "paid", mode: "payment",
+    created: Math.floor(Date.now() / 1000), amount_total: 4900, currency: "usd", payment_intent: "pi_LegacyAudit0001",
+    metadata: { store: "legacyaudit", product: auditMade.product.id }, customer_details: { email: "legacy-audit-buyer@example.test" } }) as never;
   for (const loss of ["claim-ack-before-post", "ses-ack-after-post"] as const) {
     account = approved(); askAgain(); clear();
     const sessionId = "cs_test_" + (loss === "claim-ack-before-post" ? "a" : "b").repeat(24);
     const key = `nimbus-confirm:${sessionId}`;
     const claim = `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
-    const session = {id:sessionId,status:"complete",payment_status:"paid",mode:"payment",created:Math.floor(Date.now()/1000),amount_total:4900,currency:"usd",payment_intent:"pi_LegacyAudit0001",metadata:{store:"legacyaudit",product:auditMade.product.id},customer_details:{email:"legacy-audit-buyer@example.test"}} as never;
+    const session = auditPaid(sessionId);
+    const knownSendCounts = [await sesSentLast24h(), await sentThisMonth()];
     let interrupted = false;
     if (loss === "claim-ack-before-post") redis.pipeline = async commands => {
       const result = await originalPipeline(commands);
@@ -291,8 +295,16 @@ async function main(): Promise<void> {
     is(`${loss}: the existing claim remains sticky`, [afterFirst.claim, afterSecond.claim], ["1", "1"]);
     is(`${loss}: the replay never adds a provider POST`, [afterFirst.amazon, afterFirst.resend, afterSecond.amazon, afterSecond.resend], loss === "claim-ack-before-post" ? [0, 0, 0, 0] : [1, 0, 1, 0]);
     is(`${loss}: a replay cannot manufacture the consumer's sent marker`, afterSecond.consumer, null);
-    is(`${loss}: unknown acceptance must not become consumer sent`,second,"failed");
+    is(`${loss}: unknown acceptance must not become consumer sent`, second, "failed");
+    is(`${loss}: a held replay does not add a known-send counter`, [await sesSentLast24h(), await sentThisMonth()], knownSendCounts);
   }
+
+  account = approved(); askAgain(); clear();
+  const knownSessionId = "cs_test_" + "c".repeat(24);
+  const knownSession = auditPaid(knownSessionId);
+  is("a confirmed purchase still commits its own sent marker", [await confirmPurchase(auditStore, knownSessionId, knownSession), redis.run(["GET", confirmationKey(knownSessionId)])], ["sent", "sent"]);
+  is("a replay with that confirmed consumer marker is already done", await confirmPurchase(auditStore, knownSessionId, knownSession), "already");
+  is("confirmed consumer replay adds no provider dispatch", [amazon.length, resend.length], [1, 0]);
 
   part("An uncertain individual SES acknowledgement never triggers another sender");
   for (const loss of ["throw", 500, 503] as const) {

@@ -346,7 +346,7 @@ end
 if op=='next' then
  if c and (r.revision<c.revision or (r.revision==c.revision and fp~=c.fingerprint)) then return {'held'} end
  if not c or r.revision>c.revision then
-  if c and (g.reviewId==c.reviewId or g.maximumChecks<=c.maximumChecks) then return {'held'} end
+  if c and (g.reviewId==c.reviewId or g.maximumChecks<c.maximumChecks) then return {'held'} end
   c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,readBytes=0,ids={},index=1,family='shipment',phase='capturing',owner='',leaseUntil=0}
  end
  if c.phase=='done' or c.phase=='unsupported' then return {c.phase} end

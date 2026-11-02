@@ -17,7 +17,7 @@
 import { COURSE_TEMPLATES } from "@/lib/course-templates";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { TRIAL_DAYS } from "@/lib/plan";
-import { AUTOMATIC_UPLOAD_CAPS } from "@/lib/upload-budget-policy";
+import { tryBeforePaying } from "@/lib/beginner-faq";
 
 /** The studio's own words, in the order a course is made. */
 export const COURSE_STUDIO_WORDS = {
@@ -28,11 +28,6 @@ export const COURSE_STUDIO_WORDS = {
 } as const;
 /** The Students section's own counts (app/studio/course/[product]/page.tsx). */
 export const STUDENT_COUNTS = ["opened it", "finished a lesson", "finished it all"] as const;
-
-/** What a store not paying for a plan cannot upload yet, read from the upload policy (lib/upload-budget-policy.ts). */
-function uploadsWait(scope: "setup" | "trial"): string {
-  return AUTOMATIC_UPLOAD_CAPS[scope].opens === 0 ? "Files and lesson videos can be uploaded once a paid plan starts." : "";
-}
 
 export function courseBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_DAYS): { q: string; a: string }[] {
   const structures = COURSE_TEMPLATES.filter((t) => t.id !== "scratch").map((t) => t.name);
@@ -47,9 +42,7 @@ export function courseBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIA
     },
     {
       q: "Can I try it before paying?",
-      a: onSale
-        ? `Yes. An eligible first store can start a ${trialDays}-day trial when it picks a plan: your card is taken when the trial starts and first charged when it ends, and canceling inside it means it is never charged. A course can be set up during the trial, and the trial leaves out paid AI writing. ${uploadsWait("trial")}`.trim()
-        : `Yes. Paid plans are not on sale yet, so there is nothing to pay for now, and you can set up a course in your own store's studio with no card: its modules, and its lessons with their text. ${uploadsWait("setup")} To see a store working, open the live demo store from the link at the end of this page: a made-up store, marked as a demo.`.replace("  ", " "),
+      a: tryBeforePaying("A course", "a course with its modules and the text of its lessons", onSale, trialDays),
     },
     {
       q: "Do courses work?",

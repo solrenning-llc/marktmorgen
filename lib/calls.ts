@@ -1404,9 +1404,13 @@ export async function confirmBooking(input: {
     });
   }
 
+  const creatorSide = hostRecipient(store, hosts);
+  const theirs = onTheirCalendar(meeting, creatorSide, store.email);
+  // The reminders before the call go to the store's own address (lib/call-reminders.ts, remindCreator).
+  const toOwner = creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase();
   await sendEmail({ meter: { by: "order" },
     from: `"Marktmorgen" <${senderAddress()}>`,
-    to: hostRecipient(store, hosts),
+    to: creatorSide,
     subject: `New booking: ${product.title}, ${readableTime(start, setup.tz)}`,
     text: [
       `${buyerEmail ?? "A buyer"} booked ${product.title} (${minutes} minutes) ${input.amountCents === 0 ? "as one session of a package they bought from you, so nothing more was charged" : "and paid on your Stripe account"}.`,
@@ -1425,12 +1429,14 @@ export async function confirmBooking(input: {
       ...(meeting && !meeting.made && video ? [VIDEO_ROOM_NOTE] : []),
       "",
       `${
-        inGoogle(meeting)
+        theirs
           ? "It is already in your Google Calendar, so no calendar file is attached."
           : "The calendar file attached adds it to your calendar."
       } Every booking is also in your studio, under Upcoming calls${
-        // The same reminders the buyer is told about: each only while it is still ahead.
-        start - Date.now() >= 25 * 3600_000
+        // The same reminders the buyer is told about: each only while it is still ahead, and only to the store's own address.
+        !toOwner
+          ? "."
+          : start - Date.now() >= 25 * 3600_000
           ? ", and you get a reminder with everyone booked a day and an hour before."
           : start - Date.now() >= 2 * 3600_000
             ? ", and you get a reminder with everyone booked an hour before."
@@ -1438,8 +1444,8 @@ export async function confirmBooking(input: {
       }`,
     ].join("\n"),
     ...(buyerEmail ? { replyTo: buyerEmail } : {}),
-    // A booking already in the creator's Google Calendar is not sent to it twice.
-    ...(inGoogle(meeting)
+    // A booking already in this person's own Google Calendar is not sent to it twice.
+    ...(theirs
       ? {}
       : { attachments: [{ filename: "call.ics", content: invite(`With ${buyerEmail ?? "your buyer"}.${room ? ` Join: ${room}` : ""}${video ? `\n\n${VIDEO_ROOM_NOTE}` : ""}`) }] }),
   });
@@ -1471,8 +1477,17 @@ async function bookingTeam(store: Store, product: CallListing, session: string):
 }
 
 /** Whether a booking's meeting is an event already in the creator's Google Calendar. */
-function inGoogle(meeting: MeetRecord | null): boolean {
-  return Boolean(meeting && meeting.made && meeting.provider === "google");
+/**
+ * Whether a booking's Google event is on the calendar of the person its
+ * creator-side email goes to: the store's owner when no host made it (its
+ * host is ""), or the team host whose calendar it was made on. A team host
+ * who is sent the email while the event sits on someone else's calendar is
+ * sent the calendar file.
+ */
+export function onTheirCalendar(meeting: Pick<MeetRecord, "made" | "provider" | "host"> | null, to: string, ownerEmail: string): boolean {
+  if (!meeting || !meeting.made || meeting.provider !== "google") return false;
+  const who = (meeting.host || ownerEmail).trim().toLowerCase();
+  return who === to.trim().toLowerCase();
 }
 
 /** What the creator is told about the meeting made, or not made, for a booking. */

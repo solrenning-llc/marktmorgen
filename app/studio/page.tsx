@@ -1620,7 +1620,7 @@ export default async function StudioPage({
                   </p>
                 ) : calls.length === 0 ? (
                   <p className="mt-2 text-ink-soft">
-                    Nothing booked yet. When someone books, it shows up here, and you both get an email with a calendar file, then a reminder a day and an hour before.
+                    Nothing booked yet. When someone books, it shows up here. The buyer gets an email with a calendar file. You get one too, or the host does on a team call. If the call is already in that person&apos;s Google Calendar, their email has no file. You and the buyer get reminders a day and an hour before. A reminder that would come less than an hour after the booking is skipped. On a team call, your reminders still come to you.
                   </p>
                 ) : (
                   <ul className="mt-4 divide-y divide-line">

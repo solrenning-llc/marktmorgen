@@ -56,3 +56,4 @@ Add a row before the first commit of a unit; remove it when the unit is merged.
 | Claude 3 | 631 [AA1] unit 15 (plan of OAuth for the MCP server, from the MCP specification 2026-07-28) | claude3/aa1-oauth-plan | `docs/mcp-oauth-plan.md` | 02/11/2026 14h42 |
 | Claude 3 | 631 [AA1] unit 16 (OAuth pure rules: PKCE S256, exact redirect URI, canonical resource, scopes) | claude3/aa1-oauth-rules | `lib/mcp-oauth-rules.ts`, `tests/mcp-oauth-rules.test.ts` | 02/11/2026 14h42 |
 | Claude 3 | 632 [AA2] unit 2 (ad text checked by the existing honesty rules: no earnings promise, fast money, false urgency or unverified testimonial; pure) | claude3/aa2-ad-text-check | `lib/ad-creative-check.ts`, `tests/ad-creative-check.test.ts` | 02/11/2026 15h04 |
+| Claude 3 | 602 [WP1] unit 1 (buyer-stamped lesson video: the stamp's words and positions, reduced motion; pure) | claude3/wp1-stamp-rules | `lib/video-stamp.ts`, `tests/video-stamp.test.ts` | 02/11/2026 15h26 |

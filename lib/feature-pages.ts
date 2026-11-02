@@ -26,6 +26,7 @@ import { insightsBeginnerQuestions } from "@/lib/insights-faq";
 import { reviewsBeginnerQuestions } from "@/lib/reviews-faq";
 import { currencyBeginnerQuestions } from "@/lib/currency-faq";
 import { emailPlatformBeginnerQuestions } from "@/lib/email-platform-faq";
+import { communityBeginnerQuestions } from "@/lib/community-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -1110,6 +1111,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about the community",
         items: [
+          // 534 [FQ1], unit 27: what someone starting out asks, answered by the code (lib/community-faq.ts).
+          ...communityBeginnerQuestions(),
           { q: "How are points counted?", a: "One point for every like a member's post or comment gets from somebody else, and one taken away if that like is taken back. Your own likes earn you nothing, and the creator collects no points. Levels start at 5, 20, 65, 155, 515, 2,015, 8,015 and 33,015 points, and the leaderboard page shows every member exactly what each level opens." },
           { q: "Who can see what is posted?", a: "Only the people let in, and you. Community pages and their pictures are shown only to a browser that is let in, and they are kept out of search engines." },
           { q: "Can members see each other's email addresses?", a: "No. Other members see only the name someone chose, and the directory lists only those who asked to be listed. You see members' addresses in your studio, because they are your buyers." },

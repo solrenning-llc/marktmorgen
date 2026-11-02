@@ -114,7 +114,7 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
         typeof r.evidence !== "string" || !r.evidence.trim() || r.evidence.length > 1000 ||
         typeof r.triggerEvidence !== "string" || !r.triggerEvidence.trim() || r.triggerEvidence.length > 1000) return null;
     for (const key of ["revision", "startsAt", "until", "maximumAttempts", "maximumCommandUnits", "checkpointBytes", "maximumTriggerInvocations"]) if (!integer(r[key])) return null;
-    if (Number(r.revision) < 1 || Number(r.startsAt) > now || Number(r['until']) <= now || Number(r['until']) <= Number(r.startsAt) ||
+    if (Number(r.revision) < 1 || Number(r.revision) > 1_000_000_000 || Number(r.startsAt) > now || Number(r['until']) <= now || Number(r['until']) <= Number(r.startsAt) ||
         Number(r.maximumAttempts) < 1 || Number(r.maximumAttempts) > 1000 || Number(r.maximumCommandUnits) < 64 || Number(r.maximumCommandUnits) > 64_000 ||
         Number(r.checkpointBytes) < 4096 || Number(r.checkpointBytes) > 8192 || Number(r.maximumTriggerInvocations) < 1 || Number(r.maximumTriggerInvocations) > 1000) return null;
     p.recovery = r;
@@ -300,7 +300,7 @@ if not ok or type(g)~='table' or type(g.recovery)~='table' or not now then retur
 local r=g.recovery
 local clock=redis.call('TIME')
 local serverNow=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
-if math.abs(now-serverNow)>60000 or now<r.startsAt or now>=r['until'] or r.version~=1 or r.revision<1 or r.revision%1~=0 or r.maximumAttempts<1 or r.maximumAttempts>1000 or r.maximumCommandUnits<64 or r.maximumCommandUnits>64000 or r.checkpointBytes<4096 or r.checkpointBytes>8192 or r.maximumTriggerInvocations<1 or r.maximumTriggerInvocations>1000 then return {'unknown'} end
+if math.abs(now-serverNow)>60000 or now<r.startsAt or now>=r['until'] or r.version~=1 or r.revision<1 or r.revision>1000000000 or r.revision%1~=0 or r.maximumAttempts<1 or r.maximumAttempts>1000 or r.maximumCommandUnits<64 or r.maximumCommandUnits>64000 or r.checkpointBytes<4096 or r.checkpointBytes>8192 or r.maximumTriggerInvocations<1 or r.maximumTriggerInvocations>1000 then return {'unknown'} end
 now=serverNow
 if now<r.startsAt or now>=r['until'] or (family~='shipment' and family~='confirmation') or #fp~=64 or #owner~=48 then return {'unknown'} end
 local pt,at=redis.call('TYPE',KEYS[1]).ok,redis.call('TYPE',KEYS[2]).ok
@@ -324,7 +324,7 @@ if raw then
  for _,field in ipairs({'revision','maximumChecks','attempts','units','index','leaseUntil'}) do
   local n=v[field];if type(n)~='number' or n<0 or n>9007199254740991 or n%1~=0 then return {'unknown'} end
  end
- if v.revision<1 or v.maximumChecks<1 or v.maximumChecks>10000 or v.attempts>1000 or v.units~=v.attempts*64 or v.index<1 or v.index>#v.ids+1 or type(v.fingerprint)~='string' or #v.fingerprint~=64 or string.find(v.fingerprint,'[^a-f0-9]') or type(v.reviewId)~='string' or #v.reviewId<1 or #v.reviewId>128 or (v.family~='shipment' and v.family~='confirmation') or (v.phase~='capturing' and v.phase~='active' and v.phase~='done' and v.phase~='unsupported') or type(v.owner)~='string' or (v.owner~='' and (#v.owner~=48 or string.find(v.owner,'[^a-f0-9]'))) or ((v.owner=='')~=(v.leaseUntil==0)) then return {'unknown'} end
+ if v.revision<1 or v.revision>1000000000 or v.maximumChecks<1 or v.maximumChecks>10000 or v.attempts>1000 or v.units~=v.attempts*64 or v.index<1 or v.index>#v.ids+1 or type(v.fingerprint)~='string' or #v.fingerprint~=64 or string.find(v.fingerprint,'[^a-f0-9]') or type(v.reviewId)~='string' or #v.reviewId<1 or #v.reviewId>128 or (v.family~='shipment' and v.family~='confirmation') or (v.phase~='capturing' and v.phase~='active' and v.phase~='done' and v.phase~='unsupported') or type(v.owner)~='string' or (v.owner~='' and (#v.owner~=48 or string.find(v.owner,'[^a-f0-9]'))) or ((v.owner=='')~=(v.leaseUntil==0)) then return {'unknown'} end
  local seen={};local size=0
  for key,id in pairs(v.ids) do
   if type(key)~='number' or key<1 or key>#v.ids or key%1~=0 or type(id)~='string' or #id~=64 or string.find(id,'[^a-f0-9]') or seen[id] then return {'unknown'} end

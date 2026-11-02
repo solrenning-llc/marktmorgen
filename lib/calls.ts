@@ -43,6 +43,7 @@
  * booking also takes its hosts' time on every store at once, atomically
  * (lib/host-claims.ts), under the same lock as everything here.
  */
+import type { DepositFigures } from "@/lib/deposit-code";
 import { chargeNow } from "@/lib/call-deposit";
 import { type CallPlace, placeIcsLines, placeLine, whereOf } from "@/lib/call-place";
 import { admitOrders } from "@/lib/order-admission";
@@ -661,6 +662,12 @@ export function callCheckoutBody(input: {
   team?: { hosts: string[]; claim: string } | null;
   /** The affiliate a lead is credited to once the call takes place, where the store pays per booking (lib/affiliate-leads.ts). */
   lead?: string | null;
+  /**
+   * A discount code on a booking with a deposit (lib/deposit-code.ts): off
+   * the whole price, already read and figured; the deposit is never more
+   * than the discounted price, and the rest is what is left of it.
+   */
+  code?: { id: string; code: string; figures: DepositFigures } | null;
 }): URLSearchParams {
   const { store, product, start, end, buyerTz, origin } = input;
   const pkg = input.fromPackage;
@@ -670,7 +677,12 @@ export function callCheckoutBody(input: {
   const lang = LANGUAGES[parseLanguage(store.language)];
   const when = `${readableTime(start, buyerTz, lang.locale)} (${zoneName(start, buyerTz, lang.locale)})`;
   // Never from a package: the package was the payment.
-  const due = pkg ? { cents: product.priceCents, rest: 0 } : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
+  const code = pkg ? null : input.code ?? null;
+  const due = pkg
+    ? { cents: product.priceCents, rest: 0 }
+    : code
+      ? { cents: code.figures.charged, rest: code.figures.rest }
+      : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
   const name = `${product.title} \u2014 ${when}`;
   const body = new URLSearchParams({
     mode: "payment",
@@ -697,16 +709,27 @@ export function callCheckoutBody(input: {
     cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
-  if (due.rest > 0) {
+  if (due.rest > 0 || code) {
     // Said on Stripe's own page, before paying, and kept on the sale for the creator.
     const said = formatMoney(due.rest, store.currency, lang.locale);
+    const bw = bookingWords(store.language);
     // The creator's own summary first, then the sentence, kept whole within Stripe's 500 characters.
-    const sentence = bookingWords(store.language).depositRest(said, store.name);
+    // With a code, what it took off the whole price is said too (the owner's decision of 2 November 2026).
+    const sentence = [code ? bw.codeOffPrice(code.code, formatMoney(code.figures.off, store.currency, lang.locale)) : "", due.rest > 0 ? bw.depositRest(said, store.name) : ""].filter(Boolean).join(" ");
     const summary = product.summary ? product.summary.slice(0, Math.max(0, 500 - sentence.length - 3)) : "";
     body.set("line_items[0][price_data][product_data][description]", summary ? `${summary} \u2014 ${sentence}` : sentence.slice(0, 500));
-    body.set("metadata[deposit]", String(due.cents));
-    body.set("metadata[rest]", String(due.rest));
-    body.set("payment_intent_data[metadata][rest]", String(due.rest));
+    if (due.rest > 0) {
+      body.set("metadata[deposit]", String(due.cents));
+      body.set("metadata[rest]", String(due.rest));
+      body.set("payment_intent_data[metadata][rest]", String(due.rest));
+    }
+    if (code) {
+      // The whole price, the code and what it took off, on the sale for the creator's orders.
+      body.set("metadata[price]", String(product.priceCents));
+      body.set("metadata[code]", code.code);
+      body.set("metadata[code_off]", String(code.figures.off));
+      body.set("payment_intent_data[metadata][code]", code.code);
+    }
   }
   if (input.team) {
     body.set("metadata[hosts]", input.team.hosts.join(","));
@@ -719,8 +742,8 @@ export function callCheckoutBody(input: {
     body.set("cancel_url", pkg.back);
     // Nothing is paid, so Stripe makes no payment of it to carry these.
     for (const key of [...body.keys()]) if (key.startsWith("payment_intent_data")) body.delete(key);
-  } else if (store.hasDiscounts && due.rest === 0) body.set("allow_promotion_codes", "true");
-  // With a deposit, a code would come off the deposit alone, and its minimum be checked against it: no code box until that is decided (520 [LB1], 5b).
+  } else if (store.hasDiscounts && due.rest === 0 && !code) body.set("allow_promotion_codes", "true");
+  // With a deposit, Stripe's box would take a code off the deposit alone: the code is typed on the booking page instead and taken off the whole price (lib/deposit-code.ts).
   // Sent by an affiliate: credited to them, at today's share (lib/affiliates.ts).
   // A booking is one product, with nothing else able to ride along, so a
   // share of nothing is a sale that earns nothing and is not written down.
@@ -757,6 +780,8 @@ export async function holdAndCheckout(input: {
   start: number;
   buyerTz: string;
   origin: string;
+  /** A discount code on a booking with a deposit, already read and figured (lib/deposit-code.ts). */
+  code?: { id: string; code: string; figures: DepositFigures } | null;
   /** The affiliate whose link the buyer followed, and the share it earns. */
   via?: { aff: string; rate: number } | null;
   /** The affiliate a lead is credited to once the call takes place (callCheckoutBody). */
@@ -819,11 +844,12 @@ export async function holdAndCheckout(input: {
     }
 
     const pkg = input.fromPackage ?? null;
-    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, lead: input.lead ?? null });
+    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, lead: input.lead ?? null, code: input.code ?? null });
     // The share of the sale, when the store's plan has one (lib/platform-share.ts).
     // A session from a package pays nothing here: its share was taken on the package.
     if (!pkg) {
-      const mayComeOff = store.hasDiscounts && shareBps(store) > 0 ? await codesMayTakeOff(store.stripeAccountId, store.currency) : [];
+      // A code typed on the booking page is already off the amount, and Stripe's page offers none then.
+      const mayComeOff = store.hasDiscounts && shareBps(store) > 0 && !input.code ? await codesMayTakeOff(store.stripeAccountId, store.currency) : [];
       applyShare(body, store, { recurring: false, least: leastPaid(linesTotal(body).cents, mayComeOff) });
     }
 

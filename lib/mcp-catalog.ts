@@ -9,11 +9,35 @@
  * Moved here unchanged from app/api/mcp/route.ts, where the tools themselves
  * are still dispatched.
  */
-export type McpTool = {
+type ToolDraft = {
   name: string;
   description: string;
   inputSchema: { type: string; properties: Record<string, unknown>; additionalProperties: boolean };
   annotations: { readOnlyHint: boolean };
+};
+
+/**
+ * A tool as served, with a human title beside its name (MCP's `title`, also
+ * in `annotations.title`): connector directories show it, and Anthropic's
+ * asks every tool for a title and a read-only or destructive hint (unit 8,
+ * 2 November 2026).
+ */
+export type McpTool = Omit<ToolDraft, "annotations"> & { title: string; annotations: { readOnlyHint: boolean; title: string } };
+
+const TITLES: Readonly<Record<string, string>> = {
+  get_numbers: "Store numbers",
+  list_products: "List products",
+  get_revenue_by_channel: "Revenue by channel",
+  get_funnel: "Visit-to-sale funnel",
+  get_product_numbers: "Product numbers",
+  get_buyers: "Buyers in numbers",
+  get_worth_knowing: "Worth knowing",
+  get_memberships: "Membership numbers",
+  get_emails: "Emails and sequences",
+  get_affiliates: "Affiliates",
+  get_live: "Live and today",
+  get_numbers_for_days: "Numbers for any days",
+  get_store: "Which store",
 };
 
 export const MCP_SERVER = { name: "marktmorgen", version: "1.1.0" } as const;
@@ -23,7 +47,7 @@ export const MCP_INSTRUCTIONS =
 
 export const MCP_PROTOCOL = "2025-06-18";
 
-export const MCP_TOOLS: readonly McpTool[] = [
+const DRAFTS: readonly ToolDraft[] = [
   {
     name: "get_numbers",
     description:
@@ -95,3 +119,9 @@ export const MCP_TOOLS: readonly McpTool[] = [
     annotations: { readOnlyHint: true },
   },
 ];
+
+/** Every tool, with its title; a tool without one fails the tests rather than shipping untitled. */
+export const MCP_TOOLS: readonly McpTool[] = DRAFTS.map((tool) => {
+  const title = TITLES[tool.name] ?? "";
+  return { ...tool, title, annotations: { ...tool.annotations, title } };
+});

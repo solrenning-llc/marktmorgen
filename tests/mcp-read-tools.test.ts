@@ -8,6 +8,7 @@ import { POST } from "@/app/api/mcp/route";
 import { makeKey } from "@/lib/api-keys";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { liveTool, rangeTool } from "@/lib/mcp-tools";
+import { MCP_TOOLS } from "@/lib/mcp-catalog";
 import type { RangeData } from "@/lib/stats";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -41,6 +42,11 @@ async function main(): Promise<void> {
       const body = (await response.json()) as { result: { isError: boolean; content: { text: string }[] } };
       return { isError: body.result.isError, value: JSON.parse(body.result.content[0].text) as Record<string, unknown> };
     };
+
+    part("Every tool has a title and a read-only hint (what connector directories ask for)");
+    is("tools without a title", MCP_TOOLS.filter((t) => !t.title || t.annotations.title !== t.title).map((t) => t.name), []);
+    is("every tool says it reads only", MCP_TOOLS.every((t) => t.annotations.readOnlyHint === true), true);
+    is("names are 64 characters or fewer", MCP_TOOLS.every((t) => t.name.length <= 64), true);
 
     part("get_live: right now and today, counted, nobody named");
     const live = await tool("get_live");

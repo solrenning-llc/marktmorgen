@@ -37,7 +37,7 @@ part("Nothing for what is not a store or a product");
 is("no store", shortcode({ product: "abc123def" }), "");
 is("a store with a slash in it", shortcode({ store: "../evil", product: "abc123def" }), "");
 is("a product with a quote in it", shortcode({ store: "harbor-kitchen", product: 'abc"><script>' }), "");
-is("a colour that is not one falls back", shortcode({ store: "harbor-kitchen", product: "abc123def", fill: "red;background:url(x)" }).includes("background:#15112e"), true);
+is("a color that is not one falls back", shortcode({ store: "harbor-kitchen", product: "abc123def", fill: "red;background:url(x)" }).includes("background:#15112e"), true);
 
 part("The script: the very same bytes, once per page, only when used");
 is("the plugin's script is the studio's, byte for byte", php("echo MARKTMORGEN_LOADER;"), loaderSource(SITE_URL));

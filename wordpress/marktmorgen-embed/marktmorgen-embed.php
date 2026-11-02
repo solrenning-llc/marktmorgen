@@ -82,8 +82,8 @@ function marktmorgen_tag($raw)
     return substr(preg_replace('/[^a-z0-9._-]/', '', strtolower(trim((string) $raw))), 0, 30);
 }
 
-/** A colour as #rrggbb, or the default the studio uses. */
-function marktmorgen_colour($raw, $fallback)
+/** A color as #rrggbb, or the default the studio uses. */
+function marktmorgen_color($raw, $fallback)
 {
     return preg_match('/^#[0-9a-f]{6}$/i', (string) $raw) ? (string) $raw : $fallback;
 }
@@ -114,8 +114,8 @@ function marktmorgen_link($attrs)
     if ($text === '') {
         $text = $product !== '' ? 'Buy now' : 'Join the list';
     }
-    $fill = marktmorgen_colour($attrs['fill'] ?? '', '#15112e');
-    $on_fill = marktmorgen_colour($attrs['text_color'] ?? '', '#ffffff');
+    $fill = marktmorgen_color($attrs['fill'] ?? '', '#15112e');
+    $on_fill = marktmorgen_color($attrs['text_color'] ?? '', '#ffffff');
     $style = 'display:inline-block;padding:14px 28px;border-radius:999px;background:' . $fill . ';color:' . $on_fill
         . ";font:600 16px/1.25 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;text-decoration:none;";
     $href = marktmorgen_href($store, $product, marktmorgen_tag($attrs['place'] ?? ''), marktmorgen_tag($attrs['campaign'] ?? ''));

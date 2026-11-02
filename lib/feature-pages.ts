@@ -4,6 +4,7 @@ import { courseBeginnerQuestions } from "@/lib/course-faq";
 import { membershipBeginnerQuestions } from "@/lib/membership-faq";
 import { callBeginnerQuestions } from "@/lib/call-faq";
 import { storeBeginnerQuestions } from "@/lib/store-page-faq";
+import { deliveryBeginnerQuestions } from "@/lib/delivery-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -723,6 +724,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about delivery",
         items: [
+          // 534 [FQ1], unit 6: what someone starting out asks, answered by the code (lib/delivery-faq.ts).
+          ...deliveryBeginnerQuestions(),
           { q: "How does a buyer get a file again after three days?", a: "At the bottom of your store page: “Bought something here? Get it again.” They type the address they paid with and receive a link to a page with everything that address bought from you, read from your Stripe account. No account and no password." },
           { q: "Can a buyer pass the download around?", a: "The download is tied to their order and to a short window, and the file is fetched through a link that expires in minutes. A leaked link does not become a free copy for everyone. With stamping on, a PDF also carries the buyer's email on every page." },
           { q: "What if a buyer was refunded?", a: "A sale you refunded in full stops downloading at once and no longer appears when they ask to get their purchases again, because both read your Stripe account each time. A partial refund keeps both. A file already saved cannot be taken back." },

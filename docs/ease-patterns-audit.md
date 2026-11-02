@@ -14,13 +14,24 @@ The screen-by-screen audit that 487 [IT4] asks for: what was checked, what was f
 
   Without `autoComplete="off"`, a browser is asked to offer the creator's own address there. "off" asks it not to; some browsers may still offer it, so this reduces the mistake rather than ruling it out.
 - **Number fields:** about thirty `type="number"` fields. Most hold counts (days, percent, people, keys). The monthly goal in `components/path-onboarding.tsx` is an amount, and the dynamic fields in `components/person-fields.tsx` and `components/email-studio.tsx` hold the creator's own numbers. All of them already open the number keyboard, and the amount already sets its `inputMode`. Nothing changed.
-- **Phone fields:** the app has none.
+- **Phone fields:** none with `type="tel"`. Corrected on 2 November 2026: the WhatsApp row of a store's profiles (`components/socials-editor.tsx`) holds a phone number, typed as text, so it opened the letter keyboard (see "Second pass" below).
 - **Money fields:** the text fields whose names mention a price are headings or sentences ("The launch price ends in", "What is compared"), not amounts. The amounts already use `inputMode="decimal"`, or `numeric` for JPY, as the discount editor does.
 
 **Fixed.**
 - The three email fields in `components/` take `autoComplete="off"`, as the other fields for someone else's address already do (for example the gift recipient in `components/store-product.tsx`).
 - "Move to" in `app/studio/page.tsx` takes `autoComplete="off"` too, now that the file is no longer held by an open PR. Nothing waits any more.
 - The test fails if any email field in the app, `<input>` or `<EmailField>`, gives no `autocomplete`. It extracts whole tags and recognizes a type chosen in code.
+
+### Second pass (2 November 2026)
+
+Re-read with the same brace-counting parser, looking also at fields whose type is chosen in code. Two fields were missed:
+
+- **The WhatsApp number in a store's profiles** (`components/socials-editor.tsx`) is a phone number typed as text, with `autoComplete="off"`. It now opens the phone keyboard (`inputMode="tel"`) and may be filled in with the person's own number (`autoComplete="tel"`). A pasted wa.me link is still taken: `inputMode` only picks the keyboard and limits nothing that is pasted, and `socialUrl` reads wa.me addresses. A number filled in by the browser comes as the browser kept it, which may be without the country code; the field's example still asks for it, and the line under the row shows the link it makes before saving.
+- **The email row of the same list** is the address shown on the store, usually the creator's own, and it also had `autoComplete="off"`. It now offers the person's own address (`autoComplete="email"`). A handle or a link on any other network is still not filled in. Each row is its own autofill section (`section-profile-<row>`), so choosing a suggestion in one row never fills another one with an address or a number that would be shown on the store.
+
+The choice is one function, `profileKeyboard`, held by `tests/socials-keyboards.test.ts`. Not changed:
+- The two number fields in `components/affiliate-studio.tsx`, while another agent's open PR holds that file. They already open the number keyboard by their type.
+- The other `type="number"` fields, for the reason given above.
 
 ## Pattern 4: a label always visible (1 November 2026, first pass)
 

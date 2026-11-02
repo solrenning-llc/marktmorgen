@@ -47,6 +47,17 @@ function hasLarger(tier: Tier | undefined): boolean {
   return tier === "creator" ? PRO_ON_SALE : tier === "pro";
 }
 
+/**
+ * The words for a page's "allowance-<reason>" code (lib/metered-limits.ts, serviceRefusalCode): the store's calls
+ * to connected services used, in its own window; no place this month; or not counted just now. Null for any other code.
+ */
+export function serviceAllowanceWords(store: AllowanceStore, code: string, now = Date.now()): string | null {
+  if (code === "allowance-pool") return POOL_FULL_WORDS;
+  if (code === "allowance-unknown") return "This can't be counted right now. Try again in a minute.";
+  if (code !== "allowance-used") return null;
+  return usedWords("integration", allowanceFor(store, "integration", now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended.integration === 0), standingOf(store, now / 1000), PLANS_ON_SALE, hasLarger(store.tier));
+}
+
 export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, n = 1, now = Date.now(), asked = false): Promise<Taken> {
   const whole = allowanceFor(store, kind, now / 1000);
   const limit = asked ? askedCeiling(whole) : whole;

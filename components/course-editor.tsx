@@ -62,7 +62,8 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   video_unavailable: "Videos cannot be taken in just now. Try again in a few minutes.",
-  slow_down: "That is a lot of videos in one hour. Try again a little later.",
+  // Also the store's calls to connected services used, or no place this month (lib/metered-limits.ts): no reason is claimed.
+  slow_down: "Videos can't start uploading just now. Try again later.",
   upload_stopped: "The upload stopped before the end, and could not go on. Check your connection and upload the video again.",
   caption_format: "That file could not be read as captions. Upload a .vtt or .srt file with a time on every caption.",
   caption_empty: "That file is empty.",

@@ -614,7 +614,7 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration"),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
-      { file: "lib/metered-limits.ts", names: ["withinService"] },
+      { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
     ],
     basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart.",
   },

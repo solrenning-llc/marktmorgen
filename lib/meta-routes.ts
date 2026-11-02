@@ -6,7 +6,7 @@
  * Meta app.
  */
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { noticeCreator } from "@/lib/account-notice";
@@ -32,10 +32,11 @@ export async function startMeta(request: NextRequest): Promise<Response> {
   // 232 [CA1] 4b3: no new connection while the plan's costs are paused (lib/integration-pause.ts).
   const paused = integrationPauseWord(store);
   if (paused) return back(origin, store, paused);
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(origin, store, "limited");
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(origin, store, "funding");
   const named = store.statsId ? store : await ensureStatsId(ref);
   if (!named?.statsId || !store.sid) return back(origin, store, "error");
-  if (!(await withinService("metaads-start", named.statsId, 10, 600, named))) return back(origin, store, "limited");
+  const refused = await withinServiceWhy("metaads-start", named.statsId, 10, 600, named);
+  if (refused) return back(origin, store, serviceRefusalCode(refused, "limited"));
   try {
     const url = await beginMeta({ statsId: named.statsId, sid: store.sid, sessionCookie: request.cookies.get(SESSION_COOKIE)?.value ?? "", email, redirect: `${origin}${CALLBACK}` });
     return new Response(null, { status: 303, headers: { Location: url, "Cache-Control": "no-store" } });
@@ -71,7 +72,7 @@ export async function finishMetaConnect(request: NextRequest): Promise<Response>
   if (code.length > 2048 || !/^[A-Za-z0-9._~/+=#-]+$/.test(code)) return back(origin, store, "error");
   const paused = integrationPauseWord(store);
   if (paused) return back(origin, store, paused);
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(origin, store, "limited");
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(origin, store, "funding");
   try {
     const result = await finishMeta({
       statsId: taken.statsId,

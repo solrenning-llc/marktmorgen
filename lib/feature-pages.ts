@@ -17,6 +17,8 @@ import { calendarBeginnerQuestions } from "@/lib/calendar-faq";
 import { webhookBeginnerQuestions } from "@/lib/webhook-faq";
 import { discordBeginnerQuestions } from "@/lib/discord-faq";
 import { affiliateBeginnerQuestions } from "@/lib/affiliate-faq";
+import { phoneBeginnerQuestions } from "@/lib/phone-faq";
+import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
@@ -2300,7 +2302,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "How it works",
         items: [
           { title: "On iPhone, install the studio", body: "In Safari: Share, then “Add to Home Screen.” On Android and on a computer, notifications come straight from the browser, and the studio can be installed there too." },
-          { title: "Turn notifications on", body: "In the studio, choose which of the five you want on that device, and send yourself a test." },
+          { title: "Turn notifications on", body: "In the studio, choose which ones you want on that device, and send yourself a test." },
           { title: "It arrives as it happens", body: "Sent the moment the sale or the booking is confirmed, without making any buyer wait for it." },
         ],
       },
@@ -2314,8 +2316,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "handshake", title: "Affiliate applications", body: "Someone confirmed an application to your program." },
           { icon: "chat", title: "Course comments", body: "A student commented under a lesson: which lesson, and the start of what they wrote." },
           { icon: "video", title: "Live events", body: "One of your community's live events starts in 15 minutes: time to open the room.", href: "/platform/live-events" },
-          { icon: "lock", title: "Written for a lock screen", body: "Amounts, titles and times: never a buyer's name or email address." },
-          { icon: "users", title: "Each person their own", body: "Up to ten devices each. Your team members see only their own devices, and hear only what their role may see." },
+          { icon: "lock", title: "Written for a lock screen", body: "Amounts, titles, times and the start of a lesson comment, as the student wrote it. We never add a buyer's name or email address." },
+          { icon: "users", title: "Each person their own", body: `Up to ${MAX_DEVICES} devices each. Your team members see only their own devices, and hear only what their role may see.` },
         ],
       },
       {
@@ -2334,6 +2336,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about phone notifications",
         items: [
+          // 534 [FQ1], unit 19: what someone starting out asks, answered by the code (lib/phone-faq.ts).
+          ...phoneBeginnerQuestions(),
           { q: "Which plan is it on?", a: `Every plan, the ${PLAN_AT.creator} one included.` },
           { q: "Does a new device get notifications without me knowing?", a: "No. You are emailed each time notifications are turned on for a new device." },
         ],

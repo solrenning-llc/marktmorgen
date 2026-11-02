@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 import { useHydrated } from "@/components/use-hydrated";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -8,7 +9,6 @@ import { STUDIO_SCOPE, STUDIO_WORKER } from "@/components/studio-app";
 import type { DeviceView, PhoneEvent, PhoneView } from "@/lib/phone-alerts";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
-const MAX_DEVICES = 10;
 
 /** Every event, in the order the studio lists them, with what each one says. */
 const EVENTS: { key: PhoneEvent; label: string; hint: string }[] = [
@@ -383,7 +383,11 @@ export function PhoneAlertsPanel({ view: initial }: { view: PhoneView }) {
               <span className="font-semibold text-ink">Live in 15 minutes</span> — the community live event, its start time and
               how many people RSVP&apos;d.
             </li>
-            <li>They never show a buyer&apos;s or an applicant&apos;s name or email address, so nothing private sits on your lock screen.</li>
+            <li>
+              <span className="font-semibold text-ink">New comment on a lesson</span> — which lesson, and the start of what the
+              student wrote, as they wrote it.
+            </li>
+            <li>We never add a buyer&apos;s or an applicant&apos;s name or email address; a comment&apos;s start shows only what the student typed.</li>
             <li>
               Sales from a buyer who closed the page before coming back from Stripe arrive within about five minutes. Reports and
               applications are held to twenty of each an hour.

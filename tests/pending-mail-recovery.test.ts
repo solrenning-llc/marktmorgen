@@ -21,6 +21,16 @@ test('an explicit finite recovery grant belongs to the same mail review', () => 
  assert.ok(shipmentMailPolicy(policy, now, false), 'a valid bounded construction grant must be captured');
 });
 
+test('explicit recovery origin coverage admits a bounded hundred without changing legacy encoding', () => {
+ const legacy={...shipmentPolicy(now),recovery:recovery()};
+ const captured=shipmentMailPolicy(legacy,now,false);assert.ok(captured?.recovery);
+ assert.equal(Object.hasOwn(captured.recovery,'maximumOrigins'),false);
+ assert.equal(JSON.stringify(captured.recovery),JSON.stringify(recovery()),'the legacy grant bytes remain identical');
+ const larger=shipmentMailPolicy({...legacy,recovery:{...recovery(),maximumOrigins:100}},now,false);
+ assert.ok(larger?.recovery,'explicitly financed100-origin capacity must be captured');
+ assert.equal(Object.getOwnPropertyDescriptor(larger.recovery,'maximumOrigins')?.value,100);
+});
+
 test('ordinary pending storage evidence never supplies recovery capacity', () => {
  const p = shipmentMailPolicy(shipmentPolicy(now), now, false);
  assert.ok(p);

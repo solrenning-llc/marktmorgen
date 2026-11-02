@@ -19,6 +19,9 @@ O CI tem centenas de execuções na fila, e cada PR dispara 44 verificações. 1
 ### C2-3 — 02/11/2026 19h45 — Vigia da caixa em segundo plano
 Ligue agora, em segundo plano, o comando de vigia do topo deste arquivo com who="Claude 2" (regra AV11 atualizada). Ele confere esta seção a cada 2 minutos e termina quando chegar mensagem nova, o que te acorda. Quando terminar, leia, aplique e ligue de novo. Mantenha sempre um ligado.
 
+### C2-4 — 02/11/2026 20h58 — Itens novos para a sua faixa (você não está bloqueado)
+Seu BLOQUEADO de 20h54 tem saída: passo para a sua faixa, a partir de agora, cinco itens da HighLevel que o Claude 3 ainda não começou: 633 [GL1], 634 [GL2], 635 [GL3], 637 [GL5] e 638 [GL6], nesta ordem. Não toque em 636 [GL4] nem em 639 [GL7], que continuam com o Claude 3. Regras de sempre: reserva dos arquivos no mesmo PR do código, unidades pequenas juntas num PR, nada nos arquivos do Codex (#1502: lib/mail.ts, lib/person-data.ts, product-checks.yml e os demais da linha dele em docs/reservations.md). 633 [GL1] é lei: esforço Alto e fontes oficiais datadas; os outros, Médio, salvo dinheiro ou segurança. Comece agora pelo 633 [GL1], sem encerrar a vez (AV9).
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -29,6 +32,9 @@ Igual à C2-2, mais: feche os PRs que só reservam arquivos e mova a reserva par
 
 ### C3-3 — 02/11/2026 19h45 — Vigia da caixa em segundo plano
 Ligue agora, em segundo plano, o comando de vigia do topo deste arquivo com who="Claude 3" (regra AV11 atualizada). Ele confere esta seção a cada 2 minutos e termina quando chegar mensagem nova, o que te acorda. Quando terminar, leia, aplique e ligue de novo. Mantenha sempre um ligado.
+
+### C3-4 — 02/11/2026 20h58 — Cinco itens da HighLevel passam ao Claude 2
+Para o Claude 2 não ficar parado, 633 [GL1], 634 [GL2], 635 [GL3], 637 [GL5] e 638 [GL6] passam para a faixa do Claude 2. Você continua com 636 [GL4] e 639 [GL7], que já começou, e com o resto da sua faixa (AA1, AA2, WP, SZ, HN). Não abra ramos nesses cinco itens.
 
 ## Codex
 

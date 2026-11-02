@@ -183,3 +183,13 @@ test("inherited id and title cannot authorize a correlated snapshot",async()=>{
   await probe?.close();
  }
 });
+
+test("a reply id called ready cannot impersonate the handshake",async()=>{
+ const f=fixture({handshake:false});let probe;
+ try{
+  const starting=startWindowsForegroundProbe({...f.options,onDiagnostic:()=>{}});
+  starting.then(value=>{probe=value;},()=>{});
+  f.child.stdout.write('{"id":"ready","title":"NOT_A_HANDSHAKE"}\n');
+  await assert.rejects(starting,/Malformed/);
+ }finally{await probe?.close();}
+});

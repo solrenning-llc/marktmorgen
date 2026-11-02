@@ -88,6 +88,10 @@ const PIXEL_CONNECT = [
   "https://ads-twitter.com",
   "https://ads-api.twitter.com",
   "https://analytics.twitter.com",
+  // Reddit (613 [WP12] unit 2): its script's host, as Reddit's page gives it (Reddit item 1). The host its
+  // script reports to was not in the pages read, so Reddit's own domain is allowed for it; nobody else's.
+  "https://www.redditstatic.com",
+  "https://*.reddit.com",
 ];
 
 /** Frames Google's tag opens for ad conversions. Nothing else is framed from elsewhere. */

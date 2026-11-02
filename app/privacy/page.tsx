@@ -259,7 +259,7 @@ export default function PrivacyPage() {
           <strong className="text-black">
             Ad measurement a creator switches on.
           </strong>{" "}
-          A creator can add their own Meta, Google, TikTok, Pinterest or X pixel to
+          A creator can add their own Meta, Google, TikTok, Pinterest, X or Reddit pixel to
           their store. When they do, and only once it is allowed, that
           store&apos;s pages load that platform&apos;s script, which sets its own cookies and tells
           the platform about page views, checkouts started, requests for free
@@ -279,6 +279,12 @@ export default function PrivacyPage() {
           events with X, and never about checkouts started; where a visitor
           has not said yes (because their country does not ask first), X is
           told to limit how it uses the data, with X&apos;s own setting for that.
+          Reddit is told about page visits, purchases and requests for free
+          products, never about checkouts started and never an email address;
+          where a visitor has not said yes, it is marked Limited Data Use with
+          the visitor&apos;s country and, when known, region, and the creator
+          has to switch off Reddit&apos;s automatic matching of email addresses
+          before the pixel can be added.
         </p>
         <p id="ads-server">
           <strong className="text-black">
@@ -1772,7 +1778,7 @@ export default function PrivacyPage() {
             <strong className="text-black">
               The ad platforms a creator adds
             </strong>
-            {" "}(Meta, Google, TikTok, Pinterest or X), whose scripts on that
+            {" "}(Meta, Google, TikTok, Pinterest, X or Reddit), whose scripts on that
             store&apos;s pages receive what the section on ad measurement
             lists, only once they are allowed; and
           </li>

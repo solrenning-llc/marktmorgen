@@ -10,7 +10,7 @@
  * server enforces.
  */
 
-export type PixelKind = "meta" | "google" | "tiktok" | "pinterest" | "x";
+export type PixelKind = "meta" | "google" | "tiktok" | "pinterest" | "x" | "reddit";
 
 /**
  * X names each event by an ID the creator makes in X's Events Manager, sent
@@ -21,15 +21,21 @@ export type PixelKind = "meta" | "google" | "tiktok" | "pinterest" | "x";
  */
 export type XEvents = { purchase: string | null; lead: string | null };
 
-/** `xEvents` only while the X pixel is on. */
-export type Pixels = Record<PixelKind, string | null> & { xEvents?: XEvents };
+/**
+ * `xEvents` only while the X pixel is on. `redditMatchingOff` only while the
+ * Reddit pixel is on: the creator's word that Reddit's Automated Advanced
+ * Matching is switched off for it (613 [WP12] unit 2). It reads email
+ * addresses shown or typed on a page, and store pages show buyers' own; no
+ * switch for it in code was confirmed, so the pixel is saved only with it.
+ */
+export type Pixels = Record<PixelKind, string | null> & { xEvents?: XEvents; redditMatchingOff?: true };
 
-export const NO_PIXELS: Pixels = { meta: null, google: null, tiktok: null, pinterest: null, x: null };
+export const NO_PIXELS: Pixels = { meta: null, google: null, tiktok: null, pinterest: null, x: null, reddit: null };
 
-export const PIXEL_KINDS: PixelKind[] = ["meta", "google", "tiktok", "pinterest", "x"];
+export const PIXEL_KINDS: PixelKind[] = ["meta", "google", "tiktok", "pinterest", "x", "reddit"];
 
-/** A field the studio sends that can be refused: a pixel, or one of X's two event IDs. */
-export type PixelField = PixelKind | "xPurchase" | "xLead";
+/** A field the studio sends that can be refused: a pixel, one of X's two event IDs, or Reddit's matching confirmation. */
+export type PixelField = PixelKind | "xPurchase" | "xLead" | "redditMatching";
 
 export const PIXEL_INFO: Record<
   PixelKind,
@@ -71,6 +77,14 @@ export const PIXEL_INFO: Record<
     example: "a1b2c",
     where: "X Events Manager: the ID of your pixel, letters and numbers only.",
     pattern: /^[A-Za-z0-9]{3,32}$/,
+  },
+  // Reddit's exact ID format is not in the pages read either: a safe shape.
+  reddit: {
+    name: "Reddit",
+    label: "Reddit Pixel ID",
+    example: "a2_abc123",
+    where: "Reddit Events Manager: the ID of your pixel, letters, numbers and underscores only.",
+    pattern: /^[A-Za-z0-9_]{3,40}$/,
   },
 };
 
@@ -119,6 +133,10 @@ export function readPixels(raw: unknown): { ok: true; pixels: Pixels } | { ok: f
   if (purchase && !X_EVENT_PATTERN.test(purchase)) return { ok: false, bad: "xPurchase" };
   if (lead && !X_EVENT_PATTERN.test(lead)) return { ok: false, bad: "xLead" };
   if (pixels.x) pixels.xEvents = { purchase: purchase || null, lead: lead || null };
+  if (pixels.reddit) {
+    if (value.redditMatchingOff !== true) return { ok: false, bad: "redditMatching" };
+    pixels.redditMatchingOff = true;
+  }
   return { ok: true, pixels };
 }
 
@@ -141,6 +159,9 @@ export function parsePixels(raw: unknown): Pixels {
     };
     pixels.xEvents = { purchase: one(kept.purchase), lead: one(kept.lead) };
   }
+  // A Reddit pixel kept without the creator's word on matching is not put on a page.
+  if (pixels.reddit && value.redditMatchingOff !== true) pixels.reddit = null;
+  if (pixels.reddit) pixels.redditMatchingOff = true;
   return pixels;
 }
 

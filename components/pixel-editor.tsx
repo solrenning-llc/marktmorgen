@@ -31,7 +31,7 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
   const router = useRouter();
   const ready = useSyncExternalStore(subscribeReady, clientReady, serverReady);
   const disclosure = useRef<HTMLDetailsElement>(null);
-  const [draft, setDraft] = useState<Record<PixelField, string>>(() => ({
+  const [draft, setDraft] = useState<Record<Exclude<PixelField, "redditMatching">, string>>(() => ({
     meta: pixels.meta ?? "",
     google: pixels.google ?? "",
     tiktok: pixels.tiktok ?? "",
@@ -39,7 +39,10 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
     x: pixels.x ?? "",
     xPurchase: pixels.xEvents?.purchase ?? "",
     xLead: pixels.xEvents?.lead ?? "",
+    reddit: pixels.reddit ?? "",
   }));
+  // The creator's word that Reddit's Automated Advanced Matching is off (613 [WP12] unit 2, lib/pixels.ts).
+  const [redditOff, setRedditOff] = useState(pixels.redditMatchingOff === true);
   const [busy, setBusy] = useState(false);
   const [bad, setBad] = useState<PixelField | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +52,7 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
     event.preventDefault();
     if (!ready || busy) return;
     setError(null);
-    const local = readPixels(draft);
+    const local = readPixels({ ...draft, redditMatchingOff: redditOff });
     if (!local.ok) {
       setBad(local.bad);
       return;
@@ -69,7 +72,7 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
         router.refresh();
         return;
       }
-      if (data.error === "format" && data.bad && (X_EVENT_FIELDS.some((f) => f.field === data.bad) || PIXEL_KINDS.some((kind) => kind === data.bad))) setBad(data.bad);
+      if (data.error === "format" && data.bad && (data.bad === "redditMatching" || X_EVENT_FIELDS.some((f) => f.field === data.bad) || PIXEL_KINDS.some((kind) => kind === data.bad))) setBad(data.bad);
       else setError((typeof data.error === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, data.error) ? MESSAGES[data.error] : undefined) ?? "Your pixel IDs are still here. Saving could not be confirmed. Reload to check the saved IDs before trying again.");
     } catch {
       setError(MESSAGES.server_error);
@@ -84,7 +87,7 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
         Ad pixels
       </h2>
       <p className="mt-2 text-ink-soft">
-        Put your Meta, Google, TikTok, Pinterest or X pixel on your store, so the ads you run can see who visits, who
+        Put your Meta, Google, TikTok, Pinterest, X or Reddit pixel on your store, so the ads you run can see who visits, who
         starts to pay and who buys, with the amount. Included in your plan.
       </p>
 
@@ -159,6 +162,28 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
                     })}
                   </fieldset>
                 ) : null}
+                {kind === "reddit" ? (
+                  <div className="mt-3">
+                    <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-ink">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-5 w-5 shrink-0"
+                        checked={redditOff}
+                        onChange={(e) => setRedditOff(e.target.checked)}
+                        aria-invalid={bad === "redditMatching"}
+                        aria-describedby="px-redditMatching-help"
+                      />
+                      <span>
+                        <span className="font-semibold">Automated Advanced Matching is switched off for this pixel in Reddit.</span>
+                      </span>
+                    </label>
+                    <span id="px-redditMatching-help" className={`mt-1 block text-xs ${bad === "redditMatching" ? "font-semibold text-danger" : "text-ink-soft"}`}>
+                      {bad === "redditMatching"
+                        ? "Switch it off in your Reddit pixel's settings first, then check this box. Your store's pages show buyers' email addresses, which that setting would read."
+                        : "Reddit can read email addresses shown or typed on a page with it. Your store's pages show buyers' own, so switch it off in your Reddit pixel's settings; Marktmorgen never sends Reddit an email address."}
+                    </span>
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -168,7 +193,7 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
               Sent to them: a page view on every page of your store, a checkout started when someone presses buy or
               books, a lead when someone asks for something free, and a purchase with its amount once it is paid. X
               gets page views, and purchases and leads only for the events you give it an ID for; X is never told about
-              a checkout started.
+              a checkout started. Reddit gets page visits, purchases and leads, and nothing when a checkout starts.
             </p>
             <p className="mt-2">
               These platforms set cookies, so visitors in the EU, Iceland, Liechtenstein, Norway, the UK, Switzerland and

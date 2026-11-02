@@ -249,7 +249,7 @@ export default function TermsPage() {
           <strong className="text-black">
             Ad pixels, and purchases sent to ad platforms.
           </strong>{" "}
-          When you add a Meta, Google, TikTok, Pinterest or X pixel to your store,
+          When you add a Meta, Google, TikTok, Pinterest, X or Reddit pixel to your store,
           or give us an access token so that purchases, membership payments and
           sign-ups are also sent to that platform from our server, you are instructing us to send that data to
           that platform on your behalf, and you are responsible for doing so

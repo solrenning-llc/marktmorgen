@@ -68,13 +68,15 @@ export async function startWindowsForegroundProbe(options={}){
   try{
    let value;
    try{value=JSON.parse(line);}catch{throw Error("Malformed native foreground reply");}
+   if(!value||typeof value!=="object"||Array.isArray(value))throw Error("Malformed native foreground reply");
    if(value&&Object.hasOwn(value,"stage")){
     const expected=["powershell_started","interop_ready"][milestone];
     if(Object.keys(value).length!==1||readySeen||value.stage!==expected)throw Error("Malformed native foreground startup milestone");
     stage=value.stage;milestone++;diagnostic("startup_stage");return;
    }
-   const id=value?.ready===true&&Object.keys(value).length===1?"ready":value?.id;
-   if(id!=="ready"&&(typeof id!=="string"||!/^[0-9]+$/.test(id)||typeof value.title!=="string"||value.title.length>1023||Object.keys(value).length!==2))throw Error("Malformed native foreground reply");
+   const isReady=Object.hasOwn(value,"ready")&&value.ready===true&&Object.keys(value).length===1;
+   const id=isReady?"ready":Object.hasOwn(value,"id")?value.id:undefined;
+   if(!isReady&&(!Object.hasOwn(value,"title")||typeof id!=="string"||!/^[0-9]+$/.test(id)||typeof value.title!=="string"||value.title.length>1023||Object.keys(value).length!==2))throw Error("Malformed native foreground reply");
    const entry=pending.get(id);
    if(!entry)throw Error("Uncorrelated native foreground reply");
    if(id==="ready"){readySeen=true;stage="ready";diagnostic("ready");}

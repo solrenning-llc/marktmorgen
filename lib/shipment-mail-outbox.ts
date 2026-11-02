@@ -344,6 +344,7 @@ local function save()
  return true
 end
 if op=='next' then
+ local replaced=false
  if c and (r.revision<c.revision or (r.revision==c.revision and fp~=c.fingerprint)) then return {'held'} end
  if not c or r.revision>c.revision then
   if c and (g.reviewId==c.reviewId or g.maximumChecks<c.maximumChecks) then return {'held'} end
@@ -355,6 +356,14 @@ if op=='next' then
   local index=continuing and c.index or 1
   local currentFamily=continuing and c.family or 'shipment'
   c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,readBytes=0,ids=ids,index=index,family=currentFamily,phase=continuing and 'active' or 'capturing',owner='',leaseUntil=0}
+  replaced=true
+ end
+ -- A known other family does no variable source work. Fixed admission/guard
+ -- reads still require the explicit external trigger/infra funding envelope.
+ -- Commit a new accepted grant first, so no old ticket regains authority.
+ if c.phase=='active' and c.family~=family then
+  if replaced and not save() then return {'unknown'} end
+  return {'held'}
  end
  if c.phase=='done' or c.phase=='unsupported' then return {c.phase} end
  if c.attempts>=r.maximumAttempts or c.attempts>=r.maximumTriggerInvocations or c.units+64>r.maximumCommandUnits or c.readBytes+1048576>r.maximumReadBytes then return {'exhausted'} end

@@ -26,6 +26,8 @@ while ($null -ne ($line = [Console]::ReadLine())) {
 `;
 
 export async function startWindowsForegroundProbe(options={}){
+ // Real callers get separate finite budgets. A legacy explicit override
+ // retains both phases for existing short-lived test fixtures.
  const {env=process.env,platform=process.platform,launch=spawn,timeoutMs=3000,
   startupTimeoutMs=options.timeoutMs===undefined?10000:timeoutMs,
   onDiagnostic=event=>console.error("AX2_NVDA_NATIVE_DIAGNOSTIC:"+JSON.stringify(event))}=options;

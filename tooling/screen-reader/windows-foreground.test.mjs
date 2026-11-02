@@ -218,6 +218,8 @@ test("a hung default startup expires at ten seconds and still owns bounded clean
  const f=fixture({handshake:false,exitOnEnd:false}),events=[],options={...f.options};delete options.timeoutMs;
  const starting=startWindowsForegroundProbe({...options,onDiagnostic:e=>events.push(e)});
  const rejected=assert.rejects(starting,/startup.*deadline/);
+ // A preceding RED assertion may fail before the cleanup/rejection await.
+ rejected.catch(()=>{});
  try{
   t.mock.timers.tick(9999);assert.ok(!events.some(e=>e.event==="failed"));
   t.mock.timers.tick(1);await Promise.resolve();

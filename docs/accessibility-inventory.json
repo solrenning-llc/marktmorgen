@@ -1433,6 +1433,7 @@
     "components/review-form.tsx",
     "components/review-list.tsx",
     "components/review-photo-field.tsx",
+    "components/review-qr.tsx",
     "components/review-stars.tsx",
     "components/review-studio.tsx",
     "components/sale-editor.tsx",

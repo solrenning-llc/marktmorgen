@@ -60,12 +60,18 @@ export type WriteError =
   | "cannot_email"
   | "daily_limit"
   | "monthly_limit"
+  | "no_place"
   | "store_full"
   | "unavailable";
 
-type Done<T> = { ok: true; value: T } | { ok: false; error: WriteError };
+// `message`, when given, is said instead of the code's fixed words: the store's own figure, in its own window.
+type Done<T> = { ok: true; value: T } | { ok: false; error: WriteError; message?: string };
 
-const fail = <T>(error: WriteError): Done<T> => ({ ok: false, error });
+const fail = <T>(error: WriteError, message?: string): Done<T> => (message ? { ok: false, error, message } : { ok: false, error });
+
+/** A refusal of the store's API figure, said as lib/api-guard.ts says it: used, no place this month, or not counted. */
+export const refusedFigure = <T>(taken: { reason: "used" | "pool" | "unknown"; message: string }): Done<T> =>
+  taken.reason === "used" ? fail("monthly_limit", taken.message) : taken.reason === "pool" ? fail("no_place", taken.message) : fail("unavailable");
 
 function readEmail(raw: unknown): string {
   const email = normaliseEmail(typeof raw === "string" ? raw : "");
@@ -103,7 +109,11 @@ export async function addLead(store: Store, body: Record<string, unknown>): Prom
   const had = parseContact(before);
   if (!had && !(await withinLimit("api-add", store.sid ?? store.handle, ADDS_PER_DAY, 86_400))) return fail("daily_limit");
   // A contact written is API_WRITE_UNITS of the window's API requests, the request itself one of them.
-  if (!had && !(await takeAllowance(store, "api", API_WRITE_UNITS - 1)).ok) return fail("monthly_limit");
+  if (!had) {
+    // Used, or not counted just now (no place this month, or the database did not answer): said as each is.
+    const taken = await takeAllowance(store, "api", API_WRITE_UNITS - 1);
+    if (!taken.ok) return refusedFigure(taken);
+  }
   const [outcome] = await importContactRows(listId, [{ email, name, tags }], store);
   if (outcome === "left") return fail("unsubscribed");
   if (outcome === "full") return fail("list_full");
@@ -200,7 +210,8 @@ export async function giveAccess(
   if (already) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return fail("unavailable");
   if (!(await withinLimit("api-give", store.sid, GIVES_PER_DAY, 86_400))) return fail("daily_limit");
-  if (!(await takeAllowance(store, "api", API_WRITE_UNITS - 1)).ok) return fail("monthly_limit");
+  const taken = await takeAllowance(store, "api", API_WRITE_UNITS - 1);
+  if (!taken.ok) return refusedFigure(taken);
   const [isNew] = await grantImported(statsId, `api:${keyId}`, [{ email, productId: product.id, items }], undefined, store.sid, store);
   if (!store.pastBuyers) await setPastBuyers(storeRef(store));
   if (!isNew) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
@@ -263,7 +274,9 @@ export const WRITE_ERRORS: Record<WriteError, [number, string]> = {
   not_given_here: [404, "This address was not given this product through the API, so the API cannot take it back."],
   cannot_email: [409, "Emailing needs your store's plan to be active. Send notify: false, or start your plan."],
   daily_limit: [429, "That is as many as a store may add in a day through the API. Try again tomorrow."],
-  monthly_limit: [429, `Your store's API requests for this month are used (each contact added or product given counts as ${API_WRITE_UNITS}). They open again with your next billing month, or at once on a larger plan.`],
+  // Said with the store's own words when the write has them (refusedFigure); these are only the fallback.
+  monthly_limit: [429, `Your store's API requests are used (each contact added or product given counts as ${API_WRITE_UNITS}).`],
+  no_place: [429, "Stores without a paid plan are full for this month, so this can't run right now."],
   store_full: [409, "Your store's data room is full, so nothing was added. Delete something you no longer need, such as old posts, drafts, pages or contacts, or move to a larger plan."],
 };
 

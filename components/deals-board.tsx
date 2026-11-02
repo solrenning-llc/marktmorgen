@@ -133,7 +133,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
     const answer = await call(body);
     setBusy(false);
     if (answer.ok) {
-      toast(answer.workflows === "not_checked" ? `${done} Your studio requests for this month are used up, so the workflow its stage starts was not checked.` : done);
+      toast(answer.workflows === "not_checked" ? `${done} The workflow for this stage was not started for this person.` : done);
       after?.();
       startRefresh(() => router.refresh());
       return;

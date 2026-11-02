@@ -30,6 +30,7 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   upload_budget_unavailable: "New uploads are paused right now. Existing files and downloads are not changed by this pause.",
   uploads_pending: "Other uploads are using the remaining space. Finish or cancel them before trying again. If an earlier upload stopped, try again later.",
   upload_stopped: "The upload stopped before it finished. Check your connection, then choose the file again.",
-  slow_down: "This hour's upload allowance is used. Try again later.",
+  // Also the store's calls to connected services used, or no place this month (lib/metered-limits.ts): no reason is claimed.
+  slow_down: "Uploads can't start just now. Try again later.",
   files_unavailable: "File uploads are unavailable right now. Keep your file and try again in a few minutes.",
 };

@@ -1,3 +1,4 @@
+import { serviceAllowanceWords } from "@/lib/store-allowance";
 import { SalesLevers } from "@/components/sales-levers";
 import { costsPaused } from "@/lib/plan-standing";
 import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pause";
@@ -371,6 +372,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
   limited: {
     title: "That was a lot of tries",
     body: "Wait ten minutes, then connect again.",
+  },
+  // The paid period's resources could not be reserved (lib/contract-resource-window.ts): not a matter of tries.
+  funding: {
+    title: "Meta can't be connected just now",
+    body: "Connections can't be made just now. Nothing was changed; try again later.",
   },
   busy: {
     title: "Meta could not be reached",
@@ -788,6 +794,9 @@ export default async function StudioPage({
   const notice =
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
     STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
+    // A call to PayPal or Meta refused for the store's calls to connected services (lib/metered-limits.ts).
+    (store && typeof params.paypal === "string" && serviceAllowanceWords(store, params.paypal) ? { title: "PayPal can't be connected just now", body: serviceAllowanceWords(store, params.paypal) ?? "" } : undefined) ??
+    (store && typeof params.metaads === "string" && serviceAllowanceWords(store, params.metaads) ? { title: "Meta can't be connected just now", body: serviceAllowanceWords(store, params.metaads) ?? "" } : undefined) ??
     PAYPAL_NOTICES[typeof params.paypal === "string" ? params.paypal : ""] ??
     META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""] ??
     BILLING_NOTICES[BILLING_ALIASES[String(params.billing)] ?? (typeof params.billing === "string" ? params.billing : "")] ??

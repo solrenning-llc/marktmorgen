@@ -31,7 +31,7 @@ export function emailPlatformBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays
     },
     {
       q: "Can I try it before paying?",
-      a: `${tryBeforePaying("The connection", "the connection", onSale, trialDays)} Calls to your platform are one of those limits: once they are used, the studio says it cannot reach your platform just now. Nobody is sent until someone signs up for something free or buys, and your store can take a sign-up or open a checkout only on a plan${onSale ? " or its trial" : ""}.`,
+      a: `${tryBeforePaying("The connection", "the connection", onSale, trialDays)} Calls to your platform are one of those limits: once they are used, the studio says so and when they open again. Nobody is sent until someone signs up for something free or buys, and your store can take a sign-up or open a checkout only on a plan${onSale ? " or its trial" : ""}.`,
     },
   ];
 }

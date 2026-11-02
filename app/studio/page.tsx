@@ -95,6 +95,7 @@ import { keepHandle, webhooksView } from "@/lib/webhooks";
 import { PixelEditor } from "@/components/pixel-editor";
 import { ExitOfferEditor } from "@/components/exit-offer-editor";
 import { StoreLayoutEditor } from "@/components/store-layout-editor";
+import { VisitUsEditor } from "@/components/visit-us-editor";
 import { CollectionsEditor } from "@/components/collections-editor";
 import { BuyButtonEditor } from "@/components/buy-button-editor";
 import { CheckoutScriptEditor } from "@/components/checkout-script-editor";
@@ -1852,6 +1853,7 @@ export default async function StudioPage({
                     <>
                       <ExitOfferEditor current={store.exitOffer} free={free} />
                       {may("page") ? <StoreLayoutEditor sections={store.sections} announcement={store.announcement} products={published} /> : null}
+                      {may("page") ? <VisitUsEditor visitUs={store.visitUs} /> : null}
                       {may("page") ? <CollectionsEditor collections={store.collections ?? []} products={published} handle={store.handle} /> : null}
                       {may("page") ? (
                         <BuyButtonEditor

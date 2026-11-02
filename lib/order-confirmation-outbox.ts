@@ -688,7 +688,7 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
   const pipeline = runtime.pipeline ?? redisPipeline;
   if (onlyId === undefined && p.recovery) await recoverPendingMail("confirmation", deadline, runtime, async id => {
     try {
-      const reply = array(await pipeline([["TYPE", confirmationOriginRowKey(id)], ["GETRANGE", confirmationOriginRowKey(id), 0, SHIPMENT_MAIL_MAX_ROW_BYTES], ["GET", sourceKey(id)]]));
+      const reply = array(await pipeline([["TYPE", confirmationOriginRowKey(id)], ["GETRANGE", confirmationOriginRowKey(id), 0, SHIPMENT_MAIL_MAX_ROW_BYTES], ["GETRANGE", sourceKey(id), 0, 8192]]));
       if (!reply || reply.length !== 3 || typeof reply[1] !== "string") return null;
       if (reply[0] === "none" && reply[1] === "") return { raw: "" };
       if (reply[0] !== "string" || Buffer.byteLength(reply[1]) > SHIPMENT_MAIL_MAX_ROW_BYTES) return null;

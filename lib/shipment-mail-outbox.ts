@@ -117,7 +117,9 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
     if (Number(r.revision) < 1 || Number(r.revision) > 1_000_000_000 || Number(r.startsAt) > now || Number(r['until']) <= now || Number(r['until']) <= Number(r.startsAt) ||
         Number(r.maximumAttempts) < 1 || Number(r.maximumAttempts) > 1000 || Number(r.maximumCommandUnits) < 64 || Number(r.maximumCommandUnits) > 64_000 ||
         Number(r.checkpointBytes) < 4096 || Number(r.checkpointBytes) > 8192 || Number(r.maximumTriggerInvocations) < 1 || Number(r.maximumTriggerInvocations) > 1000) return null;
-    p.recovery = r;
+    const captured: Record<string, unknown> = Object.create(null);
+    for (const key of fields) captured[key] = r[key];
+    p.recovery = captured;
   }
   if (p.coveredOrigins !== undefined) {
     const input = p.coveredOrigins;
@@ -306,6 +308,7 @@ if now<r.startsAt or now>=r['until'] or (family~='shipment' and family~='confirm
 local pt,at=redis.call('TYPE',KEYS[1]).ok,redis.call('TYPE',KEYS[2]).ok
 if (pt~='none' and pt~='hash') or (at~='none' and at~='set') then return {'unknown'} end
 if pt=='none' then return {at=='none' and 'empty' or 'unknown'} end
+if redis.call('HSTRLEN',KEYS[1],'items')>16 or redis.call('HSTRLEN',KEYS[1],'bytes')>16 or redis.call('HSTRLEN',KEYS[1],'pendingRecovery')>8192 then return {'unknown'} end
 local financial=redis.call('HMGET',KEYS[1],'items','bytes')
 for _,value in ipairs(financial) do
  if type(value)~='string' or (#value>1 and string.sub(value,1,1)=='0') or string.find(value,'[^0-9]') or #value>16 or not tonumber(value) or tonumber(value)>9007199254740991 then return {'unknown'} end
@@ -382,7 +385,7 @@ if current~='' and ARGV[8]=='valid' then
   if (family=='shipment' and row.kind~=nil) or (family=='confirmation' and (row.kind~='confirmation' or row.originKind~=nil)) then return {'unknown'} end
   if KEYS[4]~=sourcePrefix..(family=='shipment' and row.session or id) or type(row.statsId)~='string' or type(row.person)~='string' then return {'unknown'} end
   local dt,st=redis.call('TYPE',KEYS[5]).ok,redis.call('TYPE',KEYS[4]).ok
-  if (dt~='none' and dt~='zset') or st~='string' or redis.call('GET',KEYS[4])~=row.sourceValue then return {'unknown'} end
+  if (dt~='none' and dt~='zset') or st~='string' or redis.call('GETRANGE',KEYS[4],0,8192)~=row.sourceValue then return {'unknown'} end
   local fencePrefix=family=='shipment' and 'nl:ship:mail:' or 'nl:order-confirmation:'
   if KEYS[6]~=fencePrefix..'closed:'..row.statsId or KEYS[7]~=fencePrefix..'erased:'..row.statsId..':'..row.person then return {'unknown'} end
   local supported=row.reviewId==g.reviewId

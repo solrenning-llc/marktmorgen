@@ -56,3 +56,52 @@ test("process errors refuse pending snapshots and retain their cause",async()=>{
  f.child.emit("error",Error("synthetic process fault"));await assert.rejects(read,/process failed/);
  await assert.rejects(probe.read(),/process failed/);await probe.close();
 });
+
+test("startup milestones are distinct from native window snapshots",async()=>{
+ const f=fixture({handshake:false}),events=[];
+ const starting=startWindowsForegroundProbe({...f.options,onDiagnostic:event=>events.push(event)});
+ f.child.stdout.write('{"stage":"powershell_started"}\n');
+ f.child.stdout.write('{"stage":"interop_ready"}\n');
+ f.child.stdout.write('{"ready":true}\n');
+ const probe=await starting;
+ assert.deepEqual(events.filter(e=>e.event==="startup_stage").map(e=>e.stage),["powershell_started","interop_ready"]);
+ assert.equal(events.find(e=>e.event==="ready")?.readySeen,true);
+ assert.ok(events.every(e=>Number.isInteger(e.elapsedMs)&&e.elapsedMs>=0&&e.elapsedMs<=60000));
+ assert.ok(events.every(e=>!Object.hasOwn(e,"title")),"Readiness is not a native snapshot");
+ await probe.close();
+});
+test("deadline identifies last startup stage and bounded stderr without exposing content",async()=>{
+ const f=fixture({handshake:false}),events=[];
+ const starting=startWindowsForegroundProbe({...f.options,timeoutMs:5,onDiagnostic:event=>events.push(event)});
+ f.child.stdout.write('{"stage":"powershell_started"}\n');
+ f.child.stderr.write('Add-Type CS1234 SECRET_DIAGNOSTIC_SENTINEL '+"x".repeat(100000));
+ await assert.rejects(starting,/deadline/);
+ const failure=events.find(e=>e.event==="failed");
+ assert.equal(failure?.reason,"deadline");
+ assert.equal(failure?.stage,"powershell_started");
+ assert.equal(failure?.readySeen,false);
+ assert.equal(failure?.stderrBytes,65536);
+ assert.equal(failure?.stderrBytesCapped,true);
+ assert.ok(failure?.stderrCategories.includes("interop_compile"));
+ assert.ok(!JSON.stringify(events).includes("SECRET_DIAGNOSTIC_SENTINEL"));
+ assert.ok(!JSON.stringify(events).includes("CS1234"));
+ assert.equal(f.child.stdin.writableEnded,true);
+});
+test("pre-ready process exit retains only allowlisted code and signal",async()=>{
+ const f=fixture({handshake:false}),events=[];
+ const starting=startWindowsForegroundProbe({...f.options,onDiagnostic:event=>events.push(event)});
+ f.child.emit("exit",23,"SIGKILL");
+ await assert.rejects(starting,/exited/);
+ const exit=events.find(e=>e.event==="exit");
+ assert.equal(exit?.exitCode,23);assert.equal(exit?.exitSignal,"SIGKILL");
+ assert.equal(exit?.readySeen,false);
+ assert.equal(events.find(e=>e.event==="failed")?.reason,"process_exit");
+});
+test("unterminated oversized stdout fails its bounded parser without leaking bytes",async()=>{
+ const f=fixture({handshake:false}),events=[];
+ const starting=startWindowsForegroundProbe({...f.options,onDiagnostic:event=>events.push(event)});
+ f.child.stdout.write('SECRET_STDOUT_SENTINEL'+"x".repeat(100000));
+ await assert.rejects(starting,/reply budget/);
+ assert.equal(events.find(e=>e.event==="failed")?.reason,"stdout_budget");
+ assert.ok(!JSON.stringify(events).includes("SECRET_STDOUT_SENTINEL"));
+});

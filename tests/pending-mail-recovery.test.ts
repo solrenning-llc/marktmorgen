@@ -130,3 +130,78 @@ test('normal physical workers recover original cap holds through real Lua and fi
   if(priorPool.length) await confirmationLocalPipeline([['HSET',pool,...priorPool.map(String)]]);
  }
 });
+
+/** Each opt-in owns only its captured keys, never a database-wide reset. */
+async function isolatedRecoveryProof(body:(pipeline:typeof confirmationLocalPipeline,pool:string,all:string)=>Promise<void>) {
+ const pool='nl:ship:mail:pool',all='nl:ship:mail:all';
+ const [prior,items,bytes,count]=await confirmationLocalPipeline([['HGETALL',pool],['HGET',pool,'items'],['HGET',pool,'bytes'],['SCARD',all]]);
+ assert.ok(Array.isArray(prior));assert.equal(count,0);assert.ok(items===null||items==='0');assert.ok(bytes===null||bytes==='0');
+ const made=new Set([pool,all]);
+ const pipeline:typeof confirmationLocalPipeline=async commands=>{
+  for(const c of commands){if(c[0]==='EVAL')c.slice(3,3+Number(c[2])).forEach(k=>made.add(String(k)));else if(['SET','HSET','SADD','ZADD'].includes(String(c[0])))made.add(String(c[1]));}
+  return confirmationLocalPipeline(commands);
+ };
+ try {await body(pipeline,pool,all);}finally{await confirmationLocalPipeline([['DEL',...made]]);if(prior.length)await confirmationLocalPipeline([['HSET',pool,...prior.map(String)]]);}
+}
+const redisOptIn=process.env.MARKTMORGEN_REDIS_INTEGRATION!=='1'||!process.env.CONFIRMATION_ORIGIN_REDIS_PORT;
+
+test('expired preparation with a historical index hole cannot hide later original shipment mail', {skip:redisOptIn}, async()=>{
+ await isolatedRecoveryProof(async(pipeline,pool)=>{
+  const clock=Date.now,old=shipmentPolicy();
+  const runtime={lifecycle:'active' as const,policy:{...old,maximumChecks:1},pipeline,now:clock};
+  const ids:string[]=[];
+  for(const tag of ['one','two']){
+   const input={statsId:'review_recovery_original',session:'cs_test_reviewRecovery00000'+tag,authorizedAt:clock(),
+    shipped:{at:Math.floor(clock()/1000),tracking:'https://example.test/track'},message:{from:'Store <mail@example.test>',to:'buyer@example.test',subject:'Original '+tag,text:'Immutable '+tag,replyTo:'owner@example.test'}};
+   assert.equal((await enqueueShipmentMail(input,runtime)).ok,true);ids.push(shipmentMailId(input.statsId,input.session));
+  }
+  ids.sort();
+  // Model a stopped preparation and a historical index hole after genuine
+  // enqueue/sealing. The selected message/fingerprint/source never changes.
+  for(const [i,id]of ids.entries()){
+   const key='nl:ship:mail:row:'+id,[raw]=await pipeline([['GET',key]]),row=JSON.parse(String(raw));
+   Object.assign(row,{state:i===0?'preparing':'queued',owner:i===0?'e'.repeat(48):'',leaseUntil:i===0?clock()-1000:0,next:i===0?clock()-1000:0,checks:1});
+   await pipeline([['SET',key,JSON.stringify(row)],['ZREM','nl:ship:mail:due',id]]);
+  }
+  const renewed={...runtime,policy:{...old,reviewId:'SYNTHETIC_REVIEW_PREPARATION',continuedReviewIds:[old.reviewId],maximumChecks:2,
+   recovery:{...recovery(),startsAt:clock()-1000,until:clock()+3600000}}};
+  assert.equal((await runShipmentMail(clock()+30000,async()=> 'waiting',renewed)).waiting,1,'the expired preparation must rejoin its normal bounded claim');
+  const [cursor]=await pipeline([['HGET',pool,'pendingRecovery']]);assert.equal(JSON.parse(String(cursor)).index,2,'the later snapshot position is reachable');
+  let sends=0;
+  const result=await runShipmentMail(clock()+30000,async(message,beforePost)=>{assert.match(message.subject,/^Original /);assert.equal(await beforePost(),true);sends++;return 'accepted';},renewed);
+  assert.equal(result.accepted,1);assert.equal(sends,1);assert.equal((await pipeline([['GET','nl:ship:mail:row:'+ids[1]]]))[0],null);
+ });
+});
+
+test('a genuine lost creation ACK after73h is recovered by normal workers without another checkout POST', {skip:redisOptIn}, async()=>{
+ await isolatedRecoveryProof(async(pipeline,pool,all)=>{
+  const clock=Date.now,started=clock(),descriptor=Object.getOwnPropertyDescriptor(Date,'now')!;
+  let f!:Awaited<ReturnType<typeof physicalPaidFixture>>;
+  try{
+   Date.now=()=>started-73*3600000;f=await physicalPaidFixture();const original=f.runtime.provider!;
+   f.runtime.provider=async(...args)=>{const response=await original(...args);if(args[0]==='POST')throw Error('Synthetic lost original creation ACK');if(args[2].split('?')[0]==='/checkout/sessions')return {object:'list',has_more:false,data:[]};return response;};
+   await assert.rejects(()=>createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime));
+  }finally{Object.defineProperty(Date,'now',descriptor);assert.deepEqual(Object.getOwnPropertyDescriptor(Date,'now'),descriptor);}
+  const id=originId(),source=await readConfirmationOrigin(id,f.runtime);assert.ok(source&&!source.row.session);
+  const row=source.row,keys=[confirmationOriginRowKey(id),`nl:order-confirmation:source:${id}`,'nl:order-confirmation:due',
+   `nl:order-confirmation:store:${row.statsId}`,`nl:order-confirmation:person:${row.statsId}:${row.person}`,pool,`nl:ship:mail:pool:${row.statsId}`,all];
+  await pipeline([['SET',keys[0],source.raw],['SET',keys[1],row.sourceValue],['ZADD',keys[2],row.next,id],
+   ...[3,4,7].map(i=>['SADD',keys[i],id]),['HSET',pool,'items',1,'bytes',row.bytes],['HSET',keys[6],'items',1,'bytes',row.bytes]]);
+  let available=false;const original=f.runtime.provider!;
+  const runtime={...f.runtime,pipeline,now:clock,policy:{...f.runtime.policy!,maximumChecks:1},provider:async(...args:Parameters<typeof original>)=>{
+   if(args[0]==='POST')throw Error('Recovery must never create another checkout');
+   if(args[2].split('?')[0]==='/checkout/sessions'&&available)return {object:'list',has_more:false,data:[...f.sessions.values()]};
+   return original(...args);
+  }};
+  assert.equal((await runOrderConfirmationMail(clock()+30000,async()=>{throw Error('No paid email');},runtime)).waiting,1);
+  const held=await readConfirmationOrigin(id,runtime);assert.ok(held);assert.equal(held.row.phase,'creation_unknown');assert.equal(held.row.checks,1);assert.equal(held.row.next,0);
+  available=true;
+  const renewed={...runtime,policy:{...runtime.policy,reviewId:'SYNTHETIC_REVIEW_CREATION_ACK',continuedReviewIds:[runtime.policy.reviewId],maximumChecks:2,
+   recovery:{...recovery(),startsAt:clock()-1000,until:clock()+3600000}}};
+  await runShipmentMail(clock()+30000,async()=>{throw Error('No shipment');},renewed);
+  assert.equal((await runOrderConfirmationMail(clock()+30000,async()=>{throw Error('No paid email');},renewed)).waiting,1);
+  const found=await readConfirmationOrigin(id,renewed);assert.ok(found?.row.session,'the ordinary worker must bind the original recovered session');
+  assert.equal(found.row.bodyDigest,held.row.bodyDigest);assert.equal(found.row.intentFingerprint,held.row.intentFingerprint);assert.equal(found.row.created,held.row.created);
+  assert.equal(f.calls.filter(c=>c.method==='POST').length,1,'only the original synthetic creation POST');
+ });
+});

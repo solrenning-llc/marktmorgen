@@ -208,7 +208,7 @@ async function tellSenderIsFull(): Promise<void> {
     const accepted = await sendEmail({ idempotencyKey: key, meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
-      subject: "List email is waiting: check sending availability",
+      subject: "List email is waiting for Amazon SES",
       text: [
         "Creator list email sends only through Amazon SES.",
         "Sending waits until availability can be confirmed.",

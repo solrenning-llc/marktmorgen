@@ -772,7 +772,7 @@ async function main(): Promise<void> {
       const content = notice?.body.Content as { Simple?: { Body?: { Text?: { Data?: string } } } } | undefined;
       const words = content?.Simple?.Body?.Text?.Data ?? "";
       is(`${sample.name}: canonical subject does not assert a changing diagnosis`, notice?.subject,
-        "List email is waiting: check sending availability");
+        "List email is waiting for Amazon SES");
       is(`${sample.name}: no numeric quota or current usage is embedded`,
         [words.includes("50,000"), words.includes("40,000"), words.includes("allows -1"), words.includes("14 emails per second")], [false, false, false, false]);
       is(`${sample.name}: unknown capacity waits for confirmation`, words.includes("Sending waits until availability can be confirmed."), true);

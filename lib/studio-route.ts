@@ -149,7 +149,15 @@ export async function resolveAccess(
   // 612 [WP11]: the owner may require two-step sign-in of the whole team; a
   // member without an authenticator app or a passkey opens nothing of this
   // store until they set one up (their own account settings stay open).
-  if (await teamTwoStepBlocks(access.store, email, access.role)) return { ok: false, reason: "two_step", store: access.store };
+  if (await teamTwoStepBlocks(access.store, email, access.role)) {
+    // Not asked for by name: somebody who owns a store of their own is taken
+    // there rather than held at another store's door.
+    if (!pinned) {
+      const own = (await storeForEmail(email)) ?? (await accountStores(email))[0] ?? null;
+      if (own) access = { email, store: own, ref: storeRef(own), role: "owner" };
+    }
+    if (access.role !== "owner") return { ok: false, reason: "two_step", store: access.store };
+  }
   if (need && need !== "member" && !can(access.role, need)) return { ok: false, reason: "forbidden", store: access.store };
   return { ok: true, access };
 }
@@ -272,7 +280,7 @@ export async function creatorFrom(
     if (result.reason === "no_store") return away(origin, "/studio?stripe=nostore");
     if (result.reason === "gone") return away(origin, "/studio?team=gone");
     if (result.reason === "locked") return away(origin, "/studio?two-step=locked");
-    if (result.reason === "two_step") return away(origin, "/studio?two-step=required#two-step");
+    if (result.reason === "two_step") return away(origin, `/studio/second-step?store=${result.store?.sid ?? ""}`);
     if (result.reason === "used") return away(origin, studioPath(result.store ?? { sid: "" }, `why=${result.why ?? "used"}`, "paused"));
     return away(origin, studioPath(result.store ?? { sid: "" }, "team=forbidden"));
   }
@@ -321,6 +329,8 @@ export async function studioView(
     result = await resolveAccess(email, { remembered: cookies.get(STORE_COOKIE)?.value ?? null }, need);
     fellBack = true;
   }
+  // 612 [WP11]: the team requires a second step this person has not set up: to the page that sets it up.
+  if (!result.ok && result.reason === "two_step" && result.store?.sid) redirect(`/studio/second-step?store=${result.store.sid}`);
   if (!result.ok) return { ok: false, reason: result.reason, email, store: result.store };
 
   let { access } = result;

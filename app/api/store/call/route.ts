@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: read }, { status: 400 });
     }
     setup = read;
+    // In person (lib/call-place.ts; 520 [LB1]) is not offered yet: the booking page, the page after paying and the
+    // buyer's list of purchases do not say where, and the editor does not keep it. Refused until they do (unit 3).
+    if (setup.place) return Response.json({ ok: false, error: "place" }, { status: 400 });
     if (setup.meet && !(await usableProviders(guarded.store.statsId)).includes(setup.meet)) {
       return Response.json({ ok: false, error: `meet_${setup.meet}` }, { status: 400 });
     }

@@ -213,6 +213,8 @@ const en = {
   icsAlarm: (title: string) => `${title} in 15 minutes`,
   icsJoin: (room: string) => `Join: ${room}`,
   icsWillSend: (store: string) => `${store} will send the link to join.`,
+  /** An in-person booking (lib/call-place.ts): where it is, in the email and the calendar file. */
+  whereAt: (address: string) => `Where: ${address}`,
 
   // ---- A package of sessions ---------------------------------------------------------
   /** On Stripe's page. */
@@ -389,6 +391,7 @@ const es: BookingWords = {
   icsAlarm: (title) => `${title} en 15 minutos`,
   icsJoin: (room) => `Unirse: ${room}`,
   icsWillSend: (store) => `${store} enviará el enlace para unirse.`,
+  whereAt: (address) => `Dónde: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sesión", "sesiones")}`,
   packageDescription: (sessions, limit) =>
@@ -565,6 +568,7 @@ const fr: BookingWords = {
   icsAlarm: (title) => `${title} dans 15${S}minutes`,
   icsJoin: (room) => `Participer${S}: ${room}`,
   icsWillSend: (store) => `${store} enverra le lien pour participer.`,
+  whereAt: (address) => `Où${S}: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions}${S}${pluralFr(sessions, "séance", "séances")}`,
   packageDescription: (sessions, limit) =>
@@ -738,6 +742,7 @@ const de: BookingWords = {
   icsAlarm: (title) => `${title} in 15 Minuten`,
   icsJoin: (room) => `Teilnehmen: ${room}`,
   icsWillSend: (store) => `${store} schickt den Link zur Teilnahme.`,
+  whereAt: (address) => `Wo: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "Termin", "Termine")}`,
   packageDescription: (sessions, limit) =>
@@ -912,6 +917,7 @@ const it: BookingWords = {
   icsAlarm: (title) => `${title} tra 15 minuti`,
   icsJoin: (room) => `Partecipa: ${room}`,
   icsWillSend: (store) => `${store} invierà il link per partecipare.`,
+  whereAt: (address) => `Dove: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessione", "sessioni")}`,
   packageDescription: (sessions, limit) =>
@@ -1085,6 +1091,7 @@ const nl: BookingWords = {
   icsAlarm: (title) => `${title} over 15 minuten`,
   icsJoin: (room) => `Meedoen: ${room}`,
   icsWillSend: (store) => `${store} stuurt de link om mee te doen.`,
+  whereAt: (address) => `Waar: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessie", "sessies")}`,
   packageDescription: (sessions, limit) =>
@@ -1259,6 +1266,7 @@ const pt: BookingWords = {
   icsAlarm: (title) => `${title} daqui a 15 minutos`,
   icsJoin: (room) => `Entrar: ${room}`,
   icsWillSend: (store) => `${store} vai enviar a ligação para entrar.`,
+  whereAt: (address) => `Onde: ${address}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessão", "sessões")}`,
   packageDescription: (sessions, limit) =>

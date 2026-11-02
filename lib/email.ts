@@ -235,7 +235,7 @@ async function tellAmazonIsDown(why: string): Promise<void> {
         "",
         "What to look at: the Amazon SES console, under Account dashboard (is the account paused or under review?) and Identities (is the sending domain still verified?).",
       ].join("\n"),
-    });
+    }, undefined);
   } catch (error) {
     console.error("telling the inbox Amazon SES is down failed", error);
   }
@@ -306,11 +306,11 @@ const onceKey = (key: string) => `nl:ses:once:${createHash("sha256").update(key)
  * acceptance is unknown, including a pre-existing legacy claim. A claim is
  * not proof of delivery, nor a source-funded lifetime reservation.
  */
-async function viaAmazon(message: OneMessage, to: string): Promise<boolean | null> {
+async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey: string | undefined): Promise<boolean | null> {
   const config = sesConfig();
   if (!config || !(await sesReady())) return false;
   // Amazon keeps no record of a key, so the once-only promise is kept here.
-  const once = message.idempotencyKey ? onceKey(message.idempotencyKey) : null;
+  const once = originalIdempotencyKey ? onceKey(originalIdempotencyKey) : null;
   if (once) {
     try {
       const reply: unknown = await redisPipeline([["SET", once, "1", "NX", "EX", 86_400]]);
@@ -370,14 +370,17 @@ export async function sendEmail(message: OneMessage, runtime: ResendTransportRun
   const to = oneAddress(message.to);
   if (!to) return false;
   if (!isSenderConfigured() || serviceMailKnownUnavailable(runtime)) return false;
+  // Keep one identity across awaits and both routes. Preserve the original
+  // string and the existing structural contract, including inherited keys.
+  const originalIdempotencyKey = message.idempotencyKey;
   if (isSesConfigured()) {
     if (!(await metered(message.meter, 1))) return false;
-    const amazon = await viaAmazon(message, to);
+    const amazon = await viaAmazon(message, to, originalIdempotencyKey);
     if (amazon === true) return true;
     if (amazon === null) return false;
-    return viaResend(message, runtime); // The existing SES path already took its allowance.
+    return viaResend(message, originalIdempotencyKey, runtime); // The existing SES path already took its allowance.
   }
-  return viaResend(message, runtime, lazyMeter(message.meter, 1));
+  return viaResend(message, originalIdempotencyKey, runtime, lazyMeter(message.meter, 1));
 }
 
 /** Durable shipment work owns its lifetime claim in the outbox, not the
@@ -418,7 +421,7 @@ export function queuedShipmentMailSender(runtime: ResendTransportRuntime = {}): 
 export const sendQueuedShipmentMail: ShipmentMailDispatch = queuedShipmentMailSender();
 
 /** One email through Resend: the first sender, and the floor under the other. */
-async function viaResend(message: OneMessage, runtime: ResendTransportRuntime = {}, authorization?: MeterAuthorization): Promise<boolean> {
+async function viaResend(message: OneMessage, originalIdempotencyKey: string | undefined, runtime: ResendTransportRuntime = {}, authorization?: MeterAuthorization): Promise<boolean> {
   const usageCredential = usageKey() ?? "";
   const key = keyFor(message.from);
   if (!key) return false;
@@ -432,7 +435,7 @@ async function viaResend(message: OneMessage, runtime: ResendTransportRuntime = 
   let from = message.from;
   // Separate intentional service calls with identical text; retries within
   // this invocation keep one stable provider key and budget identity.
-  let under = message.idempotencyKey?.trim() ? message.idempotencyKey : `nimbus-service:${randomBytes(16).toString("hex")}`;
+  let under = originalIdempotencyKey?.trim() ? originalIdempotencyKey : `nimbus-service:${randomBytes(16).toString("hex")}`;
   const payload = {
     to: [to],
     subject: headerText(message.subject),

@@ -1091,6 +1091,16 @@ async function main(): Promise<void> {
 
   part("One original identity before sender awaits, with the legacy structural contract");
   const identityClaim = (key: string) => `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
+  redis.clear(); clear(); account = approved();
+  const entryKey = "identity-before-meter-await-A", laterKey = "identity-before-meter-await-B";
+  redis.run(["SET", identityClaim(entryKey), "1", "EX", 86_400]);
+  const entryMessage = { ...letter("entry@example.test"), idempotencyKey: entryKey };
+  const entryPending = sendEmail(entryMessage);
+  entryMessage.idempotencyKey = laterKey;
+  is("capture precedes the first sender await, including metering", [await entryPending, amazon.length, resend.length, redis.run(["GET", identityClaim(laterKey)])], [false, 0, 0, null]);
+  let rejectedIdentityReads = 0;
+  const rejectedMessage = Object.defineProperty(letter("not-an-address"), "idempotencyKey", { get() { rejectedIdentityReads += 1; return entryKey; } });
+  is("synchronous recipient refusal does not evaluate identity", [await sendEmail(rejectedMessage), rejectedIdentityReads], [false, 0]);
   for (const fallback of [false, true]) {
     for (const changing of [false, true]) {
       redis.clear(); clear();

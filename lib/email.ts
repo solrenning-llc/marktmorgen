@@ -218,9 +218,15 @@ export function hasResend(): boolean {
 async function tellAmazonIsDown(why: string): Promise<void> {
   try {
     const day = new Date().toISOString().slice(0, 10);
-    const [first] = await redisPipeline([["SET", `nl:ses:told:${day}`, "1", "NX", "EX", 2 * 86_400]]);
-    if (first === null || !hasResend()) return;
-    await viaResend({
+    const key = `nl:ses:told:${day}`;
+    const read: unknown = await redisPipeline([["GET", key]]);
+    if (!Array.isArray(read)) return;
+    const length = Object.getOwnPropertyDescriptor(read, "length");
+    if (!length || !("value" in length) || length.value !== 1) return;
+    const previous = Object.getOwnPropertyDescriptor(read, "0");
+    // Only confirmed absence permits a send; an unknown read is not absence.
+    if (!previous || !("value" in previous) || previous.value !== null || !hasResend()) return;
+    const accepted = await viaResend({
       meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
@@ -230,12 +236,15 @@ async function tellAmazonIsDown(why: string): Promise<void> {
         "",
         why || "(no reason given)",
         "",
-        "Service email may use Resend while SES is unavailable. List-only email waits for SES; this notice does not confirm delivery.",
+        "Service email can use Resend only while the account review, credential binding and paid fallback quota are confirmed. Missing proof blocks that route. List-only email waits for SES; this notice does not confirm delivery.",
         "The account is checked again automatically. Sending resumes only when its current status allows it.",
         "",
         "What to look at: the Amazon SES console, under Account dashboard (is the account paused or under review?) and Identities (is the sending domain still verified?).",
       ].join("\n"),
-    }, undefined);
+    }, key);
+    // A failed/uncertain send consumes no notice period. The stable sender
+    // identity also protects a retry if this additional write loses its ACK.
+    if (accepted === true) await redisPipeline([["SET", key, "1", "NX", "EX", 2 * 86_400]]);
   } catch (error) {
     console.error("telling the inbox Amazon SES is down failed", error);
   }

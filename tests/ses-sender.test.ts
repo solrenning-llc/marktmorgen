@@ -21,7 +21,7 @@ import { POST } from "@/app/api/mail/ses/route";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { isMailable, upsertContact } from "@/lib/contacts";
 import { hasResend, isSenderConfigured, sendBatch, sendListBatch, sendEmail, sentKey, sentThisMonth } from "@/lib/email";
-import { listCeiling, reserveDay, senderRoom } from "@/lib/mail";
+import { listCeiling, reserve as reserveMail, reserveDay, senderRoom } from "@/lib/mail";
 import { LIST_TAG, STORE_TAG, healthId, listHealth } from "@/lib/mail-health";
 import { HOLD_SECONDS, isSesConfigured, notYetTaken, sesBulkRoom, sesConfig, sesSentLast24h, sesState } from "@/lib/ses";
 import { stringToSign, type SnsMessage } from "@/lib/sns";
@@ -714,7 +714,7 @@ async function main(): Promise<void> {
 
 
 
-  part("An uncertain existing owner-notice claim sends no email");
+  part("An uncertain existing owner-notice read sends no email");
   const claimPipeline = redis.pipeline;
   const ownerNoticeKey = `nl:sender:${new Date().toISOString().slice(0, 7)}:told`;
   let noticeGetterCalls = 0;
@@ -724,7 +724,7 @@ async function main(): Promise<void> {
   Object.setPrototypeOf(inheritedNotice, { 0: "OK" });
   try {
     for (const [name, reply] of [
-      ["empty", []], ["already claimed", [null]], ["boolean", [true]], ["lowercase", ["ok"]],
+      ["empty", []], ["already written", ["1"]], ["boolean", [true]], ["lowercase", ["ok"]],
       ["extra", ["OK", "OK"]], ["computed", computedNotice], ["inherited", inheritedNotice],
       ["lost acknowledgement", new Error("synthetic applied owner claim reply lost")],
     ] as [string, unknown][]) {
@@ -733,8 +733,7 @@ async function main(): Promise<void> {
       const askedBefore = asked;
       redis.pipeline = async commands => {
         if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === sentKey()) return [];
-        if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === ownerNoticeKey) {
-          await claimPipeline.call(redis, commands);
+        if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === ownerNoticeKey) {
           if (reply instanceof Error) throw reply;
           return reply as unknown[];
         }
@@ -742,7 +741,7 @@ async function main(): Promise<void> {
       };
       is(`${name}: unconfirmed notice claim keeps list admission held`, await reserveDay(1), false);
       is(`${name}: no provider email or account query is authorized`, [amazon.length, resend.length, asked], [0, 0, askedBefore]);
-      is(`${name}: a possibly applied claim is retained`, (await claimPipeline.call(redis, [["GET", ownerNoticeKey]]))[0], "1");
+      is(`${name}: an unknown read creates no notice mark`, (await claimPipeline.call(redis, [["GET", ownerNoticeKey]]))[0], null);
     }
     is("owner-notice claim getters were never invoked", noticeGetterCalls, 0);
   } finally {
@@ -760,7 +759,8 @@ async function main(): Promise<void> {
     for (const sample of noticeCases) {
       account = approved({ SendQuota: { Max24HourSend: sample.max, MaxSendRate: 14 } });
       askAgain();
-      redis.run(["DEL", `nl:sender:${new Date().toISOString().slice(0, 7)}:told`]);
+      const sampleKey = `nl:sender:${new Date().toISOString().slice(0, 7)}:told`;
+      redis.run(["DEL", sampleKey, `nl:ses:once:${createHash("sha256").update(sampleKey).digest("hex").slice(0, 40)}`]);
       clear();
       redis.pipeline = async commands => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === sentKey()
         ? sample.usage === null ? [] : [sample.usage]
@@ -1262,6 +1262,105 @@ async function main(): Promise<void> {
   fetched.length = 0;
   const elsewhere = await POST(announce({ Type: "SubscriptionConfirmation", Token: "abc", SubscribeURL: "https://example.net/confirm", Message: "You have chosen to subscribe" }));
   is("a link anywhere else is not opened", [elsewhere.status, fetched.filter((u) => u.includes("example.net"))], [400, []]);
+
+  part("Owner notices record acceptance only after the real sender accepts");
+  const dailyNotice = `nl:ses:told:${new Date().toISOString().slice(0, 10)}`;
+  const monthlyNotice = `nl:sender:${new Date().toISOString().slice(0, 7)}:told`;
+  const acceptedKey = process.env.RESEND_API_KEY;
+  process.env.AWS_SES_ROLE_ARN = "arn:aws:iam::123456789012:role/marktmorgen-email";
+  const originalNoticeFetch = globalThis.fetch;
+  const originalNoticePipeline = redis.pipeline;
+  const notices: [string, string, () => Promise<unknown>][] = [
+    ["SES down", dailyNotice, () => sendEmail(letter("notice-trigger@example.test"))],
+    ["general sender", monthlyNotice, () => reserveDay(1)],
+    ["list-only sender", monthlyNotice, () => reserveMail(store, 1, true)],
+  ];
+  try {
+    for (const [purpose, marker, trigger] of notices) {
+      const setup = () => {
+        redis.clear(); clear(); resendKeys.clear();
+        account = approved();
+        amazonSays = () => ({ status: 400, type: "AccountSuspendedException", message: "synthetic paused" });
+        if (purpose !== "SES down") {
+          account = approved({ ProductionAccessEnabled: false });
+          redis.run(["SET", sentKey(), String(listCeiling())]);
+        }
+      };
+      // Deliberately unregistered: synthetic refusal, not proof of production NULL policy.
+      setup(); process.env.RESEND_API_KEY = "re_SYNTHETIC_NOTICE_UNREVIEWED_ONLY";
+      await trigger(); await trigger();
+      is(`${purpose}: refused fallback consumes no notice mark`, [redis.run(["GET", marker]), amazon.length, resend.length], [null, 0, 0]);
+      process.env.RESEND_API_KEY = acceptedKey;
+      setup();
+      const beforePosts: unknown[] = [];
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(String(input));
+        if (url.hostname === "api.resend.com" && init?.method === "POST") {
+          const body = JSON.parse(String(init.body));
+          if (body.to?.[0] === SUPPORT) beforePosts.push(redis.run(["GET", marker]));
+        }
+        return originalNoticeFetch(input, init);
+      }) as typeof fetch;
+      await trigger();
+      is(`${purpose}: marker absent at provider POST, written after acceptance`, [beforePosts, redis.run(["GET", marker])], [[null], "1"]);
+      await trigger();
+      is(`${purpose}: confirmed notice mark skips subsequent owner email`, resend.filter(m => m.to === SUPPORT).length, 1);
+      const notice = resend.find(m => m.to === SUPPORT);
+      is(`${purpose}: sender has a stable purpose/period identity`, notice?.key, marker);
+      for (const outcome of ["rejected", "uncertain"] as const) {
+        setup();
+        let attempted = 0;
+        globalThis.fetch = (async (input, init) => {
+          const url = new URL(String(input));
+          if (url.hostname === "api.resend.com" && init?.method === "POST" && JSON.parse(String(init.body)).to?.[0] === SUPPORT) {
+            attempted += 1;
+            is(`${purpose}/${outcome}: no mark before POST`, redis.run(["GET", marker]), null);
+            if (outcome === "rejected") return new Response(JSON.stringify({ message: "synthetic rejection" }), { status: 422 });
+            await originalNoticeFetch(input, init);
+            throw new TypeError("synthetic provider ACK lost after acceptance");
+          }
+          return originalNoticeFetch(input, init);
+        }) as typeof fetch;
+        await trigger(); await trigger();
+        is(`${purpose}/${outcome}: no acceptance mark`, redis.run(["GET", marker]), null);
+        is(`${purpose}/${outcome}: uncertain acceptance cannot dispatch twice`, resend.filter(m => m.to === SUPPORT).length, outcome === "uncertain" ? 1 : 0);
+        is(`${purpose}/${outcome}: provider was exercised`, attempted > 0, true);
+      }
+      globalThis.fetch = originalNoticeFetch;
+      let noticeReadGetters = 0;
+      const accessorRead = Object.defineProperty(new Array(1), "0", { get() { noticeReadGetters += 1; return null; } });
+      const inheritedRead = Object.setPrototypeOf(new Array(1), { 0: null });
+      for (const reply of [[], ["1"], [undefined], [true], [null, null], new Array(1), accessorRead, inheritedRead, new Error("synthetic notice read lost")]) {
+        setup();
+        redis.pipeline = async commands => {
+          if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === marker) {
+            if (reply instanceof Error) throw reply;
+            return reply;
+          }
+          return originalNoticePipeline.call(redis, commands);
+        };
+        await trigger();
+        is(`${purpose}: existing or unknown marker read holds owner notice`, [resend.filter(m => m.to === SUPPORT).length, redis.run(["GET", marker])], [0, null]);
+        redis.pipeline = originalNoticePipeline;
+      }
+      is(`${purpose}: notice reads never invoke getters`, noticeReadGetters, 0);
+      setup();
+      await Promise.all([trigger(), trigger()]);
+      is(`${purpose}: concurrent notices share provider identity`, resend.filter(m => m.to === SUPPORT).map(m => m.key), [marker]);
+      setup();
+      redis.pipeline = async commands => {
+        if (commands.some(c => c[0] === "SET" && c[1] === marker)) throw Error("synthetic mark persistence unavailable after ACK");
+        return originalNoticePipeline.call(redis, commands);
+      };
+      await trigger(); await trigger();
+      is(`${purpose}: lost marker persistence retains sender deduplication`, [redis.run(["GET", marker]), resend.filter(m => m.to === SUPPORT).map(m => m.key)], [null, [marker]]);
+      redis.pipeline = originalNoticePipeline;
+      globalThis.fetch = originalNoticeFetch;
+    }
+  } finally {
+    redis.pipeline = originalNoticePipeline; globalThis.fetch = originalNoticeFetch;
+    process.env.RESEND_API_KEY = acceptedKey; amazonSays = () => ({ status: 200 });
+  }
 
   done();
 }

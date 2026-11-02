@@ -196,16 +196,20 @@ const toldKey = (now = new Date()) => `nl:sender:${now.toISOString().slice(0, 7)
  */
 async function tellSenderIsFull(listOnly = false): Promise<void> {
   try {
-    const claim: unknown = await redisPipeline([["SET", toldKey(), "1", "NX", "EX", 40 * 86_400]]);
-    if (!Array.isArray(claim)) return;
-    const length = Object.getOwnPropertyDescriptor(claim, "length");
+    const key = toldKey();
+    const read: unknown = await redisPipeline([["GET", key]]);
+    if (!Array.isArray(read)) return;
+    const length = Object.getOwnPropertyDescriptor(read, "length");
     if (!length || !("value" in length) || length.value !== 1) return;
-    const first = Object.getOwnPropertyDescriptor(claim, "0");
-    // The existing claim may have applied before losing its acknowledgement.
-    // Only a confirmed fresh claim authorizes this bounded owner email.
-    if (!first || !("value" in first) || first.value !== "OK") return;
+    const previous = Object.getOwnPropertyDescriptor(read, "0");
+    if (!previous || !("value" in previous) || previous.value !== null) return;
+    // Sender identity bounds concurrent/retried notices before acceptance.
+    // Recording the period costs one additional command only after an ACK.
+    const recordAccepted = async (accepted: boolean) => {
+      if (accepted === true) await redisPipeline([["SET", key, "1", "NX", "EX", 40 * 86_400]]);
+    };
     if (listOnly) {
-      await sendEmail({ meter: { by: "company" },
+      await recordAccepted(await sendEmail({ idempotencyKey: key, meter: { by: "company" },
         from: NIMBUS_FROM, to: SUPPORT_EMAIL,
         subject: "List email is waiting for Amazon SES",
         text: [
@@ -214,7 +218,7 @@ async function tellSenderIsFull(listOnly = false): Promise<void> {
           "Resend is not used for this list batch. This notice does not confirm delivery.",
           "Sign-in links, receipts and deliveries keep their existing sending route.",
         ].join("\n"),
-      });
+      }));
       return;
     }
     const quota = senderQuota();
@@ -224,7 +228,7 @@ async function tellSenderIsFull(listOnly = false): Promise<void> {
     const amazonQuota = amazon?.max24 === -1
       ? `Amazon SES reports no daily quota ceiling for this account. Its sending rate is ${amazon.rate.toLocaleString("en-US")} emails per second. Each store's existing email allowance and delivery controls still apply.`
       : amazon ? `This account allows ${amazon.max24.toLocaleString("en-US")} in any 24 hours; creators' list email uses up to ${Math.floor(amazon.max24 * SES_BULK_SHARE).toLocaleString("en-US")} of them. Amazon raises that number by itself as the account proves itself, and a higher one can be asked for in the Amazon SES console, under Account dashboard.` : "";
-    await sendEmail({ meter: { by: "company" },
+    await recordAccepted(await sendEmail({ idempotencyKey: key, meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
       subject: resendSent === null ? "List email is waiting: sender usage cannot be confirmed" : "List email is waiting: the sender's monthly volume is nearly used",
@@ -244,7 +248,7 @@ async function tellSenderIsFull(listOnly = false): Promise<void> {
         "",
         resendSent === null ? "Usage is checked again automatically. Waiting email resumes when room can be confirmed." : "To let list email continue before the month turns: move the sender to a larger plan, then set SENDER_MONTHLY_QUOTA on the host to that plan's number of emails. Waiting emails go out by themselves after that.",
       ].join("\n"),
-    });
+    }));
   } catch (error) {
     console.error("telling the inbox the sender is nearly full failed", error);
   }

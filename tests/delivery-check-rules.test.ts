@@ -91,7 +91,7 @@ is(
   ],
   [true, true, true, true, true],
 );
-is("a problem names the address and what to do", [gone.found.includes("https://example.com/vault"), gone.fix], [true, "Put the right address on the product, or bring the page back."]);
+is("a problem names the address and what to do", [gone.found, gone.fix], ["Your link, https://example.com/vault, says the page is not there (404), so buyers cannot open it.", "Put the right address on the product, or bring the page back."]);
 
 part("One product");
 is(

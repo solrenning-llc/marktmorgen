@@ -12,6 +12,7 @@ import { optionsBeginnerQuestions } from "@/lib/price-options-faq";
 import { bundleBeginnerQuestions } from "@/lib/bundle-faq";
 import { keyBeginnerQuestions } from "@/lib/license-key-faq";
 import { quizBeginnerQuestions } from "@/lib/quiz-faq";
+import { stampBeginnerQuestions } from "@/lib/pdf-stamp-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -1746,12 +1747,15 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           "PDFs up to 50 MB. A bigger one, or one locked with a password or damaged, is handed over as you uploaded it, and your studio tells you.",
           "PDFs only. Images, ZIP files and everything else are handed over as uploaded.",
           "A product sold as a link is not stamped: the file is wherever you keep it.",
+          "A free download is handed over as you uploaded it: only a paid one is stamped.",
         ],
       },
       {
         kind: "faq",
         title: "Questions about PDF stamping",
         items: [
+          // 534 [FQ1], unit 14: what someone starting out asks, answered by the code (lib/pdf-stamp-faq.ts).
+          ...stampBeginnerQuestions(),
           { q: "Does it change my original file?", a: "No. Your upload stays as it is. Each buyer's copy is made from it, kept beside it, and deleted with it." },
           { q: "Is the file sent to another company to be stamped?", a: "No. It is stamped by our own code on the servers that run Marktmorgen, and not sent anywhere else." },
           { q: "Should I tell buyers?", a: "Yes. Their email is printed on the file they receive, so say so on the product." },

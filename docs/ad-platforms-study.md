@@ -41,3 +41,11 @@ Each step needs the owner's own accounts and acceptance of the platform's terms,
 ## What follows in the code, once confirmed
 
 The first rules unit of 632 (b): a campaign plan created paused, refused without an end date or a total budget (never an unbounded spend), and the maximum possible spend shown to the creator computed from the confirmed overspend rule of the platform, never from the budget alone.
+
+## Already in the product, not to be built twice (rule "Pedidos repetidos", step 5)
+
+Checked in the code on 2 November 2026:
+
+- **632 (q), a campaign QR code for events and print, with the same sales measure**: short links for posts, videos, talks and flyers (`lib/short-links.ts`, `components/short-links.tsx`) each have their own QR code to download (SVG and PNG) and their own line of visits, sales and revenue in the numbers. Nothing new to build; at most the word "campaign" in the studio's help, later.
+- **632 (p), a weekly ads report**: the weekly email (`lib/stats-report.ts`, `weeklyMessage`) already reads the ad spend lines (`lib/ad-spend-rules.ts`, Meta spend read by `lib/meta-ads.ts`) into what is worth knowing. What 632 adds later is a section per campaign, once campaigns are made from here.
+- **632 (c), honest ad words**: the store's honesty rules (`lib/terms-check-rules.ts`) are applied to ad text in `lib/ad-creative-check.ts` (632 unit 2), without any platform rule that is not confirmed.

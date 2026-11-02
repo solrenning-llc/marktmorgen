@@ -26,6 +26,8 @@ RED adicional7f931c103(18PASS/3FAIL) reproduziu readiness herdada, id/title herd
 
 # Fila de trabalho do Codex — Marktmorgen
 
+Codex — AV10, 02/11/2026: percentual de uso restante e data de renovação não acessíveis nesta sessão; orçamento diário não calculado, sem valores estimados. Seguir com unidades menores, sem leitores paralelos rotineiros; esforço Alto reservado a dinheiro, impostos, segurança, lei e revisão independente. Conferir `docs/reservations.md` antes de cada unidade. #1491: correção do inventário documental em validação; a integral anterior teve uma única falha nesse inventário, não uma aprovação integral da fonte corrigida.
+
 **AV2 — 30/10/2026:** passos1–2 concluídos conforme histórico; passo3 em andamento. #1262 e #1280 publicados, pausa opcional desligada e retomada no566FF2. Faltam coberturas essenciais comprovadas, depois passos4–6 e10–12 a cargo do Codex; passos7–9 com Claude pelaAV4 (89já iniciado ficaCodex). Nenhum retorno à proteção opcional da pausa.
 
 

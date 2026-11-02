@@ -20,6 +20,7 @@ import { affiliateBeginnerQuestions } from "@/lib/affiliate-faq";
 import { phoneBeginnerQuestions } from "@/lib/phone-faq";
 import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 import { teamBeginnerQuestions } from "@/lib/team-faq";
+import { securityBeginnerQuestions } from "@/lib/security-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -2555,6 +2556,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about security",
         items: [
+          // 534 [FQ1], unit 21: what someone starting out asks, answered by the code (lib/security-faq.ts).
+          ...securityBeginnerQuestions(),
           { q: "What if I get an email about a change I did not make?", a: "Log in, choose “Log out of all devices” at the bottom of your studio, put the setting back, and reply to that email so we can help." },
           { q: "Who handles a refund?", a: "You do, in your own Stripe dashboard. What a full refund closes here happens by itself, read from Stripe." },
           { q: "Can I sign in with a password?", a: "No. There is no password to set, and none kept here to be stolen. Each link we email works once, for 15 minutes." },

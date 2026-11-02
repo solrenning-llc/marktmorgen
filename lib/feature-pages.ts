@@ -16,6 +16,8 @@ import { stampBeginnerQuestions } from "@/lib/pdf-stamp-faq";
 import { calendarBeginnerQuestions } from "@/lib/calendar-faq";
 import { webhookBeginnerQuestions } from "@/lib/webhook-faq";
 import { discordBeginnerQuestions } from "@/lib/discord-faq";
+import { affiliateBeginnerQuestions } from "@/lib/affiliate-faq";
+import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -1354,7 +1356,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "how",
         title: "How your program runs",
         items: [
-          { title: "Set the terms", body: "A share of 1% to 90%, for the whole store or product by product, and a window of 1 to 90 days after a click." },
+          { title: "Set the terms", body: `A share of 1% to 90%, for the whole store or product by product, and a window of up to ${MAX_COOKIE_DAYS} days after a click, for as long as the buyer's browser keeps it.` },
           { title: "Approve who you want", body: "People apply on your store's affiliate page with an email address they confirm, and nobody is in until you say so. Or switch on buyers joining without applying: the thanks page and the purchase email offer everyone who buys their own link, approved at once." },
           { title: "Pay what is owed", body: "Connect your own PayPal Business account and pay everyone owed in one press, or let it pay by itself on your payday. Or download the batch for PayPal or Wise and mark it paid." },
         ],
@@ -1369,7 +1371,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "What the program keeps track of",
         items: [
           { icon: "user", title: "A page for each affiliate", body: "Their link, their clicks, their sales, what they earned and what you paid them. They never see who the buyers were." },
-          { icon: "link", title: "Last click wins", body: "The most recent affiliate link a buyer followed, inside your window, gets the sale." },
+          { icon: "link", title: "Last click wins, or the first", body: "You choose: the most recent affiliate link a buyer followed inside your window gets the sale, or the first one does. One sale earns one affiliate either way." },
           { icon: "scale", title: "Worked out fairly", body: "The share is a percentage of what was paid, before tax. A refund on your Stripe account cancels it, and a partial refund reduces it." },
           { icon: "shield", title: "Hard to game", body: "No commission on an affiliate's own purchase, even from their address written another way, a click counted once per visitor per day, and your own clicks not counted. Two affiliates sharing an inbox or payout address, or a link reached from a paid search ad on your name, have their commission held until you look." },
           { icon: "refresh", title: "Memberships that keep paying", body: "Choose whether a membership sold through a link earns on its first payment, on every payment for 3, 6, 12 or 24 months, or for as long as the member pays; a payment plan earns on each of its payments. Read from your Stripe account as each payment arrives, and a membership keeps the terms it was sold with." },
@@ -1402,6 +1404,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about affiliates",
         items: [
+          // 534 [FQ1], unit 18: what someone starting out asks, answered by the code (lib/affiliate-faq.ts).
+          ...affiliateBeginnerQuestions(),
           { q: "Does Marktmorgen take a cut of affiliate sales?", a: feeWords().fromAffiliateSale },
           { q: "How is a sale tied to an affiliate?", a: "Their link is your store's address with their code on the end. Following it leaves a cookie on your store's own address with the code and the time of the click, and a purchase inside your window is credited to them. Visitors in the European Economic Area, the United Kingdom, Switzerland and Brazil, whose rules require consent first, are asked in one line on the page, and the cookie is set when they allow it." },
           { q: "What does someone need to join?", a: "An email address they can open. They apply on your store's affiliate page, confirm with the link we email, and you approve them in your studio. If you let buyers join without applying, a buyer presses Get my link on the thanks page or follows the link in their purchase email, and joins with the address they paid with. Anyone you declined or removed stays out." },

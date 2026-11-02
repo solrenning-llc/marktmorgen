@@ -7,6 +7,7 @@ import { storeBeginnerQuestions } from "@/lib/store-page-faq";
 import { deliveryBeginnerQuestions } from "@/lib/delivery-faq";
 import { checkoutBeginnerQuestions } from "@/lib/checkout-faq";
 import { stripeBeginnerQuestions } from "@/lib/your-stripe-faq";
+import { salesPageBeginnerQuestions } from "@/lib/sales-page-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -1836,6 +1837,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about sales pages",
         items: [
+          // 534 [FQ1], unit 9: what someone starting out asks, answered by the code (lib/sales-page-faq.ts).
+          ...salesPageBeginnerQuestions(),
           { q: "Which plan is it on?", a: `Every plan, the ${PLAN_AT.creator} one included. On Stan, by its help center read on September 28, 2026, each product has a checkout page with a description and a video that can be made a private landing page on every plan, and funnels of several pages are on its $99 plan.` },
           { q: "Who on my team can edit them?", a: "You, an Admin and an Editor. Support cannot." },
           { q: "Can I put a testimonial I collected on the page?", a: "Yes, in the Said elsewhere block, if it was said in public: their words as they said them, who said them, and the address of the post, video or comment, shown as a link so visitors can check it. The Reviews block shows only reviews written by people who paid, with their stars, and nothing you type can appear as one." },

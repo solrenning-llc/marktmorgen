@@ -279,3 +279,19 @@ test("invalid diagnostic clocks cannot leak or replace observed replies",async t
   }finally{await probe?.close();now.mock.restore();}
  }
 });
+
+test("startup expiry keeps the primary deadline when the owned child never confirms exit",async t=>{
+ t.mock.timers.enable({apis:["setTimeout"]});
+ const f=fixture({handshake:false,exitOnEnd:false}),events=[],errors=[],options={...f.options};delete options.timeoutMs;
+ f.child.kill=()=>{f.child.killed=true;return true;};
+ const error=t.mock.method(console,"error",value=>errors.push(String(value)));
+ const starting=startWindowsForegroundProbe({...options,onDiagnostic:e=>events.push(e)});
+ const rejected=assert.rejects(starting,/startup.*deadline/);rejected.catch(()=>{});
+ try{
+  t.mock.timers.tick(10000);await Promise.resolve();
+  assert.equal(events.find(e=>e.event==="failed")?.reason,"startup_deadline");
+  t.mock.timers.tick(999);assert.equal(f.child.killed,true);
+  t.mock.timers.tick(1);await rejected;
+  assert.ok(errors.some(s=>s.includes("CLEANUP_ERROR")&&s.includes("did not exit")));
+ }finally{f.child.emit("exit",0);await starting.catch(()=>{});error.mock.restore();}
+});

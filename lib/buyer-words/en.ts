@@ -62,6 +62,11 @@ export const en = {
   callLive: (dates: number) => `Live session, online, ${dates} ${plural(dates, "date", "dates")} scheduled`,
   callGroup: (minutes: number, seats: number) => `Group call, ${minutes} minutes, up to ${seats} people, online`,
   callOne: (minutes: number) => `${minutes}-minute call, online`,
+  /** An in-person booking (lib/call-place.ts): no call, at the creator's address. */
+  inPersonLive: (dates: number) => `Live session, in person, ${dates} ${plural(dates, "date", "dates")} scheduled`,
+  inPersonGroup: (minutes: number, seats: number) => `${minutes} minutes, up to ${seats} people, in person`,
+  inPersonOne: (minutes: number) => `${minutes} minutes, in person`,
+  inPersonLiveNone: "Live session, in person, no dates scheduled",
   bundleOf: (count: number, worth: string | null) => `Bundle of ${count} products${worth ? ` · ${worth}` : ""}`,
   /** "$120 of products for $49". */
   worth: (worth: string, price: string) => `${worth} of products for ${price}`,

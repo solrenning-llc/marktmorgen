@@ -43,19 +43,15 @@ import type { Listing, Store } from "@/lib/store";
 import { idsOfKind, readListing, recordListings } from "@/lib/catalog";
 import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
-import { LOOKAHEAD_DAYS, MAX_FEEDS } from "@/lib/calendar-limits";
+import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 
 /** Calendars one store may read, and how far ahead (lib/calendar-limits.ts, which the studio and the feature page read too). */
-export { LOOKAHEAD_DAYS, MAX_FEEDS };
+export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
 /** The largest calendar file read. A busy calendar of ten years is well under it. */
 export const FEED_MAX_BYTES = 2_000_000;
 /** How long a calendar may take to answer, redirects included. */
 export const FEED_TIMEOUT_MS = 8_000;
-/** How long a reading is used before the calendar is asked again. */
-export const CACHE_SECONDS = 600;
-/** How long the last good reading stands in for a calendar that stopped answering. */
-export const STALE_SECONDS = 6 * 3600;
 /** How long the subscription file is reused before it is made again. */
 const OUT_SECONDS = 300;
 /** The longest address accepted. Google's secret addresses are about 150 characters. */

@@ -13,6 +13,7 @@ import { bundleBeginnerQuestions } from "@/lib/bundle-faq";
 import { keyBeginnerQuestions } from "@/lib/license-key-faq";
 import { quizBeginnerQuestions } from "@/lib/quiz-faq";
 import { stampBeginnerQuestions } from "@/lib/pdf-stamp-faq";
+import { calendarBeginnerQuestions } from "@/lib/calendar-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -1456,6 +1457,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about calendar sync",
         items: [
+          // 534 [FQ1], unit 15: what someone starting out asks, answered by the code (lib/calendar-faq.ts).
+          ...calendarBeginnerQuestions(),
           { q: "Does Stan do this?", a: "Stan's help center, read on September 26, 2026, lists Google Calendar for its calls. Ours reads Google, Outlook and iCloud calendars by their private address, and writes events only for calls set to Google Meet, on a Google Calendar you connect." },
           { q: "What happens to my calendar's address?", a: "It is stored with your store and used only to read your busy times. Once saved it is never shown again, not even to you. If you are ever unsure, reset it in your calendar app and the old one stops working." },
           { q: "Does it block group calls and live sessions too?", a: "It hides call times you are busy for. Live sessions are on the dates you set yourself, so they are yours to place around your calendar." },

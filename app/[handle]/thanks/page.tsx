@@ -66,6 +66,7 @@ import type { BundleContents } from "@/lib/bundles";
 import { thanksWords } from "@/lib/buyer-words/thanks";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
+import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
 import { speech } from "@/lib/buyer-words";
@@ -1059,6 +1060,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                         <p className="st-muted mt-3 text-sm">{t.courseDeviceNote(store.name, order.email ?? t.theAddressYouPaidWith)}</p>
                       ) : null}
                     </form>
+                  ) : wasShipped(order.record) && activeShipping(added.product) ? (
+                    /* A second product shipped in a cart's order: it goes to the address shown above (lib/cart-shipping.ts, shippedFirst). */
+                    <p className="st-muted mt-2 text-sm">{shippingWords(store.language).alsoShips(store.name)}</p>
                   ) : added.link ? (
                     <>
                       <a

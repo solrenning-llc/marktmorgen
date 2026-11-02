@@ -42,6 +42,7 @@ export function testAliases(file,root,here){
  if(file==='path-growth-facts.test.ts')for(const name of ['redis','catalog','broadcasts','reviews'])aliases['@/lib/'+name]=join(here,'path-growth-world.ts');
  if(file==='path-reminder-push.test.ts')aliases['@/lib/web-push']=join(here,'path-push-world.ts');
  if(file==='digital-consent.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='cart-physical.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='deals-board-pipelines-render.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='mail-reservation.test.ts'){aliases['@/lib/email']=join(here,'mail-reservation-email.ts');aliases['@/lib/ses']=join(here,'mail-reservation-ses.ts');}

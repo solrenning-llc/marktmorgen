@@ -1076,8 +1076,10 @@ function Compose(props: {
               </select>
             </label>
             <p className="text-xs text-ink-soft">
-              Only buyers can match these three. They are read from your own Stripe account when the email goes out, in your
-              store&apos;s currency; support for your work, sales in another currency and sales paid with PayPal are not counted.
+              Only buyers can match these three. They are read from your own Stripe account when the email goes out. Support for
+              your work and sales paid with PayPal are not counted. A sale in another currency counts as a purchase for where
+              they came from and when they last bought, but its amount is not added to what they spent, which counts only your
+              store&apos;s currency.
               {partial ? " Your Stripe account holds more sales than one reading takes, so the oldest are not counted." : ""}
             </p>
           </div>

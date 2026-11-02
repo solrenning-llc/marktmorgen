@@ -16,7 +16,7 @@
  * readPaidSales), only when an email asks for one, and the answer is kept ten
  * minutes so a creator changing the boxes does not ask Stripe each time:
  *
- *   nl:stats:<statsId>:ledger   JSON { c: currency, p: partial, v: 2, r: [[address, cents, last ms, channel, orders], …] }, ten minutes
+ *   nl:stats:<statsId>:ledger   JSON { c: currency, p: partial, v: 3, r: [[address, cents, last ms, channel, orders], …] }, ten minutes
  *   nl:mail:segs:<listId>       hash: <id> → JSON Segment, the store's saved groups
  *
  * A group is a name over the choices the composer already has: who, one
@@ -50,13 +50,17 @@ export type LedgerEntry = { cents: number; last: number; channel: string; orders
 export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean };
 
 type Row = [string, number, number, string, number];
-/** The cached rows' shape; a reading kept in an older one is read again. */
-const LEDGER_SHAPE = 2;
+/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase). */
+const LEDGER_SHAPE = 3;
 
 /**
  * Every buyer of this store, from its sales on the creator's Stripe account,
- * as far back as a reading reaches (ALL_TIME_PAGES pages of each). Only the
- * store's currency counts; support for the creator's work is not a purchase.
+ * as far back as a reading reaches (ALL_TIME_PAGES pages of each). Support
+ * for the creator's work is not a purchase. A sale in another currency (from
+ * before the store changed its own) is a purchase like any other: its order,
+ * its date and its channel count, but not its money, because amounts in two
+ * currencies do not add up, so "spent with you" counts the store's currency
+ * only (22 [E5], unit 2c).
  */
 export async function buyerLedger(store: Store): Promise<Ledger> {
   if (!readsSales(store) && !store.pastBuyers) return { buyers: new Map(), partial: false };
@@ -76,14 +80,13 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
   const { sales, partial } = await readPaidSales(store, 0, ALL_TIME_PAGES);
   const buyers = new Map<string, LedgerEntry & { firstAt: number }>();
   for (const sale of sales) {
-    if (sale.currency !== store.currency) continue;
     if ((sale.row.metadata as Record<string, string> | null | undefined)?.kind === "tip") continue;
     const details = sale.row.customer_details as { email?: unknown } | null | undefined;
     const raw = sale.upsell ? sale.row.receipt_email : details?.email;
     if (typeof raw !== "string" || !raw.trim()) continue;
     const email = normaliseEmail(raw);
     const row = buyers.get(email) ?? { cents: 0, last: 0, channel: "direct", orders: 0, firstAt: Infinity };
-    row.cents += sale.cents;
+    if (sale.currency === store.currency) row.cents += sale.cents;
     if (!sale.upsell) row.orders += 1;
     row.last = Math.max(row.last, sale.created);
     // Where they first came from: the channel on their earliest checkout.

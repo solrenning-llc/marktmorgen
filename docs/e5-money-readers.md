@@ -17,14 +17,14 @@ The grep (`store.currency`, `current.currency`, a name ending in `s.currency`) a
 
 ## What unit 2 must fix first
 
-Unit 2b fixed 1, 2 and 5 (marked below); the rest are next.
+Unit 2b fixed 1, 2 and 5, and unit 2c fixed 3 and 6 (marked below); the rest are next.
 
 1. **Fixed in unit 2b.** **The tier switch had no currency check.** `lib/tier-switch.ts` makes the new tier's Price in the store's currency (lines 94 and 135) and never compares it with the subscription's. The offer after paying, the yearly switch and the yearly ask all refuse a mismatch; the tier switch does not, so for a member who subscribed before the store changed its currency, it asks Stripe to move the subscription onto a Price in another currency. What Stripe then does has not been tried here.
 2. **Fixed in unit 2b** (counted and said on the numbers page). **Refunds and disputes in another currency vanished from the numbers.** `lib/stats.ts` puts sales in another currency in "elsewhere", but drops refunds and disputes in another currency without counting them (lines 1489–1535).
-3. **A buyer whose sales are all in another currency is missing from segments.** `lib/segments.ts:79` leaves them out of the buyer ledger entirely: orders, last purchase and channel, not just the money.
+3. **Fixed in unit 2c** (the order, date and channel count; the money stays in the store's currency only, and the email studio says so). **A buyer whose sales were all in another currency was missing from segments.** `lib/segments.ts:79` left them out of the buyer ledger entirely: orders, last purchase and channel, not just the money.
 4. **Totals that drop another currency with no "elsewhere":** A/B tests, discount impact, email revenue, subject tests, "how did you hear", payment recovery and member health.
 5. **Fixed in unit 2b.** **Past amounts labelled with the store's currency:** the phone alert for a booked call (`lib/calls.ts:1341`) and the bookings API (`lib/api-read.ts:189`).
-6. **Lists that ignore a record's own currency:** payment requests and agreements keep a currency on each record, but the studio lists format them with the store's.
+6. **Fixed in unit 2c** for payment requests: the studio list shows each request in its own currency. Agreements too: their list shows no amount, and a new version started from an older one in another currency now leaves its amounts empty and says to type them again in the store's currency, instead of reading €50 as $50.
 
 7. **A paid call's orders and affiliate lead keep no currency.** `lib/calls.ts` counts a booking's orders (`countOrder`) and credits an affiliate's lead (`recordLead`, `paid`) with the amount alone, so a call paid in the old currency is added to the store's own in those figures.
 
@@ -76,7 +76,7 @@ Unit 2b fixed 1, 2 and 5 (marked below); the rest are next.
 | `app/studio/memberships/page.tsx` | TOTALS | 73: membership numbers in their own currency, else the store's | partly: "elsewhere" for live subscriptions |
 | `app/studio/page.tsx` | TOTALS | 1442 Meta, 1468 goal, 1408 short links; the price editors and labels are SETTING | partly: through the numbers' "elsewhere" |
 | `app/studio/path/page.tsx` | TOTALS | 91: the money certificate only in the store's currency | partly |
-| `components/email-studio.tsx` | TOTALS | 691–1054: the "spent with you" threshold in the store's currency | partly: other currencies skipped |
+| `components/email-studio.tsx` | TOTALS | 691–1054: the "spent with you" threshold in the store's currency | partly: another currency's sales count as purchases, not toward the amount (unit 2c) |
 | `lib/affiliate-payouts.ts` | TOTALS | 165/170/210: the payout file and batch in the store's currency | partly: the rest stays in "elsewhere" |
 | `lib/affiliates.ts` | TOTALS | 1701/1829–1860: the book sums the store's currency, with an "elsewhere" count; 1965/1984 bonuses | partly: "elsewhere" |
 | `lib/broadcasts.ts` | TOTALS | 578: subject-test sales in the store's currency only | partly: left out |
@@ -94,7 +94,7 @@ Unit 2b fixed 1, 2 and 5 (marked below); the rest are next.
 | `lib/path-rules.ts` | TOTALS | 529–532: level thresholds scaled to the facts' currency | partly |
 | `lib/payment-recovery-report.ts` | TOTALS | 135–136: recovered money in the store's currency only | partly: left out |
 | `lib/paypal-payouts.ts` | TOTALS | 199/242: the PayPal payout batch in the store's currency | partly: through the book's "elsewhere" |
-| `lib/segments.ts` | TOTALS | 79: the buyer ledger skips every sale not in the store's currency | partly: a buyer with only other-currency sales is missing entirely |
+| `lib/segments.ts` | TOTALS | 79: the buyer ledger skips every sale not in the store's currency | partly: other-currency sales count as purchases (order, date, channel), their money is left out (fixed in unit 2c) |
 | `lib/stats.ts` | TOTALS | 1396–1460: sales, the rest in "elsewhere"; 1489–1535 refunds and disputes in another currency dropped | partly: refunds and disputes are not counted apart |
 | `lib/store-alerts.ts` | TOTALS | 205/209: daily alerts against the goal in the store's currency | partly |
 | `app/studio/people/page.tsx` | PAST-SALE | 200: a buyer's sale in the sale's own currency | yes |

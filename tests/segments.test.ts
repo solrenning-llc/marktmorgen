@@ -94,18 +94,21 @@ async function main(): Promise<void> {
   };
   is("each address once, all it paid, where it first came from", [row("ana@example.com"), row("ben@example.com"), row("cy@example.com")], [[25000, "instagram"], [7000, "tiktok"], [9000, "direct"]]);
   is("how many times each bought: each checkout once, an offer taken after paying not again (270 [GR1])", ["ana@example.com", "ben@example.com", "cy@example.com"].map((e) => ledger.buyers.get(e)?.orders), [2, 1, 1]);
-  is("support, euros and another store's sales are not buyers here", [row("dee@example.com"), row("eve@example.com"), row("fay@example.com")], [null, null, null]);
+  is("support and another store's sales are not buyers here", [row("dee@example.com"), row("fay@example.com")], [null, null]);
+  // A sale in euros, from before the store changed its currency (22 [E5], unit 2c): a buyer, with a purchase and its date, but nothing added to "spent".
+  is("a buyer who paid in another currency is a buyer: the order and the date count, the money does not", [row("eve@example.com"), ledger.buyers.get("eve@example.com")?.orders, (ledger.buyers.get("eve@example.com")?.last ?? 0) > 0], [[0, "direct"], 1, true]);
   is("the channels, the most buyers first", ledgerChannels(ledger).sort(), ["direct", "instagram", "tiktok"]);
   const asked = stripeCalls;
   await buyerLedger(store);
   is("read again within ten minutes: nothing asked of Stripe", stripeCalls, asked);
 
   part("Who each narrowing keeps");
-  const keep = (n: Partial<typeof NO_NARROW>) => ["ana@example.com", "ben@example.com", "cy@example.com", "nobody@example.com"].filter(keeps({ ...NO_NARROW, ...n }, ledger, NOW));
-  is("spent at least $80", keep({ minSpent: 8000 }), ["ana@example.com", "cy@example.com"]);
+  const keep = (n: Partial<typeof NO_NARROW>) => ["ana@example.com", "ben@example.com", "cy@example.com", "eve@example.com", "nobody@example.com"].filter(keeps({ ...NO_NARROW, ...n }, ledger, NOW));
+  // eve paid 500 euros three days ago, in another currency than the store's (22 [E5], unit 2c).
+  is("spent at least $80: euros are not added, so not eve", keep({ minSpent: 8000 }), ["ana@example.com", "cy@example.com"]);
   is("first found you through Instagram", keep({ channel: "instagram" }), ["ana@example.com"]);
-  is("first found you directly", keep({ channel: "direct" }), ["cy@example.com"]);
-  is("has not bought in 90 days, but has bought", keep({ quietDays: 90 }), ["ben@example.com"]);
+  is("first found you directly, eve among them", keep({ channel: "direct" }), ["cy@example.com", "eve@example.com"]);
+  is("has not bought in 90 days, but has bought: not eve, who bought three days ago", keep({ quietDays: 90 }), ["ben@example.com"]);
   is("all three at once", keep({ minSpent: 1, channel: "tiktok", quietDays: 30 }), ["ben@example.com"]);
 
   part("A list narrowed that way");

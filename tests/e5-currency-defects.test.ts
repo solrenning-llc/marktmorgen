@@ -33,4 +33,13 @@ const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => { con
 is("no other caller", ["app", "components", "lib"].flatMap(walk).filter((f) => /confirmBooking\(\{/.test(readFileSync(f, "utf8")) && !confirmations.includes(f)), []);
 is("nothing labels a paid call with the store's currency alone any more", /formatMoney\(input\.amountCents, store\.currency\)/.test(calls), false);
 
+part("A payment request's own currency (unit 2c)");
+const requests = flat("components/payment-requests-studio.tsx");
+const list = requests.slice(requests.indexOf("rows.map((r) =>"));
+is("the studio list says each request, what was paid and what was refunded in the request's own currency", [list.includes("const its = (cents: number) => formatMoney(cents, r.currency);"), list.includes("{its(r.total)}"), list.includes("`paid ${its(r.amountPaid || r.total)}"), list.includes("`${its(r.refunded)} refunded`"), /money\(r\./.test(list)], [true, true, true, true, false]);
+
+part("An agreement's older version in another currency (unit 2c)");
+const studio = flat("components/agreements-studio.tsx");
+is("the read says its version's currency; the editor reads the amounts in it, then leaves them empty and says why", [flat("app/api/store/agreements/route.ts").includes("sha256: version.sha256, currency: version.currency }"), studio.includes("const then: Currency = isCurrency(its) ? its : currency;"), studio.includes('lines: read.lines.map((line) => ({ ...line, amount: "" }))'), studio.includes("Type its amounts again in ${currency.toUpperCase()}, your store's currency now.")], [true, true, true, true]);
+
 done();

@@ -33,7 +33,7 @@ is("four questions", now.map((x) => x.q), ["What is a course here?", "How do I s
 is("the structures named from the code's own list, scratch by its own name", [answer(now, "How do I start one?").includes(COURSE_TEMPLATES.filter((t) => t.id !== "scratch").map((t) => t.name).join(", ")), answer(now, "How do I start one?").includes(`“${COURSE_STUDIO_WORDS.scratch}”`)], [true, true]);
 is("never a step the studio does not take next", /then “?Add lessons/.test(answer(now, "How do I start one?")), false);
 const before = answer(now, "Can I try it before paying?");
-is("before plans are on sale: no card, and only what a store without a plan can do", [before.includes("no card"), before.includes("its modules, and its lessons with their text.")], [true, true]);
+is("before plans are on sale: no card, and only what a store without a plan can do", [before.includes("no card"), before.includes("you can set up a course with its modules and the text of its lessons in your own store's studio with no card.")], [true, true]);
 is("uploads said as the upload policy has them: none before a paid plan", [AUTOMATIC_UPLOAD_CAPS.setup.opens, before.includes("Files and lesson videos can be uploaded once a paid plan starts."), uploadAllowanceWords("setup", null).length > 0], [0, true, true]);
 is("no promise of files or videos played before a plan", /videos play|upload (a|your) (file|video)s? (now|today)/i.test(before), false);
 const trial = answer(later, "Can I try it before paying?");

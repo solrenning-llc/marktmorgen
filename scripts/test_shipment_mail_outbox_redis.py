@@ -39,10 +39,21 @@ def pending_recovery_cases(redis, source, made):
                  reviewId="NEW", maximumChecks=2, globalItems=100, globalBytes=10000000, continuedReviewIds=["OLD"])
     owner = "b" * 48
     fp = "c" * 64
+    profiles={'next':[], 'finish':[]}
+    def command_counts(text):
+        return {m[1]:int(m[2]) for m in re.finditer(r'^cmdstat_([^:]+):calls=(\d+),',text,re.M)}
     def run(op, family="shipment", keys=None, raw="", valid="skip", who=owner, proof=fp, g=grant):
         selected = keys or [pool, all_key]
         t = redis.command("TIME"); at = int(t[0])*1000+int(t[1])//1000
-        return redis.command("EVAL", lua, len(selected), *selected, op, json.dumps(g), proof, who, family, at, raw, valid)
+        redis.command('MULTI');redis.command('INFO','COMMANDSTATS')
+        redis.command("EVAL", lua, len(selected), *selected, op, json.dumps(g), proof, who, family, at, raw, valid)
+        redis.command('INFO','COMMANDSTATS')
+        before,result,after=redis.command('EXEC')
+        a,b=command_counts(before),command_counts(after)
+        count=sum(b.get(k,0)-a.get(k,0) for k in set(a)|set(b))-1 # exactly one observer INFO, no application command filtered
+        profiles[op].append(count)
+        assert count<=64,(op,count)
+        return result
     def checkpoint(): return json.loads(redis.command("HGET", pool, "pendingRecovery"))
     def setup(name, review="OLD", state="queued", phase=None):
         id = hashlib.sha256(name.encode()).hexdigest(); stats="synthetic_recovery"; person="d"*64
@@ -123,6 +134,7 @@ def pending_recovery_cases(redis, source, made):
     assert run('next')==['ticket',id,'1']
     assert run('finish',keys=keys,raw=raw,valid='valid')==['skipped']
     assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id) is None
+    redis.command('DEL',keys[5]) # only this synthetic case's deliberately installed closure fence
     print('PASS: permanent uncertain dispatch, refusal and closure fences never become new provider permission')
     redis.command('DEL',pool,all_key)
     id,raw,keys=setup('lost-ticket')
@@ -144,6 +156,10 @@ def pending_recovery_cases(redis, source, made):
     assert json.loads(redis.command('HGET',pool,'pendingRecovery'))['attempts']==0
     redis.command('HSET',pool,'pendingRecovery',saved)
     print('PASS: malformed or inconsistent checkpoint counters remain unknown rather than replenished')
+    assert max(profiles['next'])+3+max(profiles['finish'])<=64
+    print(json.dumps({'recovery_eval_and_internal_max':{key:max(values) for key,values in profiles.items()},
+                      'confirmation_observation_commands':3,'reserved_variable_command_units':64,
+                      'checkpoint_stored_bytes':len(saved.encode()),'supplier_invoice':False}))
 
 
 def main():

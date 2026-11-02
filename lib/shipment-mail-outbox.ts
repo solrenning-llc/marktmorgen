@@ -409,7 +409,7 @@ end
 -- idempotent membership effect; a lost/failed progress ACK keeps this item.
 c.index=c.index+1;c.owner='';c.leaseUntil=0
 if c.index>#c.ids then
- if c.family=='shipment' then c.family='confirmation';c.index=1 else c.phase='done' end
+ if c.family=='shipment' then c.family='confirmation';c.index=1 else c.phase='done';c.ids={};c.index=1 end
 end
 if not save() then return {'unknown'} end
 return {result}

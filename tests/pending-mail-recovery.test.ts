@@ -66,11 +66,11 @@ test('normal physical workers recover original cap holds through real Lua and fi
  const realNow = Date.now;
  const grant = (revision:number) => ({ ...recovery(), revision, startsAt:realNow()-1000, until:realNow()+3600000 });
  try {
-  let clock=realNow(),posts=0;
+  const clock=realNow();let posts=0;
   const input={statsId:'recovery_physical_synthetic',session:'cs_test_recoveryShipment000001',authorizedAt:clock,
    shipped:{at:Math.floor(clock/1000),tracking:'https://example.test/track'},message:{from:'Store <mail@example.test>',to:'buyer@example.test',subject:'Original shipment',text:'Immutable original',replyTo:'owner@example.test'}};
   const old=shipmentPolicy(clock);
-  let runtime={lifecycle:'active' as const,policy:{...old,maximumChecks:1},pipeline,now:()=>clock};
+  const runtime={lifecycle:'active' as const,policy:{...old,maximumChecks:1},pipeline,now:()=>clock};
   assert.equal((await enqueueShipmentMail(input,runtime)).ok,true);
   assert.equal((await runShipmentMail(clock+30000,async()=> 'waiting',runtime)).waiting,1);
   const id=shipmentMailId(input.statsId,input.session),rk='nl:ship:mail:row:'+id;

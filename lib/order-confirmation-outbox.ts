@@ -16,7 +16,7 @@ import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
   CURRENT_SHIPMENT_MAIL_LIFECYCLE, CURRENT_SHIPMENT_MAIL_POLICY,
   SHIPMENT_MAIL_SCRIPT, SHIPMENT_MAIL_MAX_ROW_BYTES, SHIPMENT_MAIL_MAX_INDEX_ITEMS,
-  shipmentMailPolicy, type ShipmentMailDispatch,
+  shipmentMailPolicy, recoverPendingMail, type ShipmentMailDispatch,
   type ShipmentMailPipeline, type ShipmentMailPolicy, type ShipmentMailRuntime,
 } from "@/lib/shipment-mail-outbox";
 
@@ -686,11 +686,29 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
   const p = confirmationOutboxPolicy(runtime, false);
   if (!p) return { ...counts, unknown: 1 };
   const pipeline = runtime.pipeline ?? redisPipeline;
+  if (onlyId === undefined && p.recovery) await recoverPendingMail("confirmation", deadline, runtime, async id => {
+    try {
+      const reply = array(await pipeline([["TYPE", confirmationOriginRowKey(id)], ["GETRANGE", confirmationOriginRowKey(id), 0, SHIPMENT_MAIL_MAX_ROW_BYTES], ["GET", sourceKey(id)]]));
+      if (!reply || reply.length !== 3 || typeof reply[1] !== "string") return null;
+      if (reply[0] === "none" && reply[1] === "") return { raw: "" };
+      if (reply[0] !== "string" || Buffer.byteLength(reply[1]) > SHIPMENT_MAIL_MAX_ROW_BYTES) return null;
+      const row = parse(reply[1]);
+      if (!row || row.id !== id || row.originKind !== undefined) return { raw: reply[1] };
+      if (reply[2] !== row.sourceValue) return { raw: reply[1] };
+      const opened = unseal(row.sealed, context(id));
+      if (!opened.ok || hash(opened.value) !== row.fingerprint) return { raw: reply[1] };
+      const payload = data(JSON.parse(opened.value));
+      if (!payload || typeof payload.body !== "string" || confirmationBodyDigest(payload.body) !== row.bodyDigest ||
+          typeof payload.preintentToken !== "string" || hash(payload.preintentToken) !== row.intentFingerprint ||
+          payload.intentFingerprint !== row.intentFingerprint || !data(payload.snapshot)) return { raw: reply[1] };
+      return { raw: reply[1], keys: keys(row) };
+    } catch { return null; }
+  });
   let ids: unknown[] | null;
   try {
     if (onlyId !== undefined) { if (!HASH.test(onlyId)) throw Error("Unknown confirmation"); ids = [onlyId]; }
     else {
-      const got = array(await pipeline([["TYPE", CONFIRMATION_ORIGIN_DUE], ["ZRANGEBYSCORE", CONFIRMATION_ORIGIN_DUE, "-inf", now(), "LIMIT", 0, 25]]));
+      const got = array(await pipeline([["TYPE", CONFIRMATION_ORIGIN_DUE], ["ZRANGEBYSCORE", CONFIRMATION_ORIGIN_DUE, 0, now(), "LIMIT", 0, 25]]));
       ids = got?.length === 2 && ["none", "zset"].includes(String(got[0])) ? array(got[1], 25) : null;
     }
     if (!ids || ids.some(id => typeof id !== "string" || !HASH.test(id)) || new Set(ids).size !== ids.length) throw Error("Unknown confirmation index");

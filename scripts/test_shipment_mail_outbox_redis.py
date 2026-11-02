@@ -3,6 +3,7 @@ No application credential, provider call, real recipient or account is used.
 """
 import concurrent.futures
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -18,6 +19,131 @@ class LocalRedis(Redis):
             raise RuntimeError("Dedicated loopback Redis port required")
         self.sock = socket.create_connection(("127.0.0.1", port), timeout=10)
         self.stream = self.sock.makefile("rb")
+
+
+def pending_recovery_cases(redis, source, made):
+    """Exact new Lua on an exclusively owned disposable Redis, no provider.
+    Negative-query unfairness is separately RED; this snapshot cannot truncate.
+    """
+    match = re.search(r"export const PENDING_MAIL_RECOVERY_SCRIPT = `([^`]+)`;", source)
+    assert match and "${" not in match[1]
+    lua = match[1]
+    pool, all_key = "nl:ship:mail:pool", "nl:ship:mail:all"
+    assert redis.command("EXISTS", pool, all_key) == 0, "Recovery test refuses a previously used global namespace"
+    made.update([pool, all_key])
+    clock = redis.command("TIME")
+    now = int(clock[0]) * 1000 + int(clock[1]) // 1000
+    grant = dict(recovery=dict(version=1, revision=1, evidence="SYNTHETIC only", startsAt=now-1000, until=now+3600000,
+                              maximumAttempts=100, maximumCommandUnits=6400, checkpointBytes=8192,
+                              maximumTriggerInvocations=100, triggerEvidence="SYNTHETIC fixed infra coverage"),
+                 reviewId="NEW", maximumChecks=2, globalItems=100, globalBytes=10000000, continuedReviewIds=["OLD"])
+    owner = "b" * 48
+    fp = "c" * 64
+    def run(op, family="shipment", keys=None, raw="", valid="skip", who=owner, proof=fp, g=grant):
+        selected = keys or [pool, all_key]
+        t = redis.command("TIME"); at = int(t[0])*1000+int(t[1])//1000
+        return redis.command("EVAL", lua, len(selected), *selected, op, json.dumps(g), proof, who, family, at, raw, valid)
+    def checkpoint(): return json.loads(redis.command("HGET", pool, "pendingRecovery"))
+    def setup(name, review="OLD", state="queued", phase=None):
+        id = hashlib.sha256(name.encode()).hexdigest(); stats="synthetic_recovery"; person="d"*64
+        row = dict(id=id, statsId=stats, session="cs_test_"+id, person=person, sourceValue='{"at":1,"tracking":""}',
+                   sealed="s1.synthetic", fingerprint="a"*64, bytes=12000, created=now-74*3600000,
+                   authorizedAt=now-74*3600000, next=0, state=state, owner="", leaseUntil=0, checks=1, reviewId=review)
+        if phase is not None: row.update(kind="confirmation",phase=phase)
+        family = "shipment" if phase is None else "confirmation"
+        prefix = "nl:ship:mail:" if family=="shipment" else "nl:order-confirmation:"
+        rk=prefix+"row:"+id; sk="nl:ship:done:"+row['session'] if family=="shipment" else prefix+"source:"+id
+        due=prefix+"due"; closed=prefix+"closed:"+stats; erased=prefix+"erased:"+stats+":"+person
+        keys=[pool,all_key,rk,sk,due,closed,erased];made.update(keys)
+        raw=json.dumps(row);redis.command("SET",rk,raw);redis.command("SET",sk,row['sourceValue']);redis.command("SADD",all_key,id)
+        redis.command("HINCRBY",pool,"items",1);redis.command("HINCRBY",pool,"bytes",12000)
+        return id,raw,keys
+    id,raw,keys=setup("first")
+    assert run("next")==["ticket",id,"1"]
+    before=checkpoint();assert before['units']==64 and before['attempts']==1
+    assert run("finish",keys=keys,raw=raw,valid="valid")==["rearmed"]
+    assert redis.command("GET",keys[2])==raw
+    assert redis.command("ZSCORE",keys[4],id) is not None
+    assert checkpoint()['family']=='confirmation'
+    after=checkpoint()
+    assert run("finish",keys=keys,raw=raw,valid="valid")==["held"]
+    assert checkpoint()==after
+    assert run("next",family="confirmation")==["ticket",id,"1"]
+    missing="nl:order-confirmation:row:"+id;made.add(missing)
+    assert run("finish",family="confirmation",keys=[pool,all_key,missing])==["skipped"]
+    assert checkpoint()['phase']=='done'
+    assert run("next")==["done"]
+    assert redis.command("GET",keys[2])==raw and redis.command("TTL",keys[2])==-1
+    print("PASS: recovery snapshot, pre-read ticket, unchanged source, one rearm and lost-finish ACK replay are durable")
+    # Higher revision cannot reuse the same review or shrink the allowed cap.
+    bad={**grant,"recovery":{**grant['recovery'],"revision":2}}
+    assert run("next",g=bad,proof="e"*64)==["held"]
+    assert run("next",g=grant,proof="f"*64)==["held"]
+    print("PASS: consumed grant cannot restart, mutate its fingerprint or replay the same review")
+    # The next synthetic grant sees a full bounded snapshot, including first
+    # unsupported reviews; each known refusal advances rather than hot-polling.
+    redis.command("DEL",pool,all_key)
+    rows=[setup("cohort"+str(i),review="UNSUPPORTED" if i<24 else "OLD") for i in range(25)]
+    ordered=sorted(rows,key=lambda v:v[0]); target=rows[-1][0]
+    for expected,observed,k in ordered:
+        assert run("next")==["ticket",expected,str(checkpoint()['index'])]
+        result=run("finish",keys=k,raw=observed,valid="valid")
+        assert result==(["rearmed"] if expected==target else ["skipped"])
+    assert redis.command("ZSCORE",rows[-1][2][4],target) is not None
+    assert len(checkpoint()['ids'])==25 and len(redis.command("HGET",pool,"pendingRecovery").encode())<=8192
+    print("PASS: all25 snapshot positions progress through unsupported reviews; the supported target is not hidden")
+    redis.command("DEL",pool,all_key)
+    for i in range(26):redis.command("SADD",all_key,hashlib.sha256(("over"+str(i)).encode()).hexdigest())
+    redis.command("HSET",pool,"items",26,"bytes",26*12000)
+    before=redis.command("INFO","COMMANDSTATS")
+    assert run("next")==["unsupported"]
+    after=redis.command("INFO","COMMANDSTATS")
+    def calls(text,name):
+        m=re.search(r"^cmdstat_"+name+r":calls=(\d+),",text,re.M);return int(m[1]) if m else 0
+    assert calls(after,"smembers")==calls(before,"smembers")
+    assert checkpoint()['phase']=='unsupported' and redis.command("SCARD",all_key)==26
+    print("PASS: cohort26 refuses before enumeration, never truncates or discards any origin")
+    redis.command("DEL",pool,all_key)
+    id,raw,keys=setup("budget")
+    finite={**grant,'recovery':{**grant['recovery'],'maximumAttempts':1,'maximumCommandUnits':64,'maximumTriggerInvocations':1}}
+    assert run('next',g=finite)==['ticket',id,'1']
+    before=checkpoint()
+    assert run('next',g=finite,who='e'*48)==['exhausted']
+    assert checkpoint()==before and redis.command('GET',keys[2])==raw
+    print('PASS: unknown ticket ACK cannot mint a free retry or advance the cursor after finite capacity is spent')
+    for state in ['dispatching','refused']:
+        redis.command('DEL',pool,all_key)
+        id,raw,keys=setup('terminal-'+state,state=state)
+        assert run('next')==['ticket',id,'1']
+        assert run('finish',keys=keys,raw=raw,valid='valid')==['skipped']
+        assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id) is None
+    redis.command('DEL',pool,all_key)
+    id,raw,keys=setup('fenced')
+    redis.command('SET',keys[5],'original-close-fence')
+    assert run('next')==['ticket',id,'1']
+    assert run('finish',keys=keys,raw=raw,valid='valid')==['skipped']
+    assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id) is None
+    print('PASS: permanent uncertain dispatch, refusal and closure fences never become new provider permission')
+    redis.command('DEL',pool,all_key)
+    id,raw,keys=setup('lost-ticket')
+    assert run('next')==['ticket',id,'1']
+    before=checkpoint()
+    assert run('next',who='f'*48)==['held']
+    after=checkpoint()
+    assert after['index']==before['index'] and after['owner']==before['owner'] and after['attempts']==before['attempts']+1
+    assert run('finish',keys=keys,raw=raw+' ',valid='valid')==['changed']
+    assert checkpoint()['index']==1 and redis.command('GET',keys[2])==raw
+    assert run('finish',keys=keys,raw=raw,valid='valid')==['rearmed']
+    print('PASS: concurrent/unknown ticket and changed row retain the exact snapshot position until an acknowledged matching effect')
+    # Counter corruption is not free capacity. Preserve the corrupt value,
+    # refuse before another source/index effect, and do not reset a revision.
+    saved=redis.command('HGET',pool,'pendingRecovery')
+    corrupt=json.loads(saved);corrupt['attempts']=0
+    redis.command('HSET',pool,'pendingRecovery',json.dumps(corrupt))
+    assert run('next')==['unknown']
+    assert json.loads(redis.command('HGET',pool,'pendingRecovery'))['attempts']==0
+    redis.command('HSET',pool,'pendingRecovery',saved)
+    print('PASS: malformed or inconsistent checkpoint counters remain unknown rather than replenished')
 
 
 def main():
@@ -152,7 +278,7 @@ def main():
         assert redis.command("ZSCORE", k[2], r["id"]) is not None
         held = run("claim", json.loads(last[1]), k, last[1], at=now + 61_000, p={**policy, "maximumChecks": 1})
         assert held[0] == "queued" and json.loads(held[1])["next"] == 0
-        assert redis.command("ZSCORE", k[2], r["id"]) is None
+        assert redis.command("ZSCORE", k[2], r["id"]) == "-1"
         print("PASS: the final abandoned preparation becomes an explicit on-hold record, never a phantom queued retry")
 
         r, k = fixture("old-producer", store="deleted")
@@ -220,6 +346,7 @@ def main():
         assert redis.command("EXISTS", unknown_keys[0]) == 0
         assert redis.command("HGET", unknown_keys[5], "bytes") == "not-a-number"
         print("PASS: privacy erasure removes payload even if financial evidence is corrupt; unknown reserve is never released")
+        pending_recovery_cases(redis, source, made)
     finally:
         if made:
             redis.command("DEL", *sorted(made))

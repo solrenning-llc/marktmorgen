@@ -425,7 +425,7 @@ def main():
 import {build} from 'esbuild';
 import {spawnSync} from 'node:child_process';
 import {testAliases,testEnvironment} from './tests/test-config.mjs';
-for(const file of ['order-confirmation-paid.test.ts','order-confirmation-paid-erasure.test.ts','course-origin-persistence.test.ts']) {
+for(const file of ['order-confirmation-paid.test.ts','order-confirmation-paid-erasure.test.ts','course-origin-persistence.test.ts','pending-mail-recovery.test.ts']) {
 await build({entryPoints:['tests/'+file],bundle:true,platform:'node',format:'cjs',outfile:process.argv[1],logLevel:'error',alias:testAliases(file,process.cwd(),process.cwd()+'/tests')});
 const result=spawnSync(process.execPath,[process.argv[1]],{env:testEnvironment(process.env),stdio:'inherit'});
 if(result.status!==0){process.exitCode=result.status ?? 1;break;}

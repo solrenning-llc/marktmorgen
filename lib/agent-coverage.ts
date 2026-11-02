@@ -120,7 +120,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/closing-refunds": row("money", never(MONEY)),
   "POST store/collections": row("pages", draft),
   "POST store/come-back": row("offers", draft),
-  "POST store/community/events": row("community", execute, "Scheduling, moving and cancelling a live event tells the people coming."),
+  "POST store/community/events": row("community", execute, "Scheduling, moving and canceling a live event tells the people coming."),
   "POST store/community/manage": row("community", execute, "Muting or taking a member out reaches that member."),
   "POST store/contact-box": row("pages", draft),
   "GET store/course": row("courses", read),

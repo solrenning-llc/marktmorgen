@@ -107,6 +107,8 @@ Ordem anterior à MQ2, preservada como histórico — Localizadores do Grupo A s
 
 **Entrada posterior AA1 — 02/11/2026, 02h15 Fortaleza (decisão do dono):** **631 [AA1]** (loja inteira controlada por agente de IA, evidentemente superior ao Whop), na fila, **ACIMA DO MARCO MQ1, Grupo A, logo depois de 571 [VS1]** na ordem vigente da MQ2/MQ3. **27 [E10] e 258 [KJ3] sobem para o Grupo A dentro do 631 [AA1]** e deixam a posição do Grupo B; a linha de comando (616 [WP15](24)), a listagem do conector (616 [WP15](25)) e a documentação para agentes (614 [WP13]) também passam ao 631. Texto integral no item 631.
 
+**Entrada posterior AA2 — 02/11/2026, 02h17 Fortaleza (decisão do dono):** **632 [AA2]** (anúncios lançados de dentro da Marktmorgen, na conta de anúncios do próprio criador, vendo para onde vai cada dólar), na fila, **ACIMA DO MARCO MQ1, Grupo A, logo depois de 631 [AA1]**. 42 [G4], 401 [WX2] e a parte de criativos de anúncio de 376 [TB2] sobem para o Grupo A dentro do 632. Texto integral no item 632.
+
 **Entrada posterior NC1 — 30/10/2026, 16h35 Fortaleza:** **569 [NC1]**, na fila, ACIMA DO MARCO MQ1, Grupo A, logo depois de 414 [KX1] na ordem vigente (posição 3), pelo critério (a) da MQ2 (direitos do cliente), por indicação expressa do dono; e pré-requisito antes da abertura dentro da AV1, na parte do Claude (AV4), logo depois de 414 [KX1]. Inserir somente este novo item nessa posição; os demais conservam entre si a ordem. O número 569 é o próximo livre (568 era o maior).
 
 **Entrada posterior DR1 — 30/10/2026, 17h30 Fortaleza:** **570 [DR1]**, na fila, ACIMA DO MARCO MQ1, Grupo A, logo depois de 461 [EL5] na ordem vigente, pelo critério (c) da MQ2, por indicação expressa do dono. Inserir somente este novo item nessa posição; os demais conservam entre si a ordem. O número 570 é o próximo livre (569 era o maior).
@@ -2487,7 +2489,7 @@ Proveniência AB: passou a fazer parte do Bloco de abertura, posição (j), por 
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.
    - Custo e margem: Calcular quotas, custos, aprovação e armazenamento; não pedir aprovação sem dono.
 
-42. **[G4] Documentar e preparar criação de anúncios dentro do produto, desligada.**
+42. **[G4] Documentar e preparar criação de anúncios dentro do produto, desligada.** — Movido para o Grupo A dentro de 632 [AA2] por decisão do dono (02/11/2026, 02h17 Fortaleza); executar como parte do 632, sem fazer duas vezes.
    - Pedido: P2 G4; datas/horas e grau de certeza em Proveniência.
    - Estado: **a fazer**. Posição vigente: OR: Bloco B, posição 64/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.
@@ -10983,7 +10985,7 @@ Conferir periodicamente a posse do produto na conta Stripe DO CRIADOR, com conse
 
 Teto automático por loja ANTES de chamadas/verificações e gasto: reconciliador existente, páginas, membros, lotes, frequência, retries/backoff, concorrência, expiração de convites, filas e armazenamento medidos e limitados; reserva e reconciliação idempotentes, sem fila infinita ou consumo gratuito presumido. UX acessível AX274 e alternativa clara para conexão/convite pendente/erro, sem promessa de acesso garantido sob indisponibilidade.
 
-401. [WX2] Estudo de anúncios Meta no painel, sem construir.
+401. [WX2] Estudo de anúncios Meta no painel, sem construir. — Movido para o Grupo A dentro de 632 [AA2] por decisão do dono (02/11/2026, 02h17 Fortaleza); executar como parte do 632, sem fazer duas vezes.
 
 Estado: na fila. Entrega: docs/meta-ads-study.md. Estudar criação/acompanhamento Facebook/Instagram como referência Whop Ads, reaproveitando somente mecanismos existentes quando apropriado. Conferir fontes oficiais datadas: Marketing API, requisitos e versões, revisão do aplicativo, permissões, eventual verificação empresarial e necessidade real de agência gerenciada, contas elegíveis, regras de anúncios/dados, limites e custos de manutenção. Não copiar hipótese de agência da Whop como requisito universal da Meta.
 
@@ -21615,5 +21617,37 @@ Testes automáticos: cobertura de ferramentas (a); nenhuma ação sem confirmaç
 Acessibilidade (AX274, Parte A, integral): o assistente, as prévias, o histórico e o código gerado em WCAG 2.2 AAA, ATAG 2.0 (o estúdio ajuda o criador a produzir conteúdo acessível) e operação completa por teclado e por voz quando houver.
 
 Proibido: mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; deixar o agente publicar, enviar, cobrar, reembolsar ou apagar sem confirmação; deixar código gerado rodar no mesmo domínio do estúdio ou do checkout; mostrar recurso que não funciona; afirmar superioridade sem prova; criar contas, aceitar termos, contratar, pagar ou contatar terceiros; apagar conteúdo de criadores ou qualquer coisa da Hazelsong.
+
+Aplicar a regra VR.
+
+## AA2 — Anúncios lançados de dentro da Marktmorgen (02/11/2026)
+
+Etiqueta: [AA2], item 632.
+
+Solicitação do dono (02/11/2026, 02h17, horário de Fortaleza), ao ver no Whop o bloco "Anúncios — Lance campanhas de dentro do seu produto e veja para onde vai o investimento": "QUERO ISSO". Contexto da mesma conversa: "QUERO SER EVIDENTEMENTE MELHOR E SUPERIOR A WHOP" (02h15). Texto redigido pelo Claude; gravado diretamente pelo Claude.
+
+Pedidos repetidos: absorve e substitui a posição de 42 [G4] (criação de anúncios dentro do produto, desligada), 401 [WX2] (estudo de anúncios Meta) e da parte de criativos de anúncio de 376 [TB2]; reaproveita lib/meta-ads.ts e lib/meta-ads-rules.ts (conta de anúncios da Meta ligada, gasto lido por dia), lib/ad-spend-rules.ts (gasto, resultado depois de reembolsos e dias para se pagar por canal), lib/pixels.ts, lib/ad-events.ts e lib/ad-consent.ts (pixels e conversões pelo servidor com consentimento), 613 [WP12] (X e Reddit), 631 [AA1] (o agente de IA também lança e ajusta campanhas, com confirmação); sem duplicar.
+
+Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 631 [AA1].
+
+Objetivo: o criador lança e acompanha campanhas de anúncio sem sair da Marktmorgen e vê, por campanha e por produto, quanto gastou, quanto vendeu depois dos reembolsos e em quantos dias o anúncio se pagou; de forma evidentemente melhor que o Whop, que roda os anúncios em contas da própria plataforma (a conta, o histórico e os públicos ficam com ela). Aqui a conta de anúncios, o cartão, os públicos e o histórico são sempre do criador; a Marktmorgen nunca paga, adianta, recebe ou guarda dinheiro de anúncio.
+
+O que construir, em unidades pequenas:
+(a) Estudo com fontes oficiais datadas, primeiro: Marketing API da Meta (permissões de criação e gestão de anúncios, revisão do aplicativo, verificação da empresa, limites de chamadas, versões), Google Ads API e TikTok Marketing API, as regras de anúncio e de dados de cada uma e o que exige conta, revisão ou contrato; registrar em "Depende do dono" o passo exato de cada revisão de aplicativo, sem criar conta nem pedir revisão.
+(b) Lançar de dentro: a partir de um produto da loja, o criador escolhe objetivo, público (sempre da própria conta e do próprio pixel; nunca compradores de uma loja usados para anúncios de outra), orçamento diário e total, datas e o criativo; a campanha é criada na conta de anúncios dele, pausada, e só começa a gastar depois da confirmação; o estúdio mostra o gasto máximo possível antes de confirmar.
+(c) Criativos com IA aprovados pelo criador: textos e imagens a partir do produto e das fotos dele, com os filtros de honestidade existentes (nada de promessa de ganho, escassez ou depoimento inventado), respeitando as regras de anúncio de cada rede, marcados como gerados por IA onde a lei ou a rede pedir; reserva antes de cada chamada, dentro dos trabalhos de IA do plano.
+(d) Ver para onde vai o investimento: painel por campanha e por produto com gasto (lido da conta do criador), vendas atribuídas pelos pixels e conversões pelo servidor com consentimento, resultado depois de reembolsos e contestações, custo por venda e dias para se pagar; o que não se mede aparece como desconhecido, nunca como zero; sem previsão de ganho.
+(e) Proteções: pausar, ajustar orçamento e encerrar em um clique; aviso quando o gasto do dia passa do limite que o criador escolheu e pausa automática opcional no limite; o agente do 631 pode sugerir e preparar ajustes, mas nada muda sem confirmação.
+(f) Que o cliente saiba: a página pública mostra o recurso só quando funcionar de verdade (VR), com exemplo da loja de demonstração e a diferença honesta em relação ao Whop (conta do próprio criador), com fonte datada, sem afirmar superioridade sem a prova exigida em AX274 item 7.
+
+Dependências do dono (nunca executadas pelo agente): aplicativo da Meta com as permissões de criação de anúncios aprovadas na revisão da Meta e as chaves na implantação (como já é o caso do META_APP_ID e META_APP_SECRET para a leitura); o mesmo para Google e TikTok, quando entrarem.
+
+Custo: chamadas às APIs de anúncios e de IA com teto mensal por loja antes do gasto, dentro das requisições e dos trabalhos de IA do plano; nenhum gasto de anúncio passa pela Marktmorgen. Custo desconhecido reprova, nunca é zero. Pior caso por plano, mensal e anual, pela regra MR e pela política TX.
+
+Testes automáticos: campanha criada sempre pausada até a confirmação; nenhum público de outra loja; orçamento máximo mostrado igual ao enviado; pausa automática no limite; criativo com promessa de ganho recusado; somente APIs simuladas.
+
+Acessibilidade (AX274, Parte A, integral): todo o fluxo em WCAG 2.2 AAA, com tabelas em vez de gráficos sem alternativa e textos simples.
+
+Proibido: gastar dinheiro de anúncio sem confirmação do criador; usar contas de anúncio da plataforma ou dados de compradores de outra loja; criar contas, aceitar termos ou pedir revisão de aplicativo pelo agente; mudar preços, limites visíveis, comissão, PLANS_ON_SALE, OPENING_REQUESTED, o tax gate, o art. 9a, a revisão comercial ou stripePlatformEligibilityReady; afrouxar qualquer trava; mostrar recurso que não funciona; afirmar superioridade sem prova; apagar conteúdo de criadores ou qualquer coisa da Hazelsong.
 
 Aplicar a regra VR.

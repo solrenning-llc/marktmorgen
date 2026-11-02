@@ -19,7 +19,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { WHO, type Who, audience } from "@/lib/contacts";
+import { WHO, type Who, audience, readTags } from "@/lib/contacts";
 import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
 import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonth } from "@/lib/mail";
 import { windowId } from "@/lib/allowance-window";
@@ -59,6 +59,12 @@ export type Broadcast = {
    * starts. Null for none, which is every email made before 12 October 2026.
    */
   narrow: Narrow | null;
+  /**
+   * Only people who carry this label (lib/contacts.ts, tags; 99
+   * [E2-TAG-BROADCAST]), as an import or a sequence put it on them. Null for
+   * none, and absent on every email made before 2 November 2026.
+   */
+  label?: string | null;
   status: BroadcastStatus;
   createdAt: number;
   sendAt: number;
@@ -120,6 +126,7 @@ function parse(raw: unknown): Broadcast | null {
       tagged: value.tagged === true,
       who: WHO.includes(value.who) ? value.who : "all",
       narrow: isNarrowed(value.narrow) ? readNarrow(value.narrow) : null,
+      ...(typeof value.label === "string" && value.label ? { label: value.label } : {}),
       test: parseTest(value.test),
     };
   } catch {
@@ -162,6 +169,7 @@ function parseStoredBroadcast(raw: unknown, id: string, listId?: string): Broadc
   if (!b || b.id !== id || typeof b.listId !== "string" || !b.listId.trim() || (listId !== undefined && b.listId !== listId) || typeof b.handle !== "string" || !b.handle.trim() || typeof b.subject !== "string" || !b.subject.trim() || typeof b.body !== "string" || !b.body.trim() || !association(b.productId) || !statuses.has(b.status) || !nonnegative(b.createdAt) || !b.createdAt || !nonnegative(b.sendAt) || !b.sendAt || !nonnegative(b.finishedAt) || !nonnegative(b.total) || !nonnegative(b.sent) || b.sent > b.total || !nonnegative(b.failures) || typeof b.listed !== "boolean" || typeof b.note !== "string") throw new Error("Invalid campaign fields");
   // These fields were absent in older campaigns; explicit malformed values are not legacy defaults.
   if (value.who !== undefined && !WHO.includes(value.who as Who) || value.notProductId !== undefined && !association(value.notProductId) || value.tagged !== undefined && typeof value.tagged !== "boolean" || value.test !== undefined && value.test !== null && b.test === null) throw new Error("Invalid campaign options");
+  if (value.label !== undefined && value.label !== null && (typeof value.label !== "string" || readTags([value.label])[0] !== value.label)) throw new Error("Invalid campaign label");
   if (value.narrow !== undefined && value.narrow !== null) {
     if (typeof value.narrow !== "object" || Array.isArray(value.narrow)) throw new Error("Invalid campaign audience");
     const narrow = value.narrow as Record<string, unknown>;
@@ -228,7 +236,7 @@ export function linksToStore(body: string, store: Pick<Store, "handle" | "domain
 /** Writes a broadcast down to go now or later. What it may contain is checked here. */
 export async function createBroadcast(
   store: Store,
-  input: { subject: unknown; body: unknown; productId: unknown; notProductId: unknown; sendAt: unknown; who?: unknown; test?: unknown; narrow?: unknown },
+  input: { subject: unknown; body: unknown; productId: unknown; notProductId: unknown; sendAt: unknown; who?: unknown; test?: unknown; narrow?: unknown; label?: unknown },
 ): Promise<CreateResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
   if (!store.mail || !store.listId) return { ok: false, reason: "setup" };
@@ -247,6 +255,8 @@ export async function createBroadcast(
   const who: Who = WHO.includes(input.who as Who) ? (input.who as Who) : "all";
   const asNarrowed = readNarrow(input.narrow);
   const narrow = isNarrowed(asNarrowed) ? asNarrowed : null;
+  // A label as a file or a sequence writes one: cleaned, at most MAX_TAG_LENGTH; empty is none.
+  const label = typeof input.label === "string" ? readTags([input.label])[0] ?? null : null;
   const now = Math.floor(Date.now() / 1000);
   let sendAt = now;
   if (input.sendAt !== undefined && input.sendAt !== null && input.sendAt !== "") {
@@ -255,7 +265,7 @@ export async function createBroadcast(
     sendAt = Math.max(at, now);
   }
   // Checked now for a send that starts now; a scheduled one is checked again when it starts.
-  const reach = (await audience(store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), await keepFor(store, narrow))).length;
+  const reach = (await audience(store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), await keepFor(store, narrow), label ?? undefined)).length;
   if (reach === 0) return { ok: false, reason: "empty" };
   // A second subject line, when one was asked for. Refused here, with the
   // reason, whenever it could not be a real test: the creator finds out while
@@ -283,6 +293,7 @@ export async function createBroadcast(
     notProductId,
     who,
     narrow,
+    ...(label ? { label } : {}),
     status: "scheduled",
     createdAt: now,
     sendAt,
@@ -392,7 +403,7 @@ export async function advanceBroadcast(
         await save(b);
         return b;
       }
-      const to = await audience(b.listId, b.productId ?? undefined, b.notProductId ?? undefined, whoOf(store, b.who), await keepFor(store, b.narrow));
+      const to = await audience(b.listId, b.productId ?? undefined, b.notProductId ?? undefined, whoOf(store, b.who), await keepFor(store, b.narrow), b.label ?? undefined);
       let test = b.test;
       if (test) {
         if (to.length < MIN_TEST_REACH) {

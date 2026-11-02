@@ -121,6 +121,29 @@ def pending_recovery_cases(redis, source, made):
     assert run('finish',keys=keys,raw=raw,valid='valid',g=newer,proof=new_fp)==['skipped']
     assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id) is None
     print('PASS: an explicitly renewed discovery grant may keep cap10000 without resetting checks or accepting old permissions')
+    # Each newly financed small grant must continue the SAME immutable list,
+    # not recapture the unsupported first ID on every budget renewal.
+    redis.command('DEL',pool,all_key)
+    rows=sorted([setup('grant-progress-one'),setup('grant-progress-two')],key=lambda row:row[0])
+    first_id,first_raw,first_keys=rows[0]
+    first=json.loads(first_raw);first['reviewId']='UNSUPPORTED'
+    first_raw=json.dumps(first);redis.command('SET',first_keys[2],first_raw)
+    rows[0]=(first_id,first_raw,first_keys)
+    target_id,target_raw,target_keys=rows[1]
+    visited=[]
+    for revision in range(1,7):
+        funded={**grant,'reviewId':'CONTINUATION_'+str(revision),'recovery':{**grant['recovery'],'revision':revision,
+            'maximumAttempts':1,'maximumCommandUnits':640,'maximumReadBytes':10485760,'maximumTriggerInvocations':10}}
+        proof=hashlib.sha256(('continuation'+str(revision)).encode()).hexdigest()
+        ticket=run('next',g=funded,proof=proof)
+        if ticket[0]=='ticket':
+            selected=next(row for row in rows if row[0]==ticket[1]);visited.append(ticket[1])
+            assert run('finish',keys=selected[2],raw=selected[1],valid='valid',g=funded,proof=proof) in [['skipped'],['rearmed'],['already']]
+    assert redis.command('ZSCORE',target_keys[4],target_id)=='0', 'financed successor grants must reach the later supported origin'
+    assert visited[:2]==[first_id,target_id], 'successor must preserve snapshot index and sorted IDs'
+    assert redis.command('GET',target_keys[2])==target_raw
+    progress=checkpoint();assert progress['family']=='confirmation' and progress['index']==1
+    print('PASS: newly financed grants compose snapshot progress through an unsupported prefix without resetting original sources')
     # The next synthetic grant sees a full bounded snapshot, including first
     # unsupported reviews; each known refusal advances rather than hot-polling.
     redis.command("DEL",pool,all_key)

@@ -11,7 +11,7 @@ const now = 1_800_000_000_000;
 const recovery = () => ({
  version: 1 as const, revision: 1, evidence: 'SYNTHETIC finite recovery; no actual funding',
  startsAt: now - 1000, until: now + 3_600_000,
- maximumAttempts: 100, maximumCommandUnits: 6400,
+ maximumAttempts: 100, maximumCommandUnits: 6400, maximumReadBytes: 104857600,
  checkpointBytes: 8192, maximumTriggerInvocations: 100,
  triggerEvidence: 'SYNTHETIC fixed trigger/function/failed-guard funding envelope',
 });
@@ -30,7 +30,7 @@ test('ordinary pending storage evidence never supplies recovery capacity', () =>
 test('recovery periods, finite budgets and own data are required before new IO', () => {
  for (const change of [
   { maximumAttempts: 0 }, { maximumAttempts: Infinity }, { maximumCommandUnits: 0 },
-  { checkpointBytes: 1 }, { startsAt: now + 1 }, { until: now },
+  { maximumReadBytes: 0 }, { checkpointBytes: 1 }, { startsAt: now + 1 }, { until: now },
   { revision: 0 }, { revision: Number.MAX_SAFE_INTEGER }, { maximumTriggerInvocations: 0 }, { triggerEvidence: '' },
  ]) assert.equal(shipmentMailPolicy({ ...shipmentPolicy(now), recovery: { ...recovery(), ...change } }, now, false), null);
  let reads = 0;

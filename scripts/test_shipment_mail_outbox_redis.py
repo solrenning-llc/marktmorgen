@@ -34,7 +34,7 @@ def pending_recovery_cases(redis, source, made):
     clock = redis.command("TIME")
     now = int(clock[0]) * 1000 + int(clock[1]) // 1000
     grant = dict(recovery=dict(version=1, revision=1, evidence="SYNTHETIC only", startsAt=now-1000, until=now+3600000,
-                              maximumAttempts=100, maximumCommandUnits=6400, checkpointBytes=8192,
+                              maximumAttempts=100, maximumCommandUnits=6400, maximumReadBytes=104857600, checkpointBytes=8192,
                               maximumTriggerInvocations=100, triggerEvidence="SYNTHETIC fixed infra coverage"),
                  reviewId="NEW", maximumChecks=2, globalItems=100, globalBytes=10000000, continuedReviewIds=["OLD"])
     owner = "b" * 48
@@ -112,11 +112,12 @@ def pending_recovery_cases(redis, source, made):
     def calls(text,name):
         m=re.search(r"^cmdstat_"+name+r":calls=(\d+),",text,re.M);return int(m[1]) if m else 0
     assert calls(after,"smembers")==calls(before,"smembers")
+    assert calls(after,"sscan")==calls(before,"sscan")
     assert checkpoint()['phase']=='unsupported' and redis.command("SCARD",all_key)==26
     print("PASS: cohort26 refuses before enumeration, never truncates or discards any origin")
     redis.command("DEL",pool,all_key)
     id,raw,keys=setup("budget")
-    finite={**grant,'recovery':{**grant['recovery'],'maximumAttempts':1,'maximumCommandUnits':64,'maximumTriggerInvocations':1}}
+    finite={**grant,'recovery':{**grant['recovery'],'maximumAttempts':1,'maximumCommandUnits':64,'maximumReadBytes':1048576,'maximumTriggerInvocations':1}}
     assert run('next',g=finite)==['ticket',id,'1']
     before=checkpoint()
     assert run('next',g=finite,who='e'*48)==['exhausted']

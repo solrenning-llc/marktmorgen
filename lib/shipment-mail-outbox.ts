@@ -16,7 +16,7 @@ export type ShipmentMailState = "queued" | "preparing" | "dispatching" | "refuse
 export type ShipmentMailView = { state: "queued" | "on_hold" | "accepted" | "acceptance_unknown" | "refused" | "not_recorded"; delayed: boolean };
 export type PendingMailRecoveryGrant = {
   version: 1; revision: number; evidence: string; startsAt: number; until: number;
-  maximumAttempts: number; maximumCommandUnits: number; checkpointBytes: number;
+  maximumAttempts: number; maximumCommandUnits: number; maximumReadBytes: number; checkpointBytes: number;
   maximumTriggerInvocations: number; triggerEvidence: string;
 };
 export type ShipmentMailPolicy = {
@@ -109,13 +109,14 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
   }
   if (p.recovery !== undefined) {
     const r = data(p.recovery);
-    const fields = ["version", "revision", "evidence", "startsAt", "until", "maximumAttempts", "maximumCommandUnits", "checkpointBytes", "maximumTriggerInvocations", "triggerEvidence"];
+    const fields = ["version", "revision", "evidence", "startsAt", "until", "maximumAttempts", "maximumCommandUnits", "maximumReadBytes", "checkpointBytes", "maximumTriggerInvocations", "triggerEvidence"];
     if (!r || Object.keys(r).length !== fields.length || !fields.every(key => Object.hasOwn(r, key)) || r.version !== 1 ||
         typeof r.evidence !== "string" || !r.evidence.trim() || r.evidence.length > 1000 ||
         typeof r.triggerEvidence !== "string" || !r.triggerEvidence.trim() || r.triggerEvidence.length > 1000) return null;
-    for (const key of ["revision", "startsAt", "until", "maximumAttempts", "maximumCommandUnits", "checkpointBytes", "maximumTriggerInvocations"]) if (!integer(r[key])) return null;
+    for (const key of ["revision", "startsAt", "until", "maximumAttempts", "maximumCommandUnits", "maximumReadBytes", "checkpointBytes", "maximumTriggerInvocations"]) if (!integer(r[key])) return null;
     if (Number(r.revision) < 1 || Number(r.revision) > 1_000_000_000 || Number(r.startsAt) > now || Number(r['until']) <= now || Number(r['until']) <= Number(r.startsAt) ||
         Number(r.maximumAttempts) < 1 || Number(r.maximumAttempts) > 1000 || Number(r.maximumCommandUnits) < 64 || Number(r.maximumCommandUnits) > 64_000 ||
+        Number(r.maximumReadBytes) < 1_048_576 || Number(r.maximumReadBytes) > 1_048_576_000 ||
         Number(r.checkpointBytes) < 4096 || Number(r.checkpointBytes) > 8192 || Number(r.maximumTriggerInvocations) < 1 || Number(r.maximumTriggerInvocations) > 1000) return null;
     const captured: Record<string, unknown> = Object.create(null);
     for (const key of fields) captured[key] = r[key];
@@ -302,7 +303,7 @@ if not ok or type(g)~='table' or type(g.recovery)~='table' or not now then retur
 local r=g.recovery
 local clock=redis.call('TIME')
 local serverNow=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
-if math.abs(now-serverNow)>60000 or now<r.startsAt or now>=r['until'] or r.version~=1 or r.revision<1 or r.revision>1000000000 or r.revision%1~=0 or r.maximumAttempts<1 or r.maximumAttempts>1000 or r.maximumCommandUnits<64 or r.maximumCommandUnits>64000 or r.checkpointBytes<4096 or r.checkpointBytes>8192 or r.maximumTriggerInvocations<1 or r.maximumTriggerInvocations>1000 then return {'unknown'} end
+if math.abs(now-serverNow)>60000 or now<r.startsAt or now>=r['until'] or r.version~=1 or r.revision<1 or r.revision>1000000000 or r.revision%1~=0 or r.maximumAttempts<1 or r.maximumAttempts>1000 or r.maximumCommandUnits<64 or r.maximumCommandUnits>64000 or r.maximumReadBytes<1048576 or r.maximumReadBytes>1048576000 or r.checkpointBytes<4096 or r.checkpointBytes>8192 or r.maximumTriggerInvocations<1 or r.maximumTriggerInvocations>1000 then return {'unknown'} end
 now=serverNow
 if now<r.startsAt or now>=r['until'] or (family~='shipment' and family~='confirmation') or #fp~=64 or #owner~=48 then return {'unknown'} end
 local pt,at=redis.call('TYPE',KEYS[1]).ok,redis.call('TYPE',KEYS[2]).ok
@@ -320,14 +321,14 @@ if raw then
  if #raw>8192 then return {'unknown'} end
  local good,v=pcall(cjson.decode,raw)
  if not good or type(v)~='table' or v.version~=1 or type(v.ids)~='table' or #v.ids>25 then return {'unknown'} end
- local expected={version=true,revision=true,fingerprint=true,reviewId=true,maximumChecks=true,attempts=true,units=true,ids=true,index=true,family=true,phase=true,owner=true,leaseUntil=true}
+ local expected={version=true,revision=true,fingerprint=true,reviewId=true,maximumChecks=true,attempts=true,units=true,readBytes=true,ids=true,index=true,family=true,phase=true,owner=true,leaseUntil=true}
  local count=0
  for field,_ in pairs(v) do if not expected[field] then return {'unknown'} end;count=count+1 end
- if count~=13 then return {'unknown'} end
- for _,field in ipairs({'revision','maximumChecks','attempts','units','index','leaseUntil'}) do
+ if count~=14 then return {'unknown'} end
+ for _,field in ipairs({'revision','maximumChecks','attempts','units','readBytes','index','leaseUntil'}) do
   local n=v[field];if type(n)~='number' or n<0 or n>9007199254740991 or n%1~=0 then return {'unknown'} end
  end
- if v.revision<1 or v.revision>1000000000 or v.maximumChecks<1 or v.maximumChecks>10000 or v.attempts>1000 or v.units~=v.attempts*64 or v.index<1 or v.index>#v.ids+1 or type(v.fingerprint)~='string' or #v.fingerprint~=64 or string.find(v.fingerprint,'[^a-f0-9]') or type(v.reviewId)~='string' or #v.reviewId<1 or #v.reviewId>128 or (v.family~='shipment' and v.family~='confirmation') or (v.phase~='capturing' and v.phase~='active' and v.phase~='done' and v.phase~='unsupported') or type(v.owner)~='string' or (v.owner~='' and (#v.owner~=48 or string.find(v.owner,'[^a-f0-9]'))) or ((v.owner=='')~=(v.leaseUntil==0)) then return {'unknown'} end
+ if v.revision<1 or v.revision>1000000000 or v.maximumChecks<1 or v.maximumChecks>10000 or v.attempts>1000 or v.units~=v.attempts*64 or v.readBytes~=v.attempts*1048576 or v.index<1 or v.index>#v.ids+1 or type(v.fingerprint)~='string' or #v.fingerprint~=64 or string.find(v.fingerprint,'[^a-f0-9]') or type(v.reviewId)~='string' or #v.reviewId<1 or #v.reviewId>128 or (v.family~='shipment' and v.family~='confirmation') or (v.phase~='capturing' and v.phase~='active' and v.phase~='done' and v.phase~='unsupported') or type(v.owner)~='string' or (v.owner~='' and (#v.owner~=48 or string.find(v.owner,'[^a-f0-9]'))) or ((v.owner=='')~=(v.leaseUntil==0)) then return {'unknown'} end
  local seen={};local size=0
  for key,id in pairs(v.ids) do
   if type(key)~='number' or key<1 or key>#v.ids or key%1~=0 or type(id)~='string' or #id~=64 or string.find(id,'[^a-f0-9]') or seen[id] then return {'unknown'} end
@@ -346,18 +347,24 @@ if op=='next' then
  if c and (r.revision<c.revision or (r.revision==c.revision and fp~=c.fingerprint)) then return {'held'} end
  if not c or r.revision>c.revision then
   if c and (g.reviewId==c.reviewId or g.maximumChecks<=c.maximumChecks) then return {'held'} end
-  c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,ids={},index=1,family='shipment',phase='capturing',owner='',leaseUntil=0}
+  c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,readBytes=0,ids={},index=1,family='shipment',phase='capturing',owner='',leaseUntil=0}
  end
  if c.phase=='done' or c.phase=='unsupported' then return {c.phase} end
- if c.attempts>=r.maximumAttempts or c.attempts>=r.maximumTriggerInvocations or c.units+64>r.maximumCommandUnits then return {'exhausted'} end
- c.attempts=c.attempts+1;c.units=c.units+64
+ if c.attempts>=r.maximumAttempts or c.attempts>=r.maximumTriggerInvocations or c.units+64>r.maximumCommandUnits or c.readBytes+1048576>r.maximumReadBytes then return {'exhausted'} end
+ c.attempts=c.attempts+1;c.units=c.units+64;c.readBytes=c.readBytes+1048576
  -- Write-ahead charge: a failed enumeration cannot restore its budget.
  if not save() then return {'unknown'} end
  if c.phase=='capturing' then
   local count=redis.call('SCARD',KEYS[2])
   if count~=tonumber(financial[1]) then return {'unknown'} end
   if count>25 then c.phase='unsupported';save();return {'unsupported'} end
-  local ids=redis.call('SMEMBERS',KEYS[2])
+  -- Cardinality bounds replies independently of COUNT; MATCH bounds member
+  -- bytes BEFORE copying them. A partial cursor is unsupported, never a
+  -- silently truncated snapshot. No repeated scan is hidden in this grant.
+  local scan=redis.call('SSCAN',KEYS[2],0,'MATCH',string.rep('?',64),'COUNT',1000)
+  if scan[1]~='0' then c.phase='unsupported';save();return {'unsupported'} end
+  local ids=scan[2]
+  if #ids~=count then return {'unknown'} end
   for _,id in ipairs(ids) do if #id~=64 or string.find(id,'[^a-f0-9]') then return {'unknown'} end end
   table.sort(ids);c.ids=ids;c.index=1;c.family='shipment';c.phase=#ids==0 and 'done' or 'active'
   if not save() then return {'unknown'} end

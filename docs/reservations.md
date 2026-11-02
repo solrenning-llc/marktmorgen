@@ -44,10 +44,10 @@ Add a row before the first commit of a unit; remove it when the unit is merged.
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Codex | 465 [MR2], #1530: integrate current main so native reader CI can run | codex/mr2-historical-floor-tests | `docs/reservations.md`, `docs/codex-queue.md` | 02/11/2026 |
 | Claude 3 | 631 [AA1] unit 1 (coverage of every studio action by an agent tool, step (a)) | claude3/aa1-coverage | `lib/agent-coverage.ts`, `tests/agent-coverage.test.ts`, `docs/ai-agent-store.md` | 02/11/2026 13h45 |
 | Claude 3 | 631 [AA1] unit 2 (proposals, confirmation and undo as pure rules, step (c); no storage yet) | claude3/aa1-proposal-rules | `lib/agent-proposal-rules.ts`, `tests/agent-proposal-rules.test.ts` | 02/11/2026 14h05 |
 | Claude 3 | 631 [AA1] unit 3 (agent keys by scope: read, draft, execute; step (c); no studio screen yet) | claude3/aa1-agent-keys | `lib/api-keys.ts`, `lib/api-key-rules.ts`, `lib/api-guard.ts`, `tests/agent-keys.test.ts` | 02/11/2026 14h20 |
 | Claude 2 | 520 [LB1] unit 5 (deposit: "The rest is paid at the salon") | claude2/lb1-deposit | `lib/call-deposit.ts`, `tests/call-deposit.test.ts`, and the deposit parts of `lib/call-setup.ts`, `lib/calls.ts`, `components/call-editor.tsx`, `app/[handle]/book/[product]/page.tsx`, `lib/buyer-words/booking.ts` (stacked on its own open PRs #1733–#1736) | 02/11/2026 12h59 |
 | Claude 3 | 631 [AA1] unit 4 (check of AI-generated code before publishing, step (d); pure rules, nothing published) | claude3/aa1-code-check | `lib/generated-code-check.ts`, `tests/generated-code-check.test.ts`, `lib/form-sensitive.ts` (one exported helper, same rules) | 02/11/2026 14h40 |
-| Codex | 465 [MR2], #1530: restore initial VoiceOver document position | codex/mr2-historical-floor-tests | `tooling/screen-reader/navigate-to-content.mjs`, `tooling/screen-reader/navigate-to-content.test.mjs`, `docs/reservations.md` | 02/11/2026 |
 

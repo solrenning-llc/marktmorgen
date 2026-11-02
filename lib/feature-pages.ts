@@ -3,6 +3,7 @@ import { funnelBeginnerQuestions } from "@/lib/funnel-faq";
 import { courseBeginnerQuestions } from "@/lib/course-faq";
 import { membershipBeginnerQuestions } from "@/lib/membership-faq";
 import { callBeginnerQuestions } from "@/lib/call-faq";
+import { storeBeginnerQuestions } from "@/lib/store-page-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -184,6 +185,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about the store page",
         items: [
+          // 534 [FQ1], unit 5: what someone starting out asks, answered by the code (lib/store-page-faq.ts).
+          ...storeBeginnerQuestions(),
           { q: "Can I change my store address later?", a: "Yes, from your studio, whenever you want. The addresses your store holds keep working and send people to the current one, up to ten at once. An address you let go of stops working, and after 30 days anyone may take it." },
           { q: "Is the page up before I connect Stripe?", a: "Yes. The page, the editor and your address are free and stay free; without a plan, the page is shown for " + countWords(publicVisitLimit(SETUP_VISITS)) + " visits a month. Taking a card needs two things: Stripe has cleared your account, and your plan or its 14-day trial is running. Until then the page says plainly that it cannot take a payment." },
           { q: "Can I use my own domain?", a: DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan. You add one record where you bought the domain, and the certificate is made for you. Your marktmorgen.com address keeps working as well.` : "Not yet. It is planned for the Studio plan, and this page will say so on the day it works." },

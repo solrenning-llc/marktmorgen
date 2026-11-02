@@ -1,5 +1,6 @@
 import { readDraftSubjectTest, sameDraftSubjectTest } from "@/lib/mail-draft-test";
 import { sameDraftAudience } from "@/lib/mail-draft-audience";
+import { readTags } from "@/lib/contact-rules";
 import { readNarrow, type Narrow } from "@/lib/segments-rules";
 import { MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 export type MailAnswer = Record<string, unknown> & { ok?: boolean; error?: string };
@@ -19,7 +20,7 @@ export function keptWaitHours(answer: MailAnswer): number | null {
   return answer.ok === true && typeof wait === "number" && Number.isInteger(wait) && wait >= 0 && wait <= MAX_FLOW_WAIT_HOURS ? wait : null;
 }
 
-export type MailCopy = { subject: string; body: string; productId: string | null; who: "all" | "buyers" | "leads"; notProductId: string | null; narrow: Narrow | null };
+export type MailCopy = { subject: string; body: string; productId: string | null; who: "all" | "buyers" | "leads"; notProductId: string | null; narrow: Narrow | null; label?: string };
 /** A copy must retain its content and audience before replacing the composer. */
 export function confirmedMailCopy(answer: MailAnswer): MailCopy | null {
   if (answer.ok !== true || !answer.copy || typeof answer.copy !== "object" || Array.isArray(answer.copy)) return null;
@@ -33,7 +34,10 @@ export function confirmedMailCopy(answer: MailAnswer): MailCopy | null {
     narrow = readNarrow(raw);
     if (raw.minSpent !== narrow.minSpent || raw.channel !== narrow.channel || raw.quietDays !== narrow.quietDays) return null;
   }
-  return { subject: copy.subject, body: copy.body, productId: copy.productId, who: copy.who as MailCopy["who"], notProductId: copy.notProductId, narrow };
+  // A label, when the sent email had one (99 [E2-TAG-BROADCAST]); absent on a copy of an older email.
+  if (!(copy.label === undefined || copy.label === null || typeof copy.label === "string" && readTags([copy.label])[0] === copy.label)) return null;
+  const label = typeof copy.label === "string" ? copy.label : "";
+  return { subject: copy.subject, body: copy.body, productId: copy.productId, who: copy.who as MailCopy["who"], notProductId: copy.notProductId, narrow, ...(label ? { label } : {}) };
 }
 
 /** Accept only a complete draft result belonging to the draft being edited. */

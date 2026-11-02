@@ -14,8 +14,8 @@ const MESSAGES: Record<string, string> = {
   kind: "A headline at the top and the reviews cannot be in a section: a page has one of each.",
   too_big: "Those blocks hold more words than one section can.",
   shape: "One of those blocks would not be kept as it is. Check it is complete and try again.",
-  sections_full: "Your library holds as many sections as your plan allows. Remove one to save another.",
-  applies_full: "Pages have been updated from sections as often as your plan allows this month. It opens again with your next billing month, or on a larger plan.",
+  sections_full: "Your library holds all the sections your store can keep. Remove one to save another.",
+  applies_full: "Pages have been updated from sections as often as your store's figure allows for now. More can be done when the figure opens again.",
   pages: "Those pages no longer use this section. Reload and try again.",
   forbidden: "Your role cannot change one of those pages.",
   unknown: "That section is gone. Reload the page.",
@@ -291,7 +291,7 @@ export function SavedSections({
               Save blocks of this page as a section
             </button>
           )}
-          {sections.length >= limit && limit > 0 ? <p className="mt-2 text-xs text-ink-soft">{`Your plan keeps ${limit} sections. Remove one to save another.`}</p> : null}
+          {sections.length >= limit && limit > 0 ? <p className="mt-2 text-xs text-ink-soft">{`Your store can keep ${limit} ${limit === 1 ? "section" : "sections"}. Remove one to save another.`}</p> : null}
         </>
       )}
     </details>

@@ -211,6 +211,7 @@ type SessionRow = {
   created?: unknown;
   custom_fields?: unknown;
   amount_total?: unknown;
+  currency?: unknown;
   payment_intent?: unknown;
 };
 
@@ -235,6 +236,8 @@ export async function paidCalls(store: Store): Promise<
     answers: Answer[];
     /** What was paid, in cents. */
     amount: number;
+    /** The currency it was paid in, as the checkout session says; empty when it says none, and readers fall back to the store's (22 [E5], unit 2b). */
+    currency: string;
     /** A team booking's hosts' ids and the claim on their time; empty for an ordinary call. */
     hosts: string[];
     claim: string;
@@ -274,6 +277,7 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     moves: 0,
     answers: readAnswers(row),
     amount: typeof row.amount_total === "number" ? row.amount_total : 0,
+    currency: typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "",
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
     pi: paymentOf(row.payment_intent),
@@ -501,6 +505,7 @@ export async function catchUpBookings(store: Store, paid: PaidCall[], origin: st
       moves: call.moves,
       answers: call.answers,
       amountCents: call.amount,
+      currency: call.currency,
       lead: call.lead,
       pi: call.pi,
       origin,
@@ -1287,6 +1292,8 @@ export async function confirmBooking(input: {
   answers?: Answer[];
   /** What was paid, in cents, for the creator's phone; left out when not known. */
   amountCents?: number | null;
+  /** The currency it was paid in; the store's when not known (a store may have changed its currency since). */
+  currency?: string;
   /** The affiliate a lead is credited to (metadata lead_via), and the booking's payment, which a refund is made against. */
   lead?: string;
   pi?: string;
@@ -1337,8 +1344,8 @@ export async function confirmBooking(input: {
   }).catch((error) => console.error("queueing the call.booked webhook failed", error));
   // The creator's phone, when a device of theirs asked for bookings
   // (lib/phone-alerts.ts): what, when in their own time zone, and what was paid.
-  // In the store's currency (lib/money.ts), which is what its calls are charged in.
-  const paid = typeof input.amountCents === "number" && input.amountCents > 0 ? formatMoney(input.amountCents, store.currency) : "";
+  // In the currency it was paid in: the store's own, unless the store changed its currency since.
+  const paid = typeof input.amountCents === "number" && input.amountCents > 0 ? formatMoney(input.amountCents, input.currency || store.currency) : "";
   await alertCreator(
     store,
     "booking",

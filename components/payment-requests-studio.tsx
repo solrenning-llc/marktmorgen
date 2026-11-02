@@ -332,12 +332,14 @@ export function PaymentRequestsStudio({
             const status = statusOf(r, now);
             const next = nextReminderAt(r, now);
             const again = canSendAgain(r, now);
+            // Each request in the currency it was made in: the store may have changed its own since (22 [E5], unit 2c).
+            const its = (cents: number) => formatMoney(cents, r.currency);
             return (
               <li key={r.id} className="card p-4 sm:p-5">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="font-semibold text-ink [overflow-wrap:anywhere]">{r.name ? `${r.name} · ${r.email}` : r.email}</p>
                   <p className="flex items-center gap-2">
-                    <span className="font-semibold tabular-nums text-ink">{money(r.total)}</span>
+                    <span className="font-semibold tabular-nums text-ink">{its(r.total)}</span>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${TONES[status]}`}>{STATUS_WORDS[status]}</span>
                   </p>
                 </div>
@@ -349,8 +351,8 @@ export function PaymentRequestsStudio({
                     status === "open" ? `link works until ${day(r.expiresAt)}` : "",
                     r.sent.length ? `emailed ${r.sent.length} of ${MAX_SENDS} times, last ${day(r.sent[r.sent.length - 1])}` : "not emailed yet",
                     next !== null ? `next reminder ${day(next)}` : "",
-                    status === "paid" || status === "refunded" ? `paid ${money(r.amountPaid || r.total)} on ${day(r.paidAt)}` : "",
-                    r.refunded > 0 ? `${money(r.refunded)} refunded` : "",
+                    status === "paid" || status === "refunded" ? `paid ${its(r.amountPaid || r.total)} on ${day(r.paidAt)}` : "",
+                    r.refunded > 0 ? `${its(r.refunded)} refunded` : "",
                   ].filter(Boolean).join(" · ")}
                 </p>
                 {r.failed && status === "open" ? <p className="mt-1 text-xs font-semibold text-danger">{r.failed}</p> : null}

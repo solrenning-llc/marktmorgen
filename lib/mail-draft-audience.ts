@@ -1,5 +1,7 @@
 import { readNarrow, type Narrow } from "@/lib/segments-rules";
-export type DraftAudience = { who: "all" | "buyers" | "leads"; notProductId: string | null; narrow: Narrow | null };
+import { readTags } from "@/lib/contact-rules";
+/** `label`: only people who carry it (99 [E2-TAG-BROADCAST]); absent for none, as on every draft saved before it. */
+export type DraftAudience = { who: "all" | "buyers" | "leads"; notProductId: string | null; narrow: Narrow | null; label?: string };
 /** Audience restrictions are explicit; malformed values must never become a broader group. */
 export function readDraftAudience(raw: unknown): DraftAudience | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -13,7 +15,10 @@ export function readDraftAudience(raw: unknown): DraftAudience | null {
     narrow = readNarrow(n);
     if (n.minSpent !== narrow.minSpent || n.channel !== narrow.channel || n.quietDays !== narrow.quietDays) return null;
   }
-  return { who: value.who, notProductId: value.notProductId, narrow };
+  // Absent (or null) for none; otherwise a label exactly as an email keeps one.
+  if (value.label !== undefined && value.label !== null && (typeof value.label !== "string" || readTags([value.label])[0] !== value.label)) return null;
+  const label = typeof value.label === "string" ? value.label : "";
+  return { who: value.who, notProductId: value.notProductId, narrow, ...(label ? { label } : {}) };
 }
 export function sameDraftAudience(left: unknown, right: unknown): boolean {
   const a = readDraftAudience(left), b = readDraftAudience(right);

@@ -30,6 +30,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isBillingConfigured, readSubscription } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
+import { PLANS_ON_SALE } from "@/lib/opening";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_NAMES, PLAN_PRICES, type Tier, yearSaving } from "@/lib/plan";
 import { type Store, saleHandles } from "@/lib/store";
@@ -99,7 +100,7 @@ export async function firstSaleAt(store: Pick<Store, "sid" | "handle">): Promise
  * ever seen, and makes the yearly offer. Safe to call with the same rows on
  * every pass: only the first call that finds a sale does anything.
  */
-export async function noteFirstSale(store: Store, paid: Checkout[]): Promise<boolean> {
+export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale = PLANS_ON_SALE): Promise<boolean> {
   if (!isRedisConfigured() || !store.stripeAccountId) return false;
   const sales = paid.filter(isSale);
   if (!sales.length) return false;
@@ -114,7 +115,7 @@ export async function noteFirstSale(store: Store, paid: Checkout[]): Promise<boo
   if (earlier === null) return false; // Stripe could not be asked: the next pass asks again.
   const [set] = await redisPipeline([["SET", firstSaleKey(store), String(earlier || at), "NX"]]);
   if (set === null || earlier) return false;
-  await offerYearly(store).catch((error) => console.error("offering the yearly plan failed", store.handle, error));
+  await offerYearly(store, plansOnSale).catch((error) => console.error("offering the yearly plan failed", store.handle, error));
   return true;
 }
 
@@ -144,9 +145,10 @@ async function soldBefore(store: Store, at: number): Promise<number | null> {
 }
 
 /** Writes the offer, once per subscription, to a store it fits. */
-export async function offerYearly(store: Store): Promise<boolean> {
+export async function offerYearly(store: Store, plansOnSale = PLANS_ON_SALE): Promise<boolean> {
   const subscription = store.subscriptionId;
-  if (!subscription || !isBillingConfigured() || !isSenderConfigured() || !store.email) return false;
+  // While no plan is on sale the studio cannot switch one (app/api/billing/switch), so nothing is offered.
+  if (!plansOnSale || !subscription || !isBillingConfigured() || !isSenderConfigured() || !store.email) return false;
   const live = await readSubscription(subscription);
   if (live.state !== "active" || live.cycle !== "month" || live.cancelsAtEnd || live.changePending) return false;
   const [claimed] = await redisPipeline([["SET", offeredKey(subscription), "1", "NX"]]);

@@ -128,7 +128,7 @@ async function apiKeyed(
   }
   // Each request is one of the store's window (lib/store-allowance-rules.ts), taken before any work.
   const taken = await takeAllowance(store, "api");
-  if (!taken.ok) return apiError(429, taken.reason === "used" ? "monthly_limit" : "unavailable", taken.message);
+  if (!taken.ok) return apiError(429, taken.reason === "used" ? "monthly_limit" : taken.reason === "pool" ? "no_place" : "unavailable", taken.message);
   return { store, keyId: found.id, write: found.write };
 }
 

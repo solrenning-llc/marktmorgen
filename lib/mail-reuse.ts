@@ -97,6 +97,8 @@ export function planKeep(broadcast: Broadcast | null, listId: string | null, flo
   if (broadcast.notProductId) narrowing.push({ if: "lacks", productId: broadcast.notProductId });
   if (broadcast.who === "leads") narrowing.push({ if: "lead" });
   if (broadcast.who === "buyers" && broadcast.productId) narrowing.push({ if: "buyer" });
+  // Only the people with a label (99 [E2-TAG-BROADCAST]): a sequence's step reads it for each person.
+  if (broadcast.label) narrowing.push({ if: "tag", tag: broadcast.label });
   if (narrowing.length > 1) return { ok: false, reason: "excludes" };
   const when = narrowing[0];
 
@@ -157,8 +159,8 @@ export async function keepSending(
 export async function copyOf(
   store: Store,
   broadcastId: string,
-): Promise<{ subject: string; body: string; productId: string | null; who: Broadcast["who"]; notProductId: string | null; narrow: Broadcast["narrow"] } | null> {
+): Promise<{ subject: string; body: string; productId: string | null; who: Broadcast["who"]; notProductId: string | null; narrow: Broadcast["narrow"]; label?: string } | null> {
   const broadcast = await readBroadcast(broadcastId);
   if (!broadcast || broadcast.id !== broadcastId || !store.listId || broadcast.listId !== store.listId) return null;
-  return { subject: broadcast.subject, body: broadcast.body, productId: broadcast.productId, who: broadcast.who, notProductId: broadcast.notProductId, narrow: broadcast.narrow };
+  return { subject: broadcast.subject, body: broadcast.body, productId: broadcast.productId, who: broadcast.who, notProductId: broadcast.notProductId, narrow: broadcast.narrow, ...(broadcast.label ? { label: broadcast.label } : {}) };
 }

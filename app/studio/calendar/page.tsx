@@ -1,3 +1,4 @@
+import { serviceAllowanceWords } from "@/lib/store-allowance";
 import type { Metadata } from "next";
 import { INTEGRATION_PAUSED_WORDS } from "@/lib/integration-pause";
 import { cookies } from "next/headers";
@@ -38,6 +39,9 @@ function outcome(word: string): { tone: "ok" | "warn" | "error"; text: string } 
       return { tone: "warn", text: "That connection attempt had expired or was started in another session. Start it again from this page." };
     case "limited":
       return { tone: "warn", text: "That is too many attempts in a few minutes. Wait a moment and try again." };
+    // The paid period's resources could not be reserved (lib/contract-resource-window.ts): not a matter of tries.
+    case "funding":
+      return { tone: "warn", text: "Connections can't be made just now. Nothing was changed; try again later." };
     case "paused_unpaid":
     case "paused_disputed":
       return { tone: "warn", text: INTEGRATION_PAUSED_WORDS[word] };
@@ -82,7 +86,9 @@ export default async function StudioCalendarPage({ searchParams }: Params) {
     console.error("reading a host's calendar failed", error);
     return null;
   });
-  const said = outcome(typeof query.cal === "string" ? query.cal : "");
+  // The store's calls to connected services used, no place this month, or not counted (lib/metered-limits.ts).
+  const allowance = typeof query.cal === "string" ? serviceAllowanceWords(store, query.cal) : null;
+  const said = allowance ? { tone: "warn" as const, text: allowance } : outcome(typeof query.cal === "string" ? query.cal : "");
 
   return (
     <div className="min-h-screen bg-paper text-ink">

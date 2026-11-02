@@ -4,7 +4,7 @@
  * the product editor's own field (components/product-editor.tsx, "How often
  * it charges"), the intervals (lib/product-recurring.ts), the Membership
  * numbers page (app/studio/memberships/page.tsx), and the shared answer to
- * "Can I try it before paying?" (lib/beginner-faq.ts). No number of members
+ * "Can I try memberships before paying?" (lib/beginner-faq.ts). No number of members
  * or sales, no time promise. Shown first in the memberships page's own
  * "Questions" block (components/topic-page.tsx).
  */
@@ -25,11 +25,11 @@ export function membershipBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = 
       a: "A product that charges again every day, week, month or year on your own Stripe account, and stays open while the membership runs. It can deliver a file, a link, a course or a private podcast, and can open your community. The member cancels on their own from “Manage or cancel” under the membership, ending on Stripe's own page, without writing to you.",
     },
     {
-      q: "How do I start one?",
+      q: "How do I start a membership?",
       a: `In your studio, on a paid product, choose how often it charges under “${MEMBERSHIP_EDITOR_WORDS.field}” instead of “${MEMBERSHIP_EDITOR_WORDS.once}”, then press “${MEMBERSHIP_EDITOR_WORDS.add}”, or “${MEMBERSHIP_EDITOR_WORDS.save}” on a product you already have. Calls, bundles and products you ship are sold once.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try memberships before paying?",
       a: tryBeforePaying("A membership", "a product as a membership", onSale, trialDays),
     },
     {

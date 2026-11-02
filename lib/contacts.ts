@@ -35,7 +35,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { MAX_IMPORT, MAX_LEADS } from "@/lib/contact-rules";
+import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { type DataStore, needData } from "@/lib/store-data";
@@ -87,22 +87,8 @@ export type Contact = {
   clicks?: string;
 };
 
-/** How long a name kept for a contact may be, and how many labels of what length. */
-export const MAX_CONTACT_NAME = 100;
-export const MAX_CONTACT_TAGS = 10;
-export const MAX_TAG_LENGTH = 40;
-
-/** Labels as a file writes them — "vip, buyers" or "vip;buyers" — cleaned and kept once each. */
-export function readTags(raw: string | string[]): string[] {
-  const pieces = Array.isArray(raw) ? raw : raw.split(/[,;|]/);
-  const out: string[] = [];
-  for (const piece of pieces) {
-    const tag = String(piece).replace(/\s+/g, " ").trim().slice(0, MAX_TAG_LENGTH);
-    if (tag && !out.some((t) => t.toLowerCase() === tag.toLowerCase())) out.push(tag);
-    if (out.length >= MAX_CONTACT_TAGS) break;
-  }
-  return out;
-}
+// Labels' rules live with the list's other pure rules, so a page may read them too (99 [E2-TAG-BROADCAST]).
+export { MAX_CONTACT_NAME, MAX_CONTACT_TAGS, MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
 
 /**
  * What contacts take in the store's data room (lib/store-data.ts), all in
@@ -829,13 +815,17 @@ export async function audience(
   who?: { kind: Who; paid: ReadonlySet<string> },
   /** What spending, channel and quiet days narrow it to (lib/segments.ts); undefined for no narrowing. */
   keep?: (email: string) => boolean,
+  /** Only people who carry this label (99 [E2-TAG-BROADCAST]), compared as a sequence compares one: case and spaces at the ends aside. Read from the same record, so no extra read. */
+  label?: string,
 ): Promise<string[]> {
   const out: string[] = [];
+  const wanted = label?.trim().toLocaleLowerCase() ?? "";
   await forEachContact(listId, (email, contact) => {
     if (!mailable(contact)) return;
     if (productId && !contact.ids.includes(productId)) return;
     if (notProductId && contact.ids.includes(notProductId)) return;
     if (who && who.kind !== "all" && isBuyer(contact, who.paid) !== (who.kind === "buyers")) return;
+    if (wanted && !contact.tags.some((t) => t.trim().toLocaleLowerCase() === wanted)) return;
     if (keep && !keep(email)) return;
     out.push(email);
   });

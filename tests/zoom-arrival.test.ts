@@ -179,13 +179,13 @@ async function main(): Promise<void> {
   const beforeConnectUnits = await allowanceUsed(funded, "integration");
   const ownerStart = await startConnect(post(`/api/integrations/zoom/start?${pin}`, `${SESSION_COOKIE}=${session}; ${ZOOM_ARRIVAL_COOKIE}=1`), "zoom");
   const ownerDestination = new URL(ownerStart.headers.get("location") ?? "https://none.invalid/");
-  is("owner remains at the studio instead of a new consent", [ownerStart.status, ownerDestination.hostname, ownerDestination.searchParams.get("meet")], [303, HOST, "limited"]);
+  is("owner remains at the studio instead of a new consent", [ownerStart.status, ownerDestination.hostname, ownerDestination.searchParams.get("meet")], [303, HOST, "funding"]);
   const previousHostScopes = process.env.GOOGLE_CALENDAR_SYNC_SCOPES;
   try {
     process.env.GOOGLE_CALENDAR_SYNC_SCOPES = "1";
     const hostStart = await startHostConnect(post(`/api/integrations/google/host/start?${pin}`, `${SESSION_COOKIE}=${session}`));
     const hostDestination = new URL(hostStart.headers.get("location") ?? "https://none.invalid/");
-    is("a member's optional host consent is also refused", [hostStart.status, hostDestination.hostname, hostDestination.searchParams.get("cal")], [303, HOST, "limited"]);
+    is("a member's optional host consent is also refused", [hostStart.status, hostDestination.hostname, hostDestination.searchParams.get("cal")], [303, HOST, "funding"]);
   } finally {
     if (previousHostScopes === undefined) delete process.env.GOOGLE_CALENDAR_SYNC_SCOPES;
     else process.env.GOOGLE_CALENDAR_SYNC_SCOPES = previousHostScopes;
@@ -202,14 +202,14 @@ async function main(): Promise<void> {
     return finishConnect(page(`/api/integrations/${provider}/callback?${query}`, `${SESSION_COOKIE}=${session}`), provider);
   };
   const ownerReturn = await callbackFor("zoom");
-  is("new owner credentials are refused after state validation", [ownerReturn.status, new URL(ownerReturn.headers.get("location")!).searchParams.get("meet")], [303, "limited"]);
+  is("new owner credentials are refused after state validation", [ownerReturn.status, new URL(ownerReturn.headers.get("location")!).searchParams.get("meet")], [303, "funding"]);
   const ownerDecline = await callbackFor("zoom", false, true);
   is("canceling remains available without funding", new URL(ownerDecline.headers.get("location")!).searchParams.get("meet"), "declined");
   const previousReturnScopes = process.env.GOOGLE_CALENDAR_SYNC_SCOPES;
   try {
     process.env.GOOGLE_CALENDAR_SYNC_SCOPES = "1";
     const hostReturn = await callbackFor("google", true);
-    is("new host credentials are also refused", [hostReturn.status, new URL(hostReturn.headers.get("location")!).searchParams.get("cal")], [303, "limited"]);
+    is("new host credentials are also refused", [hostReturn.status, new URL(hostReturn.headers.get("location")!).searchParams.get("cal")], [303, "funding"]);
     const hostDecline = await callbackFor("google", true, true);
     is("host canceling remains available", new URL(hostDecline.headers.get("location")!).searchParams.get("cal"), "declined");
   } finally {

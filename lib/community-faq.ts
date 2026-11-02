@@ -24,11 +24,11 @@ export function communityBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = T
       a: `In your studio, the owner or an ${ROLE_NAMES.admin} opens “${w.tool}” and presses “${w.start}”: it starts switched off, so only the store's owner can open it. Further down, under “${w.who}”, check the products that open it and press “${w.saveWho}”; with no product yet, it asks you to add one first. Then, back at the top, press “${w.on}”.`,
     },
     {
-      q: "How do my buyers find it?",
+      q: "How do my buyers find the community?",
       a: `Once it is switched on, your store page shows the way in while the page is open to visitors. It also has an address of its own, under “${w.address}” in your studio, to send to your buyers.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try the community before paying?",
       a: `${tryBeforePaying("The community", "your community", onSale, trialDays)} Buyers come in by holding a product that opens it, and a sale or a free copy needs your store's plan${onSale ? " or its trial" : ""}.`,
     },
   ];

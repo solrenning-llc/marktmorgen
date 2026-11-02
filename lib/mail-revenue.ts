@@ -7,12 +7,13 @@
  * about anybody: the figures are a count and a sum, cached for ten minutes
  * so that opening the email page does not ask Stripe every time.
  *
- *   nl:stats:<statsId>:mailsales    the last reading (JSON), for ten minutes
+ *   nl:stats:<statsId>:mailsales:v2 the last reading (JSON), for ten minutes
  *   nl:stats:<statsId>:mailvisits   the same for visits, for ten minutes
  *
  * What a figure means, exactly: checkouts paid on the page one of that
  * email's links opened, in the store's own currency, over the last
- * STATS_DAYS days. A one-click extra taken after such a checkout is not
+ * STATS_DAYS days; sales in another currency are counted apart
+ * (`elsewhere`), never added. A one-click extra taken after such a checkout is not
  * added, and neither is somebody who came back later by themselves.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -20,23 +21,29 @@ import { STATS_DAYS, campaignViews, readPaidSales } from "@/lib/stats";
 import { MAIL_SOURCE, broadcastCampaigns, flowCampaignPrefix } from "@/lib/mail-links";
 import type { Store } from "@/lib/store";
 
-export type MailMoney = { sales: number; cents: number };
+/** Sales and their money in the store's currency; `elsewhere` counts the sales in another currency than the store's, never added (22 [E5], unit 2d). */
+export type MailMoney = { sales: number; cents: number; elsewhere?: number };
 export type MailRevenue = { by: Record<string, MailMoney>; partial: boolean };
 
-const cacheKey = (statsId: string) => `nl:stats:${statsId}:mailsales`;
+// v2: with the sales in another currency counted apart (22 [E5], unit 2d).
+const cacheKey = (statsId: string) => `nl:stats:${statsId}:mailsales:v2`;
 const CACHE_SECONDS = 600;
 /** Pages of a hundred sales read from Stripe for one reading, the same as the studio's own numbers. */
 const PAGES = 10;
 
-/** Sales that arrived from an email, added up by which email. Other currencies are left out, never converted. */
+/** Sales that arrived from an email, added up by which email. Other currencies are counted apart, never converted or added. */
 export function moneyByCampaign(
   sales: { source: string; campaign: string; cents: number; currency: string }[],
   currency: string,
 ): Record<string, MailMoney> {
   const by: Record<string, MailMoney> = {};
   for (const sale of sales) {
-    if (sale.source !== MAIL_SOURCE || !sale.campaign || sale.currency !== currency) continue;
+    if (sale.source !== MAIL_SOURCE || !sale.campaign) continue;
     const row = (by[sale.campaign] ??= { sales: 0, cents: 0 });
+    if (sale.currency !== currency) {
+      row.elsewhere = (row.elsewhere ?? 0) + 1;
+      continue;
+    }
     row.sales += 1;
     row.cents += sale.cents;
   }
@@ -49,27 +56,29 @@ export function moneyByCampaign(
  */
 export function broadcastMoney(revenue: MailRevenue | null, broadcastId: string): MailMoney | null {
   if (!revenue) return null;
-  const total = { sales: 0, cents: 0 };
+  const total: MailMoney = { sales: 0, cents: 0 };
   for (const campaign of broadcastCampaigns(broadcastId)) {
     const money = revenue.by[campaign];
     if (!money) continue;
     total.sales += money.sales;
     total.cents += money.cents;
+    if (money.elsewhere) total.elsewhere = (total.elsewhere ?? 0) + money.elsewhere;
   }
-  return total.sales ? total : null;
+  return total.sales || total.elsewhere ? total : null;
 }
 
 /** What every email of one sequence sold together. */
 export function flowMoney(revenue: MailRevenue | null, flowId: string): MailMoney | null {
   if (!revenue) return null;
   const start = flowCampaignPrefix(flowId);
-  const total = { sales: 0, cents: 0 };
+  const total: MailMoney = { sales: 0, cents: 0 };
   for (const [campaign, money] of Object.entries(revenue.by)) {
     if (!campaign.startsWith(start)) continue;
     total.sales += money.sales;
     total.cents += money.cents;
+    if (money.elsewhere) total.elsewhere = (total.elsewhere ?? 0) + money.elsewhere;
   }
-  return total.sales ? total : null;
+  return total.sales || total.elsewhere ? total : null;
 }
 
 /** The store's email sales, from the cache when it is fresh. Never throws: a page is not lost over a number. */

@@ -419,6 +419,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       moves: order.call.moves,
       answers: order.answers,
       amountCents: order.amount,
+      currency: order.currency,
       lead: order.call.lead,
       pi: order.call.pi,
       origin: SITE_URL,

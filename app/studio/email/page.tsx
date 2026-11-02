@@ -11,6 +11,7 @@ import { productLink } from "@/lib/checkout-recovery";
 import { idsOfKind, readTitles } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { PLANS_ON_SALE } from "@/lib/opening";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
@@ -24,7 +25,7 @@ import { readFlowListStrict } from "@/lib/flow-list";
 import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";
 import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
-import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
+import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
 import { EmailStudio } from "@/components/email-studio";
 import { emailEquivalence } from "@/lib/email-equivalence";
 import { readForms } from "@/lib/form-store";
@@ -32,7 +33,8 @@ import { readFields, readPipelines } from "@/lib/crm";
 import { labeledStages } from "@/lib/crm-rules";
 import { listDraftsStrict } from "@/lib/mail-drafts";
 import { can } from "@/lib/team-roles";
-import { trialOffered } from "@/lib/billing";
+import { isBillingConfigured, trialOffered } from "@/lib/billing";
+import { planDisputed } from "@/lib/plan-dispute-rules";
 import { listSegments } from "@/lib/segments";
 import { activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
 import { listHeld, runsToday } from "@/lib/flow-runs";
@@ -130,7 +132,25 @@ export default async function StudioEmailPage({ searchParams }: Params) {
           one-click unsubscribe, and anyone who leaves is never written to again.
         </p>
 
-        {allowance === 0 ? (
+        {allowance === 0 && store.subscriptionActive && hasPro(store.tier) ? (
+          // Already on Pro or Scale, and stopped by an unpaid renewal or a disputed plan payment
+          // (lib/plan.ts canUse): moving "up to Pro" is not the way back (lib/checkup-rules.ts says the same).
+          <div role="status" className="card mt-8 p-6 sm:p-8">
+            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)
+                ? "Email to your list is stopped: your plan's last renewal is not paid."
+                : "Email to your list is stopped while a payment for your plan is disputed."}
+            </p>
+            <p className="mt-2 text-ink-soft">
+              {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)
+                ? "Nothing goes to your list, and your sequences wait, until it is paid. Sign-in links and receipts still go out."
+                : "Nothing goes to your list, and your sequences wait, until the dispute is closed. Sign-in links and receipts still go out."}
+            </p>
+            {isBillingConfigured() && can(role, "billing") ? (
+              <a href={`${studioPath(store)}#billing`} className="btn btn-secondary mt-5">See your plan</a>
+            ) : null}
+          </div>
+        ) : allowance === 0 ? (
           <div className="card mt-8 p-6 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</p>
@@ -145,18 +165,26 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <li>Import the list you already have, and take it with you as a file whenever you like.</li>
             </ul>
             <p className="mt-4 text-sm text-ink-soft">
-              {`${priceWords("pro", "month")}, or ${priceWords("pro", "year")} — $${(yearSaving("pro") / 100).toLocaleString("en-US")} less. Everything else in your store stays exactly as it is.`}
+              {`${PLANS_ON_SALE ? "" : "When plans open, Pro is "}${priceWords("pro", "month")}, or ${priceWords("pro", "year")} — $${(yearSaving("pro") / 100).toLocaleString("en-US")} less. Everything else in your store stays exactly as it is.`}
             </p>
             {!can(role, "billing") ? (
               <p className="mt-5 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
                 The store&apos;s owner chooses its plan. When they move it to Pro, email opens here for you too.
               </p>
+            ) : !PLANS_ON_SALE || !isBillingConfigured() ? (
+              // The checkout and the switch both refuse then (app/api/billing/checkout, app/api/billing/switch),
+              // so no button offers either.
+              <p className="mt-5 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
+                Paid plans are not on sale yet, so this store cannot move to Pro for now.
+              </p>
             ) : store.subscriptionActive ? (
-              <form action={`/api/billing/switch?store=${store.sid}`} method="post" className="mt-5">
-                <input type="hidden" name="tier" value="pro" />
-                <input type="hidden" name="cycle" value={store.cycle} />
-                <button type="submit" className="btn btn-primary">Move up to Pro</button>
-              </form>
+              store.subscriptionId ? (
+                <form action={`/api/billing/switch?store=${store.sid}`} method="post" className="mt-5">
+                  <input type="hidden" name="tier" value="pro" />
+                  <input type="hidden" name="cycle" value={store.cycle} />
+                  <button type="submit" className="btn btn-primary">Move up to Pro</button>
+                </form>
+              ) : null
             ) : (
               <form action={`/api/billing/checkout?store=${store.sid}`} method="post" className="mt-5 flex flex-col items-start gap-3">
                 <input type="hidden" name="tier" value="pro" />
@@ -170,9 +198,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
                 </button>
               </form>
             )}
-            <p className="mt-3 text-sm text-ink-soft">
-              {`During the free trial a store sends up to ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with the first payment.`}
-            </p>
+            {PLANS_ON_SALE && trialOffered(store) ? (
+              <p className="mt-3 text-sm text-ink-soft">
+                {`During the free trial a store sends up to ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with the first payment.`}
+              </p>
+            ) : null}
           </div>
         ) : (
           <>
@@ -215,7 +245,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             // The way up for a list that has outgrown Pro, offered beside the
             // month's count to whoever may change the plan (lib/plan.ts).
             moveUp={
-              PRO_ON_SALE && store.tier === "pro" && store.subscriptionActive && can(role, "billing")
+              PLANS_ON_SALE && isBillingConfigured() && PRO_ON_SALE && store.tier === "pro" && store.subscriptionActive && can(role, "billing")
                 ? {
                     action: `/api/billing/switch?store=${store.sid}`,
                     cycle: store.cycle,
@@ -240,6 +270,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               who: b.who,
               notProductId: b.notProductId,
               narrow: b.narrow,
+              label: b.label ?? null,
               tagged: b.tagged,
               money: broadcastMoney(revenue, b.id),
               visits: visits?.[b.id] ?? null,

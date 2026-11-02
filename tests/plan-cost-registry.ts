@@ -419,6 +419,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/purchase-email.ts", names: ["confirmRequest", "countOrder"] },
       // An affiliate's lead for a free product or a booked call is written inside that order (18 October 2026).
       { file: "lib/calls.ts", names: ["recordLead"] },
+      // A cart's checkout reads the offers of each of its products, and what each bundle in it hands over, at most MAX_CART of each, to know whose offers follow it (556 [CT1], 1 and 2 November 2026): reads only, inside that order.
+      { file: "lib/cart-offers.ts", names: ["cartOfferOwner", "liveFunnel"] },
+      { file: "lib/cart-rules.ts", names: ["MAX_CART = 4"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
     ],
     basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE.",
@@ -659,7 +662,7 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration"),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
-      { file: "lib/metered-limits.ts", names: ["withinService"] },
+      { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
     ],
     basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart.",
   },

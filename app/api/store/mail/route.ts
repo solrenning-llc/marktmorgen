@@ -9,7 +9,7 @@ import {
   storeForHandle,
 } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses } from "@/lib/contacts";
+import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
 import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
@@ -149,10 +149,12 @@ export async function POST(request: NextRequest) {
       const notProductId = text(body.notProductId, 40) || undefined;
       const who = WHO.includes(body.who as Who) ? (body.who as Who) : "all";
       const narrow = readNarrow(body.narrow);
+      // Only people with this label (99 [E2-TAG-BROADCAST]), cleaned as an email keeps it; empty is none.
+      const label = readTags([text(body.label, 80)])[0] || undefined;
       // The store's sales are read only when an email narrows by them, or
       // when the composer opens the choices that do (lib/segments.ts).
       if (!isNarrowed(narrow) && body.channels !== true) {
-        return Response.json({ ok: true, count: (await audience(store.listId, productId, notProductId, whoOf(store, who))).length });
+        return Response.json({ ok: true, count: (await audience(store.listId, productId, notProductId, whoOf(store, who), undefined, label)).length });
       }
       const ledger = await buyerLedger(store).catch((error) => {
         console.error("reading a store's buyers for an email failed", error);
@@ -162,7 +164,7 @@ export async function POST(request: NextRequest) {
       const keep = isNarrowed(narrow) ? keeps(narrow, ledger) : undefined;
       return Response.json({
         ok: true,
-        count: (await audience(store.listId, productId, notProductId, whoOf(store, who), keep)).length,
+        count: (await audience(store.listId, productId, notProductId, whoOf(store, who), keep, label)).length,
         channels: ledgerChannels(ledger),
         partial: ledger.partial,
       });
@@ -229,6 +231,7 @@ export async function POST(request: NextRequest) {
         notProductId: text(body.notProductId, 40),
         who: text(body.who, 10),
         narrow: body.narrow,
+        label: text(body.label, 80),
         sendAt: typeof body.sendAt === "number" ? body.sendAt : undefined,
         // A second subject line to try against the first; what it may be is
         // decided where the email is written down (lib/mail-test.ts).

@@ -217,6 +217,7 @@ export function hasResend(): boolean {
  */
 async function tellAmazonIsDown(why: string): Promise<void> {
   try {
+    console.error("Amazon SES account sending is unavailable", why || "(no reason given)");
     const day = new Date().toISOString().slice(0, 10);
     const key = `nl:ses:told:${day}`;
     const read: unknown = await redisPipeline([["GET", key]]);
@@ -232,9 +233,7 @@ async function tellAmazonIsDown(why: string): Promise<void> {
       to: SUPPORT_EMAIL,
       subject: "Amazon SES is not sending: check the account",
       text: [
-        "Amazon SES refused to send an email, for a reason that is the account's and not the email's:",
-        "",
-        why || "(no reason given)",
+        "Amazon SES refused account sending. Check its current account status and sending identity.",
         "",
         "Service email can use Resend only while the account review, credential binding and paid fallback quota are confirmed. Missing proof blocks that route. List-only email waits for SES; this notice does not confirm delivery.",
         "The account is checked again automatically. Sending resumes only when its current status allows it.",

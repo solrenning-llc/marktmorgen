@@ -16,7 +16,7 @@
 import { bodyHtml, bodyText } from "@/lib/mail-body";
 import { lookColours } from "@/lib/store-look";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
-import { SES_BULK_SHARE, isSesConfigured, sesBulkRoom, sesReady, sesSentLast24h } from "@/lib/ses";
+import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
 import { tokensFor } from "@/lib/contacts";
@@ -194,7 +194,7 @@ const toldKey = (now = new Date()) => `nl:sender:${now.toISOString().slice(0, 7)
  * is a payment, and nobody but the owner can make one. Everything else about
  * the limit looks after itself.
  */
-async function tellSenderIsFull(listOnly = false): Promise<void> {
+async function tellSenderIsFull(): Promise<void> {
   try {
     const key = toldKey();
     const read: unknown = await redisPipeline([["GET", key]]);
@@ -203,52 +203,23 @@ async function tellSenderIsFull(listOnly = false): Promise<void> {
     if (!length || !("value" in length) || length.value !== 1) return;
     const previous = Object.getOwnPropertyDescriptor(read, "0");
     if (!previous || !("value" in previous) || previous.value !== null) return;
-    // Sender identity bounds concurrent/retried notices before acceptance.
-    // Recording the period costs one additional command only after an ACK.
-    const recordAccepted = async (accepted: boolean) => {
-      if (accepted === true) await redisPipeline([["SET", key, "1", "NX", "EX", 40 * 86_400]]);
-    };
-    if (listOnly) {
-      await recordAccepted(await sendEmail({ idempotencyKey: key, meter: { by: "company" },
-        from: NIMBUS_FROM, to: SUPPORT_EMAIL,
-        subject: "List email is waiting for Amazon SES",
-        text: [
-          "Creator list email sends only through Amazon SES.",
-          "Its configuration or available sending capacity could not be confirmed for this batch. The saved recipients wait for the next automatic check.",
-          "Resend is not used for this list batch. This notice does not confirm delivery.",
-          "Sign-in links, receipts and deliveries keep their existing sending route.",
-        ].join("\n"),
-      }));
-      return;
-    }
-    const quota = senderQuota();
-    const resendSent = await sentThisMonth();
-    const amazon = isSesConfigured() ? await sesReady() : null;
-    const amazonSent = amazon ? await sesSentLast24h() : null;
-    const amazonQuota = amazon?.max24 === -1
-      ? `Amazon SES reports no daily quota ceiling for this account. Its sending rate is ${amazon.rate.toLocaleString("en-US")} emails per second. Each store's existing email allowance and delivery controls still apply.`
-      : amazon ? `This account allows ${amazon.max24.toLocaleString("en-US")} in any 24 hours; creators' list email uses up to ${Math.floor(amazon.max24 * SES_BULK_SHARE).toLocaleString("en-US")} of them. Amazon raises that number by itself as the account proves itself, and a higher one can be asked for in the Amazon SES console, under Account dashboard.` : "";
-    await recordAccepted(await sendEmail({ idempotencyKey: key, meter: { by: "company" },
+    // One canonical payload for the period, including retries through a
+    // different admission route. Changing usage must not change its receipt.
+    const accepted = await sendEmail({ idempotencyKey: key, meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
-      subject: resendSent === null ? "List email is waiting: sender usage cannot be confirmed" : "List email is waiting: the sender's monthly volume is nearly used",
+      subject: "List email is waiting: check sending availability",
       text: [
-        ...(amazon
-          ? [
-              `${amazonSent === null ? "Amazon SES usage in the last 24 hours cannot currently be confirmed." : `In the last 24 hours ${amazonSent.toLocaleString("en-US")} emails went out through Amazon SES.`} ${amazonQuota}`,
-              "",
-              "List admission also depends on Resend's confirmed monthly room:",
-              "",
-            ]
-          : []),
-        resendSent === null ? "Resend usage this month cannot currently be confirmed. List email waits until its available room can be confirmed." : `This month ${resendSent.toLocaleString("en-US")} emails have gone out through Resend, of every kind.`,
-        `Resend's configured quota is ${quota.toLocaleString("en-US")} a month and its whole-account ceiling is ${(quota * SENDER_PAUSES_AT).toLocaleString("en-US")}; creators' list email is held at ${listCeiling().toLocaleString("en-US")}.`,
-        "",
+        "Creator list email sends only through Amazon SES.",
+        "Sending waits until availability can be confirmed.",
+        "Account settings, sending capacity or usage may need attention. This notice does not identify the current cause or confirm delivery.",
+        "Service email can use Resend only while the account review, credential binding and paid fallback quota are confirmed. Missing proof blocks that route.",
         "Sign-in links, receipts and deliveries keep their existing sending route.",
-        "",
-        resendSent === null ? "Usage is checked again automatically. Waiting email resumes when room can be confirmed." : "To let list email continue before the month turns: move the sender to a larger plan, then set SENDER_MONTHLY_QUOTA on the host to that plan's number of emails. Waiting emails go out by themselves after that.",
+        "Availability is checked again automatically. Check account status and sending usage in the providers' consoles before considering a plan change.",
       ].join("\n"),
-    }));
+    });
+    // One additional command after acceptance; no mark for false/unknown.
+    if (accepted === true) await redisPipeline([["SET", key, "1", "NX", "EX", 40 * 86_400]]);
   } catch (error) {
     console.error("telling the inbox the sender is nearly full failed", error);
   }
@@ -257,7 +228,7 @@ async function tellSenderIsFull(listOnly = false): Promise<void> {
 /** Whether `n` more list emails fit under the sender's ceiling; says so once when they do not. */
 async function senderTakes(n: number, listOnly = false): Promise<boolean> {
   if ((await senderRoom(listOnly)) >= n) return true;
-  await tellSenderIsFull(listOnly);
+  await tellSenderIsFull();
   return false;
 }
 

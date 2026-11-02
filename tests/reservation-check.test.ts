@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { agentOfBranch, conflicts, lanePrefixes, reservations } from "../scripts/reservation-check.mjs";
+import { execFileSync } from "node:child_process";
+import { agentOfBranch, conflicts, lanePrefixes, pullRequestInputs, report, reservations } from "../scripts/reservation-check.mjs";
 
 const sample = `Lanes (who owns which subjects):
 
@@ -47,4 +48,13 @@ test("the real reservations file parses: every lane has a prefix and rows name e
   const lanes = lanePrefixes(text);
   for (const prefix of ["codex/", "claude/", "claude2/", "claude3/"]) assert.ok(lanes.some((l: { prefix: string }) => l.prefix === prefix), prefix);
   for (const r of reservations(text)) assert.match(r.file, /^[\w.\[\]\/-]+$/, r.file);
+});
+
+// The real check: on a pull request (GitHub sets GITHUB_HEAD_REF), the files this PR changes
+// against its base must not include a file another agent reserved on the base branch.
+test("this pull request changes no file another agent reserved", { skip: !process.env.GITHUB_HEAD_REF }, () => {
+  const branch = process.env.GITHUB_HEAD_REF!;
+  const { text, changed } = pullRequestInputs((args: string[]) => execFileSync("git", args, { encoding: "utf8" }));
+  const result = report(conflicts({ text, branch, changed }), branch, changed.length);
+  assert.ok(result.ok, result.lines.join("\n"));
 });

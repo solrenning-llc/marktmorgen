@@ -2,7 +2,8 @@
 // docs/reservations.md (owner, 02/11/2026: four agents, no conflicts; rule AV5).
 // It reads only the repository: the PR branch name, the list of changed files
 // and the reservations table. It changes nothing and needs no secret.
-import { readFileSync } from "node:fs";
+// In CI it runs inside `npm test` (tests/reservation-check.test.ts) on every
+// pull request; locally: node scripts/reservation-check.mjs <branch> <base>.
 import { execFileSync } from "node:child_process";
 
 /** Files every agent edits through its own small docs PRs (see docs/reservations.md). */
@@ -63,14 +64,29 @@ export function conflicts({ text, branch, changed }) {
   return { me, found };
 }
 
+/** In a pull_request checkout (the merge commit), the PR's changed files and the base's reservations. */
+export function pullRequestInputs(git) {
+  // The merge commit's first parent is the base; fetch it when the checkout is shallow.
+  try { git(["rev-parse", "--verify", "--quiet", "HEAD^1"]); }
+  catch { git(["fetch", "--no-tags", "--quiet", "--deepen=1", "origin"]); }
+  const text = git(["show", "HEAD^1:docs/reservations.md"]);
+  const changed = git(["diff", "--name-only", "HEAD^1", "HEAD"]).split("\n").filter(Boolean);
+  return { text, changed };
+}
+
+export function report({ me, found }, branch, changedCount) {
+  if (!me) return { ok: true, lines: [`Branch ${branch} belongs to no agent lane; nothing to check.`] };
+  if (!found.length) return { ok: true, lines: [`${me}: none of the ${changedCount} changed files is reserved by another agent.`] };
+  return { ok: false, lines: found.map((r) => `${r.file} is reserved by ${r.agent} (${r.item}) in docs/reservations.md. Pick another unit or wait until that reservation is removed.`) };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [branch, base] = process.argv.slice(2);
+  const git = (args) => execFileSync("git", args, { encoding: "utf8" });
   // The reservations as they are on the base branch: a PR cannot clear another agent's row for itself.
-  const text = execFileSync("git", ["show", `${base}:docs/reservations.md`], { encoding: "utf8" });
-  const changed = execFileSync("git", ["diff", "--name-only", `${base}...HEAD`], { encoding: "utf8" }).split("\n").filter(Boolean);
-  const { me, found } = conflicts({ text, branch, changed });
-  if (!me) { console.log(`Branch ${branch} belongs to no agent lane; nothing to check.`); process.exit(0); }
-  if (!found.length) { console.log(`${me}: none of the ${changed.length} changed files is reserved by another agent.`); process.exit(0); }
-  for (const r of found) console.log(`::error file=${r.file}::${r.file} is reserved by ${r.agent} (${r.item}) in docs/reservations.md. Pick another unit or wait until that reservation is removed.`);
-  process.exit(1);
+  const text = git(["show", `${base}:docs/reservations.md`]);
+  const changed = git(["diff", "--name-only", `${base}...HEAD`]).split("\n").filter(Boolean);
+  const result = report(conflicts({ text, branch, changed }), branch, changed.length);
+  for (const line of result.lines) console.log(line);
+  process.exit(result.ok ? 0 : 1);
 }

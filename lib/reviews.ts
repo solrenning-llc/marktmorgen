@@ -166,6 +166,7 @@ export function parseReview(raw: unknown): Review | null {
       refunded: value.refunded === true,
       reply: reply && reply.text ? reply : null,
       photo: parseReviewPhoto(value.photo),
+      ...(Number.isSafeInteger(value.paidAt) && (value.paidAt as number) > 0 ? { paidAt: value.paidAt as number } : {}),
     };
   } catch {
     return null;
@@ -305,6 +306,8 @@ export type SaveInput = {
   rating: number;
   text: string;
   name: string;
+  /** When the order was paid, in seconds, from the order's proof (606 [WP5]); 0 when not known. */
+  paidAt?: number;
 };
 
 export type SaveResult = { state: "created" | "updated"; review: Review } | { state: "full" | "noroom" | "busy" | "invalid" };
@@ -353,6 +356,9 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
       // A photo stays through an edit; it is added or taken off by setReviewPhoto.
       photo: before?.photo ?? null,
     };
+    // When the order was paid: kept from the first writing of the same order, else as the order's proof says.
+    const paidAt = before && before.reference === input.reference && before.paidAt ? before.paidAt : input.paidAt;
+    if (Number.isSafeInteger(paidAt) && (paidAt as number) > 0) review.paidAt = paidAt;
     const grown = reviewBytes(review) - reviewBytes(before);
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     await write(statsId, review);

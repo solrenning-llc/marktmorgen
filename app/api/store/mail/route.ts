@@ -77,7 +77,7 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
  *   { action: "settings", fromName, address }
  *   { action: "import", text, confirm: true }
  *   { action: "count", productId, notProductId, who, narrow? }   who: "all" | "buyers" | "leads";
- *                            narrow: { minSpent, channel, quietDays } (lib/segments.ts); answers the
+ *                            narrow: { minSpent, channel, quietDays, group?, activeDays? } (lib/segments.ts); answers the
  *                            channels the store's buyers first came from too, when it reads them
  *   { action: "segment-save", name, who, productId, notProductId, narrow }  /  { action: "segment-remove", id }
  *   { action: "test", subject, body }

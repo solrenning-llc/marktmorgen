@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   is("a bulk notice is refused the same way", await reserveDay(21), false);
 
   part("The owner is told, once");
-  is("one email to the site's own inbox", single.map((m) => [m.to[0], m.subject]), [["support@marktmorgen.com", "List email is waiting: the sender's monthly volume is nearly used"]]);
+  is("one email to the site's own inbox", single.map((m) => [m.to[0], m.subject]), [["support@marktmorgen.com", "List email is waiting for Amazon SES"]]);
   await reserve(store, 21);
   await reserve(store, 21);
   is("and not again this month, however many sends meet it", single.length, 1);
@@ -166,8 +166,8 @@ async function main(): Promise<void> {
     redis.run(["DEL", `nl:sender:${new Date().toISOString().slice(0, 7)}:told`]);
     single.length = 0;
     await reserve(store, 1);
-    is("the existing owner notice names uncertainty rather than invented usage",
-      single.map(m => m.subject), ["List email is waiting: sender usage cannot be confirmed"]);
+    is("unknown usage does not invent a new diagnosis or dispatch an accepted owner notice again",
+      [single.map(m => m.subject), redis.run(["GET", `nl:sender:${new Date().toISOString().slice(0, 7)}:told`])], [[], "1"]);
     single.length = 0;
     is("an essential login link remains available while list usage is unknown",
       [await sendEmail({ ...message("buyer@example.com"), subject: "Your login link" }), single.length], [true, 1]);

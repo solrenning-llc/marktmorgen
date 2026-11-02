@@ -911,18 +911,28 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
     ["DEL", linkKey(token)],
   ]);
 
+  // Approved at once when the creator chose it (624 [SZ8](35)): through the same decision as by hand, so the
+  // approval email with their link goes as usual. Only a new application; someone declined or removed stays out.
+  const autoApproved = created && grant.k !== 1 && store.affiliates.autoApprove === true && affiliate.status === "pending";
+  if (autoApproved) affiliate = (await decide(store, affiliate.id, "approve")) ?? affiliate;
+
   if (created && isSenderConfigured() && grant.k !== 1) {
+    const studioLink = `${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`;
     await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
       from: `Marktmorgen <${senderAddress()}>`,
       to: store.email,
-      subject: `New affiliate application: ${affiliate.email}`,
+      subject: autoApproved ? `New affiliate: ${affiliate.email}` : `New affiliate application: ${affiliate.email}`,
       text: [
-        `${affiliate.email} applied to be an affiliate of ${store.name}.`,
+        autoApproved
+          ? `${affiliate.email} joined as an affiliate of ${store.name}, approved at once because you chose to approve every application.`
+          : `${affiliate.email} applied to be an affiliate of ${store.name}.`,
         ...(affiliate.note ? [`Where they will share it: ${affiliate.note}`] : []),
         "",
-        `Approve or decline them in your studio: ${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`,
+        autoApproved ? `Remove them in your studio if you would rather not: ${studioLink}` : `Approve or decline them in your studio: ${studioLink}`,
         "",
-        "Nothing changes until you decide. Commissions are paid by you, directly, never by Marktmorgen.",
+        autoApproved
+          ? "Commissions are paid by you, directly, never by Marktmorgen."
+          : "Nothing changes until you decide. Commissions are paid by you, directly, never by Marktmorgen.",
       ].join("\n"),
     }).catch((error) => console.error("telling a creator about an application failed", error));
   }
@@ -934,7 +944,9 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
       "affiliate",
       grant.k === 1
         ? { title: "Your partner accepted", body: `Somebody you invited as a partner on ${store.name} opened their link.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" }
-        : { title: "New affiliate application", body: `Someone applied to promote ${store.name}. Approve or decline them in your studio.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
+        : autoApproved
+          ? { title: "New affiliate", body: `Someone joined as an affiliate of ${store.name}, approved at once as you chose.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" }
+          : { title: "New affiliate application", body: `Someone applied to promote ${store.name}. Approve or decline them in your studio.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
       { seed: affiliate.id },
     ).catch((error) => console.error("an application notification failed", error));
   }

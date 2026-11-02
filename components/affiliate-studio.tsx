@@ -633,6 +633,7 @@ function Terms({
   const [payday, setPayday] = useState(String(setting.payday));
   const [hold, setHold] = useState(String(setting.hold));
   const [buyers, setBuyers] = useState(setting.buyers);
+  const [autoApprove, setAutoApprove] = useState(setting.autoApprove === true);
   const [directory, setDirectory] = useState(setting.directory);
   const [numbers, setNumbers] = useState(setting.numbers);
   const [kit, setKit] = useState(setting.kit);
@@ -682,6 +683,7 @@ function Terms({
               payday: Number(payday.trim()),
               hold: Number(hold.trim()),
               buyers,
+              autoApprove,
               lifetime,
               recurring: Number(recurringMonths),
               paidSearch,
@@ -737,6 +739,22 @@ function Terms({
             <span className="block text-ink-soft">
               The thanks page and the purchase email offer everyone who buys their own link, approved at once. Anyone you
               declined or removed stays out, and everyone else still applies.
+            </span>
+          </span>
+        </label>
+
+        <label className="mt-3 flex min-h-[44px] cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
+          <input
+            type="checkbox"
+            checked={autoApprove}
+            onChange={(e) => setAutoApprove(e.target.checked)}
+            className="h-5 w-5 shrink-0 accent-[var(--violet)]"
+          />
+          <span className="text-sm">
+            <span className="block font-semibold text-ink">Approve every application at once</span>
+            <span className="block text-ink-soft">
+              Anyone who applies gets their link straight away, and you are told who joined; you can remove them at any time.
+              Anyone you declined or removed stays out. Off, each application waits for you.
             </span>
           </span>
         </label>

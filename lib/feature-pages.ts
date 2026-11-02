@@ -23,6 +23,7 @@ import { teamBeginnerQuestions } from "@/lib/team-faq";
 import { securityBeginnerQuestions } from "@/lib/security-faq";
 import { domainBeginnerQuestions } from "@/lib/domain-faq";
 import { insightsBeginnerQuestions } from "@/lib/insights-faq";
+import { reviewsBeginnerQuestions } from "@/lib/reviews-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -2014,6 +2015,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about reviews",
         items: [
+          // 534 [FQ1], unit 24: what someone starting out asks, answered by the code (lib/reviews-faq.ts).
+          ...reviewsBeginnerQuestions(),
           { q: "Why can't I delete a bad review?", a: "Because a rating you could clean up would be worth nothing to a buyer. You can hide its words, answer it, or refund the order in full, which takes its stars out." },
           { q: "Who on my team can moderate them?", a: "You, an Admin, an Editor and Support can hide and answer reviews. Switching on the email that asks is a setting, for you and Admins." },
         ],

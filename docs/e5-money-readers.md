@@ -17,29 +17,34 @@ The grep (`store.currency`, `current.currency`, a name ending in `s.currency`) a
 
 ## What unit 2 must fix first
 
-1. **The tier switch has no currency check.** `lib/tier-switch.ts` makes the new tier's Price in the store's currency (lines 94 and 135) and never compares it with the subscription's. The offer after paying, the yearly switch and the yearly ask all refuse a mismatch; the tier switch does not, so for a member who subscribed before the store changed its currency, it asks Stripe to move the subscription onto a Price in another currency. What Stripe then does has not been tried here.
-2. **Refunds and disputes in another currency vanish from the numbers.** `lib/stats.ts` puts sales in another currency in "elsewhere", but drops refunds and disputes in another currency without counting them (lines 1489–1535).
+Unit 2b fixed 1, 2 and 5 (marked below); the rest are next.
+
+1. **Fixed in unit 2b.** **The tier switch had no currency check.** `lib/tier-switch.ts` makes the new tier's Price in the store's currency (lines 94 and 135) and never compares it with the subscription's. The offer after paying, the yearly switch and the yearly ask all refuse a mismatch; the tier switch does not, so for a member who subscribed before the store changed its currency, it asks Stripe to move the subscription onto a Price in another currency. What Stripe then does has not been tried here.
+2. **Fixed in unit 2b** (counted and said on the numbers page). **Refunds and disputes in another currency vanished from the numbers.** `lib/stats.ts` puts sales in another currency in "elsewhere", but drops refunds and disputes in another currency without counting them (lines 1489–1535).
 3. **A buyer whose sales are all in another currency is missing from segments.** `lib/segments.ts:79` leaves them out of the buyer ledger entirely: orders, last purchase and channel, not just the money.
 4. **Totals that drop another currency with no "elsewhere":** A/B tests, discount impact, email revenue, subject tests, "how did you hear", payment recovery and member health.
-5. **Past amounts labelled with the store's currency:** the phone alert for a booked call (`lib/calls.ts:1341`) and the bookings API (`lib/api-read.ts:189`).
+5. **Fixed in unit 2b.** **Past amounts labelled with the store's currency:** the phone alert for a booked call (`lib/calls.ts:1341`) and the bookings API (`lib/api-read.ts:189`).
 6. **Lists that ignore a record's own currency:** payment requests and agreements keep a currency on each record, but the studio lists format them with the store's.
+
+7. **A paid call's orders and affiliate lead keep no currency.** `lib/calls.ts` counts a booking's orders (`countOrder`) and credits an affiliate's lead (`recordLead`, `paid`) with the amount alone, so a call paid in the old currency is added to the store's own in those figures.
 
 ## Counts
 
 | Class | Files |
 | --- | --- |
-| FOLLOW-UP-CHARGE | 7 |
+| FOLLOW-UP-CHARGE | 8 |
 | NEW-CHARGE | 12 |
 | TOTALS | 33 |
 | PAST-SALE | 9 |
 | SETTING | 40 |
 | OTHER | 1 |
-| All | 102 |
+| All | 103 |
 
 ## The files
 
 | File | Class | Where and why | Already handles another currency? |
 | --- | --- | --- | --- |
+| `app/[handle]/manage/page.tsx` | FOLLOW-UP-CHARGE | 215: no switch offered to a membership paid in another currency than the store's, with a line that says why (unit 2b) | yes |
 | `app/[handle]/manage/switch/page.tsx` | FOLLOW-UP-CHARGE | 163: the yearly switch's saving labelled with the store's currency, not the subscription's | partly: yearlyChoice is null when the subscription's currency differs |
 | `app/[handle]/thanks/page.tsx` | FOLLOW-UP-CHARGE | 548: the offer after paying only when the order is in the store's currency; 1158–1175 its prices; 1366/1381 the sale's own currency | partly: the offer is turned off, not charged in the order's currency |
 | `lib/membership-manage.ts` | FOLLOW-UP-CHARGE | 487: the yearly choice priced in the store's currency; 478 the subscription's price currency | partly: hidden for another currency |

@@ -576,7 +576,8 @@ async function countTest(store: Store, b: Broadcast): Promise<{ visits: Counted;
     try {
       const read = await readPaidSales(store, b.sendAt - 60, 5);
       const by = moneyByCampaign(read.sales, store.currency);
-      sales = { a: by[a]?.sales ?? 0, b: by[bee]?.sales ?? 0 };
+      // A count of sales, so a sale in another currency counts too; no amount is added (22 [E5], unit 2d).
+      sales = { a: (by[a]?.sales ?? 0) + (by[a]?.elsewhere ?? 0), b: (by[bee]?.sales ?? 0) + (by[bee]?.elsewhere ?? 0) };
     } catch (error) {
       console.error("reading a subject test's sales failed", error);
     }

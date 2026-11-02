@@ -17,16 +17,16 @@ The grep (`store.currency`, `current.currency`, a name ending in `s.currency`) a
 
 ## What unit 2 must fix first
 
-Unit 2b fixed 1, 2 and 5, and unit 2c fixed 3 and 6 (marked below); the rest are next.
+Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, and unit 2d part of 4 and checked 7 (marked below); the rest are next.
 
 1. **Fixed in unit 2b.** **The tier switch had no currency check.** `lib/tier-switch.ts` makes the new tier's Price in the store's currency (lines 94 and 135) and never compares it with the subscription's. The offer after paying, the yearly switch and the yearly ask all refuse a mismatch; the tier switch does not, so for a member who subscribed before the store changed its currency, it asks Stripe to move the subscription onto a Price in another currency. What Stripe then does has not been tried here.
 2. **Fixed in unit 2b** (counted and said on the numbers page). **Refunds and disputes in another currency vanished from the numbers.** `lib/stats.ts` puts sales in another currency in "elsewhere", but drops refunds and disputes in another currency without counting them (lines 1489–1535).
 3. **Fixed in unit 2c** (the order, date and channel count; the money stays in the store's currency only, and the email studio says so). **A buyer whose sales were all in another currency was missing from segments.** `lib/segments.ts:79` left them out of the buyer ledger entirely: orders, last purchase and channel, not just the money.
-4. **Totals that drop another currency with no "elsewhere":** A/B tests, discount impact, email revenue, subject tests, "how did you hear", payment recovery and member health.
+4. **Totals that drop another currency with no "elsewhere".** Fixed in unit 2d for email revenue (each email and sequence counts its sales in another currency apart and says so; the MCP emails tool gives `sales_in_another_currency`) and subject tests (a test by sales counts a sale in any currency, adding no amount). Still to do: A/B tests, discount impact, "how did you hear", payment recovery and member health.
 5. **Fixed in unit 2b.** **Past amounts labelled with the store's currency:** the phone alert for a booked call (`lib/calls.ts:1341`) and the bookings API (`lib/api-read.ts:189`).
 6. **Fixed in unit 2c** for payment requests: the studio list shows each request in its own currency. Agreements too: their list shows no amount, and a new version started from an older one in another currency now leaves its amounts empty and says to type them again in the store's currency, instead of reading €50 as $50.
 
-7. **A paid call's orders and affiliate lead keep no currency.** `lib/calls.ts` counts a booking's orders (`countOrder`) and credits an affiliate's lead (`recordLead`, `paid`) with the amount alone, so a call paid in the old currency is added to the store's own in those figures.
+7. **Checked in unit 2d, not a defect: a paid call's orders and affiliate lead.** `countOrder` only asks whether anything was paid (`coveredByShare`), and the lead's `paid` is only compared with the refunds of the same payment, which are in its own currency; the lead's bounty is the creator's terms, in the store's currency. No amount is added across currencies there.
 
 ## Counts
 
@@ -79,13 +79,13 @@ Unit 2b fixed 1, 2 and 5, and unit 2c fixed 3 and 6 (marked below); the rest are
 | `components/email-studio.tsx` | TOTALS | 691–1054: the "spent with you" threshold in the store's currency | partly: another currency's sales count as purchases, not toward the amount (unit 2c) |
 | `lib/affiliate-payouts.ts` | TOTALS | 165/170/210: the payout file and batch in the store's currency | partly: the rest stays in "elsewhere" |
 | `lib/affiliates.ts` | TOTALS | 1701/1829–1860: the book sums the store's currency, with an "elsewhere" count; 1965/1984 bonuses | partly: "elsewhere" |
-| `lib/broadcasts.ts` | TOTALS | 578: subject-test sales in the store's currency only | partly: left out |
+| `lib/broadcasts.ts` | TOTALS | 578: a subject test counts sales in any currency (unit 2d) | yes |
 | `lib/buyer-profile.ts` | TOTALS | 576: paid and refunded in the store's currency, the rest in otherCurrencies | yes |
 | `lib/checkout-sweep.ts` | TOTALS | 201: only test sales in the store's currency counted | partly: left out |
 | `lib/discount-impact.ts` | TOTALS | 89: the discount table keeps only one currency's sales | partly: left out |
 | `lib/heard.ts` | TOTALS | 71: "how did you hear" money is zero for another currency | partly: the answer counts, the money not |
-| `lib/mail-revenue.ts` | TOTALS | 85: email revenue in the store's currency (moneyByCampaign drops the rest) | partly: left out |
-| `lib/mcp-tools.ts` | TOTALS | 256: the MCP emails tool labels revenue with the store's currency | partly |
+| `lib/mail-revenue.ts` | TOTALS | 85: email revenue in the store's currency, the rest counted apart (unit 2d) | yes |
+| `lib/mcp-tools.ts` | TOTALS | 248–277: revenue in the store's currency, sales_in_another_currency apart (unit 2d) | yes |
 | `lib/member-health.ts` | TOTALS | 160: a member's monthly value is zero in another currency; 192 the at-risk total | partly: zeroed |
 | `lib/membership-numbers.ts` | TOTALS | 523/541: membership numbers and MRR movements in the store's currency | partly: "elsewhere" for live subscriptions only |
 | `lib/meta-ads.ts` | TOTALS | 611: ad spend only for an account in the store's currency | partly: refused |

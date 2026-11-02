@@ -38,7 +38,7 @@ type AmazonSent = { to: string; subject: string; body: Record<string, unknown>; 
 type ResendSent = { to: string; subject: string; key: string | null };
 const amazon: AmazonSent[] = [];
 const resend: ResendSent[] = [];
-const resendKeys = new Set<string>();
+const resendKeys = new Map<string, string>();
 let asked = 0;
 let account: Record<string, unknown> | number = 0;
 let accountLosesReply = false;
@@ -77,10 +77,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (url.hostname === "api.resend.com") {
     const key = (init?.headers as Record<string, string>)["Idempotency-Key"] ?? null;
-    const body = JSON.parse(String(init?.body)) as { to: string[]; subject: string } | { to: string[]; subject: string }[];
+    const bytes = String(init?.body);
+    const body = JSON.parse(bytes) as { to: string[]; subject: string } | { to: string[]; subject: string }[];
     // Resend answers a key it has seen without sending again.
+    if (key && resendKeys.has(key) && resendKeys.get(key) !== bytes) return json({ name: "invalid_idempotent_request" }, 409);
     if (key && resendKeys.has(key)) return json(Array.isArray(body) ? { data: body.map((_, i) => ({ id: `again_${i}` })) } : { id: "again" });
-    if (key) resendKeys.add(key);
+    if (key) resendKeys.set(key, bytes);
     for (const m of Array.isArray(body) ? body : [body]) resend.push({ to: m.to[0], subject: m.subject, key });
     return json(Array.isArray(body) ? { data: body.map((_, i) => ({ id: `email_${i + 1}` })) } : { id: "email_1" });
   }
@@ -769,19 +771,14 @@ async function main(): Promise<void> {
       const notice = amazon.find(m => m.to === SUPPORT);
       const content = notice?.body.Content as { Simple?: { Body?: { Text?: { Data?: string } } } } | undefined;
       const words = content?.Simple?.Body?.Text?.Data ?? "";
-      is(`${sample.name}: existing subject distinguishes unknown usage`, notice?.subject,
-        sample.usage === null ? "List email is waiting: sender usage cannot be confirmed" : "List email is waiting: the sender's monthly volume is nearly used");
-      is(`${sample.name}: no quota sentinel is printed as a negative volume`,
-        [words.includes("allows -1"), words.includes("up to -1"), words.includes("used up too")], [false, false, false]);
-      is(`${sample.name}: daily account limit is described precisely`,
-        [words.includes("no daily quota ceiling for this account"), words.includes("allows 50,000"), words.includes("up to 40,000")],
-        [sample.max === -1, sample.max !== -1, sample.max !== -1]);
-      if (sample.max === -1) {
-        is("account information preserves rate and store allowances",
-          [words.includes("14 emails per second"), words.includes("Each store's existing email allowance and delivery controls still apply")], [true, true]);
-      }
-      is(`${sample.name}: unknown usage does not ask for a paid-plan change`,
-        words.includes("move the sender to a larger plan"), sample.usage !== null);
+      is(`${sample.name}: canonical subject does not assert a changing diagnosis`, notice?.subject,
+        "List email is waiting: check sending availability");
+      is(`${sample.name}: no numeric quota or current usage is embedded`,
+        [words.includes("50,000"), words.includes("40,000"), words.includes("allows -1"), words.includes("14 emails per second")], [false, false, false, false]);
+      is(`${sample.name}: unknown capacity waits for confirmation`, words.includes("Sending waits until availability can be confirmed."), true);
+      is(`${sample.name}: lists retain their SES-only route`, words.includes("Creator list email sends only through Amazon SES."), true);
+      is(`${sample.name}: fallback proof requirements are explicit`, words.includes("Missing proof blocks that route."), true);
+      is(`${sample.name}: no paid-plan change is prescribed from unknown evidence`, words.includes("move the sender to a larger plan"), false);
       is(`${sample.name}: essential route remains explicit`,
         words.includes("Sign-in links, receipts and deliveries keep their existing sending route"), true);
       await reserveDay(sample.want);
@@ -1355,6 +1352,45 @@ async function main(): Promise<void> {
       await trigger(); await trigger();
       is(`${purpose}: lost marker persistence retains sender deduplication`, [redis.run(["GET", marker]), resend.filter(m => m.to === SUPPORT).map(m => m.key)], [null, [marker]]);
       redis.pipeline = originalNoticePipeline;
+      globalThis.fetch = originalNoticeFetch;
+      setup();
+      const retryBodies: string[] = [];
+      globalThis.fetch = (async (input, init) => {
+        if (new URL(String(input)).hostname === "api.resend.com" && init?.method === "POST" && JSON.parse(String(init.body)).to?.[0] === SUPPORT) retryBodies.push(String(init.body));
+        return originalNoticeFetch(input, init);
+      }) as typeof fetch;
+      redis.pipeline = async commands => {
+        if (commands.some(c => c[0] === "SET" && c[1] === marker)) throw Error("synthetic marker failed after provider acceptance");
+        return originalNoticePipeline.call(redis, commands);
+      };
+      await trigger();
+      is(`${purpose}: accepted sender with lost marker still has no notice mark`, redis.run(["GET", marker]), null);
+      redis.pipeline = originalNoticePipeline;
+      // Change every formerly interpolated diagnosis. Monthly retry also
+      // changes between list-only and general admission, under the same key.
+      if (purpose === "SES down") {
+        askAgain(); account = approved();
+        amazonSays = () => ({ status: 400, type: "AccountSuspendedException", message: "different synthetic account reason" });
+        await trigger();
+      } else if (purpose === "list-only sender") await reserveDay(1);
+      else await reserveMail(store, 1, true);
+      is(`${purpose}: canonical retry recovers existing receipt and records mark`, [redis.run(["GET", marker]), retryBodies.length, resend.filter(m => m.to === SUPPORT).length], ["1", 1, 1]);
+      globalThis.fetch = originalNoticeFetch;
+      setup();
+      let rejectOnce = true;
+      const rejectedBodies: string[] = [];
+      globalThis.fetch = (async (input, init) => {
+        if (new URL(String(input)).hostname === "api.resend.com" && init?.method === "POST" && JSON.parse(String(init.body)).to?.[0] === SUPPORT) {
+          rejectedBodies.push(String(init.body));
+          if (rejectOnce) { rejectOnce = false; return new Response(JSON.stringify({ message: "synthetic known rejection" }), { status: 422 }); }
+        }
+        return originalNoticeFetch(input, init);
+      }) as typeof fetch;
+      await trigger();
+      is(`${purpose}: known rejection leaves the period unspent`, redis.run(["GET", marker]), null);
+      if (purpose === "SES down") { askAgain(); account = approved(); }
+      await trigger();
+      is(`${purpose}: rejected key is not cached and the next acceptance records the period`, [redis.run(["GET", marker]), rejectedBodies.length, rejectedBodies[0] === rejectedBodies[1], resend.filter(m => m.to === SUPPORT).length], ["1", 2, true, 1]);
       globalThis.fetch = originalNoticeFetch;
     }
   } finally {

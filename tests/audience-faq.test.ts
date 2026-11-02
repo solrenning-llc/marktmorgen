@@ -36,7 +36,7 @@ is("the list shown to the owner, under its title, with a check on each step done
 part("The answers, in both states");
 const today = audienceBeginnerQuestions(false, TRIAL_DAYS);
 const later = audienceBeginnerQuestions(true, TRIAL_DAYS);
-is("two questions", today.map((x) => x.q), ["How do I start my own store?", "Can I try it before paying?"]);
+is("two questions", today.map((x) => x.q), ["How do I start my own store?", "Can I try my store before paying?"]);
 const start = today[0].a;
 is("starting: every word in the order the creator meets it", (() => { const k = [w.start, w.address, w.name, w.create, w.list, w.first, w.last].map((x) => start.indexOf(`“${x}”`)); return k.every((x, i) => x >= 0 && (i === 0 || x > k[i - 1])); })(), true);
 is("starting: no password, and nothing sent while logging in is off", [start.includes("with no password"), start.endsWith("If logging in is not switched on yet, the sign-in page says so and sends nothing.")], [true, true]);

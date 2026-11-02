@@ -30,7 +30,7 @@ export function emailPlatformBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays
       a: `Once connected, press “${w.test}”: it checks your key and the place you picked with the platform, and tells you whether both work or that it could not check just now. Under “${w.log}”, each person handed to the platform shows as sent, still sending or failed, and anyone who did not agree to emails shows as not sent.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I connect my email tool before paying?",
       a: `${tryBeforePaying("The connection", "the connection", onSale, trialDays)} Calls to your platform are one of those limits: once they are used, the studio says so and when they open again. Nobody is sent until someone signs up for something free or buys, and your store can take a sign-up or open a checkout only on a plan${onSale ? " or its trial" : ""}.`,
     },
   ];

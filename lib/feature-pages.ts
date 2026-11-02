@@ -225,7 +225,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           ...storeBeginnerQuestions(),
           { q: "Can I change my store address later?", a: "Yes, from your studio, whenever you want. The addresses your store holds keep working and send people to the current one, up to ten at once. An address you let go of stops working, and after 30 days anyone may take it." },
           { q: "Is the page up before I connect Stripe?", a: "Yes. The page, the editor and your address are free and stay free; without a plan, the page is shown for " + countWords(publicVisitLimit(SETUP_VISITS)) + " visits a month. Taking a card needs two things: Stripe has cleared your account, and your plan or its 14-day trial is running. Until then the page says plainly that it cannot take a payment." },
-          { q: "Can I use my own domain?", a: DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan. You add one record where you bought the domain, and the certificate is made for you. Your marktmorgen.com address keeps working as well.` : "Not yet. It is planned for the Studio plan, and this page will say so on the day it works." },
+          { q: "Can I use my own domain?", a: DOMAINS ? `Yes, on the ${PLAN_AT.pro} Studio plan. You add the records your studio shows where you bought the domain, and the certificate is made for you. Your marktmorgen.com address keeps working as well.` : "Not yet. It is planned for the Studio plan, and this page will say so on the day it works." },
           { q: "How do I see what the page looks like before I save?", a: "The studio shows the page with your photo, theme, color and letters as you change them, before anything is saved." },
           { q: "Is there a limit on how many people can visit?", a: `Your plan covers a number of visits a month: ${countWords(VISITS_INCLUDED.creator)} on the ${PLAN_AT.creator} plan, ${countWords(VISITS_INCLUDED.pro)} on the ${PLAN_AT.pro} plan and ${countWords(VISITS_INCLUDED.scale)} on the ${PLAN_AT.scale} plan. A visit is one person opening your store on one day, however many pages they look at, and you are never counted. Visits are never billed: public pages pause at ${(10_000 - BUYER_RESERVE_BPS) / 100}% of the figure until the month turns or a plan change gives a larger one, and the last ${BUYER_RESERVE_BPS / 100}% are kept for your buyers' courses, community and podcasts. Your studio shows the count as it grows.` },
           { q: "Can one account run more than one store?", a: "Yes, up to five, each with its own address, products and Stripe account, and a plan of its own to take payments. You switch between them at the top of your studio." }
@@ -916,9 +916,9 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 22: what someone starting out asks, answered by the code (lib/domain-faq.ts).
           ...domainBeginnerQuestions(DOMAINS),
-          { q: "Does Stan offer this?", a: "No. Our comparison with Stan, checked against their own help center and pricing in September 2026, lists a custom domain as not available." },
+          { q: "Does Stan offer your own domain?", a: "No. Our comparison with Stan, checked against their own help center and pricing in September 2026, lists a custom domain as not available." },
           { q: "Who owns the domain?", a: "You do, and you keep access to its settings. If you ever leave, remove the record and point it wherever you like." },
-          { q: "How long does it take?", a: "Adding it takes a minute. The record usually shows up within minutes, and can take up to 48 hours, depending on where you bought the domain." },
+          ...(DOMAINS ? [{ q: "How long does a domain take to start working?", a: "Usually a few minutes after you add the records your studio shows where you bought the domain, and up to 48 hours. Press “Check again” until it says “Live”. The domain is held for your store for three days while you do this." }] : []),
         ],
       },
     ],
@@ -1131,7 +1131,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "Can members see each other's email addresses?", a: "No. Other members see only the name someone chose, and the directory lists only those who asked to be listed. You see members' addresses in your studio, because they are your buyers." },
           { q: "What happens after a refund?", a: "A payment you refund in full on your Stripe account stops opening the community, within five minutes." },
           { q: "Can buyers I bring over from another platform get in?", a: "Yes. A buyer you import for a product that opens the community is let in, like anyone who bought it here." },
-          { q: "Does Stan have this?", a: `Yes. Stan has a community, and its help center, read on September 27, 2026, adds webinars to it as a product members sign up for, with Zoom or Google Meet links made automatically. Ours holds live events members RSVP to, in a private video room, at your own link or in a Google Meet made on your Google Calendar, with no Zoom link made for you yet. Ours is on the ${PLAN_AT.creator} plan; emailing announcements needs Studio.` },
+          { q: "Does Stan have live events?", a: `Yes. Stan has a community, and its help center, read on September 27, 2026, adds webinars to it as a product members sign up for, with Zoom or Google Meet links made automatically. Ours holds live events members RSVP to, in a private video room, at your own link or in a Google Meet made on your Google Calendar, with no Zoom link made for you yet. Ours is on the ${PLAN_AT.creator} plan; emailing announcements needs Studio.` },
         ],
       },
     ],
@@ -1207,7 +1207,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 29: what someone starting out asks, answered by the code (lib/live-events-faq.ts).
           ...liveEventsBeginnerQuestions(),
-          { q: "Which plan is it on?", a: `Every plan, the ${PLAN_AT.creator} one included, with the community. The reminders and the emails about a move or a cancellation are sent on every plan and are not counted in Studio's monthly emails.` },
+          { q: "Which plan are live events on?", a: `Every plan, the ${PLAN_AT.creator} one included, with the community. The reminders and the emails about a move or a cancellation are sent on every plan and are not counted in Studio's monthly emails.` },
           { q: "Can someone who is not a member get the link?", a: "Not from us. Emails, calendar files and the feed point to the event's page, and the page shows the way in only from 15 minutes before, only to a member who may come, checked again on every visit. A member whose membership lapsed, or who was refunded or taken out, loses it with the rest of the community." },
           { q: "How does this compare with Stan?", a: "Stan adds webinars to its community as a product members sign up for on its landing page, with Zoom or Google Meet links made automatically, according to its help center, read on September 27, 2026. Ours are events members RSVP to, with reminders, a cap, a room in the page or a Google Meet made on your Google Calendar, and replays, with no Zoom link made for you yet." },
         ],
@@ -1498,7 +1498,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 15: what someone starting out asks, answered by the code (lib/calendar-faq.ts).
           ...calendarBeginnerQuestions(),
-          { q: "Does Stan do this?", a: "Stan's help center, read on September 26, 2026, lists Google Calendar for its calls. Ours reads Google, Outlook and iCloud calendars by their private address, and writes events only for calls set to Google Meet, on a Google Calendar you connect." },
+          { q: "Does Stan sync calendars?", a: "Stan's help center, read on September 26, 2026, lists Google Calendar for its calls. Ours reads Google, Outlook and iCloud calendars by their private address, and writes events only for calls set to Google Meet, on a Google Calendar you connect." },
           { q: "What happens to my calendar's address?", a: "It is stored with your store and used only to read your busy times. Once saved it is never shown again, not even to you. If you are ever unsure, reset it in your calendar app and the old one stops working." },
           { q: "Does it block group calls and live sessions too?", a: "It hides call times you are busy for. Live sessions are on the dates you set yourself, so they are yours to place around your calendar." },
         ],
@@ -1902,8 +1902,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 9: what someone starting out asks, answered by the code (lib/sales-page-faq.ts).
           ...salesPageBeginnerQuestions(),
-          { q: "Which plan is it on?", a: `Every plan, the ${PLAN_AT.creator} one included. On Stan, by its help center read on September 28, 2026, each product has a checkout page with a description and a video that can be made a private landing page on every plan, and funnels of several pages are on its $99 plan.` },
-          { q: "Who on my team can edit them?", a: "You, an Admin and an Editor. Support cannot." },
+          { q: "Which plan are sales pages on, here and on Stan?", a: `Every plan, the ${PLAN_AT.creator} one included. On Stan, by its help center read on September 28, 2026, each product has a checkout page with a description and a video that can be made a private landing page on every plan, and funnels of several pages are on its $99 plan.` },
+          { q: "Who on my team can edit sales pages?", a: "You, an Admin and an Editor. Support cannot." },
           { q: "Can I put a testimonial I collected on the page?", a: "Yes, in the Said elsewhere block, if it was said in public: their words as they said them, who said them, and the address of the post, video or comment, shown as a link so visitors can check it. The Reviews block shows only reviews written by people who paid, with their stars, and nothing you type can appear as one." },
         ],
       },
@@ -1976,7 +1976,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 39: what someone starting out asks, answered by the code (lib/ai-writing-faq.ts).
           ...aiWritingBeginnerQuestions(),
-          { q: "Which model writes it?", a: "Anthropic's Claude, through its API, with our key. It receives what you typed and what the product's page says, and nothing about your buyers, members or list." },
+          { q: "Which AI model writes the drafts?", a: "Anthropic's Claude, through its API, with our key. It receives what you typed and what the product's page says, and nothing about your buyers, members or list." },
           { q: "Which language does it write in?", a: "Your store's: English, Spanish, French, German, Italian, Dutch or Portuguese. A reply to a review is written in the review's own language." },
           { q: "Can it make claims I would not make?", a: "It is told never to invent a result, a number, a testimonial or a deadline, and a rewrite that brings in a number your page did not have is thrown away rather than shown. Read every draft before you publish it: it goes out under your name." },
         ],
@@ -2043,7 +2043,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           // 534 [FQ1], unit 24: what someone starting out asks, answered by the code (lib/reviews-faq.ts).
           ...reviewsBeginnerQuestions(),
           { q: "Why can't I delete a bad review?", a: "Because a rating you could clean up would be worth nothing to a buyer. You can hide its words, answer it, or refund the order in full, which takes its stars out." },
-          { q: "Who on my team can moderate them?", a: "You, an Admin, an Editor and Support can hide and answer reviews. Switching on the email that asks is a setting, for you and Admins." },
+          { q: "Who on my team can moderate reviews?", a: "You, an Admin, an Editor and Support can hide and answer reviews. Switching on the email that asks is a setting, for you and Admins." },
         ],
       },
     ],
@@ -2384,7 +2384,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 19: what someone starting out asks, answered by the code (lib/phone-faq.ts).
           ...phoneBeginnerQuestions(),
-          { q: "Which plan is it on?", a: `Every plan, the ${PLAN_AT.creator} one included.` },
+          { q: "Which plan are phone notifications on?", a: `Every plan, the ${PLAN_AT.creator} one included.` },
           { q: "Does a new device get notifications without me knowing?", a: "No. You are emailed each time notifications are turned on for a new device." },
         ],
       },
@@ -2449,8 +2449,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 36: what someone starting out asks, answered by the code (lib/switching-faq.ts).
           ...switchingBeginnerQuestions(),
-          { q: "In what order should I import?", a: "Products first, because the buyers' file names them by their title or their ID here. Then add each product's file or lessons, then your list and your buyers." },
-          { q: "Which plan is it on, and who can run it?", a: "Every plan. You and your Admins can import; Editors and Support cannot. The one email to past buyers, and the emails to members, are sent only while your plan or its trial is running." },
+          { q: "In what order should I bring things over?", a: "Products first, because the buyers' file names them by their title or their ID here. Then add each product's file or lessons, then your list and your buyers." },
+          { q: "Which plan does a move need, and who can run it?", a: "Every plan. You and your Admins can import; Editors and Support cannot. The one email to past buyers, and the emails to members, are sent only while your plan or its trial is running." },
           { q: "How do my members move without paying twice?", a: "Make the membership here first, at the same price. Export your members with the date each would next renew, import them under Your members, and stop the renewals where they are now. Each member keeps theirs with their own link: the card is taken then and first charged on that date. A date less than two days away is charged when they keep it, and their page says so before they press." },
           { q: "Is my file kept?", a: "The file itself never reaches us: your browser reads it and sends the columns you matched. Those rows, the report of what was left out and the import's counts are deleted two weeks after the import began, so download the report before then. What the import added (contacts, drafts and purchases) stays." },
           { q: "What does Stan offer here?", a: "According to its help center, read on September 27, 2026, Stan imports up to 5,000 contacts per store in all, and has you send them an email to opt in again; it gives a customer a download, a course or the community one customer at a time, with no way to undo that in bulk. We found no import for products there. Here you confirm your contacts agreed instead of us emailing them, and buyers come in from a file." },
@@ -2519,11 +2519,11 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 37: what someone starting out asks, answered by the code (lib/clickfunnels-faq.ts).
           ...clickFunnelsBeginnerQuestions(),
-          { q: "In what order should I import?", a: "Products first, because your Orders file and your funnel name them. Then your contacts, your past buyers, and last your funnel's pages." },
+          { q: "In what order should I import from ClickFunnels?", a: "Products first, because your Orders file and your funnel name them. Then your contacts, your past buyers, and last your funnel's pages." },
           { q: "Which contacts can I email after the move?", a: "Only those ClickFunnels marks Subscribed, and only after you check the box confirming those people agreed to receive your emails. Nobody is emailed because of the import." },
           { q: "Is anything saved during the dry run?", a: "No. The dry run checks every row and every page and lists what would happen. Nothing is added to your store until you press import." },
           { q: "What if I run the same import twice?", a: "Nothing is made twice: contacts already on your list are left as they are, products already in your store by name are not made again, buyers keep what they have, and the same funnel import answers with what the first one made." },
-          { q: "Which plan is it on, and who can run it?", a: "Every plan. You and your Admins can import; Editors and Support cannot." },
+          { q: "Which plan does a move from ClickFunnels need, and who can run it?", a: "Every plan. You and your Admins can import; Editors and Support cannot." },
         ],
       },
       { kind: "features", title: "Compare before moving", items: [

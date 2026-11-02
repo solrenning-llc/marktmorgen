@@ -35,13 +35,13 @@ is("a sale or a free copy needs the plan or its trial; bought-over buyers come i
 part("The answers, in both states");
 const now = liveEventsBeginnerQuestions(false, TRIAL_DAYS);
 const later = liveEventsBeginnerQuestions(true, TRIAL_DAYS);
-is("three questions", now.map((x) => x.q), ["How do I schedule my first event?", "Is anyone told when I schedule one?", "Can I try it before paying?"]);
+is("three questions", now.map((x) => x.q), ["How do I schedule my first event?", "Is anyone told when I schedule an event?", "Can I try live events before paying?"]);
 const how = answer(now, "How do I schedule my first event?");
 is("scheduling: the community set up first by the owner or an Admin, the studio's words in order, seen once switched on", [how.startsWith("Events live inside your community, so the owner or an Admin sets that up first"), how.endsWith("Members see it once the community is switched on."), (() => { const at = [w.tool, w.setUp, w.part, w.schedule, w.title, w.when, w.where, w.confirm].map((x) => how.indexOf(`“${x}”`)); return at.every((x, k) => x >= 0 && (k === 0 || x > at[k - 1])); })()], [true, true, true]);
-const tryNow = answer(now, "Can I try it before paying?");
-const tryLater = answer(later, "Can I try it before paying?");
+const tryNow = answer(now, "Can I try live events before paying?");
+const tryLater = answer(later, "Can I try live events before paying?");
 is("try before paying: the shared answer, then members by an event's own name, bought, free or brought over", [tryNow.startsWith(tryBeforePaying("A live event", "a live event", false, TRIAL_DAYS)), tryLater.startsWith(tryBeforePaying("A live event", "a live event", true, TRIAL_DAYS)), tryNow.includes("Members come to an event through a product"), tryNow.includes("which needs your store's plan, or held by buyers"), tryLater.includes("which needs your store's plan or its trial, or held by buyers"), /Members come to it\b/.test(tryNow + tryLater)], [true, true, true, true, true, false]);
-is("told: not by email, the feed post, reminders only on RSVP and consent", answer(now, "Is anyone told when I schedule one?").startsWith(`Not by email. It shows in your community, and with “${w.announce}” checked`), true);
+is("told: not by email, the feed post, reminders only on RSVP and consent", answer(now, "Is anyone told when I schedule an event?").startsWith(`Not by email. It shows in your community, and with “${w.announce}” checked`), true);
 const all = [...now, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);
 is("no figure but the trial's days, no percent, no result promised", [/\d/.test(all.split(`${TRIAL_DAYS}-day`).join("")), /%|guarantee|attendance|proven/i.test(all)], [false, false]);

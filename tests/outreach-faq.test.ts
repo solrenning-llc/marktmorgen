@@ -38,10 +38,10 @@ is("nothing is sent from here", read("lib/feature-pages.ts").includes("It does n
 part("The answers, in both states");
 const now = outreachBeginnerQuestions(false);
 const later = outreachBeginnerQuestions(true);
-is("two questions", now.map((x) => x.q), ["How do I write my first pitch?", "Can I try it before paying?"]);
+is("two questions", now.map((x) => x.q), ["How do I write my first pitch?", "Can I try outreach before paying?"]);
 const how = answer(now, "How do I write my first pitch?");
 is("writing: paid-up Studio or Scale, labeled Pro, switched on, who, the studio's words in order, sent by you", [how.startsWith(`On a paid-up ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan (your studio calls the ${PLAN_TITLES.pro} plan “Pro”), while the writing help is available for your store`), (() => { const k = [w.tool, w.who, w.name, w.address, w.save, w.write, w.goal, w.site, w.country, w.notHere, w.find, w.addresses, w.draft, w.pitches, w.gmail, w.mailApp, w.copy].map((x) => how.indexOf(`“${x}”`)); return k.every((x, i) => x >= 0 && (i === 0 || x > k[i - 1])); })(), how.endsWith("you send it yourself, from your own mailbox.")], [true, true, true]);
-is("trying: not yet today; not in the trial later, and no promise past a paid-up plan", [answer(now, "Can I try it before paying?").startsWith("Not yet."), answer(later, "Can I try it before paying?").startsWith("Not in the free trial: the trial leaves out paid AI writing"), answer(later, "Can I try it before paying?").endsWith("plan that is paid up."), /It opens once/.test(answer(later, "Can I try it before paying?"))], [true, true, true, false]);
+is("trying: not yet today; not in the trial later, and no promise past a paid-up plan", [answer(now, "Can I try outreach before paying?").startsWith("Not yet."), answer(later, "Can I try outreach before paying?").startsWith("Not in the free trial: the trial leaves out paid AI writing"), answer(later, "Can I try outreach before paying?").endsWith("plan that is paid up."), /It opens once/.test(answer(later, "Can I try outreach before paying?"))], [true, true, true, false]);
 const all = [...now, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);
 is("no figure, no percent, no answer promised", [/\d/.test(all), /%|guarantee|will answer|reply rate/i.test(all)], [false, false]);

@@ -39,11 +39,11 @@ is("past the limit, the pipelines a store has stay and can be edited; only addin
 part("The answers, in both states");
 const today = crmBeginnerQuestions(false, TRIAL_DAYS);
 const later = crmBeginnerQuestions(true, TRIAL_DAYS);
-is("three questions", today.map((x) => x.q), ["How do I record my first deal?", "How do I keep a detail about each person?", "Can I try it before paying?"]);
+is("three questions", today.map((x) => x.q), ["How do I record my first deal?", "How do I keep a detail about each person?", "Can I try deals and fields before paying?"]);
 const deal = answer(today, "How do I record my first deal?");
 is("a deal: who, the studio's words in order, no next-stage button", [deal.includes("the owner, or a teammate with the Admin or Support role"), /next stage|as the conversation/.test(deal), (() => { const k = [w.tool, w.newDeal, w.what, w.saveDeal, w.unloaded, w.reload].map((x) => deal.indexOf(`“${x}”`)); return k.every((x, i) => x >= 0 && (i === 0 || x > k[i - 1])); })()], [true, false, true]);
 is("a field: the studio's words in order", (() => { const f = answer(today, "How do I keep a detail about each person?"); const k = [w.fields, w.firstField, w.addField, w.kind, w.saveFields, w.buyers].map((x) => f.indexOf(`“${x}”`)); return k.every((x, i) => x >= 0 && (i === 0 || x > k[i - 1])); })(), true);
-is("trying: the shared answer, and one pipeline without a plan", [answer(today, "Can I try it before paying?").startsWith(tryBeforePaying("People and deals", "your fields, deals and a pipeline", false, TRIAL_DAYS)), answer(today, "Can I try it before paying?").endsWith("Without a plan, you cannot add a pipeline to the one every store starts with; a plan has room for more."), answer(later, "Can I try it before paying?").endsWith("Without a plan, you cannot add a pipeline to the one every store starts with; a plan or its trial has room for more.")], [true, true, true]);
+is("trying: the shared answer, and one pipeline without a plan", [answer(today, "Can I try deals and fields before paying?").startsWith(tryBeforePaying("People and deals", "your fields, deals and a pipeline", false, TRIAL_DAYS)), answer(today, "Can I try deals and fields before paying?").endsWith("Without a plan, you cannot add a pipeline to the one every store starts with; a plan has room for more."), answer(later, "Can I try deals and fields before paying?").endsWith("Without a plan, you cannot add a pipeline to the one every store starts with; a plan or its trial has room for more.")], [true, true, true]);
 const all = [...today, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);
 is("no figure but the trial's days", /\d/.test(all.split(`${TRIAL_DAYS}-day`).join("")), false);

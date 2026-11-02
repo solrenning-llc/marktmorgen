@@ -32,10 +32,10 @@ is("off on the Store plan, without a plan and in a trial; none on the Store plan
 part("The answers, in both states");
 const today = aiWritingBeginnerQuestions(false);
 const later = aiWritingBeginnerQuestions(true);
-is("two questions", today.map((x) => x.q), ["Where do I find it?", "Can I try it before paying?"]);
-const where = answer(today, "Where do I find it?");
+is("two questions", today.map((x) => x.q), ["Where do I find the writing help?", "Can I try the writing help before paying?"]);
+const where = answer(today, "Where do I find the writing help?");
 is("finding it: next to what it writes, paid-up Studio or Scale, its label, while available, the button, the panel and its press, the help box, not shown otherwise", [where.startsWith("In your studio, next to what it writes."), where.includes(`On a paid-up ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan (your studio calls the ${PLAN_TITLES.pro} plan “Pro”), while the writing help is available for your store`), (() => { const k = [w.draft, w.panel, w.write, w.help].map((x) => where.indexOf(`“${x}”`)); return k.every((x, i) => x >= 0 && (i === 0 || x > k[i - 1])); })(), where.endsWith("Otherwise none of these are shown."), /switched on|save it yourself/.test(where)], [true, true, true, true, false]);
-is("trying: needs, never comes with; not in the trial; no promise past a paid-up plan; nothing the page's closing already says", [answer(today, "Can I try it before paying?"), answer(later, "Can I try it before paying?")], [`Not yet. The writing help needs a paid-up ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan, and paid plans are not on sale yet.`, `Not in the free trial: the trial does not include the writing help. It needs a ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan that is paid up.`]);
+is("trying: needs, never comes with; not in the trial; no promise past a paid-up plan; nothing the page's closing already says", [answer(today, "Can I try the writing help before paying?"), answer(later, "Can I try the writing help before paying?")], [`Not yet. The writing help needs a paid-up ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan, and paid plans are not on sale yet.`, `Not in the free trial: the trial does not include the writing help. It needs a ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale} plan that is paid up.`]);
 const all = [...today, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);
 is("no figure, no percent, no result promised", [/\d/.test(all), /%|guarantee|more sales|convert/i.test(all)], [false, false]);

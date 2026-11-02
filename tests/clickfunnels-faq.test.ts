@@ -39,10 +39,10 @@ is("the funnel import asks for no plan, only no paused costs", [/isPaidUp|canSel
 part("The answers, in both states");
 const now = clickFunnelsBeginnerQuestions(false, TRIAL_DAYS);
 const later = clickFunnelsBeginnerQuestions(true, TRIAL_DAYS);
-is("two questions", now.map((x) => x.q), ["Where do I start?", "Can I try it before paying?"]);
-const start = answer(now, "Where do I start?");
+is("two questions", now.map((x) => x.q), ["Where do I start my move from ClickFunnels?", "Can I move from ClickFunnels before paying?"]);
+const start = answer(now, "Where do I start my move from ClickFunnels?");
 is("starting: the studio's words in order", (() => { const k = [w.tool, w.part, w.first, w.last, w.file, w.columns, w.check, w.go, w.pages, w.role, w.checkFunnel, w.goFunnel].map((x) => start.indexOf(`“${x}”`)); return k.every((x, i) => x >= 0 && (i === 0 || x > k[i - 1])); })(), true);
-is("trying: the shared answer, and the buyers' email only with the plan", [answer(now, "Can I try it before paying?").startsWith(tryBeforePaying("A move from ClickFunnels", "your products, contacts, past buyers and funnel pages", false, TRIAL_DAYS)), answer(now, "Can I try it before paying?").includes("only while your store's plan is active and paid up and our email sending is switched on"), answer(later, "Can I try it before paying?").includes("only while your store's plan (or its trial) is active and paid up")], [true, true, true]);
+is("trying: the shared answer, and the buyers' email only with the plan", [answer(now, "Can I move from ClickFunnels before paying?").startsWith(tryBeforePaying("A move from ClickFunnels", "your products, contacts, past buyers and funnel pages", false, TRIAL_DAYS)), answer(now, "Can I move from ClickFunnels before paying?").includes("only while your store's plan is active and paid up and our email sending is switched on"), answer(later, "Can I move from ClickFunnels before paying?").includes("only while your store's plan (or its trial) is active and paid up")], [true, true, true]);
 is("no order said again: the page already answers it", [/in that order|then your contacts/i.test(start), findPage("platform", "move-from-clickfunnels") !== undefined], [false, true]);
 const all = [...now, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);

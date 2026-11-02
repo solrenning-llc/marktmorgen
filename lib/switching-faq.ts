@@ -19,11 +19,11 @@ export function switchingBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = T
   const w = SWITCHING_WORDS;
   return [
     {
-      q: "Where do I start?",
+      q: "Where do I start my move to Marktmorgen?",
       a: `In your studio, open “${w.tool}” and pick what to bring in: ${w.tabs.slice(0, -1).map((t) => `“${t}”`).join(", ")} or “${w.tabs[w.tabs.length - 1]}”. Press “${w.file}”, check what each column holds under “${w.columns}”, and look over “${w.rows}”. For a list, check “${w.agreed}”; for members, check “${w.stopped}” Then press “${w.go} …”.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I move my store to Marktmorgen before paying?",
       a: `${tryBeforePaying("A move", "your list, products and past buyers", onSale, trialDays)} Your members come over only while your store can take payments and send email, because each one is emailed their own link and keeps their membership by paying here.`,
     },
   ];

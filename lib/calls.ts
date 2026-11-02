@@ -96,7 +96,7 @@ import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { codesMayTakeOff } from "@/lib/discount";
 import { hostId, isClaimId, isHostId, newClaimId } from "@/lib/host-claims";
-import { parseTeamSetup, teamBookable } from "@/lib/team-scheduling-rules";
+import { chosenTeam, hostChoices, parseTeamSetup, teamBookable } from "@/lib/team-scheduling-rules";
 import {
   type TeamBusy,
   activeTeam,
@@ -634,7 +634,7 @@ function writesAboutBookings(store: Store): boolean {
 
 export type HoldResult =
   | { ok: true; url: string; session: string }
-  | { ok: false; reason: "taken" | "invalid" | "unavailable" | "error" };
+  | { ok: false; reason: "taken" | "invalid" | "unavailable" | "error" | "host-changed" };
 
 
 /**
@@ -784,6 +784,12 @@ export async function holdAndCheckout(input: {
   start: number;
   buyerTz: string;
   origin: string;
+  /**
+   * On a team that lets buyers choose (lib/team-scheduling-rules.ts,
+   * chosenTeam): the host's position and name as the page showed them; only
+   * that host is held, or the booking is refused as "host-changed".
+   */
+  host?: { key: string; label: string } | null;
   /** A discount code on a booking with a deposit, already read and figured (lib/deposit-code.ts). */
   code?: { id: string; code: string; figures: DepositFigures } | null;
   /** The affiliate whose link the buyer followed, and the share it earns. */
@@ -808,8 +814,12 @@ export async function holdAndCheckout(input: {
   const end = start + length;
   const buyerTz = isTimeZone(input.buyerTz) ? input.buyerTz : setup.tz;
 
-  const team = await activeTeam(store, product).catch(() => "closed" as const);
-  if (team === "closed") return { ok: false, reason: "unavailable" };
+  const whole = await activeTeam(store, product).catch(() => "closed" as const);
+  if (whole === "closed") return { ok: false, reason: "unavailable" };
+  // The host the buyer chose, never anyone else: a team edited since the page was drawn is said, not guessed.
+  const chosen = whole && input.host?.key ? chosenTeam(whole, input.host.key, input.host.label) : null;
+  if (chosen === "changed") return { ok: false, reason: "host-changed" };
+  const team = chosen ?? whole;
 
   // Counted as orders, admitted before anything is held or opened: nobody is stopped while paying.
   const admitted = await admitOrders(store, CALL_ORDER_UNITS);
@@ -931,17 +941,22 @@ function offerFrom(product: CallListing, now: number, seats: TeamBusy[], session
  * Every open time or session for a call product, or null when it cannot be
  * read, and the paid calls read on the way, for catchUpBookings.
  */
-export async function slotsForProduct(store: Store, product: CallListing) {
+export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null) {
   try {
     const now = Date.now();
     const { busy, paid, blocked, sessions } = await readBusy(store, now);
-    const team = await activeTeam(store, product);
+    const whole = await activeTeam(store, product);
     // A team event type the plan or the team no longer allows: nothing on offer.
-    if (team === "closed") return { days: [], left: {}, sessions: [], paid };
-    if (team) {
+    if (whole === "closed") return { days: [], left: {}, sessions: [], paid };
+    if (whole) {
+      // A team that lets buyers choose: who they may pick, and only the chosen host's times once they have.
+      const hosts = hostChoices(whole);
+      const picked = pick?.key ? hosts.find((h) => h.key === pick.key) ?? null : null;
+      const narrowed = picked ? chosenTeam(whole, picked.key, picked.label) : null;
+      const team = narrowed && narrowed !== "changed" ? narrowed : whole;
       // The page is where each host's calendar is read again, when its last reading is old.
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true });
-      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid };
+      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked };
     }
     return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid };
   } catch {

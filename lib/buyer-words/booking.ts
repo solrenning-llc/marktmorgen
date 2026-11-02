@@ -53,6 +53,7 @@ const en = {
     "code-unknown": { title: "That code does not work here", body: "Nothing was charged. Check the code, or book without it." },
     "code-limited": { title: "That code cannot be used with a deposit", body: "Nothing was charged. A code with conditions (a limit on its uses, a first purchase or one customer only, some products only, or an end date) cannot be used when part of the price is paid in person. Book without it." },
     "code-small": { title: "That code leaves too little to pay online", body: "Nothing was charged. With that code, what is left to pay online is below the smallest amount that can be charged. Book without it." },
+    "host-changed": { title: "The team changed since this page opened", body: "Nothing was charged. Pick who you book with again." },
     slow: {
       title: "That was a lot of tries in a few minutes",
       body: "Nothing was charged. Wait a few minutes, then pick a time again.",
@@ -230,6 +231,11 @@ const en = {
   codeLabel: "Discount code (optional)",
   codeHelp: "It comes off the whole price. What is left after the deposit is paid in person.",
   codeOffPrice: (code: string, amount: string) => `Code ${code}: ${amount} off the whole price.`,
+  /** Choosing who to book with, on a team that lets buyers choose (lib/team-scheduling-rules.ts, hostChoices). */
+  hostPick: "Who would you like to book with?",
+  hostAny: "Any available",
+  hostShow: "Show their times",
+  withHost: (name: string) => `With ${name}`,
 
   // ---- A package of sessions ---------------------------------------------------------
   /** On Stripe's page. */
@@ -285,6 +291,7 @@ const es: BookingWords = {
     "code-unknown": { title: "Ese código no sirve aquí", body: "No se ha cobrado nada. Revisa el código o reserva sin él." },
     "code-limited": { title: "Ese código no se puede usar con un depósito", body: "No se ha cobrado nada. Un código con condiciones (usos limitados, solo una primera compra o un cliente, solo algunos productos o una fecha de fin) no se puede usar cuando parte del precio se paga en persona. Reserva sin él." },
     "code-small": { title: "Con ese código queda muy poco para pagar en línea", body: "No se ha cobrado nada. Con ese código, lo que queda por pagar en línea está por debajo del importe mínimo que se puede cobrar. Reserva sin él." },
+    "host-changed": { title: "El equipo cambió desde que abriste esta página", body: "No se ha cobrado nada. Vuelve a elegir con quién reservar." },
     slow: { title: "Demasiados intentos en pocos minutos", body: "No se ha cobrado nada. Espera unos minutos y vuelve a elegir un horario." },
   },
   moveNotices: {
@@ -421,6 +428,10 @@ const es: BookingWords = {
   codeLabel: "Código de descuento (opcional)",
   codeHelp: "Se descuenta del precio completo. Lo que queda después del depósito se paga en persona.",
   codeOffPrice: (code, amount) => `Código ${code}: ${amount} de descuento sobre el precio total.`,
+  hostPick: "¿Con quién quieres reservar?",
+  hostAny: "Cualquiera disponible",
+  hostShow: "Ver sus horarios",
+  withHost: (name) => `Con ${name}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sesión", "sesiones")}`,
   packageDescription: (sessions, limit) =>
@@ -473,6 +484,7 @@ const fr: BookingWords = {
     "code-unknown": { title: "Ce code ne fonctionne pas ici", body: "Rien n'a été débité. Vérifiez le code, ou réservez sans lui." },
     "code-limited": { title: "Ce code ne peut pas être utilisé avec un acompte", body: "Rien n'a été débité. Un code avec des conditions (utilisations limitées, premier achat ou un seul client, certains produits seulement, ou une date de fin) ne peut pas servir quand une partie du prix se paie en personne. Réservez sans lui." },
     "code-small": { title: "Avec ce code, il reste trop peu à payer en ligne", body: "Rien n'a été débité. Avec ce code, ce qui reste à payer en ligne est sous le plus petit montant qui peut être débité. Réservez sans lui." },
+    "host-changed": { title: "L'équipe a changé depuis l'ouverture de cette page", body: "Rien n'a été débité. Choisissez à nouveau avec qui réserver." },
     slow: { title: "Beaucoup de tentatives en quelques minutes", body: "Rien n'a été débité. Patientez quelques minutes, puis choisissez de nouveau un créneau." },
   },
   moveNotices: {
@@ -611,6 +623,10 @@ const fr: BookingWords = {
   codeLabel: "Code de réduction (facultatif)",
   codeHelp: "Il s'applique au prix entier. Ce qui reste après l'acompte se paie en personne.",
   codeOffPrice: (code, amount) => `Code ${code}${S}: ${amount} de moins sur le prix entier.`,
+  hostPick: `Avec qui voulez-vous réserver${S}?`,
+  hostAny: "Toute personne disponible",
+  hostShow: "Voir ses horaires",
+  withHost: (name) => `Avec ${name}`,
 
   packageName: (title, sessions) => `${title} — ${sessions}${S}${pluralFr(sessions, "séance", "séances")}`,
   packageDescription: (sessions, limit) =>
@@ -661,6 +677,7 @@ const de: BookingWords = {
     "code-unknown": { title: "Dieser Code gilt hier nicht", body: "Es wurde nichts berechnet. Prüfen Sie den Code oder buchen Sie ohne ihn." },
     "code-limited": { title: "Dieser Code gilt nicht mit einer Anzahlung", body: "Es wurde nichts berechnet. Ein Code mit Bedingungen (begrenzte Einlösungen, nur erster Kauf oder ein Kunde, nur bestimmte Produkte oder ein Enddatum) gilt nicht, wenn ein Teil des Preises vor Ort bezahlt wird. Buchen Sie ohne ihn." },
     "code-small": { title: "Mit diesem Code bleibt online zu wenig zu zahlen", body: "Es wurde nichts berechnet. Mit diesem Code liegt der online zu zahlende Betrag unter dem kleinsten Betrag, der berechnet werden kann. Buchen Sie ohne ihn." },
+    "host-changed": { title: "Das Team hat sich geändert, seit diese Seite geöffnet wurde", body: "Es wurde nichts berechnet. Wählen Sie erneut, bei wem Sie buchen." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und wählen Sie dann erneut einen Termin." },
   },
   moveNotices: {
@@ -797,6 +814,10 @@ const de: BookingWords = {
   codeLabel: "Rabattcode (optional)",
   codeHelp: "Er gilt für den ganzen Preis. Was nach der Anzahlung bleibt, zahlen Sie vor Ort.",
   codeOffPrice: (code, amount) => `Code ${code}: ${amount} Rabatt auf den Gesamtpreis.`,
+  hostPick: "Bei wem möchten Sie buchen?",
+  hostAny: "Wer gerade frei ist",
+  hostShow: "Zeiten anzeigen",
+  withHost: (name) => `Bei ${name}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "Termin", "Termine")}`,
   packageDescription: (sessions, limit) =>
@@ -849,6 +870,7 @@ const it: BookingWords = {
     "code-unknown": { title: "Quel codice qui non vale", body: "Non è stato addebitato nulla. Controlla il codice, oppure prenota senza." },
     "code-limited": { title: "Quel codice non vale con un acconto", body: "Non è stato addebitato nulla. Un codice con condizioni (utilizzi limitati, solo primo acquisto o un solo cliente, solo alcuni prodotti, o una data di fine) non vale quando una parte del prezzo si paga di persona. Prenota senza." },
     "code-small": { title: "Con quel codice resta troppo poco da pagare online", body: "Non è stato addebitato nulla. Con quel codice, quanto resta da pagare online è sotto l'importo minimo che si può addebitare. Prenota senza." },
+    "host-changed": { title: "Il team è cambiato da quando hai aperto questa pagina", body: "Non è stato addebitato nulla. Scegli di nuovo con chi prenotare." },
     slow: { title: "Troppi tentativi in pochi minuti", body: "Non è stato addebitato nulla. Attendi qualche minuto, poi scegli di nuovo un orario." },
   },
   moveNotices: {
@@ -985,6 +1007,10 @@ const it: BookingWords = {
   codeLabel: "Codice sconto (facoltativo)",
   codeHelp: "Vale sul prezzo intero. Quanto resta dopo l'acconto si paga di persona.",
   codeOffPrice: (code, amount) => `Codice ${code}: ${amount} in meno sul prezzo intero.`,
+  hostPick: "Con chi vuoi prenotare?",
+  hostAny: "Chiunque sia disponibile",
+  hostShow: "Mostra i suoi orari",
+  withHost: (name) => `Con ${name}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessione", "sessioni")}`,
   packageDescription: (sessions, limit) =>
@@ -1037,6 +1063,7 @@ const nl: BookingWords = {
     "code-unknown": { title: "Die code werkt hier niet", body: "Er is niets afgeschreven. Controleer de code, of boek zonder." },
     "code-limited": { title: "Die code werkt niet met een aanbetaling", body: "Er is niets afgeschreven. Een code met voorwaarden (beperkt aantal keer gebruik, alleen een eerste aankoop of één klant, alleen sommige producten, of een einddatum) werkt niet als een deel van de prijs ter plaatse wordt betaald. Boek zonder." },
     "code-small": { title: "Met die code blijft er te weinig online te betalen", body: "Er is niets afgeschreven. Met die code ligt wat online te betalen overblijft onder het kleinste bedrag dat kan worden afgeschreven. Boek zonder." },
+    "host-changed": { title: "Het team is veranderd sinds deze pagina openging", body: "Er is niets afgeschreven. Kies opnieuw bij wie je boekt." },
     slow: { title: "Veel pogingen in een paar minuten", body: "Er is niets afgeschreven. Wacht een paar minuten en kies dan opnieuw een tijd." },
   },
   moveNotices: {
@@ -1172,6 +1199,10 @@ const nl: BookingWords = {
   codeLabel: "Kortingscode (optioneel)",
   codeHelp: "Die gaat van de hele prijs af. Wat na de aanbetaling overblijft, betaal je ter plaatse.",
   codeOffPrice: (code, amount) => `Code ${code}: ${amount} korting op de hele prijs.`,
+  hostPick: "Bij wie wil je boeken?",
+  hostAny: "Wie er beschikbaar is",
+  hostShow: "Toon de tijden",
+  withHost: (name) => `Bij ${name}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessie", "sessies")}`,
   packageDescription: (sessions, limit) =>
@@ -1224,6 +1255,7 @@ const pt: BookingWords = {
     "code-unknown": { title: "Esse código não funciona aqui", body: "Nada foi cobrado. Confirme o código, ou marque sem ele." },
     "code-limited": { title: "Esse código não pode ser usado com um sinal", body: "Nada foi cobrado. Um código com condições (utilizações limitadas, só primeira compra ou um único cliente, só alguns produtos, ou uma data de fim) não pode ser usado quando parte do preço é paga presencialmente. Marque sem ele." },
     "code-small": { title: "Com esse código fica muito pouco para pagar online", body: "Nada foi cobrado. Com esse código, o que fica para pagar online está abaixo do valor mínimo que pode ser cobrado. Marque sem ele." },
+    "host-changed": { title: "A equipa mudou desde que esta página foi aberta", body: "Nada foi cobrado. Escolha de novo com quem quer marcar." },
     slow: { title: "Demasiadas tentativas em poucos minutos", body: "Nada foi cobrado. Aguarde alguns minutos e escolha novamente um horário." },
   },
   moveNotices: {
@@ -1360,6 +1392,10 @@ const pt: BookingWords = {
   codeLabel: "Código de desconto (opcional)",
   codeHelp: "É descontado do preço total. O que resta depois do sinal é pago presencialmente.",
   codeOffPrice: (code, amount) => `Código ${code}: menos ${amount} no preço total.`,
+  hostPick: "Com quem quer marcar?",
+  hostAny: "Qualquer pessoa disponível",
+  hostShow: "Ver os horários",
+  withHost: (name) => `Com ${name}`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessão", "sessões")}`,
   packageDescription: (sessions, limit) =>

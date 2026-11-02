@@ -67,11 +67,23 @@ export type TeamHost = {
   noticeHours: number;
   /** Team calls they take at most in one of their days. */
   dailyCap: number;
+  /**
+   * The name buyers see when they may choose who they book with (520 [LB1],
+   * unit 6): the creator's own words, such as "Ana", never their address.
+   * Shown only on a team that lets buyers choose (TeamSetup.pick).
+   */
+  label?: string;
 };
 
 export type TeamSetup = {
   mode: TeamMode;
   hosts: TeamHost[];
+  /**
+   * Round robin only: the buyer may choose who they book with, by each host's
+   * label, or "Any available" (520 [LB1], unit 6). Every host has a label
+   * then, each a different one.
+   */
+  pick?: boolean;
   /** When it became a team event, ISO: the oldest ones stay on when a plan allows fewer. */
   createdAt: string;
 };
@@ -122,6 +134,8 @@ export type TeamProblem =
   | "team_host_buffer"
   | "team_host_notice"
   | "team_host_cap"
+  | "team_host_label"
+  | "team_pick"
   | "team_call";
 
 const EMAIL = /^[^\s@<>"]{1,64}@[^\s@<>"]{1,190}\.[^\s@<>".]{2,}$/;
@@ -178,10 +192,59 @@ export function readTeamSetup(raw: unknown, setup: Pick<CallSetup, "kind" | "sea
     if (!(NOTICE_CHOICES as readonly number[]).includes(noticeHours)) return "team_host_notice";
     const dailyCap = Number(h.dailyCap ?? 4);
     if (!(DAILY_CAPS as readonly number[]).includes(dailyCap)) return "team_host_cap";
-    hosts.push({ email, tz: h.tz as string, weekly, bufferMinutes, noticeHours, dailyCap });
+    // The name buyers see: absent or empty is none; anything else must be a plain short name.
+    const rawLabel = h.label === undefined || h.label === null ? "" : h.label;
+    if (typeof rawLabel !== "string") return "team_host_label";
+    const label = rawLabel.trim().replace(/\s+/g, " ");
+    if (label && !isHostLabel(label)) return "team_host_label";
+    hosts.push({ email, tz: h.tz as string, weekly, bufferMinutes, noticeHours, dailyCap, ...(label ? { label } : {}) });
   }
   const createdAt = typeof value.createdAt === "string" && !Number.isNaN(Date.parse(value.createdAt)) ? value.createdAt : new Date().toISOString();
-  return { mode: value.mode, hosts, createdAt };
+  // Letting buyers choose: round robin only, every host named, each name once.
+  const pick = value.pick === true;
+  if (pick) {
+    const names = hosts.map((h) => (h.label ?? "").toLowerCase());
+    if (value.mode !== "round_robin" || names.some((n) => !n) || new Set(names).size !== names.length) return "team_pick";
+  }
+  return { mode: value.mode, hosts, createdAt, ...(pick ? { pick: true } : {}) };
+}
+
+/** Longest name a buyer is shown for a host. */
+export const HOST_LABEL_MAX = 40;
+
+/**
+ * A host's public name: a plain short name, never an address, a link or
+ * markup, so a buyer is shown only what the creator meant them to see.
+ */
+export function isHostLabel(label: string): boolean {
+  return (
+    label.length >= 1 &&
+    label.length <= HOST_LABEL_MAX &&
+    !/[@<>{}\[\]\\/]|https?:|www\.|\.(com|net|org|io|co)\b/i.test(label) &&
+    !/[\u0000-\u001f\u007f\u2028\u2029]/.test(label)
+  );
+}
+
+/** What a buyer may choose on a team that lets them: each host's position and name, in the team's order. */
+export function hostChoices(team: TeamSetup): { key: string; label: string }[] {
+  if (!team.pick || team.mode !== "round_robin") return [];
+  return team.hosts.map((h, i) => ({ key: String(i), label: h.label ?? "" })).filter((c) => c.label);
+}
+
+/**
+ * The team narrowed to the host a buyer chose: null for "Any available" (no
+ * choice, or a team that does not let buyers choose), "changed" when that
+ * position no longer has that name (the team was edited since the page was
+ * drawn), so a buyer is never booked with someone they did not pick.
+ */
+export function chosenTeam(team: TeamSetup, key: string, label: string): TeamSetup | null | "changed" {
+  if (!key) return null;
+  const choices = hostChoices(team);
+  if (!choices.length) return "changed";
+  const index = /^[0-5]$/.test(key) ? Number(key) : -1;
+  const host = team.hosts[index];
+  if (!host || !host.label || host.label !== label) return "changed";
+  return { ...team, hosts: [host] };
 }
 
 /** Whatever came back from storage, made safe to use, or null. */

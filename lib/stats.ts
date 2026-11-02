@@ -1255,7 +1255,46 @@ export type RenewalPayment = {
   paymentIntent: string;
   /** The channel the subscription was sold through, by the same rule as renewalEntries: "" for direct, UNRECORDED when it says nothing. */
   channel: string;
+  /** The invoice, to find its payment among the account's invoice payments when the invoice does not name it. */
+  invoice: string;
 };
+
+/**
+ * Each paid invoice's payment on the creator's account, invoice id to payment
+ * intent, from Stripe's list of invoice payments (GET /v1/invoice_payments,
+ * whose `invoice` filter is optional: "List all payments for an invoice",
+ * read 2 November 2026), so a refund of a membership's or a payment plan's
+ * payment can be matched whatever API version the account answers in. At
+ * most `pages` pages of a hundred, stopping at `deadline`; `partial` when
+ * there was more (270 [GR1], unit 3a).
+ */
+export async function readInvoicePayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{ byInvoice: Map<string, string[]>; partial: boolean }> {
+  // Every paid payment of an invoice (one paid in parts has several); a paid one with no payment intent (a charge) is kept as "", a miss.
+  const byInvoice = new Map<string, string[]>();
+  let after = "";
+  const seen = new Set<string>();
+  let partial = false;
+  for (let page = 0; page < pages; page += 1) {
+    const list = (await onAccount(
+      "GET",
+      store.stripeAccountId as string,
+      `/invoice_payments?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+    )) as { data?: unknown; has_more?: unknown };
+    const rows = financialPage(list, seen);
+    for (const row of rows) {
+      const invoice = typeof row.invoice === "string" ? row.invoice : "";
+      const intent = (row.payment as { payment_intent?: unknown } | null | undefined)?.payment_intent;
+      if (row.status !== "paid" || !invoice) continue;
+      byInvoice.set(invoice, [...(byInvoice.get(invoice) ?? []), typeof intent === "string" ? intent : ""]);
+    }
+    if (!list.has_more) break;
+    const last = rows[rows.length - 1];
+    after = typeof last.id === "string" ? last.id : "";
+    if (!after) { partial = true; break; }
+    if (page === pages - 1 || Date.now() > deadline) { partial = true; break; }
+  }
+  return { byInvoice, partial };
+}
 
 /**
  * The paid renewals of this store since `since` (seconds), each with the
@@ -1286,7 +1325,7 @@ export async function readRenewalPayments(store: Store, since: number, pages: nu
       const listedPayment = ((invoice.payments as { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | null | undefined)?.data ?? []).find((p) => p.status === "paid")?.payment?.payment_intent;
       const paymentIntent = typeof invoice.payment_intent === "string" ? invoice.payment_intent : typeof listedPayment === "string" ? listedPayment : "";
       const channel = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
-      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency: currencyOf(invoice), paymentIntent, channel });
+      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency: currencyOf(invoice), paymentIntent, channel, invoice: typeof invoice.id === "string" ? invoice.id : "" });
     }
     if (!list.has_more) break;
     // Out of time: what was read is kept, and the reading says it is partial.

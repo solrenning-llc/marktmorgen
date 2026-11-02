@@ -54,6 +54,8 @@ const intents = [
 let invoices: Record<string, unknown>[] = [];
 let refunds: Record<string, unknown>[] = [];
 let disputes: Record<string, unknown>[] = [];
+let invoicePayments: Record<string, unknown>[] = [];
+let invoicePaymentsFail = false;
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
@@ -64,6 +66,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   if (url.pathname === "/v1/invoices") return new Response(JSON.stringify({ data: invoices, has_more: false }));
   if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ data: refunds, has_more: false }));
   if (url.pathname === "/v1/disputes") return new Response(JSON.stringify({ data: disputes, has_more: false }));
+  if (url.pathname === "/v1/invoice_payments") return invoicePaymentsFail ? new Response("{}", { status: 500 }) : new Response(JSON.stringify({ data: invoicePayments, has_more: false }));
   return new Response(JSON.stringify({ data: [], has_more: false }));
 }) as typeof fetch;
 
@@ -173,6 +176,44 @@ async function main(): Promise<void> {
   is("a buyer known only by a renewal came from the subscription's channel", at("kim@example.com")?.channel, "newsletter");
   is("a membership payment refunded in full, matched through the invoice's payments, does not count", at("oli@example.com"), undefined);
   is("all of it read: not partial", fresh.partial, false);
+
+  part("A membership's payment found through the account's invoice payments (270 [GR1], unit 3a)");
+  // A renewal whose invoice names no payment, and a membership sold through checkout (no payment on the session), both refunded.
+  sessions.push({ ...session("pam1", "pam@example.com", 20, 2900), payment_intent: null, mode: "subscription", invoice: "in_pamfirst" } as unknown as ReturnType<typeof session>);
+  invoices = [{ ...renewal("quin", "quin@example.com", 3, 1900), payments: undefined }];
+  invoicePayments = [
+    { id: "inpay_1", object: "invoice_payment", invoice: "in_pamfirst", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_pamfirst00000" } },
+    { id: "inpay_2", object: "invoice_payment", invoice: "in_quin", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_quinpaid00000" } },
+  ];
+  refunds = [
+    { id: "re_pam", status: "succeeded", amount: 2900, currency: "usd", created: now - 19 * DAY, payment_intent: "pi_pamfirst00000" },
+    { id: "re_quin", status: "succeeded", amount: 1900, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_quinpaid00000" },
+  ];
+  disputes = [];
+  const third = await buyerLedger({ ...store, statsId: "u".repeat(32) } as Store);
+  is("a membership's first payment through checkout, refunded, is not a purchase", third.buyers.get("pam@example.com"), undefined);
+  is("nor is a renewal refunded, matched by its invoice", third.buyers.get("quin@example.com"), undefined);
+  is("still read in full", third.partial, false);
+
+  // Paid in two parts, refunded in two: both are taken off.
+  invoices = [{ ...renewal("rae1", "rae@example.com", 3, 3000), payments: undefined }];
+  invoicePayments = [
+    { id: "inpay_3", invoice: "in_rae1", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_raepart100000" } },
+    { id: "inpay_4", invoice: "in_rae1", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_raepart200000" } },
+  ];
+  refunds = [
+    { id: "re_rae1", status: "succeeded", amount: 1000, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_raepart100000" },
+    { id: "re_rae2", status: "succeeded", amount: 500, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_raepart200000" },
+  ];
+  const parts = await buyerLedger({ ...store, statsId: "v".repeat(32) } as Store);
+  is("an invoice paid in parts: each part's refund is taken off", parts.buyers.get("rae@example.com")?.cents, 1500);
+
+  // The account's invoice payments could not be read: a renewal needing one is unmatched, so the reading is partial.
+  invoicePaymentsFail = true;
+  const unread = await buyerLedger({ ...store, statsId: "w".repeat(32) } as Store);
+  is("an unread list of invoice payments, when one was needed, makes the reading partial", unread.partial, true);
+  invoicePaymentsFail = false;
+  invoicePayments = [];
   invoices = [];
   refunds = [];
   disputes = [];

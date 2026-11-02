@@ -96,7 +96,7 @@ async function main(): Promise<void> {
   const made = await addProduct(OWNER, "Haircut", "", "45", null);
   if (!made.ok) throw new Error("no product");
   const saved = await setProductCall(OWNER, made.product.id, { ...weekly, place: ADDRESS.join("\n") } as unknown as CallSetup);
-  is("the product record keeps it (stored below the studio's route, which refuses it for now)", (saved as { ok: boolean }).ok, true);
+  is("the product record keeps it", (saved as { ok: boolean }).ok, true);
   const store = (await storeForEmail(OWNER)) as Store;
   const listing = (await readListing(store, made.product.id)) as CallListing;
   is("and the product carries it", listing.call.place, { lines: ADDRESS });
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
     readFileSync("lib/calendar-sync.ts", "utf8").includes("const room = place ? null :"),
   ], [2, 2, true, true]);
   is("a meeting retried for it later sends no new link", readFileSync("lib/call-meetings.ts", "utf8").includes('whereOf(product.call).kind !== "place"'), true);
-  is("and until the booking pages and the editor say where, the studio's save refuses it", readFileSync("app/api/store/call/route.ts", "utf8").includes('if (setup.place) return Response.json({ ok: false, error: "place" }, { status: 400 });'), true);
+  is("the studio's save takes it, now that the booking pages and the editor say where (unit 3)", readFileSync("app/api/store/call/route.ts", "utf8").includes('if (setup.place) return Response.json({ ok: false, error: "place" }'), false);
 
   done();
 }

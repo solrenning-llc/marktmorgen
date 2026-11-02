@@ -220,6 +220,10 @@ export async function callsFor(store: Store, email: string): Promise<BookedCall[
     store.callsId,
     known.map(({ call, setup }) => ({ product: call.product, setup, session: call.session, start: call.start, end: call.end })),
   );
+  // In person (lib/call-place.ts): no link, not even a room kept from when it was online.
+  known.forEach(({ setup }, i) => {
+    if (setup.place) rooms[i] = null;
+  });
   return known.map(({ call, setup, title }, i) => ({
     session: call.session,
     productId: call.product,

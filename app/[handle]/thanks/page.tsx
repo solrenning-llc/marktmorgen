@@ -1,4 +1,6 @@
 import { withinStore } from "@/lib/metered-limits";
+import { placeLine } from "@/lib/call-place";
+import { bookingWords } from "@/lib/buyer-words/booking";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
 import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import { isDiscordConfigured } from "@/lib/discord";
@@ -430,8 +432,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       ? {
           ...order.call,
           setup: order.product.call,
+          // In person (lib/call-place.ts): no link, not even a room kept from when it was online.
           room:
-            sessionId
+            sessionId && !order.product.call.place
               ? await roomOf(store.callsId, {
                   product: order.product.id,
                   setup: order.product.call,
@@ -889,14 +892,20 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                       {t.addToCalendar}
                     </a>
                   </div>
+                  {/* In person (lib/call-place.ts): where, as text the buyer can copy, and no link. */}
+                  {booked.setup.place ? (
+                    <p className="mt-5 text-sm" data-call-place="">{bookingWords(store.language).whereAt(placeLine(booked.setup.place))}</p>
+                  ) : null}
                   {isHouseStore(store) && booked.room ? (
                     // The demo writes to nobody, so it promises no email (lib/house-store.ts).
                     <p className="st-muted mt-5 text-sm">{DEMO_BOOKED_NOTE}</p>
-                  ) : (
+                  ) : booked.setup.place && !order.email ? null : (
                     <p className="st-muted mt-5 text-sm">
-                      {booked.room
-                        ? t.joinWithLink
-                        : t.willSendLink(store.name)}
+                      {booked.setup.place
+                        ? ""
+                        : booked.room
+                          ? t.joinWithLink
+                          : t.willSendLink(store.name)}
                       {isVideoRoom(booked.room) ? ` ${videoRoomNote(store.language)}` : ""}
                       {order.email ? ` ${t.confirmationOnWay(order.email, reminderWords(store, booked.start), store.name)}` : ""}
                     </p>

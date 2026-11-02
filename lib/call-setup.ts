@@ -27,6 +27,7 @@
  * is the standard way to do it and the only one that survives the two days a
  * year the clocks move.
  */
+import { type CallPlace, parsePlace } from "@/lib/call-place";
 
 /** Call lengths a creator may pick, in minutes. */
 export const CALL_LENGTHS = [15, 20, 30, 45, 60, 90, 120] as const;
@@ -118,6 +119,13 @@ export type CallSetup = {
   seats: number;
   /** The dated sessions, soonest first. Empty for weekly hours. */
   sessions: LiveSession[];
+  /**
+   * In person, at this address (lib/call-place.ts; 520 [LB1], unit 2): then
+   * there is no meeting at all, so the link, the video room and the meeting
+   * above are always off. Absent for every setup that is a call, which is
+   * every setup saved before it existed.
+   */
+  place?: CallPlace;
 };
 
 export const MAX_ROOM_LENGTH = 500;
@@ -165,6 +173,7 @@ export type SetupProblem =
   | "horizon"
   | "buffer"
   | "room"
+  | "place"
   | "seats"
   | "sessions"
   | "session_time"
@@ -185,7 +194,7 @@ export function newSessionId(): string {
  * with the same daylight-saving rules as everything else; storage sends the
  * instant itself.
  */
-function readSession(raw: unknown, tz: string): LiveSession | SetupProblem {
+function readSession(raw: unknown, tz: string, inPersonHere = false): LiveSession | SetupProblem {
   if (!raw || typeof raw !== "object") return "sessions";
   const value = raw as Record<string, unknown>;
   let start: number | null = null;
@@ -204,7 +213,8 @@ function readSession(raw: unknown, tz: string): LiveSession | SetupProblem {
   if (!(SESSION_LENGTHS as readonly number[]).includes(minutes)) return "session_time";
   const seats = Number(value.seats);
   if (!Number.isInteger(seats) || seats < 1 || seats > MAX_SESSION_SEATS) return "session_seats";
-  const room = cleanRoom(value.room);
+  // In person (lib/call-place.ts): no link, so one left over in the form is not read at all.
+  const room = inPersonHere ? null : cleanRoom(value.room);
   if (room === "bad") return "session_room";
   const id = typeof value.id === "string" && SESSION_ID.test(value.id) ? value.id : newSessionId();
   return { id, start, minutes, seats, room };
@@ -222,9 +232,11 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
     if (!Array.isArray(value.sessions) || value.sessions.length === 0 || value.sessions.length > MAX_SESSIONS) {
       return "sessions";
     }
+    const livePlace = parsePlace(value.place);
+    if (!livePlace.ok) return "place";
     const sessions: LiveSession[] = [];
     for (const item of value.sessions) {
-      const read = readSession(item, value.tz as string);
+      const read = readSession(item, value.tz as string, livePlace.place !== null);
       if (typeof read === "string") return read;
       sessions.push(read);
     }
@@ -236,6 +248,7 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
     }
     const ids = new Set(sessions.map((s) => s.id));
     if (ids.size !== sessions.length) return "sessions";
+    if (livePlace.place) return { ...inPerson(sessions), tz: value.tz as string, noticeHours, minutes: sessions[0].minutes, place: livePlace.place };
     return {
       kind: "live",
       minutes: sessions[0].minutes,
@@ -284,7 +297,10 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
   }
   if (!any) return "weekly";
 
-  const room = cleanRoom(value.room);
+  const place = parsePlace(value.place);
+  if (!place.ok) return "place";
+  // In person: no link, so one left over in the form is not read at all.
+  const room = place.place ? null : cleanRoom(value.room);
   if (room === "bad") return "room";
 
   // A setup saved before group calls existed is a one-to-one call.
@@ -299,12 +315,19 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
     noticeHours,
     horizonDays,
     bufferMinutes,
-    room,
-    video: value.video === true,
-    meet: isMeetProvider(value.meet) ? value.meet : null,
+    // In person: no link, no video room, no meeting (lib/call-place.ts).
+    room: place.place ? null : room,
+    video: place.place ? false : value.video === true,
+    meet: place.place ? null : isMeetProvider(value.meet) ? value.meet : null,
     seats,
     sessions: [],
+    ...(place.place ? { place: place.place } : {}),
   };
+}
+
+/** Dated sessions held in person: no link, no video room, no meeting, for any of them. */
+function inPerson(sessions: LiveSession[]): Omit<CallSetup, "tz" | "noticeHours" | "minutes"> {
+  return { kind: "live", weekly: [[], [], [], [], [], [], []], horizonDays: 30, bufferMinutes: 0, room: null, video: false, meet: null, seats: 1, sessions };
 }
 
 /** Whatever came back from storage, made safe to use, or null. */

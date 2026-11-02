@@ -21,9 +21,10 @@
  *
  * Not checked here, on purpose: each platform's own published ad policies
  * (before-and-after, health, finance, AI-content labels) and their length
- * limits. Those need the official pages read and dated first
- * (docs/ad-platforms-study.md is not confirmed), so they are listed in
- * `notChecked`, never assumed. Pure; nothing is sent.
+ * limits: only what the official check confirmed may become a rule
+ * (docs/ad-platforms-official-check-2026-11-02.md), and Meta's texts were not
+ * readable there, so they are listed in `notChecked`, never assumed. Pure;
+ * nothing is sent.
  */
 import { type TermsWarningKind, checkCreatorTerms } from "@/lib/terms-check-rules";
 
@@ -51,7 +52,7 @@ export type AdCheck = { sendable: boolean; refusals: AdFinding[]; warnings: AdFi
 export const AD_TEXT_MAX = 5_000;
 
 export const AD_NOT_CHECKED: readonly string[] = [
-  "Each ad platform's own published policies (before-and-after pictures, health, finance, dating, AI-generated content labels): not confirmed yet (docs/ad-platforms-study.md)",
+  "Each ad platform's own policies beyond these words: Meta's were not readable in the official check; Google's unreliable-claims and TikTok's misleading-content rules are covered here only where they match the store's own (earnings, results); TikTok's AI-content label and before-and-after pictures are not read here (docs/ad-platforms-official-check-2026-11-02.md)",
   "Each platform's length limits for headlines and text",
   "Pictures and videos: only the words are read here",
 ];

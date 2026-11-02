@@ -562,7 +562,8 @@ export async function checkCallChange(
     setup = { ...next, sessions, minutes: sessions[0].minutes };
   }
 
-  const switching = before !== null && before.kind !== setup.kind;
+  // Online to in person, or back (lib/call-place.ts), is a change of kind too: whoever booked was told where, or given a link.
+  const switching = before !== null && (before.kind !== setup.kind || whereOf(before).kind !== whereOf(setup).kind);
   const touched = was.filter((old) => {
     if (old.start + old.minutes * 60_000 <= now) return false;
     const kept = setup.kind === "live" ? setup.sessions.find((s) => s.id === old.id) : undefined;

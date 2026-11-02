@@ -96,6 +96,10 @@ const en = {
   groupOnline: (seats: number, minutes: number) => `Group call, up to ${seats} people · ${minutes} minutes · online`,
   oneLine: (minutes: number, where: string) => `${minutes}-minute call · ${where}`,
   oneOnline: (minutes: number) => `${minutes}-minute call · online`,
+  /** An in-person booking (lib/call-place.ts): where, under its title. */
+  inPersonLine: (minutes: number, address: string) => `${minutes} minutes · in person, at ${address}`,
+  inPersonGroupLine: (seats: number, minutes: number, address: string) => `Up to ${seats} people · ${minutes} minutes · in person, at ${address}`,
+  inPersonLiveLine: (address: string) => `Live session · in person, at ${address}`,
 
   // ---- Picking a time (components/slot-picker.tsx) ---------------------------
   pickDay: "Pick a day",
@@ -294,6 +298,9 @@ const es: BookingWords = {
   groupOnline: (seats, minutes) => `Llamada en grupo, hasta ${seats} personas · ${minutes} minutos · en línea`,
   oneLine: (minutes, where) => `Llamada de ${minutes} minutos · ${where}`,
   oneOnline: (minutes) => `Llamada de ${minutes} minutos · en línea`,
+  inPersonLine: (minutes, address) => `${minutes} minutos · en persona, en ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Hasta ${seats} personas · ${minutes} minutos · en persona, en ${address}`,
+  inPersonLiveLine: (address) => `Sesión en vivo · en persona, en ${address}`,
 
   pickDay: "Elige un día",
   noTimes: "No hay horarios libres en este momento",
@@ -472,6 +479,9 @@ const fr: BookingWords = {
   groupOnline: (seats, minutes) => `Appel de groupe, jusqu'à ${seats}${S}personnes · ${minutes}${S}minutes · en ligne`,
   oneLine: (minutes, where) => `Appel de ${minutes}${S}minutes · ${where}`,
   oneOnline: (minutes) => `Appel de ${minutes}${S}minutes · en ligne`,
+  inPersonLine: (minutes, address) => `${minutes}${S}minutes · en personne, adresse${S}: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Jusqu'à ${seats}${S}personnes · ${minutes}${S}minutes · en personne, adresse${S}: ${address}`,
+  inPersonLiveLine: (address) => `Séance en personne, adresse${S}: ${address}`,
 
   pickDay: "Choisir un jour",
   noTimes: "Aucun créneau libre pour l'instant",
@@ -645,6 +655,9 @@ const de: BookingWords = {
   groupOnline: (seats, minutes) => `Gruppengespräch, bis zu ${seats} Personen · ${minutes} Minuten · online`,
   oneLine: (minutes, where) => `${minutes}-minütiges Gespräch · ${where}`,
   oneOnline: (minutes) => `${minutes}-minütiges Gespräch · online`,
+  inPersonLine: (minutes, address) => `${minutes} Minuten · vor Ort, Adresse: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Bis zu ${seats} Personen · ${minutes} Minuten · vor Ort, Adresse: ${address}`,
+  inPersonLiveLine: (address) => `Live-Session · vor Ort, Adresse: ${address}`,
 
   pickDay: "Tag wählen",
   noTimes: "Gerade sind keine Termine frei",
@@ -820,6 +833,9 @@ const it: BookingWords = {
   groupOnline: (seats, minutes) => `Chiamata di gruppo, fino a ${seats} persone · ${minutes} minuti · online`,
   oneLine: (minutes, where) => `Chiamata di ${minutes} minuti · ${where}`,
   oneOnline: (minutes) => `Chiamata di ${minutes} minuti · online`,
+  inPersonLine: (minutes, address) => `${minutes} minuti · di persona, indirizzo: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Fino a ${seats} persone · ${minutes} minuti · di persona, indirizzo: ${address}`,
+  inPersonLiveLine: (address) => `Sessione dal vivo · di persona, indirizzo: ${address}`,
 
   pickDay: "Scegli un giorno",
   noTimes: "Nessun orario libero al momento",
@@ -995,6 +1011,9 @@ const nl: BookingWords = {
   groupOnline: (seats, minutes) => `Groepsgesprek, tot ${seats} personen · ${minutes} minuten · online`,
   oneLine: (minutes, where) => `Gesprek van ${minutes} minuten · ${where}`,
   oneOnline: (minutes) => `Gesprek van ${minutes} minuten · online`,
+  inPersonLine: (minutes, address) => `${minutes} minuten · ter plaatse, adres: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Tot ${seats} personen · ${minutes} minuten · ter plaatse, adres: ${address}`,
+  inPersonLiveLine: (address) => `Livesessie · ter plaatse, adres: ${address}`,
 
   pickDay: "Kies een dag",
   noTimes: "Er zijn nu geen vrije tijden",
@@ -1169,6 +1188,9 @@ const pt: BookingWords = {
   groupOnline: (seats, minutes) => `Chamada de grupo, até ${seats} pessoas · ${minutes} minutos · online`,
   oneLine: (minutes, where) => `Chamada de ${minutes} minutos · ${where}`,
   oneOnline: (minutes) => `Chamada de ${minutes} minutos · online`,
+  inPersonLine: (minutes, address) => `${minutes} minutos · presencial, morada: ${address}`,
+  inPersonGroupLine: (seats, minutes, address) => `Até ${seats} pessoas · ${minutes} minutos · presencial, morada: ${address}`,
+  inPersonLiveLine: (address) => `Sessão presencial, morada: ${address}`,
 
   pickDay: "Escolher um dia",
   noTimes: "Não há horários livres neste momento",

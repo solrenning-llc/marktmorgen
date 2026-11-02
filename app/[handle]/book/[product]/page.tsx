@@ -118,6 +118,8 @@ export default async function BookPage({ params, searchParams }: Params) {
             </div>
             <p className="st-muted mt-2 text-sm font-semibold">{callLine(setup, b)}</p>
             {deposit ? <p className="mt-2 text-sm" data-call-due="">{b.depositRest(money(deposit.rest), store.name)}</p> : null}
+            {/* The creator's cancellation deadline (lib/call-setup.ts), before paying; a session from a package pays nothing here. */}
+            {setup.cancelHours && !fromPackage ? <p className="mt-2 text-sm" data-call-cancel="">{b.cancelPolicy(setup.cancelHours, store.name)}</p> : null}
             {product.summary ? <p className="st-muted mt-3 leading-relaxed">{product.summary}</p> : null}
 
             {pkgState ? (

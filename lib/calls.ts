@@ -70,9 +70,11 @@ import { formatMoney } from "@/lib/money";
 import {
   type Busy,
   type CallSetup,
+  type CancelPromise,
   KEEP_PAST_SESSION_DAYS,
   MAX_MOVES,
   isBookable,
+  readCancelPromise,
   isTimeZone,
   lengthAt,
   movableUntil,
@@ -249,6 +251,8 @@ export async function paidCalls(store: Store): Promise<
     pi: string;
     /** What is left to pay in person, and a code taken off the whole price, as the sale keeps them (lib/call-deposit.ts). */
     due: DueInPerson | null;
+    /** The cancellation deadline the buyer was promised when paying (lib/call-setup.ts, readCancelPromise). */
+    cancel: CancelPromise | null;
   }[]
 > {
   return (await readCallSessions(store)).paid;
@@ -287,6 +291,7 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
     pi: paymentOf(row.payment_intent),
     due: readDue(meta),
+    cancel: readCancelPromise(meta),
   };
 }
 
@@ -515,6 +520,7 @@ export async function catchUpBookings(store: Store, paid: PaidCall[], origin: st
       lead: call.lead,
       pi: call.pi,
       due: call.due,
+      cancel: call.cancel,
       origin,
     }).catch((error) => console.error("catching up a booking failed", error));
   }
@@ -713,19 +719,32 @@ export function callCheckoutBody(input: {
     cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
-  if (due.rest > 0 || code) {
+  // The creator's cancellation deadline (lib/call-setup.ts, cancelHours): said before paying; never for a session from a package, which pays nothing here.
+  // A time already inside it when booked is told so, never promised a refund nobody owes.
+  const cancelHours = pkg ? 0 : product.call?.cancelHours ?? 0;
+  const cancelLate = cancelHours > 0 && start - Date.now() < cancelHours * 3_600_000;
+  if (due.rest > 0 || code || cancelHours) {
     // Said on Stripe's own page, before paying, and kept on the sale for the creator.
     const said = formatMoney(due.rest, store.currency, lang.locale);
     const bw = bookingWords(store.language);
     // The creator's own summary first, then the sentence, kept whole within Stripe's 500 characters.
     // With a code, what it took off the whole price is said too (the owner's decision of 2 November 2026).
-    const sentence = [code ? bw.codeOffPrice(code.code, formatMoney(code.figures.off, store.currency, lang.locale)) : "", due.rest > 0 ? bw.depositRest(said, store.name) : ""].filter(Boolean).join(" ");
+    const sentence = [
+      code ? bw.codeOffPrice(code.code, formatMoney(code.figures.off, store.currency, lang.locale)) : "",
+      due.rest > 0 ? bw.depositRest(said, store.name) : "",
+      cancelHours ? (cancelLate ? bw.cancelTooLate(cancelHours, store.name) : bw.cancelPolicy(cancelHours, store.name)) : "",
+    ].filter(Boolean).join(" ");
     const summary = product.summary ? product.summary.slice(0, Math.max(0, 500 - sentence.length - 3)) : "";
     body.set("line_items[0][price_data][product_data][description]", summary ? `${summary} \u2014 ${sentence}` : sentence.slice(0, 500));
     if (due.rest > 0) {
       body.set("metadata[deposit]", String(due.cents));
       body.set("metadata[rest]", String(due.rest));
       body.set("payment_intent_data[metadata][rest]", String(due.rest));
+    }
+    if (cancelHours) {
+      // The promise as made, kept on the sale: the confirmation and any refund read it from there (lib/call-setup.ts, readCancelPromise).
+      body.set("metadata[cancel_hours]", String(cancelHours));
+      if (cancelLate) body.set("metadata[cancel_late]", "1");
     }
     if (code) {
       // The whole price, the code and what it took off, on the sale for the creator's orders.
@@ -1315,6 +1334,19 @@ export function buyerNote(words: BookingWords, store: Store, room: string | null
   return room ? `${words.icsJoin(room)}${isVideoRoom(room) ? `\n\n${words.videoRoomNote}` : ""}` : words.icsWillSend(store.name);
 }
 
+/**
+ * What the creator is told about the cancellation deadline the buyer was
+ * promised, in English as every creator email is. The refund is made on the
+ * store's Stripe account: by them, or by the store's owner when the email
+ * goes to a host on the team.
+ */
+export function creatorCancelLine(cancel: CancelPromise, owner: boolean): string {
+  const who = owner ? "You make a refund in your Stripe dashboard." : "A refund is made by the store's owner, in their Stripe dashboard.";
+  return cancel.late
+    ? `They were told this time starts within the ${cancel.hours}-hour cancellation deadline, so what they paid online does not have to be refunded if they cancel or miss it; if the store cancels, they get it all back. ${who}`
+    : `They were told: cancel at least ${cancel.hours} hours before, by replying, and what they paid online is refunded; if they cancel later or miss it, it does not have to be; if the store cancels, they get it all back. ${who}`;
+}
+
 /** Where a calendar file for a booking can be fetched again, from an email. */
 export function icsLink(origin: string, store: Store, session: string): string {
   return `${origin}/api/store/ics?handle=${encodeURIComponent(store.handle)}&session_id=${encodeURIComponent(session)}`;
@@ -1371,6 +1403,8 @@ export async function confirmBooking(input: {
    * read, and then read from the sale here for an in-person booking.
    */
   due?: DueInPerson | null;
+  /** The cancellation deadline promised when paying, read from the sale like `due`; left out when not read. */
+  cancel?: CancelPromise | null;
   origin: string;
 }): Promise<void> {
   const { store, product, session, start, end, buyerEmail, origin } = input;
@@ -1378,18 +1412,23 @@ export async function confirmBooking(input: {
   // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
   // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
   // (catchUpBookings, the daily job), which carries it, instead of sending both emails without it.
+  // The deadline promised when paying is read the same way, only when the product has one now (none now, none said).
   let due = input.due;
-  if (due === undefined) {
-    if (whereOf(product.call).kind !== "place") due = null;
-    else {
-      try {
-        due = (await paidCall(store, session))?.due ?? null;
-      } catch (error) {
-        console.error("reading what is left to pay in person failed; confirmed later", error);
-        return;
-      }
+  let cancel = input.cancel;
+  const needDue = due === undefined && whereOf(product.call).kind === "place";
+  const needCancel = cancel === undefined && Boolean(product.call.cancelHours);
+  if (needDue || needCancel) {
+    try {
+      const sale = await paidCall(store, session);
+      if (due === undefined) due = sale?.due ?? null;
+      if (cancel === undefined) cancel = sale?.cancel ?? null;
+    } catch (error) {
+      console.error("reading the sale's note failed; confirmed later", error);
+      return;
     }
   }
+  due = due ?? null;
+  cancel = cancel ?? null;
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;
   // Booked: the orders it was admitted as are the window's (lib/orders.ts), once, by the checkout.
@@ -1496,6 +1535,8 @@ export async function confirmBooking(input: {
         }`,
         ...(canMove(setup, start, input.moves ?? 0) ? [b.moveYourself(hours, moveLink(origin, store, product.id, session))] : []),
         b.toCancel(store.name),
+        // The creator's deadline, as Stripe's page said it; a session from a package paid nothing here.
+        ...(cancel ? [cancel.late ? b.cancelTooLate(cancel.hours, store.name) : b.cancelPolicy(cancel.hours, store.name)] : []),
         "",
         `${store.name}${b.colon}${origin}/@${store.handle}`,
       ].join("\n"),
@@ -1531,6 +1572,8 @@ export async function confirmBooking(input: {
       ...(meeting && !meeting.made && video ? [VIDEO_ROOM_NOTE] : []),
       // What is left to collect in person, whatever the booking is now, so the creator never misses it.
       ...(due ? [creatorDueLine(due, { paidCents: input.amountCents, currency: paidIn })] : []),
+      // What the buyer was told about cancelling: the refund it promises is the creator's to make.
+      ...(cancel ? [creatorCancelLine(cancel, creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase())] : []),
       "",
       `${
         theirs

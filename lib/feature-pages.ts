@@ -32,6 +32,7 @@ import { emailBeginnerQuestions } from "@/lib/email-faq";
 import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
 import { switchingBeginnerQuestions } from "@/lib/switching-faq";
 import { clickFunnelsBeginnerQuestions } from "@/lib/clickfunnels-faq";
+import { crmBeginnerQuestions } from "@/lib/crm-faq";
 import { INVITE_DAYS } from "@/lib/team-roles";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
@@ -118,6 +119,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         { icon: "scale", title: "Compare with HighLevel", body: "HighLevel's agency accounts, phone and SMS tools and SaaS resale have different scope and usage costs. CRM records in a creator's store are not an equivalent phone system or agency platform.", href: "/proof/highlevel" },
         { icon: "list", title: "Read all the plan allowances", body: "Record space, contacts, email sends and workflow starts have their own limits. Stripe processing and optional add-ons are separate.", href: "/pricing" },
       ] },
+      // 534 [FQ1], unit 38: what someone starting out asks, answered by the code (lib/crm-faq.ts).
+      { kind: "faq", title: "Questions about people and deals", items: crmBeginnerQuestions() },
     ],
   },
 

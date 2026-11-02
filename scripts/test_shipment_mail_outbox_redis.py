@@ -219,6 +219,22 @@ def pending_recovery_cases(redis, source, made):
         assert run('finish',family='confirmation',keys=keys,raw=raw,valid='valid')==['rearmed'], 'lost creation ACK must remain discoverable by the read-only worker'
         assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id)=='0'
     print('PASS: all pre-session creation phases rejoin read-only original-account recovery without source replacement')
+    # Literal-prefix refactoring must preserve BOTH existing physical fence
+    # key families byte-for-byte, not classify generic unknown key suffixes.
+    for family in ['shipment','confirmation']:
+        for fence in [5,6]:
+            redis.command('DEL',pool,all_key)
+            id,raw,keys=setup('concrete-fence-'+family+'-'+str(fence),phase='queued' if family=='confirmation' else None)
+            if family=='confirmation':
+                row=json.loads(raw);row.update(erasedPeople='',erasureSaturated=False);raw=json.dumps(row);redis.command('SET',keys[2],raw)
+                assert run('next')==['ticket',id,'1']
+                assert run('finish',keys=[pool,all_key,'nl:ship:mail:row:'+id])==['skipped']
+            redis.command('SET',keys[fence],'synthetic-literal-fence')
+            assert run('next',family=family)==['ticket',id,'1']
+            assert run('finish',family=family,keys=keys,raw=raw,valid='valid')==['skipped']
+            assert redis.command('GET',keys[2])==raw and redis.command('ZSCORE',keys[4],id) is None
+            redis.command('DEL',keys[fence])
+    print('PASS: concrete closed/erased keys remain exact for both existing physical families and deny rearm')
     assert max(profiles['next'])+3+max(profiles['finish'])<=64
     print(json.dumps({'recovery_eval_and_internal_max':{key:max(values) for key,values in profiles.items()},
                       'confirmation_observation_commands':3,'reserved_variable_command_units':64,

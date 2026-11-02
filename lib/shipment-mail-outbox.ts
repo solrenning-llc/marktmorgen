@@ -423,14 +423,16 @@ export async function recoverPendingMail(family: "shipment" | "confirmation", de
  if (lifecycle(runtime) !== "active") return;
  const now = runtime.now ?? Date.now, p = shipmentMailPolicy(runtime.policy === undefined ? CURRENT_SHIPMENT_MAIL_POLICY : runtime.policy, now(), false);
  if (!p?.recovery || !integer(deadline) || now() >= deadline) return;
+ const started = performance.now(), monotonicDeadline = started + Math.min(250, deadline - now());
+ const expired = () => now() >= deadline || performance.now() >= monotonicDeadline;
  const grant = { recovery: p.recovery, reviewId: p.reviewId, maximumChecks: p.maximumChecks, globalItems: p.globalItems, globalBytes: p.globalBytes, continuedReviewIds: p.continuedReviewIds ?? [] };
  const proof = JSON.stringify(grant), fp = digest(proof), owner = randomBytes(24).toString("hex"), pipeline = runtime.pipeline ?? redisPipeline;
  try {
   const response = ownArray(await pipeline([["EVAL", PENDING_MAIL_RECOVERY_SCRIPT, 2, POOL, ALL, "next", proof, fp, owner, family, now(), "", ""]]));
   const ticket = response?.length === 1 ? ownArray(response[0]) : null;
-  if (ticket?.length !== 3 || ticket[0] !== "ticket" || typeof ticket[1] !== "string" || !HASH.test(ticket[1]) || now() >= deadline) return;
+  if (ticket?.length !== 3 || ticket[0] !== "ticket" || typeof ticket[1] !== "string" || !HASH.test(ticket[1]) || expired()) return;
   const id = ticket[1], found = await observe(id);
-  if (!found || now() >= deadline) return;
+  if (!found || expired()) return;
   const keyset = found.keys;
   const base = family === "shipment" ? `nl:ship:mail:row:${id}` : `nl:order-confirmation:row:${id}`;
   // Missing/known unsupported observations cannot authorize a rearm.

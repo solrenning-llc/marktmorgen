@@ -9,6 +9,10 @@
 import type { LanguageCode } from "@/lib/store-language";
 
 export type PolicyWords = {
+  /** The page's own title. */
+  page: string;
+  /** "Version" before the fingerprint of these words. */
+  version: string;
   titles: { seller: string; cancel: string; memberships: string; measurement: string; contact: string };
   sellerIs: (name: string) => string;
   notParty: string;
@@ -32,6 +36,8 @@ const S = " ";
 
 export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
   en: {
+    page: "How this store works",
+    version: "Version",
     titles: { seller: "Who sells", cancel: "Canceling within 14 days", memberships: "Memberships", measurement: "Ad measurement", contact: "Contact" },
     sellerIs: (n) => `${n} is the seller. Each sale is a contract between ${n} and the buyer.`,
     notParty: "Marktmorgen provides the store and its checkout. It is not a party to the sale and is not the merchant of record.",
@@ -52,6 +58,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
       "This page describes how this store works and is updated by itself when its settings change. It is not legal advice, and it does not say that the store meets any particular law.",
   },
   es: {
+    page: "Cómo funciona esta tienda",
+    version: "Versión",
     titles: { seller: "Quién vende", cancel: "Cancelar en 14 días", memberships: "Membresías", measurement: "Medición de anuncios", contact: "Contacto" },
     sellerIs: (n) => `${n} es quien vende. Cada venta es un contrato entre ${n} y quien compra.`,
     notParty: "Marktmorgen ofrece la tienda y su pago. No es parte de la venta ni actúa como comerciante registrado.",
@@ -72,6 +80,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
       "Esta página describe cómo funciona esta tienda y se actualiza sola cuando cambian sus ajustes. No es asesoramiento jurídico y no dice que la tienda cumpla ninguna ley en particular.",
   },
   fr: {
+    page: "Comment fonctionne cette boutique",
+    version: "Version",
     titles: { seller: "Qui vend", cancel: "Se rétracter dans les 14 jours", memberships: "Abonnements", measurement: "Mesure des publicités", contact: "Contact" },
     sellerIs: (n) => `${n} est le vendeur. Chaque vente est un contrat entre ${n} et l'acheteur.`,
     notParty: "Marktmorgen fournit la boutique et son paiement. Marktmorgen n'est pas partie à la vente et n'agit pas comme vendeur officiel.",
@@ -91,6 +101,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
       "Cette page décrit le fonctionnement de cette boutique et se met à jour d'elle-même quand ses réglages changent. Ce n'est pas un conseil juridique, et elle ne dit pas que la boutique respecte une loi en particulier.",
   },
   de: {
+    page: "So funktioniert dieser Shop",
+    version: "Version",
     titles: { seller: "Wer verkauft", cancel: "Widerruf innerhalb von 14 Tagen", memberships: "Mitgliedschaften", measurement: "Messung von Werbung", contact: "Kontakt" },
     sellerIs: (n) => `${n} ist der Verkäufer. Jeder Verkauf ist ein Vertrag zwischen ${n} und der kaufenden Person.`,
     notParty: "Marktmorgen stellt den Shop und die Kasse bereit. Marktmorgen ist nicht Partei des Verkaufs und tritt nicht als Händler auf.",
@@ -111,6 +123,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
       "Diese Seite beschreibt, wie dieser Shop funktioniert, und aktualisiert sich selbst, wenn sich seine Einstellungen ändern. Sie ist keine Rechtsberatung und sagt nicht, dass der Shop ein bestimmtes Gesetz einhält.",
   },
   it: {
+    page: "Come funziona questo negozio",
+    version: "Versione",
     titles: { seller: "Chi vende", cancel: "Recesso entro 14 giorni", memberships: "Abbonamenti", measurement: "Misurazione degli annunci", contact: "Contatti" },
     sellerIs: (n) => `${n} è il venditore. Ogni vendita è un contratto tra ${n} e chi acquista.`,
     notParty: "Marktmorgen fornisce il negozio e il pagamento. Non è parte della vendita e non agisce come venditore registrato.",
@@ -131,6 +145,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
       "Questa pagina descrive come funziona questo negozio e si aggiorna da sola quando cambiano le sue impostazioni. Non è una consulenza legale e non afferma che il negozio rispetti una legge in particolare.",
   },
   nl: {
+    page: "Hoe deze winkel werkt",
+    version: "Versie",
     titles: { seller: "Wie verkoopt", cancel: "Annuleren binnen 14 dagen", memberships: "Lidmaatschappen", measurement: "Meten van advertenties", contact: "Contact" },
     sellerIs: (n) => `${n} is de verkoper. Elke verkoop is een overeenkomst tussen ${n} en de koper.`,
     notParty: "Marktmorgen levert de winkel en de betaling. Marktmorgen is geen partij bij de verkoop en treedt niet op als verkoper.",
@@ -151,6 +167,8 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
       "Deze pagina beschrijft hoe deze winkel werkt en wordt vanzelf bijgewerkt als de instellingen veranderen. Het is geen juridisch advies en zegt niet dat de winkel aan een bepaalde wet voldoet.",
   },
   pt: {
+    page: "Como esta loja funciona",
+    version: "Versão",
     titles: { seller: "Quem vende", cancel: "Cancelar no prazo de 14 dias", memberships: "Subscrições", measurement: "Medição de anúncios", contact: "Contacto" },
     sellerIs: (n) => `${n} é o vendedor. Cada venda é um contrato entre ${n} e o comprador.`,
     notParty: "A Marktmorgen fornece a loja e o pagamento. Não é parte na venda nem atua como vendedor registado.",

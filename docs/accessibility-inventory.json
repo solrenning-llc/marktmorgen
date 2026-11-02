@@ -530,6 +530,17 @@
       ]
     },
     {
+      "source": "app/[handle]/policies/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/policies",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/renew/[product]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/renew/[product]",
@@ -1918,6 +1929,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 131
+    "pageTemplates": 132
   }
 }

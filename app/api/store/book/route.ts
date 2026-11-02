@@ -80,7 +80,8 @@ export async function POST(request: NextRequest) {
   const back = (status: string) =>
     new Response(null, {
       status: 303,
-      headers: { Location: `${origin}/@${store.handle}/book/${product.id}?status=${status}${pkg ? `&pkg=${encodeURIComponent(pkg)}` : ""}`, "Cache-Control": "no-store" },
+      // The host the buyer chose stays chosen when they come back, so their next try is never booked with anyone else.
+      headers: { Location: `${origin}/@${store.handle}/book/${product.id}?status=${status}${pkg ? `&pkg=${encodeURIComponent(pkg)}` : ""}${hostKey && status !== "host-changed" ? `&with=${hostKey}` : ""}`, "Cache-Control": "no-store" },
     });
 
   if (!canSellProduct(store, product)) return back("unavailable");

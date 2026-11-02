@@ -195,7 +195,7 @@ export function readTeamSetup(raw: unknown, setup: Pick<CallSetup, "kind" | "sea
     // The name buyers see: absent or empty is none; anything else must be a plain short name.
     const rawLabel = h.label === undefined || h.label === null ? "" : h.label;
     if (typeof rawLabel !== "string") return "team_host_label";
-    const label = rawLabel.trim().replace(/\s+/g, " ");
+    const label = rawLabel.normalize("NFKC").trim().replace(/\s+/g, " ");
     if (label && !isHostLabel(label)) return "team_host_label";
     hosts.push({ email, tz: h.tz as string, weekly, bufferMinutes, noticeHours, dailyCap, ...(label ? { label } : {}) });
   }
@@ -203,7 +203,7 @@ export function readTeamSetup(raw: unknown, setup: Pick<CallSetup, "kind" | "sea
   // Letting buyers choose: round robin only, every host named, each name once.
   const pick = value.pick === true;
   if (pick) {
-    const names = hosts.map((h) => (h.label ?? "").toLowerCase());
+    const names = hosts.map((h) => (h.label ?? "").normalize("NFKC").toLowerCase());
     if (value.mode !== "round_robin" || names.some((n) => !n) || new Set(names).size !== names.length) return "team_pick";
   }
   return { mode: value.mode, hosts, createdAt, ...(pick ? { pick: true } : {}) };
@@ -217,11 +217,17 @@ export const HOST_LABEL_MAX = 40;
  * markup, so a buyer is shown only what the creator meant them to see.
  */
 export function isHostLabel(label: string): boolean {
+  const name = label.normalize("NFKC");
   return (
-    label.length >= 1 &&
-    label.length <= HOST_LABEL_MAX &&
-    !/[@<>{}\[\]\\/]|https?:|www\.|\.(com|net|org|io|co)\b/i.test(label) &&
-    !/[\u0000-\u001f\u007f\u2028\u2029]/.test(label)
+    name.length >= 1 &&
+    name.length <= HOST_LABEL_MAX &&
+    // No address, link, website or markup: an at sign in any form, a slash, brackets, a scheme, www., or a dot right before a word ("ana.dev").
+    !/[@＠﹫<>{}\[\]\\/]|https?:|www\.|\.\p{L}{2,}/iu.test(name) &&
+    // No phone number (six digits or more), and no address spelled out ("ana at gmail dot com").
+    !/(\d[\s\-().]*){6,}/.test(name) &&
+    !/\b(at|arroba)\b.*\b(dot|ponto)\b/i.test(name) &&
+    // Nothing invisible or reordering (format and control characters), so two names never look alike.
+    !/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(name)
   );
 }
 

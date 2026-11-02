@@ -80,8 +80,8 @@ async function main(): Promise<void> {
   is("a name's spaces are tidied", (readTeamSetup(raw({}, [{ ...host("ana@example.com"), label: "  Ana   Lima " }]), weekly) as { hosts: TeamHost[] }).hosts[0].label, "Ana Lima");
   is(
     "a name that is an address, a link, markup, too long or not text is refused",
-    ["ana@example.com", "https://ana.example", "www.ana", "ana.com", "<b>Ana</b>", "x".repeat(41), "Ana\u0007Lima"].map((label) => readTeamSetup(raw({}, [{ ...host("ana@example.com"), label }]), weekly)).concat([readTeamSetup(raw({}, [{ ...host("ana@example.com"), label: 7 }]), weekly)]),
-    Array(8).fill("team_host_label"),
+    ["ana@example.com", "https://ana.example", "www.ana", "ana.com", "<b>Ana</b>", "x".repeat(41), "Ana\u0007Lima", "ana.dev", "ana\uff20gmail", "+55 85 99999-9999", "ana at gmail dot com", "Ana\u200b", "\u202eanA"].map((label) => readTeamSetup(raw({}, [{ ...host("ana@example.com"), label }]), weekly)).concat([readTeamSetup(raw({}, [{ ...host("ana@example.com"), label: 7 }]), weekly)]),
+    Array(14).fill("team_host_label"),
   );
   is(
     "choosing needs round robin, every host named, each name once",
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   );
   const plain = readTeamSetup({ mode: "round_robin", hosts: [host("ana@example.com")] }, weekly);
   is("a team without it reads as before, with no pick and no name", typeof plain === "string" ? plain : ["pick" in plain, "label" in plain.hosts[0]], [false, false]);
-  is("a plain name is a name", [isHostLabel("Ana"), isHostLabel("Dr. Ana Lima"), isHostLabel("José")], [true, true, true]);
+  is("a plain name is a name", [isHostLabel("Ana"), isHostLabel("Dr. Ana Lima"), isHostLabel("José"), isHostLabel("Ana (Room 2)")], [true, true, true, true]);
 
   part("The choices");
   const team = kept as Exclude<typeof kept, string>;
@@ -139,6 +139,7 @@ async function main(): Promise<void> {
 
   part("The route, the page and the editor");
   const route = readFileSync("app/api/store/book/route.ts", "utf8");
+  is("a refusal keeps the chosen host chosen, but not when the team changed", route.includes('${hostKey && status !== "host-changed" ? `&with=${hostKey}` : ""}'), true);
   is("the route reads the position and the name, and passes them on", [route.includes('hostKey = /^[0-5]$/.test(read("host")) ? read("host") : "";'), route.includes('hostLabel = read("host_label").slice(0, 60);'), route.includes("host: hostKey ? { key: hostKey, label: hostLabel } : null,")], [true, true, true]);
   const page = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");
   is(

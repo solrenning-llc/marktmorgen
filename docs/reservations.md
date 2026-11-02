@@ -45,3 +45,4 @@ Add a row before the first commit of a unit; remove it when the unit is merged.
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 3 | 631 [AA1] | claude3/aa1-… | (to be listed by Claude 3 before its first commit) | — |
+| Claude 2 | 520 [LB1] unit 5 (deposit: "The rest is paid at the salon") | claude2/lb1-deposit | `lib/call-deposit.ts`, `tests/call-deposit.test.ts`, and the deposit parts of `lib/call-setup.ts`, `lib/calls.ts`, `components/call-editor.tsx`, `app/[handle]/book/[product]/page.tsx`, `lib/buyer-words/booking.ts` (stacked on its own open PRs #1733–#1736) | 02/11/2026 12h59 |

@@ -260,7 +260,7 @@ async function main(): Promise<void> {
   const auditOwner = "legacy-audit-owner@example.test";
   await claimHandle(auditOwner, "legacyaudit", "Synthetic legacy audit", "");
   await ensureStatsId(auditOwner);
-  await setStripeAccount(auditOwner, "acct_audit01", true);
+  await setStripeAccount(auditOwner, "acct_audit0001", true);
   await setSubscription(auditOwner, { customerId: "cus_LegacyAudit0001", subscriptionId: "sub_LegacyAudit0001", active: true, period: paidPeriod() });
   const auditMade = await addProduct(auditOwner, "Synthetic audit product", "", "49", null);
   if (!auditMade.ok) throw new Error("Synthetic audit product unavailable");

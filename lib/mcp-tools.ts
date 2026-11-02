@@ -26,7 +26,7 @@ import { readAbout } from "@/lib/product-about";
 import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
 import { readQuizFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
-import { readPage } from "@/lib/sales-page-store";
+import { readPage, readVersions } from "@/lib/sales-page-store";
 import { type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
 import { expectedShareB, readCounts } from "@/lib/headline-test";
 import { type Counts, testState } from "@/lib/headline-test-rules";
@@ -499,4 +499,29 @@ export async function readPageReadingTool(store: Store, id: string) {
     why_not: depth.whyNot,
     videos: depth.videos,
   };
+}
+
+/**
+ * A product's sales page as it was before its last saves (631 [AA1] (a),
+ * unit 13): the list, or one version block by block, with testimonials
+ * counted as on get_sales_page. What an agent shows as "before" when it
+ * prepares a change, and how a creator can ask to bring one back.
+ */
+export async function readPageVersionsTool(store: Store, id: string, version: number | null) {
+  const listing = await readListing(store, id);
+  if (!listing) return { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
+  const versions = await readVersions(store.statsId, listing.id);
+  if (version === null) {
+    return {
+      found: true as const,
+      value: {
+        product: listing.id,
+        note: "Newest first. at is when that version was saved over, in milliseconds since 1970 (UTC). Read one with version.",
+        versions: versions.map((v, index) => ({ version: index, at: v.at, blocks: v.page.blocks.length, headline: v.page.blocks[0]?.kind === "hero" ? v.page.blocks[0].headline : "" })),
+      },
+    };
+  }
+  const one = versions[version];
+  if (!one) return { found: false as const, error: "There is no such version. Read the list first, without version." };
+  return { found: true as const, value: { ...salesPageTool(listing.id, listing.title, one.page), version, at: one.at } };
 }

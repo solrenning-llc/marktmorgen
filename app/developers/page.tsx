@@ -374,14 +374,14 @@ export default function DevelopersPage() {
           the header <code className="font-mono">Authorization: Bearer nl_live_…</code> and one of your keys.
         </p>
         <p>
-          It has nineteen tools, all reading only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
+          It has twenty tools, all reading only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
           your products, revenue by channel read three ways, the funnel from visit to sale, each product&apos;s numbers and
           what buyers buy next, your buyers in numbers, what is worth knowing, your memberships (MRR, churn, why members
           left, month by month), your emails and sequences with what they sold, your affiliates by their codes, who is on
           your store right now and today so far, your numbers for any stretch of days you name, a product&apos;s description
           and its sales page block by block (testimonials counted, never quoted), a course&apos;s outline and each lesson&apos;s
-          text, quiz and task (files named, never located), how a product&apos;s page test is going and how far down its
-          sales page visitors read, and which store the key belongs to. Most of the ones about a stretch of time take <code className="font-mono">days</code>: 7, 30 or 90;
+          text, quiz and task (files named, never located), how a product&apos;s page test is going, how far down its
+          sales page visitors read and its earlier versions, and which store the key belongs to. Most of the ones about a stretch of time take <code className="font-mono">days</code>: 7, 30 or 90;
           the one for any stretch takes <code className="font-mono">from</code> and <code className="font-mono">to</code>{" "}
           as YYYY-MM-DD, up to 400 days back. It changes nothing, and it does not read anybody&apos;s name or address, buyers&apos;, members&apos;,
           subscribers&apos; or affiliates&apos;: what an assistant reads is kept by whoever runs the assistant,

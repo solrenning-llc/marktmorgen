@@ -43,6 +43,7 @@ const TITLES: Readonly<Record<string, string>> = {
   get_lesson: "Course lesson",
   get_page_test: "Page test",
   get_page_reading: "How far the page is read",
+  get_page_versions: "Earlier page versions",
   get_store: "Which store",
 };
 
@@ -159,6 +160,19 @@ const DRAFTS: readonly ToolDraft[] = [
     name: "get_page_reading",
     description: "How far down a product's sales page visitors read, block by block, the reasons visitors picked for not buying, and how far each video was watched.",
     inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_page_versions",
+    description: "A product's sales page as it was before its last saves: the list of earlier versions, newest first, or one version block by block. Testimonials are counted, never quoted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "The product's id, from list_products." },
+        version: { type: "number", description: "Which earlier version, from the list (0 is the newest); left out, the list." },
+      },
+      additionalProperties: false,
+    },
     annotations: { readOnlyHint: true },
   },
   {

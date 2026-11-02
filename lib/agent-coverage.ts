@@ -192,7 +192,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/page": row("pages", tool("get_sales_page")),
   "POST store/page": row("pages", draft),
   "POST store/page-funnels": row("pages", draft),
-  "GET store/page-versions": row("pages", read),
+  "GET store/page-versions": row("pages", tool("get_page_versions")),
   "POST store/pairs": row("products", draft),
   "GET store/path": row("settings", read),
   "POST store/path": row("settings", draft),

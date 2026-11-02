@@ -21,6 +21,7 @@ import {
   readLessonTool,
   readPageReadingTool,
   readPageTestTool,
+  readPageVersionsTool,
   readSalesPageTool,
   readFullNumbers,
   windowOf,
@@ -154,6 +155,14 @@ export async function POST(request: Request) {
       }
       const tested = product ? await readPageTestTool(store, product) : { found: false as const, error: unknown.error };
       return result(id, tested.found ? said(tested.value) : said({ error: tested.error }, true));
+    }
+    if (params.name === "get_page_versions") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const raw = params.arguments?.version;
+      const version = raw === undefined || raw === null ? null : Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) < 100 ? (raw as number) : -1;
+      if (version === -1) return result(id, said({ error: "version is a whole number from the list, 0 for the newest." }, true));
+      const found = product ? await readPageVersionsTool(store, product, version) : { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
+      return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
     }
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));

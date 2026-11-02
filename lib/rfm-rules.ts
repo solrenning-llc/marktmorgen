@@ -9,12 +9,13 @@
  * here predicts what anybody will spend. A buyer brought over from another
  * platform has no purchase here, so is in none of them.
  *
- * Not yet counted, so no group is shown or used until they are (unit 2,
- * on the queue): a membership's or a payment plan's later payments (the
- * ledger reads checkouts and offers after paying, not renewals), so a member
- * who pays every month would read as quiet since joining; and refunds, so a
- * purchase given back still counts. The ledger can also be partial (a
- * reading reaches so far back); the panel says so when it is.
+ * Counted since units 2 and 3a: a membership's and a payment plan's later
+ * payments (each moves the last purchase and is one more time they bought,
+ * so a member of a year is not "new"), and refunds
+ * and disputes, of one-time purchases and of every invoice's payment (a
+ * purchase given back in full is not one). The ledger can be partial (a
+ * reading reaches so far back, or a list could not be read); the panel says
+ * so when it is.
  *
  * Browser-safe: plain data and pure functions.
  */

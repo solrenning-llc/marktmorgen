@@ -80,6 +80,7 @@ import { eventIdFor } from "@/lib/webhooks";
 import { Suspense } from "react";
 import { NextOfferCard } from "@/components/next-offer-card";
 import { NewTab } from "@/components/new-tab";
+import { orderCourses } from "@/lib/order-courses";
 
 export async function generateMetadata({ params }: Pick<Params, "params">): Promise<Metadata> {
   const { handle } = await params;
@@ -469,10 +470,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
 
   // A course is written down as bought, so the student list and the emails
   // about modules opening know about this student from today — a course in
-  // a bundle as much as one bought on its own.
+  // a bundle, or anywhere in a cart, as much as one bought on its own (lib/order-courses.ts).
   if (order.state === "paid" && order.email) {
-    const courses = [...(order.product.course ? [order.product] : []), ...bundled.filter((p) => p.course)];
-    for (const course of courses) {
+    for (const course of orderCourses(order)) {
       await recordEnrollment(store, order.email, course.id, order.created).catch((error) =>
         console.error("recording a course purchase failed", error),
       );
@@ -1064,9 +1064,22 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               {order.bumps.map((added, at) => (
                 <div key={added.key} className="mt-6 rounded-2xl px-5 py-4" style={{ border: "1px solid var(--st-line)" }}>
                   <p className="st-label">{t.alsoYours}</p>
-                  <p className="mt-1 font-semibold">{added.product.title}</p>
+                  <p id={`also-${added.key}`} className="mt-1 font-semibold">{added.product.title}</p>
                   {added.items ? (
                     contents(added.items, added.key, downloadAt({ item: added.key }), t.insideIt)
+                  ) : added.product.course ? (
+                    /* A course anywhere in a cart opens as the first one does (lib/order-courses.ts). */
+                    <form action="/api/store/course/start" method="post">
+                      <input type="hidden" name="handle" value={store.handle} />
+                      <input type="hidden" name="session_id" value={sessionId ?? ""} />
+                      <input type="hidden" name="product" value={added.product.id} />
+                      {/* Several courses in one cart: each button is told apart by its course's title. */}
+                      <button type="submit" className="btn st-btn mt-3" aria-describedby={`also-${added.key}`}>{t.startCourse}</button>
+                      {/* How to open it on another device, said once, unless the product bought already said it. */}
+                      {!order.product.course && order.bumps.find((other) => other.product.course && !other.items)?.key === added.key ? (
+                        <p className="st-muted mt-3 text-sm">{t.courseDeviceNote(store.name, order.email ?? t.theAddressYouPaidWith)}</p>
+                      ) : null}
+                    </form>
                   ) : added.link ? (
                     <>
                       <a

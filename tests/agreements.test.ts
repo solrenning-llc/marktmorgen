@@ -184,7 +184,18 @@ async function main(): Promise<void> {
   const signedA = (await readAgreement(a.id))!;
   const sig = signedA.versions[1].signature!;
   is("signed, with the name typed, the time, the version's fingerprint, and the sentence checked word for word", [statusOf(signedA, now), sig.name, sig.sha256, sig.consent, sig.consentVersion, typeof sig.at], ["signed", "Dana Reyes", revised.version.sha256, AGREEMENT_WORDS.en.consent, CONSENT_VERSION, "number"]);
-  const raw = JSON.stringify([...redis.keys()].filter((k) => k.startsWith("nl:agree:")).map((k) => redis.run(["GET", k])));
+  // Inspect every agreement value, including its non-string indexes.
+  const raw = JSON.stringify([...redis.keys()].filter((k) => k.startsWith("nl:agree:")).map((key) => {
+    switch (redis.run(["TYPE", key])) {
+      case "string": return redis.run(["GET", key]);
+      case "hash": return redis.run(["HGETALL", key]);
+      case "set": return redis.run(["SMEMBERS", key]);
+      case "zset": return redis.run(["ZRANGEBYSCORE", key, "-inf", "+inf"]);
+      case "list": return redis.run(["LRANGE", key, 0, -1]);
+      case "none": return null;
+      default: throw new Error("Unrecognized synthetic agreement value type");
+    }
+  }));
   is("only a one-way code from the internet address: the address itself is kept nowhere", [sig.ipHash.length, raw.includes("203.0.113.7")], [64, false]);
   is("the address typed is not kept beside the signature", JSON.stringify(sig).includes("CLIENT@"), false);
   is("signed once: a second signature on it is refused", await where({ version: "2", sha256: revised.version.sha256 }), `https://marktmorgen.com/@maracoach/sign/${a.id}?notice=closed`);

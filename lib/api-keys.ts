@@ -22,6 +22,10 @@
  *     it, that it may also write (lib/api-write.ts): add people to the list,
  *     change their labels, give and take back products. That choice is the
  *     key's for good; every key made before it existed reads only.
+ *   - Apart from that, a key may be one an AI agent uses to prepare changes
+ *     for the creator to confirm (631 [AA1] (c), `agent`): drafts, or drafts
+ *     and changes that reach people. It never carries anything out by itself;
+ *     every key made before 2 November 2026 prepares nothing.
  *   - Revoking it works at once: the very next request with it is refused.
  *   - At most MAX_KEYS a store, each named by the creator, each showing when
  *     it was last used, so an old one nobody remembers can be seen and cut.
@@ -34,8 +38,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
-import { type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME } from "@/lib/api-key-rules";
-export { type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME };
+import { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME, agentScopeOf } from "@/lib/api-key-rules";
+export { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME };
 const KEY_PATTERN = /^nl_live_[0-9a-f]{40}$/;
 const ID_PATTERN = /^[0-9a-f]{12}$/;
 const SID_PATTERN = /^[0-9a-f]{32}$/;
@@ -60,6 +64,7 @@ function parseStored(raw: unknown): Stored | null {
       madeAt: typeof v.madeAt === "number" ? v.madeAt : 0,
       usedAt: typeof v.usedAt === "number" ? v.usedAt : 0,
       write: v.write === true,
+      agent: agentScopeOf(v.agent),
     };
   } catch {
     return null;
@@ -77,7 +82,7 @@ export async function listKeys(sid: string): Promise<ApiKey[]> {
   const out: ApiKey[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const stored = parseStored(flat[i + 1]);
-    if (stored) out.push({ id: stored.id, name: stored.name, hint: stored.hint, madeAt: stored.madeAt, usedAt: stored.usedAt, write: stored.write });
+    if (stored) out.push({ id: stored.id, name: stored.name, hint: stored.hint, madeAt: stored.madeAt, usedAt: stored.usedAt, write: stored.write, agent: stored.agent });
   }
   return out.sort((a, b) => b.madeAt - a.madeAt);
 }
@@ -85,9 +90,12 @@ export async function listKeys(sid: string): Promise<ApiKey[]> {
 export type MakeResult = { ok: true; key: string; made: ApiKey } | { ok: false; reason: "full" | "name" | "unavailable" };
 
 /**
- * Makes a key and returns it — the only time it is ever seen whole.
+ * Makes a key and returns it — the only time it is ever seen whole. `agent`
+ * (631 [AA1] (c)) says what an AI agent holding it may prepare for the
+ * creator to confirm; left out, nothing.
  */
-export async function makeKey(sid: string, rawName: unknown, now = Date.now(), write = false): Promise<MakeResult> {
+export async function makeKey(sid: string, rawName: unknown, now = Date.now(), write = false, agentRaw: AgentScope = "none"): Promise<MakeResult> {
+  const agent = agentScopeOf(agentRaw);
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
   const name = clean(rawName);
   if (!name) return { ok: false, reason: "name" };
@@ -97,7 +105,7 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   const key = `${KEY_PREFIX}${randomBytes(20).toString("hex")}`;
   const id = randomBytes(6).toString("hex");
   const hash = hashOf(key);
-  const stored: Stored = { id, hash, name, hint: key.slice(KEY_PREFIX.length, KEY_PREFIX.length + 6), madeAt: Math.floor(now / 1000), usedAt: 0, write };
+  const stored: Stored = { id, hash, name, hint: key.slice(KEY_PREFIX.length, KEY_PREFIX.length + 6), madeAt: Math.floor(now / 1000), usedAt: 0, write, agent };
   const [, , after] = await redisPipeline([
     ["SET", lookupKey(hash), JSON.stringify({ sid, id })],
     ["HSET", listKey(sid), id, JSON.stringify(stored)],
@@ -110,7 +118,7 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
     await redisPipeline([["DEL", lookupKey(hash)], ["HDEL", listKey(sid), id]]);
     return { ok: false, reason: "full" };
   }
-  return { ok: true, key, made: { id, name, hint: stored.hint, madeAt: stored.madeAt, usedAt: 0, write } };
+  return { ok: true, key, made: { id, name, hint: stored.hint, madeAt: stored.madeAt, usedAt: 0, write, agent } };
 }
 
 /** Takes a key away. The next request with it is refused. */
@@ -152,7 +160,7 @@ const TOUCH_SECONDS = 60;
  * Checked against both records, so a key whose lookup survived a revocation
  * that was cut short still opens nothing.
  */
-export async function resolveKey(presented: string, now = Date.now()): Promise<{ sid: string; id: string; write: boolean } | null> {
+export async function resolveKey(presented: string, now = Date.now()): Promise<{ sid: string; id: string; write: boolean; agent: AgentScope } | null> {
   if (!KEY_PATTERN.test(presented) || !isRedisConfigured()) return null;
   const hash = hashOf(presented);
   const [raw] = await redisPipeline([["GET", lookupKey(hash)]]);
@@ -174,7 +182,7 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   if (seconds - stored.usedAt >= TOUCH_SECONDS) {
     await redisPipeline([["HSET", listKey(sid), id, JSON.stringify({ ...stored, usedAt: seconds })]]).catch(() => {});
   }
-  return { sid, id, write: stored.write };
+  return { sid, id, write: stored.write, agent: stored.agent };
 }
 
 /** Reads the key from an Authorization header: "Bearer nl_live_…". */

@@ -27,7 +27,11 @@ import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
 import { readQuizFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
 import { readPage } from "@/lib/sales-page-store";
-import type { SalesPage } from "@/lib/sales-page";
+import { type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
+import { expectedShareB, readCounts } from "@/lib/headline-test";
+import { type Counts, testState } from "@/lib/headline-test-rules";
+import { reachShares, readDepth } from "@/lib/page-depth";
+import { isFree } from "@/lib/store-field-rules";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { listBroadcasts } from "@/lib/broadcasts";
 import { broadcastMoney, flowMoney, readMailRevenue } from "@/lib/mail-revenue";
@@ -444,4 +448,55 @@ export async function readLessonTool(store: Store, id: string, lessonId: string)
   if (!listing || !course || !found) return null;
   const [text, quiz, task] = await Promise.all([readBody(course.id, lessonId), readQuizFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);
   return { product: listing.id, module: found.unit.title, lesson: found.lesson.id, title: found.lesson.title, text, quiz, task };
+}
+
+/**
+ * How a product's page test stands (631 [AA1] (a), unit 12): the views,
+ * checkouts, sales and money of each version, and the state the studio's own
+ * rule gives (lib/headline-test-rules.ts testState), never a winner of this
+ * tool's own making.
+ */
+export function pageTestTool(productId: string, page: SalesPage, counts: Counts, measure: "money" | "checkouts", shareB: number, now = Date.now()) {
+  const state = testState(counts, measure, { declared: declaredMeasure(page), shareB, now });
+  const version = (v: "a" | "b") => ({ views: counts[`v${v}`], checkouts_started: counts[`c${v}`], sales: counts[`s${v}`] ?? null, revenue: counts[`r${v}`] ?? null });
+  return {
+    product: productId,
+    test: page.variant ? "whole_page" : "headline",
+    headlines: page.test && !page.variant ? { b: page.test.headline, b_line: page.test.sub } : null,
+    measure,
+    note: "a is the page as saved, b the version tested against it. state is the studio's own rule: won, running, too_few, split, maturing, measure_changed or unavailable. Money is in the store currency's smallest unit; null is not counted.",
+    state: state.state,
+    winner: state.winner,
+    a: version("a"),
+    b: version("b"),
+  };
+}
+
+/** A product's page test as the studio reads it, or why there is none. */
+export async function readPageTestTool(store: Store, id: string): Promise<{ found: false; error: string } | { found: true; value: ReturnType<typeof pageTestTool> }> {
+  const listing = await readListing(store, id);
+  if (!listing) return { found: false, error: "There is no product with that id in this store. Use list_products for the ids." };
+  const page = await readPage(store.statsId, listing.id);
+  const test = runningTest(page);
+  if (!test) return { found: false, error: "This product's page is not running a test." };
+  const counts = await readCounts(store.statsId, listing.id, test);
+  if (counts.unavailable) return { found: false, error: "The test's numbers could not be read just now. Try again in a moment." };
+  return { found: true, value: pageTestTool(listing.id, page, counts, isFree(listing) ? "checkouts" : "money", expectedShareB(test)) };
+}
+
+/** How far down a product's sales page visitors read, block by block, as the studio shows it; null for an unknown product. */
+export async function readPageReadingTool(store: Store, id: string) {
+  const listing = await readListing(store, id);
+  if (!listing) return null;
+  const [page, depth] = await Promise.all([readPage(store.statsId, listing.id), readDepth(store.statsId, listing.id)]);
+  // While a whole second version is tested, each visitor reads one of two pages: no single depth means anything.
+  const reach = page.variant ? null : reachShares(page.blocks.map((b) => b.id), depth.stopped, depth.visitors);
+  return {
+    product: listing.id,
+    note: "reached is the percent of measured visitors who scrolled to each block, in page order. Null while a whole second version of the page is tested. why_not counts the reasons visitors picked for not buying; videos count how far each video was watched.",
+    visitors_measured: reach ? reach.visitors : null,
+    blocks: reach ? page.blocks.map((b) => ({ id: b.id, kind: b.kind, reached_percent: reach.shares[b.id] ?? 0 })) : null,
+    why_not: depth.whyNot,
+    videos: depth.videos,
+  };
 }

@@ -41,6 +41,8 @@ const TITLES: Readonly<Record<string, string>> = {
   get_sales_page: "Sales page",
   get_course_outline: "Course outline",
   get_lesson: "Course lesson",
+  get_page_test: "Page test",
+  get_page_reading: "How far the page is read",
   get_store: "Which store",
 };
 
@@ -145,6 +147,18 @@ const DRAFTS: readonly ToolDraft[] = [
       },
       additionalProperties: false,
     },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_page_test",
+    description: "How a product's page test is going (a second headline or a second version of the whole page): views, checkouts, sales and money of each version, and whether it has been won by the studio's own rule.",
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_page_reading",
+    description: "How far down a product's sales page visitors read, block by block, the reasons visitors picked for not buying, and how far each video was watched.",
+    inputSchema: { type: "object", properties: { product: { type: "string", description: "The product's id, from list_products." } }, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {

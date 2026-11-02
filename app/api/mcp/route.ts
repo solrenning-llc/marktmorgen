@@ -19,6 +19,8 @@ import {
   rangeTool,
   readCourseTool,
   readLessonTool,
+  readPageReadingTool,
+  readPageTestTool,
   readSalesPageTool,
   readFullNumbers,
   windowOf,
@@ -142,6 +144,16 @@ export async function POST(request: Request) {
       const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
       const found = !product ? null : params.name === "get_lesson" ? (lesson ? await readLessonTool(store, product, lesson) : null) : await readCourseTool(store, product);
       return result(id, found ? said(found) : said({ error: params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids." }, true));
+    }
+    if (params.name === "get_page_test" || params.name === "get_page_reading") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const unknown = { error: "There is no product with that id in this store. Use list_products for the ids." };
+      if (params.name === "get_page_reading") {
+        const reading = product ? await readPageReadingTool(store, product) : null;
+        return result(id, reading ? said(reading) : said(unknown, true));
+      }
+      const tested = product ? await readPageTestTool(store, product) : { found: false as const, error: unknown.error };
+      return result(id, tested.found ? said(tested.value) : said({ error: tested.error }, true));
     }
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));

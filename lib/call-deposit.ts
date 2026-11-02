@@ -63,7 +63,7 @@ export function readDue(meta: Record<string, string | undefined> | null | undefi
   if (!meta) return null;
   const rest = whole(meta.rest);
   const codeOff = whole(meta.code_off);
-  const code = typeof meta.code === "string" && /^[A-Z0-9-]{3,24}$/.test(meta.code) && codeOff > 0 ? meta.code : null;
+  const code = typeof meta.code === "string" && /^[A-Za-z0-9-]{3,24}$/.test(meta.code) && codeOff > 0 ? meta.code : null;
   if (!rest && !code) return null;
   return { rest, code, codeOff: code ? codeOff : 0 };
 }

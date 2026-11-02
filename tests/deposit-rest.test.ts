@@ -33,6 +33,7 @@ import { paidPeriod } from "./billing-period-fixture";
 const emails: { to: string; text: string }[] = [];
 const reads: string[] = [];
 let sale: Record<string, unknown> = {};
+let stripeDown = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
@@ -45,7 +46,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   if (method === "GET" && /^\/checkout\/sessions\/cs_test_/.test(path)) {
     reads.push(path);
-    return answer(sale);
+    return stripeDown ? answer({ error: { message: "down" } }, 500) : answer(sale);
   }
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
@@ -72,8 +73,8 @@ async function main(): Promise<void> {
   part("The sale's note, read strictly");
   is(
     "the rest, and a code with what it took off",
-    [readDue({ rest: "4000", code: "SPRING", code_off: "2000" }), readDue({ rest: "6000" }), readDue({ code: "SPRING", code_off: "7000" })],
-    [{ rest: 4000, code: "SPRING", codeOff: 2000 }, { rest: 6000, code: null, codeOff: 0 }, { rest: 0, code: "SPRING", codeOff: 7000 }],
+    [readDue({ rest: "4000", code: "SPRING", code_off: "2000" }), readDue({ rest: "6000" }), readDue({ code: "SPRING", code_off: "7000" }), readDue({ code: "spring", code_off: "7000" })],
+    [{ rest: 4000, code: "SPRING", codeOff: 2000 }, { rest: 6000, code: null, codeOff: 0 }, { rest: 0, code: "SPRING", codeOff: 7000 }, { rest: 0, code: "spring", codeOff: 7000 }],
   );
   is(
     "nothing, or anything not as the checkout writes it, is not said",
@@ -159,11 +160,27 @@ async function main(): Promise<void> {
   await confirm("cs_test_rest000000000003", null);
   is("with nothing left, nothing is said", /The rest|deposit/.test(emails.map((e) => e.text).join("\n")), false);
 
+  emails.length = 0;
+  reads.length = 0;
+  stripeDown = true;
+  const origError = console.error;
+  console.error = () => {};
+  await confirm("cs_test_rest000000000004");
+  console.error = origError;
+  stripeDown = false;
+  is("a failed read sends nothing and marks nothing, so the booking is confirmed later", [reads.length, emails.length], [1, 0]);
+  await confirm("cs_test_rest000000000004", { rest: 6000, code: null, codeOff: 0 });
+  is("and the next confirmation, which carries the rest, sends both emails with it", [emails.length, emails.every((e) => /The rest, \$60, is paid/.test(e.text))], [2, true]);
+
   part("Every path hands it on, and the pages say it");
   const calls = readFileSync("lib/calls.ts", "utf8");
   is("the sale's note is read with every paid booking", calls.includes("    due: readDue(meta),\n"), true);
   is("the booking catch-up and the daily job hand it to the confirmation", [calls.includes("      due: call.due,\n      origin,\n    }).catch((error) => console.error(\"catching up a booking failed\""), readFileSync("lib/call-reminders.ts", "utf8").includes("              due: call.due,\n")], [true, true]);
-  is("only an in-person booking is read for it", calls.includes("const due = input.due !== undefined ? input.due : place ? ((await paidCall(store, session).catch(() => null))?.due ?? null) : null;"), true);
+  is(
+    "only an in-person booking is read for it, before the once-only mark",
+    [calls.includes('if (whereOf(product.call).kind !== "place") due = null;'), calls.indexOf("due = (await paidCall(store, session))?.due ?? null;") < calls.indexOf('const [fresh] = await orderWrite(store, [["SET", confirmedKey(session)')],
+    [true, true],
+  );
   const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
   is(
     "the thanks page reads it for an in-person booking, hands it on, and shows it under the address",

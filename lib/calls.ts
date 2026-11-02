@@ -1360,6 +1360,21 @@ export async function confirmBooking(input: {
 }): Promise<void> {
   const { store, product, session, start, end, buyerEmail, origin } = input;
   if (!isRedisConfigured() || !store.callsId) return;
+  // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
+  // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
+  // (catchUpBookings, the daily job), which carries it, instead of sending both emails without it.
+  let due = input.due;
+  if (due === undefined) {
+    if (whereOf(product.call).kind !== "place") due = null;
+    else {
+      try {
+        due = (await paidCall(store, session))?.due ?? null;
+      } catch (error) {
+        console.error("reading what is left to pay in person failed; confirmed later", error);
+        return;
+      }
+    }
+  }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;
   // Booked: the orders it was admitted as are the window's (lib/orders.ts), once, by the checkout.
@@ -1432,8 +1447,6 @@ export async function confirmBooking(input: {
   const place = whereOf(setup).kind === "place" ? setup.place! : null;
   const room = place ? null : await roomOf(store.callsId, { product: product.id, setup, session, start, end });
   const video = isVideoRoom(room);
-  // A deposit and a code are only ever in person: read from the sale when the caller did not, so neither email leaves the rest out.
-  const due = input.due !== undefined ? input.due : place ? ((await paidCall(store, session).catch(() => null))?.due ?? null) : null;
   const paidIn = input.currency || store.currency;
   const invite = (note: string, words?: BookingWords) =>
     Buffer.from(
@@ -1495,12 +1508,14 @@ export async function confirmBooking(input: {
         : []),
       `${readableTime(start, setup.tz)} (${zoneName(start, setup.tz)}, your time zone)`,
       "",
-      place ? [`In person, at: ${placeLine(place)}`, creatorDueLine(due, { paidCents: input.amountCents, currency: paidIn })].filter(Boolean).join("\n") : meeting ? meetingLine(meeting, setup.kind === "live" || setup.seats > 1) : room
+      place ? `In person, at: ${placeLine(place)}` : meeting ? meetingLine(meeting, setup.kind === "live" || setup.seats > 1) : room
         ? video
           ? `A private video room was made for ${setup.kind === "live" || setup.seats > 1 ? "this time" : "this booking"}, and they were given it: ${room}\n${VIDEO_ROOM_NOTE} Open it a few minutes early and sign in, so they are not left waiting.`
           : `They were given your meeting link: ${room}`
         : `You have not set a meeting link, so send them one before the call${buyerEmail ? ` at ${buyerEmail}` : ""}.`,
       ...(meeting && !meeting.made && video ? [VIDEO_ROOM_NOTE] : []),
+      // What is left to collect in person, whatever the booking is now, so the creator never misses it.
+      ...(due ? [creatorDueLine(due, { paidCents: input.amountCents, currency: paidIn })] : []),
       "",
       `${
         theirs

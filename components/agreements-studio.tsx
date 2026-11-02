@@ -7,7 +7,7 @@ import { agreementReply, type AgreementAction, type AgreementReply } from "@/lib
 import { agreementEditorVersion } from "@/lib/agreement-editor-version";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
-import { type Currency, fieldPrefix, formatMoney, readMoney } from "@/lib/money";
+import { type Currency, fieldPrefix, formatMoney, isCurrency, readMoney } from "@/lib/money";
 import {
   KEEP_DAYS,
   KIND_WORDS,
@@ -136,11 +136,17 @@ export function AgreementsStudio({
     const answer = await call({ action: "read", id: row.id });
     setBusy("");
     const latest = latestOf(row);
-    const v = agreementEditorVersion(answer.version, currency, latest?.n ?? 0);
-    if (!answer.ok || !v || v.sha256 !== latest?.sha256) {
+    // A version written before the store changed its currency keeps its own (22 [E5], unit 2c): its
+    // amounts are read in it, then left empty here, so €50 never comes back as $50.
+    const its = answer.version && typeof answer.version === "object" ? (answer.version as { currency?: unknown }).currency : undefined;
+    const then: Currency = isCurrency(its) ? its : currency;
+    const read = agreementEditorVersion(answer.version, then, latest?.n ?? 0);
+    if (!answer.ok || !read || read.sha256 !== latest?.sha256) {
       toast(answer.message ?? "That agreement can't be read right now. Try again in a moment.");
       return;
     }
+    const v = then === currency ? read : { ...read, lines: read.lines.map((line) => ({ ...line, amount: "" })) };
+    if (then !== currency) toast(`Its last version was in ${then.toUpperCase()}. Type its amounts again in ${currency.toUpperCase()}, your store's currency now.`);
     setEditing(row);
     setKind(row.kind);
     setEmail(row.email);

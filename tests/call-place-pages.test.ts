@@ -83,6 +83,7 @@ async function main(): Promise<void> {
   is("in person chosen with no address is refused, never saved as a call", route.includes('if (asked !== undefined && asked !== null && !setup.place) return Response.json({ ok: false, error: "place" }, { status: 400 });'), true);
   is("and the editor says so before sending", (editor.match(/if \(draft\.inPerson && !draft\.place\.trim\(\)\) \{/g) ?? []).length, 2);
   is("switching between online and in person with bookings to come is refused, as switching kind is", readFileSync("lib/calls.ts", "utf8").includes("whereOf(before).kind !== whereOf(setup).kind"), true);
+  is("a package of in-person sessions promises no meeting link", [readFileSync("lib/call-packages.ts", "utf8").includes("product.call?.place ? b.packageKeepPlace : b.packageKeep"), /link/i.test(bookingWords("en").packageKeepPlace.replace("that link is how you book", ""))], [true, false]);
   is("the studio's upcoming list says where", readFileSync("app/studio/page.tsx", "utf8").includes("`In person, at: ${placeLine(product.call.place)}`"), true);
 
   done();

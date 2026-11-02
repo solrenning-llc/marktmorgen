@@ -1396,7 +1396,8 @@ export async function confirmBooking(input: {
       to: buyerEmail,
       subject: b.bookedSubject(product.title, store.name),
       text: [
-        setup.kind === "live" ? b.seatBooked(store.name) : setup.seats > 1 ? b.groupBooked(store.name) : b.callBooked(store.name),
+        // In person (lib/call-place.ts): a time at the address, never "a call".
+        setup.kind === "live" ? b.seatBooked(store.name) : place ? b.timeBooked(store.name) : setup.seats > 1 ? b.groupBooked(store.name) : b.callBooked(store.name),
         "",
         b.titleLength(product.title, minutes),
         `${readableTime(start, buyerTz, locale)} (${zoneName(start, buyerTz, locale)})`,

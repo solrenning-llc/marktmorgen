@@ -45,6 +45,7 @@ Add a row before the first commit of a unit; remove it when the unit is merged.
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Codex | 309 [EM1], #1502: integrate partial retained origin with accepted-notice repair | codex/list-mail-ses-only | `lib/store-checkout.ts`, `lib/order-confirmation-outbox.ts`, `lib/shipment-mail-outbox.ts`, `lib/purchase-email.ts`, `tests/single-digital-confirmation.test.ts`, `tests/single-digital-confirmation-world.ts`, `scripts/test_single_digital_confirmation_redis.py`, `docs/reservations.md`, `docs/codex-queue.md`, `docs/e5-money-readers.md` | 02/11/2026 |
+| Codex | 309 [EM1], #1502: preserve legacy recovery grant bytes when origin coverage is omitted | codex/list-mail-ses-only | `lib/shipment-mail-outbox.ts`, `docs/reservations.md` | 02/11/2026 |
 | Claude 3 | 631 [AA1] unit 1 (coverage of every studio action by an agent tool, step (a)) | claude3/aa1-coverage | `lib/agent-coverage.ts`, `tests/agent-coverage.test.ts`, `docs/ai-agent-store.md` | 02/11/2026 13h45 |
 | Claude 3 | 631 [AA1] unit 2 (proposals, confirmation and undo as pure rules, step (c); no storage yet) | claude3/aa1-proposal-rules | `lib/agent-proposal-rules.ts`, `tests/agent-proposal-rules.test.ts` | 02/11/2026 14h05 |
 | Claude 3 | 631 [AA1] unit 3 (agent keys by scope: read, draft, execute; step (c); no studio screen yet) | claude3/aa1-agent-keys | `lib/api-keys.ts`, `lib/api-key-rules.ts`, `lib/api-guard.ts`, `tests/agent-keys.test.ts` | 02/11/2026 14h20 |

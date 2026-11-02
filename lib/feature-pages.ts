@@ -11,6 +11,7 @@ import { salesPageBeginnerQuestions } from "@/lib/sales-page-faq";
 import { optionsBeginnerQuestions } from "@/lib/price-options-faq";
 import { bundleBeginnerQuestions } from "@/lib/bundle-faq";
 import { keyBeginnerQuestions } from "@/lib/license-key-faq";
+import { quizBeginnerQuestions } from "@/lib/quiz-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -1531,7 +1532,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "Quizzes that teach,",
     highlight: "a certificate that proves it",
     intro:
-      "A quiz after any lesson, marked on our side, or an assignment students hand in and you read, and a certificate of completion with a page of its own that anyone can open to check it.",
+      "A quiz after any lesson, marked on our side, or an assignment students hand in that you can read and approve, and a certificate of completion with a page of its own that anyone can open to check it.",
     visual: "quizzes",
     badge: WORKING,
     accent: "from-pink-brand to-violet-brand",
@@ -1545,7 +1546,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "From a lesson to a certificate",
         items: [
           { title: "Add a quiz to a lesson", body: "Up to 20 questions, each with one right answer or several, and a line of explanation shown afterward. On " + AI_PLANS_WORDS + ", AI can also draft 3 to 10 from the lesson's text, with answers of the same length and the right one in a different place each time, for you to read, change and save." },
-          { title: "Set the rules", body: "The pass mark, how many tries (up to 10, or as many as they like), and whether later lessons stay locked until it is passed." },
+          { title: "Set the rules", body: "The pass mark, how many tries (1 to 10), and whether later lessons stay locked until it is passed." },
           { title: "Or give an assignment", body: "Ask students to do something and hand it in: a few paragraphs, a file of up to 10 MB, or both. You read it, write back, and approve it or ask for another try; what you write reaches them by email, in your store's language." },
           { title: "Switch certificates on", body: "A student who finishes every lesson and passes every quiz that has to be passed types their name and gets a certificate." },
         ],
@@ -1580,6 +1581,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about quizzes and certificates",
         items: [
+          // 534 [FQ1], unit 13: what someone starting out asks, answered by the code (lib/quiz-faq.ts).
+          ...quizBeginnerQuestions(),
           { q: "Can a certificate be faked by editing a link?", a: "No. Its page is read from our record of it, never from anything in the address. Anyone checking one should open its page on your store." },
           { q: "Does passing a quiz count as finishing the lesson?", a: "Yes. Passing marks the lesson done, which is what a certificate counts." },
           { q: "When is a lesson with an assignment done?", a: "When the student hands it in, or, if you read each one, when you approve it. Either way it counts toward the certificate, and you choose whether the lessons after it wait." },

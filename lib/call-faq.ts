@@ -15,8 +15,8 @@ import { tryBeforePaying } from "@/lib/beginner-faq";
 
 /** The call editor's own words for starting a call and saving it. */
 export const CALL_EDITOR_WORDS = {
-  weekly: "Sell this as a paid call with a calendar",
-  weeklySave: "Sell it as a call",
+  weekly: "Sell this as a paid booking with a calendar: a call, or a time at your address",
+  weeklySave: "Sell these hours",
   live: "Sell seats in live sessions on set dates",
   liveSave: "Sell seats in these sessions",
 } as const;
@@ -27,7 +27,7 @@ export function callBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_
   return [
     {
       q: "What is a paid call here?",
-      a: `A time with you that the buyer picks and pays for as they book it, on your own Stripe account, or books later from a package of sessions they already paid for: one person at a time, a group of up to ${MAX_SEATS} at each time, or seats in live sessions on dates you set. The buyer gets an email with a calendar file. You get one too, or the host does on a team call you do not host. If the call is already in that person's Google Calendar, their email has no file. The call itself happens on the meeting service you choose, or by a link you send yourself; nothing is streamed or recorded here.`,
+      a: `A time with you that the buyer picks and pays for as they book it, on your own Stripe account, or books later from a package of sessions they already paid for: one person at a time, a group of up to ${MAX_SEATS} at each time, or seats in live sessions on dates you set. The buyer gets an email with a calendar file. You get one too, or the host does on a team call you do not host. If the call is already in that person's Google Calendar, their email has no file. The call itself happens on the meeting service you choose, or by a link you send yourself; or it is not a call at all but a time at the address you give, in person. Either way, nothing is streamed or recorded here.`,
     },
     {
       q: "How do I set up a paid call?",

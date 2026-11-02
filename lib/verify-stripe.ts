@@ -19,6 +19,10 @@
  *   documents a checkout that offers the tax number box and draws up an
  *             invoice is accepted, with both switched on as Stripe reads them
  *             (lib/tax.ts)
+ *   shipping  a cart with two physical products and a digital one is
+ *             accepted with the address asked only in the countries both
+ *             ship to and the two shipping amounts added on one line
+ *             (lib/cart-shipping.ts, applyCartShipping; added 2 November 2026)
  *
  * Completing the free checkout takes a browser, which a scheduled job has
  * not: that was done by hand on September 30, 2026, and Stripe read it as
@@ -30,6 +34,7 @@ import { callCheckoutBody, NO_COST_VERSION } from "@/lib/calls";
 import { packageCheckoutBody, sessionCouponBody } from "@/lib/call-packages";
 import { previewBody, switchBody, tierPriceBody } from "@/lib/tier-switch";
 import { currentMeta, dueNow, productOfSub } from "@/lib/tier-rules";
+import { applyCartShipping, cartItemOf, cartShipping } from "@/lib/cart-shipping";
 import type { Listing, Product, Store } from "@/lib/store";
 
 export type Check = { check: string; ok: boolean; detail: string };
@@ -210,6 +215,48 @@ export async function verifyTaxDocuments(origin: string): Promise<Check[]> {
         check: "a checkout with the tax number box and an invoice is accepted, with both on",
         ok: made.status === 200 && ids && invoice && str(made.data.customer_creation) === "always",
         detail: made.status === 200 ? `tax number box ${ids ? "on" : "off"}, invoice ${invoice ? "on" : "off"}, customer ${str(made.data.customer_creation)}` : err(made),
+      },
+    ];
+  } finally {
+    if (opened) await onDemoAccount("POST", `/checkout/sessions/${encodeURIComponent(opened)}/expire`, new URLSearchParams()).catch(() => null);
+  }
+}
+
+/**
+ * A cart that ships (513 [PF1], unit 2b): two physical products, one to the
+ * United States and Canada and one to the United States and Germany, and a
+ * digital one, with the very fields the cart's checkout sends
+ * (applyCartShipping). Stripe must take it, ask for an address only in the
+ * United States, and show the shipping as the two amounts added together.
+ */
+export async function verifyCartShipping(origin: string): Promise<Check[]> {
+  const s = checkStore();
+  const physical = (id: string, countries: string[], cents: number) =>
+    ({ id, title: `Verification ${id}`, priceCents: 2000, recurring: null, call: null, options: [], pwyw: null, plan: null, file: null, link: null, course: null, podcast: null, bundle: null, shipping: { cents, region: "custom", countries, note: "" } }) as unknown as Listing;
+  const products = [physical("verify-box", ["US", "CA"], 700), physical("verify-poster", ["US", "DE"], 300), { ...physical("verify-guide", [], 0), shipping: null, link: "https://example.com/guide" } as unknown as Listing];
+  const shipping = cartShipping(products.map(cartItemOf));
+  if (shipping.kind !== "ships") return [{ check: "a cart that ships is accepted with the shared countries and the amounts added", ok: false, detail: `the rule answered ${shipping.kind}` }];
+  const body = new URLSearchParams({ mode: "payment", success_url: `${origin}/stripe-check`, cancel_url: `${origin}/stripe-check` });
+  products.forEach((product, i) => {
+    body.set(`line_items[${i}][quantity]`, "1");
+    body.set(`line_items[${i}][price_data][currency]`, s.currency);
+    body.set(`line_items[${i}][price_data][unit_amount]`, String(product.priceCents));
+    body.set(`line_items[${i}][price_data][product_data][name]`, product.title);
+  });
+  applyCartShipping(body, s, products, shipping);
+  let opened = "";
+  try {
+    const made = await onDemoAccount("POST", "/checkout/sessions", body);
+    if (made.status === 200) opened = str(made.data.id);
+    const countries = (made.data.shipping_address_collection as { allowed_countries?: unknown } | null)?.allowed_countries;
+    const option = Array.isArray(made.data.shipping_options) ? (made.data.shipping_options[0] as { shipping_amount?: unknown } | undefined) : undefined;
+    const amount = num(option?.shipping_amount);
+    const where = Array.isArray(countries) ? countries.join(",") : "";
+    return [
+      {
+        check: "a cart that ships is accepted with the shared countries and the amounts added",
+        ok: made.status === 200 && where === "US" && amount === 1000,
+        detail: made.status === 200 ? `countries ${where || "none"}, shipping ${Number.isNaN(amount) ? "none" : amount}` : err(made),
       },
     ];
   } finally {

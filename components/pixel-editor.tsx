@@ -5,7 +5,7 @@ import { pixelSettingsConfirmed } from "@/lib/marketing-settings-response";
 import { useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
-import { PIXEL_INFO, PIXEL_KINDS, type PixelKind, type Pixels, hasPixels, readPixels } from "@/lib/pixels";
+import { PIXEL_INFO, PIXEL_KINDS, type PixelField, type Pixels, hasPixels, readPixels } from "@/lib/pixels";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -16,23 +16,32 @@ const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
+/** X's two event IDs, under the X pixel (613 [WP12]). */
+const X_EVENT_FIELDS: { field: "xPurchase" | "xLead"; label: string }[] = [
+  { field: "xPurchase", label: "X Purchase event ID" },
+  { field: "xLead", label: "X Lead event ID" },
+];
+
 const subscribeReady = () => () => {};
 const clientReady = () => true;
 const serverReady = () => false;
 
-/** The creator's Meta, Google, TikTok and Pinterest ids, on their store's pages. */
+/** The creator's Meta, Google, TikTok, Pinterest and X ids, on their store's pages. */
 export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pixels; canViewAttribution?: boolean }) {
   const router = useRouter();
   const ready = useSyncExternalStore(subscribeReady, clientReady, serverReady);
   const disclosure = useRef<HTMLDetailsElement>(null);
-  const [draft, setDraft] = useState<Record<PixelKind, string>>(() => ({
+  const [draft, setDraft] = useState<Record<PixelField, string>>(() => ({
     meta: pixels.meta ?? "",
     google: pixels.google ?? "",
     tiktok: pixels.tiktok ?? "",
     pinterest: pixels.pinterest ?? "",
+    x: pixels.x ?? "",
+    xPurchase: pixels.xEvents?.purchase ?? "",
+    xLead: pixels.xEvents?.lead ?? "",
   }));
   const [busy, setBusy] = useState(false);
-  const [bad, setBad] = useState<PixelKind | null>(null);
+  const [bad, setBad] = useState<PixelField | null>(null);
   const [error, setError] = useState<string | null>(null);
   const on = PIXEL_KINDS.filter((kind) => pixels[kind]);
 
@@ -53,14 +62,14 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pixels: local.pixels }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: unknown; pixels?: unknown; error?: string; bad?: PixelKind };
+      const data = (await response.json().catch(() => ({}))) as { ok?: unknown; pixels?: unknown; error?: string; bad?: PixelField };
       if (pixelSettingsConfirmed(response.ok, data, local.pixels)) {
         if (disclosure.current) disclosure.current.open = false;
         toast("Pixels saved.");
         router.refresh();
         return;
       }
-      if (data.error === "format" && data.bad && PIXEL_KINDS.includes(data.bad)) setBad(data.bad);
+      if (data.error === "format" && data.bad && (X_EVENT_FIELDS.some((f) => f.field === data.bad) || PIXEL_KINDS.some((kind) => kind === data.bad))) setBad(data.bad);
       else setError((typeof data.error === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, data.error) ? MESSAGES[data.error] : undefined) ?? "Your pixel IDs are still here. Saving could not be confirmed. Reload to check the saved IDs before trying again.");
     } catch {
       setError(MESSAGES.server_error);
@@ -75,7 +84,7 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
         Ad pixels
       </h2>
       <p className="mt-2 text-ink-soft">
-        Put your Meta, Google, TikTok or Pinterest pixel on your store, so the ads you run can see who visits, who
+        Put your Meta, Google, TikTok, Pinterest or X pixel on your store, so the ads you run can see who visits, who
         starts to pay and who buys, with the amount. Included in your plan.
       </p>
 
@@ -115,8 +124,41 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
                   className="field font-mono"
                 />
                 <span id={`px-${kind}-help`} className={`mt-1 block text-xs ${invalid ? "font-semibold text-danger" : "text-ink-soft"}`}>
-                  {invalid ? `That is not a ${info.label}. A ${info.label} looks like ${info.example}. ${info.where}` : `${info.where} Leave it empty to turn it off.`}
+                  {invalid ? `That is not ${kind === "x" ? "an" : "a"} ${info.label}. ${kind === "x" ? "It has only letters and numbers." : `A ${info.label} looks like ${info.example}.`} ${info.where}` : `${info.where} Leave it empty to turn it off.`}
                 </span>
+                {kind === "x" ? (
+                  <fieldset className="mt-3 rounded-[10px] px-4 py-3 ring-1 ring-line">
+                    <legend className="px-1 text-sm font-semibold text-ink">X events (optional)</legend>
+                    <p className="text-xs text-ink-soft">
+                      X counts page views by itself. For purchases and leads, create a Purchase event and a Lead event in X
+                      Events Manager and paste each one&apos;s ID here; an event left empty is not sent to X.
+                    </p>
+                    {X_EVENT_FIELDS.map(({ field, label }) => {
+                      const wrong = bad === field;
+                      return (
+                        <div key={field} className="mt-3">
+                          <label htmlFor={`px-${field}`} className="field-label">{label}</label>
+                          <input
+                            id={`px-${field}`}
+                            type="text"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={draft[field]}
+                            aria-invalid={wrong}
+                            aria-describedby={`px-${field}-help`}
+                            onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}
+                            className="field font-mono"
+                          />
+                          <span id={`px-${field}-help`} className={`mt-1 block text-xs ${wrong ? "font-semibold text-danger" : "text-ink-soft"}`}>
+                            {wrong
+                              ? "That is not an X event ID. Paste the ID from X Events Manager: letters and numbers, or the whole tw-… name X shows."
+                              : "The event's ID, or the whole tw-… name X shows. Leave it empty to not send this event."}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </fieldset>
+                ) : null}
               </div>
             );
           })}
@@ -124,7 +166,9 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
           <div className="rounded-[10px] bg-paper px-4 py-3 text-sm text-ink-soft ring-1 ring-line">
             <p>
               Sent to them: a page view on every page of your store, a checkout started when someone presses buy or
-              books, a lead when someone asks for something free, and a purchase with its amount once it is paid.
+              books, a lead when someone asks for something free, and a purchase with its amount once it is paid. X
+              gets page views, and purchases and leads only for the events you give it an ID for; X is never told about
+              a checkout started.
             </p>
             <p className="mt-2">
               These platforms set cookies, so visitors in the EU, Iceland, Liechtenstein, Norway, the UK, Switzerland and

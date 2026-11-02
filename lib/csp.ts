@@ -82,6 +82,12 @@ const PIXEL_CONNECT = [
   // Pinterest
   "https://ct.pinterest.com",
   "https://s.pinimg.com",
+  // X (613 [WP12]): its script's host and the three it reports to, as X's own page lists them
+  // (docs/x-reddit-pixels-official-check-2026-11-02.md, X item 2).
+  "https://static.ads-twitter.com",
+  "https://ads-twitter.com",
+  "https://ads-api.twitter.com",
+  "https://analytics.twitter.com",
 ];
 
 /** Frames Google's tag opens for ad conversions. Nothing else is framed from elsewhere. */

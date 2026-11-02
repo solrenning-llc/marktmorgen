@@ -27,7 +27,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="October 30, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 2, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -259,7 +259,7 @@ export default function PrivacyPage() {
           <strong className="text-black">
             Ad measurement a creator switches on.
           </strong>{" "}
-          A creator can add their own Meta, Google, TikTok or Pinterest pixel to
+          A creator can add their own Meta, Google, TikTok, Pinterest or X pixel to
           their store. When they do, and only once it is allowed, that
           store&apos;s pages load that platform&apos;s script, which sets its own cookies and tells
           the platform about page views, checkouts started, requests for free
@@ -274,7 +274,11 @@ export default function PrivacyPage() {
           allowed, that store also keeps a cookie of its own saying so, with the
           ad click id the visitor last arrived with (Meta&apos;s fbclid,
           TikTok&apos;s ttclid or Pinterest&apos;s epik), for 30 days; it is
-          deleted the moment the choice is no.
+          deleted the moment the choice is no. X is told about purchases and
+          requests for free products only when the creator set up those
+          events with X, and never about checkouts started; where a visitor
+          has not said yes (because their country does not ask first), X is
+          told to limit how it uses the data, with X&apos;s own setting for that.
         </p>
         <p id="ads-server">
           <strong className="text-black">
@@ -1768,7 +1772,7 @@ export default function PrivacyPage() {
             <strong className="text-black">
               The ad platforms a creator adds
             </strong>
-            {" "}(Meta, Google, TikTok or Pinterest), whose scripts on that
+            {" "}(Meta, Google, TikTok, Pinterest or X), whose scripts on that
             store&apos;s pages receive what the section on ad measurement
             lists, only once they are allowed; and
           </li>

@@ -202,7 +202,7 @@ async function main(): Promise<void> {
   if(!preservedProduct.ok || !libraryStore.statsId)throw Error("No preserved page fixture");
   await writePage(libraryStore.statsId,preservedProduct.product.id,parsePage({blocks:[{id:"kephero1",kind:"hero",headline:"Keep my creator headline",sub:"Keep my creator wording",media:"none",video:null}]}),libraryStore);
   if(!(await setProductPage(libraryOwner,preservedProduct.product.id,true)).ok)throw Error("No preserved page index");
-  if(!(await setPixels(libraryOwner,{meta:"123456789012345",google:"G-AB12CD34EF",tiktok:"C4ABCDEFGH1234567890",pinterest:null})).ok)throw Error("No synthetic pixel fixture");
+  if(!(await setPixels(libraryOwner,{meta:"123456789012345",google:"G-AB12CD34EF",tiktok:"C4ABCDEFGH1234567890",pinterest:null,x:null})).ok)throw Error("No synthetic pixel fixture");
   const libraryFixture={preservedProduct:preservedProduct.product.id,session:await openSession(libraryOwner),sid:libraryStore.sid,product:libraryProduct.product.id};
   const shippingOwner="shipping-proof@example.test";
   if(!(await claimHandle(shippingOwner,"shippingprooffixture","Shipping proof fixture","Synthetic local tests.")).ok)throw Error("No shipping fixture");

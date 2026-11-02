@@ -37,11 +37,15 @@ export const STAMP_SPOTS: readonly { top: number; side: "left" | "right" }[] = [
 /** The lowest the mark's top edge may be, in percent: below it are the controls and captions. */
 export const LOWEST_TOP = 60;
 
-/** The mark's words: the student's email, the day of the purchase and the end of the order number. */
+/**
+ * The mark's words: the student's email, the day they joined the course and,
+ * when the page knows it, the end of the order number ("" leaves it out
+ * rather than reading the order again on every lesson).
+ */
 export function videoStampText(email: string, reference: string, at: Date): string {
   const day = at.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   const order = reference.replace(/^(cs|pi)_(test|live)?_?/, "").slice(-6).toUpperCase();
-  return `${email} · ${day} · order …${order}`;
+  return order ? `${email} · ${day} · order …${order}` : `${email} · ${day}`;
 }
 
 function hash(text: string): number {
@@ -70,8 +74,8 @@ export function stampSpot(seed: string, now: number, reducedMotion: boolean): (t
 
 /** What the course page tells a buyer before they pay, when the creator switched the mark on. */
 export const VIDEO_STAMP_NOTICE =
-  "This course's videos show your email, the date and your order number while they play, to discourage sharing.";
+  "This course's videos show your email and the date you joined while they play, to discourage sharing.";
 
 /** What the studio tells the creator beside the switch. */
 export const VIDEO_STAMP_STUDIO_NOTE =
-  "Shows each student's email, the date and their order number over the lesson videos, moving now and then. It discourages sharing; it cannot stop anyone from recording their screen. Buyers are told on the course page before they pay.";
+  "Shows each student's email and the date they joined over the lesson videos, moving now and then. It discourages sharing; it cannot stop anyone from recording their screen, and it is not shown while a video plays full screen. Buyers are told on the course page before they pay.";

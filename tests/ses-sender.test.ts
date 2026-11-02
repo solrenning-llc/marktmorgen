@@ -1,3 +1,5 @@
+import { addProduct, setProductLink, setStripeAccount } from "@/lib/store";
+import { confirmPurchase, confirmationKey } from "@/lib/purchase-email";
 /**
  * Email goes through Amazon SES when Amazon says it may, and through Resend
  * whenever it may not — with nobody choosing, nothing lost, and nobody
@@ -253,6 +255,44 @@ async function main(): Promise<void> {
     redis.pipeline = originalPipeline;
   }
   is("the positive probe sees the sole member and one sender", [memberReads, amazon.length, resend.length], [1, 1, 0]);
+
+  part("An existing legacy SES claim cannot certify a purchase confirmation");
+  const auditOwner = "legacy-audit-owner@example.test";
+  await claimHandle(auditOwner, "legacyaudit", "Synthetic legacy audit", "");
+  await ensureStatsId(auditOwner);
+  await setStripeAccount(auditOwner, "acct_1LegacyAudit0001", true);
+  await setSubscription(auditOwner, { customerId: "cus_LegacyAudit0001", subscriptionId: "sub_LegacyAudit0001", active: true, period: paidPeriod() });
+  const auditMade = await addProduct(auditOwner, "Synthetic audit product", "", "49", null);
+  if (!auditMade.ok) throw new Error("Synthetic audit product unavailable");
+  await setProductLink(auditOwner, auditMade.product.id, "https://example.test/audit-only");
+  const auditStore = (await storeForEmail(auditOwner))!;
+  for (const loss of ["claim-ack-before-post", "ses-ack-after-post"] as const) {
+    account = approved(); askAgain(); clear();
+    const sessionId = "cs_test_" + (loss === "claim-ack-before-post" ? "a" : "b").repeat(24);
+    const key = `nimbus-confirm:${sessionId}`;
+    const claim = `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
+    const session = {id:sessionId,status:"complete",payment_status:"paid",mode:"payment",created:Math.floor(Date.now()/1000),amount_total:4900,currency:"usd",payment_intent:"pi_LegacyAudit0001",metadata:{store:"legacyaudit",product:auditMade.product.id},customer_details:{email:"legacy-audit-buyer@example.test"}} as never;
+    let interrupted = false;
+    if (loss === "claim-ack-before-post") redis.pipeline = async commands => {
+      const result = await originalPipeline(commands);
+      if (!interrupted && commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === claim) {
+        interrupted = true; throw new Error("Synthetic SET ACK lost before any provider POST");
+      }
+      return result;
+    };
+    else amazonLosesReply = () => "throw";
+    let first: Awaited<ReturnType<typeof confirmPurchase>>;
+    try {first=await confirmPurchase(auditStore,sessionId,session);} finally {redis.pipeline=originalPipeline;amazonLosesReply=()=>null;}
+    const afterFirst = {claim:redis.run(["GET",claim]),consumer:redis.run(["GET",confirmationKey(sessionId)]),amazon:amazon.length,resend:resend.length};
+    const second=await confirmPurchase(auditStore,sessionId,session);
+    const afterSecond = {claim:redis.run(["GET",claim]),consumer:redis.run(["GET",confirmationKey(sessionId)]),amazon:amazon.length,resend:resend.length};
+    is(`${loss}: the first unacknowledged operation reports failure`, first, "failed");
+    is(`${loss}: no consumer confirmation is committed on unknown acknowledgement`, afterFirst.consumer, null);
+    is(`${loss}: the existing claim remains sticky`, [afterFirst.claim, afterSecond.claim], ["1", "1"]);
+    is(`${loss}: the replay never adds a provider POST`, [afterFirst.amazon, afterFirst.resend, afterSecond.amazon, afterSecond.resend], loss === "claim-ack-before-post" ? [0, 0, 0, 0] : [1, 0, 1, 0]);
+    is(`${loss}: a replay cannot manufacture the consumer's sent marker`, afterSecond.consumer, null);
+    is(`${loss}: unknown acceptance must not become consumer sent`,second,"failed");
+  }
 
   part("An uncertain individual SES acknowledgement never triggers another sender");
   for (const loss of ["throw", 500, 503] as const) {

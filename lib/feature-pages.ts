@@ -5,6 +5,7 @@ import { membershipBeginnerQuestions } from "@/lib/membership-faq";
 import { callBeginnerQuestions } from "@/lib/call-faq";
 import { storeBeginnerQuestions } from "@/lib/store-page-faq";
 import { deliveryBeginnerQuestions } from "@/lib/delivery-faq";
+import { checkoutBeginnerQuestions } from "@/lib/checkout-faq";
 import { NEW_CREATOR_PAGES } from "@/lib/creator-situations";
 import { withFeatureMechanisms } from "@/lib/feature-mechanisms";
 import { paidVideoWords, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -587,6 +588,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "faq",
         title: "Questions about the checkout tools",
         items: [
+          // 534 [FQ1], unit 7: what someone starting out asks, answered by the code (lib/checkout-faq.ts).
+          ...checkoutBeginnerQuestions(),
           { q: "Is the one-click offer safe for the buyer?", a: "The card is kept only for payments made while the buyer is there, never to charge them later. The offer works only in the browser that paid, for an hour, and once; if the bank asks the buyer to confirm, they confirm it." },
           { q: "Who files the tax that Stripe collects?", a: "You do, because you are the seller. Stripe Tax works it out and collects it on your account, and gives you reports of what was collected. Stripe charges for Stripe Tax at its own published price." },
           { q: "Can a buyer who chose a payment plan also take the box at checkout?", a: "Yes. The added product is charged with the first payment, and the button says the total due today." },

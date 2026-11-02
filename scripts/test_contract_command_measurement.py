@@ -36,6 +36,18 @@ def main():
             refused = True
         assert refused, 'Missing application command must fail'
         assert client.command('PING') == 'PONG'
+        # A caller cannot hide a second queued application command inside one
+        # measured operation; reject the whole profile rather than undercount.
+        def extra_command():
+            assert client.command('PING') == 'QUEUED'
+            return client.command('EVAL', 'return 1', 0)
+        refused = False
+        try:
+            measured_command(client, extra_command)
+        except (AssertionError, RuntimeError):
+            refused = True
+        assert refused, 'Two application commands cannot masquerade as one'
+        assert client.command('PING') == 'PONG'
         print('PASS: atomic INFO/EVAL/INFO excludes external PING, retains EVAL, internal PING/DBSIZE/INFO; invalid probe leaves no transaction')
     finally:
         client.close()

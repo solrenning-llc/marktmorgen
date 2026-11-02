@@ -188,24 +188,8 @@ def main():
             redis.command('HSET', key, 'grant:ctr_one', receipt)
         def activate(client, key, subscription='sub_Activation001', store='one', nonce='ctr_one', created=instant, now=instant+1, phase='paid', period_start=instant, period_end=instant+30*86400):
             return client.command('EVAL', activation_script, 1, key, 'binding', 'review', store, 'creator_month', nonce, subscription, created, now, 50, 100, 0, 300, 2, phase, period_start, period_end)
-        def command_calls():
-            raw = redis.command('INFO', 'commandstats')
-            if not isinstance(raw, str):
-                raise AssertionError('Expected INFO commandstats text')
-            counts = {}
-            for line in raw.splitlines():
-                match = re.fullmatch(r'cmdstat_([^:]+):calls=(\d+),.*', line)
-                if match:
-                    counts[match.group(1)] = int(match.group(2))
-            if 'eval' not in counts or 'hget' not in counts:
-                raise AssertionError('Command counters must include Lua and its internal calls')
-            return counts
         def measured_activation(key, label, **args):
-            before = command_calls()
-            result = activate(redis, key, **args)
-            after = command_calls()
-            changes = {name: after.get(name, 0) - before.get(name, 0)
-                       for name in set(before) | set(after) if name != 'info'}
+            result, changes = measured_command(redis, lambda: activate(redis, key, **args))
             assert all(value >= 0 for value in changes.values()), changes
             changes = {name: value for name, value in changes.items() if value}
             assert changes.get('eval') == 1, changes
@@ -237,11 +221,8 @@ def main():
         assert take(redis, keys[12], nonce='ctr_second_checkout') == 0
         assert snapshot(keys[12]) == before
         active = redis.command('HGET', keys[12], 'active:one')
-        before_switch = command_calls()
-        assert take(redis, keys[12], nonce='ctr_switch_after_active', action='switch', source_subscription='sub_Activation001') == 1
-        after_switch = command_calls()
-        switch_changes = {name: after_switch.get(name, 0) - before_switch.get(name, 0)
-                          for name in set(before_switch) | set(after_switch) if name != 'info'}
+        measured_ack, switch_changes = measured_command(redis, lambda: take(redis, keys[12], nonce='ctr_switch_after_active', action='switch', source_subscription='sub_Activation001'))
+        assert measured_ack == 1
         assert all(value >= 0 for value in switch_changes.values()), switch_changes
         switch_changes = {name: value for name, value in switch_changes.items() if value}
         assert switch_changes.get('eval') == 1 and sum(switch_changes.values()) == 17, switch_changes
@@ -290,11 +271,8 @@ def main():
         forged_receipt = 'review|one|creator_month|checkout|50|1800000300|1800003600|1800086400|2000000000000'
         assert redis.command('EVAL', script, 1, keys[20], 'binding', 'review', 'one', 'creator_month', 50, 100, 0, 2, 'ctr_wrong_action', forged_receipt, 'switch') == 0
         assert snapshot(keys[20]) == before
-        before_calls = command_calls()
-        assert take(redis, keys[20]) == 1
-        after_calls = command_calls()
-        changes = {name: after_calls.get(name, 0) - before_calls.get(name, 0)
-                   for name in set(before_calls) | set(after_calls) if name != 'info'}
+        measured_ack, changes = measured_command(redis, lambda: take(redis, keys[20]))
+        assert measured_ack == 1
         assert all(value >= 0 for value in changes.values()), changes
         changes = {name: value for name, value in changes.items() if value}
         assert changes.get('eval') == 1 and sum(changes.values()) == 15, changes
@@ -367,11 +345,8 @@ def main():
         switch_ready(keys[28])
         source_proof = redis.command('HGET', keys[28], 'active:one')
         source_receipt = redis.command('HGET', keys[28], 'grant:ctr_one')
-        before_calls = command_calls()
-        assert switch_activate(redis, keys[28]) == [1, instant+86400]
-        after_calls = command_calls()
-        switch_activation_changes = {name: after_calls.get(name, 0)-before_calls.get(name, 0)
-                                     for name in set(before_calls) | set(after_calls) if name != 'info'}
+        measured_ack, switch_activation_changes = measured_command(redis, lambda: switch_activate(redis, keys[28]))
+        assert measured_ack == [1, instant + 86400]
         assert all(value >= 0 for value in switch_activation_changes.values())
         switch_activation_changes = {name: count for name, count in switch_activation_changes.items() if count}
         assert switch_activation_changes.get('eval') == 1 and sum(switch_activation_changes.values()) == 16, switch_activation_changes
@@ -383,11 +358,8 @@ def main():
         assert redis.command('HGET', keys[28], 'reserved') == '100'
         assert redis.command('HGET', keys[28], 'slots:creator_month') == '0'
         before = snapshot(keys[28])
-        before_calls = command_calls()
-        assert switch_activate(redis, keys[28]) == [2, instant+30*86400]
-        after_calls = command_calls()
-        retry_changes = {name: after_calls.get(name, 0)-before_calls.get(name, 0)
-                         for name in set(before_calls) | set(after_calls) if name != 'info'}
+        measured_ack, retry_changes = measured_command(redis, lambda: switch_activate(redis, keys[28]))
+        assert measured_ack == [2, instant + 30 * 86400]
         assert all(value >= 0 for value in retry_changes.values()) and sum(retry_changes.values()) == 13, retry_changes
         print('MEASURED switch activation retry commands:', 13, sorted((name, count) for name, count in retry_changes.items() if count))
         assert snapshot(keys[28]) == before
@@ -435,11 +407,8 @@ def main():
         # Late observations may read only a previously committed exact term.
         # Reuse existing generated keys; no extra service or cleanup namespace.
         before = snapshot(keys[13])
-        before_calls = command_calls()
-        assert activate(redis, keys[13], now=instant+2*86400) == [2, instant+30*86400]
-        after_calls = command_calls()
-        changes = {name: after_calls.get(name, 0)-before_calls.get(name, 0)
-                   for name in set(before_calls) | set(after_calls) if name != 'info'}
+        measured_ack, changes = measured_command(redis, lambda: activate(redis, keys[13], now=instant + 2 * 86400))
+        assert measured_ack == [2, instant + 30 * 86400]
         assert all(value >= 0 for value in changes.values()) and sum(changes.values()) == 11, changes
         print('MEASURED committed checkout term observation commands:', 11, sorted((name, count) for name, count in changes.items() if count))
         assert snapshot(keys[13]) == before
@@ -447,11 +416,8 @@ def main():
         assert activate(redis, keys[13], now=instant+2*86400, period_end=instant+30*86400+1) == 0
         assert snapshot(keys[13]) == before
         before = snapshot(keys[29])
-        before_calls = command_calls()
-        assert switch_activate(redis, keys[29], now=instant+2*86400) == [2, instant+30*86400]
-        after_calls = command_calls()
-        changes = {name: after_calls.get(name, 0)-before_calls.get(name, 0)
-                   for name in set(before_calls) | set(after_calls) if name != 'info'}
+        measured_ack, changes = measured_command(redis, lambda: switch_activate(redis, keys[29], now=instant + 2 * 86400))
+        assert measured_ack == [2, instant + 30 * 86400]
         assert all(value >= 0 for value in changes.values()) and sum(changes.values()) == 13, changes
         print('MEASURED committed switch term observation commands:', 13, sorted((name, count) for name, count in changes.items() if count))
         assert snapshot(keys[29]) == before
@@ -479,11 +445,8 @@ def main():
         resource_slots(keys[37])
         original = snapshot(keys[37])
         for expected_count, label in [(18, 'first cohort'), (17, 'repeated cohort')]:
-            before_calls = command_calls()
-            assert resource_claim(redis, keys[37]) == [1, (instant+30*86400)*1000]
-            after_calls = command_calls()
-            delta = {name: after_calls.get(name, 0)-before_calls.get(name, 0)
-                     for name in set(before_calls) | set(after_calls) if name != 'info'}
+            measured_ack, delta = measured_command(redis, lambda: resource_claim(redis, keys[37]))
+            assert measured_ack == [1, (instant + 30 * 86400) * 1000]
             assert all(value >= 0 for value in delta.values()) and sum(delta.values()) == expected_count, delta
             print('MEASURED paid resource commands:', label, expected_count, sorted((name, value) for name, value in delta.items() if value))
         for name, value in original:
@@ -601,23 +564,15 @@ def main():
         ceiling_match = re.search(r'restartReservation:\{[^}]*commandCeiling:(\d+)', rule_source)
         assert ceiling_match
         command_ceiling = int(ceiling_match.group(1))
-        def command_counts():
-            answer = redis.command('INFO', 'commandstats')
-            return {name: int(count) for name, count in re.findall(r'cmdstat_([^:]+):calls=(\d+)', answer)}
-        def difference(before, after):
-            return {name: count-before.get(name, 0) for name, count in after.items()
-                    if name != 'info' and count-before.get(name, 0) > 0}
         old_binding, old_receipt = seed_restart(keys[41])
-        before_counts = command_counts()
-        assert take_restart(redis, keys[41]) == 1
-        first_counts = difference(before_counts, command_counts())
+        measured_ack, first_counts = measured_command(redis, lambda: take_restart(redis, keys[41]))
+        assert measured_ack == 1
         assert sum(first_counts.values()) <= command_ceiling
         # Ignore that committed acknowledgement; neither same nor new nonce
         # may reserve again, expire ownership, release old cash or overwrite it.
         before = snapshot(keys[41])
-        before_counts = command_counts()
-        assert take_restart(redis, keys[41]) == 0
-        duplicate_counts = difference(before_counts, command_counts())
+        measured_ack, duplicate_counts = measured_command(redis, lambda: take_restart(redis, keys[41]))
+        assert measured_ack == 0
         assert sum(duplicate_counts.values()) <= command_ceiling
         assert take_restart(redis, keys[41], 'ctr_retry_restart') == 0
         assert take(redis, keys[41], store='restart-store', nonce='ctr_restart_checkout') == 0
@@ -838,9 +793,7 @@ def main():
                                   'binding','review','restart-store','ctr_restart_new','claim_first',
                                   1800000002,1800000001,1800000300,ref,pause,binding,
                                   'price_SyntheticRestart01','a' * 64)
-        counts = command_counts()
-        armed_ack = arm_direct(redis)
-        first_arm_counts = difference(counts, command_counts())
+        armed_ack, first_arm_counts = measured_command(redis, lambda: arm_direct(redis))
         assert sum(first_arm_counts.values()) <= intent_ceiling
         assert armed_ack[0] == 1
         # Deliberately ignore first ACK: all contenders must refuse permanently.
@@ -929,9 +882,8 @@ def main():
             return client.command('EVAL', result_script, 1, keys[42],
                                   options['grant'],options['review'],options['stats'],options['claim'],
                                   options['price'],options['digest'],subscription,options['now'],options['armed'])
-        count_before = command_counts()
-        assert record_result(redis) == 1
-        record_counts = difference(count_before, command_counts())
+        measured_ack, record_counts = measured_command(redis, lambda: record_result(redis))
+        assert measured_ack == 1
         assert sum(record_counts.values()) <= 17
         known = json.loads(redis.command('HGET', keys[42], 'restart-intent:ctr_restart_new'))
         assert known['submission']['phase'] == 'observed'
@@ -995,9 +947,7 @@ def main():
         assert arm(redis,keys[42],ref,pause)[0] == 1
         before_recovery = snapshot(keys[42])
         initial = json.loads(redis.command('HGET',keys[42],'restart-intent:ctr_restart_new'))
-        counts = command_counts()
-        first_recovery = recovery(redis,keys[42],ref,pause)  # Deliberately ignore this provider-read allowance.
-        recovery_counts = difference(counts,command_counts())
+        first_recovery, recovery_counts = measured_command(redis, lambda: recovery(redis, keys[42], ref, pause))   # Deliberately ignore this provider-read allowance.
         assert first_recovery[0] == 'read'
         assert sum(recovery_counts.values()) <= 17
         def recovery_race(_index):
@@ -1091,9 +1041,7 @@ def main():
                                   args['now'],args['minimum'],args['limit'],args['carry'],args['funded'],args['span'])
         fixture = activation_ready()
         before = snapshot(keys[42])
-        before_counts = command_counts()
-        ignored = activate_restart(redis,fixture) # Deliberately lose first ACK.
-        activation_counts = difference(before_counts,command_counts())
+        ignored, activation_counts = measured_command(redis, lambda: activate_restart(redis, fixture))  # Deliberately lose first ACK.
         assert ignored == [1,1800086400]
         assert sum(activation_counts.values()) <= 17
         new_binding = 'ctr_restart_new|sub_ObservedRestart01|creator_month|1800000003|paid|1800000003|1801000000'
@@ -1244,9 +1192,7 @@ def main():
                 redis.command('HSET',keys[42],'restart-intent:ctr_restart_new',json.dumps(raw_owner,separators=(',',':')))
             state = snapshot(keys[42])
             evidence = [redis.command('GET','nl:pause:'+fixture[0]),redis.command('GET','nl:pause:last:'+fixture[0]),redis.command('ZSCORE','nl:pause:due',fixture[0])]
-            before_counts = command_counts()
-            ignored = recovery(redis,keys[42],fixture[0],fixture[1],now=1800086402) # Lose ACK.
-            activated_recovery_counts = difference(before_counts,command_counts())
+            ignored, activated_recovery_counts = measured_command(redis, lambda: recovery(redis, keys[42], fixture[0], fixture[1], now=1800086402))  # Lose ACK.
             assert ignored[0] == 'activated' and ignored[2] == new_binding
             assert sum(activated_recovery_counts.values()) <= 17
             assert activated_recovery_counts.get('hset',0) == 0
@@ -1376,10 +1322,8 @@ def main():
         print('PASS:strict CAS11invalid/expired/type/budget cases,UTF8bytes and newer-write recovery preserve exact values')
 
         seed_strict()
-        strict_before = command_counts()
-        assert strict_cas(redis) == 1
-        strict_after = command_counts()
-        strict_counts = {name: strict_after.get(name,0)-strict_before.get(name,0) for name in strict_after if name!='info' and strict_after.get(name,0)>strict_before.get(name,0)}
+        measured_ack, strict_counts = measured_command(redis, lambda: strict_cas(redis))
+        assert measured_ack == 1
         assert sum(strict_counts.values()) <= 8, strict_counts
         print('PASS:actual strict CAS INFO commands=' + json.dumps(strict_counts,sort_keys=True))
 
@@ -1425,9 +1369,8 @@ def main():
             assert strict_record(lock_key) == before_lock, scenario
             assert strict_record(value_key) == before_store, scenario
         seed_strict()
-        release_before = command_counts()
-        assert release_strict(redis) == 1
-        release_counts = difference(release_before, command_counts())
+        measured_ack, release_counts = measured_command(redis, lambda: release_strict(redis))
+        assert measured_ack == 1
         assert sum(release_counts.values()) <= 5, release_counts
         print('PASS:strict release5negative cases and actual INFO commands=' + json.dumps(release_counts,sort_keys=True))
 
@@ -1443,17 +1386,15 @@ def main():
         assert observe_pause() == [0]
         for value in ('', 'x' * 4097, 'é' * 2049):
             redis.command('SET', observation_key, value, 'EX', 600)
-            before_observe = command_counts()
-            assert observe_pause() == [-1]
-            observed_counts = difference(before_observe, command_counts())
+            measured_ack, observed_counts = measured_command(redis, lambda: observe_pause())
+            assert measured_ack == [-1]
             assert sum(observed_counts.values()) <= 3, observed_counts
             assert redis.command('GET', observation_key) == value
             assert 0 < redis.command('TTL', observation_key) <= 600
         for value in ('x' * 4096, 'é' * 2048, '{"unknownCreatorField":[],"funding":{"version":1}}'):
             redis.command('SET', observation_key, value)
-            before_observe = command_counts()
-            assert observe_pause() == [1, value]
-            observed_counts = difference(before_observe, command_counts())
+            measured_ack, observed_counts = measured_command(redis, lambda: observe_pause())
+            assert measured_ack == [1, value]
             assert sum(observed_counts.values()) <= 3, observed_counts
             assert redis.command('GET', observation_key) == value
         redis.command('DEL', observation_key)
@@ -1476,9 +1417,8 @@ def main():
         for value in ('x' * 1280, 'é' * 640):
             redis.command('ZADD',bounded_due_key,1800000000,value)
             redis.command('EXPIRE',bounded_due_key,600)
-            before_due = command_counts()
-            assert observe_due() == [value]
-            due_counts = difference(before_due,command_counts())
+            measured_ack, due_counts = measured_command(redis, lambda: observe_due())
+            assert measured_ack == [value]
             assert sum(due_counts.values()) <= 3, due_counts
             assert 0 < redis.command('TTL',bounded_due_key) <= 600
             redis.command('DEL',bounded_due_key)
@@ -1530,27 +1470,23 @@ def main():
         for length in (4096, 4097, 100000):
             bounded_worker_raw = worker_raw + ' ' * (length - len(worker_raw))
             seed_worker(bounded_worker_raw)
-            before_bounded_worker = command_counts()
-            result = worker_forget('known', bounded_worker_raw)
-            bounded_worker_counts = difference(before_bounded_worker, command_counts())
+            result, bounded_worker_counts = measured_command(redis, lambda: worker_forget('known', bounded_worker_raw))
             assert sum(bounded_worker_counts.values()) <= 5, bounded_worker_counts
             assert result == (1 if length == 4096 else 0)
             assert redis.command('GET', pause_key) == (None if length == 4096 else bounded_worker_raw)
             assert redis.command('ZSCORE', due_key, 'synthetic-member') == (None if length == 4096 else '1800000000')
         print('PASS:known pause cleanup reads at most4097bytes;4096boundary accepts exact generation;oversized replacement retained without cleanup')
         seed_worker()
-        before_worker = command_counts()
-        assert worker_forget('known', worker_raw) == 1
-        worker_counts = difference(before_worker, command_counts())
+        measured_ack, worker_counts = measured_command(redis, lambda: worker_forget('known', worker_raw))
+        assert measured_ack == 1
         assert sum(worker_counts.values()) <= 5, worker_counts
         assert redis.command('GET', pause_key) is None
         assert redis.command('ZSCORE', due_key, 'synthetic-member') is None
         seed_worker(replacement, 1800086400)
         assert worker_forget('known', worker_raw) == 0  # Lost ACK never removes a replacement.
         seed_worker(None)
-        before_worker = command_counts()
-        assert worker_forget('missing', '') == 1
-        missing_counts = difference(before_worker, command_counts())
+        measured_ack, missing_counts = measured_command(redis, lambda: worker_forget('missing', ''))
+        assert measured_ack == 1
         assert sum(missing_counts.values()) <= 3, missing_counts
         assert redis.command('ZSCORE', due_key, 'synthetic-member') is None
         print('PASS:pause worker exact raw/due cleanup preserves replacements, changed score, funded ownership and lostACK;known=' + json.dumps(worker_counts, sort_keys=True) + ';missing=' + json.dumps(missing_counts, sort_keys=True))
@@ -1584,9 +1520,8 @@ def main():
         seed_worker(notice_raw)
         redis.command('PEXPIRE', pause_key, 60000)
         ttl_before = redis.command('PTTL', pause_key)
-        before_notice = command_counts()
-        assert notice() == 1
-        notice_counts = difference(before_notice, command_counts())
+        measured_ack, notice_counts = measured_command(redis, lambda: notice())
+        assert measured_ack == 1
         assert sum(notice_counts.values()) <= 4, notice_counts
         ttl_after = redis.command('PTTL', pause_key)
         assert 0 < ttl_after <= ttl_before
@@ -1670,9 +1605,7 @@ def main():
             ks,args,before,after,receipt=joint_ready(shared)
             cash=snapshot(joint_ledger)
             annual=redis.command('GET',ks[5])
-            counts=command_counts()
-            ignored=joint_call(redis,ks,args) # Deliberately lose the write ACK.
-            write_counts=difference(counts,command_counts())
+            ignored, write_counts = measured_command(redis, lambda: joint_call(redis, ks, args))  # Deliberately lose the write ACK.
             assert ignored==[1,1801000000]
             assert sum(write_counts.values())<=64,write_counts
             assert json.loads(redis.command('GET',joint_owner))==after
@@ -1689,9 +1622,8 @@ def main():
             assert redis.command('SISMEMBER',joint_indexes[1],joint_ref)==1
             assert redis.command('SISMEMBER',joint_indexes[2],joint_ref)==int(shared)
             state=joint_state(ks)
-            counts=command_counts()
-            assert joint_call(redis,ks,args,True)==[2,1801000000]
-            read_counts=difference(counts,command_counts())
+            measured_ack, read_counts = measured_command(redis, lambda: joint_call(redis, ks, args, True))
+            assert measured_ack == [2, 1801000000]
             assert sum(read_counts.values())<=64,read_counts
             assert all(name not in read_counts for name in ('set','hset','hdel','del','zadd','zrem','sadd','srem'))
             def joint_readback(_index):
@@ -1739,9 +1671,7 @@ def main():
         for shared in (False,True):
             restart_resource_ready(shared)
             before=snapshot(joint_ledger)
-            before_counts=command_counts()
-            ignored=restart_resource(redis) # Lost ACK retains one existing cohort.
-            cohort_counts=difference(before_counts,command_counts())
+            ignored, cohort_counts = measured_command(redis, lambda: restart_resource(redis))  # Lost ACK retains one existing cohort.
             assert ignored==[1,1801000000000]
             assert sum(cohort_counts.values())<=40,cohort_counts
             field='resource:ctr_restart_new:0'
@@ -1844,9 +1774,7 @@ def main():
         bounded_key = prefix + ':bounded-restart-source'
         keys.append(bounded_key)
         redis.command('SET', bounded_key, 'x' * 1000002)
-        before_bounded = command_counts()
-        bounded_result = redis.command('GETRANGE', bounded_key, 0, 1000000)
-        bounded_counts = difference(before_bounded, command_counts())
+        bounded_result, bounded_counts = measured_command(redis, lambda: redis.command('GETRANGE', bounded_key, 0, 1000000))
         assert len(bounded_result.encode('utf-8')) == 1000001
         assert sum(bounded_counts.values()) == 1, bounded_counts
         redis.command('SET', bounded_key, 'é' * 450000)

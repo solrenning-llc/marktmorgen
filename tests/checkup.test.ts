@@ -65,7 +65,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const SHOP = { sid: "a".repeat(32), listId: "b".repeat(32), statsId: "c".repeat(32), stripeAccountId: "acct_1Checkupxxxxxxx", domain: { name: "harborkitchen.com", liveAt: 1 }, subscriptionActive: true, tier: "pro", renewalUnpaidSince: 0, planDisputes: [] } as never;
 const with_ = (over: Record<string, unknown>) => ({ ...(SHOP as object), ...over }) as never;
 const OWNER = (permission: Parameters<typeof can>[1]) => can("owner", permission);
-const run = (store: never = SHOP, who = OWNER, ms?: number) => runCheckup(store, who, NOW, ms);
+// Plans on sale and billing set up, unless a check says otherwise; the closed state has its own check below.
+const run = (store: never = SHOP, who = OWNER, ms?: number) => runCheckup(store, who, NOW, ms, true, true);
 const stateOf = (checks: { id: string; state: string }[], id: string) => checks.find((c) => c.id === id)?.state ?? "left out";
 
 async function main(): Promise<void> {
@@ -164,9 +165,11 @@ async function main(): Promise<void> {
   is("strict reading: unreadable is null, never 0", [await allowancesUsedStrict({ ...(SHOP as object), sid: "", statsId: null, handle: "" } as never, ALLOWANCE_KINDS, NOW), (await allowancesUsedStrict(SHOP, ALLOWANCE_KINDS, NOW))?.every((r) => r.used === 0)], [null, true]);
 
   await takeAllowance(SHOP, "studio", STORE_ALLOWANCES.pro.studio, NOW);
-  const noBilling = (await runCheckup(SHOP, OWNER, NOW, undefined, false)).find((c) => c.id === "limits");
+  const noBilling = (await runCheckup(SHOP, OWNER, NOW, undefined, false, true)).find((c) => c.id === "limits");
   is("billing not set up here: the plan card is not drawn, so the way is said, not linked", [noBilling?.fix?.kind, noBilling?.fix?.kind === "outside" && noBilling.fix.where], ["outside", "Plans cannot be started or changed on this site just now."]);
   const editor = (permission: Parameters<typeof can>[1]) => can("editor", permission);
+  const closedPlans = (await runCheckup(SHOP, OWNER, NOW, undefined, true, false)).find((c) => c.id === "limits");
+  is("no plan on sale: the way to a plan is said, not linked, and the studio's rest names only what works", [closedPlans?.fix?.kind, closedPlans?.fix?.kind === "outside" && closedPlans.fix.where], ["outside", "Plans are not on sale yet, so no plan can be started or changed for now."]);
   is("a role without billing: asked to tell the owner", (await run(SHOP, editor)).find((c) => c.id === "limits")?.fix?.kind, "outside");
   await redis.pipeline([["DEL", redis.keys().find((k) => k.startsWith("nl:allow:studio:"))!]]);
   const trialing = with_({ trialEnds: NOW / 1000 + 5 * 86_400, sid: "d".repeat(32) });

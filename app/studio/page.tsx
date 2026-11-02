@@ -848,7 +848,7 @@ export default async function StudioPage({
   const billedYearly = live?.state === "active" ? live.cycle === "year" : current?.cycle === "year";
   // A store that has sold sees the yearly plan offered open, not folded away
   // (lib/yearly-offer.ts). One read, and only for a monthly plan.
-  const firstSale = store && paid && !billedYearly ? await firstSaleAt(store) : 0;
+  const firstSale = PLANS_ON_SALE && store && paid && !billedYearly ? await firstSaleAt(store) : 0;
   // A break the creator chose (lib/plan-pause.ts): set and not yet begun on
   // this subscription, or begun, with the plan starting again on its day.
   const pauseObservation = store && isBillingConfigured() ? await pauseView(store) : { kind: "missing" as const };
@@ -2038,14 +2038,21 @@ export default async function StudioPage({
                 ) : (
                   <>
                     <p className="mt-2 text-ink-soft">
-                      {`Your store on a domain of your own, like shop.yourname.com, with its certificate handled for you. Part of Pro, at ${priceWords("pro", "month")}.`}
+                      {`Your store on a domain of your own, like shop.yourname.com, with its certificate handled for you. Part of Pro, ${PLANS_ON_SALE ? "at" : "which, when plans open, is"} ${priceWords("pro", "month")}.`}
                     </p>
                     {store.domain ? (
                       <p className="mt-3 rounded-2xl bg-sand px-4 py-3 text-sm text-ink-soft">
                         {`${store.domain.name} is resting while your store is not on Pro: visitors are sent to marktmorgen.com/@${store.handle}. It opens your store again the moment Pro is back.`}
                       </p>
                     ) : null}
-                    <a href="#billing" className="btn btn-secondary mt-5">See Pro</a>
+                    {/* #billing is drawn only for whoever may change the plan, where billing is set up, and offers Pro only while plans are on sale. */}
+                    {!may("billing") ? (
+                      <p className="mt-5 text-sm text-ink-soft">The store&apos;s owner chooses its plan.</p>
+                    ) : !PLANS_ON_SALE || !billingReady ? (
+                      <p className="mt-5 text-sm text-ink-soft">Paid plans are not on sale yet, so this store cannot move to Pro for now.</p>
+                    ) : (
+                      <a href="#billing" className="btn btn-secondary mt-5">See Pro</a>
+                    )}
                   </>
                 )}
               </div>
@@ -2703,6 +2710,11 @@ export default async function StudioPage({
                         A change of billing is waiting for your bank to let the
                         payment through. Until it does, nothing has changed.
                       </p>
+                    ) : !PLANS_ON_SALE ? (
+                      // Every change below goes through app/api/billing/switch, which refuses while no plan is on sale.
+                      <p className="mt-3 text-sm text-ink-soft">
+                        {`Plans are not on sale yet, so this plan and how it is billed cannot be changed for now.${store.subscriptionId ? " You can still cancel it below." : ""}`}
+                      </p>
                     ) : billedYearly ? (
                       <details className="mt-4">
                         <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
@@ -2743,7 +2755,7 @@ export default async function StudioPage({
                         </form>
                       </details>
                     )}
-                    {!changePending && PRO_ON_SALE && tier === "creator" ? (
+                    {PLANS_ON_SALE && !changePending && PRO_ON_SALE && tier === "creator" ? (
                       <details className="mt-4">
                         <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                           {`Move up to Pro: ${priceWords("pro", billedYearly ? "year" : "month")}`}
@@ -2769,7 +2781,7 @@ export default async function StudioPage({
                       count on the Email page, and nowhere as a nag: a store
                       that never reaches its emails is never asked.
                     */}
-                    {!changePending && PRO_ON_SALE && tier === "pro" ? (
+                    {PLANS_ON_SALE && !changePending && PRO_ON_SALE && tier === "pro" ? (
                       <details className="mt-4">
                         <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                           {`Move up to Scale: ${priceWords("scale", billedYearly ? "year" : "month")}`}
@@ -2789,7 +2801,7 @@ export default async function StudioPage({
                         </form>
                       </details>
                     ) : null}
-                    {!changePending && tier === "scale" ? (
+                    {PLANS_ON_SALE && !changePending && tier === "scale" ? (
                       <details className="mt-4">
                         <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                           {`Go back to Pro: ${priceWords("pro", billedYearly ? "year" : "month")}`}
@@ -2808,7 +2820,7 @@ export default async function StudioPage({
                         </form>
                       </details>
                     ) : null}
-                    {!changePending && tier === "pro" ? (
+                    {PLANS_ON_SALE && !changePending && tier === "pro" ? (
                       <details className="mt-4">
                         <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                           {`Go back to the ${priceWords("creator", billedYearly ? "year" : "month")} plan`}
@@ -2850,6 +2862,8 @@ export default async function StudioPage({
                         </form>
                       </details>
                     ) : null}
+                    {/* The cancel route needs the subscription's id (app/api/billing/cancel); without one, nothing to offer. */}
+                    {store.subscriptionId ? (
                     <details className="mt-4">
                       <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                         Cancel the subscription
@@ -2869,6 +2883,7 @@ export default async function StudioPage({
                         </button>
                       </form>
                     </details>
+                    ) : null}
                     <p className="mt-3 text-sm text-ink-soft">
                       No email to us, no chat, no second request. This button
                       is the whole of it, and you can change your mind until

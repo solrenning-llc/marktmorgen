@@ -214,8 +214,8 @@ export function checkoutCheck(trouble: { week: number; last: { message: string }
 const LARGEST_TAKE: Partial<Record<AllowanceKind, number>> = { studio: STUDIO_PAGE_UNITS, api: API_WRITE_UNITS };
 
 /** What stops when a figure is used up, kind by kind. */
-function stopsWords(kind: AllowanceKind, reset: string): string {
-  if (kind === "studio") return `Your studio rests until it opens again; changing or canceling your plan, deleting the store and downloading your data still work. ${reset}`;
+function stopsWords(kind: AllowanceKind, reset: string, plansOnSale = true): string {
+  if (kind === "studio") return `Your studio rests until it opens again; ${plansOnSale ? "changing or canceling your plan" : "canceling your plan"}, deleting the store and downloading your data still work. ${reset}`;
   return `Until it opens again, what needs it does not run. ${reset}`;
 }
 
@@ -229,11 +229,12 @@ function stopsWords(kind: AllowanceKind, reset: string): string {
  * Fine otherwise, with the most used one; not checked when they could not be
  * read. A figure of zero (not on this plan) is left out. `paying` says
  * whether the store pays for a plan, so the way out is a larger plan or a
- * plan at all.
+ * plan at all; `plansOnSale` (lib/opening.ts) whether either can be had now.
  */
-export function limitsCheck(readings: { kind: AllowanceKind; used: number; figure: number }[] | null, reset: string, paying: boolean): Check {
+export function limitsCheck(readings: { kind: AllowanceKind; used: number; figure: number }[] | null, reset: string, paying: boolean, plansOnSale = true): Check {
   const title = "Your plan's limits";
   if (!readings) return { id: "limits", title, state: "not-checked", found: "We could not read how much of your plan's figures is used just now. Try again in a few minutes." };
+  // While no plan is on sale this fix is said, not linked (lib/checkup.ts, forBilling).
   const fix: CheckFix = { kind: "studio", href: "/studio#billing", label: paying ? "See a larger plan" : "Start a plan" };
   const counted = readings.filter((r) => r.figure > 0);
   const share = (r: { used: number; figure: number }) => r.used / r.figure;
@@ -248,7 +249,7 @@ export function limitsCheck(readings: { kind: AllowanceKind; used: number; figur
       title,
       state: "problem",
       found: `${first.used >= first.figure ? `${words.what} in this period are used: ${n(first.figure)} ${words.many}.` : `${words.what} in this period are almost used: ${n(first.used)} of ${n(first.figure)} ${words.many}, less than the next use takes.`}${more.length ? ` ${more.length === 1 ? "One more figure is" : `${more.length} more figures are`} used up too.` : ""}`,
-      ifLeft: stopsWords(first.kind, reset),
+      ifLeft: stopsWords(first.kind, reset, plansOnSale),
       fix,
     };
   }

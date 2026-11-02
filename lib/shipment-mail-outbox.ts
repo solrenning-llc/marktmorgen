@@ -38,8 +38,8 @@ export type ShipmentMailPolicy = {
   admissionsUntil: number;
   continuedReviewIds?: string[];
   /** Explicit extra source coverage in this same funded envelope; absence
-   * preserves legacy physical/shipment coverage, never admits courses. */
-  coveredOrigins?: ("course-confirmation")[];
+   * preserves legacy physical/shipment coverage, never admits extra origins. */
+  coveredOrigins?: ("course-confirmation" | "single-digital-confirmation")[];
   /** Separate quantified discovery/trigger coverage in this SAME review.
    * Storage funding is not recovery funding. Actual review remains NULL. */
   recovery?: PendingMailRecoveryGrant;
@@ -142,11 +142,16 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
   }
   if (p.coveredOrigins !== undefined) {
     const input = p.coveredOrigins;
-    if (!Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype ||
-        Object.getOwnPropertyDescriptor(input, "length")?.value !== 1 || Reflect.ownKeys(input).length !== 2) return null;
-    const field = Object.getOwnPropertyDescriptor(input, "0");
-    if (!field || !Object.hasOwn(field, "value") || field.value !== "course-confirmation") return null;
-    p.coveredOrigins = ["course-confirmation"];
+    if (!Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype) return null;
+    const length = Object.getOwnPropertyDescriptor(input, "length")?.value;
+    if (!Number.isSafeInteger(length) || length < 1 || length > 2 || Reflect.ownKeys(input).length !== length + 1) return null;
+    const origins: ("course-confirmation" | "single-digital-confirmation")[] = [];
+    for (let i = 0; i < length; i++) {
+      const field = Object.getOwnPropertyDescriptor(input, String(i));
+      if (!field || !Object.hasOwn(field, "value") || !["course-confirmation", "single-digital-confirmation"].includes(field.value) || origins.includes(field.value)) return null;
+      origins.push(field.value);
+    }
+    p.coveredOrigins = origins;
   }
   return p as unknown as ShipmentMailPolicy;
   } catch { return null; }
@@ -239,8 +244,17 @@ if op == 'enqueue' then
  -- Courses are a reserve/readback construction only. Funding must explicitly
  -- cover this origin in the SAME policy; no physical funding inheritance.
  if n.originKind~=nil then
-  if n.originKind~='course' or n.phase~='course_reserved' or n.state~='queued' or n.next~=0 or type(n.courseBindingFingerprint)~='string' or #n.courseBindingFingerprint~=64 or string.find(n.courseBindingFingerprint,'[^a-f0-9]') or
-     type(p.coveredOrigins)~='table' or #p.coveredOrigins~=1 or p.coveredOrigins[1]~='course-confirmation' then return {'unknown'} end
+  if type(p.coveredOrigins)~='table' or #p.coveredOrigins<1 or #p.coveredOrigins>2 then return {'unknown'} end
+  local covered={}
+  for _,purpose in ipairs(p.coveredOrigins) do
+   if (purpose~='course-confirmation' and purpose~='single-digital-confirmation') or covered[purpose] then return {'unknown'} end
+   covered[purpose]=true
+  end
+  if n.originKind=='course' then
+   if n.phase~='course_reserved' or n.state~='queued' or n.next~=0 or type(n.courseBindingFingerprint)~='string' or #n.courseBindingFingerprint~=64 or string.find(n.courseBindingFingerprint,'[^a-f0-9]') or not covered['course-confirmation'] then return {'unknown'} end
+  elseif n.originKind=='single_digital' then
+   if n.kind~='confirmation' or n.phase~='awaiting_creation' or n.state~='queued' or not covered['single-digital-confirmation'] then return {'unknown'} end
+  else return {'unknown'} end
  end
  if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then return {'unknown'} end
  local a,b=pool(KEYS[6]),pool(KEYS[7])
@@ -257,7 +271,7 @@ if op == 'enqueue' then
  redis.call('SET',KEYS[2],n.sourceValue)
  -- Reserve-only courses have no worker stage. Keep their protected source
  -- in the existing ownership indices, without an unbounded polling member.
- if n.originKind==nil then redis.call('ZADD',KEYS[3],now,n.id) end
+ if n.originKind~='course' then redis.call('ZADD',KEYS[3],now,n.id) end
  redis.call('SADD',KEYS[4],n.id); redis.call('SADD',KEYS[5],n.id); redis.call('SADD',KEYS[8],n.id)
  return {'queued',supplied}
 end
@@ -265,11 +279,18 @@ if not r then return {'missing'} end
 if raw ~= expected then return {'changed'} end
 if op == 'cancel' then drop(); return {'canceled'} end
 -- This construction has no claim, dispatch or acceptance protocol for courses.
-if r.originKind~=nil then return {'unknown'} end
+if r.originKind~=nil and r.originKind~='single_digital' then return {'unknown'} end
+-- Retention-only digital origins have no proved access/dispatch stage.
+if r.originKind=='single_digital' and op~='claim' and op~='defer' then return {'unknown'} end
 if source ~= r.sourceValue then return {'unknown'} end
 if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then return {'held',raw} end
 local good,p=pcall(cjson.decode,ARGV[6])
 if not good or type(p)~='table' then return {'unknown'} end
+if r.originKind=='single_digital' then
+ local covered=false
+ if type(p.coveredOrigins)=='table' then for _,purpose in ipairs(p.coveredOrigins) do if purpose=='single-digital-confirmation' then covered=true end end end
+ if not covered then return {'unknown'} end
+end
 local supported = r.reviewId==p.reviewId
 if type(p.continuedReviewIds)=='table' then for _,id in ipairs(p.continuedReviewIds) do if id==r.reviewId then supported=true end end end
 if not supported then return {'unknown'} end
@@ -495,7 +516,12 @@ if current~='' and ARGV[8]=='valid' then
  local good,row=pcall(cjson.decode,current)
  if not good or type(row)~='table' or row.id~=id then return {'unknown'} end
  do
-  if (family=='shipment' and row.kind~=nil) or (family=='confirmation' and (row.kind~='confirmation' or row.originKind~=nil)) then return {'unknown'} end
+  if (family=='shipment' and row.kind~=nil) or (family=='confirmation' and (row.kind~='confirmation' or (row.originKind~=nil and row.originKind~='single_digital'))) then return {'unknown'} end
+  if row.originKind=='single_digital' then
+   local covered=false
+   if type(g.coveredOrigins)=='table' then for _,purpose in ipairs(g.coveredOrigins) do if purpose=='single-digital-confirmation' then covered=true end end end
+   if not covered then return {'unknown'} end
+  end
   if KEYS[4]~=sourcePrefix..(family=='shipment' and row.session or id) or type(row.statsId)~='string' or type(row.person)~='string' then return {'unknown'} end
   local dt,st=redis.call('TYPE',KEYS[5]).ok,redis.call('TYPE',KEYS[4]).ok
   if (dt~='none' and dt~='zset') or st~='string' or redis.call('GETRANGE',KEYS[4],0,8192)~=row.sourceValue then return {'unknown'} end
@@ -556,7 +582,7 @@ export async function recoverPendingMail(family: "shipment" | "confirmation", de
  if (!p?.recovery || !integer(deadline) || now() >= deadline) return;
  const started = performance.now(), monotonicDeadline = started + Math.min(250, deadline - now());
  const expired = () => now() >= deadline || performance.now() >= monotonicDeadline;
- const grant = { recovery: p.recovery, reviewId: p.reviewId, maximumChecks: p.maximumChecks, globalItems: p.globalItems, globalBytes: p.globalBytes, continuedReviewIds: p.continuedReviewIds ?? [] };
+ const grant = { recovery: p.recovery, reviewId: p.reviewId, maximumChecks: p.maximumChecks, globalItems: p.globalItems, globalBytes: p.globalBytes, continuedReviewIds: p.continuedReviewIds ?? [], coveredOrigins: p.coveredOrigins ?? [] };
  const proof = JSON.stringify(grant), fp = digest(proof), owner = randomBytes(24).toString("hex"), pipeline = runtime.pipeline ?? redisPipeline;
  try {
   const response = ownArray(await pipeline([["EVAL", PENDING_MAIL_RECOVERY_SCRIPT, 2, POOL, ALL, "next", proof, fp, owner, family, now(), "", ""]]));

@@ -474,7 +474,7 @@ async function confirmOnce(
   if (session.id !== sessionId) return "skip";
   // The original reserved source owns confirmation and accounting. The
   // thanks page/sweep must never start a second legacy sender or counter.
-  if (session.metadata?.mm_order_origin === "physical-v1") return "skip";
+  if (["physical-v1", "single-digital-v1"].includes(session.metadata?.mm_order_origin ?? "")) return "skip";
   read.session = session;
   // A gift through "Support my work" has nothing to hand over or confirm (lib/store-tips.ts).
   if (session.metadata?.kind === "tip") return "skip";

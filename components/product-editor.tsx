@@ -2128,7 +2128,7 @@ export function ProductEditor({
             {editingId === product.id ? (() => {
               // What this save changes in what buyers pay, if anything (lib/price-review.ts): a price, a membership's, a price they choose.
               const review = reviewPrice(
-                { hidden: product.hidden, options: product.options.length, priceCents: product.priceCents, interval: product.recurring?.interval ?? null, suggestedCents: product.pwyw?.suggestedCents ?? null, intro: product.intro ? { cents: product.intro.cents, count: product.intro.count } : null, yearlyCents: product.yearly?.cents ?? null },
+                { hidden: product.hidden, options: product.options.length, priceCents: product.priceCents, interval: product.recurring?.interval ?? null, suggestedCents: product.pwyw?.suggestedCents ?? null, intro: product.intro ? { cents: product.intro.cents, count: product.intro.count } : null, yearlyCents: product.yearly?.cents ?? null, trialDays: product.recurring?.trialDays ?? 0, payments: product.recurring?.payments ?? 0 },
                 draft,
                 (typed) => readMoney(typed, currency),
                 (cents) => formatMoney(cents, currency),
@@ -2154,7 +2154,7 @@ export function ProductEditor({
                 draft={draft}
                 setDraft={(next) => {
                   setDraft(next);
-                  if (next.price !== draft.price || next.every !== draft.every || next.pwyw !== draft.pwyw || next.suggested !== draft.suggested || next.introPrice !== draft.introPrice || next.introCount !== draft.introCount || next.yearlyPrice !== draft.yearlyPrice) setPriceReview(null);
+                  if (next.price !== draft.price || next.every !== draft.every || next.pwyw !== draft.pwyw || next.suggested !== draft.suggested || next.introPrice !== draft.introPrice || next.introCount !== draft.introCount || next.yearlyPrice !== draft.yearlyPrice || next.trial !== draft.trial || next.payments !== draft.payments) setPriceReview(null);
                 }}
                 busy={busy}
                 error={error}

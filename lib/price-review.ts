@@ -7,10 +7,10 @@
  * Reviewed: how buyers pay (once, every day, week, month or year, or they
  * choose); the price, or the lowest price they may choose; the price their
  * box starts at; a membership's introductory price and its yearly price,
- * also when a change of schedule takes them away; and, in its own editor, the
- * price of one of several price options (optionPriceReview). Not reviewed
- * yet: a membership's free trial and its number of payments; drafts, which
- * no buyer sees.
+ * also when a change of schedule takes them away; a membership's free trial
+ * and the number of payments it ends after; and, in its own editor, the
+ * price of one of several price options (optionPriceReview). Drafts, which
+ * no buyer sees, are not reviewed.
  *
  * What it says about members is what the code does: a membership's checkout
  * makes the member's subscription at the price and schedule of that moment
@@ -20,7 +20,7 @@
  * joined at, also when the product stops being a membership, until they or
  * the creator cancel.
  */
-import type { Interval } from "@/lib/product-recurring";
+import { readRecurring, type Interval } from "@/lib/product-recurring";
 
 export type PricedProduct = {
   /** A draft is seen by no buyer: nothing to review. */
@@ -35,12 +35,15 @@ export type PricedProduct = {
   intro: { cents: number; count: number } | null;
   /** A monthly membership's yearly price, or null. */
   yearlyCents: number | null;
+  /** A membership's free trial in days and the payments it ends after; 0 for none. Absent: none. */
+  trialDays?: number;
+  payments?: number;
 };
 
-export type PriceDraft = { price: string; every: string; pwyw: boolean; suggested: string; introPrice: string; introCount: string; yearlyPrice: string };
+export type PriceDraft = { price: string; every: string; pwyw: boolean; suggested: string; introPrice: string; introCount: string; yearlyPrice: string; trial?: string; payments?: string };
 
 /** Which field a row's "Change" goes back to. */
-export type PriceField = "every" | "pwyw" | "price" | "suggested" | "intro" | "yearly";
+export type PriceField = "every" | "pwyw" | "price" | "suggested" | "intro" | "yearly" | "trial" | "payments";
 
 export type PriceRow = { key: string; label: string; now: string; then: string; field: PriceField };
 
@@ -85,14 +88,27 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
   if (chooses && suggested !== product.suggestedCents) rows.push({ key: "suggested", label: "Price their box starts at", now: chose && product.suggestedCents !== null ? money(product.suggestedCents) : "None", then: money(suggested!), field: "suggested" });
   const introWords = (i: { cents: number; count: number } | null) => (i ? `${money(i.cents)} for the first ${i.count === 1 ? "payment" : `${i.count} payments`}` : "None");
   if (introWords(intro) !== introWords(product.intro)) rows.push({ key: "intro", label: "Introductory price", now: introWords(product.intro), then: introWords(intro), field: "intro" });
+  // The free trial and the payments it ends after, read by the product route's own rule (lib/product-recurring.ts, readRecurring):
+  // one it would refuse (out of range, not a whole number) is not reviewed, and the save says why.
+  const recurring = every ? readRecurring(every, draft.trial?.trim() ?? "", draft.payments?.trim() ?? "") : null;
+  if (recurring === "trial" || recurring === "payments") return null;
+  const trial = recurring ? recurring.trialDays : 0;
+  const payments = recurring ? recurring.payments : 0;
+  // Nor a combination the route refuses: an introductory price with a trial or an end, a yearly price with an end.
+  if ((intro && (trial > 0 || payments > 0)) || (yearly !== null && payments > 0)) return null;
+  const trialWords = (days: number) => (days ? `${days} ${days === 1 ? "day" : "days"} free` : "None");
+  // Something bought once neither ends nor runs: "None".
+  const endsWords = (n: number, member: boolean) => (!member ? "None" : n ? `After ${n} payments` : "Runs until canceled");
+  if (trial !== (product.trialDays ?? 0)) rows.push({ key: "trial", label: "Free trial", now: trialWords(product.trialDays ?? 0), then: trialWords(trial), field: "trial" });
+  if (payments !== (product.payments ?? 0)) rows.push({ key: "payments", label: "Ends", now: endsWords(product.payments ?? 0, Boolean(product.interval)), then: endsWords(payments, Boolean(every)), field: "payments" });
   if (yearly !== product.yearlyCents) rows.push({ key: "yearly", label: "Yearly price", now: product.yearlyCents === null ? "None" : money(product.yearlyCents), then: yearly === null ? "None" : money(yearly), field: "yearly" });
   if (!rows.length) return null;
 
   const note = !product.interval
     ? "Your store shows this as soon as you save."
     : every
-      ? "New members pay this once you save; a checkout already open keeps what it opened with. Members who already joined keep the price and schedule they joined at."
-      : "Members who already joined keep being charged the price and schedule they joined at until they or you cancel: saving this does not cancel them. To stop them, cancel their memberships in your Stripe dashboard. New buyers pay what this summary shows once you save.";
+      ? "New members pay this once you save; a checkout already open keeps what it opened with. Members who already joined keep the price, schedule, trial and end they joined at."
+      : "Members who already joined keep being charged the price and schedule they joined at until they or you cancel, or their last payment if theirs ends by itself: saving this does not cancel them. To stop them, cancel their memberships in your Stripe dashboard. New buyers pay what this summary shows once you save.";
   return { rows, note };
 }
 

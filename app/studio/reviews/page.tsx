@@ -11,6 +11,9 @@ import { canWrite } from "@/lib/mail";
 import { HIDDEN_RULE, OVERVIEW_READ_MAX, type StudioRow, averageText, reviewsSince, showsRating, studioReviews, summaries } from "@/lib/reviews";
 import { OVERVIEW_MONTHS, byMonth, monthAverage, monthStart } from "@/lib/review-overview";
 import { ReviewAskEditor, ReviewRow, SeenAllButton, type StudioReview } from "@/components/review-studio";
+import { ReviewQr } from "@/components/review-qr";
+import { canRecover } from "@/lib/buyer-orders";
+import { storeBase } from "@/lib/purchase-email";
 import { AiOn } from "@/components/ai-assist";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
 import { Stars } from "@/components/review-stars";
@@ -219,6 +222,16 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 </ul>
               )}
             </div>
+
+            {/* Only where the purchases page works for buyers (lib/buyer-orders.ts): otherwise the code would open a dead end. */}
+            {canRecover(store) ? (
+              <section aria-labelledby="in-person-title" className="card p-5 sm:p-6">
+                <h2 id="in-person-title" className="font-semibold text-ink">Buyers you meet in person</h2>
+                <div className="mt-2">
+                  <ReviewQr url={`${storeBase(store)}/orders`} storeName={store.name} />
+                </div>
+              </section>
+            ) : null}
 
             <section aria-labelledby="by-month-title" className="card p-5 sm:p-6">
               <h2 id="by-month-title" className="font-semibold text-ink">By month</h2>

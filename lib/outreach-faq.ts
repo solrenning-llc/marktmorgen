@@ -21,7 +21,7 @@ export function outreachBeginnerQuestions(onSale = PLANS_ON_SALE): { q: string; 
   return [
     {
       q: "How do I write my first pitch?",
-      a: `On a paid-up ${plans} plan (in your studio, ${PLAN_TITLES.pro} is labeled “${w.studioPlan}”), with writing help switched on for your store, the owner, an ${ROLE_NAMES.admin} or an ${ROLE_NAMES.editor} opens “${w.tool}” in the studio. Under “${w.who}”, fill in “${w.name}” and “${w.address}” and press “${w.save}”. Under “${w.write}”, pick one of the options under “${w.goal}”, type “${w.site}”, and pick “${w.country}” from those not marked “${w.notHere}”. Say what you would offer, and press “${w.find}”. Under “${w.addresses}”, choose one you can select and press “${w.draft}”. The draft appears under “${w.pitches}”, where you can read and change it. Then press “${w.gmail}”, “${w.mailApp}” or “${w.copy}”: you send it yourself, from your own mailbox.`,
+      a: `On a paid-up ${plans} plan (your studio calls the ${PLAN_TITLES.pro} plan “${w.studioPlan}”), while the writing help is available for your store, the owner, an ${ROLE_NAMES.admin} or an ${ROLE_NAMES.editor} opens “${w.tool}” in the studio. Under “${w.who}”, fill in “${w.name}” and “${w.address}” and press “${w.save}”. Under “${w.write}”, pick one of the options under “${w.goal}”, type “${w.site}”, and pick “${w.country}” from those not marked “${w.notHere}”. Say what you would offer, and press “${w.find}”. Under “${w.addresses}”, choose one you can select and press “${w.draft}”. The draft appears under “${w.pitches}”, where you can read and change it. Then press “${w.gmail}”, “${w.mailApp}” or “${w.copy}”: you send it yourself, from your own mailbox.`,
     },
     {
       q: "Can I try it before paying?",

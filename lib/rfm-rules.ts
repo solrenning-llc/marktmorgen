@@ -10,7 +10,8 @@
  * platform has no purchase here, so is in none of them.
  *
  * Counted since units 2 and 3a: a membership's and a payment plan's later
- * payments (each moves the last purchase, none is a new order), and refunds
+ * payments (each moves the last purchase and is one more time they bought,
+ * so a member of a year is not "new"), and refunds
  * and disputes, of one-time purchases and of every invoice's payment (a
  * purchase given back in full is not one). The ledger can be partial (a
  * reading reaches so far back, or a list could not be read); the panel says

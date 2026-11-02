@@ -5,7 +5,8 @@ import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { TeamManager } from "@/components/team-manager";
 import { studioPath, studioView } from "@/lib/studio-route";
-import { MAX_TEAM, readLog, readTeam } from "@/lib/team";
+import { MAX_TEAM, hasSecondStep, readLog, readTeam } from "@/lib/team";
+import { TeamTwoStepSwitch } from "@/components/team-two-step-switch";
 import { ROLE_NAMES } from "@/lib/team-roles";
 
 export const metadata: Metadata = {
@@ -39,6 +40,11 @@ export default async function StudioTeamPage({
   const { view } = found;
   const { store } = view;
   const [team, log] = await Promise.all([readTeam(store.sid), readLog(store.sid)]);
+  // Who has a second step now (612 [WP11]): read only for the owner, who alone sees the switch.
+  const owner = view.role === "owner";
+  const [ownerReady, ready] = owner
+    ? await Promise.all([hasSecondStep(view.email).catch(() => false), Promise.all(team.members.map((m) => hasSecondStep(m.email).catch(() => false)))])
+    : [false, [] as boolean[]];
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -65,6 +71,17 @@ export default async function StudioTeamPage({
               max={MAX_TEAM}
             />
           </div>
+
+          {owner ? (
+            <section className="card mt-8 p-6 sm:p-8" aria-labelledby="two-step-title">
+              <h2 id="two-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                Two-step sign-in for the team
+              </h2>
+              <div className="mt-3">
+                <TeamTwoStepSwitch on={team.requireTwoStep === true} ownerReady={ownerReady} members={team.members.map((m, i) => ({ email: m.email, ready: ready[i] === true }))} />
+              </div>
+            </section>
+          ) : null}
 
           <section className="card mt-8 p-6 sm:p-8" aria-labelledby="log-title">
             <h2 id="log-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">

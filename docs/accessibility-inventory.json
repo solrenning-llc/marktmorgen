@@ -1502,6 +1502,7 @@
     "components/tax-editor.tsx",
     "components/team-event-editor.tsx",
     "components/team-manager.tsx",
+    "components/team-two-step-switch.tsx",
     "components/template-library.tsx",
     "components/terms-check-panel.tsx",
     "components/test-counts-notice.tsx",

@@ -172,8 +172,13 @@ export async function teamTwoStepBlocks(store: Store, email: string, role: Role)
   if (role === "owner" || !store.sid) return false;
   const team = await readTeam(store.sid);
   if (!team.requireTwoStep) return false;
+  return !(await hasSecondStep(email));
+}
+
+/** Whether a person has a second step: an authenticator app turned on, or a passkey. */
+export async function hasSecondStep(email: string): Promise<boolean> {
   const [app, keys] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
-  return !app && keys.length === 0;
+  return app || keys.length > 0;
 }
 
 /** The owner turns the requirement on or off; written into the team's activity log. */

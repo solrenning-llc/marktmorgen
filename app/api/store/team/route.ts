@@ -2,7 +2,7 @@ import { type NextRequest, after } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { linkOrigin } from "@/lib/request-origin";
 import { noticeCreator } from "@/lib/account-notice";
-import { inviteMember, logTeam, removeMember, revokeInvite, setMemberRole } from "@/lib/team";
+import { hasSecondStep, inviteMember, logTeam, removeMember, revokeInvite, setMemberRole, setRequireTwoStep } from "@/lib/team";
 import { ROLE_NAMES, parseTeamRole } from "@/lib/team-roles";
 import { forgetPerson } from "@/lib/phone-alerts";
 
@@ -16,6 +16,7 @@ const ANSWERS: Record<string, number> = {
   role: 400,
   owner: 400,
   member: 409,
+  owner_two_step: 409,
   invited: 409,
   full: 409,
   limited: 429,
@@ -76,6 +77,16 @@ export async function POST(request: NextRequest) {
       await forgetDevices(store, who);
       await logTeam(store.sid, { who: email, role, what: `Took ${who.toLowerCase()} off the team` });
       return Response.json({ ok: true });
+    }
+
+    // 612 [WP11]: the owner requires two-step sign-in of the team, or stops.
+    // Only an owner who has a second step themselves may require one.
+    if (action === "two-step") {
+      if (role !== "owner") return fail("owner");
+      const on = body.on === true;
+      if (on && !(await hasSecondStep(email))) return fail("owner_two_step");
+      await setRequireTwoStep(store, on, email);
+      return Response.json({ ok: true, on });
     }
 
     if (action === "leave") {

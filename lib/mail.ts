@@ -212,6 +212,7 @@ async function tellSenderIsFull(): Promise<void> {
       text: [
         "Creator list email sends only through Amazon SES.",
         "Sending waits until availability can be confirmed.",
+        "Resend is not used for this list batch. This notice does not confirm delivery.",
         "Account settings, sending capacity or usage may need attention. This notice does not identify the current cause or confirm delivery.",
         "Service email can use Resend only while the account review, credential binding and paid fallback quota are confirmed. Missing proof blocks that route.",
         "Sign-in links, receipts and deliveries keep their existing sending route.",

@@ -21,6 +21,7 @@ import {
 } from "@/lib/affiliates";
 import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes";
 import { leadProblem } from "@/lib/affiliate-lead-rules";
+import { planTerms, readNoticeDays } from "@/lib/affiliate-notice";
 import { MAX_LEAD_DECISIONS, decideLeads } from "@/lib/affiliate-leads";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest) {
 
   try {
     if (action === "settings") {
-      const setting = parseAffiliateSetting({ ...body, enabled: body.enabled === true });
+      // A pending cut is never taken from the request: it is worked out below.
+      const setting = parseAffiliateSetting({ ...body, enabled: body.enabled === true, pending: null });
       // Out-of-range numbers are refused, not quietly replaced by the defaults.
       if (Number(body.percent) !== setting.percent) return fail("percent");
       if (Number(body.days) !== setting.days) return fail("days");
@@ -83,7 +85,17 @@ export async function POST(request: NextRequest) {
       if (leadRefused) return fail(leadRefused);
       const asked = body.rates && typeof body.rates === "object" ? Object.keys(body.rates as object).length : 0;
       if (asked !== Object.keys(setting.rates).length) return fail("rate");
-      const result = await setAffiliateSetting(guarded.ref, setting);
+      // Notice before a cut (630 [HN6](2), lib/affiliate-notice.ts): none, or 3 to 90 days, refused otherwise.
+      const notice = readNoticeDays(body.notice);
+      if (body.notice !== undefined && body.notice !== null && body.notice !== "" && Number(body.notice) !== 0 && notice === 0) return fail("notice");
+      const before = (await storeForEmail(guarded.ref))?.affiliates ?? null;
+      const terms = (s: { percent: number; rates: Record<string, number>; days: number }) => ({ percent: s.percent, rates: s.rates, days: s.days });
+      // A cut waits the longer of the notice the program had, as its affiliates were told, and the one chosen now;
+      // and never ends before a notice already running.
+      const plan = before
+        ? planTerms(terms(before), terms(setting), Math.max(notice, before.notice ?? 0), Math.floor(Date.now() / 1000), before.pending ?? null)
+        : { current: terms(setting), pending: null };
+      const result = await setAffiliateSetting(guarded.ref, { ...setting, ...plan.current, notice, pending: plan.pending });
       if (!result.ok) return fail(result.reason);
       return Response.json({ ok: true });
     }

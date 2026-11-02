@@ -64,6 +64,13 @@ is("the window cut withdrawn: the window stays", again.pending?.days, 60);
 is("the share cut still waits, from the new save", again.pending ? [again.pending.percent, again.pending.from] : null, [20, later + 30 * DAY]);
 const undone = planTerms(cut.current, base, 30, later);
 is("the creator puts the old terms back: nothing waits", undone.pending, null);
+const same = planTerms(cut.current, { ...base, percent: 20, days: 30 }, 30, later, cut.pending);
+is("saving the very terms announced (another field changed) keeps the day", same.pending?.from, NOW + 30 * DAY);
+const sooner = planTerms(cut.current, { ...base, percent: 10, days: 30 }, 0, later, cut.pending);
+is("a deeper cut with no notice now still waits for the day already announced", sooner.pending ? [sooner.pending.percent, sooner.pending.from] : null, [10, NOW + 30 * DAY]);
+is("…and the terms of today stay the old ones", sooner.current.percent, 30);
+const longer = planTerms(cut.current, { ...base, percent: 10, days: 30 }, 60, later, cut.pending);
+is("a new notice that ends later moves the day later", longer.pending?.from, later + 60 * DAY);
 
 part("Read back from storage only whole");
 const bounds = { minPercent: 1, maxPercent: 90, minDays: 1, maxDays: 400 };

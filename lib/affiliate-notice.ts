@@ -52,15 +52,24 @@ export function lowers(now: NoticeTerms, next: NoticeTerms): boolean {
 /**
  * The terms in force today after a creator saves `next` over `now`, and what
  * waits, if anything. Each term that gets better applies at once; each that
- * gets worse keeps its old value until `now + notice days`, when the whole of
- * `next` takes over. A saved change replaces any notice already running:
- * the clock restarts only for what still gets worse.
+ * gets worse keeps its old value until the day, when the whole of `next`
+ * takes over. `running` is a notice already under way: saving the very terms
+ * it announced keeps its day; saving others replaces it, and never on an
+ * earlier day than it had announced, even with no notice now.
  *
- * `noticeDays` 0 applies everything at once, as before notice existed.
+ * `noticeDays` 0, with nothing running, applies everything at once, as before
+ * notice existed.
  */
-export function planTerms(now: NoticeTerms, next: NoticeTerms, noticeDays: number, nowSeconds: number): { current: NoticeTerms; pending: PendingTerms | null } {
+export function planTerms(
+  now: NoticeTerms,
+  next: NoticeTerms,
+  noticeDays: number,
+  nowSeconds: number,
+  running: PendingTerms | null = null,
+): { current: NoticeTerms; pending: PendingTerms | null } {
+  if (running && sameTerms(next, running)) return { current: copy(now), pending: { ...copy(running), from: running.from } };
   const notice = readNoticeDays(noticeDays);
-  if (!notice || !lowers(now, next)) return { current: copy(next), pending: null };
+  if (!lowers(now, next) || (!notice && !running)) return { current: copy(next), pending: null };
   const percent = Math.max(now.percent, next.percent);
   const days = Math.max(now.days, next.days);
   // Every product whose share would differ from the new store share is written out, so none moves with it unasked.
@@ -70,7 +79,16 @@ export function planTerms(now: NoticeTerms, next: NoticeTerms, noticeDays: numbe
     const keep = Math.max(rateOf(now, id), rateOf(next, id));
     if (keep !== percent || id in next.rates) rates[id] = keep;
   }
-  return { current: { percent, rates, days }, pending: { ...copy(next), from: nowSeconds + notice * 86_400 } };
+  const from = Math.max(nowSeconds + notice * 86_400, running?.from ?? 0);
+  return { current: { percent, rates, days }, pending: { ...copy(next), from } };
+}
+
+/** Whether two sets of terms say the same, whatever order the products are in. */
+export function sameTerms(a: NoticeTerms, b: NoticeTerms): boolean {
+  if (a.percent !== b.percent || a.days !== b.days) return false;
+  const ids = new Set([...Object.keys(a.rates), ...Object.keys(b.rates)]);
+  for (const id of ids) if (a.rates[id] !== b.rates[id]) return false;
+  return true;
 }
 
 /** The terms in force at a moment (seconds): the pending ones from their day on. */

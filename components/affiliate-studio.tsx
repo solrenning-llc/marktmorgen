@@ -41,11 +41,13 @@ import { LeadReview, type LeadRow, LeadTerms, type LeadTermsState } from "@/comp
 import { MAX_LEAD_BUDGET_CENTS, MAX_LEAD_CAP, MAX_LEAD_CENTS, MAX_LEAD_HOLD_DAYS, MIN_LEAD_BUDGET_CENTS, MIN_LEAD_CENTS, MIN_LEAD_HOLD_DAYS } from "@/lib/affiliate-lead-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
+import { MAX_NOTICE_DAYS, MIN_NOTICE_DAYS, noticeLines } from "@/lib/affiliate-notice";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   percent: `Type a whole share from ${MIN_COMMISSION} to ${MAX_COMMISSION} percent.`,
   days: `Type a whole number of days from ${MIN_COOKIE_DAYS} to ${MAX_COOKIE_DAYS}.`,
+  notice: `Type a whole number of days of notice from ${MIN_NOTICE_DAYS} to ${MAX_NOTICE_DAYS}, or leave it empty for none.`,
   rate: `A product's own share is a whole number from 0 to ${MAX_COMMISSION}; 0 leaves it out.`,
   rule: "Pick whether the first or the last link a buyer followed earns the sale.",
   share_percent: SHARE_PROBLEMS.percent,
@@ -537,8 +539,11 @@ function Terms({
   error: React.ReactNode;
 }) {
   const [enabled, setEnabled] = useState(setting.enabled);
-  const [percent, setPercent] = useState(String(setting.percent));
-  const [days, setDays] = useState(String(setting.days));
+  // A cut under notice (630 [HN6](2)): the form shows the terms it leads to, so saving anything else keeps it.
+  const target = setting.pending ?? setting;
+  const [percent, setPercent] = useState(String(target.percent));
+  const [days, setDays] = useState(String(target.days));
+  const [notice, setNotice] = useState(setting.notice ? String(setting.notice) : "");
   const [rule, setRule] = useState<AttributionRule>(setting.rule);
   const [payday, setPayday] = useState(String(setting.payday));
   const [hold, setHold] = useState(String(setting.hold));
@@ -555,9 +560,9 @@ function Terms({
     setting.bonuses.map((b) => ({ sales: String(b.sales), amount: moneyField(b.cents, storeCurrency) })),
   );
   const [rates, setRates] = useState<Record<string, string>>(
-    Object.fromEntries(Object.entries(setting.rates).map(([id, n]) => [id, String(n)])),
+    Object.fromEntries(Object.entries(target.rates).map(([id, n]) => [id, String(n)])),
   );
-  const [showRates, setShowRates] = useState(Object.keys(setting.rates).length > 0);
+  const [showRates, setShowRates] = useState(Object.keys(target.rates).length > 0);
   const [lead, setLead] = useState<LeadTermsState>({
     kind: setting.lead.kind,
     amount: moneyField(setting.lead.cents, storeCurrency),
@@ -587,6 +592,7 @@ function Terms({
               enabled,
               percent: Number(percent.trim()),
               days: Number(days.trim()),
+              notice: notice.trim() ? Number(notice.trim()) : 0,
               rule,
               payday: Number(payday.trim()),
               hold: Number(hold.trim()),
@@ -750,8 +756,43 @@ function Terms({
           </label>
         </div>
         <p className="mt-2 text-xs text-ink-soft">
-          {`From ${MIN_COMMISSION} to ${MAX_COMMISSION}%, of what the buyer paid before tax, and a window of ${MIN_COOKIE_DAYS} to ${MAX_COOKIE_DAYS} days. A change applies to sales from then on; a sale keeps the share it was made at. Visitors from the European Economic Area, the UK, Switzerland and Brazil are asked first, because the rules there require it, and their click is remembered once they allow it.`}
+          {`From ${MIN_COMMISSION} to ${MAX_COMMISSION}%, of what the buyer paid before tax, and a window of ${MIN_COOKIE_DAYS} to ${MAX_COOKIE_DAYS} days. A raise applies to sales from then on; a cut does too, unless you give notice below, and then it applies from the day the notice ends. A sale keeps the share it was made at. Visitors from the European Economic Area, the UK, Switzerland and Brazil are asked first, because the rules there require it, and their click is remembered once they allow it.`}
         </p>
+        <label className="mt-4 block" htmlFor="aff-notice">
+          <span className="field-label">Notice before a cut (optional)</span>
+          <span className="relative block max-w-[12rem]">
+            <input
+              id="aff-notice"
+              type="number"
+              inputMode="numeric"
+              min={MIN_NOTICE_DAYS}
+              max={MAX_NOTICE_DAYS}
+              step={1}
+              placeholder="None"
+              value={notice}
+              onChange={(e) => setNotice(e.target.value)}
+              aria-describedby="aff-notice-help"
+              className="field pr-14"
+            />
+            <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-3 grid place-items-center text-ink-soft">days</span>
+          </span>
+          <span id="aff-notice-help" className="mt-1 block text-xs text-ink-soft">
+            {`${MIN_NOTICE_DAYS} to ${MAX_NOTICE_DAYS} days. When you lower the share, a product's share or the days a click counts, your affiliates keep the old terms until then. Empty means none: a cut applies at once. A notice already running is never shortened.`}
+          </span>
+        </label>
+        {setting.pending ? (
+          <div className="notice mt-3 text-sm" role="note" aria-label="A cut waiting for its day">
+            <p className="font-semibold text-ink">
+              {`On ${new Date(setting.pending.from * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })} (UTC), these change:`}
+            </p>
+            <ul className="mt-1 list-disc pl-5 text-ink-soft">
+              {noticeLines(setting, setting.pending, (id) => products.find((p) => p.id === id)?.title ?? null).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <p className="mt-1 text-ink-soft">Until then your affiliates keep the terms they have. The fields above show the new terms.</p>
+          </div>
+        ) : null}
         <p className="mt-1 text-xs text-ink-soft">
           A click is remembered in the buyer&rsquo;s own browser, so the window runs for as long as that browser keeps it.
           Browsers set their own limit and shorten a long one without telling the site, and a buyer who clears their

@@ -205,3 +205,36 @@ test('a genuine lost creation ACK after73h is recovered by normal workers withou
   assert.equal(f.calls.filter(c=>c.method==='POST').length,1,'only the original synthetic creation POST');
  });
 });
+
+test('newly funded discovery at cap10000 recovers a lost ticket without resetting9999 original checks', {skip:redisOptIn}, async()=>{
+ await isolatedRecoveryProof(async(pipeline,pool)=>{
+  const clock=Date.now,old=shipmentPolicy();
+  const input={statsId:'same_cap_original',session:'cs_test_sameCapOriginal0000001',authorizedAt:clock(),
+   shipped:{at:Math.floor(clock()/1000),tracking:'https://example.test/track'},message:{from:'Store <mail@example.test>',to:'buyer@example.test',subject:'Original capped shipment',text:'Original selected text',replyTo:'owner@example.test'}};
+  const original={lifecycle:'active' as const,policy:{...old,maximumChecks:10000},pipeline,now:clock};
+  assert.equal((await enqueueShipmentMail(input,original)).ok,true);
+  const id=shipmentMailId(input.statsId,input.session),key='nl:ship:mail:row:'+id,[stored]=await pipeline([['GET',key]]),row=JSON.parse(String(stored));
+  // Model9999 previously funded checks and a historical DUE hole; the
+  // authentic encrypted payload/source/identity and captured time stay exact.
+  Object.assign(row,{checks:9999,next:0});const held=JSON.stringify(row);
+  await pipeline([['SET',key,held],['ZREM','nl:ship:mail:due',id]]);
+  let lose=true;
+  const oneAttempt={...original,policy:{...old,reviewId:'SYNTHETIC_DISCOVERY_ONE',continuedReviewIds:[old.reviewId],maximumChecks:10000,
+   recovery:{...recovery(),startsAt:clock()-1000,until:clock()+3600000,maximumAttempts:1,maximumCommandUnits:64,maximumReadBytes:1048576,maximumTriggerInvocations:1}},
+   pipeline:async(commands:(string|number)[][])=>{const reply=await pipeline(commands);if(lose&&commands.some(c=>c[0]==='EVAL'&&String(c[1]).includes('marktmorgen:pending-mail-recovery:v1')&&c[5]==='next')){lose=false;throw Error('Synthetic lost recovery ticket ACK');}return reply;}};
+  await runShipmentMail(clock()+30000,async()=>{throw Error('The unknown ticket cannot send');},oneAttempt);
+  await runShipmentMail(clock()+30000,async()=>{throw Error('The exhausted grant cannot send');},oneAttempt);
+  const [checkpoint,unchanged]=await pipeline([['HGET',pool,'pendingRecovery'],['GET',key]]);
+  const spent=JSON.parse(String(checkpoint));assert.equal(spent.attempts,1);assert.equal(spent.units,64);assert.equal(spent.readBytes,1048576);assert.equal(unchanged,held);
+  const successor={...original,policy:{...old,reviewId:'SYNTHETIC_DISCOVERY_TWO',continuedReviewIds:[old.reviewId],maximumChecks:10000,
+   recovery:{...recovery(),revision:2,startsAt:clock()-1000,until:clock()+3600000}}};
+  let posts=0;
+  const outcome=await runShipmentMail(clock()+30000,async(message,beforePost)=>{
+   assert.equal(JSON.stringify(message),JSON.stringify(input.message));
+   const [current]=await pipeline([['GET',key]]),claimed=JSON.parse(String(current));
+   assert.equal(claimed.checks,10000);assert.equal(claimed.created,row.created);assert.equal(claimed.fingerprint,row.fingerprint);assert.equal(claimed.sourceValue,row.sourceValue);
+   assert.equal(await beforePost(),true);posts++;return 'accepted';
+  },successor);
+  assert.equal(outcome.accepted,1);assert.equal(posts,1);assert.equal((await pipeline([['GET',key]]))[0],null);
+ });
+});

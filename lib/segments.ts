@@ -16,7 +16,7 @@
  * readPaidSales), only when an email asks for one, and the answer is kept ten
  * minutes so a creator changing the boxes does not ask Stripe each time:
  *
- *   nl:stats:<statsId>:ledger   JSON { c: currency, p: partial, v: 3, r: [[address, cents, last ms, channel, orders], …] }, ten minutes
+ *   nl:stats:<statsId>:ledger   JSON { c: currency, p: partial, v: 4, r: [[address, cents, last ms, channel, orders], …] }, ten minutes
  *   nl:mail:segs:<listId>       hash: <id> → JSON Segment, the store's saved groups
  *
  * A group is a name over the choices the composer already has: who, one
@@ -28,7 +28,8 @@ import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
 import { WHO, type Who, readTags } from "@/lib/contacts";
-import { ALL_TIME_PAGES, readsSales, readPaidSales } from "@/lib/stats";
+import { paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
+import { ALL_TIME_PAGES, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { MAX_SEGMENTS, MAX_SEGMENT_NAME, type Narrow, type Segment, isNarrowed, readNarrow } from "@/lib/segments-rules";
@@ -50,8 +51,12 @@ export type LedgerEntry = { cents: number; last: number; channel: string; orders
 export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean };
 
 type Row = [string, number, number, string, number];
-/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase). */
-const LEDGER_SHAPE = 3;
+/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes). */
+const LEDGER_SHAPE = 4;
+/** Pages of a hundred refunds read for the ledger; `partial` when there were more. */
+const TAKEN_BACK_PAGES = 10;
+/** How long the renewals are read for one ledger before the reading stops, partial: inside the email route's minute. */
+const RENEWALS_SECONDS = 25;
 
 /**
  * Every buyer of this store, from its sales on the creator's Stripe account,
@@ -77,16 +82,40 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
       }
     }
   }
-  const { sales, partial } = await readPaidSales(store, 0, ALL_TIME_PAGES);
+  // Checkouts and offers after paying; and, on a Stripe account, the renewals
+  // of memberships and payment plans, and what refunds and disputes took back
+  // (270 [GR1], unit 2): a member who pays every month is not quiet since they
+  // joined, and a purchase given back is not a purchase.
+  const stripe = Boolean(store.stripeAccountId);
+  const none = { rows: [], partial: false };
+  const [paid, renewals, refunds, disputes, paypalBack] = await Promise.all([
+    readPaidSales(store, 0, ALL_TIME_PAGES),
+    // Renewals stop reading after RENEWALS_SECONDS, partial, so a store with years of them is not a timeout.
+    stripe ? readRenewalPayments(store, 0, ALL_TIME_PAGES, Date.now() + RENEWALS_SECONDS * 1000) : Promise.resolve(none),
+    stripe ? readStoreRefunds(store, 0, TAKEN_BACK_PAGES) : Promise.resolve(none),
+    stripe ? readStoreDisputes(store, 0) : Promise.resolve(none),
+    // PayPal's refunds, as the numbers read them (lib/stats.ts): unread is partial, never none.
+    store.paypalSeller ? readPayPalRefundsWithCoverage(store.statsId, 0).catch(() => null) : Promise.resolve(none),
+  ]);
+  const { sales } = paid;
+  const partial = paid.partial || renewals.partial || refunds.partial || disputes.partial || !paypalBack || paypalBack.partial;
+  // What was given back of each payment, by the payment: refunds (Stripe's and PayPal's), and disputes that took or hold the money.
+  const takenBack = new Map<string, number>();
+  const backs = [...refunds.rows, ...disputes.rows, ...(paypalBack?.rows ?? []).map((r) => ({ cents: r.cents, paymentIntent: paypalPaymentId(r.capture) }))];
+  for (const back of backs) if (back.paymentIntent) takenBack.set(back.paymentIntent, (takenBack.get(back.paymentIntent) ?? 0) + back.cents);
+  const kept = (paymentIntent: string, cents: number) => Math.max(0, cents - (paymentIntent ? takenBack.get(paymentIntent) ?? 0 : 0));
   const buyers = new Map<string, LedgerEntry & { firstAt: number }>();
   for (const sale of sales) {
     if ((sale.row.metadata as Record<string, string> | null | undefined)?.kind === "tip") continue;
     const details = sale.row.customer_details as { email?: unknown } | null | undefined;
     const raw = sale.upsell ? sale.row.receipt_email : details?.email;
     if (typeof raw !== "string" || !raw.trim()) continue;
+    // Given back in full: not a purchase (a free copy, which cost nothing, still is).
+    const left = kept(sale.paymentIntent, sale.cents);
+    if (sale.cents > 0 && left === 0) continue;
     const email = normaliseEmail(raw);
     const row = buyers.get(email) ?? { cents: 0, last: 0, channel: "direct", orders: 0, firstAt: Infinity };
-    if (sale.currency === store.currency) row.cents += sale.cents;
+    if (sale.currency === store.currency) row.cents += left;
     if (!sale.upsell) row.orders += 1;
     row.last = Math.max(row.last, sale.created);
     // Where they first came from: the channel on their earliest checkout.
@@ -94,6 +123,17 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
       row.firstAt = sale.created;
       row.channel = sale.first || sale.source || "direct";
     }
+    buyers.set(email, row);
+  }
+  // A renewal is a payment, not a new order: it moves the last purchase and adds what was kept, in the store's currency.
+  for (const renewal of renewals.rows) {
+    const left = kept(renewal.paymentIntent, renewal.cents);
+    if (left === 0) continue;
+    const email = normaliseEmail(renewal.email);
+    // A buyer known only by a renewal came from the channel the subscription was sold through.
+    const row = buyers.get(email) ?? { cents: 0, last: 0, channel: renewal.channel || "direct", orders: 0, firstAt: Infinity };
+    if (renewal.currency === store.currency) row.cents += left;
+    row.last = Math.max(row.last, renewal.created);
     buyers.set(email, row);
   }
   const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial };

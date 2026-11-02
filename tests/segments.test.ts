@@ -50,12 +50,20 @@ const intents = [
   { id: "pi_extra000000001", status: "succeeded", created: now - 120 * DAY, amount: 4000, currency: "usd", receipt_email: "BEN@example.com", metadata: { kind: "upsell", store: "bakery", product: "kit" } },
 ];
 
+// Renewals, refunds and disputes (270 [GR1], unit 2), filled in by their own part below.
+let invoices: Record<string, unknown>[] = [];
+let refunds: Record<string, unknown>[] = [];
+let disputes: Record<string, unknown>[] = [];
+
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.hostname !== "api.stripe.com") return new Response("{}", { status: 404 });
   stripeCalls += 1;
   if (url.pathname === "/v1/checkout/sessions") return new Response(JSON.stringify({ data: sessions, has_more: false }));
   if (url.pathname === "/v1/payment_intents") return new Response(JSON.stringify({ data: intents, has_more: false }));
+  if (url.pathname === "/v1/invoices") return new Response(JSON.stringify({ data: invoices, has_more: false }));
+  if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ data: refunds, has_more: false }));
+  if (url.pathname === "/v1/disputes") return new Response(JSON.stringify({ data: disputes, has_more: false }));
   return new Response(JSON.stringify({ data: [], has_more: false }));
 }) as typeof fetch;
 
@@ -130,6 +138,44 @@ async function main(): Promise<void> {
   is("the same name replaces it", again.ok ? again.segments.map((s) => [s.name, s.minSpent, s.quietDays]) : again, [["best customers", 0, 180]]);
   const id = (await listSegments("list0001"))[0].id;
   is("and it can be removed", (await removeSegment(store, id)).length, 0);
+
+  part("Renewals, refunds and disputes (270 [GR1], unit 2)");
+  // In a newer API version's shape: the payment among the invoice's payments, not on the invoice.
+  const renewal = (id: string, email: string, daysAgo: number, cents: number, store = "bakery", currency = "usd") => ({ id: `in_${id}`, status: "paid", billing_reason: "subscription_cycle", amount_paid: cents, currency, created: now - daysAgo * DAY, customer_email: email, payments: { data: [{ status: "paid", payment: { payment_intent: `pi_${id.padEnd(14, "0")}` } }] }, parent: { subscription_details: { metadata: { store, channel: "newsletter" } } } });
+  sessions.push(
+    session("gil1", "gil@example.com", 400, 2000),
+    session("hal1", "hal@example.com", 10, 3000),
+    session("ian1", "ian@example.com", 10, 6000),
+    session("jo01", "jo@example.com", 10, 2500),
+    session("max1", "max@example.com", 10, 2500),
+    session("ned1", "ned@example.com", 300, 2500),
+  );
+  invoices = [renewal("gilr", "gil@example.com", 5, 2000), renewal("kimr", "kim@example.com", 2, 1500), renewal("othr", "lou@example.com", 2, 1500, "somebody-else"), renewal("ned2", "ned@example.com", 3, 900, "bakery", "eur"), renewal("olir", "oli@example.com", 4, 1200)];
+  refunds = [
+    { id: "re_hal", status: "succeeded", amount: 3000, currency: "usd", created: now - 9 * DAY, payment_intent: "pi_hal10000000000" },
+    { id: "re_ian", status: "succeeded", amount: 1000, currency: "usd", created: now - 9 * DAY, payment_intent: "pi_ian10000000000" },
+    // A membership payment refunded in full, matched through the invoice's payments.
+    { id: "re_oli", status: "succeeded", amount: 1200, currency: "usd", created: now - 3 * DAY, payment_intent: "pi_olir0000000000" },
+  ];
+  disputes = [
+    { id: "dp_jo", status: "lost", amount: 2500, currency: "usd", created: now - 9 * DAY, payment_intent: "pi_jo010000000000" },
+    // Still open: the money is held, so it does not count either.
+    { id: "dp_max", status: "needs_response", amount: 2500, currency: "usd", created: now - 9 * DAY, payment_intent: "pi_max10000000000" },
+  ];
+  const fresh = await buyerLedger({ ...store, statsId: "t".repeat(32) } as Store);
+  const at = (email: string) => fresh.buyers.get(email);
+  is("a member's renewal moves their last purchase and adds what it paid, but is not a new order", [at("gil@example.com")?.cents, at("gil@example.com")?.orders, Math.round(((at("gil@example.com")?.last ?? 0) / 1000 - now) / DAY)], [4000, 1, -5]);
+  is("a renewal with no checkout read is still a buyer, with no order", [at("kim@example.com")?.cents, at("kim@example.com")?.orders], [1500, 0]);
+  is("another store's renewal is not", at("lou@example.com"), undefined);
+  is("refunded in full is not a purchase; in part, what was kept counts", [at("hal@example.com"), at("ian@example.com")?.cents], [undefined, 5000]);
+  is("a dispute the buyer won, or one still open, is not a purchase either", [at("jo@example.com"), at("max@example.com")], [undefined, undefined]);
+  is("a renewal in another currency moves the last payment, adding nothing", [at("ned@example.com")?.cents, Math.round(((at("ned@example.com")?.last ?? 0) / 1000 - now) / DAY)], [2500, -3]);
+  is("a buyer known only by a renewal came from the subscription's channel", at("kim@example.com")?.channel, "newsletter");
+  is("a membership payment refunded in full, matched through the invoice's payments, does not count", at("oli@example.com"), undefined);
+  is("all of it read: not partial", fresh.partial, false);
+  invoices = [];
+  refunds = [];
+  disputes = [];
 
   done();
 }

@@ -14,6 +14,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { HOLD_SECONDS, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { limitedStock } from "@/lib/product-extras";
+import { type Held, LockBusyError, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import type { Listing, Store } from "@/lib/store";
 
 const HOLD_MS = HOLD_SECONDS * 1000;
@@ -61,6 +62,11 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
   for (const [session, entry] of entries) {
     if (entry.paid || entry.until > now) {
       used += 1;
+      continue;
+    }
+    // A cart's provisional hold that lapsed: every checkout opened under it has closed, and none bears its name (withCartStockHolds).
+    if (session.startsWith(PENDING)) {
+      writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
       continue;
     }
     if (checks >= MAX_CHECKS || !store.stripeAccountId) {
@@ -166,4 +172,126 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
     return;
   }
   await redisPipeline([["HDEL", stockKey(store.statsId, product.id), session]]);
+}
+
+/** Why a cart's units could not be held: one of its limited products has none left (`ids`), or the count could not be read safely. */
+export type CartStockHold<T> = { ok: true; value: T } | { ok: false; reason: "soldout"; ids: string[] } | { ok: false; reason: "busy" };
+
+/**
+ * A provisional hold, written under the locks before a cart's checkout is
+ * opened and replaced by the checkout's own hold once it exists. Its time
+ * covers the checkout's whole life (HOLD_MS, from before it is opened) and
+ * the longest the opening can take at Stripe, so a checkout opened under it
+ * has always closed before it lapses; a lapsed one is let go without asking
+ * Stripe (stockLeft), since no checkout bears its name.
+ */
+const PENDING = "p_";
+const PENDING_MS = HOLD_MS + 5 * 60 * 1000;
+
+/**
+ * A cart's checkout (lib/cart-checkout.ts; 513 [PF1], unit 3, added 2
+ * November 2026): one unit of each limited product in it held for the one
+ * checkout, as withStockHold holds one for a product bought on its own.
+ *
+ * Every limited product's lock is taken first (lib/redis-lock.ts: a token
+ * only its holder can let go of), always in the order of their ids, so two
+ * carts sharing products never wait on each other. Every count is read
+ * under them; each lock is then renewed, and if any ran out meanwhile (a
+ * count may ask Stripe several times), nothing is held, since another
+ * checkout may have counted the same unit. Only then a provisional hold is
+ * written for each and the locks let go, so no lock is held while Stripe
+ * opens the checkout. Once it exists, its own hold replaces the provisional
+ * one; if it cannot be opened, the provisional ones are taken back; if its
+ * hold cannot be written, it is closed at Stripe and nothing is sold on it.
+ * Any lock not taken, or any count that cannot be read, opens nothing
+ * (unknown never becomes a unit). Each hold is then settled as a single
+ * product's is: paid becomes sold, expired is handed back (stockLeft).
+ */
+export async function withCartStockHolds<T extends { id: string }>(
+  store: Store,
+  products: Listing[],
+  open: (held: boolean) => Promise<T>,
+): Promise<CartStockHold<T>> {
+  const limited = [...new Map(products.filter((product) => limitedStock(product) !== null).map((product) => [product.id, product])).values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  if (limited.length === 0) return { ok: true, value: await open(false) };
+  if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "busy" };
+  const statsId = store.statsId;
+  const pending = `${PENDING}${crypto.randomUUID().replace(/-/g, "")}`;
+  const taken: Held[] = [];
+  try {
+    for (const product of limited) taken.push(await takeLock(lockKey(statsId, product.id), 15, 1500));
+    const now = Date.now();
+    const out: string[] = [];
+    for (const product of limited) {
+      const left = await stockLeft(store, product, now).catch(() => undefined);
+      if (left === undefined) return { ok: false, reason: "busy" };
+      if (left !== null && left <= 0) out.push(product.id);
+    }
+    if (out.length > 0) return { ok: false, reason: "soldout", ids: out };
+    for (const held of taken) if (!(await holdLock(held))) return { ok: false, reason: "busy" };
+    const receipt = await redisPipeline(limited.map((product) => ["HSET", stockKey(statsId, product.id), pending, JSON.stringify({ until: Date.now() + PENDING_MS })]));
+    if (!Array.isArray(receipt) || receipt.length !== limited.length || receipt.some((recorded: unknown) => recorded !== 0 && recorded !== 1)) {
+      await redisPipeline(limited.map((product) => ["HDEL", stockKey(statsId, product.id), pending])).catch(() => {});
+      return { ok: false, reason: "busy" };
+    }
+  } catch (error) {
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
+    throw error;
+  } finally {
+    for (const held of taken) await releaseLock(held);
+  }
+  let value: T;
+  try {
+    value = await open(true);
+  } catch (error) {
+    await redisPipeline(limited.map((product) => ["HDEL", stockKey(statsId, product.id), pending])).catch(() => {});
+    throw error;
+  }
+  // Counted from after the checkout exists, so its hold outlasts it; the provisional one goes.
+  const hold = JSON.stringify({ until: Date.now() + HOLD_MS });
+  const receipt = await redisPipeline(limited.flatMap((product) => [["HSET", stockKey(statsId, product.id), value.id, hold], ["HDEL", stockKey(statsId, product.id), pending]])).catch(() => null);
+  const written = Array.isArray(receipt) && receipt.length === limited.length * 2 && receipt.every((recorded: unknown) => recorded === 0 || recorded === 1);
+  if (!written) {
+    // Nobody is sent to a checkout whose units are not written as its own: it is closed at Stripe, and the provisional holds lapse.
+    if (store.stripeAccountId) await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => {});
+    return { ok: false, reason: "busy" };
+  }
+  return { ok: true, value };
+}
+
+/** Marks every limited product of a paid cart as sold, once the buyer is back, as confirmStock does for one. */
+export async function confirmCartStock(store: Store, products: Listing[], session: string): Promise<void> {
+  const limited = products.filter((product) => limitedStock(product) !== null);
+  if (limited.length === 0 || !store.statsId || !isRedisConfigured()) return;
+  const statsId = store.statsId;
+  await redisPipeline(limited.map((product) => ["HSET", stockKey(statsId, product.id), session, JSON.stringify({ until: 0, paid: true })]));
+}
+
+/**
+ * Hands back what a buyer was holding with a cart's checkout when they go
+ * back from Stripe's page and pay for a cart again, as releaseStockHold does
+ * for one product: the old checkout is closed at Stripe first, so it can
+ * never be paid as well; then its hold is let go on every limited product of
+ * the new cart that it held. A hold on a product no longer in the cart is
+ * let go by stockLeft once Stripe says the checkout expired.
+ */
+export async function releaseCartStockHolds(store: Store, products: Listing[], session: string): Promise<void> {
+  const limited = products.filter((product) => limitedStock(product) !== null);
+  if (limited.length === 0 || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return;
+  if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
+  const holding: Listing[] = [];
+  for (const product of limited) {
+    const entry = (await readEntries(store, product)).get(session);
+    if (entry?.paid) return;
+    if (entry) holding.push(product);
+  }
+  if (holding.length === 0) return;
+  try {
+    const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
+    if (closed.status !== "expired") return;
+  } catch {
+    return;
+  }
+  const statsId = store.statsId;
+  await redisPipeline(holding.map((product) => ["HDEL", stockKey(statsId, product.id), session]));
 }

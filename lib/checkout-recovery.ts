@@ -180,15 +180,18 @@ async function paidSince(store: Store, email: string, productIds: string[], sinc
 
 export type RemindOutcome = "sent" | "skip" | "failed";
 
-/** The products of a cart that can still go in one and be bought now, in its order. */
+/** The products of a cart that can still go in one and be bought now, in its order: none sold out. */
 async function cartItems(store: Store, raw: (string | undefined)[]): Promise<Listing[]> {
   const ids = readCartIds(raw.filter((id): id is string => typeof id === "string" && id !== ""));
   if (ids.length === 0) return [];
   const listed = await readListings(store, ids);
-  return ids.flatMap((id) => {
+  const kept = ids.flatMap((id) => {
     const product = listed.find((p) => p.id === id);
     return product && cartable(product) && canSellProduct(store, product) ? [product] : [];
   });
+  // A limited one with none left is not reminded of, as for one product below (513 [PF1], unit 3).
+  const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product).catch(() => null) : Promise.resolve(null))));
+  return kept.filter((_, i) => left[i] !== 0);
 }
 
 /**

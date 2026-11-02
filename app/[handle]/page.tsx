@@ -453,7 +453,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                             bundleItems={bundleItems.get(product.id) ?? null}
                             soon={soon.has(product.id)}
                             preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}
-                            cart={cartOn && !soon.has(product.id) && cartable(product)}
+                            cart={cartOn && !soon.has(product.id) && cartable(product) && left.get(product.id) !== 0}
                             sold={soldLine(soldCounts?.byProduct[product.id])}
                           />
                         ))}

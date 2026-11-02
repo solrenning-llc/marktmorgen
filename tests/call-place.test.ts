@@ -24,7 +24,7 @@ function main(): void {
   const typed = "  Bela Studio \n12 Harbor Street, Suite 3\n\nPortland, ME 04101\r\nUnited States  ";
   is("rows kept as typed, the spaces around and the empty ones dropped", parsePlace(typed), { ok: true, place: { lines: ["Bela Studio", "12 Harbor Street, Suite 3", "Portland, ME 04101", "United States"] } });
   is("the same from a record", parsePlace({ lines: ["Bela Studio", "12 Harbor Street"] }), { ok: true, place: { lines: ["Bela Studio", "12 Harbor Street"] } });
-  is("from a list", parsePlace(["São Paulo — Rua Augusta, 900"]), { ok: true, place: { lines: ["São Paulo — Rua Augusta, 900"] } });
+  is("from a list", parsePlace(["São Paulo — Praça do Exemplo, 12"]), { ok: true, place: { lines: ["São Paulo — Praça do Exemplo, 12"] } });
   is("nothing typed is no place", [parsePlace(undefined), parsePlace(null), parsePlace(""), parsePlace("  \n \n"), parsePlace([])], Array(5).fill({ ok: true, place: null }));
 
   part("What is not kept");

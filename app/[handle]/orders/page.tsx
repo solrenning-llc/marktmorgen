@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { EmailField } from "@/components/email-field";
 import { placeLine } from "@/lib/call-place";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -446,11 +447,19 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                           {purchase.main ? (
                             <DeliveryButton handle={store.handle} token={token} purchase={purchase} delivery={purchase.main} item="main" words={words} language={store.language} />
                           ) : null}
-                          {purchase.added.map((added) =>
-                            added.delivery ? (
-                              <DeliveryButton key={added.key} handle={store.handle} token={token} purchase={purchase} delivery={added.delivery} item={added.key} words={words} language={store.language} />
-                            ) : null,
-                          )}
+                          {purchase.added.map((added) => (
+                            <Fragment key={added.key}>
+                              {/* A course anywhere in a cart opens on its own page, named, as the first one does (lib/order-courses.ts). */}
+                              {added.courseProduct ? (
+                                <Link href={`/@${store.handle}/course/${added.courseProduct}`} className="btn st-btn btn-block">
+                                  {words.openTitle(added.title)}
+                                </Link>
+                              ) : null}
+                              {added.delivery ? (
+                                <DeliveryButton handle={store.handle} token={token} purchase={purchase} delivery={added.delivery} item={added.key} words={words} language={store.language} />
+                              ) : null}
+                            </Fragment>
+                          ))}
                         </div>
                         {purchase.kind === "imported" && !purchase.giftFrom && !purchase.paidWith && !purchase.place && !purchase.preorder ? (
                           <p className="st-muted mt-3 text-xs leading-relaxed">{words.importedNote(store.name)}</p>

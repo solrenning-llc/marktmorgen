@@ -5,9 +5,16 @@
  */
 import { readMoney, type Currency } from "@/lib/money";
 import type { Who } from "@/lib/contacts";
+import { RFM_GROUPS, type RfmGroup } from "@/lib/rfm-rules";
 
-/** Spent at least, in the smallest unit of the store's currency; first found the store through; has not bought in this many days. */
-export type Narrow = { minSpent: number; channel: string; quietDays: number };
+/**
+ * Spent at least, in the smallest unit of the store's currency; first found
+ * the store through; has not bought in this many days; and, only when chosen,
+ * one group of the store's buyers by how recently and how often they bought
+ * (lib/rfm-rules.ts, 270 [GR1], unit 3b), absent otherwise, as on every
+ * email, draft and group saved before it.
+ */
+export type Narrow = { minSpent: number; channel: string; quietDays: number; group?: RfmGroup };
 
 export const NO_NARROW: Narrow = { minSpent: 0, channel: "", quietDays: 0 };
 /** The choices offered for "has not bought in the last…", in days. */
@@ -28,15 +35,30 @@ export function readNarrow(raw: unknown): Narrow {
   const spent = Math.round(Number(value.minSpent));
   const quiet = Math.round(Number(value.quietDays));
   const channel = typeof value.channel === "string" ? value.channel.trim().toLowerCase() : "";
+  const group = RFM_GROUPS.find((g) => g.id === value.group)?.id;
   return {
     minSpent: Number.isFinite(spent) && spent > 0 ? Math.min(spent, MAX_SPENT) : 0,
     channel: CHANNEL.test(channel) ? channel : "",
     quietDays: (QUIET_DAYS as readonly number[]).includes(quiet) ? quiet : 0,
+    ...(group ? { group } : {}),
   };
 }
 
 export function isNarrowed(narrow: Narrow | null | undefined): narrow is Narrow {
-  return Boolean(narrow && (narrow.minSpent > 0 || narrow.channel || narrow.quietDays > 0));
+  return Boolean(narrow && (narrow.minSpent > 0 || narrow.channel || narrow.quietDays > 0 || narrow.group));
+}
+
+const NARROW_KEYS = new Set(["minSpent", "channel", "quietDays", "group"]);
+
+/**
+ * Whether a narrowing sent or kept is exactly the one read from it: a field
+ * that would be dropped or changed, or one this version does not know, is
+ * never read as a broader group. So a record written by a later version with
+ * a new way to narrow is refused here rather than sent to more people.
+ */
+export function sameNarrow(raw: Record<string, unknown>, narrow: Narrow): boolean {
+  if (!Object.keys(raw).every((key) => NARROW_KEYS.has(key))) return false;
+  return raw.minSpent === narrow.minSpent && raw.channel === narrow.channel && raw.quietDays === narrow.quietDays && (raw.group ?? undefined) === narrow.group;
 }
 
 /** Empty/zero means no minimum; malformed or out-of-range text must not broaden an audience. */

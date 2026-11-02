@@ -73,7 +73,7 @@ test("keep sending: the label becomes the sequence's own condition", () => {
 test("the composer sends the label everywhere the audience goes, and shows it", () => {
   const studio = readFileSync("components/email-studio.tsx", "utf8").replace(/\s+/g, " ");
   assert.ok(studio.includes("const cleanLabel = readTags([label])[0] ?? \"\";"), "cleaned once, as the server keeps it");
-  assert.ok(studio.includes('call({ action: "count", productId, notProductId, who, narrow: { minSpent, channel, quietDays }, label: countedLabel,'), "the count, once the typing stops");
+  assert.ok(studio.includes('call({ action: "count", productId, notProductId, who, narrow, label: countedLabel,'), "the count, once the typing stops");
   assert.ok(studio.includes("setTimeout(() => setCountedLabel(cleanLabel), 400)"), "and not at every key");
   assert.ok(studio.includes("...(cleanLabel ? { label: cleanLabel } : {}) };"), "the draft");
   assert.ok(studio.includes("label: cleanLabel, sendAt,"), "the send");

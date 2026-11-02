@@ -295,3 +295,14 @@ test("startup expiry keeps the primary deadline when the owned child never confi
   assert.ok(errors.some(s=>s.includes("CLEANUP_ERROR")&&s.includes("did not exit")));
  }finally{f.child.emit("exit",0);await starting.catch(()=>{});error.mock.restore();}
 });
+
+test("clock regression between received milestones is unknown even above the initial reading",async t=>{
+ let value=100;const now=t.mock.method(performance,"now",()=>value),f=fixture({handshake:false}),events=[];let probe;
+ try{
+  const starting=startWindowsForegroundProbe({...f.options,onDiagnostic:e=>events.push(e)});
+  value=200;f.child.stdout.write('{"stage":"powershell_started"}\n');
+  value=199;f.child.stdout.write('{"stage":"interop_ready"}\n{"ready":true}\n');probe=await starting;
+  const observed=events.find(e=>e.event==="startup_stage"&&e.stage==="interop_ready");
+  assert.equal(observed?.elapsedUnknown,true);assert.equal(observed?.elapsedMs,null);
+ }finally{await probe?.close();now.mock.restore();}
+});

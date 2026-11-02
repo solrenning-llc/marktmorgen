@@ -1515,6 +1515,7 @@
     "components/url-field.tsx",
     "components/usage-meter.tsx",
     "components/video-embed.tsx",
+    "components/video-stamp.tsx",
     "components/waitlist-panel.tsx",
     "components/webhook-editor.tsx",
     "components/weekly-ai-toggle.tsx",

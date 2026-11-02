@@ -27,6 +27,8 @@ import { speech } from "@/lib/buyer-words";
 import { type CoursesWords, coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
+import { VideoStamp } from "@/components/video-stamp";
+import { videoStampText } from "@/lib/video-stamp";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -136,6 +138,11 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Work to hand in, still holding the lessons after it shut.
   const mustHandIn = Boolean(student && task && lesson.task?.gate && !passed.has(lesson.id));
 
+  // The buyer's mark over the video (602 [WP1]): only a signed-in student's own
+  // email and the day they joined, only when the creator switched it on; never
+  // for the creator, a visitor on a free preview, or anybody else's email.
+  const stamp = course.stampVideo === true && student && start !== null ? videoStampText(student.email, "", new Date(start * 1000)) : null;
+
   const order = lessonsInOrder(course);
   const at = order.findIndex((entry) => entry.lesson.id === lesson.id);
   const reachable = (entry: (typeof order)[number]) =>
@@ -176,7 +183,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {lesson.video ? (
               video?.kind === "stream" ? (
-                <div className="mt-6 overflow-hidden rounded-2xl bg-black">
+                <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
+                  {stamp ? <VideoStamp text={stamp} seed={`${course.id}:${who}`} /> : null}
                   {/* The video service's player (lib/stream.ts): it sends the
                       size the line can carry, so the video does not stop to
                       wait. The frame takes the video's own shape, so one
@@ -197,7 +205,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
                   />
                 </div>
               ) : video?.kind === "file" ? (
-                <div className="mt-6 overflow-hidden rounded-2xl bg-black">
+                <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
+                  {stamp ? <VideoStamp text={stamp} seed={`${course.id}:${who}`} /> : null}
                   {/* Vertical videos stay vertical: the player takes the
                       shape of the video instead of forcing it wide. */}
                   <video

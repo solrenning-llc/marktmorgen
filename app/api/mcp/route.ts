@@ -22,6 +22,7 @@ import {
   readPageReadingTool,
   readPageTestTool,
   readPageVersionsTool,
+  savedBlocksTool,
   readSalesPageTool,
   readFullNumbers,
   windowOf,
@@ -164,6 +165,7 @@ export async function POST(request: Request) {
       const found = product ? await readPageVersionsTool(store, product, version) : { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
       return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
     }
+    if (params.name === "list_saved_blocks") return result(id, said(await savedBlocksTool(store)));
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));
     if (params.name === "get_affiliates") return result(id, said(await affiliatesTool(store)));

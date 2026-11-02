@@ -27,6 +27,8 @@ import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
 import { readQuizFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
 import { readPage, readVersions } from "@/lib/sales-page-store";
+import { readSections } from "@/lib/saved-block-store";
+import type { PageBlock } from "@/lib/sales-page";
 import { type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
 import { expectedShareB, readCounts } from "@/lib/headline-test";
 import { type Counts, testState } from "@/lib/headline-test-rules";
@@ -373,6 +375,11 @@ export function rangeTool(range: RangeData, titles: ReadonlyMap<string, string>)
   };
 }
 
+/** A block as an agent may read it: testimonials counted, never quoted. */
+export function blockForAgent(block: PageBlock) {
+  return block.kind === "quotes" ? { id: block.id, kind: block.kind, heading: block.heading, testimonials: block.items.length } : block;
+}
+
 /**
  * A product's sales page as the creator saved it, block by block, so an agent
  * sees what is there before it prepares any change (631 [AA1] (a), unit 9).
@@ -386,7 +393,7 @@ export function salesPageTool(productId: string, title: string, page: SalesPage)
     note: "Blocks in page order, as saved. Testimonials (kind quotes) are counted, not quoted. Reviews blocks name review ids only. An empty list means the product has no sales page of its own yet.",
     seo_title: page.seoTitle,
     seo_description: page.seoDescription,
-    blocks: page.blocks.map((block) => (block.kind === "quotes" ? { id: block.id, kind: block.kind, heading: block.heading, testimonials: block.items.length } : block)),
+    blocks: page.blocks.map(blockForAgent),
   };
 }
 
@@ -524,4 +531,18 @@ export async function readPageVersionsTool(store: Store, id: string, version: nu
   const one = versions[version];
   if (!one) return { found: false as const, error: "There is no such version. Read the list first, without version." };
   return { found: true as const, value: { ...salesPageTool(listing.id, listing.title, one.page), version, at: one.at } };
+}
+
+/**
+ * The creator's saved sections, the blocks kept to reuse on any page (631
+ * [AA1] (a), unit 14), newest change first, testimonials counted.
+ */
+export async function savedBlocksTool(store: Store) {
+  const sections = await readSections(store.statsId);
+  return {
+    note: "Sections the creator saved to reuse on any page, newest change first. updated_at is in seconds since 1970 (UTC). Testimonials are counted, not quoted.",
+    sections: [...sections]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((section) => ({ id: section.id, name: section.name, updated_at: section.updatedAt, blocks: section.blocks.map(blockForAgent) })),
+  };
 }

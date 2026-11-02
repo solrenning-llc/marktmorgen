@@ -220,7 +220,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/reviews": row("community", draft),
   "POST store/sale": row("offers", draft),
   "POST store/save-offer": row("offers", draft),
-  "GET store/saved-blocks": row("pages", read),
+  "GET store/saved-blocks": row("pages", tool("list_saved_blocks")),
   "POST store/saved-blocks": row("pages", draft),
   "POST store/sections": row("pages", draft),
   "POST store/setup": row("pages", draft),

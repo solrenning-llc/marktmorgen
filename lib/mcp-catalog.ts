@@ -44,6 +44,7 @@ const TITLES: Readonly<Record<string, string>> = {
   get_page_test: "Page test",
   get_page_reading: "How far the page is read",
   get_page_versions: "Earlier page versions",
+  list_saved_blocks: "Saved sections",
   get_store: "Which store",
 };
 
@@ -173,6 +174,12 @@ const DRAFTS: readonly ToolDraft[] = [
       },
       additionalProperties: false,
     },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "list_saved_blocks",
+    description: "The sections the creator saved to reuse on any page, each with its name and its blocks, newest change first. Testimonials are counted, never quoted.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {

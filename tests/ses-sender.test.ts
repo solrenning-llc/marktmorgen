@@ -1089,6 +1089,66 @@ async function main(): Promise<void> {
   askAgain();
   is("a key Amazon does not believe is an answer: not usable", [(await sesState())?.ready, (await sesState())?.why], [false, "key"]);
 
+  part("One original identity before sender awaits, with the legacy structural contract");
+  const identityClaim = (key: string) => `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
+  for (const fallback of [false, true]) {
+    for (const changing of [false, true]) {
+      redis.clear(); clear();
+      account = fallback ? approved({ ProductionAccessEnabled: false }) : approved();
+      const a = `identity-snapshot-${fallback}-${changing}-A`;
+      const b = `identity-snapshot-${fallback}-${changing}-B`;
+      if (!fallback) redis.run(["SET", identityClaim(a), "1", "EX", 86_400]);
+      const message = { ...letter("identity@example.test"), idempotencyKey: a };
+      const pipeline = redis.pipeline;
+      let release!: () => void;
+      let entered!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const waiting = new Promise<void>((resolve) => { entered = resolve; });
+      let paused = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      redis.pipeline = async (commands) => {
+        if (!paused && commands.some((command) => command[0] === "GET" && command[1] === "nl:ses:state")) {
+          paused = true; entered(); await gate;
+        }
+        return pipeline(commands);
+      };
+      try {
+        const pending = sendEmail(message);
+        await Promise.race([waiting, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("Synthetic readiness gate not reached")), 3_000); })]);
+        if (changing) message.idempotencyKey = b;
+        release();
+        const result = await pending;
+        is(`readiness ${fallback ? "fallback" : "SES"}, ${changing ? "mutated" : "fixed"}: original identity retained`,
+          [result, amazon.length, resend.length, redis.run(["GET", identityClaim(b)]), resend[0]?.key ?? null],
+          fallback ? [true, 0, 1, null, a] : [false, 0, 0, null, null]);
+      } finally {
+        release(); if (timer) clearTimeout(timer); redis.pipeline = pipeline;
+      }
+    }
+  }
+  for (const fallback of [false, true]) {
+    redis.clear(); clear();
+    account = fallback ? approved({ ProductionAccessEnabled: false }) : approved();
+    const a = `identity-accessor-${fallback}-A`, b = `identity-accessor-${fallback}-B`;
+    if (!fallback) redis.run(["SET", identityClaim(a), "1", "EX", 86_400]);
+    let reads = 0;
+    const message = Object.defineProperty(letter("getter@example.test"), "idempotencyKey", { get() { return ++reads === 1 ? a : b; } });
+    const result = await sendEmail(message);
+    is(`legacy getter is read once for ${fallback ? "fallback" : "SES"}`,
+      [result, reads, amazon.length, resend.length, redis.run(["GET", identityClaim(b)]), resend[0]?.key ?? null],
+      fallback ? [true, 1, 0, 1, null, a] : [false, 1, 0, 0, null, null]);
+  }
+  for (const [name, value] of [["missing", undefined], ["undefined", undefined], ["null", null], ["empty", ""], ["whitespace", "  "], ["long", "k".repeat(512)]] as const) {
+    redis.clear(); clear(); account = approved();
+    const message = { ...letter("identity-compat@example.test"), ...(name === "missing" ? {} : { idempotencyKey: value }) };
+    is(`compatible SES identity ${name}`, [await sendEmail(message as Parameters<typeof sendEmail>[0]), amazon.length, resend.length], [true, 1, 0]);
+  }
+  redis.clear(); clear(); account = approved();
+  const inheritedKey = "identity-inherited-original";
+  redis.run(["SET", identityClaim(inheritedKey), "1", "EX", 86_400]);
+  const inheritedMessage = Object.assign(Object.create({ idempotencyKey: inheritedKey }), letter("inherited@example.test"));
+  is("inherited legacy identity remains respected", [await sendEmail(inheritedMessage), amazon.length, resend.length], [false, 0, 0]);
+
   delete process.env.AWS_SES_ROLE_ARN;
   delete process.env.VERCEL_OIDC_TOKEN;
   exchanges.length = 0;
@@ -1192,66 +1252,6 @@ async function main(): Promise<void> {
   fetched.length = 0;
   const elsewhere = await POST(announce({ Type: "SubscriptionConfirmation", Token: "abc", SubscribeURL: "https://example.net/confirm", Message: "You have chosen to subscribe" }));
   is("a link anywhere else is not opened", [elsewhere.status, fetched.filter((u) => u.includes("example.net"))], [400, []]);
-
-  part("One original identity before sender awaits, with the legacy structural contract");
-  const identityClaim = (key: string) => `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
-  for (const fallback of [false, true]) {
-    for (const changing of [false, true]) {
-      redis.clear(); clear();
-      account = fallback ? approved({ ProductionAccessEnabled: false }) : approved();
-      const a = `identity-snapshot-${fallback}-${changing}-A`;
-      const b = `identity-snapshot-${fallback}-${changing}-B`;
-      if (!fallback) redis.run(["SET", identityClaim(a), "1", "EX", 86_400]);
-      const message = { ...letter("identity@example.test"), idempotencyKey: a };
-      const pipeline = redis.pipeline;
-      let release!: () => void;
-      let entered!: () => void;
-      const gate = new Promise<void>((resolve) => { release = resolve; });
-      const waiting = new Promise<void>((resolve) => { entered = resolve; });
-      let paused = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      redis.pipeline = async (commands) => {
-        if (!paused && commands.some((command) => command[0] === "GET" && command[1] === "nl:ses:state")) {
-          paused = true; entered(); await gate;
-        }
-        return pipeline(commands);
-      };
-      try {
-        const pending = sendEmail(message);
-        await Promise.race([waiting, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("Synthetic readiness gate not reached")), 3_000); })]);
-        if (changing) message.idempotencyKey = b;
-        release();
-        const result = await pending;
-        is(`readiness ${fallback ? "fallback" : "SES"}, ${changing ? "mutated" : "fixed"}: original identity retained`,
-          [result, amazon.length, resend.length, redis.run(["GET", identityClaim(b)]), resend[0]?.key ?? null],
-          fallback ? [true, 0, 1, null, a] : [false, 0, 0, null, null]);
-      } finally {
-        release(); if (timer) clearTimeout(timer); redis.pipeline = pipeline;
-      }
-    }
-  }
-  for (const fallback of [false, true]) {
-    redis.clear(); clear();
-    account = fallback ? approved({ ProductionAccessEnabled: false }) : approved();
-    const a = `identity-accessor-${fallback}-A`, b = `identity-accessor-${fallback}-B`;
-    if (!fallback) redis.run(["SET", identityClaim(a), "1", "EX", 86_400]);
-    let reads = 0;
-    const message = Object.defineProperty(letter("getter@example.test"), "idempotencyKey", { get() { return ++reads === 1 ? a : b; } });
-    const result = await sendEmail(message);
-    is(`legacy getter is read once for ${fallback ? "fallback" : "SES"}`,
-      [result, reads, amazon.length, resend.length, redis.run(["GET", identityClaim(b)]), resend[0]?.key ?? null],
-      fallback ? [true, 1, 0, 1, null, a] : [false, 1, 0, 0, null, null]);
-  }
-  for (const [name, value] of [["missing", undefined], ["undefined", undefined], ["null", null], ["empty", ""], ["whitespace", "  "], ["long", "k".repeat(512)]] as const) {
-    redis.clear(); clear(); account = approved();
-    const message = { ...letter("identity-compat@example.test"), ...(name === "missing" ? {} : { idempotencyKey: value }) };
-    is(`compatible SES identity ${name}`, [await sendEmail(message as Parameters<typeof sendEmail>[0]), amazon.length, resend.length], [true, 1, 0]);
-  }
-  redis.clear(); clear(); account = approved();
-  const inheritedKey = "identity-inherited-original";
-  redis.run(["SET", identityClaim(inheritedKey), "1", "EX", 86_400]);
-  const inheritedMessage = Object.assign(Object.create({ idempotencyKey: inheritedKey }), letter("inherited@example.test"));
-  is("inherited legacy identity remains respected", [await sendEmail(inheritedMessage), amazon.length, resend.length], [false, 0, 0]);
 
   done();
 }

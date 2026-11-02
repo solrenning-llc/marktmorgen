@@ -549,6 +549,8 @@ export function AffiliateStudio({
                 : "Switch the program on and share your affiliate page; applications appear here."}
             </p>
           ) : (
+            <>
+            <ShareMany members={members.filter((row) => row.affiliate.status === "approved").map((row) => ({ id: row.affiliate.id, email: row.affiliate.email, rate: row.affiliate.rate }))} percent={setting.percent} busy={busy} act={act} error={errorAt("bulk-rate")} />
             <ul className="mt-4 space-y-3">
               {members.map((row) => (
                 <Member
@@ -565,6 +567,7 @@ export function AffiliateStudio({
                 />
               ))}
             </ul>
+            </>
           )}
         </section>
 
@@ -1156,6 +1159,115 @@ function Terms({
         </div>
       </form>
     </section>
+  );
+}
+
+/**
+ * The share of several affiliates at once (630 [HN6](4), unit 2): pick them,
+ * type a share or leave it empty for the program's, save; then undo while the
+ * note shows. Each share applies to sales from then on; a sale keeps the share
+ * it was made at.
+ */
+function ShareMany({
+  members,
+  percent,
+  busy,
+  act,
+  error,
+}: {
+  members: { id: string; email: string; rate: number | null }[];
+  percent: number;
+  busy: string | null;
+  act: (where: string, payload: Record<string, unknown>, confirmation: string) => Promise<boolean>;
+  error: React.ReactNode;
+}) {
+  const router = useRouter();
+  const [picked, setPicked] = useState<string[]>([]);
+  const [rate, setRate] = useState("");
+  const [last, setLast] = useState<{ rate: number | null; before: { id: string; rate: number | null }[] } | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  if (members.length < 2 && !last) return null;
+  const chosen = picked.filter((id) => members.some((m) => m.id === id));
+  const asked = rate.trim() === "" ? null : Number(rate.trim());
+
+  async function save() {
+    setProblem(null);
+    try {
+      const response = await fetch("/api/store/affiliates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk-rate", ids: chosen, rate: asked }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; before?: { id: string; rate: number | null }[] };
+      if (!data.ok || !Array.isArray(data.before)) {
+        setProblem(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+        return;
+      }
+      setLast({ rate: asked, before: data.before });
+      setPicked([]);
+      toast("Shares saved. They apply to sales from now on.");
+      router.refresh();
+    } catch {
+      setProblem(MESSAGES.server_error);
+    }
+  }
+
+  return (
+    <details className="mt-4 rounded-2xl border border-line bg-paper p-4">
+      <summary className="cursor-pointer font-semibold text-ink">Change the share of several affiliates</summary>
+      {last ? (
+        <div className="notice mt-3 flex flex-wrap items-center justify-between gap-3 text-sm" role="status">
+          <span>{`${last.before.length} ${last.before.length === 1 ? "share" : "shares"} changed to ${last.rate === null ? `the program's ${percent}%` : `${last.rate}%`}. It applies to sales from now on.`}</span>
+          <span className="flex gap-2">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={busy !== null}
+              onClick={async () => {
+                if (await act("bulk-rate", { action: "bulk-rate-undo", before: last.before, rate: last.rate }, "Shares put back as they were.")) setLast(null);
+              }}
+            >
+              Undo
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLast(null)}>
+              Dismiss
+            </button>
+          </span>
+        </div>
+      ) : null}
+      <fieldset className="mt-3">
+        <legend className="text-sm text-ink-soft">Affiliates whose share changes</legend>
+        <ul className="mt-1 space-y-1">
+          {members.map((m) => (
+            <li key={m.id}>
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5"
+                  checked={chosen.includes(m.id)}
+                  onChange={(e) => setPicked(e.target.checked ? [...chosen, m.id] : chosen.filter((id) => id !== m.id))}
+                />
+                <span className="[overflow-wrap:anywhere]">{m.email}</span>
+                <span className="text-ink-soft">{m.rate === null ? `· program's ${percent}%` : `· ${m.rate}%`}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </fieldset>
+      <label className="mt-3 block max-w-[12rem]" htmlFor="share-many">
+        <span className="field-label">New share</span>
+        <span className="relative block">
+          <input id="share-many" type="number" inputMode="numeric" min={MIN_COMMISSION} max={MAX_COMMISSION} step={1} placeholder={`${percent}`} value={rate} onChange={(e) => setRate(e.target.value)} aria-describedby="share-many-help" className="field pr-9" />
+          <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-3 grid place-items-center text-ink-soft">%</span>
+        </span>
+        <span id="share-many-help" className="mt-1 block text-xs text-ink-soft">{`${MIN_COMMISSION} to ${MAX_COMMISSION}%. Empty gives them the program's share again. A product you took out stays out for everyone.`}</span>
+      </label>
+      {problem ? <p className="notice notice-error mt-3" role="alert">{problem}</p> : null}
+      {error}
+      <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy !== null || chosen.length === 0} onClick={save}>
+        {`Save for ${chosen.length} ${chosen.length === 1 ? "affiliate" : "affiliates"}`}
+      </button>
+    </details>
   );
 }
 

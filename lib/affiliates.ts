@@ -1141,6 +1141,37 @@ export async function undoMany(store: Store, before: Before[], decision: "approv
   return undone;
 }
 
+/** How one affiliate's own share stood before a change in bulk: what an undo puts back. */
+export type RateBefore = { id: string; rate: number | null };
+
+/**
+ * Sets, or clears with null, the share of several approved affiliates at
+ * once (630 [HN6](4), unit 2), each through setAffiliateRate: it applies to
+ * sales from now on, and a sale keeps the share it was made at. Returns how
+ * each stood before, leaving out those already at it.
+ */
+export async function setRatesMany(store: Store, ids: string[], rate: number | null): Promise<RateBefore[] | null> {
+  if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
+  const before: RateBefore[] = [];
+  for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
+    const affiliate = await readAffiliate(store, id);
+    if (!affiliate || affiliate.status !== "approved" || affiliate.rate === rate) continue;
+    if (await setAffiliateRate(store, id, rate)) before.push({ id, rate: affiliate.rate });
+  }
+  return before;
+}
+
+/** Puts back each share still exactly as the change left it; one changed by hand since is never overwritten. */
+export async function undoRates(store: Store, before: RateBefore[], rate: number | null): Promise<number> {
+  let undone = 0;
+  for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
+    const affiliate = await readAffiliate(store, entry.id);
+    if (!affiliate || affiliate.rate !== rate) continue;
+    if (await setAffiliateRate(store, entry.id, entry.rate)) undone += 1;
+  }
+  return undone;
+}
+
 export async function addPayout(
   store: Store,
   input: { aff: string; cents: number; currency: string; date: string; reference: string },

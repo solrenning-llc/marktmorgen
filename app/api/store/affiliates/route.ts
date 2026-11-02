@@ -13,7 +13,9 @@ import {
   MAX_BULK_DECISIONS,
   decide,
   decideMany,
+  setRatesMany,
   undoMany,
+  undoRates,
   invitePartner,
   listPartners,
   readAffiliate,
@@ -142,6 +144,25 @@ export async function POST(request: NextRequest) {
       });
       const undone = await undoMany(store, before, decision);
       return Response.json({ ok: true, undone });
+    }
+    // The share of several affiliates at once, and its undo (630 [HN6](4) unit 2).
+    if (action === "bulk-rate" || action === "bulk-rate-undo") {
+      const rate = body.rate === null || body.rate === "" ? null : Number(body.rate);
+      if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return fail("rate");
+      if (action === "bulk-rate") {
+        const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
+        if (!ids.length) return fail("unknown");
+        const before = await setRatesMany(store, ids, rate);
+        return before ? Response.json({ ok: true, before }) : fail("rate");
+      }
+      const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
+      const before = sent.flatMap((raw: unknown) => {
+        const v = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+        const id = text(v.id, 20);
+        const was = v.rate === null ? null : Number(v.rate);
+        return id && (was === null || (Number.isInteger(was) && was >= MIN_COMMISSION && was <= MAX_COMMISSION)) ? [{ id, rate: was }] : [];
+      });
+      return Response.json({ ok: true, undone: await undoRates(store, before, rate) });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
       const done = await decide(store, text(body.id, 20), action);

@@ -302,8 +302,8 @@ const onceKey = (key: string) => `nl:ses:once:${createHash("sha256").update(key)
 
 /**
  * One email through Amazon, when Amazon may be used. True when Amazon took
- * it (or an existing claim was confirmed under the same key); false when
- * fallback is allowed; null when claim ownership or SES acceptance is unknown. A claim is
+ * it; false when fallback is allowed; null when claim ownership or SES
+ * acceptance is unknown, including a pre-existing legacy claim. A claim is
  * not proof of delivery, nor a source-funded lifetime reservation.
  */
 async function viaAmazon(message: OneMessage, to: string): Promise<boolean | null> {
@@ -320,7 +320,9 @@ async function viaAmazon(message: OneMessage, to: string): Promise<boolean | nul
       if (!length || !("value" in length) || length.value !== 1) return null;
       const fresh = Object.getOwnPropertyDescriptor(reply, "0");
       if (!fresh || !("value" in fresh)) return null;
-      if (fresh.value === null) return true;
+      // This legacy marker records only a claim, not a provider ACK. It can
+      // remain after a lost SET reply before any POST, so replay is unknown.
+      if (fresh.value === null) return null;
       if (fresh.value !== "OK") return null;
     } catch {
       // SET may have committed. Keep the claim; neither sender may proceed.

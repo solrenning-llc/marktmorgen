@@ -186,7 +186,7 @@ async function main(): Promise<void> {
   part("Once means once");
   clear();
   const receipt = { ...letter("buyer@example.com", "Your receipt"), idempotencyKey: "receipt:cs_test_1" };
-  is("the same receipt asked for twice", [await sendEmail(receipt), await sendEmail(receipt)], [true, true]);
+  is("the first send is confirmed; its legacy claim alone cannot confirm replay", [await sendEmail(receipt), await sendEmail(receipt)], [true, false]);
   is("is sent one time", [amazon.length, resend.length], [1, 0]);
 
   part("An uncertain once-only claim holds both actual senders");

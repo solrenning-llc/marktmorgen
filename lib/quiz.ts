@@ -28,6 +28,7 @@
  * Pure rules at the top, storage at the bottom.
  */
 import { reserveQuizSubmission } from "@/lib/quiz-usage";
+import { MAX_WAIT_MINUTES } from "@/lib/quiz-bank-rules";
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
@@ -71,7 +72,20 @@ export type Quiz = {
   /** Whether the lessons after this one stay shut until it is passed. */
   required: boolean;
   questions: Question[];
+  /** Questions each try draws from the bank (630 [HN6](7)); absent or 0 is every question. */
+  draw?: number;
+  /** Whether each try shows its questions in an order of its own. */
+  shuffle?: boolean;
+  /** Minutes a student waits after a try before the next; absent is none. */
+  waitMinutes?: number;
 };
+
+/** The bank's three settings as kept: only what is set, within bounds. */
+function bankOf(value: Record<string, unknown>, total: number): Pick<Quiz, "draw" | "shuffle" | "waitMinutes"> {
+  const draw = wholeIn(value.draw, 1, Math.max(1, total - 1));
+  const wait = wholeIn(value.waitMinutes, 1, MAX_WAIT_MINUTES);
+  return { ...(draw !== null ? { draw } : {}), ...(value.shuffle === true ? { shuffle: true } : {}), ...(wait !== null ? { waitMinutes: wait } : {}) };
+}
 
 /** The part of a quiz the lesson carries, so the outline needs no second read. */
 export type QuizSetup = {
@@ -154,6 +168,7 @@ export function parseQuiz(raw: unknown): Quiz | null {
       attempts,
       required: value.required === true,
       questions,
+      ...bankOf(value, questions.length),
     };
   } catch {
     return null;
@@ -216,7 +231,7 @@ export function readQuiz(raw: unknown, existing: Quiz | null = null): { ok: true
       explanation: cleanParagraph(entry.explanation, MAX_EXPLANATION_LENGTH),
     });
   }
-  return { ok: true, quiz: { passPercent, attempts, required: value.required === true, questions,
+  return { ok: true, quiz: { passPercent, attempts, required: value.required === true, questions, ...bankOf(value, questions.length),
     ...(!existing || existing.usagePolicy === QUIZ_USAGE_POLICY ? { usagePolicy: QUIZ_USAGE_POLICY } : {}),
   } };
 }

@@ -45,6 +45,36 @@ test('paged recovery requires explicit total checkpoint capacity for a thousand 
   assert.equal(shipmentMailPolicy({...legacy,recovery:{...recovery(),...change}},now,false),null);
 });
 
+test('paged capacity and ticket corruption refuse before source observation', async()=>{
+ const policy={...shipmentPolicy(now),recovery:{...recovery(),maximumOrigins:1000,checkpointTotalBytes:100000}};
+ let reads=0,calls=0;
+ for(const value of [
+  Object.assign(Object.create({checkpointTotalBytes:100000}),{...recovery(),maximumOrigins:1000}),
+  Object.defineProperty({...recovery(),maximumOrigins:1000},'checkpointTotalBytes',{get(){reads++;return 100000;}}),
+  {...recovery(),maximumOrigins:1000,checkpointTotalBytes:NaN},
+ ]){
+  assert.equal(shipmentMailPolicy({...policy,recovery:value},now,false),null);
+  await recoverPendingMail('shipment',now+1000,{lifecycle:'active',policy:{...policy,recovery:value} as typeof policy,now:()=>now,
+   pipeline:async()=>{calls++;return [['done']];}},async()=>{reads++;return null;});
+ }
+ assert.equal(reads,0);assert.equal(calls,0);
+ const page=JSON.stringify(['a'.repeat(64)]),{createHash}=await import('node:crypto');
+ const checksum=createHash('sha1').update(page).digest('hex');
+ for(const metadata of [
+  {index:1,page,checksum:'f'.repeat(40),snapshot:'b'.repeat(40)},
+  {index:1,page:'x'.repeat(8193),checksum,snapshot:'b'.repeat(40)},
+  {index:1,page,checksum,snapshot:'bad'},
+  {index:1001,page,checksum,snapshot:'b'.repeat(40)},
+  {index:1,page,checksum,snapshot:'b'.repeat(40),extra:true},
+ ]){
+  let commands=0;
+  await recoverPendingMail('shipment',now+1000,{lifecycle:'active',policy,now:()=>now,
+   pipeline:async()=>{commands++;return [['ticket','a'.repeat(64),JSON.stringify(metadata)]];}},async()=>{reads++;return null;});
+  assert.equal(commands,1);
+ }
+ assert.equal(reads,0);
+});
+
 test('the omitted origin cap preserves the published grant JSON and fingerprint', async () => {
  let captured:unknown[]|undefined;
  await recoverPendingMail('shipment',now+1000,{lifecycle:'active',policy:{...shipmentPolicy(now),recovery:recovery()},now:()=>now,
@@ -266,12 +296,17 @@ for (const count of [101,1000]) test(`both normal workers recover ${count} genui
   const runtime={lifecycle:'active' as const,policy:old,pipeline,now};
   // Capture one genuine original paid-checkout source through the existing
   // explicit fixture provider; copy its exact encrypted bytes into owned Redis.
-  const f=await physicalPaidFixture();
+  let f!:Awaited<ReturnType<typeof physicalPaidFixture>>;
+  const descriptor=Object.getOwnPropertyDescriptor(Date,'now')!;
+  try {
+  Date.now=()=>clock-73*3600000;
+  f=await physicalPaidFixture();
   const checkout=await createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime);
   const session=f.sessions.get(checkout.id)!;
   Object.assign(session,{status:'complete',payment_status:'paid',amount_total:4000,customer_details:{email:'buyer@example.test'},
    payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false}},
    shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
+  }finally{Object.defineProperty(Date,'now',descriptor);assert.deepEqual(Object.getOwnPropertyDescriptor(Date,'now'),descriptor);}
   const confirmationId=originId(),source=await readConfirmationOrigin(confirmationId,f.runtime);assert.ok(source);
   const row=source.row,keys=[confirmationOriginRowKey(confirmationId),`nl:order-confirmation:source:${confirmationId}`,'nl:order-confirmation:due',
    `nl:order-confirmation:store:${row.statsId}`,`nl:order-confirmation:person:${row.statsId}:${row.person}`,pool,`nl:ship:mail:pool:${row.statsId}`,all,
@@ -286,7 +321,8 @@ for (const count of [101,1000]) test(`both normal workers recover ${count} genui
     await pipeline([['HSET',String(c[5]),String(c[10]),2],['HSET',String(c[6]),String(c[10]),2*Number(c[11])]]);}
    return pipeline(commands);
   }};
-  assert.equal((await runOrderConfirmationMail(now()+30000,async()=> 'waiting',physical)).waiting,1);
+  const initial=await runOrderConfirmationMail(now()+30000,async()=> 'waiting',physical);
+  assert.equal(initial.waiting,1,JSON.stringify(initial));
   const preserved=await readConfirmationOrigin(confirmationId,physical);assert.ok(preserved?.payload.message);
   const originalConfirmation=JSON.stringify(preserved.payload.message);
   assert.equal(preserved.row.checks,1);assert.equal(preserved.row.next,0);

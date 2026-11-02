@@ -430,18 +430,18 @@ def paged_recovery_cases(redis, source, made):
        reviewId="PAGED_100",maximumChecks=2,globalItems=1000,globalBytes=100000000,continuedReviewIds=["OLD"])
     owner="b"*48; fp="c"*64; profiles=[]
     def calls(text): return {m[1]:int(m[2]) for m in re.finditer(r'^cmdstat_([^:]+):calls=(\d+),',text,re.M)}
-    def run(op,family="shipment",id=None,page="",g=None,proof=fp,script=lua,who=owner):
-        keys=[pool,all_key] if op=="next" else [pool,all_key,("nl:ship:mail:row:" if family=="shipment" else "nl:order-confirmation:row:")+id]
+    def run(op,family="shipment",id=None,page="",g=None,proof=fp,script=lua,who=owner,selected=None,expected="",valid="skip"):
+        keys=selected or ([pool,all_key] if op=="next" else [pool,all_key,("nl:ship:mail:row:" if family=="shipment" else "nl:order-confirmation:row:")+id])
         t=redis.command("TIME"); at=int(t[0])*1000+int(t[1])//1000
         if script != lua:
-            return redis.command('EVAL',script,len(keys),*keys,op,json.dumps(g or grant),proof,who,family,at,'','skip',page)
+            return redis.command('EVAL',script,len(keys),*keys,op,json.dumps(g or grant),proof,who,family,at,expected,valid,page)
         redis.command('MULTI');redis.command('INFO','COMMANDSTATS')
-        redis.command("EVAL",script,len(keys),*keys,op,json.dumps(g or grant),proof,who,family,at,"","skip",page)
+        redis.command("EVAL",script,len(keys),*keys,op,json.dumps(g or grant),proof,who,family,at,expected,valid,page)
         redis.command('INFO','COMMANDSTATS');before,result,after=redis.command('EXEC')
         a,b=calls(before),calls(after)
         delta={k:b.get(k,0)-a.get(k,0) for k in set(a)|set(b)}
         count=sum(delta.values())-1
-        profiles.append(dict(op=op,total=count,sscan=delta.get('sscan',0),hget=delta.get('hget',0),hdel=delta.get('hdel',0)))
+        profiles.append(dict(op=op,family=family,total=count,sscan=delta.get('sscan',0),hget=delta.get('hget',0),hdel=delta.get('hdel',0)))
         assert count<=64,(op,count)
         return result
     def raw(): return redis.command('HGET',pool,'pendingRecovery')
@@ -449,7 +449,7 @@ def paged_recovery_cases(redis, source, made):
     def pagekey(i): return 'pendingRecoveryPage:'+str(i)
     def seed(n):
         redis.command('DEL',pool,all_key)
-        ids=sorted(hashlib.sha256(('paged'+str(i)).encode()).hexdigest() for i in range(n))
+        ids=sorted(hashlib.sha256(('paged'+str(n)+'-'+str(i)).encode()).hexdigest() for i in range(n))
         redis.command('HSET',pool,'items',n,'bytes',n*12000)
         redis.command('SADD',all_key,*ids)
         return ids
@@ -491,21 +491,45 @@ def paged_recovery_cases(redis, source, made):
         assert run('next',g=smaller,proof='d'*64)==['held'] and raw()==old_header
     assert run('next',who='e'*48)==['held']
     assert checkpoint()['attempts']==2 and checkpoint()['index']==1
-    assert finish(ticket)==['skipped'];assert finish(ticket)==['held']
+    # The trusted TS caller has validated source AEAD separately. Exercise
+    # the actual Lua valid-source/fence path and its complete command profile.
+    def valid_origin(id,family="shipment"):
+        stats='synthetic_paged';person='d'*64;session='cs_test_'+id
+        source_value='{"at":1,"tracking":""}'
+        row=dict(id=id,statsId=stats,person=person,session=session,sourceValue=source_value,reviewId='OLD',
+                 state='queued',next=0,checks=1,owner='',leaseUntil=0)
+        prefix='nl:ship:mail:' if family=='shipment' else 'nl:order-confirmation:'
+        source_key='nl:ship:done:'+session if family=='shipment' else prefix+'source:'+id
+        if family=='confirmation':row.update(kind='confirmation',phase='queued',erasureSaturated=False,erasedPeople='')
+        keys=[pool,all_key,prefix+'row:'+id,source_key,prefix+'due',prefix+'closed:'+stats,prefix+'erased:'+stats+':'+person]
+        made.update(keys);expected=json.dumps(row)
+        redis.command('SET',keys[2],expected);redis.command('SET',keys[3],source_value)
+        return keys,expected
+    valid_keys,valid_raw=valid_origin(ticket[1]);meta=json.loads(ticket[2])
+    assert run('finish',id=ticket[1],page=meta['page'],selected=valid_keys,expected=valid_raw,valid='valid')==['rearmed']
+    assert redis.command('GET',valid_keys[2])==valid_raw and redis.command('ZSCORE',valid_keys[4],ticket[1])=='0'
+    assert finish(ticket)==['held']
     print('PASS: malformed/changed/missing pages, stale finish and lost-next ACK never advance or restore budget')
     # One grant with enough finite capacity can complete101*2 then pay cleanup.
     for family,start in [('shipment',1),('confirmation',0)]:
         for i in range(start,len(ids)):
             ticket=run('next',family);assert ticket[:2]==['ticket',ids[i]]
-            assert finish(ticket,family)==['skipped']
+            if family=='shipment' and i==1:
+                fenced_keys,fenced_raw=valid_origin(ticket[1]);redis.command('SET',fenced_keys[6],'SYNTHETIC erasure fence')
+                assert run('finish',id=ticket[1],page=json.loads(ticket[2])['page'],selected=fenced_keys,expected=fenced_raw,valid='valid')==['skipped']
+                assert redis.command('GET',fenced_keys[2])==fenced_raw
+                redis.command('DEL',fenced_keys[6])
+            elif family=='confirmation' and i==0:
+                confirmed_keys,confirmed_raw=valid_origin(ticket[1],family)
+                assert run('finish',family,id=ticket[1],page=json.loads(ticket[2])['page'],selected=confirmed_keys,expected=confirmed_raw,valid='valid')==['rearmed']
+                assert redis.command('GET',confirmed_keys[2])==confirmed_raw
+            else:assert finish(ticket,family)==['skipped']
     clean=checkpoint();assert clean['phase']=='cleaning' and clean['attempts']==203
     retained=raw()
     legacy={**grant,'reviewId':'SMALL_CLEAN','recovery':{k:v for k,v in {**grant['recovery'],'revision':101,'maximumOrigins':100}.items() if k!='checkpointTotalBytes'}}
     assert run('next',g=legacy,proof='d'*64)==['held'] and raw()==retained
     # Crash after HDEL: write-ahead cleaning metadata keeps every known field
     # referenced, and retry admits missing deleted pages without reading them.
-    crash=lua.replace('  local target=c.afterCleanup',"  return redis.error_reply('SYNTHETIC lost cleanup ACK')\n  local target=c.afterCleanup")
-    # Lua cannot have statements after return in the same block: use error().
     crash=lua.replace('  local target=c.afterCleanup',"  error('SYNTHETIC lost cleanup ACK')\n  local target=c.afterCleanup")
     try:run('next',family='confirmation',script=crash)
     except RuntimeError:pass
@@ -554,8 +578,23 @@ def paged_recovery_cases(redis, source, made):
     assert run('next')==['unknown'] and checkpoint()['phase']=='capturing'
     assert redis.command('SCARD',all_key)==101 and all(redis.command('HEXISTS',pool,pagekey(i))==0 for i in range(1,11))
     print('PASS: a giant unmatched member leaves the full original ALL and no paged generation')
+    # A partial single scan is refused; the production COUNT indication is
+    # deliberately reduced in this external script copy, never relied on as cap.
+    ids=seed(1000)
+    partial=lua.replace("maximumOrigins>100 and 10000 or 1000)","1)")
+    assert partial!=lua and run('next',script=partial)==['unsupported']
+    assert redis.command('SCARD',all_key)==1000 and all(redis.command('HEXISTS',pool,pagekey(i))==0 for i in range(1,11))
+    ids=seed(1001)
+    assert run('next',g={**grant,'globalItems':1001})==['unsupported'] and profiles[-1]['sscan']==0
+    assert redis.command('SCARD',all_key)==1001
+    print('PASS: a partial atomic scan or1001-member cohort is refused whole without publishing pages')
     maximum=max(row['total'] for row in profiles)
-    print(json.dumps({'paged_max_eval_and_internal_commands':maximum,'reserved_variable_command_units':64,'paged_maximum_fields':10,
+    next_max=max(row['total'] for row in profiles if row['op']=='next')
+    finish_max=max(row['total'] for row in profiles if row['op']=='finish')
+    # Bulk HSET is conservatively charged as11 field writes, not one free batch.
+    weighted_ticket=next_max+finish_max+3+10
+    assert weighted_ticket<=64,weighted_ticket
+    print(json.dumps({'paged_max_eval_and_internal_commands':maximum,'reserved_variable_command_units':64,'full_next_observation_finish':next_max+finish_max+3,'confirmation_valid_finish':max(row['total'] for row in profiles if row['op']=='finish' and row['family']=='confirmation'),'conservative_next_finish_observation_plus_bulk_fields':weighted_ticket,'paged_maximum_fields':10,
        'logical_checkpoint_bound':90432,'declared_checkpoint_total':100000,'two_family_useful_positions':2000,
        'actual_provider_funding':None,'supplier_invoice':False}))
 

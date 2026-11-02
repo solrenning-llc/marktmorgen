@@ -55,3 +55,5 @@ Add a row before the first commit of a unit; remove it when the unit is merged.
 | Claude 3 | 631 [AA1] unit 12 (MCP tools for a product's page test and how far its page is read; stacked on unit 11) | claude3/aa1-page-test-tools | `tests/mcp-page-test-tools.test.ts`, and the unit 8 files | 02/11/2026 14h34 |
 | Claude 3 | 631 [AA1] unit 13 (MCP tool for a sales page's earlier versions; stacked on unit 12) | claude3/aa1-page-versions | `tests/mcp-page-versions.test.ts`, `tests/llms-txt.test.ts`, and the unit 8 files | 02/11/2026 14h37 |
 | Claude 3 | 631 [AA1] unit 14 (MCP tool for the creator's saved sections; stacked on unit 13) | claude3/aa1-saved-blocks | `tests/mcp-saved-blocks.test.ts`, and the unit 8 files | 02/11/2026 14h40 |
+| Claude 3 | 631 [AA1] unit 15 (plan of OAuth for the MCP server, from the MCP specification 2026-07-28) | claude3/aa1-oauth-plan | `docs/mcp-oauth-plan.md` | 02/11/2026 14h42 |
+| Claude 3 | 631 [AA1] unit 16 (OAuth pure rules: PKCE S256, exact redirect URI, canonical resource, scopes) | claude3/aa1-oauth-rules | `lib/mcp-oauth-rules.ts`, `tests/mcp-oauth-rules.test.ts` | 02/11/2026 14h42 |

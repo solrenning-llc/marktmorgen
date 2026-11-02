@@ -31,6 +31,41 @@ test('explicit recovery origin coverage admits a bounded hundred without changin
  assert.equal(Object.getOwnPropertyDescriptor(larger.recovery,'maximumOrigins')?.value,100);
 });
 
+test('the omitted origin cap preserves the published grant JSON and fingerprint', async () => {
+ let captured:unknown[]|undefined;
+ await recoverPendingMail('shipment',now+1000,{lifecycle:'active',policy:{...shipmentPolicy(now),recovery:recovery()},now:()=>now,
+  pipeline:async commands=>{captured=commands[0];return [['done']];}},async()=>{throw Error('No source read');});
+ assert.ok(captured);
+ // Captured from the published d489426d implementation, before this option existed.
+ const legacy='{"recovery":{"version":1,"revision":1,"evidence":"SYNTHETIC finite recovery; no actual funding","startsAt":1799999999000,"until":1800003600000,"maximumAttempts":100,"maximumCommandUnits":6400,"maximumReadBytes":104857600,"checkpointBytes":8192,"maximumTriggerInvocations":100,"triggerEvidence":"SYNTHETIC fixed trigger/function/failed-guard funding envelope"},"reviewId":"SYNTHETIC_SHIPMENT_ONLY","maximumChecks":100,"globalItems":100,"globalBytes":10000000,"continuedReviewIds":[]}';
+ assert.equal(captured[6],legacy);
+ assert.equal(captured[7],'dbc958ec0094658edb189ac5fa777e545200966b67970dd29f773216c499f192');
+});
+
+test('extra origin capacity requires explicit bounded own data and checkpoint funding before IO', async () => {
+ let calls=0,reads=0;
+ const bad:unknown[]=[...[-1,0,101,1.5,Infinity,'100',false,null,undefined].map(maximumOrigins=>({...recovery(),maximumOrigins})),
+  {...recovery(),maximumOrigins:100,checkpointBytes:4096},
+  {...recovery(),maximumOrigins:26,checkpointBytes:8191},
+  {...recovery(),maximumOrigins:100,unreviewed:true},
+  Object.assign(Object.create({maximumOrigins:100}),recovery()),
+  Object.defineProperty(recovery(),'maximumOrigins',{get(){reads++;return 100;}})];
+ for(const value of bad){
+  const policy={...shipmentPolicy(now),recovery:value};
+  assert.equal(shipmentMailPolicy(policy,now,false),null);
+  await recoverPendingMail('shipment',now+1000,{lifecycle:'active',policy:policy as Parameters<typeof recoverPendingMail>[2]['policy'],now:()=>now,
+   pipeline:async()=>{calls++;throw Error('Invalid funding must refuse before IO');}},async()=>{throw Error('No source read');});
+ }
+ for(const maximumOrigins of [1,25,26,100])assert.ok(shipmentMailPolicy({...shipmentPolicy(now),recovery:{...recovery(),maximumOrigins}},now,false));
+ assert.ok(shipmentMailPolicy({...shipmentPolicy(now),recovery:{...recovery(),maximumOrigins:25,checkpointBytes:4096}},now,false));
+ const prior=Object.getOwnPropertyDescriptor(Object.prototype,'maximumOrigins');
+ try{
+  Object.defineProperty(Object.prototype,'maximumOrigins',{get(){reads++;return 100;},configurable:true});
+  assert.equal(shipmentMailPolicy({...shipmentPolicy(now),recovery:recovery()},now,false),null);
+ }finally{if(prior)Object.defineProperty(Object.prototype,'maximumOrigins',prior);else Reflect.deleteProperty(Object.prototype,'maximumOrigins');}
+ assert.equal(calls,0);assert.equal(reads,0);
+});
+
 test('ordinary pending storage evidence never supplies recovery capacity', () => {
  const p = shipmentMailPolicy(shipmentPolicy(now), now, false);
  assert.ok(p);
@@ -164,6 +199,51 @@ async function isolatedRecoveryProof(body:(pipeline:typeof confirmationLocalPipe
  try {await body(pipeline,pool,all);}finally{await confirmationLocalPipeline([['DEL',...made]]);if(prior.length)await confirmationLocalPipeline([['HSET',pool,...prior.map(String)]]);}
 }
 const redisOptIn=process.env.MARKTMORGEN_REDIS_INTEGRATION!=='1'||!process.env.CONFIRMATION_ORIGIN_REDIS_PORT;
+
+test('both normal workers complete an explicitly funded hundred-origin snapshot with each original message once', {skip:redisOptIn}, async()=>{
+ await isolatedRecoveryProof(async(pipeline,pool,all)=>{
+  const clock=Date.now(),old={...shipmentPolicy(clock),maximumChecks:1};
+  const runtime={lifecycle:'active' as const,policy:old,pipeline,now:()=>clock};
+  const originals=new Map<string,{source:string;message:{from:string;to:string;subject:string;text:string;replyTo:string}}>();
+  for(let i=0;i<100;i++){
+   const session='cs_test_HundredRecovery'+String(i).padStart(4,'0');
+   const input={statsId:'synthetic_hundred_recovery',session,authorizedAt:clock,
+    shipped:{at:Math.floor(clock/1000),tracking:'https://example.test/track/'+i},
+    message:{from:'Store <mail@example.test>',to:'buyer@example.test',subject:'Original '+i,text:'Original immutable message '+i,replyTo:'owner@example.test'}};
+   assert.equal((await enqueueShipmentMail(input,runtime)).ok,true);
+   const id=shipmentMailId(input.statsId,session);
+   assert.equal((await runShipmentMail(clock+30000,async()=> 'waiting',runtime,id)).waiting,1);
+   const [raw,source,score]=await pipeline([['GET','nl:ship:mail:row:'+id],['GET','nl:ship:done:'+session],['ZSCORE','nl:ship:mail:due',id]]);
+   assert.equal(JSON.parse(String(raw)).checks,1);assert.equal(score,'-1');assert.equal(typeof source,'string');
+   originals.set(session,{source:String(source),message:input.message});
+  }
+  assert.equal((await pipeline([['SCARD',all]]))[0],100);
+  const renewed={...runtime,policy:{...old,reviewId:'SYNTHETIC_HUNDRED_RENEWED',continuedReviewIds:[old.reviewId],maximumChecks:2,
+   recovery:{...recovery(),startsAt:clock-1000,until:clock+3600000,maximumOrigins:100,
+    maximumAttempts:1000,maximumCommandUnits:64000,maximumReadBytes:1048576000,maximumTriggerInvocations:1000}}};
+  const sent=new Set<string>();let accepted=0,complete:Record<string,unknown>|undefined;
+  for(let pass=0;pass<250;pass++){
+   const results=await Promise.all([
+    runShipmentMail(clock+30000,async(message,barrier)=>{
+     const original=[...originals.values()].find(value=>value.message.subject===message.subject);
+     assert.ok(original);assert.equal(JSON.stringify(message),JSON.stringify(original.message));
+     assert.equal(sent.has(message.subject),false);assert.equal(await barrier(),true);sent.add(message.subject);return 'accepted';
+    },renewed),
+    runOrderConfirmationMail(clock+30000,async()=>{throw Error('There is no confirmation source');},renewed),
+   ]);
+   accepted+=results[0].accepted;
+   const [raw]=await pipeline([['HGET',pool,'pendingRecovery']]);complete=JSON.parse(String(raw));
+   if(complete?.phase==='done')break;
+  }
+  assert.equal(complete?.phase,'done');assert.equal(complete?.attempts,200);
+  assert.equal(complete?.units,12800);assert.equal(complete?.readBytes,209715200);
+  assert.equal(accepted,100);assert.equal(sent.size,100);assert.equal((await pipeline([['SCARD',all]]))[0],0);
+  for(const [session,original] of originals){
+   assert.equal((await pipeline([['GET','nl:ship:done:'+session]]))[0],original.source);
+   assert.equal((await pipeline([['GET','nl:ship:mail:row:'+shipmentMailId('synthetic_hundred_recovery',session)]]))[0],null);
+  }
+ });
+});
 
 test('expired preparation with a historical index hole cannot hide later original shipment mail', {skip:redisOptIn}, async()=>{
  await isolatedRecoveryProof(async(pipeline,pool)=>{

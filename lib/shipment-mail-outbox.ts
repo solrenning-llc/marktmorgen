@@ -18,6 +18,8 @@ export type PendingMailRecoveryGrant = {
   version: 1; revision: number; evidence: string; startsAt: number; until: number;
   maximumAttempts: number; maximumCommandUnits: number; maximumReadBytes: number; checkpointBytes: number;
   maximumTriggerInvocations: number; triggerEvidence: string;
+  /** Explicit extra snapshot capacity; omission preserves the legacy25 grant. */
+  maximumOrigins?: number;
 };
 export type ShipmentMailPolicy = {
   reviewId: string;
@@ -110,9 +112,14 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
   if (p.recovery !== undefined) {
     const r = data(p.recovery);
     const fields = ["version", "revision", "evidence", "startsAt", "until", "maximumAttempts", "maximumCommandUnits", "maximumReadBytes", "checkpointBytes", "maximumTriggerInvocations", "triggerEvidence"];
-    if (!r || Object.keys(r).length !== fields.length || !fields.every(key => Object.hasOwn(r, key)) || r.version !== 1 ||
+    const hasOrigins = !!r && Object.hasOwn(r, "maximumOrigins");
+    if (!r || Object.keys(r).length !== fields.length + Number(hasOrigins) || !fields.every(key => Object.hasOwn(r, key)) || r.version !== 1 ||
         typeof r.evidence !== "string" || !r.evidence.trim() || r.evidence.length > 1000 ||
         typeof r.triggerEvidence !== "string" || !r.triggerEvidence.trim() || r.triggerEvidence.length > 1000) return null;
+    if (!hasOrigins && Object.getPrototypeOf(p.recovery) === Object.prototype &&
+        Object.getOwnPropertyDescriptor(Object.prototype, "maximumOrigins")) return null;
+    if (hasOrigins && (!integer(r.maximumOrigins) || r.maximumOrigins < 1 || r.maximumOrigins > 100 ||
+        r.maximumOrigins > 25 && r.checkpointBytes !== 8192)) return null;
     for (const key of ["revision", "startsAt", "until", "maximumAttempts", "maximumCommandUnits", "maximumReadBytes", "checkpointBytes", "maximumTriggerInvocations"]) if (!integer(r[key])) return null;
     if (Number(r.revision) < 1 || Number(r.revision) > 1_000_000_000 || Number(r.startsAt) > now || Number(r['until']) <= now || Number(r['until']) <= Number(r.startsAt) ||
         Number(r.maximumAttempts) < 1 || Number(r.maximumAttempts) > 1000 || Number(r.maximumCommandUnits) < 64 || Number(r.maximumCommandUnits) > 64_000 ||
@@ -120,6 +127,9 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
         Number(r.checkpointBytes) < 4096 || Number(r.checkpointBytes) > 8192 || Number(r.maximumTriggerInvocations) < 1 || Number(r.maximumTriggerInvocations) > 1000) return null;
     const captured: Record<string, unknown> = Object.create(null);
     for (const key of fields) captured[key] = r[key];
+    // Do not inject a default: the existing grant's encoded bytes/fingerprint
+    // must remain unchanged when no extra snapshot capacity was supplied.
+    if (hasOrigins) captured.maximumOrigins = r.maximumOrigins;
     p.recovery = captured;
   }
   if (p.coveredOrigins !== undefined) {
@@ -301,6 +311,9 @@ local fp,owner,family=ARGV[3],ARGV[4],ARGV[5]
 local now=tonumber(ARGV[6])
 if not ok or type(g)~='table' or type(g.recovery)~='table' or not now then return {'unknown'} end
 local r=g.recovery
+local maximumOrigins=r.maximumOrigins
+if maximumOrigins==nil then maximumOrigins=25 end
+if type(maximumOrigins)~='number' or maximumOrigins%1~=0 or maximumOrigins<1 or maximumOrigins>100 or (maximumOrigins>25 and r.checkpointBytes~=8192) then return {'unknown'} end
 local clock=redis.call('TIME')
 local serverNow=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
 if math.abs(now-serverNow)>60000 or now<r.startsAt or now>=r['until'] or r.version~=1 or r.revision<1 or r.revision>1000000000 or r.revision%1~=0 or r.maximumAttempts<1 or r.maximumAttempts>1000 or r.maximumCommandUnits<64 or r.maximumCommandUnits>64000 or r.maximumReadBytes<1048576 or r.maximumReadBytes>1048576000 or r.checkpointBytes<4096 or r.checkpointBytes>8192 or r.maximumTriggerInvocations<1 or r.maximumTriggerInvocations>1000 then return {'unknown'} end
@@ -320,7 +333,7 @@ local c=nil
 if raw then
  if #raw>8192 then return {'unknown'} end
  local good,v=pcall(cjson.decode,raw)
- if not good or type(v)~='table' or v.version~=1 or type(v.ids)~='table' or #v.ids>25 then return {'unknown'} end
+ if not good or type(v)~='table' or v.version~=1 or type(v.ids)~='table' or #v.ids>100 then return {'unknown'} end
  local expected={version=true,revision=true,fingerprint=true,reviewId=true,maximumChecks=true,attempts=true,units=true,readBytes=true,ids=true,index=true,family=true,phase=true,owner=true,leaseUntil=true}
  local count=0
  for field,_ in pairs(v) do if not expected[field] then return {'unknown'} end;count=count+1 end
@@ -352,6 +365,7 @@ if op=='next' then
   -- work. Revalidate each retained position at finish under the new review.
   -- Old tickets lose authority through revision/fingerprint and owner checks.
   local continuing=c and (c.phase=='active' or c.phase=='continuing')
+  if continuing and (#c.ids>maximumOrigins or #raw>r.checkpointBytes) then return {'held'} end
   local ids=continuing and c.ids or {}
   local index=continuing and c.index or 1
   local currentFamily=continuing and c.family or 'shipment'
@@ -373,7 +387,7 @@ if op=='next' then
  if c.phase=='capturing' then
   local count=redis.call('SCARD',KEYS[2])
   if count~=tonumber(financial[1]) then return {'unknown'} end
-  if count>25 then c.phase='unsupported';save();return {'unsupported'} end
+  if count>maximumOrigins then c.phase='unsupported';save();return {'unsupported'} end
   -- Cardinality bounds replies independently of COUNT; MATCH bounds member
   -- bytes BEFORE copying them. A partial cursor is unsupported, never a
   -- silently truncated snapshot. No repeated scan is hidden in this grant.

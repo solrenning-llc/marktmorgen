@@ -234,6 +234,85 @@ def pending_recovery_cases(redis, source, made):
     assert calls(after,"sscan")==calls(before,"sscan")
     assert checkpoint()['phase']=='unsupported' and redis.command("SCARD",all_key)==26
     print("PASS: cohort26 refuses before enumeration, never truncates or discards any origin")
+    # Additional origins require an explicit option in the SAME finite review.
+    # These synthetic grants prove technical bounds, never an actual invoice.
+    hundred={**grant,'globalItems':101,'recovery':{**grant['recovery'],'maximumOrigins':100,
+        'maximumAttempts':1000,'maximumCommandUnits':64000,'maximumReadBytes':1048576000,'maximumTriggerInvocations':1000}}
+    for count in [26,100,101]:
+        redis.command('DEL',pool,all_key)
+        rows=sorted([setup('explicit-cohort-'+str(count)+'-'+str(i)) for i in range(count)],key=lambda row:row[0])
+        before=redis.command('INFO','COMMANDSTATS')
+        ticket=run('next',g=hundred)
+        after=redis.command('INFO','COMMANDSTATS')
+        if count==101:
+            assert ticket==['unsupported'] and checkpoint()['phase']=='unsupported'
+            assert calls(after,'sscan')==calls(before,'sscan')
+            assert redis.command('SCARD',all_key)==101
+            continue
+        assert ticket==['ticket',rows[0][0],'1']
+        assert len(checkpoint()['ids'])==count
+        if count==100:
+            saved_hundred=redis.command('HGET',pool,'pendingRecovery')
+            for replacement in [
+                {**grant,'reviewId':'DOWNGRADED_LEGACY','recovery':{**grant['recovery'],'revision':2}},
+                {**hundred,'reviewId':'DOWNGRADED_EXPLICIT','recovery':{**hundred['recovery'],'revision':2,'maximumOrigins':99}},
+                {**grant,'reviewId':'DOWNGRADED_CHECKPOINT','recovery':{**grant['recovery'],'revision':2,'maximumOrigins':25,'checkpointBytes':4096}},
+            ]:
+                assert run('next',g=replacement,proof='d'*64)==['held']
+                assert redis.command('HGET',pool,'pendingRecovery')==saved_hundred
+            # A lost ticket ACK is charged and retains the same first position.
+            assert run('next',g=hundred,who='e'*48)==['held']
+            assert checkpoint()['index']==1 and checkpoint()['attempts']==2
+            assert run('finish',keys=rows[0][2],raw=rows[0][1],valid='valid',g=hundred)==['rearmed']
+            # A malformed enlarged checkpoint is neither repaired nor reset.
+            active=redis.command('HGET',pool,'pendingRecovery')
+            for changes in [{'phase':'unreviewed'},{'ids':checkpoint()['ids']+['a'*64]},{'attempts':0}]:
+                malformed=json.dumps({**json.loads(active),**changes})
+                redis.command('HSET',pool,'pendingRecovery',malformed)
+                assert run('next',g=hundred)==['unknown']
+                assert redis.command('HGET',pool,'pendingRecovery')==malformed
+            redis.command('HSET',pool,'pendingRecovery',active)
+            start=1
+        else:
+            assert run('finish',keys=rows[0][2],raw=rows[0][1],valid='valid',g=hundred)==['rearmed']
+            start=1
+        for index in range(start,count):
+            id,raw,keys=rows[index]
+            assert run('next',g=hundred)==['ticket',id,str(index+1)]
+            assert run('finish',keys=keys,raw=raw,valid='valid',g=hundred)==['rearmed']
+        for index,(id,raw,keys) in enumerate(rows):
+            # Known other-family guards must not spend the useful ticket.
+            before_guard=checkpoint()
+            assert run('next',g=hundred)==['held'] and checkpoint()==before_guard
+            assert run('next',g=hundred,family='confirmation')==['ticket',id,str(index+1)]
+            missing='nl:order-confirmation:row:'+id
+            assert run('finish',g=hundred,family='confirmation',keys=[pool,all_key,missing])==['skipped']
+        complete=checkpoint();expected=2*count+int(count==100)
+        assert complete['phase']=='done' and complete['attempts']==expected
+        assert complete['units']==expected*64 and complete['readBytes']==expected*1048576
+        assert len(redis.command('HGET',pool,'pendingRecovery').encode())<=8192
+        assert redis.command('SCARD',all_key)==count
+        for id,raw,keys in rows:assert redis.command('GET',keys[2])==raw
+        assert run('next',g=hundred)==['done']
+    print('PASS: explicit8192-byte coverage admits26/100 origins and both200 family tickets, preserves legacy25, and rejects101 or an active downgrade')
+    for change in [{'maximumOrigins':v} for v in [0,101,1.5,'100',False,None]]+[{'maximumOrigins':100,'checkpointBytes':4096}]:
+        redis.command('DEL',pool,all_key)
+        before=redis.command('INFO','COMMANDSTATS')
+        assert run('next',g={**hundred,'recovery':{**hundred['recovery'],**change}})==['unknown']
+        after=redis.command('INFO','COMMANDSTATS')
+        for name in ['time','type','hget','hset','scard','sscan']:
+            # run() performs one external TIME for its supplied clock.
+            assert calls(after,name)-calls(before,name)==int(name=='time')
+        assert redis.command('EXISTS',pool,all_key)==0
+    redis.command('DEL',pool,all_key)
+    for i in range(99):redis.command('SADD',all_key,hashlib.sha256(('raw-member-'+str(i)).encode()).hexdigest())
+    redis.command('SADD',all_key,'x'*2_000_000)
+    redis.command('HSET',pool,'items',100,'bytes',100*12000)
+    assert run('next',g=hundred)==['unknown']
+    malformed=checkpoint()
+    assert not malformed['ids'] and malformed['attempts']==1
+    assert redis.command('SCARD',all_key)==100
+    print('PASS: invalid explicit capacity rejects before metadata IO; a huge unmatched member cannot enter a partial100-origin snapshot')
     redis.command("DEL",pool,all_key)
     id,raw,keys=setup("budget")
     finite={**grant,'recovery':{**grant['recovery'],'maximumAttempts':1,'maximumCommandUnits':64,'maximumReadBytes':1048576,'maximumTriggerInvocations':1}}

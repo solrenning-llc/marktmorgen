@@ -174,6 +174,13 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
   await redisPipeline([["HDEL", stockKey(store.statsId, product.id), session]]);
 }
 
+/** Exactly `count` replies, each an explicit 0 or 1, read by index so a hole in a sparse reply is never taken for one. */
+function acknowledged(receipt: unknown, count: number): boolean {
+  if (!Array.isArray(receipt) || receipt.length !== count) return false;
+  for (let i = 0; i < count; i += 1) if (receipt[i] !== 0 && receipt[i] !== 1) return false;
+  return true;
+}
+
 /** Why a cart's units could not be held: one of its limited products has none left (`ids`), or the count could not be read safely. */
 export type CartStockHold<T> = { ok: true; value: T } | { ok: false; reason: "soldout"; ids: string[] } | { ok: false; reason: "busy" };
 
@@ -230,7 +237,7 @@ export async function withCartStockHolds<T extends { id: string }>(
     if (out.length > 0) return { ok: false, reason: "soldout", ids: out };
     for (const held of taken) if (!(await holdLock(held))) return { ok: false, reason: "busy" };
     const receipt = await redisPipeline(limited.map((product) => ["HSET", stockKey(statsId, product.id), pending, JSON.stringify({ until: Date.now() + PENDING_MS })]));
-    if (!Array.isArray(receipt) || receipt.length !== limited.length || receipt.some((recorded: unknown) => recorded !== 0 && recorded !== 1)) {
+    if (!acknowledged(receipt, limited.length)) {
       await redisPipeline(limited.map((product) => ["HDEL", stockKey(statsId, product.id), pending])).catch(() => {});
       return { ok: false, reason: "busy" };
     }
@@ -250,7 +257,7 @@ export async function withCartStockHolds<T extends { id: string }>(
   // Counted from after the checkout exists, so its hold outlasts it; the provisional one goes.
   const hold = JSON.stringify({ until: Date.now() + HOLD_MS });
   const receipt = await redisPipeline(limited.flatMap((product) => [["HSET", stockKey(statsId, product.id), value.id, hold], ["HDEL", stockKey(statsId, product.id), pending]])).catch(() => null);
-  const written = Array.isArray(receipt) && receipt.length === limited.length * 2 && receipt.every((recorded: unknown) => recorded === 0 || recorded === 1);
+  const written = acknowledged(receipt, limited.length * 2);
   if (!written) {
     // Nobody is sent to a checkout whose units are not written as its own: it is closed at Stripe, and the provisional holds lapse.
     if (store.stripeAccountId) await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => {});

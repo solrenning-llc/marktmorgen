@@ -155,6 +155,14 @@ async function main(): Promise<void> {
   const unwritten = await withCartStockHolds(creator, [limited("print9", 3)], async () => ({ id: "cs_test_cartstockbad00001" }));
   redis.pipeline = original;
   is("a checkout whose hold cannot be written is closed at Stripe, and nobody is sent to it", [unwritten, expired.includes("cs_test_cartstockbad00001")], [{ ok: false, reason: "busy" }, true]);
+  let sparseOpened = 0;
+  redis.pipeline = async (commands) => (commands.length === 2 && commands[0][0] === "HSET" && commands[1][0] === "HSET" ? new Array(2) : original(commands));
+  const sparse = await withCartStockHolds(creator, [limited("print11", 3), limited("print12", 3)], async () => {
+    sparseOpened += 1;
+    return { id: "cs_test_cartstocksparse01" };
+  });
+  redis.pipeline = original;
+  is("a reply with holes is never taken for the provisional holds' acknowledgment", [sparse, sparseOpened], [{ ok: false, reason: "busy" }, 0]);
   await withCartStockHolds(creator, [limited("print10", 1)], async () => ({ id: "cs_test_cartstockdone0001" }));
   complete.add("cs_test_cartstockdone0001");
   await releaseCartStockHolds(creator, [limited("print10", 1)], "cs_test_cartstockdone0001");

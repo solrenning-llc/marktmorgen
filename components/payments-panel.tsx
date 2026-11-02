@@ -19,6 +19,7 @@ const SHORT_WORDS: Record<CurrencyShortfall["what"], string> = {
   bump: "Offer at checkout",
   offer: "Offer after paying",
   plan: "Each payment of the payment plan",
+  deposit: "Deposit paid on the site, before the rest in person",
 };
 
 /** The ways to pay, grouped the way a buyer thinks of them, each group with the one thing worth knowing. */

@@ -1,4 +1,5 @@
 import { PackageOffer } from "@/components/store-product";
+import { placeLine } from "@/lib/call-place";
 import { DEMO_MOVED_NOTE, DEMO_STAYS_NOTE, isHouseStore } from "@/lib/house-store";
 import { boughtByToken, packageState } from "@/lib/call-packages";
 import { isSoon } from "@/lib/waitlist";
@@ -237,6 +238,12 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
 
 /** The line under a call's title: how long, how many, and where. */
 function callLine(setup: CallSetup, b: BookingWords): string {
+  // In person (lib/call-place.ts): the address, and no link at all.
+  if (setup.place) {
+    const address = placeLine(setup.place);
+    if (setup.kind === "live") return b.inPersonLiveLine(address);
+    return setup.seats > 1 ? b.inPersonGroupLine(setup.seats, setup.minutes, address) : b.inPersonLine(setup.minutes, address);
+  }
   // A meeting made on the creator's own Google or Zoom account comes first,
   // as it does when the booking is confirmed (lib/meet-links.ts).
   const where = setup.meet
@@ -316,6 +323,8 @@ async function MovePage({
           <p className="mt-0.5 text-sm">
             {b.bookedLine(zoneName(booking.start, tz, locale), Math.round((booking.end - booking.start) / 60_000), product.title)}
           </p>
+          {/* In person (lib/call-place.ts): where, as text. */}
+          {setup.place ? <p className="mt-1 text-sm" data-call-place="">{b.whereAt(placeLine(setup.place))}</p> : null}
         </div>
 
         {moved ? (

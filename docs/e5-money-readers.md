@@ -33,12 +33,12 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | Class | Files |
 | --- | --- |
 | FOLLOW-UP-CHARGE | 8 |
-| NEW-CHARGE | 12 |
+| NEW-CHARGE | 13 |
 | TOTALS | 34 |
 | PAST-SALE | 10 |
 | SETTING | 41 |
 | OTHER | 1 |
-| All | 106 |
+| All | 107 |
 
 ## The files
 
@@ -59,6 +59,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/call-packages.ts` | NEW-CHARGE | 124: a package's checkout line in the store's currency; 212 the session's | partly |
 | `lib/calls.ts` | NEW-CHARGE | 670: a call's checkout line; 1341 the phone alert of what was paid, in the store's currency | no: 1341 ignores the paid currency |
 | `lib/cart-checkout.ts` | NEW-CHARGE | 143: each cart line's price_data in the store's currency | no |
+| `lib/order-confirmation-outbox.ts` | NEW-CHARGE | 310–311: reserved digital construction compares the original rights, product price and payment-body currency with the immutable store snapshot | yes: only the original currency and amount may match; no conversion or current-setting lookup, and digital payment remains closed until original access is proved |
 | `lib/pay-what-you-want.ts` | NEW-CHARGE | 123–137: the Price with a custom amount, in the store's currency | no |
 | `lib/payment-request-store.ts` | NEW-CHARGE | 92: a payment request saved with the store's currency | partly: kept per request |
 | `lib/paypal-sales.ts` | NEW-CHARGE | 288: the PayPal order in the store's currency; 260 eligibility | no |

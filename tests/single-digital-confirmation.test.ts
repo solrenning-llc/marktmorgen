@@ -79,6 +79,8 @@ test("synthetic unknown create ACK is reconciled by original-account reads after
   assert.equal(sent, 0); assert.equal(f.calls.filter(c => c.method === "POST").length, 0);
   assert.equal(f.commands.some(c => c[0] === "EVAL" && String(c[1]).includes("order-confirmation-settlement:v1")), false);
   assert.ok(f.calls.filter(c => c.method === "GET").every(c => c.account === "acct_TestOrigin01"));
+  assert.equal(f.calls.filter(c => c.method === "GET").length, 2, "one discovery page and one exact original-session verification");
+  console.log(JSON.stringify({ syntheticBoundary: "digital-lost-create-ack", providerGets: 2, providerPosts: 0, receiptPosts: sent }));
   assert.equal(await confirmPurchase(f.store, sessionId, f.sessions.get(sessionId)!), "skip");
   // Financial horizon is not an expiry of the retained source.
   f.advance(450 * 86_400_000);

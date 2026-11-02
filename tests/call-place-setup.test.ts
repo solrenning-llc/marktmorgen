@@ -109,6 +109,7 @@ async function main(): Promise<void> {
   const toBuyer = emails.find((e) => e.to === "ana@example.com");
   const toCreator = emails.find((e) => e.to !== "ana@example.com");
   is("the buyer's confirmation says where, and never a link to join nor that one will come", [toBuyer?.text.includes("Where: Bela Studio, 12 Harbor Street, Portland, ME 04101"), /Join here|send you the link|example\.com\/room/.test(toBuyer?.text ?? "")], [true, false]);
+  is("and opens with a time booked, never \"a call\" (unit 4)", [toBuyer?.text.startsWith("Your time with Bela Studio is booked."), /\bcall\b/i.test(toBuyer?.text ?? "")], [true, false]);
   is("its calendar file names the address", [toBuyer?.ics.includes("LOCATION:Bela Studio\\, 12 Harbor Street\\, Portland\\, ME 04101"), toBuyer?.ics.includes("URL:")], [true, false]);
   is("the creator is told it is in person, at that address, never asked to send a link", [toCreator?.text.includes("In person, at: Bela Studio, 12 Harbor Street, Portland, ME 04101"), /send them one before|meeting link/.test(toCreator?.text ?? "")], [true, false]);
   emails.length = 0;

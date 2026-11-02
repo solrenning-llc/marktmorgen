@@ -447,7 +447,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
           }}
           className="inline-flex min-h-11 -my-2.5 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
         >
-          Sell this as a paid call with a calendar
+          Sell this as a paid booking with a calendar: a call, or a time at your address
         </button>
         <button
           type="button"
@@ -771,7 +771,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
               seats: Number(draft.seats),
             },
           },
-          saved ? "Hours saved." : "It's now sold as a paid call.",
+          saved ? "Hours saved." : "It's now sold as a paid booking.",
         );
       }}
     >
@@ -968,7 +968,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
 
       <div className="flex flex-wrap gap-2">
         <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary">
-          {busy ? "Saving…" : saved ? "Save the hours" : "Sell it as a call"}
+          {busy ? "Saving…" : saved ? "Save the hours" : "Sell these hours"}
         </button>
         <button type="button" onClick={() => { setOpen(false); setError(null); }} className="btn btn-ghost">
           Cancel

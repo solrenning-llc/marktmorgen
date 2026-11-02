@@ -47,7 +47,7 @@ const en = {
       body: "Nothing was charged. Try again in a moment.",
     },
     unavailable: {
-      title: "This call cannot be booked right now",
+      title: "This cannot be booked right now",
       body: "Nothing was charged.",
     },
     slow: {
@@ -80,7 +80,7 @@ const en = {
   packageLeft: (left: number, total: number) => `Booking from your package: ${left} of ${total} left`,
   /** After packageLeft; the date is written without the year. */
   packageBookBy: (date: string) => ` · book by ${date}`,
-  packageLinkWrong: "That package link is not for this call, or no longer works. Use the link in your package's email.",
+  packageLinkWrong: "That package link is not for this booking, or no longer works. Use the link in your package's email.",
   closedBody: (store: string) => `${store}'s store is not taking payments at the moment. Nothing here can charge a card.`,
   timesUnread: "The times could not be read just now",
   timesUnreadBody: "Nothing was charged. Refresh the page in a moment.",
@@ -174,6 +174,8 @@ const en = {
   seatBooked: (store: string) => `Your seat with ${store} is booked.`,
   groupBooked: (store: string) => `Your place in the group call with ${store} is booked.`,
   callBooked: (store: string) => `Your call with ${store} is booked.`,
+  /** An in-person booking (lib/call-place.ts): no "call" in it. */
+  timeBooked: (store: string) => `Your time with ${store} is booked.`,
   titleLength: (title: string, minutes: number) => `${title}, ${minutes} minutes`,
   joinAtThatTime: (room: string) => `Join here at that time: ${room}`,
   willSendLink: (store: string) => `${store} will send you the link to join before the call.`,
@@ -237,6 +239,9 @@ const en = {
   packageBookHere: "Book each session, whenever you like, here:",
   packageKeep:
     "Keep this email: that link is how you book the rest. Each one gets its own confirmation, reminders and meeting link, and can be moved like any booking.",
+  /** A package of in-person bookings (lib/call-place.ts): no meeting link, the address instead. */
+  packageKeepPlace:
+    "Keep this email: that link is how you book the rest. Each one gets its own confirmation and reminders, with the address, and can be moved like any booking.",
   packageCharged: (store: string) =>
     `Charged by ${store} on their own Stripe account. Questions go to ${store} by replying to this email.`,
 };
@@ -267,7 +272,7 @@ const es: BookingWords = {
     },
     invalid: { title: "Primero elige un horario", body: "Elige uno de los horarios de abajo y luego continúa." },
     error: { title: "Algo salió mal por nuestra parte", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },
-    unavailable: { title: "Esta llamada no se puede reservar en este momento", body: "No se ha cobrado nada." },
+    unavailable: { title: "No se puede reservar en este momento", body: "No se ha cobrado nada." },
     slow: { title: "Demasiados intentos en pocos minutos", body: "No se ha cobrado nada. Espera unos minutos y vuelve a elegir un horario." },
   },
   moveNotices: {
@@ -283,7 +288,7 @@ const es: BookingWords = {
 
   packageLeft: (left, total) => `Reservando con tu paquete: te ${left === 1 ? "queda" : "quedan"} ${left} de ${total}`,
   packageBookBy: (date) => ` · reserva a más tardar el ${date}`,
-  packageLinkWrong: "Ese enlace del paquete no es para esta llamada o ya no funciona. Usa el enlace del email de tu paquete.",
+  packageLinkWrong: "Ese enlace del paquete no es para esta reserva o ya no funciona. Usa el enlace del email de tu paquete.",
   closedBody: (store) => `La tienda de ${store} no está aceptando pagos en este momento. Nada aquí puede cobrar una tarjeta.`,
   timesUnread: "No se pudieron leer los horarios en este momento",
   timesUnreadBody: "No se ha cobrado nada. Actualiza la página en un momento.",
@@ -361,6 +366,7 @@ const es: BookingWords = {
   seatBooked: (store) => `Tu plaza con ${store} está reservada.`,
   groupBooked: (store) => `Tu lugar en la llamada en grupo con ${store} está reservado.`,
   callBooked: (store) => `Tu llamada con ${store} está reservada.`,
+  timeBooked: (store) => `Tu cita con ${store} está reservada.`,
   titleLength: (title, minutes) => `${title}, ${minutes} minutos`,
   joinAtThatTime: (room) => `Únete aquí a esa hora: ${room}`,
   willSendLink: (store) => `${store} te enviará el enlace para unirte antes de la llamada.`,
@@ -414,6 +420,8 @@ const es: BookingWords = {
   packageBookHere: "Reserva cada sesión, cuando quieras, aquí:",
   packageKeep:
     "Guarda este email: con ese enlace reservas el resto. Cada una recibe su propia confirmación, sus recordatorios y su enlace de reunión, y se puede cambiar como cualquier reserva.",
+  packageKeepPlace:
+    "Guarda este email: con ese enlace reservas el resto. Cada una recibe su propia confirmación y sus recordatorios, con la dirección, y se puede cambiar como cualquier reserva.",
   packageCharged: (store) =>
     `Cobrado por ${store} en su propia cuenta de Stripe. Las preguntas le llegan a ${store} si respondes a este email.`,
 };
@@ -445,7 +453,7 @@ const fr: BookingWords = {
     },
     invalid: { title: "Choisissez d'abord un créneau", body: "Choisissez l'un des créneaux ci-dessous, puis continuez." },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été débité. Réessayez dans un instant." },
-    unavailable: { title: "Cet appel ne peut pas être réservé pour l'instant", body: "Rien n'a été débité." },
+    unavailable: { title: "La réservation n'est pas possible pour l'instant", body: "Rien n'a été débité." },
     slow: { title: "Beaucoup de tentatives en quelques minutes", body: "Rien n'a été débité. Patientez quelques minutes, puis choisissez de nouveau un créneau." },
   },
   moveNotices: {
@@ -464,7 +472,7 @@ const fr: BookingWords = {
 
   packageLeft: (left, total) => `Réservation avec votre forfait${S}: il vous en reste ${left} sur ${total}`,
   packageBookBy: (date) => ` · à réserver au plus tard le ${date}`,
-  packageLinkWrong: "Ce lien de forfait ne concerne pas cet appel, ou ne fonctionne plus. Utilisez le lien de l'e-mail de votre forfait.",
+  packageLinkWrong: "Ce lien de forfait ne concerne pas cette réservation, ou ne fonctionne plus. Utilisez le lien de l'e-mail de votre forfait.",
   closedBody: (store) => `La boutique de ${store} n'accepte pas de paiements pour le moment. Rien ici ne peut débiter une carte.`,
   timesUnread: "Les créneaux n'ont pas pu être lus pour l'instant",
   timesUnreadBody: "Rien n'a été débité. Actualisez la page dans un instant.",
@@ -541,6 +549,7 @@ const fr: BookingWords = {
   seatBooked: (store) => `Votre place avec ${store} est réservée.`,
   groupBooked: (store) => `Votre place dans l'appel de groupe avec ${store} est réservée.`,
   callBooked: (store) => `Votre appel avec ${store} est réservé.`,
+  timeBooked: (store) => `Votre rendez-vous avec ${store} est réservé.`,
   titleLength: (title, minutes) => `${title}, ${minutes}${S}minutes`,
   joinAtThatTime: (room) => `Participez ici à l'heure prévue${S}: ${room}`,
   willSendLink: (store) => `${store} vous enverra le lien pour participer avant l'appel.`,
@@ -593,6 +602,7 @@ const fr: BookingWords = {
   packageNoLimit: "Pas de limite de temps pour les réserver.",
   packageBookHere: `Réservez chaque séance, quand vous le souhaitez, ici${S}:`,
   packageKeep: `Conservez cet e-mail${S}: ce lien vous permet de réserver les suivantes. Chacune reçoit sa propre confirmation, ses rappels et son lien de réunion, et peut être déplacée comme n'importe quelle réservation.`,
+  packageKeepPlace: `Conservez cet e-mail${S}: ce lien vous permet de réserver les suivantes. Chacune reçoit sa propre confirmation et ses rappels, avec l'adresse, et peut être déplacée comme n'importe quelle réservation.`,
   packageCharged: (store) =>
     `Débité par ${store} sur son propre compte Stripe. Pour toute question, écrivez à ${store} en répondant à cet e-mail.`,
 };
@@ -624,7 +634,7 @@ const de: BookingWords = {
     },
     invalid: { title: "Wählen Sie zuerst einen Termin", body: "Wählen Sie einen der Termine unten und fahren Sie dann fort." },
     error: { title: "Bei uns ist etwas schiefgelaufen", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
-    unavailable: { title: "Dieses Gespräch kann gerade nicht gebucht werden", body: "Es wurde nichts berechnet." },
+    unavailable: { title: "Das kann gerade nicht gebucht werden", body: "Es wurde nichts berechnet." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und wählen Sie dann erneut einen Termin." },
   },
   moveNotices: {
@@ -640,7 +650,7 @@ const de: BookingWords = {
 
   packageLeft: (left, total) => `Buchung aus Ihrem Paket: noch ${left} von ${total} übrig`,
   packageBookBy: (date) => ` · zu buchen bis ${date}`,
-  packageLinkWrong: "Dieser Paket-Link gilt nicht für dieses Gespräch oder funktioniert nicht mehr. Verwenden Sie den Link aus der E-Mail zu Ihrem Paket.",
+  packageLinkWrong: "Dieser Paket-Link gilt nicht für diese Buchung oder funktioniert nicht mehr. Verwenden Sie den Link aus der E-Mail zu Ihrem Paket.",
   closedBody: (store) => `Der Shop von ${store} nimmt im Moment keine Zahlungen an. Hier kann keine Karte belastet werden.`,
   timesUnread: "Die Termine konnten gerade nicht geladen werden",
   timesUnreadBody: "Es wurde nichts berechnet. Laden Sie die Seite gleich neu.",
@@ -718,6 +728,7 @@ const de: BookingWords = {
   seatBooked: (store) => `Ihr Platz bei ${store} ist gebucht.`,
   groupBooked: (store) => `Ihr Platz im Gruppengespräch mit ${store} ist gebucht.`,
   callBooked: (store) => `Ihr Gespräch mit ${store} ist gebucht.`,
+  timeBooked: (store) => `Ihr Termin bei ${store} ist gebucht.`,
   titleLength: (title, minutes) => `${title}, ${minutes} Minuten`,
   joinAtThatTime: (room) => `Nehmen Sie zu diesem Zeitpunkt hier teil: ${room}`,
   willSendLink: (store) => `${store} schickt Ihnen vor dem Gespräch den Link zur Teilnahme.`,
@@ -771,6 +782,8 @@ const de: BookingWords = {
   packageBookHere: "Buchen Sie jeden Termin, wann Sie möchten, hier:",
   packageKeep:
     "Bewahren Sie diese E-Mail auf: Mit diesem Link buchen Sie die übrigen Termine. Jeder erhält eine eigene Bestätigung, eigene Erinnerungen und einen eigenen Meeting-Link und kann wie jede Buchung verschoben werden.",
+  packageKeepPlace:
+    "Bewahren Sie diese E-Mail auf: Mit diesem Link buchen Sie die übrigen Termine. Jeder erhält eine eigene Bestätigung und eigene Erinnerungen mit der Adresse und kann wie jede Buchung verschoben werden.",
   packageCharged: (store) =>
     `Berechnet von ${store} über das eigene Stripe-Konto. Fragen richten Sie an ${store}, indem Sie auf diese E-Mail antworten.`,
 };
@@ -802,7 +815,7 @@ const it: BookingWords = {
     },
     invalid: { title: "Prima scegli un orario", body: "Scegli uno degli orari qui sotto, poi continua." },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è stato addebitato nulla. Riprova tra un momento." },
-    unavailable: { title: "Questa chiamata non si può prenotare in questo momento", body: "Non è stato addebitato nulla." },
+    unavailable: { title: "Al momento non si può prenotare", body: "Non è stato addebitato nulla." },
     slow: { title: "Troppi tentativi in pochi minuti", body: "Non è stato addebitato nulla. Attendi qualche minuto, poi scegli di nuovo un orario." },
   },
   moveNotices: {
@@ -818,7 +831,7 @@ const it: BookingWords = {
 
   packageLeft: (left, total) => `Prenotazione con il tuo pacchetto: ${plural(left, "ne resta", "ne restano")} ${left} su ${total}`,
   packageBookBy: (date) => ` · scadenza per prenotare: ${date}`,
-  packageLinkWrong: "Quel link del pacchetto non è per questa chiamata, oppure non funziona più. Usa il link nell'email del tuo pacchetto.",
+  packageLinkWrong: "Quel link del pacchetto non è per questa prenotazione, oppure non funziona più. Usa il link nell'email del tuo pacchetto.",
   closedBody: (store) => `Il negozio di ${store} al momento non accetta pagamenti. Qui nessuna carta può essere addebitata.`,
   timesUnread: "Non è stato possibile leggere gli orari in questo momento",
   timesUnreadBody: "Non è stato addebitato nulla. Ricarica la pagina tra un momento.",
@@ -896,6 +909,7 @@ const it: BookingWords = {
   seatBooked: (store) => `Il tuo posto con ${store} è prenotato.`,
   groupBooked: (store) => `Il tuo posto nella chiamata di gruppo con ${store} è prenotato.`,
   callBooked: (store) => `La tua chiamata con ${store} è prenotata.`,
+  timeBooked: (store) => `Il tuo appuntamento con ${store} è prenotato.`,
   titleLength: (title, minutes) => `${title}, ${minutes} minuti`,
   joinAtThatTime: (room) => `Partecipa qui a quell'ora: ${room}`,
   willSendLink: (store) => `${store} ti invierà il link per partecipare prima della chiamata.`,
@@ -949,6 +963,8 @@ const it: BookingWords = {
   packageBookHere: "Prenota ogni sessione, quando vuoi, qui:",
   packageKeep:
     "Conserva questa email: con quel link prenoti le altre. Ognuna riceve la propria conferma, i propri promemoria e il proprio link alla riunione, e si può spostare come qualsiasi prenotazione.",
+  packageKeepPlace:
+    "Conserva questa email: con quel link prenoti le altre. Ognuna riceve la propria conferma e i propri promemoria, con l'indirizzo, e si può spostare come qualsiasi prenotazione.",
   packageCharged: (store) =>
     `Addebitato da ${store} sul proprio conto Stripe. Per qualsiasi domanda, scrivi a ${store} rispondendo a questa email.`,
 };
@@ -980,7 +996,7 @@ const nl: BookingWords = {
     },
     invalid: { title: "Kies eerst een tijd", body: "Kies een van de tijden hieronder en ga dan verder." },
     error: { title: "Er ging bij ons iets mis", body: "Er is niets afgeschreven. Probeer het zo meteen opnieuw." },
-    unavailable: { title: "Dit gesprek kan nu niet worden geboekt", body: "Er is niets afgeschreven." },
+    unavailable: { title: "Dit kan nu niet worden geboekt", body: "Er is niets afgeschreven." },
     slow: { title: "Veel pogingen in een paar minuten", body: "Er is niets afgeschreven. Wacht een paar minuten en kies dan opnieuw een tijd." },
   },
   moveNotices: {
@@ -996,7 +1012,7 @@ const nl: BookingWords = {
 
   packageLeft: (left, total) => `Boeken met je pakket: nog ${left} van de ${total} over`,
   packageBookBy: (date) => ` · uiterlijk te boeken op ${date}`,
-  packageLinkWrong: "Die pakketlink is niet voor dit gesprek, of werkt niet meer. Gebruik de link in de e-mail van je pakket.",
+  packageLinkWrong: "Die pakketlink is niet voor deze boeking, of werkt niet meer. Gebruik de link in de e-mail van je pakket.",
   closedBody: (store) => `De winkel van ${store} neemt op dit moment geen betalingen aan. Hier kan geen kaart worden belast.`,
   timesUnread: "De tijden konden nu niet worden geladen",
   timesUnreadBody: "Er is niets afgeschreven. Vernieuw de pagina zo meteen.",
@@ -1074,6 +1090,7 @@ const nl: BookingWords = {
   seatBooked: (store) => `Je plek bij ${store} is geboekt.`,
   groupBooked: (store) => `Je plek in het groepsgesprek met ${store} is geboekt.`,
   callBooked: (store) => `Je gesprek met ${store} is geboekt.`,
+  timeBooked: (store) => `Je afspraak bij ${store} is geboekt.`,
   titleLength: (title, minutes) => `${title}, ${minutes} minuten`,
   joinAtThatTime: (room) => `Doe op dat moment hier mee: ${room}`,
   willSendLink: (store) => `${store} stuurt je vóór het gesprek de link om mee te doen.`,
@@ -1126,6 +1143,8 @@ const nl: BookingWords = {
   packageBookHere: "Boek elke sessie wanneer je wilt, hier:",
   packageKeep:
     "Bewaar deze e-mail: met die link boek je de rest. Elke sessie krijgt een eigen bevestiging, eigen herinneringen en een eigen vergaderlink, en kan worden verplaatst zoals elke boeking.",
+  packageKeepPlace:
+    "Bewaar deze e-mail: met die link boek je de rest. Elke afspraak krijgt een eigen bevestiging en eigen herinneringen, met het adres, en kan worden verplaatst zoals elke boeking.",
   packageCharged: (store) =>
     `In rekening gebracht door ${store} op de eigen Stripe-rekening. Vragen stel je aan ${store} door deze e-mail te beantwoorden.`,
 };
@@ -1157,7 +1176,7 @@ const pt: BookingWords = {
     },
     invalid: { title: "Escolha primeiro um horário", body: "Escolha um dos horários abaixo e depois continue." },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi cobrado. Tente novamente daqui a pouco." },
-    unavailable: { title: "Esta chamada não pode ser marcada neste momento", body: "Nada foi cobrado." },
+    unavailable: { title: "Neste momento não é possível marcar", body: "Nada foi cobrado." },
     slow: { title: "Demasiadas tentativas em poucos minutos", body: "Nada foi cobrado. Aguarde alguns minutos e escolha novamente um horário." },
   },
   moveNotices: {
@@ -1173,7 +1192,7 @@ const pt: BookingWords = {
 
   packageLeft: (left, total) => `A marcar com o seu pacote: ${plural(left, "resta", "restam")} ${left} de ${total}`,
   packageBookBy: (date) => ` · marcar até ${date}`,
-  packageLinkWrong: "Essa ligação do pacote não é para esta chamada ou já não funciona. Utilize a ligação do email do seu pacote.",
+  packageLinkWrong: "Essa ligação do pacote não é para esta marcação ou já não funciona. Utilize a ligação do email do seu pacote.",
   closedBody: (store) => `A loja de ${store} não está a aceitar pagamentos de momento. Nada aqui pode cobrar um cartão.`,
   timesUnread: "Não foi possível ler os horários neste momento",
   timesUnreadBody: "Nada foi cobrado. Atualize a página daqui a pouco.",
@@ -1251,6 +1270,7 @@ const pt: BookingWords = {
   seatBooked: (store) => `O seu lugar com ${store} está marcado.`,
   groupBooked: (store) => `O seu lugar na chamada de grupo com ${store} está marcado.`,
   callBooked: (store) => `A sua chamada com ${store} está marcada.`,
+  timeBooked: (store) => `A sua marcação com ${store} está confirmada.`,
   titleLength: (title, minutes) => `${title}, ${minutes} minutos`,
   joinAtThatTime: (room) => `Entre aqui a essa hora: ${room}`,
   willSendLink: (store) => `${store} vai enviar-lhe a ligação para entrar antes da chamada.`,
@@ -1304,6 +1324,8 @@ const pt: BookingWords = {
   packageBookHere: "Marque cada sessão, quando quiser, aqui:",
   packageKeep:
     "Guarde este email: é com essa ligação que marca as restantes. Cada uma recebe a sua própria confirmação, os seus lembretes e a sua ligação para a reunião, e pode ser mudada como qualquer marcação.",
+  packageKeepPlace:
+    "Guarde este email: é com essa ligação que marca as restantes. Cada uma recebe a sua própria confirmação e os seus lembretes, com a morada, e pode ser mudada como qualquer marcação.",
   packageCharged: (store) =>
     `Cobrado por ${store} na sua própria conta Stripe. Para qualquer pergunta, escreva a ${store} respondendo a este email.`,
 };

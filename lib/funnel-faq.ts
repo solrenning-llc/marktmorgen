@@ -36,11 +36,11 @@ export function funnelBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIA
       a: `There are ${FUNNEL_TYPES.length} kinds to start from, each one a shape of empty pages for your own words: ${FUNNEL_TYPES.map((type) => type.label).join(", ")}. Each one says in the studio what it is made of; pick the one closest to what you sell. There are also ${FUNNEL_STARTERS.length} ready starters with first words already written, chosen by what you want to do, in the studio under Funnels.`,
     },
     {
-      q: "How long does it take to build one?",
+      q: "How long does it take to build a funnel?",
       a: `It depends on how much you write, so no time is promised. In your studio, under Funnels: press “${choose}”, then “${use}” on the kind you want, give it a name under “${name}”, choose your products for the steps that ask for one, press “${review}”, then “${create}”. Its new pages stay hidden and the funnel stays off. When they are ready, show the pages under Pages and switch the funnel on in its settings (“${FUNNEL_ON_WORDS}”).`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try funnels before paying?",
       a: onSale
         ? `Yes. An eligible first store can start a ${trialDays}-day trial when it picks a plan: your card is taken when the trial starts and first charged when it ends, and canceling inside it means it is never charged. Funnels can be built during the trial, within the trial's own allowances, which are smaller than the plan's and leave out paid AI writing.`
         : "Yes. Paid plans are not on sale yet, so there is nothing to pay for now, and you can build a funnel in your own store's studio with no card. To see a store working, open the live demo store from the link at the end of this page: a made-up store, marked as a demo.",

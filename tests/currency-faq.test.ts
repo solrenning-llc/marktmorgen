@@ -35,13 +35,13 @@ is("a payment request keeps the currency it was sent in", read("lib/payment-requ
 part("The answers, in both states");
 const now = currencyBeginnerQuestions(false, TRIAL_DAYS);
 const later = currencyBeginnerQuestions(true, TRIAL_DAYS);
-is("four questions", now.map((x) => x.q), ["How do I choose my store's currency?", "Can my buyers pay in their own currency?", "How do I add Apple Pay or Klarna?", "Can I try it before paying?"]);
+is("four questions", now.map((x) => x.q), ["How do I choose my store's currency?", "Can my buyers pay in their own currency?", "How do I add Apple Pay or Klarna?", "Can I choose my currency before paying?"]);
 const choose = answer(now, "How do I choose my store's currency?");
 is("choosing: the start, the studio's words in order, the confirm step, the mark only when Stripe answers", [choose.startsWith(`A new store starts with “${currencyLabel(DEFAULT_CURRENCY)}” chosen.`), choose.indexOf(`“${w.field}”`) < choose.indexOf(`“${w.save}”`), choose.includes("you are asked to confirm first"), choose.includes(`When Stripe tells us which currencies your connected account can charge in`)], [true, true, true, true]);
 const own = answer(now, "Can my buyers pay in their own currency?");
 is("own currency: no conversion, never the price as written, the payment request said", [own.startsWith("No. Our checkout asks Stripe not to convert"), /price you wrote|as written/.test(own), own.includes("A payment request sent before you changed the currency")], [true, false, true]);
 is("ways to pay: where Stripe offers them, in Stripe, the button once connected", [answer(now, "How do I add Apple Pay or Klarna?").startsWith("Where Stripe offers them for your country"), answer(now, "How do I add Apple Pay or Klarna?").includes(`After you connect it, the “${w.more}” button`)], [true, true]);
-is("try before paying: the one shared answer", [answer(now, "Can I try it before paying?"), answer(later, "Can I try it before paying?")], [tryBeforePaying("Your currency", "your store's currency", false, TRIAL_DAYS), tryBeforePaying("Your currency", "your store's currency", true, TRIAL_DAYS)]);
+is("try before paying: the one shared answer", [answer(now, "Can I choose my currency before paying?"), answer(later, "Can I choose my currency before paying?")], [tryBeforePaying("Your currency", "your store's currency", false, TRIAL_DAYS), tryBeforePaying("Your currency", "your store's currency", true, TRIAL_DAYS)]);
 const all = [...now, ...later].map((x) => x.a).join(" ");
 is("one space between sentences, never two", /\s{2}/.test(all), false);
 is("no figure but the trial's days, no percent, no result promised", [/\d/.test(all.split(`${TRIAL_DAYS}-day`).join("")), /%|guarantee|more sales|proven/i.test(all)], [false, false]);

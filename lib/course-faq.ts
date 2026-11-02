@@ -9,7 +9,7 @@
  * paying for a plan may upload (lib/upload-budget-policy.ts).
  *
  * The same four questions as the funnels page asks where they fit a course,
- * with the same answer to "Can I try it before paying?" in a course's own
+ * with the same answer to "Can I try courses before paying?" in a course's own
  * terms; no number of students or sales, no time promise. Shown on the
  * courses page in its "Questions" block, so the page and its FAQPage data
  * are one text (components/topic-page.tsx).
@@ -37,11 +37,11 @@ export function courseBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIA
       a: "Lessons in modules, sold as one product. A lesson can have a video, text, downloads, a link, and a quiz or an assignment, and a module can open a number of days after each student joins, or after a start date you set for everyone. Buyers open it with their email address, on any device, with no password.",
     },
     {
-      q: "How do I start one?",
+      q: "How do I start a course?",
       a: `In your studio, on a paid product with no file, link or price options of its own, press “${COURSE_STUDIO_WORDS.make}”: the course's page opens, with “${COURSE_STUDIO_WORDS.structures}”: ${structures.join(", ")}. Pick one to see what it adds and press “${COURSE_STUDIO_WORDS.use}”, or pick “${COURSE_STUDIO_WORDS.scratch}” and add the modules yourself.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try courses before paying?",
       a: tryBeforePaying("A course", "a course with its modules and the text of its lessons", onSale, trialDays),
     },
     {

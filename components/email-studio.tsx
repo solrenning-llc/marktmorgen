@@ -13,6 +13,7 @@ import { useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore,
 import { useRouter } from "next/navigation";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { isAiEmailCopy, isAiSequenceDraft } from "@/lib/ai-response";
+import { MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
 import { confirmedRecipientCount, confirmedDraftId, draftRemovalAnswer, confirmedMailCopy, keptWaitHours, mailAnswer, type MailAnswer } from "@/lib/mail-response";
 import { toast } from "@/components/toast";
 import { MailAccent, MailBodyEditor } from "@/components/mail-designer";
@@ -97,7 +98,7 @@ const MESSAGES: Record<string, string> = {
     "This email was sent to people chosen by what they spent, where they came from or when they last bought, and a sequence cannot choose that way. Write it again instead.",
   stripe: "Your Stripe account could not be read just now, so spending, channels and last purchases cannot be counted. Try again in a moment.",
   segment_name: "Give the group a name.",
-  segment_empty: "Choose who the group is first: a kind of reader, a product, someone to leave out, or one of the three ways below.",
+  segment_empty: "Choose who the group is first: a kind of reader, a product, someone to leave out, a label, or one of the three ways below.",
   segment_product: "That product is not in your store anymore.",
   segment_full: "A store keeps 20 saved groups at most. Remove one first.",
   keep_already: "This email is already going to new people by itself. It is under Sequences.",
@@ -149,6 +150,8 @@ type BroadcastRow = {
   notProductId: string | null;
   /** Narrowed by spending, first channel or quiet days (lib/segments.ts); null for none. */
   narrow?: Narrow | null;
+  /** Only people with this label (lib/contacts.ts, 99 [E2-TAG-BROADCAST]); null or absent for none. */
+  label?: string | null;
   /** Whether its links carry its tag, so its sales can be counted at all (lib/mail-links.ts). */
   tagged: boolean;
   /** What it sold, from the creator's own Stripe account; null when nothing is counted for it. */
@@ -160,12 +163,20 @@ type BroadcastRow = {
   /** Where it is published on the store, or null when it is not (lib/letters.ts). */
   published?: string | null;
 };
-type Money = { sales: number; cents: number };
+type Money = { sales: number; cents: number; elsewhere?: number };
 type FlowRow = Flow & { stats: FlowCounts; statsAvailable?: boolean; money: Money | null };
 
-/** "3 sales · $117.00 from its links in the last 90 days", in the store's own currency. */
+/**
+ * "3 sales · $117.00 from its links in the last 90 days", in the store's own
+ * currency; a sale in another currency than the store's is counted after it,
+ * its amount never added (22 [E5], unit 2d).
+ */
 function soldWords(money: Money, currency: string): string {
-  return `${n(money.sales)} ${money.sales === 1 ? "sale" : "sales"} · ${formatMoney(money.cents, currency)} from its links in the last 90 days`;
+  const others = money.elsewhere ?? 0;
+  const one = others === 1;
+  if (!money.sales && !others) return "No sale from its links yet";
+  if (!money.sales) return `${n(others)} ${one ? "sale" : "sales"} in another currency from its links in the last 90 days. ${one ? "Its amount is" : "Their amounts are"} not shown, since amounts here count only your store's currency`;
+  return `${n(money.sales)} ${money.sales === 1 ? "sale" : "sales"} · ${formatMoney(money.cents, currency)} from its links in the last 90 days${others ? `, plus ${n(others)} more ${one ? "sale" : "sales"} in another currency, ${one ? "whose amount is" : "whose amounts are"} not in this total` : ""}`;
 }
 
 /**
@@ -184,7 +195,7 @@ function broughtWords(visits: number | null, money: Money | null, currency: stri
  * Who a sent email goes on reaching once it is kept sending (lib/mail-reuse.ts):
  * "Everyone who joins and has not bought yet".
  */
-function keptWords(b: Pick<BroadcastRow, "who" | "productId" | "notProductId">, products: { id: string; title: string }[]): string {
+function keptWords(b: Pick<BroadcastRow, "who" | "productId" | "notProductId" | "label">, products: { id: string; title: string }[]): string {
   const title = (id: string | null) => products.find((p) => p.id === id)?.title ?? "that product";
   const start =
     b.who === "buyers" && !b.productId
@@ -193,6 +204,7 @@ function keptWords(b: Pick<BroadcastRow, "who" | "productId" | "notProductId">, 
         ? `Everyone who gets ${title(b.productId)}`
         : "Everyone who joins";
   if (b.notProductId) return `${start} and does not have ${title(b.notProductId)}`;
+  if (b.label) return `${start} and has the label \u201c${b.label}\u201d`;
   if (b.who === "leads") return `${start} and has not bought yet`;
   if (b.who === "buyers" && b.productId) return `${start} and has paid`;
   return start;
@@ -211,7 +223,7 @@ function narrowWords(narrow: Narrow, currency: string): string {
 
 /** Shared wording keeps saved drafts, history and the final review consistent. */
 function AudienceSummary({ audience, products, currency }: {
-  audience: MailAudienceSelection & { narrow?: Narrow | null };
+  audience: MailAudienceSelection & { narrow?: Narrow | null; label?: string | null };
   products: readonly { id: string; title: string }[];
   currency: string;
 }) {
@@ -219,6 +231,7 @@ function AudienceSummary({ audience, products, currency }: {
   const narrowed = narrow && Boolean(narrow.minSpent || narrow.channel || narrow.quietDays);
   return <div className="mt-1 break-words text-sm text-ink-soft">
     <p><span className="font-semibold">Audience criteria: </span>{mailAudienceWords(audience, products)}</p>
+    {audience.label ? <p className="mt-1">{`Only people with the label “${audience.label}”.`}</p> : null}
     {narrowed ? <p className="mt-1">{narrowWords(narrow, currency)}</p> : null}
   </div>;
 }
@@ -238,10 +251,10 @@ function SubjectTestReview({ preview }: { preview: SubjectTestPreview | null }) 
   </div>;
 }
 
-function keepable(b: Pick<BroadcastRow, "who" | "productId" | "notProductId" | "narrow">): boolean {
+function keepable(b: Pick<BroadcastRow, "who" | "productId" | "notProductId" | "narrow" | "label">): boolean {
   // Chosen by spending, a channel or quiet days: a sequence cannot choose that way (lib/mail-reuse.ts).
   if (b.narrow) return false;
-  return [Boolean(b.notProductId), b.who === "leads", b.who === "buyers" && Boolean(b.productId)].filter(Boolean).length < 2;
+  return [Boolean(b.notProductId), b.who === "leads", b.who === "buyers" && Boolean(b.productId), Boolean(b.label)].filter(Boolean).length < 2;
 }
 
 /** "a day", "4 hours": how long the rest of a list waits for a subject test. */
@@ -260,6 +273,7 @@ export type DraftRow = {
   who?: Who;
   notProductId?: string | null;
   narrow?: Narrow | null;
+  label?: string | null;
 };
 type Who = "all" | "buyers" | "leads";
 
@@ -615,7 +629,7 @@ function ListCard({
 type ComposerSnapshot = {
   subject: string; body: string; productId: string; notProductId: string; who: Who; draftId: string; draftSavedAt: string;
   later: boolean; at: string; testing: boolean; subjectB: string; share: number; hours: number; by: TestBy;
-  spentText: string; channel: string; quietDays: number; more: boolean; savedContent: string;
+  spentText: string; channel: string; quietDays: number; more: boolean; savedContent: string; label: string;
   /** A draft save that could not be confirmed: saving stays blocked when brought back, so a draft is never made twice. */
   uncertain: boolean;
 };
@@ -691,6 +705,17 @@ function Compose(props: {
   const [spentText, setSpentText] = useState(props.restore ? props.restore.spentText : props.draft?.narrow?.minSpent ? plainAmount(props.draft.narrow.minSpent, props.currency) : "");
   const [channel, setChannel] = useState(props.restore ? props.restore.channel : props.draft?.narrow?.channel ?? "");
   const [quietDays, setQuietDays] = useState(props.restore ? props.restore.quietDays : props.draft?.narrow?.quietDays ?? 0);
+  // Only people with this label (99 [E2-TAG-BROADCAST]); empty is everyone chosen above.
+  const [label, setLabel] = useState(props.restore ? props.restore.label ?? "" : props.draft?.label ?? "");
+  // Cleaned once, as the server keeps a label (lib/contact-rules.ts), and used everywhere the audience goes.
+  const cleanLabel = readTags([label])[0] ?? "";
+  // Counted once the typing stops, so each key pressed is not a read of the whole list.
+  const [countedLabel, setCountedLabel] = useState(cleanLabel);
+  useEffect(() => {
+    if (cleanLabel === countedLabel) return;
+    const wait = setTimeout(() => setCountedLabel(cleanLabel), 400);
+    return () => clearTimeout(wait);
+  }, [cleanLabel, countedLabel]);
   const [more, setMore] = useState(props.restore ? props.restore.more : Boolean(props.draft?.narrow && (props.draft.narrow.minSpent || props.draft.narrow.channel || props.draft.narrow.quietDays)));
   const [channels, setChannels] = useState<string[] | null>(null);
   const [partial, setPartial] = useState(false);
@@ -700,12 +725,13 @@ function Compose(props: {
   const invalidSpent = parsedSpent === null;
   const minSpent = parsedSpent ?? 0;
   const narrow: Narrow = { minSpent, channel, quietDays };
-  const countKey = JSON.stringify([productId, notProductId, who, minSpent, channel, quietDays, more, countRevision, invalidSpent]);
-  const reach = !invalidSpent && reachResult?.key === countKey ? reachResult.count : null;
+  const countKey = JSON.stringify([productId, notProductId, who, minSpent, channel, quietDays, more, countRevision, invalidSpent, countedLabel]);
+  // A label still being typed is not counted yet: no count is shown for a label other than the one typed.
+  const reach = !invalidSpent && cleanLabel === countedLabel && reachResult?.key === countKey ? reachResult.count : null;
   const monthCount = reach !== null && !later && props.month ? sendCount(reach, props.month.used, props.month.allowance) : null;
   const testPreview = testing ? subjectTestPreview(subject, { subjectB, share, hours, by }, reach) : null;
   const invalidTest = testing && testPreview?.state !== "ready";
-  const reachPending = !invalidSpent && reachResult?.key !== countKey;
+  const reachPending = !invalidSpent && (reachResult?.key !== countKey || cleanLabel !== countedLabel);
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const locked = busy || aiBusy || refreshingDrafts;
@@ -720,18 +746,18 @@ function Compose(props: {
   const [goal, setGoal] = useState<EmailGoal>("announce");
   const [about, setAbout] = useState("");
   const draftSubjectTest: DraftSubjectTest | null = testing ? { subjectB, share, hours, by } : null;
-  const content = JSON.stringify([subject, body, productId, who, notProductId, spentText, channel, quietDays, draftSubjectTest]);
+  const content = JSON.stringify([subject, body, productId, who, notProductId, spentText, channel, quietDays, draftSubjectTest, label]);
   const [savedContent, setSavedContent] = useState(props.restore ? props.restore.savedContent : !props.draft && props.initialTemplate ? "" : content);
   const dirty = (!draftId && Boolean(props.draft)) || content !== savedContent || later || at !== "";
   useLeaveGuard(dirty || aiBusy);
   // What is set aside when another email is opened over unsaved changes, so they can be brought back (485 [IT2]).
-  const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, more, savedContent, uncertain: draftSaveBlocked });
+  const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, more, savedContent, uncertain: draftSaveBlocked, label });
   useImperativeHandle(props.composerState, () => ({ dirty, busy: locked, snapshot }));
 
   useEffect(() => {
     if (invalidSpent) return;
     let live = true;
-    call({ action: "count", productId, notProductId, who, narrow: { minSpent, channel, quietDays }, channels: more && channels === null }).then((a) => {
+    call({ action: "count", productId, notProductId, who, narrow: { minSpent, channel, quietDays }, label: countedLabel, channels: more && channels === null }).then((a) => {
       if (!live) return;
       const count = confirmedRecipientCount(a);
       setReachResult({ key: countKey, count });
@@ -746,7 +772,7 @@ function Compose(props: {
     };
     // `channels` is asked for once, when the choices are first opened.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId, notProductId, who, minSpent, channel, quietDays, more, countRevision, invalidSpent]);
+  }, [productId, notProductId, who, minSpent, channel, quietDays, more, countRevision, invalidSpent, countedLabel]);
 
   async function group(payload: Record<string, unknown>, done: string) {
     if (locked || (payload.action === "segment-save" && invalidSpent)) return;
@@ -766,6 +792,7 @@ function Compose(props: {
     setWho(segment.who);
     setProductId(segment.productId);
     setNotProductId(segment.notProductId);
+    setLabel(segment.label ?? "");
     setSpentText(segment.minSpent ? plainAmount(segment.minSpent, props.currency) : "");
     setChannel(segment.channel);
     setQuietDays(segment.quietDays);
@@ -804,7 +831,7 @@ function Compose(props: {
     if (locked || draftSaveBlocked || invalidSpent) return;
     setBusy(true);
     setError(null);
-    const audience = { who, notProductId: notProductId || null, narrow: minSpent || channel || quietDays ? narrow : null };
+    const audience = { who, notProductId: notProductId || null, narrow: minSpent || channel || quietDays ? narrow : null, ...(cleanLabel ? { label: cleanLabel } : {}) };
     const a = await call({ action: "draft-save", id: draftId || undefined, subject, body, productId, audience, subjectTest: draftSubjectTest, expectedSavedAt: draftId ? draftSavedAt : undefined });
     setBusy(false);
     if (!a.ok) {
@@ -1030,6 +1057,18 @@ function Compose(props: {
               : "Everyone chosen above gets it."}
           </span>
         </label>
+        {/* 99 [E2-TAG-BROADCAST]: the labels an import or a sequence puts on people, read from the same record, so choosing one costs no extra read. */}
+        <div>
+          <label className="block" htmlFor="mail-label">
+            <span className="field-label">Only people with the label (optional)</span>
+          </label>
+          <input id="mail-label" className="field mt-2" value={label} maxLength={MAX_TAG_LENGTH} autoComplete="off" spellCheck={false} aria-describedby="mail-label-hint" onChange={(e) => setLabel(e.target.value)} />
+          <span id="mail-label-hint" className="field-hint mt-1 block">
+            {cleanLabel
+              ? `Only people chosen above who carry the label “${cleanLabel}” get it. Capital letters do not matter.`
+              : "Leave it empty to write to everyone chosen above. Labels come from your import, a sequence or the API, and each person’s are on their page under People."}
+          </span>
+        </div>
         {/*
           And three ways no list can choose by itself: what they spent, where
           they first found the store, and how long since they last bought.
@@ -1076,9 +1115,13 @@ function Compose(props: {
               </select>
             </label>
             <p className="text-xs text-ink-soft">
-              Only buyers can match these three. They are read from your own Stripe account when the email goes out, in your
-              store&apos;s currency; support for your work, sales in another currency and sales paid with PayPal are not counted.
-              {partial ? " Your Stripe account holds more sales than one reading takes, so the oldest are not counted." : ""}
+              Only buyers can match these three. They are read from your Stripe account and your PayPal sales when the email goes
+              out; support for your work is not counted. Payments of memberships and payment plans count toward what someone spent
+              and when they last paid. A purchase or a payment refunded, or held or lost in a dispute, does not count; for PayPal, only a sale refunded in full
+              is taken off. A sale in another currency counts as a purchase for where
+              they came from and when they last bought, but its amount is not added to what they spent, which counts only your
+              store&apos;s currency.
+              {partial ? " There is more to read than one reading takes, so the oldest sales, refunds or disputes may be left out and these counts may be a little off." : ""}
             </p>
           </div>
         </details>
@@ -1095,7 +1138,7 @@ function Compose(props: {
             type="button"
             className="btn btn-secondary btn-sm"
             disabled={busy || invalidSpent || !groupName.trim()}
-            onClick={() => void group({ action: "segment-save", name: groupName, who, productId, notProductId, narrow }, "Group saved.")}
+            onClick={() => void group({ action: "segment-save", name: groupName, who, productId, notProductId, narrow, label: cleanLabel }, "Group saved.")}
           >
             Save group
           </button>
@@ -1148,7 +1191,7 @@ function Compose(props: {
                 <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Who gets it</dt>
                 <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">
                   {`${n(reach)} ${reach === 1 ? "person" : "people"}`}
-                  <AudienceSummary audience={{ who, productId: productId || null, notProductId, narrow }} products={props.products} currency={props.currency} />
+                  <AudienceSummary audience={{ who, productId: productId || null, notProductId, narrow, label: cleanLabel || null }} products={props.products} currency={props.currency} />
                 </dd>
                 <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer("mail-send-to")}>Change<span className="sr-only"> who gets it</span></button></dd>
               </div>
@@ -1202,6 +1245,7 @@ function Compose(props: {
                       notProductId,
                       who,
                       narrow,
+                      label: cleanLabel,
                       sendAt,
                       draftId: draftId || undefined,
                       draftSavedAt: draftId ? draftSavedAt : undefined,
@@ -1519,7 +1563,7 @@ function History({
     if (!copy) return setError(a.ok ? "The email copy could not be confirmed. Your current draft is unchanged. Try copying again when you are ready." : message(a));
     // No id: it is a new email, not the draft of an old one. The time makes
     // the composer start afresh even when the same email is opened twice.
-    onOpen({ id: "", subject: copy.subject, body: copy.body, productId: copy.productId, who: copy.who, notProductId: copy.notProductId, narrow: copy.narrow, by: "", savedAt: String(Date.now()) });
+    onOpen({ id: "", subject: copy.subject, body: copy.body, productId: copy.productId, who: copy.who, notProductId: copy.notProductId, narrow: copy.narrow, label: copy.label ?? null, by: "", savedAt: String(Date.now()) });
     document.getElementById("compose-title")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 

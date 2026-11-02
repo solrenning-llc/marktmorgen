@@ -7,7 +7,7 @@ const ERRORS: Record<string, string> = {
   confirm: "Type DELETE in capital letters to confirm.",
   expired: "This page's search ran out: it works for an hour. Find the person again, then delete them.",
   incomplete: "Part of it could not be deleted just now. They are already kept from your emails. Press Delete again in a moment to finish; nothing is deleted twice.",
-  limited: "Your plan's studio requests for this month are used up, so nothing was deleted.",
+  limited: "Nothing was deleted: your store's studio requests are used until its allowance opens again.",
   unavailable: "That could not be done just now. Nothing was deleted. Try again in a moment.",
   email: "This person's address could not be read. Nothing was deleted.",
 };
@@ -38,7 +38,7 @@ export function PersonErase({ token, email }: { token: string; email: string }) 
         window.location.assign(answer.href);
         return;
       }
-      setError((answer.error === "limited" && answer.message) || ERRORS[answer.error ?? ""] || ERRORS.unavailable);
+      setError(((answer.error === "limited" || answer.error === "unavailable") && answer.message) || ERRORS[answer.error ?? ""] || ERRORS.unavailable);
     } catch {
       setError("That did not go through. Check your connection and try again. Nothing was deleted.");
     } finally {

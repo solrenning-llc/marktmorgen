@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { ensureStatsId } from "@/lib/store";
@@ -33,9 +33,8 @@ export async function POST(request: NextRequest) {
     const store = loaded.statsId ? loaded : await ensureStatsId(guarded.ref);
     if (!store || !store.statsId) return Response.json({ ok: false, error: "none" }, { status: 400 });
     // Every action but disconnecting reaches the platform, so they are counted.
-    if (action !== "disconnect" && !(await withinService("esync", store.statsId, PER_MINUTE, 60, store))) {
-      return Response.json({ ok: false, error: "limited" }, { status: 429 });
-    }
+    const refused = action === "disconnect" ? null : await withinServiceWhy("esync", store.statsId, PER_MINUTE, 60, store);
+    if (refused) return serviceRefusedJson(refused, "limited");
 
     if (action === "connect") {
       const before = (await syncView(store)).connected;

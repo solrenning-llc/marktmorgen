@@ -246,8 +246,10 @@ async function main(): Promise<void> {
     paid("in_FirstTry000001", 1, 2900),
     paid("in_Elsewhere00001", 3, 9900, { parent: { subscription_details: { metadata: { store: "somebody" } } } }),
     paid("in_Joined00000001", 2, 2900, { billing_reason: "subscription_create" }),
+    // A membership sold before the store changed its currency renews in euros (22 [E5], unit 2e).
+    paid("in_OldCurrency001", 3, 2500, { currency: "eur" }),
   ];
-  is("paid after failing, and after an email", recoveredFrom(invoices, new Set(["harbor"]), "usd", new Set(["in_Failing000001"]), Date.now()), { recovered: 2, cents: 5800, afterEmail: 1, afterEmailCents: 2900 });
+  is("paid after failing, and after an email; a renewal in another currency counted, never added", recoveredFrom(invoices, new Set(["harbor"]), "usd", new Set(["in_Failing000001"]), Date.now()), { recovered: 2, cents: 5800, afterEmail: 1, afterEmailCents: 2900, elsewhere: 1 });
   state.invoices = invoices;
   const report = await recoveryReport(store, true);
   is("read from Stripe, with the emails sent this month", [report?.recovered, report?.afterEmail, (report?.month.failed ?? 0) + (report?.month.cards ?? 0) > 0], [2, 1, true]);

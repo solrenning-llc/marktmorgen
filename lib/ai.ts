@@ -21,7 +21,8 @@ import { AI_ENTITLEMENT_RULES } from '@/lib/ai-entitlement-rules';
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { aiBudgetScopeFor, isAiBudgetConfigured, reserveAiSpend } from "@/lib/ai-spend";
 import { currentAiSpendPolicy } from "@/lib/ai-spend-policy";
-import { costStandingOf } from "@/lib/plan-standing";
+import { costPauseCode, costStandingOf, standingOf } from "@/lib/plan-standing";
+import { hasPro } from "@/lib/plan";
 import { timed } from "@/lib/fetch-timeout";
 import { boundedAiRequest, isSupportedAiModel } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
@@ -95,6 +96,23 @@ export const aiMonthKey = monthKey;
  * includes a monthly allowance. Store, the free trial and stores without a
  * paid plan have none (lib/ai-rules.ts), so no button is shown to them.
  */
+/**
+ * Why the writing help is off for a store, said as it is: "trial" (a trial leaves out paid AI writing), a renewal
+ * unpaid or a plan payment disputed (costPauseCode), "plan" (not a Studio or Scale plan that is paid), or "setup"
+ * (a paid-up Studio or Scale store where it is not switched on: not configured, or not funded for its plan).
+ * Null when it is on.
+ */
+export type AiOff = "trial" | "renewal_unpaid" | "plan_disputed" | "plan" | "setup";
+export function aiOffReason(store: Store, now = Date.now()): AiOff | null {
+  if (aiAvailableFor(store, now)) return null;
+  const seconds = now / 1000;
+  if (standingOf(store, seconds) === "trial") return "trial";
+  const paused = costPauseCode(store, seconds);
+  if (paused) return paused;
+  if (!hasPro(store.tier) || standingOf(store, seconds) !== "paid") return "plan";
+  return "setup";
+}
+
 export function aiAvailableFor(store: Store | null | undefined, now = Date.now()): boolean {
   if (!store || !isAiConfigured() || aiAllowance(store, now) <= 0) return false;
   // Only a paying plan has a spending allocation (lib/ai-spend-policy.ts).

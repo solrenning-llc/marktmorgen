@@ -4,7 +4,7 @@
  * today: the key editor's own words (components/licence-key-editor.tsx),
  * which products take keys (lib/key-setup.ts, canHaveKeys), where a buyer
  * sees the key (app/[handle]/thanks, app/[handle]/orders), the list of keys
- * given in the studio, and the shared answer to "Can I try it before
+ * given in the studio, and the shared answer to "Can I try … before
  * paying?" (lib/beginner-faq.ts). No number of keys or sales. Shown first in
  * the license keys page's own "Questions" block.
  */
@@ -23,11 +23,11 @@ export function keyBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_D
       a: "A code each buyer gets that nobody else has, for software, plugins and anything that unlocks with one. The buyer sees it on the thank-you page, in their confirmation email and in their list of purchases, and your software can check it.",
     },
     {
-      q: "How do I turn them on?",
+      q: "How do I turn on license keys?",
       a: `In your studio, on a paid product sold once that you do not ship, press “${w.start}”. Under “${w.source}”, choose “${w.made}” or “${w.list}”, and press “${w.save}”. For a list, then press “${w.upload}” or “${w.paste}”; until there are some, the product shows as sold out. Memberships, calls, courses, shipped products and bundles do not take keys of their own; a bundle hands out the keys of the products in it.`,
     },
     {
-      q: "Can I try it before paying?",
+      q: "Can I try license keys before paying?",
       a: tryBeforePaying("License keys", "license keys on a product", onSale, trialDays),
     },
     {

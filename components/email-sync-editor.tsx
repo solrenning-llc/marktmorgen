@@ -52,7 +52,8 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
-  limited: "The studio cannot reach your platform again just now: that is twenty requests in a minute, or this month's calls to it are used up. Try again later.",
+  // Only the short window now: a figure used, or no place this month, comes with the server's own words (data.message).
+  limited: "That is twenty requests in a minute. Wait a moment and try again.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
 };
 

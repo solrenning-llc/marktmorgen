@@ -217,7 +217,7 @@ async function main(): Promise<void> {
   const beforeMetaUnits = await allowanceUsed(funded, "integration");
   const started = await startMeta(new NextRequest(`${origin}/api/integrations/meta/start?store=${funded.sid}`, { method: "POST", headers: { host: "marktmorgen.com", origin, cookie } }));
   const destination = new URL(started.headers.get("location") ?? "https://none.invalid/");
-  is("a new start stays at the studio", [started.status, destination.hostname, destination.searchParams.get("metaads")], [303, "marktmorgen.com", "limited"]);
+  is("a new start stays at the studio", [started.status, destination.hostname, destination.searchParams.get("metaads")], [303, "marktmorgen.com", "funding"]);
   const returnMeta = async (decline = false) => {
     // Synthetic state models a consent started before its funding proof became unavailable.
     const consent = await beginMeta({ statsId: funded.statsId!, sid: funded.sid, sessionCookie: session, email: "funded-meta@example.com", redirect: `${origin}/api/integrations/meta/callback` });
@@ -226,7 +226,7 @@ async function main(): Promise<void> {
     return finishMetaConnect(new NextRequest(`${origin}/api/integrations/meta/callback?${query}`, { headers: { host: "marktmorgen.com", cookie } }));
   };
   const returned = await returnMeta();
-  is("valid new callback state cannot exchange credentials without funding", [returned.status, new URL(returned.headers.get("location")!).searchParams.get("metaads")], [303, "limited"]);
+  is("valid new callback state cannot exchange credentials without funding", [returned.status, new URL(returned.headers.get("location")!).searchParams.get("metaads")], [303, "funding"]);
   const financialDecline = await returnMeta(true);
   is("canceling remains available", new URL(financialDecline.headers.get("location")!).searchParams.get("metaads"), "declined");
   is("no provider request or extra integration allowance", [asked.length, await allowanceUsed(funded, "integration")], [beforeMetaRequests, beforeMetaUnits]);

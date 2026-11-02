@@ -202,7 +202,7 @@ async function main(): Promise<void> {
   const beforeInstallRequests = discord.length;
   const installStart = await startDiscordInstall(new NextRequest(`https://marktmorgen.com/api/store/discord/connect?store=${fundedDiscord.sid}`, { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", cookie: `${SESSION_COOKIE}=${installSession}` } }));
   const installDestination = new URL(installStart.headers.get("location") ?? "https://none.invalid/");
-  is("the owner stays at the studio instead of Discord consent", [installStart.status, installDestination.hostname, installDestination.searchParams.get("discord")], [303, "marktmorgen.com", "limited"]);
+  is("the owner stays at the studio instead of Discord consent", [installStart.status, installDestination.hostname, installDestination.searchParams.get("discord")], [303, "marktmorgen.com", "funding"]);
   is("no provider request or extra integration allowance", [discord.length, await allowanceUsed(fundedDiscord, "integration")], [beforeInstallRequests, beforeInstallUnits]);
 
 
@@ -215,7 +215,7 @@ async function main(): Promise<void> {
   const beforeReturnRequests=discord.length;
   const returned=await callbackFor(installTrip,"code=synthetic_install_code");
   const returnDestination=new URL(returned.headers.get("location")??"https://none.invalid/");
-  is("unapproved marked return stays at the studio before token exchange",[returned.status,returnDestination.hostname,returnDestination.searchParams.get("discord")],[303,"marktmorgen.com","limited"]);
+  is("unapproved marked return stays at the studio before token exchange",[returned.status,returnDestination.hostname,returnDestination.searchParams.get("discord")],[303,"marktmorgen.com","funding"]);
   is("no provider call, server replacement or extra integration allowance",[discord.length,await readServer(storeKey(fundedDiscord)),await allowanceUsed(fundedDiscord,"integration")],[beforeReturnRequests,retainedServer,beforeInstallUnits]);
   const replay=await callbackFor(installTrip,"code=synthetic_install_code");
   is("the same trip remains single-use",new URL(replay.headers.get("location")!).searchParams.get("discord"),"expired");

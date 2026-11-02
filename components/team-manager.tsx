@@ -20,7 +20,7 @@ const MESSAGES: Record<string, string> = {
   invited: "That address already has an invitation waiting. Take it back first to send a new one.",
   full: "A store's team holds five people, invitations waiting included.",
   limited: "That is a lot of invitations for one day. Try again tomorrow.",
-  unsent: "The invitation email could not be sent just now, so nothing was kept. Try again in a moment.",
+  unsent: "The invitation email could not be sent just now, so nothing was kept. Try again later.",
   unknown: "That is not there anymore. Reload the page.",
   same: "They already have that role.",
   signed_out: "Your session ended. Log in again.",

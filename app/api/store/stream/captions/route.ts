@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { MAX_CAPTION_BYTES } from "@/lib/captions";
 import { readKind } from "@/lib/catalog";
@@ -57,9 +57,8 @@ export async function POST(request: NextRequest) {
     const pathname = found?.lesson.video?.pathname ?? "";
     const folder = await storeFolder(ref);
     if (readStreamPath(pathname)?.folder !== folder) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-    if (!(await withinService("stream-captions", folder, CHANGES_PER_HOUR, 3600, store))) {
-      return Response.json({ ok: false, error: "slow_down" }, { status: 429 });
-    }
+    const refused = await withinServiceWhy("stream-captions", folder, CHANGES_PER_HOUR, 3600, store);
+    if (refused) return serviceRefusedJson(refused, "slow_down");
 
     if (action === "quote") {
       const quote = await autoQuote(pathname);

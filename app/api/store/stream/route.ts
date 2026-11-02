@@ -1,4 +1,4 @@
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { takeData } from "@/lib/store-data";
 import { reserveStoreUpload } from "@/lib/upload-budget";
 import type { NextRequest } from "next/server";
@@ -63,9 +63,8 @@ export async function POST(request: NextRequest) {
     { const paused = costPauseCode(store); if (paused) return Response.json({ ok: false, error: paused }, { status: 409 }); }
     if (!(await reserveStoreUpload(store, bytes, "stream"))) return Response.json({ ok: false, error: "off" }, { status: 404 });
     const folder = await storeFolder(ref);
-    if (!(await withinService("stream-door", folder, DOORS_PER_HOUR, 3600, store))) {
-      return Response.json({ ok: false, error: "slow_down" }, { status: 429 });
-    }
+    const refused = await withinServiceWhy("stream-door", folder, DOORS_PER_HOUR, 3600, store);
+    if (refused) return serviceRefusedJson(refused, "slow_down");
     // What a store may keep goes by where it stands with its plan (lib/plan-standing.ts).
     const standing = standingOf(store);
     const held = await storageUsed(folder, storageBrakeFor(standing, store.tier));

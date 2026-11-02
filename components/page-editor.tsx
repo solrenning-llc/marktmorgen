@@ -14,7 +14,8 @@ import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
 import { shrink } from "@/components/product-image-editor";
 import { IMAGE_ACCEPT, MAX_ALT_LENGTH, MAX_SOURCE_BYTES, imagePath, imageUrl } from "@/lib/product-image";
-import { Icon, type IconName } from "@/components/icons";
+import { Icon } from "@/components/icons";
+import { KIND_ICONS } from "@/lib/sales-page-icons";
 import { toast } from "@/components/toast";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { TranslatePage } from "@/components/translate-page";
@@ -128,30 +129,6 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
-};
-
-const KIND_ICONS: Record<BlockKind, IconName> = {
-  hero: "sparkle",
-  text: "type",
-  benefits: "check-circle",
-  inside: "list",
-  bio: "user",
-  faq: "chat",
-  guarantee: "shield",
-  cta: "arrow-right",
-  reviews: "star",
-  video: "play",
-  pictures: "camera",
-  countdown: "clock",
-  fit: "target",
-  steps: "ladder",
-  compare: "scale",
-  bonuses: "gift",
-  facts: "chart",
-  feature: "layout",
-  product: "basket",
-  quotes: "quote",
-  form: "list",
 };
 
 /** A moment in seconds as the date-and-time field holds it, in the creator's own time zone. */

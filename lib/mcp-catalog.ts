@@ -70,6 +70,25 @@ export const MCP_TOOLS: readonly McpTool[] = [
     annotations: { readOnlyHint: true },
   },
   {
+    name: "get_live",
+    description: "Who is on the store right now (visitors in the last few minutes, each once, by where they came from) and today so far: visitors, page views, checkouts started, sales and revenue. No visitor is identified.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_numbers_for_days",
+    description: "The store's numbers for any stretch of UTC days, up to 400 days back: visitors, page views, checkouts, sales and revenue, day by day, by channel and by product, beside the same number of days just before. Paid figures are null when the sales reading was incomplete.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "The first day, YYYY-MM-DD (UTC)." },
+        to: { type: "string", description: "The last day, YYYY-MM-DD (UTC), not after today." },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
     name: "get_store",
     description: "Which store this key reads: its handle, name and currency.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },

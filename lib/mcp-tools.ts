@@ -20,7 +20,7 @@ import { paidFiguresComplete } from "@/lib/paid-coverage";
  * not quoted. Money is in the smallest unit of the store's currency.
  */
 import type { Store } from "@/lib/store";
-import { type StatsData, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
+import { type Live, type RangeData, type StatsData, type Today, KEPT_DAYS, LIVE_MINUTES, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
 import { readListings, readTitles } from "@/lib/catalog";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { listBroadcasts } from "@/lib/broadcasts";
@@ -316,5 +316,49 @@ export function insightsTool(data: StatsData, w: Window) {
   return {
     window: NAMES[w],
     worth_knowing: insightsFrom(data, w, [], 6).map((i) => ({ text: i.text, tone: i.tone, arithmetic: i.math ?? null })),
+  };
+}
+
+/**
+ * Who is on the store right now and today so far, as the studio's numbers
+ * show them every half minute (631 [AA1] (a), unit 8): visitors counted once
+ * each, by where they came from. No visitor is identified.
+ */
+export function liveTool(live: Live, today: Today | null) {
+  return {
+    note: `Visitors in the last ${LIVE_MINUTES} minutes, each once. Today is the UTC day so far. Today's sales are null when Stripe is not connected or did not answer, never zero.`,
+    last_minutes: LIVE_MINUTES,
+    visitors_now: live.visitors,
+    sources_now: live.sources.map((s) => ({ channel: s.source, visitors: s.visitors })),
+    today: today
+      ? { day: today.date, visitors: today.visitors, page_views: today.views, checkouts_started: today.checkouts, sales: today.sales?.sales ?? null, revenue: today.sales?.cents ?? null, sources: today.sources.map((s) => ({ channel: s.source, visits: s.visits })) }
+      : null,
+  };
+}
+
+/**
+ * Any stretch of days the creator names, as the studio's date picker reads it
+ * (lib/stats.ts readRange; 631 [AA1] (a), unit 8). Paid figures are null
+ * unless the sales reading was complete: unknown is never zero.
+ */
+export function rangeTool(range: RangeData, titles: ReadonlyMap<string, string>) {
+  const known = range.sales === "ok" && !range.partial;
+  const paid = <T>(value: T) => (known ? value : null);
+  return {
+    from: range.from,
+    to: range.to,
+    currency: range.currency,
+    paid_figures_complete: known,
+    coverage_note: `UTC days, up to ${KEPT_DAYS} days back. Paid totals need a complete sales reading; null is unavailable, not zero. Sales in another currency are counted apart and never added to revenue. Money is in the currency smallest unit.`,
+    sales_in_another_currency: range.elsewhere,
+    totals: { visitors: range.totals.visitors, page_views: range.totals.views, checkouts_started: range.totals.checkouts, sales: paid(range.totals.sales), revenue: paid(range.totals.cents) },
+    the_same_days_before: range.before
+      ? { visitors: range.before.visitors, page_views: range.before.views, checkouts_started: range.before.checkouts, sales: paid(range.before.sales), revenue: paid(range.before.cents) }
+      : null,
+    days: range.days.map((d) => ({ day: d.date, visitors: d.visitors, page_views: d.views, checkouts_started: d.checkouts, sales: paid(d.sales), revenue: paid(d.cents) })),
+    channels: range.channels.map((c) => ({ channel: c.source, visits: c.visits, sales: paid(c.sales), revenue: paid(c.cents) })),
+    channels_truncated: range.channelsTruncated === true,
+    products: range.products.map((p) => ({ id: p.id, title: titles.get(p.id) ?? "A product no longer in your store", page_views: p.views, checkouts_started: p.checkouts, sales: paid(p.sales), revenue: paid(p.cents) })),
+    products_truncated: range.productsTruncated === true,
   };
 }

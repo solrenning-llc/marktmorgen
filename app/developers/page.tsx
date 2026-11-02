@@ -43,7 +43,7 @@ const BASE = "https://marktmorgen.com/api/v1";
 
 export default function DevelopersPage() {
   return (
-    <LegalPage title="Developers" eyebrow="For your own tools" effective={null} legalNav={false} lastUpdated="October 31, 2026">
+    <LegalPage title="Developers" eyebrow="For your own tools" effective={null} legalNav={false} lastUpdated="November 2, 2026">
       <p>
         Read your store from your own tools: your list, your community&apos;s members, a course&apos;s students, your
         affiliates and your bookings; and, with a key made to write, add people to your list, label them, and give or
@@ -374,12 +374,14 @@ export default function DevelopersPage() {
           the header <code className="font-mono">Authorization: Bearer nl_live_…</code> and one of your keys.
         </p>
         <p>
-          It has eleven tools, all reading only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
+          It has thirteen tools, all reading only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
           your products, revenue by channel read three ways, the funnel from visit to sale, each product&apos;s numbers and
           what buyers buy next, your buyers in numbers, what is worth knowing, your memberships (MRR, churn, why members
-          left, month by month), your emails and sequences with what they sold, your affiliates by their codes, and which
-          store the key belongs to. The ones about a stretch of time take <code className="font-mono">days</code>: 7, 30 or
-          90. It changes nothing, and it does not read anybody&apos;s name or address, buyers&apos;, members&apos;,
+          left, month by month), your emails and sequences with what they sold, your affiliates by their codes, who is on
+          your store right now and today so far, your numbers for any stretch of days you name, and which store the key
+          belongs to. Most of the ones about a stretch of time take <code className="font-mono">days</code>: 7, 30 or 90;
+          the one for any stretch takes <code className="font-mono">from</code> and <code className="font-mono">to</code>{" "}
+          as YYYY-MM-DD, up to 400 days back. It changes nothing, and it does not read anybody&apos;s name or address, buyers&apos;, members&apos;,
           subscribers&apos; or affiliates&apos;: what an assistant reads is kept by whoever runs the assistant,
           and the people on your list did not agree to that. The endpoints above are where your own tools read them.
         </p>

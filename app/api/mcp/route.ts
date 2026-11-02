@@ -3,6 +3,8 @@ import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { readNumbers, summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
+import { readTitles } from "@/lib/catalog";
+import { rangeProblem, readLive, readRange, readToday } from "@/lib/stats";
 import {
   affiliatesTool,
   buyersTool,
@@ -10,8 +12,10 @@ import {
   emailsTool,
   funnelTool,
   insightsTool,
+  liveTool,
   membershipsTool,
   productsTool,
+  rangeTool,
   readFullNumbers,
   windowOf,
 } from "@/lib/mcp-tools";
@@ -108,6 +112,21 @@ export async function POST(request: Request) {
     if (typeof tool === "function") {
       const data = await readFullNumbers(store);
       return result(id, data ? said(await tool(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+    }
+    if (params.name === "get_live") {
+      const [live, today] = await Promise.all([readLive(store), readToday(store).catch(() => null)]);
+      return result(id, said(liveTool(live, today)));
+    }
+    if (params.name === "get_numbers_for_days") {
+      const from = typeof params.arguments?.from === "string" ? params.arguments.from.slice(0, 10) : "";
+      const to = typeof params.arguments?.to === "string" ? params.arguments.to.slice(0, 10) : "";
+      const problem = rangeProblem(from, to);
+      if (problem) {
+        const words = { dates: "Send from and to as YYYY-MM-DD.", order: "from must not be after to.", future: "to must not be after today (UTC).", kept: "Days are kept for 400 days; start later." } as const;
+        return result(id, said({ error: words[problem] }, true));
+      }
+      const [range, titles] = await Promise.all([readRange(store, from, to), readTitles(store).catch(() => new Map<string, string>())]);
+      return result(id, range ? said(rangeTool(range, titles)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
     }
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));

@@ -160,12 +160,20 @@ type BroadcastRow = {
   /** Where it is published on the store, or null when it is not (lib/letters.ts). */
   published?: string | null;
 };
-type Money = { sales: number; cents: number };
+type Money = { sales: number; cents: number; elsewhere?: number };
 type FlowRow = Flow & { stats: FlowCounts; statsAvailable?: boolean; money: Money | null };
 
-/** "3 sales · $117.00 from its links in the last 90 days", in the store's own currency. */
+/**
+ * "3 sales · $117.00 from its links in the last 90 days", in the store's own
+ * currency; a sale in another currency than the store's is counted after it,
+ * its amount never added (22 [E5], unit 2d).
+ */
 function soldWords(money: Money, currency: string): string {
-  return `${n(money.sales)} ${money.sales === 1 ? "sale" : "sales"} · ${formatMoney(money.cents, currency)} from its links in the last 90 days`;
+  const others = money.elsewhere ?? 0;
+  const one = others === 1;
+  if (!money.sales && !others) return "No sale from its links yet";
+  if (!money.sales) return `${n(others)} ${one ? "sale" : "sales"} in another currency from its links in the last 90 days. ${one ? "Its amount is" : "Their amounts are"} not shown, since amounts here count only your store's currency`;
+  return `${n(money.sales)} ${money.sales === 1 ? "sale" : "sales"} · ${formatMoney(money.cents, currency)} from its links in the last 90 days${others ? `, plus ${n(others)} more ${one ? "sale" : "sales"} in another currency, ${one ? "whose amount is" : "whose amounts are"} not in this total` : ""}`;
 }
 
 /**

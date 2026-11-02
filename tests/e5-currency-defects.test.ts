@@ -42,4 +42,10 @@ part("An agreement's older version in another currency (unit 2c)");
 const studio = flat("components/agreements-studio.tsx");
 is("the read says its version's currency; the editor reads the amounts in it, then leaves them empty and says why", [flat("app/api/store/agreements/route.ts").includes("sha256: version.sha256, currency: version.currency }"), studio.includes("const then: Currency = isCurrency(its) ? its : currency;"), studio.includes('lines: read.lines.map((line) => ({ ...line, amount: "" }))'), studio.includes("Type its amounts again in ${currency.toUpperCase()}, your store's currency now.")], [true, true, true, true]);
 
+part("Email revenue and subject tests (unit 2d)");
+const studioMail = flat("components/email-studio.tsx");
+is("each email and sequence says its sales in another currency, and that their amounts are not in the total", [studioMail.includes("not shown, since amounts here count only your store's currency"), studioMail.includes("not in this total"), studioMail.includes('if (!money.sales && !others) return "No sale from its links yet";')], [true, true, true]);
+is("a subject test by sales counts a sale in any currency", flat("lib/broadcasts.ts").includes("a: (by[a]?.sales ?? 0) + (by[a]?.elsewhere ?? 0)"), true);
+is("the MCP emails tool says them apart", (flat("lib/mcp-tools.ts").match(/sales_in_another_currency:/g) ?? []).length, 2);
+
 done();

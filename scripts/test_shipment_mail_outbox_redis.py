@@ -419,28 +419,145 @@ def pending_recovery_cases(redis, source, made):
 
 
 def paged_recovery_cases(redis, source, made):
-    """Bounded paged recovery on the real Lua; no sender/account/provider."""
+    """Real atomic capture, page integrity, continued grants and paid cleanup."""
     lua = re.search(r"export const PENDING_MAIL_RECOVERY_SCRIPT = `([^`]+)`;", source)[1]
     pool, all_key = "nl:ship:mail:pool", "nl:ship:mail:all"
-    redis.command("DEL", pool, all_key)
     made.update([pool, all_key])
     clock = redis.command("TIME"); now = int(clock[0])*1000+int(clock[1])//1000
     grant = dict(recovery=dict(version=1,revision=100,evidence="SYNTHETIC paged only",startsAt=now-1000,until=now+3600000,
        maximumAttempts=1000,maximumCommandUnits=64000,maximumReadBytes=1048576000,checkpointBytes=8192,
        maximumOrigins=1000,checkpointTotalBytes=100000,maximumTriggerInvocations=1000,triggerEvidence="SYNTHETIC fixed admission"),
-       reviewId="PAGED_100",maximumChecks=2,globalItems=1000,globalBytes=10000000,continuedReviewIds=["OLD"])
-    owner="b"*48; fp="c"*64
-    def run(op,family="shipment",id=None,page="",g=None,proof=fp):
+       reviewId="PAGED_100",maximumChecks=2,globalItems=1000,globalBytes=100000000,continuedReviewIds=["OLD"])
+    owner="b"*48; fp="c"*64; profiles=[]
+    def calls(text): return {m[1]:int(m[2]) for m in re.finditer(r'^cmdstat_([^:]+):calls=(\d+),',text,re.M)}
+    def run(op,family="shipment",id=None,page="",g=None,proof=fp,script=lua,who=owner):
         keys=[pool,all_key] if op=="next" else [pool,all_key,("nl:ship:mail:row:" if family=="shipment" else "nl:order-confirmation:row:")+id]
         t=redis.command("TIME"); at=int(t[0])*1000+int(t[1])//1000
-        return redis.command("EVAL",lua,len(keys),*keys,op,json.dumps(g or grant),proof,owner,family,at,"","skip",page)
-    ids=[hashlib.sha256(("paged"+str(i)).encode()).hexdigest() for i in range(101)]
-    redis.command("HSET",pool,"items",len(ids),"bytes",len(ids)*12000)
-    redis.command("SADD",all_key,*ids)
-    first=run("next")
-    assert first[:2]==["ticket",sorted(ids)[0]],first
-    assert json.loads(redis.command("HGET",pool,"pendingRecovery"))["version"]==2
-    print("PASS: explicit101 uses paged checkpoint without changing the original set")
+        if script != lua:
+            return redis.command('EVAL',script,len(keys),*keys,op,json.dumps(g or grant),proof,who,family,at,'','skip',page)
+        redis.command('MULTI');redis.command('INFO','COMMANDSTATS')
+        redis.command("EVAL",script,len(keys),*keys,op,json.dumps(g or grant),proof,who,family,at,"","skip",page)
+        redis.command('INFO','COMMANDSTATS');before,result,after=redis.command('EXEC')
+        a,b=calls(before),calls(after)
+        delta={k:b.get(k,0)-a.get(k,0) for k in set(a)|set(b)}
+        count=sum(delta.values())-1
+        profiles.append(dict(op=op,total=count,sscan=delta.get('sscan',0),hget=delta.get('hget',0),hdel=delta.get('hdel',0)))
+        assert count<=64,(op,count)
+        return result
+    def raw(): return redis.command('HGET',pool,'pendingRecovery')
+    def checkpoint(): return json.loads(raw())
+    def pagekey(i): return 'pendingRecoveryPage:'+str(i)
+    def seed(n):
+        redis.command('DEL',pool,all_key)
+        ids=sorted(hashlib.sha256(('paged'+str(i)).encode()).hexdigest() for i in range(n))
+        redis.command('HSET',pool,'items',n,'bytes',n*12000)
+        redis.command('SADD',all_key,*ids)
+        return ids
+    def finish(ticket,family='shipment',g=None,proof=fp):
+        meta=json.loads(ticket[2]);return run('finish',family,ticket[1],meta['page'],g,proof)
+    ids=seed(101);ticket=run('next');assert ticket[:2]==['ticket',ids[0]],ticket
+    c=checkpoint();assert c['version']==2 and c['count']==101 and len(c['pageHashes'])==2
+    assert redis.command('SCARD',all_key)==101
+    fields=[pagekey(i) for i in range(1,3)]
+    pages=[redis.command('HGET',pool,f) for f in fields]
+    assert sum(len(v.encode())+len(f) for f,v in zip(fields,pages))+8192<=grant['recovery']['checkpointTotalBytes']
+    assert all(len(v.encode())<=8192 for v in pages) and len(raw().encode())<=8192
+    print('PASS: explicit101 captures one bounded immutable paged snapshot with original ALL unchanged')
+    old_header=raw();old_page=pages[0]
+    for bad in ['x'*8193,'{',json.dumps([ids[0]]),json.dumps(['f'*64]*100),json.dumps([*ids[1:100],ids[0]])]:
+        redis.command('HSET',pool,fields[0],bad)
+        assert finish(ticket)==['changed'] and raw()==old_header
+        assert checkpoint()['index']==1
+    redis.command('HSET',pool,fields[0],old_page)
+    # Even a valid changed page accompanied by a changed checksum cannot
+    # replace the exact bytes the trusted caller inspected before finish.
+    changed=json.dumps([*ids[1:100],ids[0]],separators=(',',':'))
+    changed_header={**c,'pageHashes':[hashlib.sha1(changed.encode()).hexdigest(),c['pageHashes'][1]]}
+    redis.command('HSET',pool,fields[0],changed,'pendingRecovery',json.dumps(changed_header))
+    before=raw();assert finish(ticket)==['changed'] and raw()==before
+    redis.command('HSET',pool,fields[0],old_page,'pendingRecovery',old_header)
+    # Missing page, bad schema and insufficient successor leave evidence exact.
+    redis.command('HDEL',pool,fields[0]);assert finish(ticket)==['changed'] and raw()==old_header
+    redis.command('HSET',pool,fields[0],old_page)
+    for malformed in [{**c,'count':1001},{**c,'pageHashes':c['pageHashes']+['a'*40]},{**c,'ids':[ids[0]]},{**c,'snapshot':'bad'}]:
+        encoded=json.dumps(malformed);redis.command('HSET',pool,'pendingRecovery',encoded)
+        assert run('next')==['unknown'] and raw()==encoded
+    redis.command('HSET',pool,'pendingRecovery',old_header)
+    for cap,total in [(100,None),(101,24640)]:
+        # A valid cap101 cannot retain a larger cohort; exercised below with1000.
+        if cap==101:continue
+        r={**grant['recovery'],'revision':101,'maximumOrigins':cap};r.pop('checkpointTotalBytes',None)
+        smaller={**grant,'reviewId':'DOWNGRADED','recovery':r}
+        assert run('next',g=smaller,proof='d'*64)==['held'] and raw()==old_header
+    assert run('next',who='e'*48)==['held']
+    assert checkpoint()['attempts']==2 and checkpoint()['index']==1
+    assert finish(ticket)==['skipped'];assert finish(ticket)==['held']
+    print('PASS: malformed/changed/missing pages, stale finish and lost-next ACK never advance or restore budget')
+    # One grant with enough finite capacity can complete101*2 then pay cleanup.
+    for family,start in [('shipment',1),('confirmation',0)]:
+        for i in range(start,len(ids)):
+            ticket=run('next',family);assert ticket[:2]==['ticket',ids[i]]
+            assert finish(ticket,family)==['skipped']
+    clean=checkpoint();assert clean['phase']=='cleaning' and clean['attempts']==203
+    retained=raw()
+    legacy={**grant,'reviewId':'SMALL_CLEAN','recovery':{k:v for k,v in {**grant['recovery'],'revision':101,'maximumOrigins':100}.items() if k!='checkpointTotalBytes'}}
+    assert run('next',g=legacy,proof='d'*64)==['held'] and raw()==retained
+    # Crash after HDEL: write-ahead cleaning metadata keeps every known field
+    # referenced, and retry admits missing deleted pages without reading them.
+    crash=lua.replace('  local target=c.afterCleanup',"  return redis.error_reply('SYNTHETIC lost cleanup ACK')\n  local target=c.afterCleanup")
+    # Lua cannot have statements after return in the same block: use error().
+    crash=lua.replace('  local target=c.afterCleanup',"  error('SYNTHETIC lost cleanup ACK')\n  local target=c.afterCleanup")
+    try:run('next',family='confirmation',script=crash)
+    except RuntimeError:pass
+    else:raise AssertionError('The exact injected post-HDEL failure must be observed')
+    assert checkpoint()['phase']=='cleaning' and all(redis.command('HEXISTS',pool,f)==0 for f in fields)
+    assert run('next',family='confirmation')==['done'] and profiles[-1]['hdel']==1 and profiles[-1]['sscan']==0
+    done=raw();assert run('next')==['done'] and raw()==done
+    assert all(redis.command('HEXISTS',pool,pagekey(i))==0 for i in range(1,11))
+    print('PASS: paid cleaning survives a post-HDEL Lua error and wrong-family invocation without unreferenced generations')
+    #1000 positions in each family need multiple explicit grants; continuation
+    # preserves every page/cursor, and the final exhausted ticket does no cleanup.
+    ids=seed(1000);current=grant;proof=fp;grants=1;visited={f:[] for f in ['shipment','confirmation']}
+    for family in visited:
+        for i,id in enumerate(ids):
+            ticket=run('next',family,g=current,proof=proof)
+            if ticket==['exhausted']:
+                revision=current['recovery']['revision']+1
+                current={**current,'reviewId':'PAGED_'+str(revision),'recovery':{**current['recovery'],'revision':revision}}
+                proof=hashlib.sha256(str(revision).encode()).hexdigest();grants+=1
+                previous=checkpoint();pages_before=[redis.command('HGET',pool,pagekey(j)) for j in range(1,11)]
+                assert run('next',family='shipment' if family=='confirmation' else 'confirmation',g=current,proof=proof)==['held']
+                assert checkpoint()['index']==previous['index'] and checkpoint()['attempts']==0
+                assert run('finish',family,ids[i-1] if i else ids[-1],page='',g=grant)==['held']
+                assert [redis.command('HGET',pool,pagekey(j)) for j in range(1,11)]==pages_before
+                ticket=run('next',family,g=current,proof=proof)
+            assert ticket[:2]==['ticket',id],(family,i,ticket)
+            visited[family].append(id);assert finish(ticket,family,current,proof)==['skipped']
+    assert grants==2 and all(v==ids for v in visited.values())
+    c=checkpoint();assert c['phase']=='cleaning' and c['afterCleanup']=='capturing' and c['attempts']==1000
+    exhausted=raw();assert run('next',g=current,proof=proof)==['exhausted'] and raw()==exhausted
+    assert profiles[-1]['hdel']==0 and profiles[-1]['sscan']==0
+    for cap in [100,999]:
+        r={**current['recovery'],'revision':102,'maximumOrigins':cap}
+        if cap<=100:r.pop('checkpointTotalBytes')
+        smaller={**current,'reviewId':'DOWNGRADED_'+str(cap),'recovery':r}
+        assert run('next',g=smaller,proof='e'*64)==['held'] and raw()==exhausted
+    renewal={**current,'reviewId':'PAGED_CLEAN','recovery':{**current['recovery'],'revision':102}}
+    assert run('next',family='confirmation',g=renewal,proof='f'*64)==['capturing']
+    assert checkpoint()['attempts']==1 and profiles[-1]['hdel']==1 and profiles[-1]['sscan']==0
+    assert all(redis.command('HEXISTS',pool,pagekey(i))==0 for i in range(1,11))
+    assert run('next',g=renewal,proof='f'*64)[0]=='ticket' and checkpoint()['attempts']==2
+    print('PASS:1000 origins and both2000 positions compose across funded grants; exhausted/renewed cleanup preserves counters and refresh')
+    # Existing100 capacity, not1000, must still refuse101 before enumeration.
+    # A giant non-ID cannot be copied into pages; no partial result is certified.
+    ids=seed(100);redis.command('SADD',all_key,'G'*2000000);redis.command('HSET',pool,'items',101)
+    assert run('next')==['unknown'] and checkpoint()['phase']=='capturing'
+    assert redis.command('SCARD',all_key)==101 and all(redis.command('HEXISTS',pool,pagekey(i))==0 for i in range(1,11))
+    print('PASS: a giant unmatched member leaves the full original ALL and no paged generation')
+    maximum=max(row['total'] for row in profiles)
+    print(json.dumps({'paged_max_eval_and_internal_commands':maximum,'reserved_variable_command_units':64,'paged_maximum_fields':10,
+       'logical_checkpoint_bound':90432,'declared_checkpoint_total':100000,'two_family_useful_positions':2000,
+       'actual_provider_funding':None,'supplier_invoice':False}))
 
 def main():
     if os.environ.get("MARKTMORGEN_REDIS_INTEGRATION") != "1":

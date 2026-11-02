@@ -20,6 +20,8 @@ export type PendingMailRecoveryGrant = {
   maximumTriggerInvocations: number; triggerEvidence: string;
   /** Explicit extra snapshot capacity; omission preserves the legacy25 grant. */
   maximumOrigins?: number;
+  /** Explicit logical header/page/field storage bound; required above100. */
+  checkpointTotalBytes?: number;
 };
 export type ShipmentMailPolicy = {
   reviewId: string;
@@ -113,13 +115,18 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
     const r = data(p.recovery);
     const fields = ["version", "revision", "evidence", "startsAt", "until", "maximumAttempts", "maximumCommandUnits", "maximumReadBytes", "checkpointBytes", "maximumTriggerInvocations", "triggerEvidence"];
     const hasOrigins = !!r && Object.hasOwn(r, "maximumOrigins");
-    if (!r || Object.keys(r).length !== fields.length + Number(hasOrigins) || !fields.every(key => Object.hasOwn(r, key)) || r.version !== 1 ||
+    const hasTotal = !!r && Object.hasOwn(r, "checkpointTotalBytes");
+    if (!r || Object.keys(r).length !== fields.length + Number(hasOrigins) + Number(hasTotal) || !fields.every(key => Object.hasOwn(r, key)) || r.version !== 1 ||
         typeof r.evidence !== "string" || !r.evidence.trim() || r.evidence.length > 1000 ||
         typeof r.triggerEvidence !== "string" || !r.triggerEvidence.trim() || r.triggerEvidence.length > 1000) return null;
     if (!hasOrigins && Object.getPrototypeOf(p.recovery) === Object.prototype &&
         Object.getOwnPropertyDescriptor(Object.prototype, "maximumOrigins")) return null;
-    if (hasOrigins && (!integer(r.maximumOrigins) || r.maximumOrigins < 1 || r.maximumOrigins > 100 ||
+    if (hasOrigins && (!integer(r.maximumOrigins) || r.maximumOrigins < 1 || r.maximumOrigins > 1000 ||
         r.maximumOrigins > 25 && r.checkpointBytes !== 8192)) return null;
+    if (hasTotal && (!integer(r.checkpointTotalBytes) || !hasOrigins || Number(r.maximumOrigins) <= 100 ||
+        r.checkpointTotalBytes < 8192 + Math.ceil(Number(r.maximumOrigins) / 100) * 8224 || r.checkpointTotalBytes > 100000)) return null;
+    if (Number(r.maximumOrigins) > 100 && !hasTotal) return null;
+    if (!hasTotal && Object.getOwnPropertyDescriptor(Object.prototype, "checkpointTotalBytes")) return null;
     for (const key of ["revision", "startsAt", "until", "maximumAttempts", "maximumCommandUnits", "maximumReadBytes", "checkpointBytes", "maximumTriggerInvocations"]) if (!integer(r[key])) return null;
     if (Number(r.revision) < 1 || Number(r.revision) > 1_000_000_000 || Number(r.startsAt) > now || Number(r['until']) <= now || Number(r['until']) <= Number(r.startsAt) ||
         Number(r.maximumAttempts) < 1 || Number(r.maximumAttempts) > 1000 || Number(r.maximumCommandUnits) < 64 || Number(r.maximumCommandUnits) > 64_000 ||
@@ -130,6 +137,7 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
     // Do not inject a default: the existing grant's encoded bytes/fingerprint
     // must remain unchanged when no extra snapshot capacity was supplied.
     if (hasOrigins) captured.maximumOrigins = r.maximumOrigins;
+    if (hasTotal) captured.checkpointTotalBytes = r.checkpointTotalBytes;
     p.recovery = captured;
   }
   if (p.coveredOrigins !== undefined) {
@@ -313,7 +321,11 @@ if not ok or type(g)~='table' or type(g.recovery)~='table' or not now then retur
 local r=g.recovery
 local maximumOrigins=r.maximumOrigins
 if maximumOrigins==nil then maximumOrigins=25 end
-if type(maximumOrigins)~='number' or maximumOrigins%1~=0 or maximumOrigins<1 or maximumOrigins>100 or (maximumOrigins>25 and r.checkpointBytes~=8192) then return {'unknown'} end
+local function totalBound(n) return 8192+math.ceil(n/100)*8224 end
+if type(maximumOrigins)~='number' or maximumOrigins%1~=0 or maximumOrigins<1 or maximumOrigins>1000 or (maximumOrigins>25 and r.checkpointBytes~=8192) then return {'unknown'} end
+if maximumOrigins>100 then
+ if type(r.checkpointTotalBytes)~='number' or r.checkpointTotalBytes%1~=0 or r.checkpointTotalBytes<totalBound(maximumOrigins) or r.checkpointTotalBytes>100000 then return {'unknown'} end
+elseif r.checkpointTotalBytes~=nil then return {'unknown'} end
 local clock=redis.call('TIME')
 local serverNow=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
 if math.abs(now-serverNow)>60000 or now<r.startsAt or now>=r['until'] or r.version~=1 or r.revision<1 or r.revision>1000000000 or r.revision%1~=0 or r.maximumAttempts<1 or r.maximumAttempts>1000 or r.maximumCommandUnits<64 or r.maximumCommandUnits>64000 or r.maximumReadBytes<1048576 or r.maximumReadBytes>1048576000 or r.checkpointBytes<4096 or r.checkpointBytes>8192 or r.maximumTriggerInvocations<1 or r.maximumTriggerInvocations>1000 then return {'unknown'} end
@@ -330,53 +342,84 @@ end
 if not financial[1] or not financial[2] or tonumber(financial[1])>g.globalItems or tonumber(financial[2])>g.globalBytes then return {'unknown'} end
 local raw=redis.call('HGET',KEYS[1],'pendingRecovery')
 local c=nil
+local function countOf(v) return v.version==2 and v.count or #v.ids end
+local function pageField(i) return 'pendingRecoveryPage:'..tostring(i) end
 if raw then
  if #raw>8192 then return {'unknown'} end
  local good,v=pcall(cjson.decode,raw)
- if not good or type(v)~='table' or v.version~=1 or type(v.ids)~='table' or #v.ids>100 then return {'unknown'} end
+ if not good or type(v)~='table' or (v.version~=1 and v.version~=2) or type(v.ids)~='table' or #v.ids>100 then return {'unknown'} end
  local expected={version=true,revision=true,fingerprint=true,reviewId=true,maximumChecks=true,attempts=true,units=true,readBytes=true,ids=true,index=true,family=true,phase=true,owner=true,leaseUntil=true}
+ if v.version==2 then expected.count=true;expected.pageHashes=true;expected.snapshot=true;expected.afterCleanup=true end
  local count=0
  for field,_ in pairs(v) do if not expected[field] then return {'unknown'} end;count=count+1 end
- if count~=14 then return {'unknown'} end
+ if count~=(v.version==2 and 18 or 14) then return {'unknown'} end
  for _,field in ipairs({'revision','maximumChecks','attempts','units','readBytes','index','leaseUntil'}) do
   local n=v[field];if type(n)~='number' or n<0 or n>9007199254740991 or n%1~=0 then return {'unknown'} end
  end
- if v.revision<1 or v.revision>1000000000 or v.maximumChecks<1 or v.maximumChecks>10000 or v.attempts>1000 or v.units~=v.attempts*64 or v.readBytes~=v.attempts*1048576 or v.index<1 or v.index>#v.ids+1 or type(v.fingerprint)~='string' or #v.fingerprint~=64 or string.find(v.fingerprint,'[^a-f0-9]') or type(v.reviewId)~='string' or #v.reviewId<1 or #v.reviewId>128 or (v.family~='shipment' and v.family~='confirmation') or (v.phase~='capturing' and v.phase~='active' and v.phase~='continuing' and v.phase~='done' and v.phase~='unsupported') or type(v.owner)~='string' or (v.owner~='' and (#v.owner~=48 or string.find(v.owner,'[^a-f0-9]'))) or ((v.owner=='')~=(v.leaseUntil==0)) then return {'unknown'} end
+ if v.revision<1 or v.revision>1000000000 or v.maximumChecks<1 or v.maximumChecks>10000 or v.attempts>1000 or v.units~=v.attempts*64 or v.readBytes~=v.attempts*1048576 or v.index<1 or type(v.fingerprint)~='string' or #v.fingerprint~=64 or string.find(v.fingerprint,'[^a-f0-9]') or type(v.reviewId)~='string' or #v.reviewId<1 or #v.reviewId>128 or (v.family~='shipment' and v.family~='confirmation') or (v.phase~='capturing' and v.phase~='active' and v.phase~='continuing' and v.phase~='done' and v.phase~='unsupported' and v.phase~='cleaning') or type(v.owner)~='string' or (v.owner~='' and (#v.owner~=48 or string.find(v.owner,'[^a-f0-9]'))) or ((v.owner=='')~=(v.leaseUntil==0)) then return {'unknown'} end
  local seen={};local size=0
  for key,id in pairs(v.ids) do
   if type(key)~='number' or key<1 or key>#v.ids or key%1~=0 or type(id)~='string' or #id~=64 or string.find(id,'[^a-f0-9]') or seen[id] then return {'unknown'} end
   seen[id]=true;size=size+1
  end
- if size~=#v.ids or ((v.phase=='active' or v.phase=='continuing') and (size==0 or v.index>size)) then return {'unknown'} end
+ if size~=#v.ids then return {'unknown'} end
+ if v.version==2 then
+  if size~=0 or type(v.count)~='number' or v.count%1~=0 or v.count<101 or v.count>1000 or type(v.pageHashes)~='table' or #v.pageHashes~=math.ceil(v.count/100) or type(v.snapshot)~='string' or #v.snapshot~=40 or string.find(v.snapshot,'[^a-f0-9]') or (v.afterCleanup~='done' and v.afterCleanup~='capturing') or (v.phase~='active' and v.phase~='continuing' and v.phase~='cleaning') then return {'unknown'} end
+  local hashes=0
+  for key,hash in pairs(v.pageHashes) do
+   if type(key)~='number' or key%1~=0 or key<1 or key>#v.pageHashes or type(hash)~='string' or #hash~=40 or string.find(hash,'[^a-f0-9]') then return {'unknown'} end
+   hashes=hashes+1
+  end
+  if hashes~=#v.pageHashes then return {'unknown'} end
+ elseif v.phase=='cleaning' then return {'unknown'} end
+ local total=countOf(v)
+ if v.index>total+1 or ((v.phase=='active' or v.phase=='continuing') and (total==0 or v.index>total)) then return {'unknown'} end
  c=v
 end
--- A retained list cannot gain coverage from a legacy fingerprint or from a
--- smaller successor. Hold the original bytes until a compatible review.
-if c and (c.phase=='active' or c.phase=='continuing') and (#c.ids>maximumOrigins or #raw>r.checkpointBytes) then return {'held'} end
+-- Retained active/cleaning pages cannot borrow undeclared storage or lose
+-- coverage under an old/smaller grant. Admission never reads a variable page.
+if c and (c.phase=='active' or c.phase=='continuing' or c.phase=='cleaning') and (countOf(c)>maximumOrigins or #raw>r.checkpointBytes or (c.version==2 and (not r.checkpointTotalBytes or r.checkpointTotalBytes<totalBound(c.count)))) then return {'held'} end
 local function save()
  local text=cjson.encode(c)
  if #text>r.checkpointBytes then return false end
  redis.call('HSET',KEYS[1],'pendingRecovery',text)
  return true
 end
+local function pageAt()
+ local number=math.floor((c.index-1)/100)+1
+ local field=pageField(number)
+ local bytes=redis.call('HSTRLEN',KEYS[1],field)
+ if bytes<1 or bytes>8192 then return nil end
+ local text=redis.call('HGET',KEYS[1],field)
+ -- SHA-1 is a corruption checksum only, not an authorization or an AEAD.
+ if type(text)~='string' or #text~=bytes or redis.sha1hex(text)~=c.pageHashes[number] then return nil end
+ local good,ids=pcall(cjson.decode,text)
+ local expected=math.min(100,c.count-(number-1)*100)
+ if not good or type(ids)~='table' or #ids~=expected then return nil end
+ local size=0;local seen={}
+ for key,id in pairs(ids) do
+  if type(key)~='number' or key%1~=0 or key<1 or key>expected or type(id)~='string' or #id~=64 or string.find(id,'[^a-f0-9]') or seen[id] then return nil end
+  size=size+1;seen[id]=true
+ end
+ if size~=expected then return nil end
+ return ids[(c.index-1)%100+1],text,c.pageHashes[number]
+end
 if op=='next' then
  local replaced=false
  if c and (r.revision<c.revision or (r.revision==c.revision and fp~=c.fingerprint)) then return {'held'} end
  if not c or r.revision>c.revision then
   if c and (g.reviewId==c.reviewId or g.maximumChecks<c.maximumChecks) then return {'held'} end
-  -- A new financed grant replaces its own budget, never completed snapshot
-  -- work. Revalidate each retained position at finish under the new review.
-  -- Old tickets lose authority through revision/fingerprint and owner checks.
   local continuing=c and (c.phase=='active' or c.phase=='continuing')
-  local ids=continuing and c.ids or {}
-  local index=continuing and c.index or 1
-  local currentFamily=continuing and c.family or 'shipment'
-  c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,readBytes=0,ids=ids,index=index,family=currentFamily,phase=continuing and 'continuing' or 'capturing',owner='',leaseUntil=0}
+  if c and (continuing or c.phase=='cleaning') then
+   c.phase=continuing and 'continuing' or 'cleaning'
+   if c.version==2 then c.afterCleanup='capturing' end
+   c.revision=r.revision;c.fingerprint=fp;c.reviewId=g.reviewId;c.maximumChecks=g.maximumChecks
+   c.attempts=0;c.units=0;c.readBytes=0;c.owner='';c.leaseUntil=0
+  else
+   c={version=1,revision=r.revision,fingerprint=fp,reviewId=g.reviewId,maximumChecks=g.maximumChecks,attempts=0,units=0,readBytes=0,ids={},index=1,family='shipment',phase='capturing',owner='',leaseUntil=0}
+  end
   replaced=true
  end
- -- A known other family does no variable source work. Fixed admission/guard
- -- reads still require the explicit external trigger/infra funding envelope.
- -- Commit a new accepted grant first, so no old ticket regains authority.
  if (c.phase=='active' or c.phase=='continuing') and c.family~=family then
   if replaced and not save() then return {'unknown'} end
   return {'held'}
@@ -384,31 +427,62 @@ if op=='next' then
  if c.phase=='done' or c.phase=='unsupported' then return {c.phase} end
  if c.attempts>=r.maximumAttempts or c.attempts>=r.maximumTriggerInvocations or c.units+64>r.maximumCommandUnits or c.readBytes+1048576>r.maximumReadBytes then return {'exhausted'} end
  c.attempts=c.attempts+1;c.units=c.units+64;c.readBytes=c.readBytes+1048576
- -- Write-ahead charge: a failed enumeration cannot restore its budget.
  if not save() then return {'unknown'} end
+ if c.phase=='cleaning' then
+  -- The charged durable manifest remains until all known fields are deleted.
+  -- A lost ACK/error after HDEL can repeat this bounded cleanup safely.
+  local fields={};for i=1,#c.pageHashes do fields[i]=pageField(i) end
+  redis.call('HDEL',KEYS[1],unpack(fields))
+  local target=c.afterCleanup
+  c.version=1;c.count=nil;c.pageHashes=nil;c.snapshot=nil;c.afterCleanup=nil
+  c.phase=target;c.ids={};c.index=1;c.family='shipment';c.owner='';c.leaseUntil=0
+  if not save() then return {'unknown'} end
+  return {target}
+ end
  if c.phase=='capturing' then
   local count=redis.call('SCARD',KEYS[2])
   if count~=tonumber(financial[1]) then return {'unknown'} end
   if count>maximumOrigins then c.phase='unsupported';save();return {'unsupported'} end
-  -- Cardinality bounds replies independently of COUNT; MATCH bounds member
-  -- bytes BEFORE copying them. A partial cursor is unsupported, never a
-  -- silently truncated snapshot. No repeated scan is hidden in this grant.
-  local scan=redis.call('SSCAN',KEYS[2],0,'MATCH',string.rep('?',64),'COUNT',1000)
+  local scan=redis.call('SSCAN',KEYS[2],0,'MATCH',string.rep('?',64),'COUNT',maximumOrigins>100 and 10000 or 1000)
   if scan[1]~='0' then c.phase='unsupported';save();return {'unsupported'} end
   local ids=scan[2]
   if #ids~=count then return {'unknown'} end
-  for _,id in ipairs(ids) do if #id~=64 or string.find(id,'[^a-f0-9]') then return {'unknown'} end end
+  local seen={}
+  for _,id in ipairs(ids) do if #id~=64 or string.find(id,'[^a-f0-9]') or seen[id] then return {'unknown'} end;seen[id]=true end
   table.sort(ids);c.ids=ids;c.index=1;c.family='shipment';c.phase=#ids==0 and 'done' or 'active'
-  if not save() then return {'unknown'} end
+  if #ids>100 then
+   local pages={};local hashes={}
+   -- Fixed known field names bound generations to ten and detect an orphan
+   -- before overwriting it. No scan of the financial hash is introduced.
+   for i=1,10 do if redis.call('HEXISTS',KEYS[1],pageField(i))~=0 then return {'unknown'} end end
+   for start=1,#ids,100 do
+    local page={};for i=start,math.min(start+99,#ids) do page[#page+1]=ids[i] end
+    local text=cjson.encode(page);if #text>8192 then return {'unknown'} end
+    pages[#pages+1]=text;hashes[#hashes+1]=redis.sha1hex(text)
+   end
+   c.version=2;c.ids={};c.count=#ids;c.pageHashes=hashes;c.snapshot=redis.sha1hex(table.concat(ids,''));c.afterCleanup='done'
+   local text=cjson.encode(c);if #text>r.checkpointBytes or totalBound(c.count)>r.checkpointTotalBytes then return {'unknown'} end
+   -- Header and every page enter one HSET, not a partially published sequence.
+   local args={'pendingRecovery',text}
+   for i,page in ipairs(pages) do args[#args+1]=pageField(i);args[#args+1]=page end
+   redis.call('HSET',KEYS[1],unpack(args))
+  elseif not save() then return {'unknown'} end
  end
  if c.phase~='active' and c.phase~='continuing' then return {c.phase} end
  if c.family~=family or (c.owner~='' and c.leaseUntil>now) then return {'held'} end
+ local id,text,checksum
+ if c.version==2 then id,text,checksum=pageAt();if not id then return {'unknown'} end else id=c.ids[c.index] end
  c.owner=owner;c.leaseUntil=math.min(now+60000,r['until'])
  if not save() then return {'unknown'} end
- return {'ticket',c.ids[c.index],tostring(c.index)}
+ if c.version==2 then return {'ticket',id,cjson.encode({index=c.index,page=text,checksum=checksum,snapshot=c.snapshot})} end
+ return {'ticket',id,tostring(c.index)}
 end
 if op~='finish' or not c or c.revision~=r.revision or c.fingerprint~=fp or (c.phase~='active' and c.phase~='continuing') or c.family~=family or c.owner~=owner or c.leaseUntil<=now then return {'held'} end
-local id=c.ids[c.index]
+local id
+if c.version==2 then
+ local page;id,page=pageAt()
+ if not id or page~=ARGV[9] then return {'changed'} end
+else id=c.ids[c.index] end
 local prefix=family=='shipment' and 'nl:ship:mail:row:' or 'nl:order-confirmation:row:'
 local sourcePrefix=family=='shipment' and 'nl:ship:done:' or 'nl:order-confirmation:source:'
 if KEYS[3]~=prefix..id then return {'unknown'} end
@@ -457,8 +531,11 @@ end
 -- No source write or dispatch is involved. Progress is committed AFTER the
 -- idempotent membership effect; a lost/failed progress ACK keeps this item.
 c.index=c.index+1;c.owner='';c.leaseUntil=0
-if c.index>#c.ids then
+if c.index>countOf(c) then
  if c.family=='shipment' then c.family='confirmation';c.index=1
+ elseif c.version==2 then
+  c.afterCleanup=c.phase=='continuing' and 'capturing' or 'done'
+  c.phase='cleaning';c.index=1;c.family='shipment'
  elseif c.phase=='continuing' then
   -- Finish the retained list first. Exactly one fresh funded capture may
   -- follow in THIS grant; do not reset any of its consumed capacity.
@@ -485,20 +562,32 @@ export async function recoverPendingMail(family: "shipment" | "confirmation", de
   const response = ownArray(await pipeline([["EVAL", PENDING_MAIL_RECOVERY_SCRIPT, 2, POOL, ALL, "next", proof, fp, owner, family, now(), "", ""]]));
   const ticket = response?.length === 1 ? ownArray(response[0]) : null;
   if (ticket?.length !== 3 || ticket[0] !== "ticket" || typeof ticket[1] !== "string" || !HASH.test(ticket[1]) || expired()) return;
+  let page = "";
+  if (p.recovery.maximumOrigins !== undefined && p.recovery.maximumOrigins > 100 && typeof ticket[2] === "string" && ticket[2].startsWith("{")) {
+   const proof = data(JSON.parse(ticket[2]));
+   if (!proof || Object.keys(proof).length !== 4 || !integer(proof.index) || proof.index < 1 || proof.index > 1000 ||
+       typeof proof.page !== "string" || Buffer.byteLength(proof.page) > 8192 || typeof proof.checksum !== "string" ||
+       !/^[a-f0-9]{40}$/.test(proof.checksum) || typeof proof.snapshot !== "string" || !/^[a-f0-9]{40}$/.test(proof.snapshot) ||
+       createHash("sha1").update(proof.page).digest("hex") !== proof.checksum) return;
+   const ids = ownArray(JSON.parse(proof.page), 100);
+   if (!ids || ids.length < 1 || !ids.every(id => typeof id === "string" && HASH.test(id)) ||
+       new Set(ids).size !== ids.length || ids[(proof.index - 1) % 100] !== ticket[1]) return;
+   page = proof.page;
+  } else if (typeof ticket[2] !== "string" || !/^[1-9][0-9]{0,2}$/.test(ticket[2])) return;
   const id = ticket[1], found = await observe(id);
   if (!found || expired()) return;
   const keyset = found.keys;
   const base = family === "shipment" ? `nl:ship:mail:row:${id}` : `nl:order-confirmation:row:${id}`;
   // Missing/known unsupported observations cannot authorize a rearm.
   const selected = keyset ? [POOL, ALL, keyset[0], keyset[1], keyset[2], keyset[8], keyset[9]] : [POOL, ALL, base];
-  await pipeline([["EVAL", PENDING_MAIL_RECOVERY_SCRIPT, selected.length, ...selected, "finish", proof, fp, owner, family, now(), found.raw, keyset ? "valid" : "skip"]]);
+  await pipeline([["EVAL", PENDING_MAIL_RECOVERY_SCRIPT, selected.length, ...selected, "finish", proof, fp, owner, family, now(), found.raw, keyset ? "valid" : "skip", page]]);
  } catch { /* Charged work/unknown transport retains this checkpoint item. */ }
 }
 
 const lifecycle = (runtime: ShipmentMailRuntime) => runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE;
-function ownArray(value: unknown): unknown[] | null {
+function ownArray(value: unknown, maximum = 3): unknown[] | null {
   try {
-    if (!Array.isArray(value) || value.length > 3 || Object.getPrototypeOf(value) !== Array.prototype) return null;
+    if (!Array.isArray(value) || value.length > maximum || Object.getPrototypeOf(value) !== Array.prototype) return null;
     const out: unknown[] = [];
     for (let i = 0; i < value.length; i++) {
       const d = Object.getOwnPropertyDescriptor(value, String(i));

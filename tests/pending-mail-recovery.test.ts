@@ -259,6 +259,81 @@ test('both normal workers complete an explicitly funded hundred-origin snapshot 
  });
 });
 
+for (const count of [101,1000]) test(`both normal workers recover ${count} genuine mixed origins through paged funded grants`, {skip:redisOptIn}, async()=>{
+ await isolatedRecoveryProof(async(pipeline,pool,all)=>{
+  const clock=Date.now(),now=Date.now;
+  const old={...shipmentPolicy(clock),maximumChecks:1,globalItems:1000,storeItems:1000,globalBytes:100000000,storeBytes:100000000};
+  const runtime={lifecycle:'active' as const,policy:old,pipeline,now};
+  // Capture one genuine original paid-checkout source through the existing
+  // explicit fixture provider; copy its exact encrypted bytes into owned Redis.
+  const f=await physicalPaidFixture();
+  const checkout=await createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime);
+  const session=f.sessions.get(checkout.id)!;
+  Object.assign(session,{status:'complete',payment_status:'paid',amount_total:4000,customer_details:{email:'buyer@example.test'},
+   payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false}},
+   shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
+  const confirmationId=originId(),source=await readConfirmationOrigin(confirmationId,f.runtime);assert.ok(source);
+  const row=source.row,keys=[confirmationOriginRowKey(confirmationId),`nl:order-confirmation:source:${confirmationId}`,'nl:order-confirmation:due',
+   `nl:order-confirmation:store:${row.statsId}`,`nl:order-confirmation:person:${row.statsId}:${row.person}`,pool,`nl:ship:mail:pool:${row.statsId}`,all,
+   `nl:order-confirmation:closed:${row.statsId}`,`nl:order-confirmation:erased:${row.statsId}:${row.person}`];
+  await pipeline([['SET',keys[0],source.raw],['SET',keys[1],row.sourceValue],['ZADD',keys[2],row.next,row.id],
+   ...[3,4,7].map(i=>['SADD',keys[i],row.id]),['HSET',pool,'items',1,'bytes',row.bytes],['HSET',keys[6],'items',1,'bytes',row.bytes]]);
+  let settled=false;
+  const physical={...f.runtime,now,policy:{...f.runtime.policy!,maximumChecks:1,globalItems:1000,globalBytes:100000000},pipeline:async(commands:(string|number)[][])=>{
+   for(const c of commands)if(c[0]==='EVAL'&&c[1]===COMMIT_ORDER_CONFIRMATION&&!settled){settled=true;
+    // Only the preexisting synthetic accounting fixture boundary is supplied;
+    // the actual paid/origin Lua and encrypted original source run unchanged.
+    await pipeline([['HSET',String(c[5]),String(c[10]),2],['HSET',String(c[6]),String(c[10]),2*Number(c[11])]]);}
+   return pipeline(commands);
+  }};
+  assert.equal((await runOrderConfirmationMail(now()+30000,async()=> 'waiting',physical)).waiting,1);
+  const preserved=await readConfirmationOrigin(confirmationId,physical);assert.ok(preserved?.payload.message);
+  const originalConfirmation=JSON.stringify(preserved.payload.message);
+  assert.equal(preserved.row.checks,1);assert.equal(preserved.row.next,0);
+  const originals=new Map<string,string>();
+  for(let i=0;i<count-1;i++){
+   const input={statsId:'synthetic_paged_recovery_'+count,session:'cs_test_PagedRecovery'+count+String(i).padStart(4,'0'),authorizedAt:clock,
+    shipped:{at:Math.floor(clock/1000),tracking:'https://example.test/track/'+i},
+    message:{from:'Store <mail@example.test>',to:'buyer@example.test',subject:'Original '+count+' '+i,text:'Immutable original '+i,replyTo:'owner@example.test'}};
+   assert.equal((await enqueueShipmentMail(input,runtime)).ok,true);
+   const id=shipmentMailId(input.statsId,input.session);originals.set(input.message.subject,JSON.stringify(input.message));
+   assert.equal((await runShipmentMail(now()+30000,async()=> 'waiting',runtime,id)).waiting,1);
+  }
+  assert.equal((await pipeline([['SCARD',all]]))[0],count);
+  let revision=1,grants=1,accepted=0,confirmationAccepted=0;
+  const sent=new Set<string>();
+  const funded=(revision:number)=>({...old,reviewId:'SYNTHETIC_PAGED_'+count+'_'+revision,continuedReviewIds:[old.reviewId,f.runtime.policy!.reviewId],maximumChecks:2,
+   recovery:{...recovery(),revision,startsAt:clock-1000,until:clock+3600000,maximumOrigins:1000,checkpointTotalBytes:100000,
+    maximumAttempts:1000,maximumCommandUnits:64000,maximumReadBytes:1048576000,maximumTriggerInvocations:1000}});
+  let policy=funded(revision),complete:Record<string,unknown>|undefined;
+  for(let pass=0;pass<2500;pass++){
+   const result=await Promise.all([
+    runShipmentMail(now()+30000,async(message,barrier)=>{
+     assert.equal(JSON.stringify(message),originals.get(message.subject));assert.equal(sent.has(message.subject),false);
+     assert.equal(await barrier(),true);sent.add(message.subject);return 'accepted';
+    },{...runtime,policy}),
+    runOrderConfirmationMail(now()+30000,async(message,barrier)=>{
+     assert.equal(JSON.stringify(message),originalConfirmation);assert.equal(confirmationAccepted,0);
+     assert.equal(await barrier(),true);return 'accepted';
+    },{...physical,policy}),
+   ]);
+   accepted+=result[0].accepted;confirmationAccepted+=result[1].accepted;
+   complete=JSON.parse(String((await pipeline([['HGET',pool,'pendingRecovery']]))[0]));
+   if(complete?.phase==='done')break;
+   if(complete?.attempts===1000){
+    // Test supplies each separate explicit review; production never fabricates
+    // funding or renews these grants on its own.
+    revision++;grants++;policy=funded(revision);
+   }
+  }
+  assert.equal(complete?.phase,'done');assert.equal(accepted,count-1);assert.equal(sent.size,count-1);assert.equal(confirmationAccepted,1);
+  assert.equal(grants,count===101?1:3);assert.equal((await pipeline([['SCARD',all]]))[0],0);
+  assert.equal(f.calls.filter(c=>c.method==='POST').length,1,'only the original checkout POST');
+  const [fields]=await pipeline([['HKEYS',pool]]);assert.ok(Array.isArray(fields));assert.equal(fields.some(f=>String(f).startsWith('pendingRecoveryPage:')),false);
+  const [keptSource]=await pipeline([['GET',keys[1]]]);assert.equal(keptSource,source.row.sourceValue);
+ });
+});
+
 test('expired preparation with a historical index hole cannot hide later original shipment mail', {skip:redisOptIn}, async()=>{
  await isolatedRecoveryProof(async(pipeline,pool)=>{
   const clock=Date.now,old=shipmentPolicy();

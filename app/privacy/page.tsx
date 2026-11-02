@@ -27,7 +27,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="October 30, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 2, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -427,7 +427,9 @@ export default function PrivacyPage() {
           most four emails in all, never two within a day, and none once it is
           paid, withdrawn or expired), and what became of it: the checkout
           opened for it, whether it was paid, the payment&apos;s reference and
-          any refund Stripe reports. It is kept for 400 days from the day it
+          any refund Stripe reports, or, when the creator marks it as paid
+          outside Stripe, how (cash, bank transfer or another way), the day
+          and a short note of theirs. It is kept for 400 days from the day it
           was made and then deleted by itself; the creator can delete it
           sooner. Deleting yourself from that store (the privacy link at the
           foot of its pages) deletes every request of yours there and withdraws

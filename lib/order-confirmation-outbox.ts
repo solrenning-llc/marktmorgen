@@ -41,8 +41,8 @@ export type ConfirmationOriginPayload = {
 };
 export type ConfirmationOrigin = {
   kind: "confirmation";
-  /** Extra immutable course variant. Legacy physical rows omit both fields. */
-  originKind?: "course"; courseBindingFingerprint?: string;
+  /** Explicit extra origin; course binding stays course-only. Physical rows omit both fields. */
+  originKind?: "course" | "single_digital"; courseBindingFingerprint?: string;
   id: string; statsId: string; nonce: string; accountId: string;
   bodyDigest: string; intentFingerprint: string; bindingFingerprint: string; session: string; person: string;
   sourceValue: string; sealed: string; fingerprint: string; bytes: number;
@@ -119,6 +119,9 @@ function parse(raw: unknown): ConfirmationOrigin | null {
     const row = data(JSON.parse(raw));
     const fields = ["kind", "id", "statsId", "nonce", "accountId", "bodyDigest", "intentFingerprint", "bindingFingerprint", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt", "next", "expiresAt", "state", "phase", "owner", "leaseUntil", "checks", "createAttempts", "reviewId", "recoveryCursor", "recoveryUpper", "erasedPeople", "erasureSaturated"];
     const course = row?.originKind === "course";
+    const digital = row?.originKind === "single_digital";
+    if (row?.originKind !== undefined && !course && !digital) return null;
+    if (digital) fields.push("originKind");
     if (course) fields.push("originKind", "courseBindingFingerprint");
     if (!row || Object.keys(row).length !== fields.length || !fields.every(key => Object.hasOwn(row, key)) || row.kind !== "confirmation" || typeof row.id !== "string" || !HASH.test(row.id) ||
         typeof row.statsId !== "string" || !STORE.test(row.statsId) || typeof row.nonce !== "string" || !HASH.test(row.nonce) ||
@@ -138,9 +141,10 @@ function parse(raw: unknown): ConfirmationOrigin | null {
         row.phase !== "course_reserved" || row.next !== 0 || row.session !== "" || row.bindingFingerprint !== "" || row.state !== "queued" || row.owner !== "" || row.leaseUntil !== 0 || row.createAttempts !== 0 || row.checks !== 0
         : row.phase === "course_reserved") return null;
     const source = data(JSON.parse(row.sourceValue));
-    if (!source || Object.keys(source).length !== (row.session ? 6 : 5) + (course ? 2 : 0) || source.kind !== "confirmation" || source.nonce !== row.nonce ||
+    if (!source || Object.keys(source).length !== (row.session ? 6 : 5) + (course ? 2 : digital ? 1 : 0) || source.kind !== "confirmation" || source.nonce !== row.nonce ||
         source.accountId !== row.accountId || source.bodyDigest !== row.bodyDigest || source.session !== row.session ||
         (row.session && source.bindingFingerprint !== row.bindingFingerprint)) return null;
+    if (digital && source.originKind !== "single_digital") return null;
     if (course && (source.originKind !== "course" || source.courseBindingFingerprint !== row.courseBindingFingerprint)) return null;
     return row as unknown as ConfirmationOrigin;
   } catch { return null; }
@@ -167,6 +171,7 @@ async function readOrigin(id: string, runtime: ShipmentMailRuntime = {}): Promis
     const opened = unseal(row.sealed, context(id));
     if (!opened.ok || hash(opened.value) !== row.fingerprint) return null;
     const payload = data(JSON.parse(opened.value));
+    if (row.originKind === "single_digital" && new URLSearchParams(String(payload?.body)).get("metadata[mm_order_origin]") !== "single-digital-v1") return null;
     if (!payload || typeof payload.body !== "string" || confirmationBodyDigest(payload.body) !== row.bodyDigest ||
         typeof payload.preintentToken !== "string" || hash(payload.preintentToken) !== row.intentFingerprint ||
         payload.intentFingerprint !== row.intentFingerprint || !data(payload.snapshot)) return null;
@@ -174,10 +179,10 @@ async function readOrigin(id: string, runtime: ShipmentMailRuntime = {}): Promis
   } catch { return null; }
 }
 
-/** Physical stages never consume an unimplemented course source. */
+/** Physical and retention-only digital stages never consume a course source. */
 export async function readConfirmationOrigin(id: string, runtime: ShipmentMailRuntime = {}) {
   const found = await readOrigin(id, runtime);
-  return found && found.row.originKind === undefined ? found : null;
+  return found && found.row.originKind !== "course" ? found : null;
 }
 
 type PersistedCourseBinding = OpenedCourseOriginBinding & { token: string; fingerprint: string };
@@ -234,9 +239,9 @@ async function reserveOrigin(input: {
   statsId: string | null; nonce: string; accountId: string; body: string;
   preintent: { token: string; expiresAtMs: number; intentFingerprint: string };
   snapshot: Record<string, unknown>;
-}, runtime: ShipmentMailRuntime = {}, course?: { token: string; fingerprint: string; selected: OpenedCourseOriginBinding["candidate"] }): Promise<{ ok: true; id: string } | { ok: false }> {
+}, runtime: ShipmentMailRuntime = {}, course?: { token: string; fingerprint: string; selected: OpenedCourseOriginBinding["candidate"] }, digital = false): Promise<{ ok: true; id: string } | { ok: false }> {
   const p = confirmationOutboxPolicy(runtime);
-  if (!p || !canSeal()) return { ok: false };
+  if (!p || !canSeal() || digital && !p.coveredOrigins?.includes("single-digital-confirmation")) return { ok: false };
   try {
     const own = data(input), preintent = data(own?.preintent);
     if (!own || !preintent || typeof own.statsId !== "string" || !STORE.test(own.statsId) || typeof own.nonce !== "string" || !HASH.test(own.nonce) ||
@@ -267,10 +272,10 @@ async function reserveOrigin(input: {
       ...(course ? { courseBindingToken: course.token } : {}) };
     const plain = JSON.stringify(payload);
     if (Buffer.byteLength(plain) > p.maxPayloadBytes) return { ok: false };
-    const row: ConfirmationOrigin = { kind: "confirmation", ...(course ? { originKind: "course" as const, courseBindingFingerprint: course.fingerprint } : {}), id, statsId, nonce: input.nonce,
+    const row: ConfirmationOrigin = { kind: "confirmation", ...(course ? { originKind: "course" as const, courseBindingFingerprint: course.fingerprint } : digital ? { originKind: "single_digital" as const } : {}), id, statsId, nonce: input.nonce,
       accountId: input.accountId, bodyDigest, intentFingerprint: input.preintent.intentFingerprint, bindingFingerprint: "",
       session: "", person: hash(`unbound:${input.nonce}`),
-      sourceValue: JSON.stringify({ kind: "confirmation", nonce: input.nonce, accountId: input.accountId, bodyDigest, session: "", ...(course ? { originKind: "course", courseBindingFingerprint: course.fingerprint } : {}) }),
+      sourceValue: JSON.stringify({ kind: "confirmation", nonce: input.nonce, accountId: input.accountId, bodyDigest, session: "", ...(course ? { originKind: "course", courseBindingFingerprint: course.fingerprint } : digital ? { originKind: "single_digital" } : {}) }),
       sealed: seal(plain, context(id)), fingerprint: hash(plain), bytes: 0,
       created: now, authorizedAt: now, next: course ? 0 : now, expiresAt: input.preintent.expiresAtMs,
       state: "queued", phase: course ? "course_reserved" : "awaiting_creation", owner: "", leaseUntil: 0, checks: 0, createAttempts: 0, reviewId: p.reviewId, recoveryCursor: "", recoveryUpper: 0, erasedPeople: "", erasureSaturated: false };
@@ -287,11 +292,35 @@ async function reserveOrigin(input: {
   } catch { return { ok: false }; }
 }
 
+/** Retention/reconciliation construction only, not payment or access permission.
+ * The source captures original rights inside the same funded envelope. There is
+ * deliberately no digital creation, payment URL, receipt or settlement stage.
+ */
+export async function reserveSingleDigitalConfirmationOrigin(input: Parameters<typeof reserveOrigin>[0], runtime: ShipmentMailRuntime = {}): Promise<{ ok: true; id: string } | { ok: false }> {
+  try {
+    const value = data(input), snapshot = data(value?.snapshot), store = data(snapshot?.store), product = data(snapshot?.product), rights = data(snapshot?.rights);
+    if (!value || typeof value.body !== "string" || !store || !product || !rights) return { ok: false };
+    const form = new URLSearchParams(value.body), file = data(product.file);
+    if (form.get("metadata[mm_order_origin]") !== "single-digital-v1" || form.get("mode") !== "payment" ||
+      !file || typeof file.pathname !== "string" || !file.pathname || typeof file.name !== "string" || !file.name ||
+      !Number.isSafeInteger(file.bytes) || Number(file.bytes) <= 0 || typeof file.contentType !== "string" || typeof file.addedAt !== "string" ||
+      typeof product.id !== "string" || form.get("metadata[product]") !== product.id ||
+      form.get("line_items[0][quantity]") !== "1" || !Number.isSafeInteger(product.priceCents) || Number(product.priceCents) <= 0 ||
+      form.get("line_items[0][price_data][unit_amount]") !== String(product.priceCents) ||
+      rights.priceCents !== product.priceCents || rights.currency !== store.currency ||
+      form.get("line_items[0][price_data][currency]") !== rights.currency ||
+      typeof rights.consent !== "string" || !/^yes:[^:]+:d:[0-9]+$/.test(rights.consent) || form.get("metadata[dc]") !== rights.consent ||
+      [product.link, product.shipping, product.call, product.course, product.podcast, product.bundle, product.recurring, product.keys, product.note, product.plan, product.pwyw, product.callPackage].some(Boolean) ||
+      !Array.isArray(product.options) || product.options.length !== 0 || !Array.isArray(product.fields) || product.fields.length !== 0) return { ok: false };
+    return reserveOrigin(input, runtime, undefined, true);
+  } catch { return { ok: false }; }
+}
+
 /** Preserve the existing physical producer contract. Course bodies cannot
  * downgrade to a physical source and bypass explicit course funding/isolation. */
 export async function reserveConfirmationOrigin(input: Parameters<typeof reserveOrigin>[0], runtime: ShipmentMailRuntime = {}): Promise<{ ok: true; id: string } | { ok: false }> {
   const value = data(input);
-  if (!value || typeof value.body !== "string" || new URLSearchParams(value.body).get("metadata[mm_order_origin]") === "course-v1") return { ok: false };
+  if (!value || typeof value.body !== "string" || new URLSearchParams(value.body).get("metadata[mm_order_origin]") !== "physical-v1") return { ok: false };
   return reserveOrigin(value as Parameters<typeof reserveOrigin>[0], runtime);
 }
 
@@ -314,10 +343,17 @@ if raw~=expected or #raw>131072 then return {'changed'} end
 local ok,r=pcall(cjson.decode,raw)
 if not ok or type(r)~='table' or r.kind~='confirmation' or redis.call('GET',KEYS[2])~=r.sourceValue or type(r.expiresAt)~='number' or now>=r.expiresAt then return {'unknown'} end
 -- Reserve-only courses cannot acquire creation, cursor, bind or URL permission.
-if r.originKind~=nil then return {'unknown'} end
+if r.originKind~=nil and r.originKind~='single_digital' then return {'unknown'} end
+-- No verified original-file access recipe: digital creation and URL stay closed.
+if r.originKind=='single_digital' and op~='cursor' and op~='bind' then return {'unknown'} end
 if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then return {'held'} end
 local good,p=pcall(cjson.decode,ARGV[6])
 if not good or type(p)~='table' then return {'unknown'} end
+if r.originKind=='single_digital' then
+ local covered=false
+ if type(p.coveredOrigins)=='table' then for _,purpose in ipairs(p.coveredOrigins) do if purpose=='single-digital-confirmation' then covered=true end end end
+ if not covered then return {'unknown'} end
+end
 local supported=r.reviewId==p.reviewId
 if type(p.continuedReviewIds)=='table' then for _,id in ipairs(p.continuedReviewIds) do if id==r.reviewId then supported=true end end end
 if not supported then return {'unknown'} end
@@ -394,7 +430,7 @@ export async function bindConfirmationOrigin(id: string, value: BoundConfirmatio
     const plain = JSON.stringify({ ...found.payload, settlementToken: candidate.settlementToken });
     const row = { ...found.row, session: candidate.sessionId, bindingFingerprint: candidate.bindingFingerprint, phase: "awaiting_payment" as const, owner: "", leaseUntil: 0,
       next: (runtime.now ?? Date.now)() + 60_000, sealed: seal(plain, context(id)), fingerprint: hash(plain),
-      sourceValue: JSON.stringify({ kind: "confirmation", nonce: found.row.nonce, accountId: found.row.accountId, bodyDigest: found.row.bodyDigest, session: candidate.sessionId, bindingFingerprint: candidate.bindingFingerprint }) };
+      sourceValue: JSON.stringify({ kind: "confirmation", nonce: found.row.nonce, accountId: found.row.accountId, bodyDigest: found.row.bodyDigest, session: candidate.sessionId, bindingFingerprint: candidate.bindingFingerprint, ...(found.row.originKind === "single_digital" ? { originKind: "single_digital" } : {}) }) };
     const raw = JSON.stringify(row);
     if (!parse(raw)) return null;
     const pipeline = runtime.pipeline ?? redisPipeline;
@@ -528,9 +564,10 @@ async function confirmationUrlPermission(found: NonNullable<Awaited<ReturnType<t
  * original-account reads remain possible after24h and process restarts.
  */
 export async function openConfirmationOrigin(id: string, runtime: ConfirmationOriginRuntime = {}): Promise<{ url: string; id: string } | null> {
+  // This origin has a retention adapter, not a verified original-file access recipe.
   if (!confirmationOutboxPolicy(runtime, false)) return null;
   let found = await readConfirmationOrigin(id, runtime);
-  if (!found) return null;
+  if (!found || found.row.originKind === "single_digital") return null;
   let bound = winner(found);
   if (!bound) {
     const claim = await claimConfirmationCreation(id, runtime);
@@ -693,7 +730,7 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       if (reply[0] === "none" && reply[1] === "") return { raw: "" };
       if (reply[0] !== "string" || Buffer.byteLength(reply[1]) > SHIPMENT_MAIL_MAX_ROW_BYTES) return null;
       const row = parse(reply[1]);
-      if (!row || row.id !== id || row.originKind !== undefined) return { raw: reply[1] };
+      if (!row || row.id !== id || row.originKind === "course") return { raw: reply[1] };
       if (reply[2] !== row.sourceValue) return { raw: reply[1] };
       const opened = unseal(row.sealed, context(id));
       if (!opened.ok || hash(opened.value) !== row.fingerprint) return { raw: reply[1] };
@@ -717,8 +754,10 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
     if (expired()) break;
     let found = await readConfirmationOrigin(String(id), runtime);
     if (!found || found.row.accountId === DEMO_CONNECTED_ACCOUNT) { counts.unknown++; continue; }
+    if (found.row.originKind === "single_digital" && !p.coveredOrigins?.includes("single-digital-confirmation")) { counts.unknown++; continue; }
     // A previous accepted outcome is never dispatched again. Its complete
     // protected source survives until original accounting is acknowledged.
+    if (found.row.originKind === "single_digital" && found.row.phase === "accepted") { counts.unknown++; continue; }
     if (found.row.phase === "accepted") {
       let receipt: unknown[] | null = null;
       try {
@@ -743,6 +782,13 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       await recoverCreation(found, runtime); // Read-only even after a lost creation ACK.
       const current = await readConfirmationOrigin(String(id), runtime);
       if (current?.row.owner === owner) await confirmationMutation("defer", current, p, runtime, owner);
+      counts.waiting++; continue;
+    }
+    // Finding the source is not proof that its original file can still be
+    // delivered. Keep the exact rights and reservation; no stale thanks URL,
+    // 40-entry purchase list, paid settlement or receipt can substitute for it.
+    if (found.row.originKind === "single_digital") {
+      await confirmationMutation("defer", found, p, runtime, owner);
       counts.waiting++; continue;
     }
     if (found.row.phase === "awaiting_payment") found = await preparePaid(found, p, runtime, owner);

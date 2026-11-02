@@ -2730,10 +2730,11 @@ export type CurrencyShortfall = {
   title: string;
   /**
    * What it is: the product's price, the floor of a price the buyer chooses,
-   * a price option, the offer at checkout, an offer after paying, or one
-   * payment of a payment plan.
+   * a price option, the offer at checkout, an offer after paying, one
+   * payment of a payment plan, or the deposit on an in-person booking
+   * (lib/call-deposit.ts).
    */
-  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan";
+  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan" | "deposit";
   /** The option's label, or the title of the product offered; "" otherwise. */
   label: string;
   /** In the smallest unit, the same number in either currency. */
@@ -2759,6 +2760,8 @@ export function chargesBelow(products: Product[], currency: Currency): CurrencyS
     for (const bump of p.bumps) if (bump.priceCents < least) on("bump", titles.get(bump.productId) ?? "", bump.priceCents);
     for (const step of p.funnel?.steps ?? []) if (step.priceCents < least) on("offer", titles.get(step.productId) ?? "", step.priceCents);
     if (p.plan && p.plan.amountCents < least) on("plan", "", p.plan.amountCents);
+    // A deposit below the smallest charge would quietly become the whole price (lib/call-deposit.ts, chargeNow): said instead.
+    if (p.call?.deposit && p.call.deposit < least) on("deposit", "", p.call.deposit);
   }
   return out;
 }

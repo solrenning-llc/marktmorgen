@@ -229,7 +229,8 @@ export async function recordPackage(input: { store: Store; session: Session; pro
       b.packageBookHere,
       `${base}/book/${product.id}?pkg=${token}`,
       "",
-      b.packageKeep,
+      // In person (lib/call-place.ts): no meeting link is promised.
+      product.call?.place ? b.packageKeepPlace : b.packageKeep,
       "",
       b.packageCharged(store.name),
     ].join("\n"),

@@ -23,7 +23,8 @@
  *     MAX_EPUB_BYTES; not a ZIP, or not an EPUB (no mimetype
  *     "application/epub+zip", no container, no package document); ZIP64 or
  *     split; an entry encrypted, or a page or the package listed in
- *     META-INF/encryption.xml (a book under DRM); a page or the package
+ *     META-INF/encryption.xml (a book under DRM); a book carrying a digital
+ *     signature (META-INF/signatures.xml), which a mark would break; a page or the package
  *     larger than MAX_PART_BYTES opened; anything that does not read back as
  *     what it says (entries that overlap or run past the directory, a local
  *     name that is not the directory's, sizes, CRC); a content page the
@@ -50,7 +51,7 @@ export const MAX_ENTRIES = 10_000;
 export const MAX_PAGES = 2_000;
 export const MAX_INFLATED_BYTES = 64 * 1024 * 1024;
 
-export type EpubProblem = "too_big" | "not_epub" | "zip64" | "encrypted" | "part_too_big" | "encoding" | "unreadable";
+export type EpubProblem = "too_big" | "not_epub" | "zip64" | "encrypted" | "signed" | "part_too_big" | "encoding" | "unreadable";
 export type EpubStamp = { ok: true; bytes: Uint8Array; pages: number } | { ok: false; why: EpubProblem };
 
 type Entry = {
@@ -244,6 +245,8 @@ export function stampEpub(file: Uint8Array, line: string): EpubStamp {
       const href = decodeEntities(attribute(item, "href")?.slice(2).find(Boolean) ?? "");
       if (href && /^application\/xhtml\+xml$/i.test(type)) pages.add(resolve(opfPath, href));
     }
+    // A signed book would fail its own signature once marked: handed over as it is.
+    if (named.has("META-INF/signatures.xml")) return { ok: false, why: "signed" };
     // A book under DRM lists what is encrypted; one of what would be marked, or any entry flagged as encrypted, is refused.
     const encryption = named.get("META-INF/encryption.xml");
     const encrypted = new Set<string>();

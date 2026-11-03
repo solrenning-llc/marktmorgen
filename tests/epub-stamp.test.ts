@@ -147,4 +147,6 @@ const z64 = Buffer.from(book()); const endAt = z64.lastIndexOf(Buffer.from([0x50
 is("ZIP64 is refused", (() => { const r = stampEpub(new Uint8Array(z64), line); return r.ok ? "ok" : r.why; })(), "zip64");
 is("over the size limit, refused before it is read", (() => { const r = stampEpub(new Uint8Array(MAX_EPUB_BYTES + 1), line); return r.ok ? "ok" : r.why; })(), "too_big");
 
+is("a book with a digital signature, which a mark would break, is handed over as it is", (() => { const r = stampEpub(book([{ name: "META-INF/signatures.xml", text: `<signatures xmlns="urn:oasis:names:tc:opendocument:xmlns:container"/>` }]), line); return r.ok ? "ok" : r.why; })(), "signed");
+
 done();

@@ -444,7 +444,7 @@ function OtherLengths({ draft, setDraft, currency, id, wrong }: { draft: Draft; 
           </label>
           <button
             type="button"
-            className="btn btn-secondary min-h-11"
+            className="btn btn-secondary"
             onClick={() => {
               setDraft({ ...draft, extra: draft.extra.filter((_, i) => i !== index) });
               focusSoon(`lengths-hint-${id}`);
@@ -466,7 +466,7 @@ function OtherLengths({ draft, setDraft, currency, id, wrong }: { draft: Draft; 
       {draft.extra.length < MAX_CALL_LENGTHS - 1 && unused.length ? (
         <button
           type="button"
-          className="btn btn-secondary mt-3 min-h-11"
+          className="btn btn-secondary mt-3"
           onClick={() => {
             const added = { id: rowId(), minutes: unused[0], price: "" };
             setDraft({ ...draft, extra: [...draft.extra, added] });

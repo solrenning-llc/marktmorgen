@@ -10,15 +10,34 @@
  *   - It is valid for BOOKING_LINK_DAYS days the creator picks (7 if they
  *     pick none) and for one paid booking: once paid for it never opens
  *     again ("used"), and past its day it never opens ("expired").
- *   - While a checkout opened from it is open, it is "held" by that
- *     checkout, so two tabs cannot book twice from one link; a checkout that
- *     closes unpaid lets it go again, until it expires.
+ *   - While a checkout opened from it can still be paid, it is "held" by
+ *     that checkout, so two tabs cannot book twice from one link; a checkout
+ *     that closes unpaid lets it go again, until it expires. A buyer coming
+ *     back while it is held is sent to that same checkout (resumable), never
+ *     a second one.
  *   - Made for one person: their address, if the creator typed one, is put
- *     on the checkout, so the booking is theirs; without one, whoever has
+ *     on the checkout as its customer_email, so the booking is made out to
+ *     them; it does not prove who holds the link. Without one, whoever has
  *     the link may use it once.
- *   - The token is LINK_TOKEN (48 hex characters, made by the storage unit
- *     from a secure source), kept only as its hash, never in a log or an
- *     address other than the link itself.
+ *   - A refunded or cancelled booking never reopens its link: the creator
+ *     makes a new one.
+ *
+ * What the storage and booking units must do, so nothing here is promised
+ * that they cannot keep:
+ *   - Take the hold in one atomic step with the time's own hold (a script,
+ *     or SET NX on the link's hold), never by reading linkState first and
+ *     writing after, so two tabs reading "open" at once cannot both pass.
+ *   - Set heldUntil to the checkout's own closing time (Stripe's expires_at
+ *     × 1000) plus a minute, so a checkout still payable is never let go.
+ *   - Mark it used by compare-and-set when the booking is confirmed: a
+ *     checkout paid while another has already used the link is refunded and
+ *     not booked. A checkout opened before the link's day may be paid until
+ *     it closes; no new one opens after the day.
+ *   - The token is LINK_TOKEN (48 hex characters from a secure source),
+ *     kept only as its SHA-256 with a prefix of its own (as lib/auth.ts
+ *     sha256Hex keeps tokens), never in a log or any address but the link.
+ *   - Check that the product is still one of the store's call products
+ *     when the link is made and when it is opened.
  */
 
 export const LINK_TOKEN = /^[0-9a-f]{48}$/;
@@ -44,28 +63,40 @@ export type LinkState = "open" | "held" | "used" | "expired";
 
 /** Where a link is: used outranks everything, so a used link never opens, even before its day. */
 export function linkState(link: BookingLink, now: number): LinkState {
-  if (link.usedAt) return "used";
+  if (link.usedAt !== undefined) return "used";
   if (now >= link.expiresAt) return "expired";
   if (link.heldBy && (link.heldUntil ?? 0) > now) return "held";
   return "open";
 }
 
-/** Whether a new checkout may open from the link: only while open, or again by the same checkout's own buyer coming back to it. */
-export function mayBook(link: BookingLink, now: number, session?: string): boolean {
-  const state = linkState(link, now);
-  return state === "open" || (state === "held" && Boolean(session) && link.heldBy === session);
+/** Whether a new checkout may open from the link: only while it is open. */
+export function mayBook(link: BookingLink, now: number): boolean {
+  return linkState(link, now) === "open";
 }
 
-const EMAIL = /^[^\s@<>()",;:]{1,64}@[^\s@<>()",;:]{1,190}\.[^\s@<>()",;:]{2,63}$/;
+/** Whether a buyer coming back is sent to the checkout already open on it: never a second checkout. */
+export function resumable(link: BookingLink, now: number, session: string): boolean {
+  return linkState(link, now) === "held" && link.heldBy === session;
+}
+
+// The same address shape the sign-in accepts (lib/auth.ts, EMAIL_PATTERN), kept here so this stays browser-safe.
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** What the studio sends to make one, as kept, or why not. */
 export function readLinkRequest(
   raw: { product?: unknown; days?: unknown; email?: unknown },
   now: number,
 ): { ok: true; link: BookingLink } | { ok: false; why: "product" | "days" | "email" } {
-  const product = typeof raw.product === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(raw.product) ? raw.product : "";
+  const product = typeof raw.product === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(raw.product) ? raw.product : "";
   if (!product) return { ok: false, why: "product" };
-  const days = raw.days === undefined || raw.days === null || raw.days === "" ? DEFAULT_LINK_DAYS : Number(raw.days);
+  const days =
+    raw.days === undefined || raw.days === null || raw.days === ""
+      ? DEFAULT_LINK_DAYS
+      : typeof raw.days === "number" && Number.isInteger(raw.days)
+        ? raw.days
+        : typeof raw.days === "string" && /^\d{1,3}$/.test(raw.days)
+          ? Number(raw.days)
+          : Number.NaN;
   if (!(BOOKING_LINK_DAYS as readonly number[]).includes(days)) return { ok: false, why: "days" };
   const typed = typeof raw.email === "string" ? raw.email.trim().toLowerCase() : "";
   if (typed && (typed.length > 254 || !EMAIL.test(typed))) return { ok: false, why: "email" };
@@ -83,12 +114,12 @@ export const LINK_PROBLEMS: Record<"product" | "days" | "email", string> = {
 export function linkStateWords(link: BookingLink, now: number, timeZone: string): string {
   const day = (ms: number) => {
     try {
-      return new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeStyle: "short", timeZone }).format(ms);
+      return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone }).format(ms);
     } catch {
-      return `${new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }).format(ms)} UTC`;
+      return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: "UTC" }).format(ms);
     }
   };
-  const who = link.email ? `for ${link.email}` : "for whoever has it";
+  const who = link.email ? `by ${link.email}` : "by whoever has it";
   switch (linkState(link, now)) {
     case "used":
       return `Used: booked on ${day(link.usedAt!)}. It no longer opens.`;
@@ -97,6 +128,6 @@ export function linkStateWords(link: BookingLink, now: number, timeZone: string)
     case "held":
       return `Being booked right now, ${who}. It works for one booking until ${day(link.expiresAt)}.`;
     case "open":
-      return `Works for one booking, ${who}, until ${day(link.expiresAt)}.`;
+      return `Works for one booking ${who}, until ${day(link.expiresAt)}.`;
   }
 }

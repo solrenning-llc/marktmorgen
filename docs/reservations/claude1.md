@@ -6,4 +6,5 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | GitHub Enterprise move: accept reader runs under the new owner, and the move runbook | claude/reader-run-owner | `scripts/accessibility-screen-reader-results.mjs`, `tests/accessibility-screen-reader-results.test.ts`, `docs/github-enterprise-move.md` | 02/11/2026 22h00 |
 | Claude 1 | Official EU texts for 619 [SZ3] and 625 [HN1] | claude/eu-official-texts | `docs/official-texts-eu-2026-11-02.md` | 02/11/2026 22h45 |

@@ -3,7 +3,8 @@
  * (components/person-tasks.tsx, app/studio/people/page.tsx). Each task a
  * checkbox named by its own words, done said in words as well as by the
  * line, dates read as the dates they are, every field labeled, refusals in
- * an alert, and the add form gone at the most a person can have.
+ * an alert, a removal undone from a status line, and the add form gone at
+ * the most a person can have.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -34,6 +35,13 @@ is("refusals are said in an alert region", html.includes('role="alert"'), true);
 const full = draw(Array.from({ length: MAX_PERSON_TASKS }, (_, i) => task(i + 1)));
 is("at the most a person can have, the form says so instead", [full.includes("New task"), full.includes(`This person has ${MAX_PERSON_TASKS} tasks`)], [false, true]);
 is("none yet", draw([]).includes("No tasks yet."), true);
+
+part("Undoing a removal");
+const source = readFileSync("components/person-tasks.tsx", "utf8");
+is("a status region, there before anything is removed, says what was removed", html.includes('<div role="status"') && source.includes("`Removed: ${removed.text}`"), true);
+is("undo puts back the words, the date and the teammate", source.includes('{ action: "add", text: task.text, due: task.due, assignee: task.assignee }'), true);
+is("and marks it done again if it was", source.includes('if (task.done && added) await send({ action: "done", id: added.id, done: true }'), true);
+is("offered only after the removal was saved", source.includes('if (await send({ action: "remove", id: task.id }, "Task removed.")) setRemoved(task);'), true);
 
 part("On the person's page");
 const page = readFileSync("app/studio/people/page.tsx", "utf8");

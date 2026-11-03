@@ -23,8 +23,9 @@ export function PersonTasks({ person, initial, assignees, today }: { person: str
   const [assignee, setAssignee] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [removed, setRemoved] = useState<PersonTask | null>(null);
 
-  async function send(body: Record<string, unknown>, done: string): Promise<boolean> {
+  async function send(body: Record<string, unknown>, done: string): Promise<PersonTask[] | null> {
     setBusy(true);
     setError("");
     try {
@@ -37,7 +38,7 @@ export function PersonTasks({ person, initial, assignees, today }: { person: str
       if (answer.ok && answer.tasks) {
         setTasks(answer.tasks);
         toast(done);
-        return true;
+        return answer.tasks;
       }
       setError(answer.message ?? (answer.error === "data_full" ? "Your store's data room is full. Delete something you no longer need first." : "That did not save. Try again in a moment."));
     } catch {
@@ -45,7 +46,16 @@ export function PersonTasks({ person, initial, assignees, today }: { person: str
     } finally {
       setBusy(false);
     }
-    return false;
+    return null;
+  }
+
+  /** The removed task put back with its words, date and teammate, done again if it was. */
+  async function undoRemove(task: PersonTask) {
+    const back = await send({ action: "add", text: task.text, due: task.due, assignee: task.assignee }, "Task put back.");
+    if (!back) return;
+    setRemoved(null);
+    const added = back[back.length - 1];
+    if (task.done && added) await send({ action: "done", id: added.id, done: true }, "Task put back.");
   }
 
   const open = tasks.filter((task) => !task.done).length;
@@ -76,7 +86,9 @@ export function PersonTasks({ person, initial, assignees, today }: { person: str
                     {task.due ? (late ? `Was due ${dayWords(task.due)}` : `Due ${dayWords(task.due)}`) : "No date"}
                     {task.assignee ? ` · ${task.assignee}` : " · Nobody named"}
                   </p>
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void send({ action: "remove", id: task.id }, "Task removed.")} aria-label={`Remove the task: ${task.text}`}>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={async () => {
+                      if (await send({ action: "remove", id: task.id }, "Task removed.")) setRemoved(task);
+                    }} aria-label={`Remove the task: ${task.text}`}>
                     Remove
                   </button>
                 </div>
@@ -85,6 +97,16 @@ export function PersonTasks({ person, initial, assignees, today }: { person: str
           })}
         </ul>
       ) : null}
+      <div role="status" className="mt-3">
+        {removed ? (
+          <p className="flex flex-wrap items-center gap-3 text-sm text-ink">
+            <span className="[overflow-wrap:anywhere]">{`Removed: ${removed.text}`}</span>
+            <button type="button" className="btn btn-secondary btn-sm" disabled={busy || tasks.length >= MAX_PERSON_TASKS} onClick={() => void undoRemove(removed)}>
+              Undo
+            </button>
+          </p>
+        ) : null}
+      </div>
       {tasks.length < MAX_PERSON_TASKS ? (
         <form
           className="mt-4 grid gap-3 sm:grid-cols-2"

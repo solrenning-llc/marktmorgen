@@ -10,6 +10,7 @@ Branches already pushed, each to open against main with the body in the file of 
 | claude3/wp1-stamp-player | 602 [WP1] unit 2: the buyer's mark drawn over lesson videos, off by default | wp1-stamp-player.md |
 | claude3/gl7-flow-versions | 639 [GL7](19): a workflow's earlier versions, and putting one back | gl7-flow-versions.md |
 | claude3/sz8-cart-link | 624 [SZ8](23): a ready cart link, with a discount code that applies itself | sz8-cart-link.md |
+| claude3/hn4-shelf-rules | 628 [HN4](b) unit 1: the course's "More from" shelf, rules and data | hn4-shelf-rules.md |
 | claude3/aa1-propose-title | 631 [AA1] (c): a product's title and summary as changes an agent may prepare (stacked on #1856) | aa1-propose-title.md |
 
 Also pushed: claude3/aa1-propose-description, the fix for its open PR #1856 (an agent's description gets the studio's word checks).

@@ -139,7 +139,29 @@ export type FormDef = {
   categories?: FormCategory[];
   /** When it was last changed, in seconds. */
   updatedAt: number;
+  /**
+   * When it starts and stops taking answers, in seconds (639 [GL7](26)):
+   * before the first and after the second the page says so instead of
+   * asking, and the answers route refuses. Absent: always open.
+   */
+  opensAt?: number;
+  closesAt?: number;
 };
+
+/** The latest moment a form may be set to open or close: the end of 2100, in seconds. */
+export const LATEST_SCHEDULE = Date.UTC(2100, 11, 31, 23, 59) / 1000;
+
+/** When a form opens, as a visitor reads it: the date and time in UTC, said so, in the store's language. */
+export function scheduleWhen(seconds: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(new Date(seconds * 1000));
+}
+
+/** Whether a form takes answers now: "open", "not_yet" (before it opens) or "ended" (after it closes). */
+export function formOpen(form: Pick<FormDef, "opensAt" | "closesAt">, nowSeconds: number): "open" | "not_yet" | "ended" {
+  if (form.opensAt && nowSeconds < form.opensAt) return "not_yet";
+  if (form.closesAt && nowSeconds >= form.closesAt) return "ended";
+  return "open";
+}
 
 const oneLine = (value: unknown, max: number) =>
   typeof value === "string"
@@ -268,7 +290,16 @@ export function parseForm(raw: unknown): FormDef | null {
     offerList,
     updatedAt,
     ...(scored ? { scoring: "points" as const, categories } : {}),
+    ...schedule(value.opensAt, value.closesAt),
   };
+}
+
+/** A schedule as sent: whole seconds up to LATEST_SCHEDULE; a close not after the opening is let go. */
+function schedule(rawOpens: unknown, rawCloses: unknown): { opensAt?: number; closesAt?: number } {
+  const at = (v: unknown) => (typeof v === "number" && Number.isInteger(v) && v > 0 && v <= LATEST_SCHEDULE ? v : 0);
+  const opensAt = at(rawOpens);
+  const closesAt = at(rawCloses);
+  return { ...(opensAt ? { opensAt } : {}), ...(closesAt && (!opensAt || closesAt > opensAt) ? { closesAt } : {}) };
 }
 
 /**

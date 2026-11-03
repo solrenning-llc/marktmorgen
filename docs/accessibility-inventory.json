@@ -1163,6 +1163,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/totals/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/totals",
+      "parameters": []
+    },
+    {
       "source": "app/takedown/[token]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/takedown/[token]",
@@ -1177,6 +1183,12 @@
       "source": "app/terms/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/terms",
+      "parameters": []
+    },
+    {
+      "source": "app/transparency/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/transparency",
       "parameters": []
     },
     {
@@ -1239,6 +1251,7 @@
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
     "components/certificate-actions.tsx",
+    "components/certificate-validity.tsx",
     "components/chat-summary-editor.tsx",
     "components/checkout-extras.tsx",
     "components/checkout-fields-editor.tsx",
@@ -1437,6 +1450,7 @@
     "components/review-qr.tsx",
     "components/review-stars.tsx",
     "components/review-studio.tsx",
+    "components/review-themes.tsx",
     "components/sale-editor.tsx",
     "components/sales-blocks.tsx",
     "components/sales-goal-card.tsx",
@@ -1924,6 +1938,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 131
+    "pageTemplates": 133
   }
 }

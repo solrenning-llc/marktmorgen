@@ -147,6 +147,22 @@ export async function readPreorder(store: Store, productId: string, sessionId: s
   return parsePreorder(raw);
 }
 
+/** A person's pre-orders of these products and what became of them, for the copy of their data (619 [SZ3]). Only reads. */
+export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
+  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
+  const address = email.trim().toLowerCase();
+  const replies = await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)]));
+  return productIds.flatMap((product, i) => {
+    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const out: (Preorder & { product: string; checkout: string })[] = [];
+    for (let k = 0; k + 1 < flat.length; k += 2) {
+      const entry = parsePreorder(flat[k + 1]);
+      if (entry && entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: String(flat[k]) });
+    }
+    return out;
+  });
+}
+
 type Session = {
   id?: unknown;
   created?: unknown;

@@ -84,7 +84,13 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
         <div className="st-card p-6 sm:p-10">
           <p className="st-muted text-sm font-semibold">{w.eyebrow(store.name)}</p>
           <h1 className="mt-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">{heading}</h1>
-          {status === "paid" ? <p className="st-muted mt-4 text-lg">{w.paidBody(said.money(request.amountPaid || request.total), store.name, said.date(request.paidAt || now))}</p> : null}
+          {status === "paid" ? (
+            <p className="st-muted mt-4 text-lg">
+              {request.outside
+                ? w.paidOutsideBody(said.money(request.amountPaid || request.total), store.name, said.date(request.paidAt || now), request.outside.method)
+                : w.paidBody(said.money(request.amountPaid || request.total), store.name, said.date(request.paidAt || now))}
+            </p>
+          ) : null}
           {status === "paid" && request.refunded > 0 ? <p className="st-muted mt-2">{w.partRefund(said.money(request.refunded))}</p> : null}
           {status === "refunded" ? <p className="st-muted mt-4 text-lg">{w.refundedBody(said.money(request.refunded || request.amountPaid), store.name)}</p> : null}
           {status === "canceled" ? <p className="st-muted mt-4 text-lg">{w.canceledBody(store.name)}</p> : null}

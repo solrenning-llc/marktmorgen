@@ -1841,6 +1841,7 @@
     "app/api/v1/leads/route.ts",
     "app/api/v1/members/route.ts",
     "app/api/v1/products/route.ts",
+    "app/api/v1/sales/route.ts",
     "app/api/v1/stats/route.ts",
     "app/api/v1/store/route.ts",
     "app/api/v1/students/route.ts"

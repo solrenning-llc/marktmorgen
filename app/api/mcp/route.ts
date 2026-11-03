@@ -3,6 +3,8 @@ import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { readNumbers, summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
+import { readTitles } from "@/lib/catalog";
+import { rangeProblem, readLive, readRange, readToday } from "@/lib/stats";
 import {
   affiliatesTool,
   buyersTool,
@@ -10,8 +12,18 @@ import {
   emailsTool,
   funnelTool,
   insightsTool,
+  liveTool,
   membershipsTool,
+  productTextTool,
   productsTool,
+  rangeTool,
+  readCourseTool,
+  readLessonTool,
+  readPageReadingTool,
+  readPageTestTool,
+  readPageVersionsTool,
+  savedBlocksTool,
+  readSalesPageTool,
   readFullNumbers,
   windowOf,
 } from "@/lib/mcp-tools";
@@ -109,6 +121,51 @@ export async function POST(request: Request) {
       const data = await readFullNumbers(store);
       return result(id, data ? said(await tool(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
     }
+    if (params.name === "get_live") {
+      const [live, today] = await Promise.all([readLive(store), readToday(store).catch(() => null)]);
+      return result(id, said(liveTool(live, today)));
+    }
+    if (params.name === "get_numbers_for_days") {
+      const from = typeof params.arguments?.from === "string" ? params.arguments.from.slice(0, 10) : "";
+      const to = typeof params.arguments?.to === "string" ? params.arguments.to.slice(0, 10) : "";
+      const problem = rangeProblem(from, to);
+      if (problem) {
+        const words = { dates: "Send from and to as YYYY-MM-DD.", order: "from must not be after to.", future: "to must not be after today (UTC).", kept: "Days are kept for 400 days; start later." } as const;
+        return result(id, said({ error: words[problem] }, true));
+      }
+      const [range, titles] = await Promise.all([readRange(store, from, to), readTitles(store).catch(() => new Map<string, string>())]);
+      return result(id, range ? said(rangeTool(range, titles)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+    }
+    if (params.name === "get_product_description" || params.name === "get_sales_page") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const found = product ? await (params.name === "get_sales_page" ? readSalesPageTool(store, product) : productTextTool(store, product)) : null;
+      return result(id, found ? said(found) : said({ error: "There is no product with that id in this store. Use list_products for the ids." }, true));
+    }
+    if (params.name === "get_course_outline" || params.name === "get_lesson") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const lesson = typeof params.arguments?.lesson === "string" ? params.arguments.lesson.slice(0, 40) : "";
+      const found = !product ? null : params.name === "get_lesson" ? (lesson ? await readLessonTool(store, product, lesson) : null) : await readCourseTool(store, product);
+      return result(id, found ? said(found) : said({ error: params.name === "get_lesson" ? "There is no such lesson in this store's courses. Use get_course_outline for the ids." : "There is no course with that id in this store. Use list_products for the ids." }, true));
+    }
+    if (params.name === "get_page_test" || params.name === "get_page_reading") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const unknown = { error: "There is no product with that id in this store. Use list_products for the ids." };
+      if (params.name === "get_page_reading") {
+        const reading = product ? await readPageReadingTool(store, product) : null;
+        return result(id, reading ? said(reading) : said(unknown, true));
+      }
+      const tested = product ? await readPageTestTool(store, product) : { found: false as const, error: unknown.error };
+      return result(id, tested.found ? said(tested.value) : said({ error: tested.error }, true));
+    }
+    if (params.name === "get_page_versions") {
+      const product = typeof params.arguments?.product === "string" ? params.arguments.product.slice(0, 40) : "";
+      const raw = params.arguments?.version;
+      const version = raw === undefined || raw === null ? null : Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) < 100 ? (raw as number) : -1;
+      if (version === -1) return result(id, said({ error: "version is a whole number from the list, 0 for the newest." }, true));
+      const found = product ? await readPageVersionsTool(store, product, version) : { found: false as const, error: "There is no product with that id in this store. Use list_products for the ids." };
+      return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
+    }
+    if (params.name === "list_saved_blocks") return result(id, said(await savedBlocksTool(store)));
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));
     if (params.name === "get_affiliates") return result(id, said(await affiliatesTool(store)));

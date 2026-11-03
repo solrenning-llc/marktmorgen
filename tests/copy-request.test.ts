@@ -8,7 +8,12 @@
  */
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { importContactRows } from "@/lib/contacts";
-import { copyFor, queuedCopies, readCopyLink, requestCopyLink } from "@/lib/copy-request";
+import { readFileSync } from "node:fs";
+import { NextRequest } from "next/server";
+import { COPY_DOOR_OPEN, copyFor, queuedCopies, readCopyLink, requestCopyLink } from "@/lib/copy-request";
+import { COPY_COMPLETE } from "@/lib/person-copy";
+import { CURRENT_EXPOSURE_BUDGET_POLICY } from "@/lib/exposure-budget-policy";
+import { POST as copyRoute } from "@/app/api/privacy/copy/route";
 import { COPY_DUE_DAYS, copyCsv, copyDueDay, copyJson } from "@/lib/copy-request-rules";
 import { EXPOSURE_SCOPES } from "@/lib/funded-exposure-rules";
 import { store as redis } from "./redis-stub";
@@ -38,6 +43,15 @@ async function main(): Promise<void> {
   await ensureStoreId(OWNER);
   const store = (await storeForEmail(OWNER))!;
   await importContactRows(store.listId!, [{ email: PERSON, name: "Ivy", tags: [], consent: "agreed" }], store);
+
+  part("Closed until the company's exposure for copies is approved (inbox C3-12)");
+  is("open only with every module copied and an approved exposure policy", COPY_DOOR_OPEN, COPY_COMPLETE && CURRENT_EXPOSURE_BUDGET_POLICY !== null);
+  is("today: no approved policy, so the door is closed", [CURRENT_EXPOSURE_BUDGET_POLICY, COPY_DOOR_OPEN], [null, false]);
+  const asked0 = await copyRoute(new NextRequest("https://marktmorgen.com/api/privacy/copy", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ action: "ask", email: "ivy@example.com" }) }));
+  is("the route says not found while it is closed", asked0.status, 404);
+  const page = readFileSync("app/privacy/copy/page.tsx", "utf8");
+  is("and so does the page", page.includes("if (!COPY_DOOR_OPEN) notFound();"), true);
+  is("the privacy policy does not point to it yet", readFileSync("app/privacy/page.tsx", "utf8").includes("/privacy/copy"), false);
 
   part("The link");
   is("data copies are a funded exposure of the company", EXPOSURE_SCOPES.includes("data_copy"), true);

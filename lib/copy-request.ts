@@ -34,6 +34,8 @@ import { storesKnownFor } from "@/lib/buyer-library";
 import { erasureScope } from "@/lib/person-erasure";
 import { type PersonCopy, copyPerson } from "@/lib/person-copy";
 import { reserveFundedExposure } from "@/lib/exposure-budget";
+import { CURRENT_EXPOSURE_BUDGET_POLICY } from "@/lib/exposure-budget-policy";
+import { COPY_COMPLETE } from "@/lib/person-copy";
 import {
   COPY_ASKS_PER_ADDRESS_HOUR,
   COPY_ASKS_PER_IP_HOUR,
@@ -44,6 +46,15 @@ import {
   copyCase,
   copyDueDay,
 } from "@/lib/copy-request-rules";
+
+/**
+ * Whether the door is open to anybody: the copy reads everything (no module
+ * pending) and the company's exposure for copies is approved and funded, so a
+ * request can be answered within the legal time, not only queued. While it is
+ * closed the page and its route answer "not found" and the privacy policy
+ * does not point to them (619 [SZ3]; nothing is shown that does not work).
+ */
+export const COPY_DOOR_OPEN = COPY_COMPLETE && CURRENT_EXPOSURE_BUDGET_POLICY !== null;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const linkKey = (token: string) => `nl:mycopy:link:${sha(`nimbus-copy-link:${token}`).slice(0, 40)}`;

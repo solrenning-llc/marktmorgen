@@ -25,10 +25,12 @@
  *     any other. A template never sends, signs or charges anything, and
  *     editing one changes no agreement already made from it.
  *   - Kept in the store's data room, like the agreements (the owner's
- *     decision of 2 November 2026, 23h36): at most MAX_TEMPLATES, each
- *     counted at its exact size before it is written and refused above
- *     MAX_TEMPLATE_BYTES, so the plan's own room pays for it and it is never
- *     a cost without a limit. Each is kept TEMPLATE_KEEP_DAYS from the last
+ *     decision of 2 November 2026, 23h36): at most MAX_TEMPLATES, each kept
+ *     in its plain form (keptTemplate: its words as an agreement reads them,
+ *     with nothing invisible left), counted at its exact size before it is
+ *     written and refused above MAX_TEMPLATE_BYTES, which that form can never
+ *     pass, so the plan's own room pays for it and it is never a cost without
+ *     a limit. Each is kept TEMPLATE_KEEP_DAYS from the last
  *     time it was saved or used to make an agreement, so one used often and
  *     seldom edited never goes; the studio says on the template until when
  *     it is kept if it is not used (keptUntilWords), and the store's export
@@ -71,18 +73,25 @@ export function templateKeptUntil(t: Pick<AgreementTemplate, "updatedAt" | "used
   return Math.max(t.updatedAt, t.usedAt ?? 0) + TEMPLATE_KEEP_DAYS * DAY;
 }
 
-/** What the studio says on a template about how long it is kept, in the creator's time zone. */
+/** What the studio says on a template about how long it is kept, in the creator's time zone (UTC when that is not one). */
 export function keptUntilWords(t: Pick<AgreementTemplate, "updatedAt" | "usedAt">, timeZone: string): string {
-  const until = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone }).format(templateKeptUntil(t));
-  return `Kept until ${until} if you don't use it. Using it or saving it keeps it another ${TEMPLATE_KEEP_DAYS} days.`;
+  const day = (zone: string) => new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: zone }).format(templateKeptUntil(t));
+  let until: string;
+  try {
+    until = day(timeZone);
+  } catch {
+    until = `${day("UTC")} (UTC)`;
+  }
+  return `Kept until ${until}, unless you use it or save it. Each time you do, it's kept for ${TEMPLATE_KEEP_DAYS} days from then.`;
 }
 
 /**
  * The most one template may take of the store's data room, in bytes, as it
- * is written: every field at its longest, each UTF-16 unit at three bytes
- * (the most UTF-8 or a JSON escape gives one), with room for the keys,
- * quantities, amounts, id and times. A template over it is refused, never
- * cut.
+ * is written in its plain form (keptTemplate): every field at its longest,
+ * each UTF-16 unit at three bytes (the most UTF-8 gives one, and in that form
+ * the only characters JSON escapes are quotes, backslashes, tabs and line
+ * breaks, at two), with room for the keys, quantities, amounts, id and
+ * times. A template over it is refused, never cut.
  */
 export const MAX_TEMPLATE_BYTES = 3 * (MAX_TEMPLATE_NAME + MAX_TITLE + MAX_BODY + MAX_LINES * (MAX_LINE_TEXT + 40)) + 1_024;
 
@@ -94,6 +103,43 @@ export function templateBytes(t: AgreementTemplate): number {
 /** Refused above MAX_TEMPLATE_BYTES as it would be written, before anything is counted or kept. */
 export function templateSizeProblem(t: AgreementTemplate): TemplateProblem | null {
   return templateBytes(t) > MAX_TEMPLATE_BYTES ? { why: "too_big" } : null;
+}
+
+// Lone surrogate halves made the replacement character (one unit, three bytes, as JSON writes it), controls made spaces.
+const wellFormed = (text: string) => text.replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "\ufffd");
+const oneLineKept = (raw: unknown, max: number) => clean(typeof raw === "string" ? wellFormed(raw).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ") : "", max + 1);
+
+/**
+ * The template as it is kept, once the rules take it, or why not: the name,
+ * title and lines' words as an agreement reads them (spaces made one,
+ * controls taken out), the text as an agreement keeps it, each quantity a
+ * number and each amount as read, nothing a reader cannot see (half of a
+ * character is made the replacement character), so what is written is what
+ * the creator wrote, and never more than MAX_TEMPLATE_BYTES. Checked again
+ * in that form, so a template is never kept in a form the rules refuse.
+ */
+export function keptTemplate(
+  t: Pick<AgreementTemplate, "name" | "kind" | "title" | "body" | "lines">,
+  keep: { id: string; kept: number; currency: Currency; now: number; usedAt?: number },
+): { ok: true; template: AgreementTemplate } | { ok: false; problem: TemplateProblem } {
+  const first = templateProblem(t, keep.kept, keep.currency);
+  if (first) return { ok: false, problem: first };
+  const template: AgreementTemplate = {
+    id: keep.id,
+    name: oneLineKept(t.name, MAX_TEMPLATE_NAME),
+    kind: t.kind,
+    title: oneLineKept(t.title, MAX_TITLE),
+    body: plainText(wellFormed(t.body), MAX_BODY),
+    lines: t.lines.map((l) => ({
+      text: oneLineKept(l.text, MAX_LINE_TEXT),
+      quantity: typeof l.quantity === "number" ? l.quantity : Number(String(l.quantity).trim()),
+      amount: String(l.amount).trim().replace(/^(\d+),(\d{1,2})$/, "$1.$2"),
+    })),
+    updatedAt: keep.now,
+    ...(keep.usedAt ? { usedAt: keep.usedAt } : {}),
+  };
+  const again = templateProblem(template, keep.kept, keep.currency) ?? templateSizeProblem(template);
+  return again ? { ok: false, problem: again } : { ok: true, template };
 }
 
 /** A template as the store's export carries it: what the creator wrote, and until when it is kept. */
@@ -175,7 +221,7 @@ const asDraftBody = (t: { kind: AgreementKind; title: string; body: string; line
  * agreement in the store's currency would refuse.
  */
 export function templateProblem(t: Pick<AgreementTemplate, "name" | "kind" | "title" | "body" | "lines">, kept: number, currency: Currency): TemplateProblem | null {
-  const name = t.name.replace(/\s+/g, " ").trim();
+  const name = oneLineKept(t.name, MAX_TEMPLATE_NAME);
   if (!name || name.length > MAX_TEMPLATE_NAME) return { why: "name" };
   if (kept >= MAX_TEMPLATES) return { why: "too_many" };
   const unknown = firstUnknown(t);

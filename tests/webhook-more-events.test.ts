@@ -13,7 +13,7 @@ import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_more_events_only";
 process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
-const account = "acct_MoreEventsTest01";
+const account = "acct_MoreEvents01";
 const HANDLE = "more-events-shop";
 let events: unknown[] = [];
 const intents: Record<string, Record<string, string>> = {};

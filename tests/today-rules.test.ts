@@ -35,7 +35,7 @@ is(
   [
     "3 sales today ($120), 1 sale yesterday ($40).",
     "2 conversations with unread messages in your inbox.",
-    "1 booking today, none tomorrow.",
+    "1 booking still to come today, none tomorrow.",
     "None today, 2 community events tomorrow.",
     "4 orders to ship.",
     "2 membership payments that failed.",
@@ -65,11 +65,11 @@ is(
   [todayView({ ...zero, unreadConversations: null }, owner), todayView({ ...zero, salesToday: null, salesYesterday: 2, revenueYesterday: "$80" }, owner), todayView({ ...zero, bookingsToday: null }, owner)],
   [
     { kind: "lines", lines: [{ id: "inbox", words: "Conversations with unread messages in your inbox: could not be read just now.", permission: "orders" }], unread: true },
-    { kind: "lines", lines: [{ id: "sales", words: "Sales today could not be read, 2 sales yesterday ($80).", permission: "orders" }], unread: true },
-    { kind: "lines", lines: [{ id: "calls", words: "Bookings today could not be read, none tomorrow.", permission: "orders" }], unread: true },
+    { kind: "lines", lines: [{ id: "sales", words: "Sales today could not be read, 2 sales yesterday ($80).", permission: "stats" }], unread: true },
+    { kind: "lines", lines: [{ id: "calls", words: "Bookings still to come today could not be read, none tomorrow.", permission: "orders" }], unread: true },
   ],
 );
-is("a sale counted without its revenue is a part not read", todayView({ ...zero, salesToday: 2 }, owner), { kind: "lines", lines: [{ id: "sales", words: "2 sales today, none yesterday.", permission: "orders" }], unread: true });
+is("a sale counted without its revenue is a part not read", todayView({ ...zero, salesToday: 2 }, owner), { kind: "lines", lines: [{ id: "sales", words: "2 sales today, none yesterday.", permission: "stats" }], unread: true });
 is("a number not read on a line the role cannot see changes nothing for them", todayView({ ...zero, affiliateRequests: null }, support), { kind: "nothing", words: NOTHING_TODAY });
 is("what the screen says then", SOME_UNREAD, "Some numbers could not be read just now, so this list may not be complete. Reload the page in a moment.");
 

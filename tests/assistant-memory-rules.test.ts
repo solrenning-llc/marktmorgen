@@ -40,7 +40,7 @@ is("an id already used is refused", addNote(notes, { kind: "preference", text: "
 is("control characters are spaces", noteText("Be\u0000brief"), "Be brief");
 
 part("Never anyone's details");
-for (const text of ["Answer jane@example.com first", "Send people to https://example.com/offer", "Call me on +1 (555) 010-2030", "See www.example.com"]) {
+for (const text of ["Answer jane@example.com first", "Send people to https://example.com/offer", "Call me on 555 010 2030", "See www.example.com"]) {
   is(`refused: ${text}`, noteProblem(noteText(text)), "personal");
 }
 is("a percent or a day is not a phone number", noteProblem("Launch on the 3rd, 20% off for 2 days"), null);

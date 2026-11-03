@@ -55,6 +55,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/yearly-ask.ts` | FOLLOW-UP-CHARGE | 83/116: the yearly offer email and its saving in the store's currency | partly: no email on a mismatch |
 | `lib/yearly-switch.ts` | FOLLOW-UP-CHARGE | 96/113: the yearly Price made in the store's currency; 182/250 preview and receipt in the invoice's | partly: guarded by yearlyChoice |
 | `app/api/store/discount/route.ts` | NEW-CHARGE | 61–68, 98–105: a fixed-amount code and its minimum made in the store's currency | no |
+| `app/api/v1/codes/route.ts` | NEW-CHARGE | 38–39: a fixed-amount code and its minimum read in the store's currency, through the same reader as the studio (lib/discount-input.ts), and its refusal said in it | no |
 | `app/api/store/payment-requests/route.ts` | NEW-CHARGE | 30: a payment request drafted in the store's currency | partly: the request keeps its own currency |
 | `app/api/store/tip/route.ts` | NEW-CHARGE | 42–43: a buyer's tip held to the store's currency's range | no |
 | `app/studio/requests/page.tsx` | NEW-CHARGE | 47–48: a request's amount prefilled in the store's currency; 73 the list labelled with it | partly: each record carries a currency the list ignores |

@@ -25,6 +25,9 @@ export type ChatWords = {
   replyIntro: (store: string) => string;
   replyLink: string;
   replyByEmail: string;
+  /** The creator writing first to one of their affiliates (630 [HN6](5), lib/inbox.ts writeToAffiliate). */
+  affiliateSubject: (store: string) => string;
+  affiliateIntro: (store: string) => string;
 };
 
 const en: ChatWords = {
@@ -53,6 +56,8 @@ const en: ChatWords = {
   replyIntro: (store) => `${store} answered you:`,
   replyLink: "Read the whole conversation and write back here:",
   replyByEmail: "Answer this email to write back.",
+  affiliateSubject: (store) => `A message from ${store} about their affiliate program`,
+  affiliateIntro: (store) => `${store} wrote to you as one of their affiliates:`,
 };
 
 const es: ChatWords = {
@@ -81,6 +86,8 @@ const es: ChatWords = {
   replyIntro: (store) => `${store} te respondió:`,
   replyLink: "Lee toda la conversación y responde aquí:",
   replyByEmail: "Responde a este email para contestar.",
+  affiliateSubject: (store) => `Un mensaje de ${store} sobre su programa de afiliados`,
+  affiliateIntro: (store) => `${store} te escribió como uno de sus afiliados:`,
 };
 
 const fr: ChatWords = {
@@ -109,6 +116,8 @@ const fr: ChatWords = {
   replyIntro: (store) => `${store} vous a répondu :`,
   replyLink: "Lisez toute la conversation et répondez ici :",
   replyByEmail: "Répondez à cet e-mail pour écrire en retour.",
+  affiliateSubject: (store) => `Un message de ${store} au sujet de son programme d'affiliation`,
+  affiliateIntro: (store) => `${store} vous a écrit en tant qu'affilié :`,
 };
 
 const de: ChatWords = {
@@ -137,6 +146,8 @@ const de: ChatWords = {
   replyIntro: (store) => `${store} hat Ihnen geantwortet:`,
   replyLink: "Lesen Sie das ganze Gespräch und antworten Sie hier:",
   replyByEmail: "Antworten Sie auf diese E-Mail, um zurückzuschreiben.",
+  affiliateSubject: (store) => `Eine Nachricht von ${store} zu seinem Affiliate-Programm`,
+  affiliateIntro: (store) => `${store} hat Ihnen als Affiliate geschrieben:`,
 };
 
 const it: ChatWords = {
@@ -165,6 +176,8 @@ const it: ChatWords = {
   replyIntro: (store) => `${store} ti ha risposto:`,
   replyLink: "Leggi tutta la conversazione e rispondi qui:",
   replyByEmail: "Rispondi a questa email per scrivere di nuovo.",
+  affiliateSubject: (store) => `Un messaggio di ${store} sul suo programma di affiliazione`,
+  affiliateIntro: (store) => `${store} ti ha scritto come suo affiliato:`,
 };
 
 const nl: ChatWords = {
@@ -193,6 +206,8 @@ const nl: ChatWords = {
   replyIntro: (store) => `${store} heeft je geantwoord:`,
   replyLink: "Lees het hele gesprek en antwoord hier:",
   replyByEmail: "Beantwoord deze e-mail om terug te schrijven.",
+  affiliateSubject: (store) => `Een bericht van ${store} over het affiliateprogramma`,
+  affiliateIntro: (store) => `${store} schreef je als een van de affiliates:`,
 };
 
 const pt: ChatWords = {
@@ -221,6 +236,8 @@ const pt: ChatWords = {
   replyIntro: (store) => `${store} respondeu-lhe:`,
   replyLink: "Leia toda a conversa e responda aqui:",
   replyByEmail: "Responda a este e-mail para escrever de volta.",
+  affiliateSubject: (store) => `Uma mensagem de ${store} sobre o programa de afiliados`,
+  affiliateIntro: (store) => `${store} escreveu-lhe como um dos seus afiliados:`,
 };
 
 export const CHAT_WORDS: Record<LanguageCode, ChatWords> = { en, es, fr, de, it, nl, pt };

@@ -54,11 +54,11 @@ is("said with each date and the time zone", conflictWords(seriesStarts(FIRST, NY
 is("a time that does not exist is said with its date", conflictWords(seriesStarts(early, NY, "weekly", 3), [1], NY, early, "weekly"), "The series cannot be booked, because these times are not open: Sunday, March 8 (that time does not exist that day). Pick another first time, or fewer sessions.");
 is("nothing to say when every date is open", conflictWords([FIRST], [], NY, FIRST, "weekly"), "");
 
-part("Ended early: the rest cancelled, never charged");
+part("Ended early: the rest canceled, never charged");
 const starts = seriesStarts(FIRST, NY, "weekly", 4).map((s) => s ?? 0);
-const cancelled = toCancel(starts, FIRST + 8 * DAY);
-is("every session not yet started is cancelled, by its place in the series", cancelled, [2, 3]);
-is("and only what took place is charged", chargeable(4, cancelled), [0, 1]);
+const canceled = toCancel(starts, FIRST + 8 * DAY);
+is("every session not yet started is canceled, by its place in the series", canceled, [2, 3]);
+is("and only what took place is charged", chargeable(4, canceled), [0, 1]);
 is("a session under way at that moment took place", toCancel(starts, FIRST + 30 * 60_000), [1, 2, 3]);
 
 done();

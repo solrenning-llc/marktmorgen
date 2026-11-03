@@ -95,6 +95,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET integrations/zoom/host": row("calls", never(SECRET)),
   "GET store/ab": row("pages", tool("get_page_test")),
   "POST store/ads-server": row("connections", never(SECRET)),
+  "POST store/agent": row("settings", never("Confirming, declining or undoing what an agent proposed is the creator's own decision (631 (c)); an agent never confirms its own work.")),
   "POST store/affiliates": row("affiliates", draft),
   "GET store/affiliates/export": row("affiliates", never(PEOPLE_FILE)),
   "GET store/affiliates/payout-batch": row("money", never(PEOPLE_FILE)),

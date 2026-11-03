@@ -931,6 +931,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/agent/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/agent",
+      "parameters": []
+    },
+    {
       "source": "app/studio/agreements/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/agreements",
@@ -1211,6 +1217,7 @@
     "components/affiliate-link-box.tsx",
     "components/affiliate-promotion-results.tsx",
     "components/affiliate-studio.tsx",
+    "components/agent-proposals.tsx",
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",
     "components/ai-posts.tsx",
@@ -1606,6 +1613,7 @@
     "app/api/store/affiliates/payto/route.ts",
     "app/api/store/affiliates/route.ts",
     "app/api/store/affiliates/signout/route.ts",
+    "app/api/store/agent/route.ts",
     "app/api/store/agreement-sign/route.ts",
     "app/api/store/agreements/route.ts",
     "app/api/store/ai/route.ts",
@@ -1918,6 +1926,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 131
+    "pageTemplates": 132
   }
 }

@@ -74,6 +74,9 @@ Resposta à sua mensagem das 00h55: não acrescente linhas em lib/data-families.
 ### C2-18 — 03/11/2026 01h08 — Webhooks novos na página pública, depois do #1888
 O #1888 do Claude 3 acrescenta os eventos de webhook membership.changed e dispute.opened. A página pública em lib/feature-pages.ts, que está na sua reserva (#1712), diz "Nine events, and how they arrive". Quando o #1888 entrar no main, acrescente os dois eventos novos nessa página (título "Eleven events"), no #1712 ou num PR próprio com a reserva, conferindo que o texto descreve exatamente o que o código envia. Antes de o #1888 entrar, não mude a página: ela tem que dizer só o que já funciona (VR).
 
+### C2-19 — 03/11/2026 01h25 — Itens novos para a sua faixa: parte do 630 [HN6]
+Seu BLOQUEADO das 01h21 tem saída: passam para a sua faixa estas unidades do 630 [HN6], que o Claude 3 ainda não começou: (1) primeiro clique e crédito ao afiliado que trouxe o contato; (2) aviso prévio aos afiliados antes de baixar comissão ou janela; (3) remoção automática opcional de afiliados sem venda nem lead; (4) ações em lote sobre afiliados e candidatos, com desfazer; (5) conversa 1:1 do criador com um afiliado e mensagem a todos os aprovados; (6) bônus para quem comprou pelo link de um afiliado; (7) banco de questões nas provas; (30) marca invisível do comprador em EPUB; (33) histórico de entradas do criador e "Sign out everywhere"; (34) ajuda para compradores em marktmorgen.com. Comece pelo (1), nesta ordem, com as regras de sempre: reserva no mesmo PR, unidades pequenas, nada nos arquivos do #1502 nem do Claude 3 em docs/reservations.md, texto do site em inglês americano e toda frase para o dono em português do Brasil. (33) é segurança: esforço Alto e revisão independente. Não encerre a vez enquanto houver unidade possível.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -137,6 +140,9 @@ Decisão do dono (00h55): "remova o lembrete". Não marque mais lembrete de 1 mi
 
 ### C3-20 — 03/11/2026 01h08 — Página de webhooks fica com o Claude 2
 Resposta à sua mensagem das 01h05: certo não mexer em lib/feature-pages.ts. Pedi ao Claude 2 (C2-18) que acrescente os dois eventos na página quando o #1888 entrar. Siga a sua faixa.
+
+### C3-21 — 03/11/2026 01h25 — Parte do 630 [HN6] passa ao Claude 2
+Para vocês não se cruzarem: as unidades (1) a (7), (30), (33) e (34) do 630 [HN6] passaram ao Claude 2 (C2-19). Continue com as demais do HN6 e com o resto da sua faixa; o (8), o certificado, continua com você.
 
 ## Codex
 

@@ -1,4 +1,5 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
+import { requestsOpen } from "@/lib/payment-requests";
 import { randomBytes } from "node:crypto";
 import { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";
 import { storeBase } from "@/lib/purchase-email";
@@ -296,6 +297,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               stages: labeledStages(await readPipelines(store.statsId).catch(() => [])).map((st) => ({ id: st.id, name: st.name })),
               // Whether the plan has proposals and agreements, so a sequence may start when one is signed (635 [GL3]).
               signing: agreementsAllowed(store),
+              // Whether the store can take payment requests now (lib/payment-requests.ts), so a sequence may start when one is paid.
+              requests: requestsOpen(store),
             }}
             workflowLimits={{
               maxActive: activeFlowLimit(store),

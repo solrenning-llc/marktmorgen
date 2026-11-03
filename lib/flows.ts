@@ -116,7 +116,10 @@ export type Flow = {
    * hear from the creator; "signed": signed a proposal or an agreement of
    * the store's, with the address it was sent to (635 [GL3], added 2 November
    * 2026, lib/agreement-flow-trigger.ts), while they are on the list and
-   * agreed to hear from the creator.
+   * agreed to hear from the creator; "paid_request": paid one of the store's
+   * payment requests, sent to their address (635 [GL3], lib/payment-flow-
+   * trigger.ts), while they are on the list and agreed to hear from the
+   * creator.
    */
   trigger: FlowTrigger;
   productId: string | null;
@@ -233,7 +236,7 @@ const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw =
 
 export type FlowResult =
   | { ok: true; flows: Flow[] }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" };
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" };
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -309,6 +312,8 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   if (trigger === "stage" && flows.some((f) => f.id !== id && f.trigger === "stage" && f.stageId === stageId)) return { ok: false, reason: "stage_taken" };
   // One workflow starts on signing, so the check a signature makes stays inside the requests it takes (lib/agreement-flow-trigger.ts); it can start others with a step.
   if (trigger === "signed" && flows.some((f) => f.id !== id && f.trigger === "signed")) return { ok: false, reason: "signed_taken" };
+  // The same for a paid payment request (lib/payment-flow-trigger.ts).
+  if (trigger === "paid_request" && flows.some((f) => f.id !== id && f.trigger === "paid_request")) return { ok: false, reason: "paid_request_taken" };
   if (!id && flows.length >= MAX_FLOWS) return { ok: false, reason: "too_many" };
   const active = at >= 0 ? raw.active === true : opts.activate === true;
   if (active && !(at >= 0 && flows[at].active) && flows.filter((f) => f.active && f.id !== id).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
@@ -475,7 +480,7 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  * Starts whichever sequences this event begins, for this person. Never
  * throws: the list must never cost anyone what they asked for.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
+export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
   try {
     if (!store.listId || monthlyAllowance(store) === 0) return;
     // Whether what they just got is sold for money: the store's own index
@@ -495,6 +500,7 @@ export async function enroll(store: Store, email: string, event: { joined: boole
           (f.trigger === "abandoned" && event.abandoned && f.productId === event.abandoned) ||
           (f.trigger === "stage" && event.stage && f.stageId === event.stage) ||
           (f.trigger === "signed" && event.signed) ||
+          (f.trigger === "paid_request" && event.paidRequest) ||
           (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
     );
     if (!flows.length) return;

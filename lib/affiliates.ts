@@ -1338,7 +1338,7 @@ export async function notePartners(
 ): Promise<void> {
   if (!store.statsId || !isRedisConfigured() || !sale.ref || !sale.product) return;
   const holders = (partners ?? (await listAffiliates(store))).filter(
-    (a) => a.status === "approved" && shareOn(a.share, sale.product) > 0,
+    (a) => a.status === "approved" && shareOn(a.share, sale.product, sale.at) > 0,
   );
   if (!holders.length) return;
   const buyer = sale.buyer ? normaliseEmail(sale.buyer) : "";
@@ -1354,7 +1354,7 @@ export async function notePartners(
       base: sale.base,
       total: sale.total,
       currency: readCurrencyCode(sale.currency),
-      percent: shareOn(partner.share, sale.product),
+      percent: shareOn(partner.share, sale.product, sale.at),
       // A 50% partner buying their own product at 50% off is not a sale.
       self: Boolean(buyer) && normaliseEmail(partner.email) === buyer,
     };

@@ -39,6 +39,11 @@ export type PartnerShare = {
    * something anybody agreed to. The creator names them.
    */
   products: string[];
+  /**
+   * When it ends, in seconds: sales from that moment on earn nothing. Absent
+   * means "until revoked" (630 [HN6](39); lib/partner-terms-rules.ts).
+   */
+  until?: number;
 };
 
 export const MIN_PARTNER_SHARE = 1;
@@ -87,19 +92,26 @@ export const SHARE_PROBLEMS: Record<ShareProblem, string> = {
 /** Whatever came back from storage or a form, made safe to use, or null. */
 export function parsePartnerShare(raw: unknown): PartnerShare | null {
   if (!raw || typeof raw !== "object") return null;
-  const value = raw as { percent?: unknown; products?: unknown };
+  const value = raw as { percent?: unknown; products?: unknown; until?: unknown };
   const percent = typeof value.percent === "string" ? Number(value.percent.trim()) : value.percent;
   if (typeof percent !== "number" || !Number.isInteger(percent)) return null;
   if (percent < MIN_PARTNER_SHARE || percent > MAX_PARTNER_SHARE) return null;
   const list = Array.isArray(value.products) ? value.products : [];
   const products = [...new Set(list.filter((id): id is string => typeof id === "string" && /^[a-z0-9]{6,40}$/.test(id)))].slice(0, 200);
   if (!products.length) return null;
-  return { percent, products };
+  const until = typeof value.until === "number" && Number.isSafeInteger(value.until) && value.until > 0 ? value.until : null;
+  return until === null ? { percent, products } : { percent, products, until };
 }
 
-/** What this partner takes of a sale of this product, in percent; 0 when none. */
-export function shareOn(share: PartnerShare | null, productId: string): number {
+/**
+ * What this partner takes of a sale of this product, in percent; 0 when none.
+ * `atSeconds` is when the sale was paid: a share with an end earns nothing on
+ * a sale paid at or after it. Without `atSeconds` the end is not read, for
+ * callers that only ask what a share covers.
+ */
+export function shareOn(share: PartnerShare | null, productId: string, atSeconds?: number): number {
   if (!share || !productId) return 0;
+  if (share.until !== undefined && atSeconds !== undefined && atSeconds >= share.until) return 0;
   return share.products.includes(productId) ? share.percent : 0;
 }
 

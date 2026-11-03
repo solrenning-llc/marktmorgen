@@ -18,6 +18,7 @@
  * must never be a way to send somebody an email. Nothing here is read on a
  * visit to any page.
  */
+import { countNotice, countStep } from "@/lib/transparency";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
@@ -51,6 +52,8 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
     ["SET", reportKey(id), JSON.stringify(report), "EX", REPORT_SECONDS],
     ["SET", tokenKey(token), id, "EX", TOKEN_SECONDS],
   ]);
+  // The public transparency page counts it (624 [SZ8](47)); nothing about who sent it or which store.
+  await countNotice(report.kind);
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
@@ -162,6 +165,7 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
     what = "Your store's pages and sales, now switched off";
   }
   await noteTakedown(ref, { at: new Date().toISOString(), what, report: report.id });
+  await countStep(report, action.type);
   await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: store.email,

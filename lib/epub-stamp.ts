@@ -31,7 +31,8 @@
  *     MAX_INFLATED_BYTES opened in all; a page or the package that is not
  *     UTF-8 (a book in UTF-16, or one encrypted without saying so).
  *   - What is written is never more than the file read plus what was marked:
- *     each entry is copied once, from a place no other entry shares.
+ *     each entry is copied once, from a place no other entry shares, under a
+ *     name no other entry has (checked again on what is written).
  *   - Only XHTML content pages are marked (the package's application/
  *     xhtml+xml items); SVG and other content documents are left as they are.
  *   - The line is written as XML text: &, <, > and quotes escaped, and "--"
@@ -126,6 +127,14 @@ function readEntries(buf: Buffer): Entry[] {
   }
   // The directory read exactly to its own end.
   if (at !== offset + size) throw new Unreadable("central");
+  // No name twice, by its bytes or as it reads: a second entry under a page's name would be written again with the mark.
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const raw = Buffer.from(entry.rawName).toString("hex");
+    if (seen.has(raw) || seen.has(`=${entry.name}`)) throw new Unreadable("twice");
+    seen.add(raw);
+    seen.add(`=${entry.name}`);
+  }
   // Each entry's place its own, in order, before the directory: no two entries share bytes, so nothing is copied twice.
   let reached = 0;
   for (const entry of [...entries].sort((a, b) => a.localOffset - b.localOffset)) {
@@ -315,7 +324,7 @@ export function stampEpub(file: Uint8Array, line: string): EpubStamp {
       head.writeUInt16LE(entry.internal, 36);
       head.writeUInt32LE(entry.external >>> 0, 38);
       head.writeUInt32LE(offset, 42);
-      parts.push(local, name, Buffer.from(data));
+      parts.push(local, name, data);
       central.push(head, name, ...(isMime ? [] : [Buffer.from(entry.extra), Buffer.from(entry.comment)]));
       offset += local.length + name.length + data.length;
     }
@@ -328,7 +337,10 @@ export function stampEpub(file: Uint8Array, line: string): EpubStamp {
     end.writeUInt32LE(offset, 16);
     const out = Buffer.concat([...parts, directory, end]);
     if (out.length > 0xffffffff) return { ok: false, why: "zip64" };
-    return { ok: true, bytes: new Uint8Array(out), pages: count };
+    // Never more than what was read and what was marked, whatever the file said.
+    const marks = [...changed.values()].reduce((sum, c) => sum + c.data.length + 64, 0);
+    if (out.length > file.length + marks) return { ok: false, why: "unreadable" };
+    return { ok: true, bytes: new Uint8Array(out.buffer, out.byteOffset, out.length), pages: count };
   } catch (error) {
     if (error instanceof Error && error.message === "zip64") return { ok: false, why: "zip64" };
     if (error instanceof Error && error.message === "part_too_big") return { ok: false, why: "part_too_big" };

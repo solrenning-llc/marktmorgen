@@ -25,7 +25,15 @@
  *     split; an entry encrypted, or a page or the package listed in
  *     META-INF/encryption.xml (a book under DRM); a page or the package
  *     larger than MAX_PART_BYTES opened; anything that does not read back as
- *     what it says (sizes, CRC).
+ *     what it says (entries that overlap or run past the directory, a local
+ *     name that is not the directory's, sizes, CRC); a content page the
+ *     package lists and the file does not hold; more than MAX_PAGES pages or
+ *     MAX_INFLATED_BYTES opened in all; a page or the package that is not
+ *     UTF-8 (a book in UTF-16, or one encrypted without saying so).
+ *   - What is written is never more than the file read plus what was marked:
+ *     each entry is copied once, from a place no other entry shares.
+ *   - Only XHTML content pages are marked (the package's application/
+ *     xhtml+xml items); SVG and other content documents are left as they are.
  *   - The line is written as XML text: &, <, > and quotes escaped, and "--"
  *     never written inside a comment, so no address can break the book.
  */
@@ -37,12 +45,17 @@ export const MAX_EPUB_BYTES = 50 * 1024 * 1024;
 export const MAX_PART_BYTES = 8 * 1024 * 1024;
 /** The most entries an EPUB may hold to be stamped. */
 export const MAX_ENTRIES = 10_000;
+/** The most content pages marked, and the most bytes opened in all, so one book never holds the server. */
+export const MAX_PAGES = 2_000;
+export const MAX_INFLATED_BYTES = 64 * 1024 * 1024;
 
-export type EpubProblem = "too_big" | "not_epub" | "zip64" | "encrypted" | "part_too_big" | "unreadable";
+export type EpubProblem = "too_big" | "not_epub" | "zip64" | "encrypted" | "part_too_big" | "encoding" | "unreadable";
 export type EpubStamp = { ok: true; bytes: Uint8Array; pages: number } | { ok: false; why: EpubProblem };
 
 type Entry = {
   name: string;
+  /** The name's own bytes, written back as they were. */
+  rawName: Uint8Array;
   flags: number;
   method: number;
   time: number;
@@ -87,6 +100,8 @@ function readEntries(buf: Buffer): Entry[] {
     const nameLength = buf.readUInt16LE(at + 28);
     const extraLength = buf.readUInt16LE(at + 30);
     const commentLength = buf.readUInt16LE(at + 32);
+    // Never read past the directory: subarray would cut silently.
+    if (at + 46 + nameLength + extraLength + commentLength > offset + size) throw new Unreadable("central");
     const entry: Entry = {
       versionMade: buf.readUInt16LE(at + 4),
       versionNeeded: buf.readUInt16LE(at + 6),
@@ -101,12 +116,25 @@ function readEntries(buf: Buffer): Entry[] {
       external: buf.readUInt32LE(at + 38),
       localOffset: buf.readUInt32LE(at + 42),
       name: buf.subarray(at + 46, at + 46 + nameLength).toString("utf8"),
+      rawName: new Uint8Array(buf.subarray(at + 46, at + 46 + nameLength)),
       extra: new Uint8Array(buf.subarray(at + 46 + nameLength, at + 46 + nameLength + extraLength)),
       comment: new Uint8Array(buf.subarray(at + 46 + nameLength + extraLength, at + 46 + nameLength + extraLength + commentLength)),
     };
     if (entry.compressed === 0xffffffff || entry.size === 0xffffffff || entry.localOffset === 0xffffffff) throw new Error("zip64");
     entries.push(entry);
     at += 46 + nameLength + extraLength + commentLength;
+  }
+  // The directory read exactly to its own end.
+  if (at !== offset + size) throw new Unreadable("central");
+  // Each entry's place its own, in order, before the directory: no two entries share bytes, so nothing is copied twice.
+  let reached = 0;
+  for (const entry of [...entries].sort((a, b) => a.localOffset - b.localOffset)) {
+    if (entry.localOffset < reached) throw new Unreadable("overlap");
+    const start = dataStart(buf, entry);
+    const localName = buf.subarray(entry.localOffset + 30, entry.localOffset + 30 + buf.readUInt16LE(entry.localOffset + 26));
+    if (!localName.equals(Buffer.from(entry.rawName))) throw new Unreadable("name");
+    reached = start + entry.compressed;
+    if (reached > offset) throw new Unreadable("overlap");
   }
   return entries;
 }
@@ -120,8 +148,13 @@ function dataStart(buf: Buffer, entry: Entry): number {
   return start;
 }
 
-function inflate(buf: Buffer, entry: Entry): Buffer {
+/** Bytes opened so far for one book, against MAX_INFLATED_BYTES. */
+type Budget = { left: number };
+
+function inflate(buf: Buffer, entry: Entry, budget: Budget): Buffer {
   if (entry.size > MAX_PART_BYTES) throw new Error("part_too_big");
+  budget.left -= entry.size;
+  if (budget.left < 0) throw new Error("part_too_big");
   const raw = buf.subarray(dataStart(buf, entry), dataStart(buf, entry) + entry.compressed);
   let out: Buffer;
   if (entry.method === 0) out = Buffer.from(raw);
@@ -131,16 +164,46 @@ function inflate(buf: Buffer, entry: Entry): Buffer {
   return out;
 }
 
+const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+/** A part's text, only when it is UTF-8 throughout: anything else is never rewritten at a guess. */
+function utf8(bytes: Buffer): string {
+  try {
+    return UTF8.decode(bytes);
+  } catch {
+    throw new Error("encoding");
+  }
+}
+
+const decodeEntities = (text: string) =>
+  text.replace(/&(amp|lt|gt|quot|apos|#\d{1,7}|#x[0-9a-f]{1,6});/gi, (whole, name: string) => {
+    const lower = name.toLowerCase();
+    if (lower === "amp") return "&";
+    if (lower === "lt") return "<";
+    if (lower === "gt") return ">";
+    if (lower === "quot") return '"';
+    if (lower === "apos") return "'";
+    const code = lower.startsWith("#x") ? parseInt(lower.slice(2), 16) : parseInt(lower.slice(1), 10);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+  });
+
 const xmlText = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 /** Inside a comment "--" may not appear, nor may it end with "-". */
 const commentText = (text: string) => xmlText(text).replace(/-{2,}/g, (dashes) => dashes.split("").join(" ")).replace(/-$/, "- ");
 
 const attribute = (tag: string, name: string) => new RegExp(`${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, "i").exec(tag);
 
-/** The resolved path of `href` from a file at `base`. */
+const segment = (piece: string) => {
+  try {
+    return decodeURIComponent(piece);
+  } catch {
+    return piece;
+  }
+};
+
+/** The resolved path of `href` (entities already decoded) from a file at `base`: each segment percent-decoded, its query and fragment left out. */
 function resolve(base: string, href: string): string {
   const parts = base.split("/").slice(0, -1);
-  for (const piece of decodeURI(href.split("#")[0]).split("/")) {
+  for (const piece of href.split(/[?#]/)[0].split("/").map(segment)) {
     if (piece === "..") parts.pop();
     else if (piece && piece !== ".") parts.push(piece);
   }
@@ -151,47 +214,56 @@ function resolve(base: string, href: string): string {
 export function stampEpub(file: Uint8Array, line: string): EpubStamp {
   if (file.length > MAX_EPUB_BYTES) return { ok: false, why: "too_big" };
   const buf = Buffer.from(file.buffer, file.byteOffset, file.byteLength);
+  const budget: Budget = { left: MAX_INFLATED_BYTES };
   try {
     const entries = readEntries(buf);
     const named = new Map(entries.map((e) => [e.name, e]));
     const mimetype = named.get("mimetype");
-    if (!mimetype || inflate(buf, mimetype).toString("utf8").trim() !== "application/epub+zip") return { ok: false, why: "not_epub" };
+    if (!mimetype || inflate(buf, mimetype, budget).toString("utf8").trim() !== "application/epub+zip") return { ok: false, why: "not_epub" };
+    if (entries.filter((e) => e.name === "mimetype").length > 1) return { ok: false, why: "not_epub" };
     const container = named.get("META-INF/container.xml");
     if (!container) return { ok: false, why: "not_epub" };
-    const rootTag = /<rootfile\b[^>]*>/i.exec(inflate(buf, container).toString("utf8"))?.[0] ?? "";
-    const opfPath = attribute(rootTag, "full-path")?.slice(2).find(Boolean) ?? "";
+    const rootTag = /<(?:[\w-]+:)?rootfile\b[^>]*>/i.exec(utf8(inflate(buf, container, budget)))?.[0] ?? "";
+    const opfPath = decodeEntities(attribute(rootTag, "full-path")?.slice(2).find(Boolean) ?? "");
     const opf = named.get(opfPath);
     if (!opf) return { ok: false, why: "not_epub" };
-    const opfText = inflate(buf, opf).toString("utf8");
+    const opfText = utf8(inflate(buf, opf, budget));
     // The content pages: the manifest's XHTML items.
     const pages = new Set<string>();
-    for (const item of opfText.match(/<item\b[^>]*>/gi) ?? []) {
+    for (const item of opfText.match(/<(?:[\w-]+:)?item\b[^>]*>/gi) ?? []) {
       const type = attribute(item, "media-type")?.slice(2).find(Boolean) ?? "";
-      const href = attribute(item, "href")?.slice(2).find(Boolean) ?? "";
+      const href = decodeEntities(attribute(item, "href")?.slice(2).find(Boolean) ?? "");
       if (href && /^application\/xhtml\+xml$/i.test(type)) pages.add(resolve(opfPath, href));
     }
     // A book under DRM lists what is encrypted; one of what would be marked, or any entry flagged as encrypted, is refused.
     const encryption = named.get("META-INF/encryption.xml");
     const encrypted = new Set<string>();
-    if (encryption) for (const ref of inflate(buf, encryption).toString("utf8").match(/<(?:\w+:)?CipherReference\b[^>]*>/gi) ?? []) {
-      const uri = attribute(ref, "URI")?.slice(2).find(Boolean);
+    if (encryption) for (const ref of utf8(inflate(buf, encryption, budget)).match(/<(?:\w+:)?CipherReference\b[^>]*>/gi) ?? []) {
+      const uri = decodeEntities(attribute(ref, "URI")?.slice(2).find(Boolean) ?? "");
       if (uri) encrypted.add(resolve("", uri));
     }
     if (entries.some((e) => (e.flags & 1) === 1) || encrypted.has(opfPath) || [...pages].some((p) => encrypted.has(p))) return { ok: false, why: "encrypted" };
 
-    const changed = new Map<string, Buffer>();
-    const meta = `<!-- ${commentText(line)} -->`;
-    const marked = opfText.replace(/<\/metadata\s*>/i, `${meta}</metadata>`);
+    if (pages.size > MAX_PAGES) return { ok: false, why: "part_too_big" };
+    // Each marked part is compressed as soon as it is marked: what is held is never more than what will be written.
+    const changed = new Map<string, { data: Buffer; crc: number; size: number }>();
+    const keep = (name: string, plain: Buffer) => changed.set(name, { data: deflateRawSync(plain), crc: crc32(plain), size: plain.length });
+    const comment = `<!-- ${commentText(line)} -->`;
+    // A function, so nothing in the buyer's address ($', $&) is read as a replacement pattern.
+    const marked = opfText.replace(/<\/(?:[\w-]+:)?metadata\s*>/i, (end) => `${comment}${end}`);
     if (marked === opfText) return { ok: false, why: "not_epub" };
-    changed.set(opfPath, Buffer.from(marked, "utf8"));
+    keep(opfPath, Buffer.from(marked, "utf8"));
     let count = 0;
     for (const page of pages) {
       const entry = named.get(page);
-      if (!entry) continue;
-      const text = inflate(buf, entry).toString("utf8");
-      // After the XML declaration, if there is one, so the page stays well-formed.
-      const declaration = /^﻿?<\?xml[^>]*\?>/.exec(text)?.[0] ?? "";
-      changed.set(page, Buffer.from(`${declaration}<!-- ${commentText(line)} -->${text.slice(declaration.length)}`, "utf8"));
+      // A page the package lists and the file does not hold: not an EPUB that can be marked throughout.
+      if (!entry) return { ok: false, why: "not_epub" };
+      const text = utf8(inflate(buf, entry, budget));
+      // After a byte order mark and the XML declaration, if there are any, so the page stays well-formed.
+      const bom = text.startsWith("\uFEFF") ? "\uFEFF" : "";
+      const declaration = /^<\?xml[^>]*\?>/.exec(text.slice(bom.length))?.[0] ?? "";
+      const head = bom.length + declaration.length;
+      keep(page, Buffer.from(`${text.slice(0, head)}${comment}${text.slice(head)}`, "utf8"));
       count += 1;
     }
 
@@ -201,17 +273,21 @@ export function stampEpub(file: Uint8Array, line: string): EpubStamp {
     const central: Buffer[] = [];
     let offset = 0;
     for (const entry of order) {
-      const name = Buffer.from(entry.name, "utf8");
-      const fresh = changed.get(entry.name);
-      const data = fresh ? deflateRawSync(fresh) : buf.subarray(dataStart(buf, entry), dataStart(buf, entry) + entry.compressed);
-      const method = fresh ? 8 : entry.method;
-      const crc = fresh ? crc32(fresh) : entry.crc;
-      const size = fresh ? fresh.length : entry.size;
-      // Sizes are always in the header: no trailing data descriptor (flag 3), and names stay UTF-8 (flag 11) as they were read.
-      const flags = (entry.flags & ~0x0008) | 0x0800;
+      const name = Buffer.from(entry.rawName);
+      const isMime = entry === mimetype;
+      // mimetype exactly as the standard has it: these bytes, stored, with nothing else.
+      const mime = Buffer.from("application/epub+zip", "ascii");
+      const fresh = isMime ? { data: mime, crc: crc32(mime), size: mime.length } : changed.get(entry.name);
+      const data = fresh ? fresh.data : buf.subarray(dataStart(buf, entry), dataStart(buf, entry) + entry.compressed);
+      const method = isMime ? 0 : fresh ? 8 : entry.method;
+      const crc = fresh ? fresh.crc : entry.crc;
+      const size = fresh ? fresh.size : entry.size;
+      // Sizes are always in the header (no trailing data descriptor, flag 3); the name's bytes and their UTF-8 flag (11) as they were.
+      const flags = entry.flags & ~0x0008;
+      const needed = fresh && !isMime ? Math.max(entry.versionNeeded, 20) : entry.versionNeeded;
       const local = Buffer.alloc(30);
       local.writeUInt32LE(LOCAL, 0);
-      local.writeUInt16LE(entry.versionNeeded, 4);
+      local.writeUInt16LE(needed, 4);
       local.writeUInt16LE(flags, 6);
       local.writeUInt16LE(method, 8);
       local.writeUInt16LE(entry.time, 10);
@@ -224,7 +300,7 @@ export function stampEpub(file: Uint8Array, line: string): EpubStamp {
       const head = Buffer.alloc(46);
       head.writeUInt32LE(CENTRAL, 0);
       head.writeUInt16LE(entry.versionMade, 4);
-      head.writeUInt16LE(entry.versionNeeded, 6);
+      head.writeUInt16LE(needed, 6);
       head.writeUInt16LE(flags, 8);
       head.writeUInt16LE(method, 10);
       head.writeUInt16LE(entry.time, 12);
@@ -233,14 +309,14 @@ export function stampEpub(file: Uint8Array, line: string): EpubStamp {
       head.writeUInt32LE(data.length, 20);
       head.writeUInt32LE(size, 24);
       head.writeUInt16LE(name.length, 28);
-      head.writeUInt16LE(entry.extra.length, 30);
-      head.writeUInt16LE(entry.comment.length, 32);
+      head.writeUInt16LE(isMime ? 0 : entry.extra.length, 30);
+      head.writeUInt16LE(isMime ? 0 : entry.comment.length, 32);
       head.writeUInt16LE(0, 34);
       head.writeUInt16LE(entry.internal, 36);
       head.writeUInt32LE(entry.external >>> 0, 38);
       head.writeUInt32LE(offset, 42);
       parts.push(local, name, Buffer.from(data));
-      central.push(head, name, Buffer.from(entry.extra), Buffer.from(entry.comment));
+      central.push(head, name, ...(isMime ? [] : [Buffer.from(entry.extra), Buffer.from(entry.comment)]));
       offset += local.length + name.length + data.length;
     }
     const directory = Buffer.concat(central);
@@ -256,6 +332,7 @@ export function stampEpub(file: Uint8Array, line: string): EpubStamp {
   } catch (error) {
     if (error instanceof Error && error.message === "zip64") return { ok: false, why: "zip64" };
     if (error instanceof Error && error.message === "part_too_big") return { ok: false, why: "part_too_big" };
+    if (error instanceof Error && error.message === "encoding") return { ok: false, why: "encoding" };
     if (error instanceof Unreadable && error.message === "not_zip") return { ok: false, why: "not_epub" };
     return { ok: false, why: "unreadable" };
   }

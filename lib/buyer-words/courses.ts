@@ -192,6 +192,15 @@ const en = {
   checkAgain: "Check my answers again",
   check: "Check my answers",
   triesLeft: (left: number) => `${left} ${plural(left, "try", "tries")} left`,
+  /** A stretch of time in minutes, said in hours when it is whole hours. */
+  span: (minutes: number) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "hour", "hours")}` : `${minutes} ${plural(minutes, "minute", "minutes")}`,
+  /** The creator's view of a question bank (630 [HN6](7)); `span` is said by `span`. */
+  bankDraw: (draw: number, total: number) => `Each try shows ${draw} of these ${total} questions, picked for each student.`,
+  bankShuffle: "Each try shows its questions in an order of its own.",
+  bankWait: (span: string) => `Students wait ${span} between tries.`,
+  waitAgain: (span: string) => `You can try again in ${span}. Come back to this page then.`,
+  staleTry: "Your questions changed since you opened this page, so nothing was checked and no try was used. Here are your questions now.",
 
   // ---- A lesson's comments ------------------------------------------------------------
   commentNotices: {
@@ -485,6 +494,13 @@ const es: CoursesWords = {
   checkAgain: "Volver a comprobar mis respuestas",
   check: "Comprobar mis respuestas",
   triesLeft: (left) => `${plural(left, "Queda", "Quedan")} ${left} ${plural(left, "intento", "intentos")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "hora", "horas")}` : `${minutes} ${plural(minutes, "minuto", "minutos")}`,
+  bankDraw: (draw, total) => `Cada intento muestra ${draw} de estas ${total} preguntas, elegidas para cada estudiante.`,
+  bankShuffle: "Cada intento muestra sus preguntas en un orden propio.",
+  bankWait: (span) => `Los estudiantes esperan ${span} entre intentos.`,
+  waitAgain: (span) => `Puedes volver a intentarlo dentro de ${span}. Vuelve a esta página entonces.`,
+  staleTry: "Tus preguntas cambiaron desde que abriste esta página, así que no se comprobó nada y no se usó ningún intento. Estas son tus preguntas ahora.",
 
   commentNotices: {
     posted: "Publicado.",
@@ -770,6 +786,13 @@ const fr: CoursesWords = {
   checkAgain: "Vérifier à nouveau mes réponses",
   check: "Vérifier mes réponses",
   triesLeft: (left) => `${left}${S}${frPlural(left, "tentative restante", "tentatives restantes")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60}${S}${frPlural(minutes / 60, "heure", "heures")}` : `${minutes}${S}${frPlural(minutes, "minute", "minutes")}`,
+  bankDraw: (draw, total) => `Chaque tentative montre ${draw} de ces ${total}${S}questions, choisies pour chaque participant.`,
+  bankShuffle: "Chaque tentative montre ses questions dans un ordre qui lui est propre.",
+  bankWait: (span) => `Les participants attendent ${span} entre deux tentatives.`,
+  waitAgain: (span) => `Vous pourrez réessayer dans ${span}. Revenez sur cette page à ce moment-là.`,
+  staleTry: `Vos questions ont changé depuis l'ouverture de cette page${S}: rien n'a été vérifié et aucune tentative n'a été utilisée. Voici vos questions maintenant.`,
 
   commentNotices: {
     posted: "Publié.",
@@ -1049,6 +1072,13 @@ const de: CoursesWords = {
   checkAgain: "Meine Antworten erneut prüfen",
   check: "Meine Antworten prüfen",
   triesLeft: (left) => `Noch ${left} ${plural(left, "Versuch", "Versuche")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "Stunde", "Stunden")}` : `${minutes} ${plural(minutes, "Minute", "Minuten")}`,
+  bankDraw: (draw, total) => `Jeder Versuch zeigt ${draw} dieser ${total} Fragen, für jede Person eigens ausgewählt.`,
+  bankShuffle: "Jeder Versuch zeigt seine Fragen in einer eigenen Reihenfolge.",
+  bankWait: (span) => `Zwischen zwei Versuchen warten Teilnehmende ${span}.`,
+  waitAgain: (span) => `Sie können es in ${span} erneut versuchen. Kommen Sie dann auf diese Seite zurück.`,
+  staleTry: "Ihre Fragen haben sich geändert, seit Sie diese Seite geöffnet haben. Deshalb wurde nichts geprüft und kein Versuch verbraucht. Hier sind Ihre Fragen jetzt.",
 
   commentNotices: {
     posted: "Veröffentlicht.",
@@ -1330,6 +1360,13 @@ const it: CoursesWords = {
   checkAgain: "Controlla di nuovo le mie risposte",
   check: "Controlla le mie risposte",
   triesLeft: (left) => `${plural(left, "Resta", "Restano")} ${left} ${plural(left, "tentativo", "tentativi")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "ora", "ore")}` : `${minutes} ${plural(minutes, "minuto", "minuti")}`,
+  bankDraw: (draw, total) => `Ogni tentativo mostra ${draw} di queste ${total} domande, scelte per ogni studente.`,
+  bankShuffle: "Ogni tentativo mostra le sue domande in un ordine tutto suo.",
+  bankWait: (span) => `Gli studenti aspettano ${span} tra un tentativo e l'altro.`,
+  waitAgain: (span) => `Puoi riprovare tra ${span}. Torna su questa pagina allora.`,
+  staleTry: "Le tue domande sono cambiate da quando hai aperto questa pagina, quindi non è stato controllato nulla e non hai usato nessun tentativo. Ecco le tue domande adesso.",
 
   commentNotices: {
     posted: "Pubblicato.",
@@ -1612,6 +1649,13 @@ const nl: CoursesWords = {
   checkAgain: "Controleer mijn antwoorden opnieuw",
   check: "Controleer mijn antwoorden",
   triesLeft: (left) => `Nog ${left} ${plural(left, "poging", "pogingen")} over`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "uur", "uur")}` : `${minutes} ${plural(minutes, "minuut", "minuten")}`,
+  bankDraw: (draw, total) => `Elke poging toont ${draw} van deze ${total} vragen, voor elke cursist apart gekozen.`,
+  bankShuffle: "Elke poging toont de vragen in een eigen volgorde.",
+  bankWait: (span) => `Cursisten wachten ${span} tussen twee pogingen.`,
+  waitAgain: (span) => `Je kunt het over ${span} opnieuw proberen. Kom dan terug naar deze pagina.`,
+  staleTry: "Je vragen zijn veranderd sinds je deze pagina opende, dus er is niets gecontroleerd en geen poging gebruikt. Dit zijn nu je vragen.",
 
   commentNotices: {
     posted: "Geplaatst.",
@@ -1894,6 +1938,13 @@ const pt: CoursesWords = {
   checkAgain: "Verificar de novo as minhas respostas",
   check: "Verificar as minhas respostas",
   triesLeft: (left) => `${plural(left, "Resta", "Restam")} ${left} ${plural(left, "tentativa", "tentativas")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "hora", "horas")}` : `${minutes} ${plural(minutes, "minuto", "minutos")}`,
+  bankDraw: (draw, total) => `Cada tentativa mostra ${draw} destas ${total} perguntas, escolhidas para cada aluno.`,
+  bankShuffle: "Cada tentativa mostra as perguntas numa ordem própria.",
+  bankWait: (span) => `Os alunos esperam ${span} entre tentativas.`,
+  waitAgain: (span) => `Pode tentar novamente dentro de ${span}. Volte a esta página nessa altura.`,
+  staleTry: "As suas perguntas mudaram desde que abriu esta página, por isso nada foi verificado e nenhuma tentativa foi usada. Estas são agora as suas perguntas.",
 
   commentNotices: {
     posted: "Publicado.",

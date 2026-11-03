@@ -100,8 +100,8 @@ import {
 } from "@/lib/affiliate-setting";
 import { readListings } from "@/lib/catalog";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
-import { type PartnerShare, parsePartnerShare, shareOn } from "@/lib/partner-share";
-import { NO_TERMS, type PartnerTerms, changeNeeds, changeOpen, readTerms, settleTerms, stepOf, withStep } from "@/lib/partner-terms-rules";
+import { type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
+import { NO_TERMS, type PartnerTerms, type WaitingChange, changeNeeds, changeOpen, readTerms, settleTerms, shareRunning, stepOf, withStep } from "@/lib/partner-terms-rules";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
 import { offerPartnership } from "@/lib/partner-invites";
 import type { Store } from "@/lib/store";
@@ -472,11 +472,44 @@ export async function answerShareChange(
   return { ok: true, state: "changed" };
 }
 
+/**
+ * For the partner's own page: the time it is read at, the change to their
+ * share still waiting for their answer (null when none, or when it lapsed),
+ * and that change's products by name.
+ */
+export async function partnerChangeFor(
+  store: Store,
+  affiliate: Affiliate | null,
+): Promise<{ nowSeconds: number; change: WaitingChange | null; titles: string[] }> {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const waiting = affiliate?.terms?.change ?? null;
+  const change = waiting && changeOpen(waiting, nowSeconds) ? waiting : null;
+  const titles = change?.share ? (await readListings(store, change.share.products)).filter((p) => p.priceCents > 0).map((p) => p.title) : [];
+  return { nowSeconds, change, titles };
+}
+
 /** A record with these terms, or without the field when there is nothing to keep. */
 function withTerms(affiliate: Affiliate, terms: PartnerTerms): Affiliate {
   const { terms: _old, ...rest } = affiliate;
   void _old;
   return terms.change || terms.history.length ? { ...rest, terms } : rest;
+}
+
+/**
+ * Whether `share` fits what its products already promise: every other
+ * approved partner's share still running and the affiliate commission, which
+ * ride on the same sale (lib/partner-share.ts shareProblem). `id` is the
+ * partner it is for, left out of the others; null for an invitation.
+ */
+export async function sharePromiseProblem(store: Store, id: string | null, share: PartnerShare, nowSeconds: number): Promise<ShareProblem | null> {
+  const others: Record<string, number[]> = {};
+  for (const other of await listPartners(store)) {
+    if (other.id === id || other.status !== "approved" || !shareRunning(other.share, nowSeconds) || !other.share) continue;
+    for (const product of other.share.products) (others[product] ??= []).push(other.share.percent);
+  }
+  const affiliatePercent: Record<string, number> = {};
+  for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
+  return shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
 }
 
 /** Everybody in this programme who holds a standing share of something. */

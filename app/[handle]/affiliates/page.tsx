@@ -14,6 +14,7 @@ import { codeOwners } from "@/lib/affiliate-codes";
 import { listCodes } from "@/lib/discount";
 import { speech } from "@/lib/buyer-words";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
+import { CHANGE_WAITS_SECONDS, shareRunning } from "@/lib/partner-terms-rules";
 import {
   MAX_NOTE_LENGTH,
   affiliateCookieName,
@@ -23,6 +24,7 @@ import {
   buyersJoin,
   canApply,
   linkEmail,
+  partnerChangeFor,
   readBook,
   recruitLink,
 } from "@/lib/affiliates";
@@ -102,6 +104,12 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   const myShared = affiliate?.share
     ? (await readListings(store, affiliate.share.products)).filter((p) => p.priceCents > 0).map((p) => p.title)
     : [];
+  // A change to that share the store asked for, waiting for this partner's
+  // answer (630 [HN6](39), lib/partner-terms-rules.ts); one left unanswered
+  // lapses on its own, so only one still open is shown.
+  const { nowSeconds, change: askedChange, titles: askedTitles } = await partnerChangeFor(store, affiliate);
+  /** The last day a share earns on, in the store's language: the day before its end. */
+  const lastDay = (until: number) => day(until - 24 * 60 * 60);
   // Codes of the store's own that this affiliate was given, which earn with no
   // click at all (lib/affiliate-codes.ts). Only asked for once they are in.
   const myCodes =
@@ -295,12 +303,44 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     check without asking.
                   */}
                   {affiliate.share ? (
-                    <>
+                    <div id="partner" className="scroll-mt-24">
                       <p className="st-label mt-7">{a.partnerShareLabel}</p>
-                      <p className="st-muted mt-2 text-sm">
-                        {a.partnerShare(affiliate.share.percent, myShared.length ? myShared.join(", ") : a.sharedFallback)}
-                      </p>
-                    </>
+                      {shareRunning(affiliate.share, nowSeconds) ? (
+                        <p className="st-muted mt-2 text-sm">
+                          {a.partnerShare(affiliate.share.percent, myShared.length ? myShared.join(", ") : a.sharedFallback)}{" "}
+                          {a.partnerRuns(affiliate.share.until === undefined ? null : lastDay(affiliate.share.until))}
+                        </p>
+                      ) : (
+                        <p className="st-muted mt-2 text-sm">{a.partnerEnded(lastDay(affiliate.share.until ?? nowSeconds))}</p>
+                      )}
+                      {askedChange ? (
+                        <form action="/api/store/affiliates/partner-answer" method="post" className="mt-3 space-y-2 text-sm">
+                          <input type="hidden" name="handle" value={store.handle} />
+                          <p className="font-semibold">
+                            {a.partnerAsked(
+                              store.name,
+                              askedChange.share ? askedChange.share.percent : null,
+                              askedTitles.length ? askedTitles.join(", ") : a.sharedFallback,
+                              askedChange.share?.until === undefined ? null : lastDay(askedChange.share.until),
+                            )}
+                          </p>
+                          <p className="st-muted">{a.partnerAskedKeep(day(askedChange.asked + CHANGE_WAITS_SECONDS - 24 * 60 * 60))}</p>
+                          <div className="flex flex-wrap gap-2">
+                            <button type="submit" name="answer" value="yes" className="btn btn-primary btn-sm">
+                              {a.partnerAccept}
+                            </button>
+                            <button type="submit" name="answer" value="no" className="btn btn-secondary btn-sm">
+                              {a.partnerDecline}
+                            </button>
+                          </div>
+                        </form>
+                      ) : null}
+                      {status === "partner-yes" || status === "partner-no" || status === "partner-cap" || status === "partner-none" ? (
+                        <p className={`st-note mt-3 text-sm${status === "partner-yes" || status === "partner-no" ? "" : " font-semibold"}`} role="status">
+                          {a.partnerAnswered[status === "partner-yes" ? "yes" : status === "partner-no" ? "no" : status === "partner-cap" ? "cap" : "none"]}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
                   {affiliate.rate !== null ? (
                     <p className="st-muted mt-2 text-sm">

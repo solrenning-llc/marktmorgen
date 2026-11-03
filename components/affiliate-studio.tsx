@@ -36,6 +36,7 @@ import {
   creatorKeeps,
 } from "@/lib/partner-share";
 import type { Affiliate, AffiliateStatus, HoldFlag, Payout } from "@/lib/affiliates";
+import { MAX_TERM_DAYS, changeOpen, lastDayWords, stepWords, termWords } from "@/lib/partner-terms-rules";
 import { StoreField } from "@/components/studio-store-pin";
 import { LeadReview, type LeadRow, LeadTerms, type LeadTermsState } from "@/components/affiliate-leads-studio";
 import { MAX_LEAD_BUDGET_CENTS, MAX_LEAD_CAP, MAX_LEAD_CENTS, MAX_LEAD_HOLD_DAYS, MIN_LEAD_BUDGET_CENTS, MIN_LEAD_CENTS, MIN_LEAD_HOLD_DAYS } from "@/lib/affiliate-lead-rules";
@@ -54,6 +55,7 @@ const MESSAGES: Record<string, string> = {
   share_products: SHARE_PROBLEMS.products,
   share_crowded: SHARE_PROBLEMS.crowded,
   share_committed: SHARE_PROBLEMS.committed,
+  share_ends: `Pick an end date after today and within ${MAX_TERM_DAYS / 365} years, or leave it empty so the share runs until you or they end it.`,
   invite_email: "Type the email address to send the invitation to.",
   gone: "That offer is no longer there. The store may have withdrawn it.",
   owner: "That is your own address. A partner is somebody else.",
@@ -123,18 +125,19 @@ const STATUS_TAG: Record<AffiliateStatus, { label: string; tone: string }> = {
   removed: { label: "Removed", tone: "" },
 };
 
-async function post(payload: Record<string, unknown>): Promise<string | null> {
+/** What a save answered: a problem in words, or none and the state the route reported (a partner's share: started, same, applied or waiting). */
+async function post(payload: Record<string, unknown>): Promise<{ problem: string | null; state: string }> {
   try {
     const response = await fetch("/api/store/affiliates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    if (data.ok) return null;
-    return MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
+    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; state?: string };
+    if (data.ok) return { problem: null, state: typeof data.state === "string" ? data.state : "" };
+    return { problem: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error, state: "" };
   } catch {
-    return MESSAGES.server_error;
+    return { problem: MESSAGES.server_error, state: "" };
   }
 }
 
@@ -260,16 +263,16 @@ export function AffiliateStudio({
   const [batchDate, setBatchDate] = useState(today);
   const [batchReference, setBatchReference] = useState("");
 
-  async function act(where: string, payload: Record<string, unknown>, confirmation: string): Promise<boolean> {
+  async function act(where: string, payload: Record<string, unknown>, confirmation: string | ((state: string) => string)): Promise<boolean> {
     setBusy(where);
     setError(null);
-    const problem = await post(payload);
+    const { problem, state } = await post(payload);
     setBusy(null);
     if (problem) {
       setError({ where, text: problem });
       return false;
     }
-    toast(confirmation);
+    toast(typeof confirmation === "string" ? confirmation : confirmation(state));
     router.refresh();
     return true;
   }
@@ -1285,7 +1288,7 @@ function Member({
   row: Row;
   today: string;
   busy: string | null;
-  act: (where: string, payload: Record<string, unknown>, confirmation: string) => Promise<boolean>;
+  act: (where: string, payload: Record<string, unknown>, confirmation: string | ((state: string) => string)) => Promise<boolean>;
   error: React.ReactNode;
   codes: StoreCode[];
   /** Which of those codes this affiliate has, by Stripe's promotion code id. */
@@ -1303,6 +1306,13 @@ function Member({
   const [sharing, setSharing] = useState(false);
   const [percent, setPercent] = useState(affiliate.share ? String(affiliate.share.percent) : "");
   const [shared, setShared] = useState<string[]>(affiliate.share?.products ?? []);
+  // The share's end as a date field reads it: its last day, or empty for until ended (630 [HN6](39)).
+  const [ends, setEnds] = useState(affiliate.share?.until ? new Date((affiliate.share.until - 86400) * 1000).toISOString().slice(0, 10) : "");
+  // Day-exact: an end is always at a day's start in UTC, and so is `today`.
+  const todaySeconds = Date.parse(`${today}T00:00:00Z`) / 1000;
+  const tomorrow = new Date((todaySeconds + 86400) * 1000).toISOString().slice(0, 10);
+  const waiting = affiliate.terms?.change && changeOpen(affiliate.terms.change, todaySeconds) ? affiliate.terms.change : null;
+  const history = affiliate.terms?.history ?? [];
   const [paying, setPaying] = useState(false);
   const [amount, setAmount] = useState(row.owed > 0 ? moneyField(row.owed, currency) : "");
   const [date, setDate] = useState(today);
@@ -1415,8 +1425,13 @@ function Member({
                 e.preventDefault();
                 const done = await act(
                   where,
-                  { action: "share", id: affiliate.id, percent: Number(percent.trim()), products: shared },
-                  "Partner share saved. It applies to sales from now on.",
+                  { action: "share", id: affiliate.id, percent: Number(percent.trim()), products: shared, ends },
+                  (state) =>
+                    state === "waiting"
+                      ? "Sent to them to accept on their affiliate page. Their current share stays until they say yes; if they do not answer in 30 days, nothing changes."
+                      : state === "same"
+                        ? "Nothing changed: that is the share they already have."
+                        : "Partner share saved. It applies to sales from now on.",
                 );
                 if (done) setSharing(false);
               }}
@@ -1466,6 +1481,23 @@ function Member({
                   })}
                 </ul>
               </fieldset>
+              <label className="mt-3 block" htmlFor={`${where}-ends`}>
+                <span className="field-label">Last day it earns (optional)</span>
+                <input
+                  id={`${where}-ends`}
+                  type="date"
+                  min={tomorrow}
+                  value={ends}
+                  onChange={(e) => setEnds(e.target.value)}
+                  aria-describedby={`${where}-ends-help`}
+                  className="field w-48"
+                />
+                <span id={`${where}-ends-help`} className="mt-1 block text-xs">
+                  {affiliate.share
+                    ? "Empty: it runs until you or they end it. Any change to an agreed share, this date included, is sent to them to accept first; until they do, their current share stays."
+                    : "Empty: it runs until you or they end it. With a date, it earns on sales through that day, and you cannot end it sooner without their yes."}
+                </span>
+              </label>
               <p className="mt-2 text-xs">
                 {`${MIN_PARTNER_SHARE}% to ${MAX_PARTNER_SHARE}% of what a buyer pays before tax, on every sale of the products you select — whoever brought the buyer. Partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. "You keep" already counts the affiliate commission on that product, and Stripe's fee comes out of your part. They are paid by you, in the same batch as your affiliates, on the same day.`}
               </p>
@@ -1482,15 +1514,24 @@ function Member({
                     className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
                     disabled={busy !== null}
                     onClick={async () => {
+                      let asked = false;
                       const done = await act(
                         where,
                         { action: "share", id: affiliate.id, percent: null },
-                        "Partner share ended. What they already earned stays owed to them.",
+                        (state) => {
+                          asked = state === "waiting";
+                          return asked
+                            ? "It runs to a date you both agreed, so they are asked to agree to end it early. It stays until they say yes."
+                            : "Partner share ended. What they already earned stays owed to them.";
+                        },
                       );
                       if (done) {
                         setSharing(false);
-                        setPercent("");
-                        setShared([]);
+                        if (!asked) {
+                          setPercent("");
+                          setShared([]);
+                          setEnds("");
+                        }
                       }
                     }}
                   >
@@ -1502,7 +1543,7 @@ function Member({
           ) : (
             <p className="mt-1">
               {affiliate.share
-                ? `Takes ${affiliate.share.percent}% of every sale of ${affiliate.share.products.length} ${affiliate.share.products.length === 1 ? "product" : "products"}, whoever brought the buyer. `
+                ? `Takes ${affiliate.share.percent}% of every sale of ${affiliate.share.products.length} ${affiliate.share.products.length === 1 ? "product" : "products"}, whoever brought the buyer. ${termWords(affiliate.share, todaySeconds)}. `
                 : "No share. A partner earns on every sale of a product, not only the ones they send you — for helping make it, or for lending their audience to it. "}
               <button
                 type="button"
@@ -1513,6 +1554,24 @@ function Member({
               </button>
             </p>
           )}
+          {waiting ? (
+            <p className="notice mt-2" role="status">
+              {waiting.share
+                ? `Waiting for their yes: ${waiting.share.percent}% of ${waiting.share.products.length} ${waiting.share.products.length === 1 ? "product" : "products"}, ${waiting.share.until ? `through ${lastDayWords(waiting.share.until)}` : "until ended"}. `
+                : "Waiting for their yes to end it early. "}
+              {"Their current share stays until then. Save their current share again to take the request back."}
+            </p>
+          ) : null}
+          {history.length ? (
+            <details className="mt-2">
+              <summary className="inline-flex min-h-11 cursor-pointer items-center font-semibold text-ink">History of this partnership</summary>
+              <ol className="mt-1 list-decimal space-y-1 pl-5 text-xs">
+                {history.map((step, i) => (
+                  <li key={`${step.at}-${i}`}>{stepWords(step)}</li>
+                ))}
+              </ol>
+            </details>
+          ) : null}
         </div>
       ) : null}
 

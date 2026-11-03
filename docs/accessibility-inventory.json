@@ -1604,6 +1604,7 @@
     "app/api/store/affiliates/join/route.ts",
     "app/api/store/affiliates/kit/route.ts",
     "app/api/store/affiliates/open/route.ts",
+    "app/api/store/affiliates/partner-answer/route.ts",
     "app/api/store/affiliates/payout-batch/route.ts",
     "app/api/store/affiliates/paypal/route.ts",
     "app/api/store/affiliates/payto/route.ts",

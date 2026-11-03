@@ -1,0 +1,102 @@
+/**
+ * 630 [HN6](39), unit 3: the studio's route, the partner's answer route and
+ * both screens. Through the real routes on a synthetic store: a share with an
+ * end starts at once; a change waits and the share in force does not move; a
+ * bad end is refused; the partner says no, then yes, from their own page; a
+ * yes the cap no longer allows is refused; the studio and the partner's page
+ * say what waits and what it means.
+ */
+import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { NextRequest } from "next/server";
+import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { affiliateCookieName, readAffiliate } from "@/lib/affiliates";
+import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
+import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
+import { POST as answerRoute } from "@/app/api/store/affiliates/partner-answer/route";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+
+const A = "prodaaaaaa";
+
+async function main(): Promise<void> {
+  redis.clear();
+  const owner = "termswired@example.com";
+  await claimHandle(owner, "termswired", "Terms Wired", "");
+  const statsId = (await ensureStatsId(owner))!.statsId!;
+  await ensureStoreId(owner);
+  await setStripeAccount(owner, "acct_1Wiredxxxxxxxxx", true);
+  await setSubscription(owner, { customerId: "cus_wired", subscriptionId: "sub_wired", active: true, tier: "creator", period: paidPeriod() });
+  const p = "aaaaaaaaaaaa";
+  const q = "bbbbbbbbbbbb";
+  for (const id of [p, q]) {
+    const person = { id, email: `${id}@example.com`, code: `c${id}`, status: "approved", appliedAt: 1, decidedAt: 5, note: "", rate: null, paypal: "", share: null, cleared: null, by: null };
+    await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, id, JSON.stringify(person)]]);
+  }
+  const session = await openSession(owner);
+  const post = async (body: Record<string, unknown>) => {
+    const response = await affiliatesRoute(new NextRequest("https://marktmorgen.com/api/store/affiliates", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
+    return (await response.json()) as { ok?: boolean; error?: string; state?: string };
+  };
+  // The partner signed in on their own page (lib/affiliates.ts affiliateForSession).
+  const token = randomBytes(32).toString("hex");
+  const key = `nl:aff:session:${createHash("sha256").update(`nimbus-aff-session:${token}`).digest("hex").slice(0, 40)}`;
+  await redis.pipeline([["SET", key, JSON.stringify({ s: statsId, a: p })]]);
+  const answer = async (value: string) => {
+    const form = new FormData();
+    form.set("handle", "termswired");
+    form.set("answer", value);
+    const response = await answerRoute(new NextRequest("https://marktmorgen.com/api/store/affiliates/partner-answer", { method: "POST", headers: { cookie: `${affiliateCookieName("termswired")}=${token}`, origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: form }));
+    return response.headers.get("location") ?? `status ${response.status}`;
+  };
+  const read = async (id: string) => (await readAffiliate((await storeForEmail(owner))!, id))!;
+  const future = (days: number) => new Date(Date.now() + days * 86400 * 1000).toISOString().slice(0, 10);
+
+  part("The studio's route");
+  is("an end that is not after today is refused", (await post({ action: "share", id: p, percent: 30, products: [A], ends: "2020-01-01" })).error, "share_ends");
+  is("a new share with an end starts at once", await post({ action: "share", id: p, percent: 30, products: [A], ends: future(60) }), { ok: true, state: "started" });
+  const started = (await read(p)).share!;
+  is("it runs through that day", [started.percent, typeof started.until === "number"], [30, true]);
+  is("lowering it waits for the partner", await post({ action: "share", id: p, percent: 20, products: [A], ends: future(60) }), { ok: true, state: "waiting" });
+  is("the share in force does not move", (await read(p)).share?.percent, 30);
+  is("ending a dated share early waits too", await post({ action: "share", id: p, percent: null }), { ok: true, state: "waiting" });
+  is("still in force", (await read(p)).share?.percent, 30);
+
+  part("The partner answers on their own page");
+  is("an answer that is neither yes nor no is refused", await answer("maybe"), "status 400");
+  is("no keeps the share", [await answer("no"), (await read(p)).share?.percent], ["https://marktmorgen.com/@termswired/affiliates?status=partner-no#partner", 30]);
+  is("nothing left to answer", await answer("yes"), "https://marktmorgen.com/@termswired/affiliates?status=partner-none#partner");
+  await post({ action: "share", id: p, percent: 40, products: [A], ends: future(60) });
+  is("another partner takes room on the same product", await post({ action: "share", id: q, percent: 35, products: [A] }), { ok: true, state: "started" });
+  is("a yes the cap no longer allows is refused", [await answer("yes"), (await read(p)).share?.percent], ["https://marktmorgen.com/@termswired/affiliates?status=partner-cap#partner", 30]);
+  await post({ action: "share", id: q, percent: null });
+  is("ending a share that runs until revoked applied at once", (await read(q)).share, null);
+  is("with room again, yes applies it", [await answer("yes"), (await read(p)).share?.percent], ["https://marktmorgen.com/@termswired/affiliates?status=partner-yes#partner", 40]);
+  is("the history has every step", (await read(p)).terms?.history.map((s) => `${s.kind}:${s.by}`), [
+    "started:creator", "asked:creator", "asked:creator", "declined:partner", "asked:creator", "changed:partner",
+  ]);
+
+  part("The screens");
+  const studio = readFileSync("components/affiliate-studio.tsx", "utf8");
+  is("a labeled end date with its rule", studio.includes("Last day it earns (optional)") && studio.includes("aria-describedby={`${where}-ends-help`}") && studio.includes("is sent to them to accept first"), true);
+  is("the studio says when a change waits and how to take it back", studio.includes("Waiting for their yes") && studio.includes("Save their current share again to take the request back."), true);
+  is("and keeps the history readable", studio.includes("History of this partnership") && studio.includes("stepWords(step)"), true);
+  const page = readFileSync("app/[handle]/affiliates/page.tsx", "utf8");
+  is("the partner's page offers both answers in a form", page.includes('action="/api/store/affiliates/partner-answer"') && page.includes('name="answer" value="yes"') && page.includes('name="answer" value="no"'), true);
+  is("and says the result in a status", page.includes('role="status"') && page.includes("a.partnerAnswered["), true);
+  const en = AFFILIATES_WORDS.en;
+  is("the words say the share stays until the answer", en.partnerAskedKeep("Dec 3, 2026"), "Until you answer, your share stays exactly as it is. If you have not answered by Dec 3, 2026, nothing changes.");
+  is("an end asked for, in words", en.partnerAsked("Terms Wired", null, "", null), "Terms Wired asks to end your partner share.");
+  for (const [lang, words] of Object.entries(AFFILIATES_WORDS)) {
+    const line = words.partnerAsked("Shop", 20, "Book", "Mar 4, 2027");
+    is(`${lang}: the change names the share, the products and the last day`, line.includes("20") && line.includes("Book") && line.includes("Mar 4, 2027"), true);
+  }
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

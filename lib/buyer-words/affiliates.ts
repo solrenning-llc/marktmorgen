@@ -118,6 +118,24 @@ const en = {
   partnerShare: (percent: number, products: string) =>
     `${percent}% of what a buyer pays before tax on every sale of ${products} — whoever brought the buyer, and whether or not they came through your link. A refunded sale earns nothing, a partly refunded one earns on what was kept, and your own purchases never earn.`,
   sharedFallback: "the products you share in",
+  /** How long the share runs: `until` is its last day, already written, or null for "until ended" (630 [HN6](39)). */
+  partnerRuns: (until: string | null) => (until === null ? "It runs until you or the store end it." : `It runs through ${until}.`),
+  /** A change the store asked for: `percent` null is ending it; `products` the titles, already joined. */
+  partnerAsked: (store: string, percent: number | null, products: string, until: string | null) =>
+    percent === null
+      ? `${store} asks to end your partner share.`
+      : `${store} asks to change your partner share to ${percent}% of every sale of ${products}, ${until === null ? "until either of you ends it" : `through ${until}`}.`,
+  partnerAskedKeep: (by: string) => `Until you answer, your share stays exactly as it is. If you have not answered by ${by}, nothing changes.`,
+  /** A share whose end has passed: `last` is its last day, already written. */
+  partnerEnded: (last: string) => `Your partner share ended after ${last}. What you earned until then is still paid.`,
+  partnerAccept: "Accept the change",
+  partnerDecline: "Keep my share as it is",
+  partnerAnswered: {
+    yes: "Done. The new terms apply to sales from now on; what you already earned does not change.",
+    no: "Your share stays as it was. The store sees your answer in its studio.",
+    cap: "This change no longer fits what the store already promises on that product, so it was not applied. Your share stays as it was.",
+    none: "That request is no longer open.",
+  },
   yourRate: (store: string, percent: number) =>
     `${store} set your share at ${percent}% of what a buyer pays before tax, on every one-time purchase through your link, except any product they took out of the program.`,
 
@@ -414,6 +432,21 @@ const es: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% de lo que paga un comprador antes de impuestos en cada venta de ${products} — sin importar quién trajo al comprador, ni si llegó o no por tu enlace. Una venta reembolsada no genera nada, una reembolsada en parte genera sobre lo que se conservó, y tus propias compras nunca generan nada.`,
   sharedFallback: "los productos en los que participas",
+  partnerRuns: (until) => (until === null ? "Dura hasta que tú o la tienda la terminen." : `Dura hasta el ${until}, inclusive.`),
+  partnerAsked: (store, percent, products, until) =>
+    percent === null
+      ? `${store} pide terminar tu participación como socio.`
+      : `${store} pide cambiar tu participación como socio a ${percent}${S}% de cada venta de ${products}, ${until === null ? "hasta que uno de los dos la termine" : `hasta el ${until}, inclusive`}.`,
+  partnerAskedKeep: (by) => `Hasta que respondas, tu participación sigue exactamente igual. Si no has respondido antes del ${by}, nada cambia.`,
+  partnerEnded: (last) => `Tu participación como socio terminó después del ${last}. Lo que ganaste hasta entonces se sigue pagando.`,
+  partnerAccept: "Aceptar el cambio",
+  partnerDecline: "Mantener mi participación como está",
+  partnerAnswered: {
+    yes: "Hecho. Las nuevas condiciones se aplican a las ventas desde ahora; lo que ya ganaste no cambia.",
+    no: "Tu participación sigue como estaba. La tienda ve tu respuesta en su estudio.",
+    cap: "Este cambio ya no cabe en lo que la tienda ya promete sobre ese producto, así que no se aplicó. Tu participación sigue como estaba.",
+    none: "Esa solicitud ya no está abierta.",
+  },
   yourRate: (store, percent) =>
     `${store} fijó tu parte en el ${percent}${S}% de lo que paga un comprador antes de impuestos, en cada compra única hecha a través de tu enlace, excepto los productos que haya retirado del programa.`,
 
@@ -681,6 +714,21 @@ const fr: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% de ce qu'un acheteur paie hors taxes sur chaque vente de ${products} — quelle que soit la personne qui a amené l'acheteur, et qu'il soit passé ou non par votre lien. Une vente remboursée ne rapporte rien, une vente partiellement remboursée rapporte sur ce qui a été conservé, et vos propres achats ne rapportent jamais rien.`,
   sharedFallback: "les produits dont vous partagez les ventes",
+  partnerRuns: (until) => (until === null ? "Elle court jusqu'à ce que vous ou la boutique y mettiez fin." : `Elle court jusqu'au ${until} inclus.`),
+  partnerAsked: (store, percent, products, until) =>
+    percent === null
+      ? `${store} demande de mettre fin à votre part de partenaire.`
+      : `${store} demande de passer votre part de partenaire à ${percent}${S}% de chaque vente de ${products}, ${until === null ? "jusqu'à ce que l'un de vous deux y mette fin" : `jusqu'au ${until} inclus`}.`,
+  partnerAskedKeep: (by) => `Tant que vous n'avez pas répondu, votre part reste exactement la même. Sans réponse de votre part avant le ${by}, rien ne change.`,
+  partnerEnded: (last) => `Votre part de partenaire a pris fin après le ${last}. Ce que vous avez gagné jusque-là reste payé.`,
+  partnerAccept: "Accepter la modification",
+  partnerDecline: "Garder ma part telle quelle",
+  partnerAnswered: {
+    yes: `C'est fait. Les nouvelles conditions s'appliquent aux ventes à partir de maintenant${S}; ce que vous avez déjà gagné ne change pas.`,
+    no: "Votre part reste telle qu'elle était. La boutique voit votre réponse dans son studio.",
+    cap: "Cette modification ne tient plus dans ce que la boutique promet déjà sur ce produit, elle n'a donc pas été appliquée. Votre part reste telle qu'elle était.",
+    none: "Cette demande n'est plus ouverte.",
+  },
   yourRate: (store, percent) =>
     `${store} a fixé votre part à ${percent}${S}% de ce qu'un acheteur paie hors taxes, sur chaque achat unique effectué via votre lien, sauf pour les produits retirés du programme.`,
 
@@ -951,6 +999,21 @@ const de: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% dessen, was ein Käufer vor Steuern zahlt, bei jedem Verkauf von ${products} — egal, wer den Käufer gebracht hat und ob er über Ihren Link kam oder nicht. Ein erstatteter Verkauf bringt nichts ein, ein teilweise erstatteter bringt auf das ein, was behalten wurde, und Ihre eigenen Käufe bringen nie etwas ein.`,
   sharedFallback: "die Produkte, an denen Sie beteiligt sind",
+  partnerRuns: (until) => (until === null ? "Sie gilt, bis Sie oder der Shop sie beenden." : `Sie gilt bis einschließlich ${until}.`),
+  partnerAsked: (store, percent, products, until) =>
+    percent === null
+      ? `${store} bittet darum, Ihre Partnerbeteiligung zu beenden.`
+      : `${store} bittet darum, Ihre Partnerbeteiligung auf ${percent}${S}% jedes Verkaufs von ${products} zu ändern, ${until === null ? "bis einer von Ihnen beiden sie beendet" : `bis einschließlich ${until}`}.`,
+  partnerAskedKeep: (by) => `Bis Sie antworten, bleibt Ihre Beteiligung genau so, wie sie ist. Wenn Sie bis zum ${by} nicht geantwortet haben, ändert sich nichts.`,
+  partnerEnded: (last) => `Ihre Partnerbeteiligung endete nach dem ${last}. Was Sie bis dahin verdient haben, wird weiter ausgezahlt.`,
+  partnerAccept: "Änderung annehmen",
+  partnerDecline: "Meine Beteiligung so lassen",
+  partnerAnswered: {
+    yes: "Erledigt. Die neuen Bedingungen gelten ab jetzt für Verkäufe; was Sie schon verdient haben, ändert sich nicht.",
+    no: "Ihre Beteiligung bleibt, wie sie war. Der Shop sieht Ihre Antwort in seinem Studio.",
+    cap: "Diese Änderung passt nicht mehr zu dem, was der Shop für dieses Produkt schon zugesagt hat, deshalb wurde sie nicht übernommen. Ihre Beteiligung bleibt, wie sie war.",
+    none: "Diese Anfrage ist nicht mehr offen.",
+  },
   yourRate: (store, percent) =>
     `${store} hat Ihren Anteil auf ${percent}${S}% dessen festgelegt, was ein Käufer vor Steuern zahlt, bei jedem Einmalkauf über Ihren Link, außer bei Produkten, die aus dem Programm genommen wurden.`,
 
@@ -1225,6 +1288,21 @@ const it: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% di quanto un acquirente paga al netto delle tasse su ogni vendita di ${products} — chiunque abbia portato l'acquirente, e che sia arrivato o no tramite il tuo link. Una vendita rimborsata non fa guadagnare nulla, una rimborsata in parte fa guadagnare su quanto è stato trattenuto, e i tuoi acquisti non fanno mai guadagnare.`,
   sharedFallback: "i prodotti a cui partecipi",
+  partnerRuns: (until) => (until === null ? "Dura finché tu o il negozio non la terminate." : `Dura fino al ${until} incluso.`),
+  partnerAsked: (store, percent, products, until) =>
+    percent === null
+      ? `${store} chiede di terminare la tua quota da partner.`
+      : `${store} chiede di cambiare la tua quota da partner in ${percent}${S}% di ogni vendita di ${products}, ${until === null ? "finché uno dei due non la termina" : `fino al ${until} incluso`}.`,
+  partnerAskedKeep: (by) => `Finché non rispondi, la tua quota resta esattamente com'è. Se non hai risposto entro il ${by}, non cambia nulla.`,
+  partnerEnded: (last) => `La tua quota da partner è terminata dopo il ${last}. Quanto hai guadagnato fino ad allora viene comunque pagato.`,
+  partnerAccept: "Accetta la modifica",
+  partnerDecline: "Lascia la mia quota com'è",
+  partnerAnswered: {
+    yes: "Fatto. Le nuove condizioni valgono per le vendite da adesso; quanto hai già guadagnato non cambia.",
+    no: "La tua quota resta com'era. Il negozio vede la tua risposta nel suo studio.",
+    cap: "Questa modifica non rientra più in quanto il negozio promette già su quel prodotto, quindi non è stata applicata. La tua quota resta com'era.",
+    none: "Quella richiesta non è più aperta.",
+  },
   yourRate: (store, percent) =>
     `${store} ha fissato la tua quota al ${percent}${S}% di quanto un acquirente paga al netto delle tasse, su ogni acquisto singolo fatto tramite il tuo link, tranne i prodotti che ha escluso dal programma.`,
 
@@ -1495,6 +1573,21 @@ const nl: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% van wat een koper vóór belasting betaalt, bij elke verkoop van ${products} — wie de koper ook heeft gebracht, en of die nu via je link kwam of niet. Een terugbetaalde verkoop levert niets op, een gedeeltelijk terugbetaalde levert op over wat is behouden, en je eigen aankopen leveren nooit iets op.`,
   sharedFallback: "de producten waarin je deelt",
+  partnerRuns: (until) => (until === null ? "Het loopt tot jij of de winkel het beëindigt." : `Het loopt tot en met ${until}.`),
+  partnerAsked: (store, percent, products, until) =>
+    percent === null
+      ? `${store} vraagt je partneraandeel te beëindigen.`
+      : `${store} vraagt je partneraandeel te wijzigen in ${percent}${S}% van elke verkoop van ${products}, ${until === null ? "tot een van jullie het beëindigt" : `tot en met ${until}`}.`,
+  partnerAskedKeep: (by) => `Tot je antwoordt, blijft je aandeel precies zoals het is. Heb je op ${by} nog niet geantwoord, dan verandert er niets.`,
+  partnerEnded: (last) => `Je partneraandeel is geëindigd na ${last}. Wat je tot dan verdiende, wordt nog steeds betaald.`,
+  partnerAccept: "De wijziging accepteren",
+  partnerDecline: "Mijn aandeel zo houden",
+  partnerAnswered: {
+    yes: "Klaar. De nieuwe voorwaarden gelden vanaf nu voor verkopen; wat je al verdiende, verandert niet.",
+    no: "Je aandeel blijft zoals het was. De winkel ziet je antwoord in zijn studio.",
+    cap: "Deze wijziging past niet meer bij wat de winkel al toezegt op dat product, dus is ze niet toegepast. Je aandeel blijft zoals het was.",
+    none: "Dat verzoek staat niet meer open.",
+  },
   yourRate: (store, percent) =>
     `${store} heeft je aandeel vastgesteld op ${percent}${S}% van wat een koper vóór belasting betaalt, bij elke eenmalige aankoop via je link, behalve producten die uit het programma zijn gehaald.`,
 
@@ -1771,6 +1864,21 @@ const pt: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% do que um comprador paga antes de impostos em cada venda de ${products} — seja quem for que trouxe o comprador, e quer tenha vindo ou não pela sua ligação. Uma venda reembolsada não gera nada, uma parcialmente reembolsada gera sobre o que foi mantido, e as suas próprias compras nunca geram nada.`,
   sharedFallback: "os produtos em que participa",
+  partnerRuns: (until) => (until === null ? "Dura até que uma das partes lhe ponha fim." : `Dura até ${until}, inclusive.`),
+  partnerAsked: (store, percent, products, until) =>
+    percent === null
+      ? `${store} pede para terminar a sua participação como parceiro.`
+      : `${store} pede para mudar a sua participação como parceiro para ${percent}${S}% de cada venda de ${products}, ${until === null ? "até que um dos dois lhe ponha fim" : `até ${until}, inclusive`}.`,
+  partnerAskedKeep: (by) => `Até responder, a sua participação fica exatamente como está. Se não tiver respondido até ${by}, nada muda.`,
+  partnerEnded: (last) => `A sua participação como parceiro terminou depois de ${last}. O que ganhou até lá continua a ser pago.`,
+  partnerAccept: "Aceitar a alteração",
+  partnerDecline: "Manter a minha participação como está",
+  partnerAnswered: {
+    yes: "Feito. As novas condições aplicam-se às vendas a partir de agora; o que já ganhou não muda.",
+    no: "A sua participação fica como estava. A loja vê a sua resposta no seu estúdio.",
+    cap: "Esta alteração já não cabe no que a loja já promete sobre esse produto, por isso não foi aplicada. A sua participação fica como estava.",
+    none: "Esse pedido já não está aberto.",
+  },
   yourRate: (store, percent) =>
     `${store} fixou a sua parte em ${percent}${S}% do que um comprador paga antes de impostos, em cada compra única feita através da sua ligação, exceto os produtos que retirou do programa.`,
 

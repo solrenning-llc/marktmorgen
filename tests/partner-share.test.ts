@@ -278,8 +278,13 @@ test("an invitation cannot be used to attach a share nobody checked", () => {
   const at = route.indexOf('if (action === "invite")');
   assert.ok(at > 0, "the invite action should exist");
   const body = route.slice(at, route.indexOf('if (action === "share")'));
-  assert.match(body, /shareProblem\(/, "the invite path has to run the same cap");
-  assert.ok(body.indexOf("shareProblem(") < body.indexOf("invitePartner("), "and run it before sending anything");
+  // The same cap as a share set for somebody already in, through one helper
+  // (lib/affiliates.ts sharePromiseProblem, which calls shareProblem).
+  assert.match(body, /sharePromiseProblem\(store, null, share, now\)/, "the invite path has to run the same cap");
+  assert.ok(body.indexOf("sharePromiseProblem(") < body.indexOf("invitePartner("), "and run it before sending anything");
+  const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
+  const helper = aff.slice(aff.indexOf("export async function sharePromiseProblem"));
+  assert.match(helper.slice(0, helper.indexOf("\n}\n")), /return shareProblem\(/, "and that helper is the cap itself");
 });
 
 // ---- a moat switched off is not a moat ---------------------------------

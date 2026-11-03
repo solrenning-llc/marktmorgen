@@ -193,6 +193,11 @@ async function main(): Promise<void> {
   is("the studio offers it, never by default", /useState\(String\(setting\.idle \?\? 0\)\)/.test(studio) && /n === 0 \? "Never"/.test(studio), true);
   is("and never with memberships credited", /idle: recurringOn \? 0 : Number\(idle\),/.test(studio), true);
 
+  part("The privacy policy says so");
+  const privacy = readFileSync(join(process.cwd(), "app/privacy/page.tsx"), "utf8").replace(/\s+/g, " ");
+  is("what is kept, the warning, from the rule's own number", privacy.includes("we keep when each affiliate was last warned: an affiliate it applies to is emailed at the address they joined with at least {IDLE_WARN_DAYS} days before"), true);
+  is("and that a removed affiliate keeps their records", privacy.includes("one taken out keeps their records like any affiliate the creator removes"), true);
+
   done();
 }
 

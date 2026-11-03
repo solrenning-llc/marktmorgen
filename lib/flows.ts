@@ -623,7 +623,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
       return each(emails, "uncertain", `Whether they were started on “${target.name}” could not be confirmed.`);
     }
   }
-  if (action.do === "field" || action.do === "deal" || action.do === "note" || action.do === "notify" || action.do === "assign") return actOnPeople(store, action, emails, at);
+  if (action.do === "field" || action.do === "deal" || action.do === "note" || action.do === "notify" || action.do === "assign" || action.do === "next") return actOnPeople(store, action, emails, at);
   if (action.do === "untag") {
     try {
       const { changed, same } = await changeLabels(listId, emails, (tags) =>
@@ -669,7 +669,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
  */
 async function actOnPeople(
   store: Store,
-  action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" }>,
+  action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" }>,
   emails: string[],
   at: { flow: Flow; step: FlowStep; index: number },
 ): Promise<Acted[]> {
@@ -706,7 +706,7 @@ async function actOnPeople(
     }
     return out;
   }
-  if (action.do === "deal" || action.do === "assign") {
+  if (action.do === "deal" || action.do === "assign" || action.do === "next") {
     const pipelines = await readPipelines(statsId);
     const stages = allStages(pipelines);
     let deals: Awaited<ReturnType<typeof readDeals>>;
@@ -732,7 +732,19 @@ async function actOnPeople(
       // Their open deal moves; with none open, a new one is made for them.
       const open = deals.find((d) => d.email === email && (!inPipeline || inPipeline.has(d.stage)) && stages.find((s) => s.id === d.stage)?.kind === "open");
       let deal;
-      if (action.do === "assign") {
+      if (action.do === "next") {
+        if (!open) {
+          out.push({ email, state: "failed", note: "They have no open deal to set a next action on." });
+          continue;
+        }
+        // The due date as the deals board keeps it: a day, counted in UTC from when the step runs.
+        const dueDate = new Date((now + action.days * 86_400) * 1000).toISOString().slice(0, 10);
+        if (open.nextAction === action.text && open.dueDate === dueDate) {
+          out.push({ email, state: "confirmed", note: "Their deal already had this next action and due date." });
+          continue;
+        }
+        deal = { ...open, nextAction: action.text, dueDate, updatedAt: now };
+      } else if (action.do === "assign") {
         if (!open) {
           out.push({ email, state: "failed", note: "They have no open deal to make someone responsible for." });
           continue;
@@ -752,7 +764,7 @@ async function actOnPeople(
           : { id: newCrmId(10), title: (action.title || at.flow.name).slice(0, 90), email, cents: 0, stage: stage!.id, note: `Made by the sequence “${at.flow.name}”.`.slice(0, 500), createdAt: now, updatedAt: now };
       }
       try {
-        out.push((await writeDeal(statsId, deal, store)) ? { email, state: "confirmed", changed: true, note: action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
+        out.push((await writeDeal(statsId, deal, store)) ? { email, state: "confirmed", changed: true, note: action.do === "next" ? `Next action on their deal: “${action.text}”, due ${deal.dueDate}.` : action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
       } catch (error) {
         if (error instanceof DataRoomError) {
           out.push({ email, state: "failed", note: "The deal was not written: the store's data room is full." });

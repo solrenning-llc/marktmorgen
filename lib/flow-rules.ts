@@ -35,7 +35,7 @@
  *
  * Browser-safe.
  */
-import { type CrmField, MAX_DEAL_TITLE, fieldValue } from "@/lib/crm-rules";
+import { type CrmField, MAX_DEAL_TITLE, fieldValue, oneLine } from "@/lib/crm-rules";
 
 export const MAX_FLOW_WAIT_HOURS = 365 * 24;
 /** Match the server's whole-hour range without silently turning invalid input into zero. */
@@ -262,7 +262,13 @@ export type FlowAction =
   /** Only waits (its step's delay): with a condition and a jump, a pure branch. Added 17 October 2026. */
   | { do: "wait" }
   /** Makes a teammate responsible for the person's open deal (lib/crm.ts). Added 17 October 2026. */
-  | { do: "assign"; assignee: string };
+  | { do: "assign"; assignee: string }
+  /** Sets the person's open deal's next action and its due date, `days` after the step (635 [GL3], added 2 November 2026). */
+  | { do: "next"; text: string; days: number };
+
+/** The longest next action a step writes (the deals board's own, lib/crm-rules.ts readFollowUp), and the furthest due date. */
+export const MAX_STEP_NEXT_ACTION = 200;
+export const MAX_STEP_NEXT_DAYS = 365;
 
 /** The longest note a step writes on a person's page. */
 export const MAX_STEP_NOTE = 300;
@@ -305,6 +311,14 @@ export function readAction(raw: unknown, isFlow: (flowId: string) => boolean, ct
   if (value.do === "assign") {
     const assignee = typeof value.assignee === "string" ? value.assignee.trim().toLowerCase() : "";
     return assignee && assignee.length <= 254 && ctx.isAssignee?.(assignee) ? { do: "assign", assignee } : "bad";
+  }
+  if (value.do === "next") {
+    if (typeof value.text !== "string" || value.text.length > MAX_STEP_NEXT_ACTION) return "bad";
+    // Cleaned as the deals board cleans it (lib/crm-rules.ts), so a deal that already has it is seen to.
+    const text = oneLine(value.text, MAX_STEP_NEXT_ACTION);
+    // Whole days typed as digits, or a whole number: an empty box is never read as today.
+    const days = typeof value.days === "number" ? value.days : typeof value.days === "string" && /^\d{1,3}$/.test(value.days.trim()) ? Number(value.days.trim()) : NaN;
+    return text && Number.isSafeInteger(days) && days >= 0 && days <= MAX_STEP_NEXT_DAYS ? { do: "next", text, days } : "bad";
   }
   return "bad";
 }

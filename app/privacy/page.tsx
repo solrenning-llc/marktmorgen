@@ -27,7 +27,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="October 30, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 2, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -259,7 +259,7 @@ export default function PrivacyPage() {
           <strong className="text-black">
             Ad measurement a creator switches on.
           </strong>{" "}
-          A creator can add their own Meta, Google, TikTok or Pinterest pixel to
+          A creator can add their own Meta, Google, TikTok, Pinterest, X or Reddit pixel to
           their store. When they do, and only once it is allowed, that
           store&apos;s pages load that platform&apos;s script, which sets its own cookies and tells
           the platform about page views, checkouts started, requests for free
@@ -274,7 +274,17 @@ export default function PrivacyPage() {
           allowed, that store also keeps a cookie of its own saying so, with the
           ad click id the visitor last arrived with (Meta&apos;s fbclid,
           TikTok&apos;s ttclid or Pinterest&apos;s epik), for 30 days; it is
-          deleted the moment the choice is no.
+          deleted the moment the choice is no. X is told about purchases and
+          requests for free products only when the creator set up those
+          events with X, and never about checkouts started; where a visitor
+          has not said yes (because their country does not ask first), X is
+          told to limit how it uses the data, with X&apos;s own setting for that.
+          Reddit is told about page visits, purchases and requests for free
+          products, never about checkouts started and never an email address;
+          where a visitor has not said yes, it is marked Limited Data Use with
+          the visitor&apos;s country and, when known, region, and the creator
+          has to switch off Reddit&apos;s automatic matching of email addresses
+          before the pixel can be added.
         </p>
         <p id="ads-server">
           <strong className="text-black">
@@ -427,7 +437,9 @@ export default function PrivacyPage() {
           most four emails in all, never two within a day, and none once it is
           paid, withdrawn or expired), and what became of it: the checkout
           opened for it, whether it was paid, the payment&apos;s reference and
-          any refund Stripe reports. It is kept for 400 days from the day it
+          any refund Stripe reports, or, when the creator marks it as paid
+          outside Stripe, how (cash, bank transfer or another way), the day
+          and a short note of theirs. It is kept for 400 days from the day it
           was made and then deleted by itself; the creator can delete it
           sooner. Deleting yourself from that store (the privacy link at the
           foot of its pages) deletes every request of yours there and withdraws
@@ -1327,8 +1339,10 @@ export default function PrivacyPage() {
           Deleting the product deletes its reviews.
           If the creator switches on the email that asks for a review, we put
           each paid order on a list with when it was paid, send its buyer one
-          email on the creator&apos;s behalf, and keep a mark that its buyer
-          was asked, for 120 days. The link in that email, tied to the order and
+          email on the creator&apos;s behalf and, only if the creator chose
+          it and the buyer has not reviewed yet, one reminder 3 to 14 days
+          later, and keep a mark that its buyer was asked (and reminded), for
+          120 days. The link in that email, tied to the order and
           the address it went to, works for 60 days; its link to stop being
           asked works for 400 days, and pressing it keeps a
           one-way hash of the address for that store for good, so that store
@@ -1768,7 +1782,7 @@ export default function PrivacyPage() {
             <strong className="text-black">
               The ad platforms a creator adds
             </strong>
-            {" "}(Meta, Google, TikTok or Pinterest), whose scripts on that
+            {" "}(Meta, Google, TikTok, Pinterest, X or Reddit), whose scripts on that
             store&apos;s pages receive what the section on ad measurement
             lists, only once they are allowed; and
           </li>

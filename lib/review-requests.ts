@@ -12,7 +12,11 @@
  *
  * What it will not do: ask twice about one order, ask about an order that
  * was refunded or has been reviewed already, or offer anything in return
- * for a review. It asks for an honest one and says the review will show as
+ * for a review. The one exception to "once" is the creator's choice of one
+ * reminder (636 [GL4](a)), 3 to 14 days after it, sent only when the order
+ * is still not refunded, the buyer still may be written to and something in
+ * it is still not reviewed; the first email says it will come, and the
+ * reminder says it is the last. It asks for an honest one and says the review will show as
  * a verified purchase under a name the buyer chooses.
  *
  * Orders are put on the list when their purchase is confirmed
@@ -22,7 +26,7 @@
  * a creator who makes it longer moves the orders still waiting; one who
  * makes it shorter sends those at the old time.
  *
- *   nl:rev:ask:sent:<reference>    that order was asked, 120 days
+ *   nl:rev:ask:sent:<reference>    that order was asked ("sent"), and reminded ("again"), 120 days
  *   nl:rev:off:<statsId>:<hash>    that address pressed stop, kept for good
  *   nl:rev:stop:<token>            who a stop link belongs to, 400 days
  */
@@ -35,7 +39,7 @@ import { canWrite, fromLine, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
-import { ASK_DUE_KEY, type AskEntry, dueAt, readAskMember } from "@/lib/review-ask";
+import { ASK_DUE_KEY, type AskEntry, againDueAt, dueAt, readAskMember } from "@/lib/review-ask";
 import { mintReviewLink, provePurchase } from "@/lib/review-proof";
 import { readReview, reviewId } from "@/lib/reviews";
 import { REVIEW_SITES, parseReviewElsewhere } from "@/lib/review-elsewhere";
@@ -119,17 +123,17 @@ export async function stopReviewRequests(token: string): Promise<boolean> {
   }
 }
 
-/** The words of the email, for one order and the products in it not reviewed yet, in the store's language. */
-export function requestText(store: Store, titles: string[], paidAt: number, link: string): { subject: string; body: string } {
+/** The words of the email, for one order and the products in it not reviewed yet, in the store's language. `stage` "again" is the one reminder. */
+export function requestText(store: Store, titles: string[], paidAt: number, link: string, stage: "first" | "again" = "first"): { subject: string; body: string } {
   const name = store.mail?.fromName || store.name;
   const g = givingWords(store.language);
   const what = titles.length === 1 ? titles[0] : g.listAnd(titles.slice(0, -1).join(", "), titles[titles.length - 1]);
   // The creator's public review page, the same in every request (lib/review-elsewhere.ts): read again here, never trusted as stored.
   const elsewhere = parseReviewElsewhere(store.reviewAsk.elsewhere?.url);
   return {
-    subject: g.askSubject(titles[0]).slice(0, 150),
+    subject: (stage === "again" ? g.againSubject(titles[0]) : g.askSubject(titles[0])).slice(0, 150),
     body: [
-      g.askLead(what, name, speech(store).date(paidAt * 1000)),
+      (stage === "again" ? g.againLead : g.askLead)(what, name, speech(store).date(paidAt * 1000)),
       "",
       g.askHow,
       link,
@@ -137,14 +141,42 @@ export function requestText(store: Store, titles: string[], paidAt: number, link
       "",
       g.askShows(name),
       "",
-      g.askOnly,
+      stage === "again" ? g.againOnly : store.reviewAsk.again ? g.askOneMore(store.reviewAsk.again) : g.askOnly,
     ].join("\n"),
   };
 }
 
 export type AskCounts = { sent: number; dropped: number; waiting: number };
 
-type Ready = { entry: AskEntry; member: string; message: BatchMessage };
+/**
+ * Which email an order is due for, from its mark: the first when it has none,
+ * the one reminder when the first was sent and the creator chose a reminder,
+ * and nothing otherwise (being sent, reminded already, or no reminder).
+ */
+export function askStage(mark: unknown, again: number | undefined): "first" | "again" | null {
+  if (mark === null || mark === undefined) return "first";
+  return mark === "sent" && again ? "again" : null;
+}
+
+/**
+ * What is written once a batch went out: each order's mark ("sent" after the
+ * first, "again" after the reminder), and, after a first, the order back on
+ * the list at its reminder's time when there is one, or off it when not.
+ */
+export function afterSent(
+  items: { reference: string; member: string; paidAt: number; stage: "first" | "again" }[],
+  ask: { days: number; again?: number },
+): (string | number)[][] {
+  const again = ask.again ?? 0;
+  const firsts = items.filter((item) => item.stage === "first");
+  return [
+    ...items.map((item) => ["SET", sentKey(item.reference), item.stage === "again" ? "again" : "sent", "EX", SENT_MARK_SECONDS]),
+    ...(again ? firsts.map((item) => ["ZADD", ASK_DUE_KEY, "XX", againDueAt(item.paidAt, ask.days, again), item.member]) : []),
+    ...(!again && firsts.length ? [["ZREM", ASK_DUE_KEY, ...firsts.map((item) => item.member)]] : []),
+  ];
+}
+
+type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again" };
 
 /**
  * Sends the review requests that are due, until the deadline or fifty
@@ -184,7 +216,14 @@ export async function sendReviewRequests(
       await drop(member);
       continue;
     }
-    const due = dueAt(entry.paidAt, store.reviewAsk.days);
+    // Asked already: only the one reminder may follow, when the creator chose it; anything else is done.
+    const [mark] = await redisPipeline([["GET", sentKey(entry.reference)]]);
+    const stage = askStage(mark, store.reviewAsk.again);
+    if (!stage) {
+      await drop(member);
+      continue;
+    }
+    const due = stage === "first" ? dueAt(entry.paidAt, store.reviewAsk.days) : againDueAt(entry.paidAt, store.reviewAsk.days, store.reviewAsk.again ?? 0);
     if (due > nowSeconds) {
       await later(member, due);
       continue;
@@ -195,11 +234,6 @@ export async function sendReviewRequests(
     }
     if (!canWrite(store)) {
       await later(member, nowSeconds + RETRY_SECONDS.plan);
-      continue;
-    }
-    const [asked] = await redisPipeline([["EXISTS", sentKey(entry.reference)]]);
-    if (Number(asked) === 1) {
-      await drop(member);
       continue;
     }
     const proof = await provePurchase(store, entry.reference);
@@ -230,15 +264,22 @@ export async function sendReviewRequests(
       await drop(member);
       continue;
     }
-    const [claimed] = await redisPipeline([["SET", sentKey(entry.reference), "sending", "NX", "EX", SENT_MARK_SECONDS]]);
-    if (claimed === null) {
-      await drop(member);
-      continue;
+    // Claimed before anything is sent, so two runs never send one email twice: the first by its mark,
+    // the reminder by taking the order off the list (only one run takes it).
+    if (stage === "first") {
+      const [claimed] = await redisPipeline([["SET", sentKey(entry.reference), "sending", "NX", "EX", SENT_MARK_SECONDS]]);
+      if (claimed === null) {
+        await drop(member);
+        continue;
+      }
+    } else {
+      const [taken] = await redisPipeline([["ZREM", ASK_DUE_KEY, member]]);
+      if (Number(taken) !== 1) continue;
     }
     const token = await mintReviewLink(store, entry.reference, email);
     const stop = await stopLink(store, email);
     const fromName = store.mail?.fromName || store.name;
-    const words = requestText(store, open.map((p) => p.title), entry.paidAt, `${storeBase(store)}/review?ask=${token}`);
+    const words = requestText(store, open.map((p) => p.title), entry.paidAt, `${storeBase(store)}/review?ask=${token}`, stage);
     const g = givingWords(store.language);
     const page = `${SITE_URL}/unsubscribe?v=${stop}`;
     const r = render(store, words.subject, words.body, null, {
@@ -255,17 +296,27 @@ export async function sendReviewRequests(
     group.ready.push({
       entry,
       member,
+      stage,
       message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers },
     });
     groups.set(entry.handle, group);
   }
 
   for (const { store, ready } of groups.values()) {
-    const unclaim = () => redisPipeline(ready.map((item) => ["DEL", sentKey(item.entry.reference)]));
+    // Undone when nothing was sent: the first's mark goes, the reminder goes back on the list.
+    const unclaim = async (at: number | null) => {
+      const firsts = ready.filter((item) => item.stage === "first");
+      const agains = ready.filter((item) => item.stage === "again");
+      await redisPipeline([
+        ...firsts.map((item) => ["DEL", sentKey(item.entry.reference)]),
+        ...(at === null ? [] : agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member])),
+      ]);
+      if (at !== null) for (const item of firsts) await later(item.member, at);
+      counts.waiting += at === null ? 0 : agains.length;
+    };
     const reserved = await reserve(store, ready.length);
     if (reserved !== "ok") {
-      await unclaim();
-      for (const item of ready) await later(item.member, nowSeconds + RETRY_SECONDS.plan);
+      await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
     }
     const outcome = await sendBatch(
@@ -274,17 +325,16 @@ export async function sendReviewRequests(
     );
     if (outcome !== "sent") {
       await release(store, ready.length);
-      await unclaim();
-      for (const item of ready) {
-        if (outcome === "refused") await drop(item.member);
-        else await later(item.member, nowSeconds + RETRY_SECONDS.sender);
+      if (outcome === "refused") {
+        await unclaim(null);
+        for (const item of ready) await drop(item.member);
+      } else {
+        await unclaim(nowSeconds + RETRY_SECONDS.sender);
       }
       continue;
     }
-    await redisPipeline([
-      ...ready.map((item) => ["SET", sentKey(item.entry.reference), "sent", "EX", SENT_MARK_SECONDS]),
-      ["ZREM", ASK_DUE_KEY, ...ready.map((item) => item.member)],
-    ]);
+    // After the first, the order waits on the list for its one reminder, when the creator chose one.
+    await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk));
     counts.sent += ready.length;
   }
   return counts;

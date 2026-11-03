@@ -1,3 +1,4 @@
+import { agreementsAllowed } from "@/lib/agreement-rules";
 import { randomBytes } from "node:crypto";
 import { MAIL_TEMPLATES, serializeMailBlocks } from "@/lib/mail-body";
 import { storeBase } from "@/lib/purchase-email";
@@ -293,6 +294,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               fields: (await readFields(store.statsId).catch(() => [])).map((f) => ({ id: f.id, name: f.name, type: f.type, options: f.options })),
               // Each stage named with its pipeline once there is more than one (lib/crm-rules.ts).
               stages: labeledStages(await readPipelines(store.statsId).catch(() => [])).map((st) => ({ id: st.id, name: st.name })),
+              // Whether the plan has proposals and agreements, so a sequence may start when one is signed (635 [GL3]).
+              signing: agreementsAllowed(store),
             }}
             workflowLimits={{
               maxActive: activeFlowLimit(store),

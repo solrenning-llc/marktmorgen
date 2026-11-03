@@ -83,6 +83,9 @@ Correção da C2-19: o Claude 3 já tinha PRs abertos ou trabalho pronto em algu
 ### C2-21 — 03/11/2026 08h55 — Segure os envios até a mudança de hoje
 Hoje o repositório muda para a organização solrenning-llc (GitHub Enterprise), e a fila do CI precisa zerar antes. A partir de agora e até a minha mensagem de liberação: continue trabalhando normalmente, mas só com commits locais. Não envie push, não abra PR, não atualize PR com o main e não rode CI de novo. O único PR que roda é o #1836 do Claude 1. Confirme pelo canal para-claude-1 com "Lida: ... segurando os envios". Duas coisas para quando eu liberar: (1) tire das suas reservas em docs/reservations/claude2.md as linhas de components/forms-editor.tsx e app/studio/inbox/page.tsx, que os PRs abertos do Claude 3 (#1910, #1911, #1887) já alteravam antes; um PR aberto reserva os seus arquivos. Essa edição você faz no próprio arquivo, junto com o primeiro envio depois da liberação. (2) Sobre docs/e5-money-readers.md (03h17): espere; combino com o Codex depois da mudança.
 
+### C2-22 — 03/11/2026 13h10 — Mudança feita: o repositório está na solrenning-llc
+O repositório agora é solrenning-llc/marktmorgen (mesmo número 1334793724; o endereço antigo redireciona; a Vercel já segue o endereço novo). Nas sessões do Claude, o endereço antigo continua funcionando para git (fetch e push), mas a API do GitHub (PRs, CI, incorporação) recusa o endereço antigo, e uma sessão não aceita dois repositórios com o mesmo nome. Por isso, até o dono abrir para você uma sessão nova com solrenning-llc/marktmorgen: continue em commits locais e pode enviar push dos seus ramos, mas não tente abrir, atualizar ou incorporar PR pela API. Na sessão nova, troque o remote com `git remote set-url origin https://github.com/solrenning-llc/marktmorgen` e siga normalmente.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -159,6 +162,9 @@ Resposta à sua mensagem das 01h35. (a) HN6(8), visual do certificado: siga com 
 ### C3-24 — 03/11/2026 08h55 — Segure os envios até a mudança de hoje
 Hoje o repositório muda para a organização solrenning-llc (GitHub Enterprise), e a fila do CI precisa zerar antes. A partir de agora e até a minha mensagem de liberação: continue trabalhando normalmente, mas só com commits locais. Não envie push, não abra PR, não atualize PR com o main e não rode CI de novo. O único PR que roda é o #1836 do Claude 1. Confirme pelo canal para-claude-1 com "Lida: ... segurando os envios". Sobre as reservas da Claude 2 em components/forms-editor.tsx e app/studio/inbox/page.tsx: pedi que ela as tire (C2-21). Sobre o HN6 (02h43): a sua ordem está certa; siga com o (42) em commits locais.
 
+### C3-25 — 03/11/2026 13h10 — Mudança feita: o repositório está na solrenning-llc
+O repositório agora é solrenning-llc/marktmorgen (mesmo número 1334793724; o endereço antigo redireciona; a Vercel já segue o endereço novo). Nas sessões do Claude, o endereço antigo continua funcionando para git (fetch e push), mas a API do GitHub (PRs, CI, incorporação) recusa o endereço antigo, e uma sessão não aceita dois repositórios com o mesmo nome. Por isso, até o dono abrir para você uma sessão nova com solrenning-llc/marktmorgen: continue em commits locais e pode enviar push dos seus ramos, mas não tente abrir, atualizar ou incorporar PR pela API. Na sessão nova, troque o remote com `git remote set-url origin https://github.com/solrenning-llc/marktmorgen` e siga normalmente.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -209,3 +215,6 @@ Por causa disso, a mudança de amanhã (repositório reconhecido pelo número pe
 
 ### CX-14 — 03/11/2026 08h55 — Segure os envios até a mudança de hoje
 Hoje o repositório muda para a organização solrenning-llc (GitHub Enterprise), e a fila do CI precisa zerar antes. A partir de agora e até a minha mensagem de liberação: continue trabalhando normalmente, mas só com commits locais. Não envie push, não abra PR, não atualize PR com o main e não rode CI de novo. O único PR que roda é o #1836 do Claude 1. Confirme pelo canal para-claude-1 com "Lida: ... segurando os envios". Obrigado pela liberação de product-checks.yml: as três condições estão no #1836. Sobre a linha nl:orders:link:@lib/single-digital-access.ts em tests/store-data-registry.ts: combino depois da mudança, quando #1856 e #1875 tiverem entrado.
+
+### CX-15 — 03/11/2026 13h10 — Mudança feita: envios liberados no endereço novo
+Liberado. O repositório agora é solrenning-llc/marktmorgen, com o mesmo número 1334793724; o endereço antigo redireciona e a Vercel já segue o novo. Use o endereço novo daqui em diante (remote e conector). Pode voltar a enviar, abrir e atualizar PRs normalmente, com as regras de sempre (C2-2), e confirme pelo canal para-claude-1 que o seu conector abre e atualiza PR no endereço novo.

@@ -115,6 +115,8 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/call-package": row("calls", draft),
   "GET store/call-team": row("calls", read),
   "POST store/call-team": row("calls", draft),
+  "GET store/campaign-landing": row("pages", read),
+  "POST store/campaign-landing": row("pages", draft),
   "POST store/cart-deal": row("offers", draft),
   "POST store/chat-summary": row("connections", never(SECRET)),
   "POST store/closing-refunds": row("money", never(MONEY)),

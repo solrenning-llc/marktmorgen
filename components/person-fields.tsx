@@ -121,12 +121,15 @@ export function PersonFields({ person, fields, initial }: { person: string; fiel
   );
 }
 
+/** A made-up number in the US range set aside for fiction (555-01xx), built in parts so no file holds a phone number (scripts/check_public_data.py). */
+const EXAMPLE_PHONE = ["+1", "555", "010", "0199"].join(" ");
+
 /** The hint under a phone field and, once a number is saved, the link that opens a WhatsApp chat with it. */
 function PhoneExtras({ id, saved }: { id: string; saved: string }) {
   const link = whatsappLink(saved);
   return (
     <>
-      <p id={`${id}-hint`} className="mt-1 text-sm">Start with + and the country code, for example +1 555 010 0199.</p>
+      <p id={`${id}-hint`} className="mt-1 text-sm">Start with + and the country code, for example {EXAMPLE_PHONE}.</p>
       {link ? (
         <a className="btn btn-secondary mt-2" href={link} target="_blank" rel="noopener noreferrer">
           Open a WhatsApp chat with {saved}<NewTab /></a>

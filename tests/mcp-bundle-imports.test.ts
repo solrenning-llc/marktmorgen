@@ -1,0 +1,128 @@
+/**
+ * 631 [AA1] (a): two more reads an agent makes through the real MCP route,
+ * with a synthetic store. list_bundle_choices gives the same products, order
+ * and reasons as the creator's own bundle picker (app/api/store/bundle, GET,
+ * both reading lib/bundle-choices.ts); get_imports gives the store's imports
+ * as counts, never the file's name, who started it or the rows.
+ */
+import { POST } from "@/app/api/mcp/route";
+import { makeKey } from "@/lib/api-keys";
+import { bundleChoices } from "@/lib/bundle-choices";
+import { addProduct, claimHandle, ensureStatsId, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+const OWNER = "mcp-bundle-imports@example.com";
+
+type Answer = { isError: boolean; raw: string; value: Record<string, unknown> };
+
+async function main(): Promise<void> {
+  redis.clear();
+  const previousFetch = globalThis.fetch;
+  let outside = 0;
+  globalThis.fetch = (async () => {
+    outside += 1;
+    throw new Error("No outside requests in this test");
+  }) as typeof fetch;
+  try {
+    await claimHandle(OWNER, "mcp-bundle-imports", "Bundle Imports", "");
+    await ensureStatsId(OWNER);
+    await setSubscription(OWNER, { customerId: "cus_McpBundleImp01", subscriptionId: "sub_McpBundleImp01", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+    const guide = await addProduct(OWNER, "Sourdough guide", "", "19");
+    const recipes = await addProduct(OWNER, "Recipe cards", "", "9");
+    const club = await addProduct(OWNER, "Bakers club", "", "5", { interval: "month" } as never);
+    const empty = await addProduct(OWNER, "Coming later", "", "12");
+    if (!guide.ok || !recipes.ok || !club.ok || !empty.ok) throw new Error("No synthetic products");
+    await setProductLink(OWNER, guide.product.id, "https://example.com/guide");
+    await setProductLink(OWNER, recipes.product.id, "https://example.com/recipes");
+    const store = (await storeForEmail(OWNER))!;
+    const key = await makeKey(store.sid, "Synthetic reader");
+    if (!key.ok) throw new Error("No synthetic key");
+    const call = async (name: string, args: Record<string, unknown> = {}): Promise<Answer> => {
+      const response = await POST(new Request("https://marktmorgen.com/api/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key.key}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+      }));
+      const body = (await response.json()) as { result: { isError: boolean; content: { text: string }[] } };
+      return { isError: body.result.isError, raw: body.result.content[0].text, value: JSON.parse(body.result.content[0].text) as Record<string, unknown> };
+    };
+
+    part("The products a bundle can be made of, as the picker lists them");
+    type Choice = { id: string; title: string; price: number; can_go_in: boolean; why_not: string | null };
+    const all = await call("list_bundle_choices");
+    const listed = all.value.products as Choice[];
+    is("answered", all.isError, false);
+    is("those that can go in first, then the rest with why", listed.map((p) => [p.title, p.can_go_in, p.why_not]), [
+      ["Sourdough guide", true, null],
+      ["Recipe cards", true, null],
+      ["Coming later", false, "It has nothing to hand over yet"],
+    ]);
+    is("a membership is never offered, as in the picker", listed.some((p) => p.title === "Bakers club"), false);
+    is("prices in the smallest unit", listed[0].price, 1900);
+    const picker = await bundleChoices(store, { owner: "", query: "", page: 1 });
+    is("the same list as the creator's picker", listed.map((p) => [p.id, p.why_not]), picker.products.map((p) => [p.id, p.why]));
+    const searched = await call("list_bundle_choices", { search: "  RECIPE  " });
+    is("found by name, as typed", (searched.value.products as Choice[]).map((p) => p.title), ["Recipe cards"]);
+    const own = await call("list_bundle_choices", { bundle: guide.product.id });
+    is("the bundle being made is left out of its own list", (own.value.products as Choice[]).some((p) => p.id === guide.product.id), false);
+    const far = await call("list_bundle_choices", { page: 9 });
+    is("a page past the end is empty, not an error", [far.isError, (far.value.products as Choice[]).length, far.value.more], [false, 0, false]);
+
+    part("Imports, as counts only");
+    is("none yet", (await call("get_imports")).value.imports, []);
+    const id = "a".repeat(24);
+    const job = {
+      id,
+      kind: "contacts",
+      sid: store.sid,
+      by: "assistant-of-owner@example.com",
+      at: 1_000,
+      state: "done",
+      file: "jane-doe-customers.csv",
+      expected: 3,
+      total: 3,
+      done: 3,
+      cursor: { batch: 0, row: 3 },
+      counts: { added: 1, already: 1, skipped: 1, errors: 0, mailed: 0, unmailed: 0, contacts: 1, stopped: 0 },
+      options: { agreed: false, consentColumn: true, tags: ["from-old-shop"], email: false, source: "csv" },
+      finishedAt: 2_000,
+    };
+    await redis.pipeline([
+      ["SET", `nl:import:${id}`, JSON.stringify(job)],
+      ["LPUSH", `nl:imports:list:${store.sid}`, id],
+      ["SET", `nl:import:${"b".repeat(24)}`, JSON.stringify({ ...job, id: "b".repeat(24), sid: "another-store" })],
+      ["LPUSH", `nl:imports:list:${store.sid}`, "b".repeat(24)],
+    ]);
+    const imports = await call("get_imports");
+    is("this store's import, and not another store's", (imports.value.imports as { id: string }[]).map((i) => i.id), [id]);
+    is("what it came to", (imports.value.imports as Record<string, unknown>[])[0], {
+      id,
+      kind: "contacts",
+      from: "csv",
+      state: "done",
+      started_at: 1_000,
+      finished_at: 2_000,
+      rows_expected: 3,
+      rows_received: 3,
+      rows_looked_at: 3,
+      added: 1,
+      already: 1,
+      skipped: 1,
+      errors: 0,
+      emailed: 0,
+      not_emailed: 0,
+      contacts_not_emailable: 1,
+      stopped: 0,
+    });
+    is("never the file's name, who started it or an address", /jane-doe|@/.test(imports.raw), false);
+
+    is("nothing reached outside", outside, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+  done();
+}
+
+void main();

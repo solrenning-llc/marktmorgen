@@ -28,6 +28,8 @@ import { readQuizFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
 import { readPage, readVersions } from "@/lib/sales-page-store";
 import { readSections } from "@/lib/saved-block-store";
+import { PICKER_PAGE, bundleChoices, choicePage, choiceQuery } from "@/lib/bundle-choices";
+import { storeImports } from "@/lib/imports";
 import type { PageBlock } from "@/lib/sales-page";
 import { type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
 import { expectedShareB, readCounts } from "@/lib/headline-test";
@@ -544,5 +546,55 @@ export async function savedBlocksTool(store: Store) {
     sections: [...sections]
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((section) => ({ id: section.id, name: section.name, updated_at: section.updatedAt, blocks: section.blocks.map(blockForAgent) })),
+  };
+}
+
+/**
+ * The products a bundle can be made of (631 [AA1] (a)): the same list, order
+ * and reasons as the creator's own picker in /studio/bundles
+ * (lib/bundle-choices.ts), so an agent preparing a bundle never offers what
+ * the store would refuse. Prices in the smallest unit of the store's currency.
+ */
+export async function bundleChoicesTool(store: Store, args: Record<string, unknown>) {
+  const owner = typeof args.bundle === "string" ? args.bundle.slice(0, 40) : "";
+  const listed = await bundleChoices(store, { owner, query: choiceQuery(args.search), page: choicePage(args.page) });
+  return {
+    note: `Products that can go in a bundle first, then the rest with why_not saying why they cannot, ${PICKER_PAGE} a page. price is in the smallest unit of the store's currency. hidden products are not listed on the store page.`,
+    page: listed.page,
+    more: listed.more,
+    matches: listed.matches,
+    products: listed.products.map((p) => ({ id: p.id, title: p.title, price: p.priceCents, what: p.what, hidden: p.hidden, can_go_in: p.why === null, why_not: p.why })),
+  };
+}
+
+/**
+ * The store's latest imports from another platform (631 [AA1] (a)): what
+ * kind, where from, how far along and what each row came to, as counts. Not
+ * the file's name nor who started it, which may name a person; not the rows
+ * themselves, and not the report of rows left out, which holds addresses.
+ */
+export async function importsTool(store: Store) {
+  const jobs = await storeImports(store);
+  return {
+    note: "Newest first, at most ten. started_at and finished_at are in milliseconds since 1970 (UTC); finished_at is 0 while it runs. added were brought in, already were there, skipped were left out on purpose (no consent, unsubscribed, a repeated row), errors could not be brought in: the creator downloads that report in the studio.",
+    imports: jobs.map((job) => ({
+      id: job.id,
+      kind: job.kind,
+      from: job.options.source ?? "csv",
+      state: job.state,
+      started_at: job.at,
+      finished_at: job.finishedAt,
+      rows_expected: job.expected,
+      rows_received: job.total,
+      rows_looked_at: job.done,
+      added: job.counts.added,
+      already: job.counts.already,
+      skipped: job.counts.skipped,
+      errors: job.counts.errors,
+      emailed: job.counts.mailed,
+      not_emailed: job.counts.unmailed,
+      contacts_not_emailable: job.counts.contacts ?? 0,
+      stopped: job.counts.stopped ?? 0,
+    })),
   };
 }

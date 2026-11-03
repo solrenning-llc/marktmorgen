@@ -24,6 +24,8 @@ import {
   readPageTestTool,
   readPageVersionsTool,
   savedBlocksTool,
+  bundleChoicesTool,
+  importsTool,
   readSalesPageTool,
   readFullNumbers,
   windowOf,
@@ -179,6 +181,8 @@ export async function POST(request: Request) {
       return result(id, found.found ? said(found.value) : said({ error: found.error }, true));
     }
     if (params.name === "list_saved_blocks") return result(id, said(await savedBlocksTool(store)));
+    if (params.name === "list_bundle_choices") return result(id, said(await bundleChoicesTool(store, params.arguments ?? {})));
+    if (params.name === "get_imports") return result(id, said(await importsTool(store)));
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));
     if (params.name === "get_affiliates") return result(id, said(await affiliatesTool(store)));

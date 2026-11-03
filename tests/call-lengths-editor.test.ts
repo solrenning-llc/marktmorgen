@@ -15,7 +15,8 @@ import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared
 import { POST as saveCall } from "@/app/api/store/call/route";
 import { POST as saveTeam } from "@/app/api/store/call-team/route";
 import { CallEditor } from "@/components/call-editor";
-import { addProduct, claimHandle, ensureStatsId, setCallPackage, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, chargesBelow, claimHandle, ensureStatsId, setCallPackage, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { readSetup, type CallSetup } from "@/lib/call-setup";
 import { readProduct } from "@/lib/catalog";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { store as redis } from "./redis-stub";
@@ -73,15 +74,29 @@ async function main(): Promise<void> {
   await post(saveCall, "call", { id, call, lengths: [{ minutes: 60, price: "80" }] });
   is("and a call with several lengths takes no package", await setCallPackage(OWNER, id, { sessions: 5, priceCents: 20000, days: 0 }), { ok: false, reason: "lengths" });
   is("nor a team", (await post(saveTeam as typeof saveCall, "call-team", { id, team: { hosts: [{ email: OWNER }], mode: "round" } })).error, "team_lengths");
+  const withLengths = readSetup({ ...call, sessions: [], lengths: [{ minutes: 30, cents: 4500 }, { minutes: 60, cents: 8000 }] }) as CallSetup;
+  await post(saveCall, "call", { id, call, lengths: [] });
+  await setCallPackage(OWNER, id, { sessions: 5, priceCents: 20000, days: 0 });
+  is("read again under the record's own write: a package that came in meanwhile refuses the lengths", await setProductCall(OWNER, id, withLengths), { ok: false, reason: "lengths_package" });
+  await setCallPackage(OWNER, id, null);
+  is("and so does a price changed meanwhile", await setProductCall(OWNER, id, readSetup({ ...call, sessions: [], lengths: [{ minutes: 30, cents: 5000 }, { minutes: 60, cents: 8000 }] }) as CallSetup), { ok: false, reason: "lengths_price" });
+  is("the route says which line is wrong", (await post(saveCall, "call", { id, call, lengths: [{ minutes: 60, price: "80" }, { minutes: 90, price: "0" }] })) as unknown, { ok: false, error: "lengths", problem: "price", index: 2 });
+
+  part("A change of the store's currency");
+  const low = { ...(await readProduct((await storeForEmail(OWNER))!, id))!, call: readSetup({ ...call, sessions: [], lengths: [{ minutes: 30, cents: 4500 }, { minutes: 60, cents: 500 }] }) as CallSetup };
+  is("an other length's price below the new currency's smallest charge is said, as every other price is", chargesBelow([low], "sek").filter((c) => c.what === "length").map((c) => [c.label, c.amount]), [["60 minutes", 500]]);
 
   part("In the studio");
+  await post(saveCall, "call", { id, call, lengths: [{ minutes: 60, price: "80" }] });
   const product = (await readProduct((await storeForEmail(OWNER))!, id))!;
   const html = renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: {} as never }, createElement(CallEditor, { product, email: OWNER })));
   is("the summary says each length", html.includes("Paid call · 30, 60 minutes · America/New_York"), true);
   const changed = renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: {} as never }, createElement(CallEditor, { product: { ...product, priceCents: 5000 }, email: OWNER })));
   is("a price changed since says only the first length is on sale, and how to offer the others", changed.includes("only the first length is on sale. Open the hours and save them again to offer the others."), true);
   const editor = readFileSync("components/call-editor.tsx", "utf8");
-  is("other lengths are a named group, one person a time only, each price with its hint, each row removable by name", [editor.includes('<legend className="field-label">Other lengths (optional)</legend>'), editor.includes("{Number(draft.seats) === 1 ? ("), editor.includes("aria-describedby={`lengths-price-${id}`}"), editor.includes("{`Remove ${row.minutes} minutes`}")], [true, true, true, true]);
+  is("other lengths are a named group, one person a time only, each price with its hint, each row removable by name", [editor.includes('<legend className="field-label">Other lengths (optional)</legend>'), editor.includes("{Number(draft.seats) === 1 ? ("), editor.includes("aria-describedby={said}") && editor.includes("`lengths-price-${id}`"), editor.includes("{`Remove ${row.minutes} minutes`}")], [true, true, true, true]);
+  is("a group says before saving that it removes the other lengths; a row no longer longer is marked on itself", [editor.includes("Saving it as a group removes the other lengths"), editor.includes("is not longer than the call's own length of"), editor.includes("aria-invalid={marked || undefined}")], [true, true, true]);
+  is("rows keep their own keys, and focus follows an added or removed row", [editor.includes("<div key={row.id}"), editor.includes("focusSoon(`length-${id}-${added.id}`)"), editor.includes("focusSoon(`lengths-hint-${id}`)")], [true, true, true]);
   is("the team and package editors say why", [readFileSync("components/team-event-editor.tsx", "utf8").includes("team_lengths:"), readFileSync("components/package-editor.tsx", "utf8").includes("lengths:")], [true, true]);
 }
 

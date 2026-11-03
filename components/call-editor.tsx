@@ -136,8 +136,11 @@ export type Draft = {
   /** The cancellation deadline in hours before the start (lib/call-setup.ts, CANCEL_HOURS); 0 is none. */
   cancelHours: number;
   /** Other lengths than the call's own, each with its price as typed (lib/call-lengths.ts); the call's own is at the product's price. */
-  extra: { minutes: number; price: string }[];
+  extra: { id: string; minutes: number; price: string }[];
 };
+
+/** A row's own key, so removing one never moves focus or a typed price onto another. */
+const rowId = () => Math.random().toString(36).slice(2, 10);
 
 /** A Google Calendar or Zoom account this store can make meetings on, as the studio shows it. */
 export type MeetAccount = { provider: MeetProvider; account: string };
@@ -334,7 +337,7 @@ function toDraft(setup: CallSetup | null, kind: "weekly" | "live", currency: Cur
       place: setup.place?.lines.join("\n") ?? "",
       seats: String(setup.seats),
       cancelHours: setup.cancelHours ?? 0,
-      extra: (setup.lengths ?? []).slice(1).map((l) => ({ minutes: l.minutes, price: String(toMajor(l.cents, currency)) })),
+      extra: (setup.lengths ?? []).slice(1).map((l) => ({ id: rowId(), minutes: l.minutes, price: String(toMajor(l.cents, currency)) })),
       // Sessions that are over are not shown, and are let go when this is saved.
       sessions: setup.sessions
         .filter((s) => s.start + s.minutes * 60_000 > now)
@@ -390,6 +393,7 @@ function sessionWhen(start: number, tz: string): string {
 }
 
 const SHORTER_LENGTH = "Each other length has to be longer than the call's own length. Pick a longer one, or make the call's own length shorter.";
+const OWN_PRICE = "This product's price is outside what your store's currency allows for a call. Change the product's price first, then add the other lengths.";
 
 /**
  * Other lengths a one-to-one call may offer, each with its price (637 [GL5],
@@ -397,22 +401,29 @@ const SHORTER_LENGTH = "Each other length has to be longer than the call's own l
  * always the first; each other one is longer, so the price on the store is
  * the call's own. Optional: none keeps the call exactly as it is.
  */
-function OtherLengths({ draft, setDraft, currency, id }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string }) {
+function OtherLengths({ draft, setDraft, currency, id, wrong }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string; wrong: number | null }) {
   const longer = CALL_LENGTHS.filter((m) => m > draft.minutes);
   const unused = longer.filter((m) => !draft.extra.some((row) => row.minutes === m));
   const setRow = (index: number, change: Partial<Draft["extra"][number]>) =>
     setDraft({ ...draft, extra: draft.extra.map((row, i) => (i === index ? { ...row, ...change } : row)) });
+  // Focus follows the change (2.4.3): to a new row's length, or back to the group's explanation once a row is gone.
+  const focusSoon = (target: string) => requestAnimationFrame(() => document.getElementById(target)?.focus());
   return (
     <fieldset aria-describedby={`lengths-hint-${id}`}>
       <legend className="field-label">Other lengths (optional)</legend>
-      <p id={`lengths-hint-${id}`} className="field-hint">
+      <p id={`lengths-hint-${id}`} className="field-hint" tabIndex={-1}>
         {`Let people choose a longer call at its own price. ${draft.minutes} minutes at this product's price is always the first choice. You can add up to ${MAX_CALL_LENGTHS - 1} more.`}
       </p>
-      {draft.extra.map((row, index) => (
-        <div key={index} className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
+      {draft.extra.map((row, index) => {
+        // Not longer than the call's own length any more (its length was changed above): said on the row, kept until the creator decides.
+        const notLonger = row.minutes <= draft.minutes;
+        const marked = notLonger || wrong === index + 1;
+        const said = [notLonger ? `length-short-${id}-${row.id}` : "", `lengths-price-${id}`].filter(Boolean).join(" ");
+        return (
+        <div key={row.id} className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
           <label className="block">
             <span className="field-label">{`Length ${index + 2}`}</span>
-            <select className="field mt-2" value={row.minutes} onChange={(e) => setRow(index, { minutes: Number(e.target.value) })}>
+            <select id={`length-${id}-${row.id}`} className="field mt-2" value={row.minutes} aria-invalid={marked || undefined} aria-describedby={notLonger ? `length-short-${id}-${row.id}` : undefined} onChange={(e) => setRow(index, { minutes: Number(e.target.value) })}>
               {[row.minutes, ...unused].filter((m, i, all) => all.indexOf(m) === i).sort((a, b) => a - b).map((m) => (
                 <option key={m} value={m}>{`${m} minutes`}</option>
               ))}
@@ -427,19 +438,41 @@ function OtherLengths({ draft, setDraft, currency, id }: { draft: Draft; setDraf
               required
               value={row.price}
               onChange={(e) => setRow(index, { price: e.target.value })}
-              aria-describedby={`lengths-price-${id}`}
+              aria-invalid={wrong === index + 1 || undefined}
+              aria-describedby={said}
             />
           </label>
-          <button type="button" className="btn btn-secondary min-h-11" onClick={() => setDraft({ ...draft, extra: draft.extra.filter((_, i) => i !== index) })}>
+          <button
+            type="button"
+            className="btn btn-secondary min-h-11"
+            onClick={() => {
+              setDraft({ ...draft, extra: draft.extra.filter((_, i) => i !== index) });
+              focusSoon(`lengths-hint-${id}`);
+            }}
+          >
             {`Remove ${row.minutes} minutes`}
           </button>
+          {notLonger ? (
+            <p id={`length-short-${id}-${row.id}`} className="field-hint font-semibold text-ink sm:col-span-3">
+              {`${row.minutes} minutes is not longer than the call's own length of ${draft.minutes} minutes. Pick a longer one, or remove it.`}
+            </p>
+          ) : null}
         </div>
-      ))}
+        );
+      })}
       {draft.extra.length ? (
         <p id={`lengths-price-${id}`} className="field-hint mt-2">{`Type each price ${rangeWords(currency)}, like ${priceExample(currency, 80)}.`}</p>
       ) : null}
       {draft.extra.length < MAX_CALL_LENGTHS - 1 && unused.length ? (
-        <button type="button" className="btn btn-secondary mt-3 min-h-11" onClick={() => setDraft({ ...draft, extra: [...draft.extra, { minutes: unused[0], price: "" }] })}>
+        <button
+          type="button"
+          className="btn btn-secondary mt-3 min-h-11"
+          onClick={() => {
+            const added = { id: rowId(), minutes: unused[0], price: "" };
+            setDraft({ ...draft, extra: [...draft.extra, added] });
+            focusSoon(`length-${id}-${added.id}`);
+          }}
+        >
           Add a length
         </button>
       ) : null}
@@ -455,6 +488,8 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
   const [draft, setDraft] = useState<Draft>(() => toDraft(product.call, product.call?.kind ?? "weekly", currency));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The other length the server said is wrong, by its line (1 is the first other one), so the editor marks it.
+  const [wrongLength, setWrongLength] = useState<number | null>(null);
 
   const eligible =
     product.priceCents > 0 &&
@@ -471,13 +506,14 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
   async function send(payload: Record<string, unknown>, confirmation: string) {
     setBusy(true);
     setError(null);
+    setWrongLength(null);
     try {
       const response = await fetch("/api/store/call", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; problem?: string; minutes?: number };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; problem?: string; minutes?: number; index?: number };
       if (data.ok) {
         setOpen(false);
         toast(confirmation);
@@ -486,7 +522,10 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
       }
       // The other lengths (lib/call-lengths.ts): what is wrong with them, in the rules' own words.
       if (data.error === "lengths" && data.problem) {
-        setError(data.problem === "shorter" ? SHORTER_LENGTH : lengthsProblemWords(data.problem as LengthsProblem, currency, data.minutes));
+        // Line 0 is the call's own length at this product's price, which is not typed here.
+        if (data.index === 0 && data.problem === "price") setError(OWN_PRICE);
+        else setError(data.problem === "shorter" ? SHORTER_LENGTH : lengthsProblemWords(data.problem as LengthsProblem, currency, data.minutes));
+        if (typeof data.index === "number" && data.index > 0) setWrongLength(data.index);
         return;
       }
       setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
@@ -588,7 +627,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
             </p>
             {setup.lengths?.length && setup.lengths[0].cents !== product.priceCents ? (
               // The price changed since the lengths were saved: only the call's own length sells (lib/call-lengths.ts, bookingLength).
-              <p className="mt-1 text-sm font-semibold text-ink" role="status">You changed this product's price after setting the other lengths, so only the first length is on sale. Open the hours and save them again to offer the others.</p>
+              <p className="mt-1 text-sm font-semibold text-ink" role="status">{"You changed this product's price after setting the other lengths, so only the first length is on sale. Open the hours and save them again to offer the others."}</p>
             ) : null}
             <p className="mt-1 text-sm text-ink-soft">{summarise(setup)}</p>
             <p className="mt-1 text-sm text-ink-soft">
@@ -904,7 +943,12 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
       </div>
 
       {Number(draft.seats) === 1 ? (
-        <OtherLengths draft={draft} setDraft={setDraft} currency={currency} id={product.id} />
+        <OtherLengths draft={draft} setDraft={setDraft} currency={currency} id={product.id} wrong={wrongLength} />
+      ) : draft.extra.length ? (
+        // A group shares one time, so it has one length: said before saving, never dropped in silence.
+        <p className="field-hint font-semibold text-ink" role="status">
+          {`A group call has one length. Saving it as a group removes the other lengths: ${draft.extra.map((row) => `${row.minutes} minutes`).join(", ")}.`}
+        </p>
       ) : null}
 
       <fieldset>

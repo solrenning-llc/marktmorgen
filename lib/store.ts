@@ -2280,7 +2280,7 @@ async function onProduct<R extends string>(
 
 export type CallResult =
   | { ok: true; store: Store; product: Product }
-  | { ok: false; reason: "none" | "unknown" | "free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle" };
+  | { ok: false; reason: "none" | "unknown" | "free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle" | "lengths_package" | "lengths_price" };
 
 /**
  * Makes a product a paid call, changes when it can be booked, or turns it
@@ -2295,10 +2295,16 @@ export async function setProductCall(
   id: string,
   setup: CallSetup | null,
 ): Promise<CallResult> {
-  return onProduct<"free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle">(
+  return onProduct<"free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle" | "lengths_package" | "lengths_price">(
     email,
     id,
     (product) => {
+      // Several lengths (lib/call-lengths.ts), read again on the record as it is now, under its write: never with a package,
+      // whose sessions are free once bought, and only while the first is still at the product's price.
+      if (setup?.lengths?.length) {
+        if (product.callPackage) return { ok: false, reason: "lengths_package" };
+        if (setup.lengths[0].cents !== product.priceCents) return { ok: false, reason: "lengths_price" };
+      }
       if (setup) {
         if (isFree(product)) return { ok: false, reason: "free" };
         // A bundle hands over its products; a time in a calendar is not one.
@@ -2736,7 +2742,7 @@ export type CurrencyShortfall = {
    * payment of a payment plan, or the deposit on an in-person booking
    * (lib/call-deposit.ts).
    */
-  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan" | "deposit";
+  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan" | "deposit" | "length";
   /** The option's label, or the title of the product offered; "" otherwise. */
   label: string;
   /** In the smallest unit, the same number in either currency. */
@@ -2764,6 +2770,8 @@ export function chargesBelow(products: Product[], currency: Currency): CurrencyS
     if (p.plan && p.plan.amountCents < least) on("plan", "", p.plan.amountCents);
     // A deposit below the smallest charge would quietly become the whole price (lib/call-deposit.ts, chargeNow): said instead.
     if (p.call?.deposit && p.call.deposit < least) on("deposit", "", p.call.deposit);
+    // A call's other lengths (lib/call-lengths.ts) are charged at their own prices: each one below the smallest charge is said too.
+    for (const length of (p.call?.lengths ?? []).slice(1)) if (length.cents < least) on("length", `${length.minutes} minutes`, length.cents);
   }
   return out;
 }

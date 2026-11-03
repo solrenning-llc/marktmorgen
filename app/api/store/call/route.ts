@@ -64,7 +64,8 @@ export async function POST(request: NextRequest) {
             deposit: setup.deposit ?? null,
             team: (await readTeams(store)).has(id),
           });
-          if (!read.ok) return Response.json({ ok: false, error: "lengths", problem: read.problem, ...(read.minutes ? { minutes: read.minutes } : {}) }, { status: 400 });
+          // Which line is wrong, so the editor marks it: 0 is the call's own length at the product's price, 1 the first other one.
+          if (!read.ok) return Response.json({ ok: false, error: "lengths", problem: read.problem, ...(read.index !== undefined ? { index: read.index } : {}), ...(read.minutes ? { minutes: read.minutes } : {}) }, { status: 400 });
           // The call's own length is the shortest: another length is always longer, so the price on the store stays the call's own.
           if (read.lengths[0].minutes !== setup.minutes) return Response.json({ ok: false, error: "lengths", problem: "shorter" }, { status: 400 });
           setup = { ...setup, lengths: read.lengths };

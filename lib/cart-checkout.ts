@@ -37,6 +37,21 @@ import { RECOVERY_OPEN_SECONDS, applyRecovery, recoveryOn, refusedRecovery, with
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { codesMayTakeOff } from "@/lib/discount";
 import { CONSENT_META, type DigitalConsent, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
+import { applyCartShipping, cartItemOf, cartShipping, shippedFirst, shipsWithOnline } from "@/lib/cart-shipping";
+
+/**
+ * A cart whose physical products cannot all be shipped to one address, one
+ * whose shipping cannot be read, or one that mixes shipped products with
+ * products handed over online (lib/cart-shipping.ts): refused before
+ * anything is admitted or opened. The open cart says which before the buyer
+ * pays, so this is met only by a cart that changed in between.
+ */
+export class CartShippingRefused extends Error {
+  constructor(readonly why: "apart" | "unreadable" | "mixed") {
+    super(`This cart cannot be shipped (${why})`);
+    this.name = "CartShippingRefused";
+  }
+}
 
 const DISPLAY_NAME = "branding_settings[display_name]";
 
@@ -91,6 +106,15 @@ export async function createCartCheckout(
 ): Promise<{ url: string; id: string }> {
   if (!store.stripeAccountId) throw new Error("This store has no account");
   if (products.length === 0 || products.length > MAX_CART) throw new Error("A cart holds one to four products");
+  // Shipped and online products are not paid for together yet (lib/cart-shipping.ts, shipsWithOnline).
+  if (shipsWithOnline(products)) throw new CartShippingRefused("mixed");
+  // As the buyer put them in, for the way back to the cart.
+  const asPut = products;
+  // Shipped products first: the order's own product is the one the thanks page and the email show the address under.
+  products = shippedFirst(products);
+  // One address, in a country every physical product ships to (lib/cart-shipping.ts).
+  const shipping = cartShipping(products.map(cartItemOf), extras.country);
+  if (shipping.kind === "apart" || shipping.kind === "unreadable") throw new CartShippingRefused(shipping.kind);
   // Refused before anything is admitted or opened, as for one product (lib/store-checkout.ts).
   const digital = products.some((product) => deliversDigitally(product));
   requireDigitalConsent(digital, extras.digitalConsent);
@@ -153,6 +177,9 @@ export async function createCartCheckout(
     lines.push({ key, cents, id: product.id });
   }
 
+  // Shipped by the creator: one address, and the shipping as its own line (lib/cart-shipping.ts).
+  if (shipping.kind === "ships") applyCartShipping(body, store, products, shipping);
+
   // Sent by an affiliate: who, and each product's share as it is today.
   if (extras.via) {
     const own = extras.via.own ?? null;
@@ -190,7 +217,7 @@ export async function createCartCheckout(
   // one reminder of the whole cart, which the buyer asks for themselves.
   const recovering = recoveryOn(store);
   if (recovering && store.recovery.asks) applyRecovery(body);
-  if (recovering) body.set("cancel_url", `${origin}/@${store.handle}/left?cart=${products.map((p) => encodeURIComponent(p.id)).join(",")}`);
+  if (recovering) body.set("cancel_url", `${origin}/@${store.handle}/left?cart=${asPut.map((p) => encodeURIComponent(p.id)).join(",")}`);
   let asking = recovering && store.recovery.asks;
   let named = isHouseStore(store);
   if (named) body.set(DISPLAY_NAME, store.name);

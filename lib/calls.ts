@@ -258,6 +258,17 @@ export async function paidCalls(store: Store): Promise<
   return (await readCallSessions(store)).paid;
 }
 
+/**
+ * The same reading as paidCalls, with whether it stopped at its last page
+ * while Stripe still had more (older checkouts, which may hold a booking for
+ * a time still to come). For the studio's "Today" counts (lib/today-rules.ts),
+ * which give no number they cannot stand behind.
+ */
+export async function paidCallsRead(store: Store): Promise<{ paid: Awaited<ReturnType<typeof paidCalls>>; partial: boolean }> {
+  const { paid, partial } = await readCallSessions(store);
+  return { paid, partial };
+}
+
 type CallRow = Awaited<ReturnType<typeof paidCalls>>[number];
 
 /**
@@ -314,13 +325,15 @@ async function withMoves(found: CallRow[]): Promise<CallRow[]> {
  * refunded in full. Only completed checkouts are read, so holds that ran out
  * never use up the pages.
  */
-async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refunded: Set<string> }> {
+async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refunded: Set<string>; partial: boolean }> {
   const refunded = new Set<string>();
-  if (!store.stripeAccountId) return { paid: [], refunded };
+  if (!store.stripeAccountId) return { paid: [], refunded, partial: false };
   const handles = saleHandles(store);
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 86400;
   const found: CallRow[] = [];
   let after = "";
+  // Whether the last page read still said there were more: older bookings were then left out.
+  let partial = false;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const list = (await onAccount(
       "GET",
@@ -335,11 +348,12 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
       } else if (call) found.push(call);
     }
     if (list.has_more !== true || rows.length === 0) break;
+    if (page === MAX_PAGES - 1) partial = true;
     const last = rows[rows.length - 1];
     after = typeof last.id === "string" ? last.id : "";
     if (!after) break;
   }
-  return { paid: await withMoves(found), refunded };
+  return { paid: await withMoves(found), refunded, partial };
 }
 
 /**

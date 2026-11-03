@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   is("a book under DRM, a damaged one, one over the limit: no copy", [await stampedCopy(drm, sale, store), await stampedCopy(broken, sale, store), await stampedCopy(huge, sale, store)], [null, null, null]);
   const problems = await stampProblems([epub, drm, broken, huge, zipFile]);
   is("each with its reason for the studio, and none for the book that was marked", [problems.get(drm.pathname), problems.get(broken.pathname), problems.get(huge.pathname), problems.has(epub.pathname), problems.has(zipFile.pathname)], ["protected", "unreadable", "too_big", false, false]);
-  is("the EPUB's own refusals in the studio's few reasons", (["too_big", "encrypted", "zip64", "part_too_big", "encoding", "not_epub", "unreadable"] as const).map(epubProblem), ["too_big", "protected", "unsupported", "unsupported", "unsupported", "unreadable", "unreadable"]);
+  is("the EPUB's own refusals in the studio's few reasons", (["too_big", "encrypted", "signed", "zip64", "part_too_big", "encoding", "not_epub", "unreadable"] as const).map(epubProblem), ["too_big", "protected", "protected", "unsupported", "unsupported", "unsupported", "unreadable", "unreadable"]);
 
   part("A PDF is still stamped as before");
   const pdfDoc = await PDFDocument.create();
@@ -181,7 +181,7 @@ async function main(): Promise<void> {
   part("What the creator and the buyer are told");
   const toggle = readFileSync("components/pdf-stamp-toggle.tsx", "utf8").replace(/\s+/g, " ");
   is("the switch's words name both, from one place", [STAMP_WORDS.box, toggle.includes("{STAMP_WORDS.box}")], ["Mark each buyer's PDF or EPUB with their email", true]);
-  is("it says where an EPUB's line is, and what is handed over as uploaded", [toggle.includes("An EPUB gets the same line written inside the book, where reading apps do not show it but every copy carries it."), toggle.includes("an EPUB with copy protection (DRM) is handed over as you uploaded it")], [true, true]);
+  is("it says where an EPUB's line is, and what is handed over as uploaded", [toggle.includes("An EPUB gets the same line written inside the book, where reading apps do not show it but the file the buyer downloads carries it."), toggle.includes("an EPUB with copy protection (DRM) is handed over as you uploaded it")], [true, true]);
   is("each EPUB reason has its own words", [toggle.includes('problem.reason === "protected"'), toggle.includes('problem.reason === "unsupported"')], [true, true]);
   is("the questions say it", stampBeginnerQuestions(false)[0].a.includes("An EPUB on the same product gets the same line written inside the book"), true);
   const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");

@@ -24,7 +24,7 @@ export function stampBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL
   return [
     {
       q: "What is PDF stamping here?",
-      a: "When it is on, each page of the PDF a buyer downloads after paying carries one small line along the bottom with their email, the date of the order and the order, for personal use, so a copy that turns up somewhere else says whose it was. An EPUB on the same product gets the same line written inside the book, where reading apps do not show it but every copy carries it.",
+      a: "When it is on, each page of the PDF a buyer downloads after paying carries one small line along the bottom with their email, the date of the order and the order, for personal use, so a copy that turns up somewhere else says whose it was. An EPUB on the same product gets the same line written inside the book, where reading apps do not show it but the file the buyer downloads carries it.",
     },
     {
       q: "How do I switch on PDF stamping?",

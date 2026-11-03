@@ -12,8 +12,8 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 function problemWords(problem: Problem): string {
   if (problem.reason === "too_big") return ` is ${readableSize(problem.bytes)}, over the ${readableSize(MAX_STAMP_BYTES)} that can be marked, so buyers get it unmarked.`;
   if (!problem.epub) return " could not be stamped — it is locked with a password or damaged — so buyers get it unstamped. Save it again without a password to stamp it.";
-  if (problem.reason === "protected") return " has copy protection (DRM), so the mark cannot be written into it and buyers get it unmarked.";
-  if (problem.reason === "unsupported") return " is saved in a way the mark cannot be written into (a page too large, text that is not UTF-8, or a ZIP64 file), so buyers get it unmarked. Export it again from your writing app to mark it.";
+  if (problem.reason === "protected") return " has copy protection (DRM) or a digital signature, so the mark is not written into it and buyers get it unmarked.";
+  if (problem.reason === "unsupported") return " is saved in a format the mark cannot read, so buyers get it unmarked. Export it again from your writing app to mark it.";
   return " could not be marked — it is damaged or is not a complete EPUB — so buyers get it unmarked. Export it again from your writing app to mark it.";
 }
 
@@ -106,7 +106,7 @@ export function PdfStampToggle({ product }: { product: Product }) {
       <p id={`${id}-hint`} className="mt-2 text-sm text-ink-soft">
         When a buyer downloads a PDF, each page carries one small line along the bottom, like{" "}
         <span className="break-words font-mono text-xs text-ink">Sold to maya@example.com on Sep 26, 2026 · order …E54F2A · for personal use</span>
-        . An EPUB gets the same line written inside the book, where reading apps do not show it but every copy carries it.
+        . An EPUB gets the same line written inside the book, where reading apps do not show it but the file the buyer downloads carries it.
         It makes a shared copy traceable to its buyer; it cannot stop anyone from sharing. Files up to{" "}
         {readableSize(MAX_STAMP_BYTES)}; a bigger one, a PDF locked with a password or an EPUB with copy protection (DRM) is handed over as you uploaded it.
       </p>

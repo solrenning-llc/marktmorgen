@@ -62,7 +62,7 @@ const PROBLEMS: readonly StampProblem[] = ["too_big", "unreadable", "protected",
 /** Why an EPUB was handed over unmarked, in the studio's few reasons. */
 export function epubProblem(why: EpubProblem): StampProblem {
   if (why === "too_big") return "too_big";
-  if (why === "encrypted") return "protected";
+  if (why === "encrypted" || why === "signed") return "protected";
   if (why === "zip64" || why === "part_too_big" || why === "encoding") return "unsupported";
   return "unreadable";
 }

@@ -30,6 +30,9 @@ is("never on a session from a package, which pays nothing here", body({ embedSit
 part("Checked against the creator's list again");
 is("a listed site, or a way back on one, is taken; anything else is not", [listedSite(store.embedSites, "https://lena.example/x"), listedSite(store.embedSites, "https://evil.example"), listedReturn(store.embedSites, "https://lena.example/thanks"), listedReturn(store.embedSites, "https://evil.example/thanks")], ["https://lena.example", null, "https://lena.example/thanks", null]);
 const route = readFileSync("app/api/store/book/route.ts", "utf8");
+const limit = Number(/const MAX_BODY_BYTES = ([\d_]+);/.exec(route)?.[1].replace(/_/g, ""));
+const longest = new URLSearchParams({ handle: "a".repeat(40), product: "p".repeat(40), start: "1".repeat(14), tz: "America/Argentina/ComodRivadavia", pkg: "k".repeat(60), code: "c".repeat(60), host: "5", host_label: "\u00e9".repeat(60), minutes: "120", site: `https://${"s".repeat(292)}`, return: `https://${"r".repeat(600)}?a=${"\u00e9".repeat(30)}` }).toString();
+is("the whole form fits the route's limit at every field's longest, form-encoded", [longest.length < limit, limit <= 4_000], [true, true]);
 is("the booking route checks what the form sent before handing it on", route.includes("embedSite: listedReturn(store.embedSites, returnAsked) ?? listedSite(store.embedSites, siteAsked) ?? null,"), true);
 
 part("Sent by the calendar's own form");

@@ -20,7 +20,9 @@ import { type DepositFigures, depositWithCode, readDepositCode } from "@/lib/dep
 /** The checkout this browser last opened for a call, so going back frees it. */
 const HOLD_COOKIE = "nl_call_hold";
 
-const MAX_BODY_BYTES = 1_200;
+// The form's fields at their longest (the listed site and the way back from the embedded calendar among them, up to 300 and
+// 700 characters, form-encoded), with room: still a small form, read whole only up to this.
+const MAX_BODY_BYTES = 4_000;
 
 /**
  * A buyer picked a time. It is checked again, held, and the buyer is sent to

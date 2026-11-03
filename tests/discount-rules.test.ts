@@ -127,7 +127,9 @@ async function main(): Promise<void> {
 
   part("Where it is asked and said");
   const route = read("app/api/store/discount/route.ts");
-  is("the route reads the minimum in the store's currency, within its range, else refuses it", route.includes('reason: "minimum"') && /readMoney\(rawMinimum, store\.currency\)/.test(route) && /priceInRange\(cents, store\.currency\)/.test(route), true);
+  // Read in lib/discount-input.ts, shared with the API (630 [HN6](19)), in the store's currency.
+  const asked = read("lib/discount-input.ts");
+  is("the route reads the minimum in the store's currency, within its range, else refuses it", route.includes("readCodeAsked(body, store.currency)") && asked.includes('reason: "minimum"') && /readMoney\(rawMinimum, currency\)/.test(asked) && /priceInRange\(cents, currency\)/.test(asked), true);
   is("and hands it to Stripe with the code", route.includes("createCode(account, code, off, maxRedemptions, minimum)"), true);
   is("a refused minimum is said in words, for every currency", [CODE_PROBLEMS.minimum.length > 20, minimumProblem("eur").includes("EUR"), minimumProblem("jpy").includes("no decimals")], [true, true, true]);
   const editor = read("components/discount-editor.tsx");

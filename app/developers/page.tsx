@@ -469,6 +469,26 @@ export default function DevelopersPage() {
         <p>{`A store may add ${ADDS_PER_DAY.toLocaleString("en-US")} new people a day through the API; past that, 429 daily_limit until the next day.`}</p>
       </LegalSection>
 
+      <LegalSection title="Discount codes">
+        <Endpoint path="/api/v1/codes">
+          Your discount codes, read from your own Stripe account as your studio lists them: what each takes off, how many
+          times it was used, its limit, its smallest order and whether it is live.
+        </Endpoint>
+        <Endpoint method="POST" path="/api/v1/codes">
+          Makes a code on your own Stripe account, checked as in your studio. Send{" "}
+          <code className="font-mono">{`{"code": "LAUNCH20", "percent": 20}`}</code>, or{" "}
+          <code className="font-mono">{`{"code": "TENOFF", "kind": "amount", "amount": "10"}`}</code> in your store&apos;s
+          currency; <code className="font-mono">uses</code> and <code className="font-mono">minimum</code> are optional. A
+          code that cannot be made says why, as <code className="font-mono">error</code> and{" "}
+          <code className="font-mono">message</code>; the same letters twice give 409 <code className="font-mono">taken</code>.
+        </Endpoint>
+        <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
+          Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
+          the list, switched off. Making and switching off need a key that writes; all three answer 409{" "}
+          <code className="font-mono">not_selling</code> while your store is not taking payments.
+        </Endpoint>
+      </LegalSection>
+
       <LegalSection title="Writing: giving a product">
         <Endpoint method="POST" path="/api/v1/access">
           Gives a product to an address with no payment, as an import of past buyers does: a file, a link, a course, a

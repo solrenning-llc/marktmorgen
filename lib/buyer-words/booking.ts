@@ -50,6 +50,9 @@ const en = {
       title: "This cannot be booked right now",
       body: "Nothing was charged.",
     },
+    "code-unknown": { title: "That code does not work here", body: "Nothing was charged. Check the code, or book without it." },
+    "code-limited": { title: "That code cannot be used with a deposit", body: "Nothing was charged. A code with conditions (a limit on its uses, a first purchase or one customer only, some products only, or an end date) cannot be used when part of the price is paid in person. Book without it." },
+    "code-small": { title: "That code leaves too little to pay online", body: "Nothing was charged. With that code, what is left to pay online is below the smallest amount that can be charged. Book without it." },
     slow: {
       title: "That was a lot of tries in a few minutes",
       body: "Nothing was charged. Wait a few minutes, then pick a time again.",
@@ -223,6 +226,10 @@ const en = {
   whereAt: (address: string) => `Where: ${address}`,
   /** A deposit on an in-person booking (lib/call-deposit.ts): what is paid now, and the rest in person. */
   depositRest: (amount: string, store: string) => `A deposit to hold your time. The rest, ${amount}, is paid in person to ${store}.`,
+  /** A code on a booking with a deposit (lib/deposit-code.ts): typed on the booking page, off the whole price. */
+  codeLabel: "Discount code (optional)",
+  codeHelp: "It comes off the whole price. What is left after the deposit is paid in person.",
+  codeOffPrice: (code: string, amount: string) => `Code ${code}: ${amount} off the whole price.`,
 
   // ---- A package of sessions ---------------------------------------------------------
   /** On Stripe's page. */
@@ -275,6 +282,9 @@ const es: BookingWords = {
     invalid: { title: "Primero elige un horario", body: "Elige uno de los horarios de abajo y luego continúa." },
     error: { title: "Algo salió mal por nuestra parte", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },
     unavailable: { title: "No se puede reservar en este momento", body: "No se ha cobrado nada." },
+    "code-unknown": { title: "Ese código no sirve aquí", body: "No se ha cobrado nada. Revisa el código o reserva sin él." },
+    "code-limited": { title: "Ese código no se puede usar con un depósito", body: "No se ha cobrado nada. Un código con condiciones (usos limitados, solo una primera compra o un cliente, solo algunos productos o una fecha de fin) no se puede usar cuando parte del precio se paga en persona. Reserva sin él." },
+    "code-small": { title: "Con ese código queda muy poco para pagar en línea", body: "No se ha cobrado nada. Con ese código, lo que queda por pagar en línea está por debajo del importe mínimo que se puede cobrar. Reserva sin él." },
     slow: { title: "Demasiados intentos en pocos minutos", body: "No se ha cobrado nada. Espera unos minutos y vuelve a elegir un horario." },
   },
   moveNotices: {
@@ -408,6 +418,9 @@ const es: BookingWords = {
   icsWillSend: (store) => `${store} enviará el enlace para unirse.`,
   whereAt: (address) => `Dónde: ${address}`,
   depositRest: (amount, store) => `Un depósito para reservar tu hora. El resto, ${amount}, se paga en persona a ${store}.`,
+  codeLabel: "Código de descuento (opcional)",
+  codeHelp: "Se descuenta del precio completo. Lo que queda después del depósito se paga en persona.",
+  codeOffPrice: (code, amount) => `Código ${code}: ${amount} menos sobre el precio completo.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sesión", "sesiones")}`,
   packageDescription: (sessions, limit) =>
@@ -457,6 +470,9 @@ const fr: BookingWords = {
     invalid: { title: "Choisissez d'abord un créneau", body: "Choisissez l'un des créneaux ci-dessous, puis continuez." },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été débité. Réessayez dans un instant." },
     unavailable: { title: "La réservation n'est pas possible pour l'instant", body: "Rien n'a été débité." },
+    "code-unknown": { title: "Ce code ne fonctionne pas ici", body: "Rien n'a été débité. Vérifiez le code, ou réservez sans lui." },
+    "code-limited": { title: "Ce code ne peut pas être utilisé avec un acompte", body: "Rien n'a été débité. Un code avec des conditions (utilisations limitées, premier achat ou un seul client, certains produits seulement, ou une date de fin) ne peut pas servir quand une partie du prix se paie en personne. Réservez sans lui." },
+    "code-small": { title: "Avec ce code, il reste trop peu à payer en ligne", body: "Rien n'a été débité. Avec ce code, ce qui reste à payer en ligne est sous le plus petit montant qui peut être débité. Réservez sans lui." },
     slow: { title: "Beaucoup de tentatives en quelques minutes", body: "Rien n'a été débité. Patientez quelques minutes, puis choisissez de nouveau un créneau." },
   },
   moveNotices: {
@@ -592,6 +608,9 @@ const fr: BookingWords = {
   icsWillSend: (store) => `${store} enverra le lien pour participer.`,
   whereAt: (address) => `Où${S}: ${address}`,
   depositRest: (amount, store) => `Un acompte pour réserver votre créneau. Le reste, ${amount}, se paie en personne à ${store}.`,
+  codeLabel: "Code de réduction (facultatif)",
+  codeHelp: "Il s'applique au prix entier. Ce qui reste après l'acompte se paie en personne.",
+  codeOffPrice: (code, amount) => `Code ${code}${S}: ${amount} de moins sur le prix entier.`,
 
   packageName: (title, sessions) => `${title} — ${sessions}${S}${pluralFr(sessions, "séance", "séances")}`,
   packageDescription: (sessions, limit) =>
@@ -639,6 +658,9 @@ const de: BookingWords = {
     invalid: { title: "Wählen Sie zuerst einen Termin", body: "Wählen Sie einen der Termine unten und fahren Sie dann fort." },
     error: { title: "Bei uns ist etwas schiefgelaufen", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
     unavailable: { title: "Das kann gerade nicht gebucht werden", body: "Es wurde nichts berechnet." },
+    "code-unknown": { title: "Dieser Code gilt hier nicht", body: "Es wurde nichts berechnet. Prüfen Sie den Code oder buchen Sie ohne ihn." },
+    "code-limited": { title: "Dieser Code gilt nicht mit einer Anzahlung", body: "Es wurde nichts berechnet. Ein Code mit Bedingungen (begrenzte Einlösungen, nur erster Kauf oder ein Kunde, nur bestimmte Produkte oder ein Enddatum) gilt nicht, wenn ein Teil des Preises vor Ort bezahlt wird. Buchen Sie ohne ihn." },
+    "code-small": { title: "Mit diesem Code bleibt online zu wenig zu zahlen", body: "Es wurde nichts berechnet. Mit diesem Code liegt der online zu zahlende Betrag unter dem kleinsten Betrag, der berechnet werden kann. Buchen Sie ohne ihn." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und wählen Sie dann erneut einen Termin." },
   },
   moveNotices: {
@@ -772,6 +794,9 @@ const de: BookingWords = {
   icsWillSend: (store) => `${store} schickt den Link zur Teilnahme.`,
   whereAt: (address) => `Wo: ${address}`,
   depositRest: (amount, store) => `Eine Anzahlung, um Ihren Termin zu sichern. Den Rest, ${amount}, zahlen Sie vor Ort an ${store}.`,
+  codeLabel: "Rabattcode (optional)",
+  codeHelp: "Er gilt für den ganzen Preis. Was nach der Anzahlung bleibt, zahlen Sie vor Ort.",
+  codeOffPrice: (code, amount) => `Code ${code}: ${amount} weniger auf den ganzen Preis.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "Termin", "Termine")}`,
   packageDescription: (sessions, limit) =>
@@ -821,6 +846,9 @@ const it: BookingWords = {
     invalid: { title: "Prima scegli un orario", body: "Scegli uno degli orari qui sotto, poi continua." },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è stato addebitato nulla. Riprova tra un momento." },
     unavailable: { title: "Al momento non si può prenotare", body: "Non è stato addebitato nulla." },
+    "code-unknown": { title: "Quel codice qui non vale", body: "Non è stato addebitato nulla. Controlla il codice, oppure prenota senza." },
+    "code-limited": { title: "Quel codice non vale con un acconto", body: "Non è stato addebitato nulla. Un codice con condizioni (utilizzi limitati, solo primo acquisto o un solo cliente, solo alcuni prodotti, o una data di fine) non vale quando una parte del prezzo si paga di persona. Prenota senza." },
+    "code-small": { title: "Con quel codice resta troppo poco da pagare online", body: "Non è stato addebitato nulla. Con quel codice, quanto resta da pagare online è sotto l'importo minimo che si può addebitare. Prenota senza." },
     slow: { title: "Troppi tentativi in pochi minuti", body: "Non è stato addebitato nulla. Attendi qualche minuto, poi scegli di nuovo un orario." },
   },
   moveNotices: {
@@ -954,6 +982,9 @@ const it: BookingWords = {
   icsWillSend: (store) => `${store} invierà il link per partecipare.`,
   whereAt: (address) => `Dove: ${address}`,
   depositRest: (amount, store) => `Un acconto per riservare il tuo orario. Il resto, ${amount}, si paga di persona a ${store}.`,
+  codeLabel: "Codice sconto (facoltativo)",
+  codeHelp: "Vale sul prezzo intero. Quanto resta dopo l'acconto si paga di persona.",
+  codeOffPrice: (code, amount) => `Codice ${code}: ${amount} in meno sul prezzo intero.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessione", "sessioni")}`,
   packageDescription: (sessions, limit) =>
@@ -1003,6 +1034,9 @@ const nl: BookingWords = {
     invalid: { title: "Kies eerst een tijd", body: "Kies een van de tijden hieronder en ga dan verder." },
     error: { title: "Er ging bij ons iets mis", body: "Er is niets afgeschreven. Probeer het zo meteen opnieuw." },
     unavailable: { title: "Dit kan nu niet worden geboekt", body: "Er is niets afgeschreven." },
+    "code-unknown": { title: "Die code werkt hier niet", body: "Er is niets afgeschreven. Controleer de code, of boek zonder." },
+    "code-limited": { title: "Die code werkt niet met een aanbetaling", body: "Er is niets afgeschreven. Een code met voorwaarden (beperkt aantal keer gebruik, alleen een eerste aankoop of één klant, alleen sommige producten, of een einddatum) werkt niet als een deel van de prijs ter plaatse wordt betaald. Boek zonder." },
+    "code-small": { title: "Met die code blijft er te weinig online te betalen", body: "Er is niets afgeschreven. Met die code ligt wat online te betalen overblijft onder het kleinste bedrag dat kan worden afgeschreven. Boek zonder." },
     slow: { title: "Veel pogingen in een paar minuten", body: "Er is niets afgeschreven. Wacht een paar minuten en kies dan opnieuw een tijd." },
   },
   moveNotices: {
@@ -1135,6 +1169,9 @@ const nl: BookingWords = {
   icsWillSend: (store) => `${store} stuurt de link om mee te doen.`,
   whereAt: (address) => `Waar: ${address}`,
   depositRest: (amount, store) => `Een aanbetaling om je tijd vast te leggen. De rest, ${amount}, betaal je ter plaatse aan ${store}.`,
+  codeLabel: "Kortingscode (optioneel)",
+  codeHelp: "Die gaat van de hele prijs af. Wat na de aanbetaling overblijft, betaal je ter plaatse.",
+  codeOffPrice: (code, amount) => `Code ${code}: ${amount} korting op de hele prijs.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessie", "sessies")}`,
   packageDescription: (sessions, limit) =>
@@ -1184,6 +1221,9 @@ const pt: BookingWords = {
     invalid: { title: "Escolha primeiro um horário", body: "Escolha um dos horários abaixo e depois continue." },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi cobrado. Tente novamente daqui a pouco." },
     unavailable: { title: "Neste momento não é possível marcar", body: "Nada foi cobrado." },
+    "code-unknown": { title: "Esse código não funciona aqui", body: "Nada foi cobrado. Confirme o código, ou marque sem ele." },
+    "code-limited": { title: "Esse código não pode ser usado com um sinal", body: "Nada foi cobrado. Um código com condições (utilizações limitadas, só primeira compra ou um único cliente, só alguns produtos, ou uma data de fim) não pode ser usado quando parte do preço é paga presencialmente. Marque sem ele." },
+    "code-small": { title: "Com esse código fica muito pouco para pagar online", body: "Nada foi cobrado. Com esse código, o que fica para pagar online está abaixo do valor mínimo que pode ser cobrado. Marque sem ele." },
     slow: { title: "Demasiadas tentativas em poucos minutos", body: "Nada foi cobrado. Aguarde alguns minutos e escolha novamente um horário." },
   },
   moveNotices: {
@@ -1317,6 +1357,9 @@ const pt: BookingWords = {
   icsWillSend: (store) => `${store} vai enviar a ligação para entrar.`,
   whereAt: (address) => `Onde: ${address}`,
   depositRest: (amount, store) => `Um sinal para reservar a sua hora. O resto, ${amount}, é pago presencialmente a ${store}.`,
+  codeLabel: "Código de desconto (opcional)",
+  codeHelp: "É descontado do preço total. O que resta depois do sinal é pago presencialmente.",
+  codeOffPrice: (code, amount) => `Código ${code}: menos ${amount} no preço total.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessão", "sessões")}`,
   packageDescription: (sessions, limit) =>

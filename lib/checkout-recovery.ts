@@ -233,9 +233,9 @@ export async function remindAbandoned(
     const product = meta.product ? await readListing(store, meta.product) : null;
     if (!Number.isSafeInteger(start) || start <= 0) return "skip";
     if (!product || !product.call || product.hidden || !canSellProduct(store, product)) return "skip";
-    if (!(await hasOpenTime(store, product as CallListing))) return "skip";
     // The length chosen, on a call with several (lib/call-lengths.ts), as the sale keeps it.
     const minutes = /^\d{1,3}$/.test(meta.minutes ?? "") ? Number(meta.minutes) : undefined;
+    if (!(await hasOpenTime(store, product as CallListing, minutes))) return "skip";
     return deliver(store, { kind: "call", product, start, tz: meta.tz ?? "", minutes }, email, {
       claim: id,
       since: created,
@@ -267,8 +267,10 @@ export async function remindAbandoned(
 }
 
 /** Whether a call has a time or a session anybody could book now. Unreadable is no. */
-async function hasOpenTime(store: Store, product: CallListing): Promise<boolean> {
-  const offer = await slotsForProduct(store, product);
+async function hasOpenTime(store: Store, product: CallListing, minutes?: number): Promise<boolean> {
+  // At the length the buyer chose, on a call with several (lib/call-lengths.ts): the link leads to its times.
+  const chosen = minutes && listedLengths(product.call, product.priceCents).some((l) => l.minutes === minutes) ? minutes : null;
+  const offer = await slotsForProduct(store, product, null, chosen);
   if (!offer) return false;
   return offer.sessions.length > 0 || offer.days.some((day) => day.starts.length > 0);
 }

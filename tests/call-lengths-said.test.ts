@@ -64,11 +64,14 @@ async function main(): Promise<void> {
   is("the price, from the lowest", [pricePill(store, product), pricePill(store, one)], ["from $45", "$45"]);
   const facts = renderToStaticMarkup(createElement(ProductFacts, { store, product }));
   const factsOne = renderToStaticMarkup(createElement(ProductFacts, { store, product: one }));
-  is("the card says every length; one length is said as before", [facts.includes("Call, 30, 60, or 90 minutes, online"), factsOne.includes("30-minute call, online")], [true, true]);
+  is("the card says every length; one length is said as before", [facts.includes("Call of 30, 60, or 90 minutes, online"), factsOne.includes("30-minute call, online")], [true, true]);
+  const inPerson = { ...product, call: { ...product.call!, place: { lines: ["12 Harbor Street"] }, room: null } } as Listing;
+  is("in person, each length too", renderToStaticMarkup(createElement(ProductFacts, { store, product: inPerson })).includes("30, 60, or 90 minutes, in person"), true);
   const card = readFileSync("components/store-product.tsx", "utf8");
-  is("the booking button says the price as the card does", card.includes("w.priced(product.call.kind === \"live\" ? w.pickSession : w.pickTime, pricePill(store, product))"), true);
-  const page = (call: CallSetup) => pageFacts({ language: "en", locale: "en-US", product: { call }, bundleItems: null, sold: null, reviews: null });
+  is("the booking button says the price as the card does, and one length's exactly as before", card.includes("listedLengths(product.call, product.priceCents).length ? pricePill(store, product) : money(product.priceCents)"), true);
+  const page = (call: CallSetup, priceCents = 4500) => pageFacts({ language: "en", locale: "en-US", product: { call, priceCents }, bundleItems: null, sold: null, reviews: null });
   is("one length for every booking is a fact; several are not one", [page(one.call!).length?.value, page(product.call!).length], ["30", undefined]);
+  is("a list the booking page does not offer (a price changed since) leaves the call's own length a fact", page(product.call!, 5000).length?.value, "30");
 
   part("To the Store assistant and to search engines");
   is("each length with its own price", priceWords(product, "usd"), "The buyer picks how long the call is, each length at its own price: 30 minutes for $45; 60 minutes for $80; 90 minutes for $110. Paid once.");
@@ -90,6 +93,11 @@ async function main(): Promise<void> {
   await remindAbandoned(store, left("cs_test_lenleft000002", "bo@example.com", "45") as never);
   const gone = emails.at(-1)!.text;
   is("a length no longer on the list leads to the call's lengths, from the lowest price", [gone.includes("The price: from $45."), gone.includes("?length=")], [true, false]);
+  await setProductCall(OWNER, id, readSetup(weekly) as CallSetup);
+  const plainStore = (await storeForEmail(OWNER)) as Store;
+  await remindAbandoned(plainStore, left("cs_test_lenleft000003", "cy@example.com") as never);
+  const plain = emails.at(-1)!.text;
+  is("a call with one length: its title, its price and its link as before", [plain.includes("\u00b7 30 minutes"), plain.includes("The price: $45."), plain.includes(`${bookLink(plainStore, id)}\n`)], [false, true, true]);
 }
 
 void main().then(() => done(), (error) => {

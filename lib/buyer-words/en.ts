@@ -63,7 +63,7 @@ export const en = {
   callGroup: (minutes: number, seats: number) => `Group call, ${minutes} minutes, up to ${seats} people, online`,
   callOne: (minutes: number) => `${minutes}-minute call, online`,
   /** A call with several lengths (lib/call-lengths.ts): "30 or 60", as the store's language lists them. */
-  callLengths: (list: string) => `Call, ${list} minutes, online`,
+  callLengths: (list: string) => `Call of ${list} minutes, online`,
   /** An in-person booking (lib/call-place.ts): no call, at the creator's address. */
   inPersonLive: (dates: number) => `Live session, in person, ${dates} ${plural(dates, "date", "dates")} scheduled`,
   inPersonGroup: (minutes: number, seats: number) => `${minutes} minutes, up to ${seats} people, in person`,

@@ -47,7 +47,10 @@
  * (components/call-editor.tsx), which checks them with readCallLengths and
  * saves the product's price as the shortest's; and the team route, which must
  * refuse a team for a call with several lengths, as readCallLengths refuses
- * lengths for a team.
+ * lengths for a team, and the package route a package for one. The public
+ * API (lib/api-read.ts) still gives only the call's own price: a `lengths`
+ * field there waits on its documentation (app/developers), open in other
+ * pull requests.
  */
 import { CALL_LENGTHS, type CallSetup, type Range, openSlots } from "@/lib/call-setup";
 import { type Currency, priceInRange, rangeWords, readMoney } from "@/lib/money";

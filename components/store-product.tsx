@@ -661,7 +661,8 @@ export function BuyBox({
     return (
       <>
         <Link prefetch={false} href={`/@${store.handle}/book/${product.id}`} className="btn st-btn btn-block mt-4">
-          {w.priced(product.call.kind === "live" ? w.pickSession : w.pickTime, pricePill(store, product))}
+          {/* Several lengths (lib/call-lengths.ts): from the lowest of their prices, as the card says it. */}
+          {w.priced(product.call.kind === "live" ? w.pickSession : w.pickTime, listedLengths(product.call, product.priceCents).length ? pricePill(store, product) : money(product.priceCents))}
         </Link>
         <PackageOffer store={store} product={product} />
       </>

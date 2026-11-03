@@ -1024,12 +1024,12 @@ export default function PrivacyPage() {
           one affiliate, and then a purchase that used that code counts for them
           with no cookie involved; what we keep for that is which code belongs
           to which affiliate, and nothing about whoever typed it. A creator who
-          pays affiliates per lead may also credit a one-off purchase that no
-          link, code or earlier purchase credits to the affiliate who brought
-          that buyer as a confirmed lead before they bought: to find it, the
-          email address the order was paid with is compared with that
-          program&apos;s leads, and nothing is kept for it beyond what any
-          credited purchase keeps. A creator may
+          pays affiliates per lead may also credit a one-off purchase to the
+          affiliate who brought the buyer as a confirmed lead before they
+          bought. This applies only when no link, code or earlier purchase
+          already credits it. To find it, we compare the email address the
+          order was paid with against that program&apos;s leads. Nothing is
+          kept for it beyond what any credited purchase keeps. A creator may
           also ask that a buyer credited to an affiliate stays credited to them
           for every later purchase. Where they have, we keep a one-way hash of
           the buyer&apos;s email address together with the store&apos;s own id,

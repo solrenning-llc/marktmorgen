@@ -1644,6 +1644,7 @@
     "app/api/store/call-package/route.ts",
     "app/api/store/call-team/route.ts",
     "app/api/store/call/route.ts",
+    "app/api/store/campaign-landing/route.ts",
     "app/api/store/cart-deal/route.ts",
     "app/api/store/cart/route.ts",
     "app/api/store/chat-summary/route.ts",
@@ -1937,6 +1938,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 132
+    "pageTemplates": 133
   }
 }

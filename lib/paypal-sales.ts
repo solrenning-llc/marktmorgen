@@ -425,6 +425,23 @@ export async function readPaid(order: string): Promise<Paid | null> {
   }
 }
 
+/**
+ * A person's paid PayPal orders for these products, for the copy of their
+ * data (619 [SZ3], lib/person-copy.ts): kept on purpose as the order's
+ * record (lib/person-data.ts). Only reads.
+ */
+export async function paypalOrdersOf(statsId: string | null, productIds: string[], email: string): Promise<Paid[]> {
+  if (!statsId || !productIds.length || !isRedisConfigured()) return [];
+  const sets = await redisPipeline(productIds.map((p) => ["SMEMBERS", ownKey(statsId, email, p)]));
+  const orders = [...new Set(sets.flatMap((set) => (Array.isArray(set) ? set.map(String) : [])))].filter((o) => ORDER_ID.test(o));
+  const out: Paid[] = [];
+  for (const order of orders) {
+    const paid = await readPaid(order);
+    if (paid) out.push(paid);
+  }
+  return out;
+}
+
 async function readOpened(order: string): Promise<Opened | null> {
   const [raw] = await redisPipeline([["GET", orderKey(order)]]);
   try {

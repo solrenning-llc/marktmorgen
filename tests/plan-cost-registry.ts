@@ -971,6 +971,9 @@ export const SCOPES: Record<string, ScopeClass> = {
   "waitlist-address": BURST("public-requests"), "numbers-link": BURST("public-requests"), preview: BURST("public-requests"),
   "affhub-address": METERED_EMAIL, "affhub-ip": METERED_EMAIL, "library-address": METERED_EMAIL, "library-ip": METERED_EMAIL,
   "erase-address": METERED_EMAIL, "erase-ip": METERED_EMAIL,
+  // A copy of one's data (619 [SZ3]): its link email is the company's, never a store's (owner, inbox C3-5), bounded per connection and per address.
+  "copy-address": guard("A person asking for a copy of their data: a few an hour per address, one company email each (lib/copy-request.ts); the copy itself is the reviewed data_copy exposure."),
+  "copy-ip": guard("A person asking for a copy of their data: a few an hour per connection, one company email each (lib/copy-request.ts); the copy itself is the reviewed data_copy exposure."),
   "podcast-link-address": METERED_EMAIL, "contact-ip": METERED_EMAIL, "contact-store": METERED_EMAIL, "remind-ask": METERED_EMAIL,
   "remind-store": METERED_EMAIL, "assist-remind-store": METERED_EMAIL, "resend-sale": METERED_EMAIL, "resend-store": METERED_EMAIL, "creator-inbound": METERED_EMAIL,
   "inbox-reply": METERED_EMAIL, "inbox-tell": METERED_EMAIL,
@@ -1009,7 +1012,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "app/api/cron/mail-check/route.ts": COMPANY, "app/api/cron/monthly/route.ts": COMPANY, "app/api/cron/stripe-check/route.ts": COMPANY,
   "app/api/cron/usage/route.ts": COMPANY, "app/api/cron/weekly/route.ts": COMPANY, "lib/account-notice.ts": COMPANY, "lib/auth.ts": COMPANY,
   "lib/billing-reminders.ts": COMPANY, "lib/passkeys.ts": COMPANY, "lib/plan-closing.ts": COMPANY, "lib/closing-buyers.ts": COMPANY, "lib/closing-plan-guard.ts": COMPANY, "lib/plan-refund-flow.ts": COMPANY, "lib/plan-pause.ts": COMPANY,
-  "lib/recovery-address.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/takedown.ts": COMPANY,
+  "lib/recovery-address.ts": COMPANY, "lib/copy-request.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/takedown.ts": COMPANY,
   "lib/trial-nudges.ts": COMPANY, "lib/two-step.ts": COMPANY, "lib/verify-mail.ts": COMPANY, "lib/yearly-offer.ts": COMPANY,
   "lib/inbound-mail.ts": ["store", "company"],
   "app/api/store/mail/route.ts": MONTHLY, "lib/api-write.ts": MONTHLY, "lib/community-mail.ts": MONTHLY, "lib/flows.ts": MONTHLY,

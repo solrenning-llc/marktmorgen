@@ -63,6 +63,10 @@ import { conversationsOf } from "@/lib/community-dm";
 import { chatMessagesOf } from "@/lib/community-chat";
 import { rsvpsOf } from "@/lib/community-events";
 import { votesOf } from "@/lib/community-polls";
+import { keysOf } from "@/lib/licence-keys";
+import { paypalOrdersOf } from "@/lib/paypal-sales";
+import { preordersOf } from "@/lib/preorders";
+import { toldOf } from "@/lib/closing-buyers";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 
@@ -104,15 +108,15 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   // What the erasure keeps on purpose (lib/person-data.ts, "kept"): still theirs to see.
   "lib/affiliates.ts": { how: "marks", what: "Commissions an affiliate earned on your purchases, which name the sale and not you" },
   "lib/community-dm.ts": { how: "marks", what: "Another member's choice not to get your messages, which is theirs and names nobody's address" },
-  "lib/paypal-sales.ts": { how: "pending", what: "Your PayPal orders: the product, the amount, the date and the box you checked before paying" },
-  "lib/licence-keys.ts": { how: "pending", what: "License keys you bought, and the sale each came from" },
+  "lib/paypal-sales.ts": { how: "copied", what: "Your PayPal orders: the product, the amount, the date and the box you checked before paying" },
+  "lib/licence-keys.ts": { how: "copied", what: "License keys you bought, and the sale each came from" },
   "lib/gifts.ts": { how: "pending", what: "Gifts you bought or were given" },
   "lib/group-buy.ts": { how: "pending", what: "Places bought for a group that you bought or were given" },
-  "lib/preorders.ts": { how: "pending", what: "Your pre-orders and what became of them" },
+  "lib/preorders.ts": { how: "copied", what: "Your pre-orders and what became of them" },
   "lib/call-packages.ts": { how: "pending", what: "Packages of calls you bought, and the sessions left" },
   "lib/meet-records.ts": { how: "pending", what: "Your place on a booked group call's guest list" },
   "lib/shipments.ts": { how: "pending", what: "When your physical orders were shipped, and their tracking links" },
-  "lib/closing-buyers.ts": { how: "pending", what: "While the store is closing: that you were emailed it closes" },
+  "lib/closing-buyers.ts": { how: "copied", what: "While the store is closing: that you were emailed it closes" },
   "lib/closing-holds.ts": { how: "pending", what: "While the store is closing: your membership's last payment, kept to give back the time you paid for" },
   "lib/closing-plan-guard.ts": { how: "marks", what: "Nothing about buyers: only the creator's own plan, if one was paid while the store was closing" },
   "lib/stripe-account.ts": { how: "elsewhere", what: "Your payments are on the creator's own Stripe account, not kept by Marktmorgen: your receipts and the store can give you them" },
@@ -317,6 +321,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     };
     const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !votes.length && Object.values(wrote).every((list) => !list.length);
     return empty ? [] : [record];
+  },
+  "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),
+  "lib/paypal-sales.ts": async (s) => paypalOrdersOf(s.statsId, s.productIds, s.email),
+  "lib/preorders.ts": async (s) => (await preordersOf(s.store, s.productIds, s.email)).map((p) => ({ ...p, at: iso(p.at), ...(p.given ? { given: iso(p.given) } : {}), ...(p.revoked ? { revoked: iso(p.revoked) } : {}) })),
+  "lib/closing-buyers.ts": async (s) => {
+    const told = await toldOf(s.store, s.email);
+    return told ? [{ toldTheStoreCloses: told.toldAt ? iso(told.toldAt) : "not yet" }] : [];
   },
   "lib/flows.ts": async (s) => {
     const flows = await readFlows(s.listId);

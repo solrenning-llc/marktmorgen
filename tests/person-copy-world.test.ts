@@ -7,7 +7,7 @@
  */
 import { normaliseEmail } from "@/lib/auth";
 import { storeForEmail } from "@/lib/store";
-import { erasePerson, erasureScope } from "@/lib/person-erasure";
+import { ERASERS, erasePerson, erasureScope } from "@/lib/person-erasure";
 import { COPY_PLAN, copyPerson } from "@/lib/person-copy";
 import { OWNER, makeWorld, seedPerson } from "./erasure-world";
 import { store as redis } from "./redis-stub";
@@ -38,12 +38,14 @@ async function main(): Promise<void> {
   const erased = await erasePerson(store, person, { kind: "person" });
   is("erased", erased.ok, true);
   const after = await copyPerson((await erasureScope((await storeForEmail(OWNER))!, person))!);
-  is("nothing the erasure reaches is left to copy", after.sections.map((s) => s.module), []);
+  // What the erasure keeps on purpose (lib/person-data.ts, "kept") may stay; what it reaches may not.
+  const reached = new Set(ERASERS.map((e) => e.module));
+  is("nothing the erasure reaches is left to copy", after.sections.map((s) => s.module).filter((m) => reached.has(m)), []);
   done();
 }
 
 /** Modules seedPerson writes nothing to for a person (see the log line above). */
-const EXPECTED_EMPTY: string[] = ["lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/assistant-reminder.ts"];
+const EXPECTED_EMPTY: string[] = ["lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/assistant-reminder.ts", "lib/paypal-sales.ts", "lib/licence-keys.ts", "lib/preorders.ts", "lib/closing-buyers.ts"];
 
 main().catch((error) => {
   console.error(error);

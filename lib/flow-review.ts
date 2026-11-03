@@ -51,6 +51,7 @@ export function flowConfigurationIssues(flow: Flow, context: FlowReviewContext):
       if (!target) issues.push(prefix + "The sequence to start is unavailable. Choose another sequence.");
       else if (!target.active || !target.steps.length) issues.push(prefix + "The sequence “" + target.name + "” is paused or has no steps. Review it before expecting this action to start it.");
     }
+    if (action?.do === "stop" && !context.flows.some(target => target.id === action.flowId && target.id !== flow.id)) issues.push(prefix + "The sequence to take them out of is unavailable. Choose another sequence.");
     if (action?.do === "field") {
       const field = context.fields.find(field => field.id === action.field);
       if (!field) issues.push(prefix + "The contact field is unavailable. Choose a current field.");

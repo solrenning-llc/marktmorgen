@@ -612,6 +612,45 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
     }
     return out;
   }
+  if (action.do === "stop") {
+    // 635 [GL3]: out of another sequence where they are now. A run lives as one entry for its next step in the queue,
+    // or in the lease while a step of it is being done, under any address the store has had (queuedOf); or it is held,
+    // waiting for the creator's choice. Each is ended here, and they are not started on it again: each person goes
+    // through a sequence once (startFlows).
+    const target = flows.find((f) => f.id === action.flowId);
+    if (!target) return each(emails, "failed", "The sequence to take them out of was removed.");
+    const note = `Taken out by step ${at.index + 1} of “${at.flow.name}”.`;
+    const out: Acted[] = [];
+    const ended: string[] = [];
+    for (const email of emails) {
+      try {
+        const reply = await redisPipeline(queuedOf(store, target, [email]));
+        const fromQueue = Number(reply[0]) || 0;
+        const fromLease = Number(reply[1]) || 0;
+        if (fromQueue > 0) {
+          ended.push(email);
+          out.push({ email, state: "confirmed", changed: true, note: `Taken out of “${target.name}”.` });
+          continue;
+        }
+        if (fromLease > 0) {
+          // A step of it is being done right now and will put the next one in line: tried again once it has.
+          out.push({ email, state: "deferred", note: `A step of “${target.name}” was being done for them; tried again in a few minutes.`, wait: "retry" });
+          continue;
+        }
+        // Held, waiting for the creator's choice: ended now, so choosing later cannot put them back in it.
+        const found = await readRun(target.id, personOf(email));
+        if (found?.run.status === "held" && found.run.open && (await releaseHold(listId, target.id, personOf(email), found.run.open, note, "ended", -1))) {
+          out.push({ email, state: "confirmed", changed: true, note: `Taken out of “${target.name}”, where it was waiting for your choice.` });
+          continue;
+        }
+        out.push({ email, state: "confirmed", note: `They were not waiting in “${target.name}”.` });
+      } catch {
+        out.push({ email, state: "deferred", note: `Whether they were taken out of “${target.name}” could not be confirmed; tried again in a few minutes.`, wait: "retry" });
+      }
+    }
+    await noteRuns(target.id, ended.map((email) => ({ email, index: -1, stepId: "", kind: "run", state: "ended" as const, note, to: -1, status: "ended" as const })), Math.floor(Date.now() / 1000)).catch((error) => console.error("writing workflow history failed", error));
+    return out;
+  }
   if (action.do === "start") {
     const target = startableFlows(flows, activeFlowLimit(store)).find((f) => f.id === action.flowId && f.active && f.steps.length > 0);
     if (!target) return each(emails, "failed", "The workflow to start is paused, removed, empty or over your plan's number of active workflows.");

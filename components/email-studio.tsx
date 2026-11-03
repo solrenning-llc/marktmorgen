@@ -1744,7 +1744,7 @@ type StepDraft = {
   editorKey: string;
   id?: string;
   /** An email, or a step that acts instead (lib/flow-rules.ts, FlowAction). */
-  kind: "email" | "tag" | "untag" | "start" | "webhook" | "field" | "deal" | "note" | "notify" | "wait" | "assign" | "next" | "rotate";
+  kind: "email" | "tag" | "untag" | "start" | "stop" | "webhook" | "field" | "deal" | "note" | "notify" | "wait" | "assign" | "next" | "rotate";
   actionTag: string;
   /** For a step that makes a teammate responsible for the person's deal. */
   actionAssignee: string;
@@ -1829,6 +1829,7 @@ function actionWords(action: FlowAction, flows: { id: string; name: string }[]):
     const target = action.flowId;
     return `starts the sequence “${flows.find((f) => f.id === target)?.name ?? "a sequence no longer in your store"}”`;
   }
+  if (action.do === "stop") return `takes them out of the sequence “${flows.find((f) => f.id === action.flowId)?.name ?? "a sequence no longer in your store"}”`;
   if (action.do === "webhook") return "tells your webhooks who reached it";
   if (action.do === "field") return `sets a field to “${action.value}”`;
   if (action.do === "deal") return "puts their deal in a stage of your deals board";
@@ -1853,6 +1854,7 @@ function stepCount(steps: Pick<FlowStep, "action">[]): string {
 function actionOf(s: StepDraft): FlowAction | null {
   if (s.kind === "tag" || s.kind === "untag") return { do: s.kind, tag: s.actionTag };
   if (s.kind === "start") return { do: "start", flowId: s.actionFlow };
+  if (s.kind === "stop") return { do: "stop", flowId: s.actionFlow };
   if (s.kind === "webhook") return { do: "webhook" };
   if (s.kind === "field") return { do: "field", field: s.actionField, value: s.actionValue };
   if (s.kind === "deal") return { do: "deal", stage: s.actionStage, title: s.actionTitle };
@@ -2138,7 +2140,7 @@ function Flows({
     if (locked || draft !== null) return;
     const opened = toDraft(flow, products);
     const others = flows.filter(other => other.id !== flow?.id);
-    const next = { ...opened, steps: opened.steps.map(step => step.kind === "start" && !others.some(other => other.id === step.actionFlow) ? { ...step, actionFlow: "" } : step) };
+    const next = { ...opened, steps: opened.steps.map(step => (step.kind === "start" || step.kind === "stop") && !others.some(other => other.id === step.actionFlow) ? { ...step, actionFlow: "" } : step) };
     setDraftBaseline(JSON.stringify(next));
     setError(null);
     setDraft(next);
@@ -2667,7 +2669,7 @@ function Flows({
                       value={s.kind}
                       onChange={(e) => {
                         const v = e.target.value;
-                        const kind = v === "tag" || v === "untag" || v === "start" || v === "webhook" || v === "field" || v === "deal" || v === "note" || v === "notify" || v === "wait" || v === "assign" || v === "next" || v === "rotate" ? v : "email";
+                        const kind = v === "tag" || v === "untag" || v === "start" || v === "stop" || v === "webhook" || v === "field" || v === "deal" || v === "note" || v === "notify" || v === "wait" || v === "assign" || v === "next" || v === "rotate" ? v : "email";
                         setStep(s.editorKey, {
                           kind,
                           actionAssignee: s.actionAssignee || assignees[0] || "",
@@ -2680,7 +2682,8 @@ function Flows({
                       <option value="email">Sends an email</option>
                       <option value="tag">Gives a label</option>
                       <option value="untag">Takes a label off</option>
-                      {otherFlows.length ? <option value="start">Starts another sequence</option> : null}
+                      {otherFlows.length || s.kind === "start" ? <option value="start">Starts another sequence</option> : null}
+                      {otherFlows.length || s.kind === "stop" ? <option value="stop">Takes them out of another sequence</option> : null}
                       <option value="webhook">Tells your webhooks</option>
                       {automation.fields.length ? <option value="field">Sets a field</option> : null}
                       {automation.stages.length ? <option value="deal">Puts their deal in a stage</option> : null}
@@ -2737,6 +2740,17 @@ function Flows({
                       ))}
                     </select>
                     <span className="mt-1 block text-sm text-ink-soft">Each person goes through a sequence once, so nobody is started on it twice.</span>
+                  </label>
+                ) : s.kind === "stop" ? (
+                  <label className="mt-3 block">
+                    <span className="text-sm text-ink-soft">The sequence to take them out of</span>
+                    <select className="field mt-1" value={s.actionFlow} onChange={(e) => setStep(s.editorKey, { actionFlow: e.target.value })} required>
+                      {s.actionFlow ? null : <option value="">A sequence that was removed: choose another</option>}
+                      {otherFlows.map((f) => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-sm text-ink-soft">They stop where they are in it, also when it waits for your choice, and are not started on it again, since each person goes through a sequence once. If a step of it is being done for them at that moment, that one step may still go, and they are taken out right after.</span>
                   </label>
                 ) : s.kind === "field" ? (
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">

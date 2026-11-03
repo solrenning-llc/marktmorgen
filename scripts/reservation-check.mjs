@@ -11,10 +11,12 @@ import { execFileSync } from "node:child_process";
 
 /**
  * Files every agent edits: the queue and the lanes through their own small
- * docs PRs, and generated files every new component regenerates by its
- * script (inbox C3-13), which are never reserved.
+ * docs PRs; generated files every new component regenerates by its script
+ * (inbox C3-13); and the agent coverage table, where each agent adds the rows
+ * of its own new studio routes without touching the others (inbox C3-14).
+ * They are never reserved.
  */
-export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json"]);
+export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts"]);
 
 /** The folder of each agent's own reservations file. */
 export const RESERVATIONS_DIR = "docs/reservations/";

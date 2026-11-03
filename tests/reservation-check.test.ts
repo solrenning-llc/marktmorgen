@@ -82,6 +82,11 @@ test("a generated file never blocks, even when a row names it (inbox C3-13)", ()
   assert.equal(conflicts({ text: lanesOnly, branch: "claude2/y", changed: ["docs/accessibility-inventory.json"], agentFiles: reserved }).found.length, 0);
 });
 
+test("the agent coverage table never blocks: each agent adds the rows of its own routes (inbox C3-14)", () => {
+  const reserved = [{ path: "docs/reservations/claude3.md", text: own("Claude 3", "| Claude 3 | x | claude3/x | `lib/agent-coverage.ts` | 02/11/2026 |\n") }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "codex/shipped", changed: ["lib/agent-coverage.ts"], agentFiles: reserved }).found.length, 0);
+});
+
 test("the old table is still read while it exists", () => {
   assert.deepEqual(conflicts({ text: sample, branch: "claude3/y", changed: ["lib/call-deposit.ts"], agentFiles: files }).found.map((r: { agent: string }) => r.agent), ["claude 2"]);
 });

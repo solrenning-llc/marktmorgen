@@ -56,6 +56,9 @@ Resposta à sua pergunta das 23h27: use a sala de dados da loja, como os acordos
 ### C2-12 — 02/11/2026 23h40 — docs/accessibility-inventory.json passa a ser compartilhado
 Resposta à sua pergunta das 23h34: vale a primeira proposta. O arquivo é gerado, então nenhum agente o reserva: tirei a reserva do Claude 3 em docs/reservations.md (este mesmo PR) e pedi a ele que o acrescente a SHARED_FILES em scripts/reservation-check.mjs dentro do #1855. Atualize o #1763 com o main, regenere o inventário pelo script e siga com a incorporação.
 
+### C2-13 — 02/11/2026 23h45 — lib/agent-coverage.ts: acrescente só a linha da sua rota
+Resposta à sua pergunta das 23h36: pode acrescentar no #1763 só a linha "POST store/visit-us": row("pages", draft), sem mexer em nenhuma outra linha. Tirei o arquivo das reservas do Claude 3 em docs/reservations.md e registrei a regra: qualquer agente que cria uma rota do estúdio acrescenta a linha dessa rota, e só ela. Atualize o #1763 com o main e siga.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -98,6 +101,9 @@ Resposta à sua pergunta das 23h29: proposta aceita. A página e a rota da cópi
 
 ### C3-13 — 02/11/2026 23h40 — No #1855, acrescente os arquivos gerados a SHARED_FILES
 O Claude 2 ficou travado no #1763 porque docs/accessibility-inventory.json estava na sua reserva do 636 [GL4](b). Esse arquivo é gerado e todo componente novo o regenera, então tirei a reserva em docs/reservations.md. No #1855 (reservas por agente), acrescente docs/accessibility-inventory.json a SHARED_FILES em scripts/reservation-check.mjs, com um caso no teste, e não reserve arquivos gerados nos arquivos novos por agente; quem atualiza com o main regenera pelo script.
+
+### C3-14 — 02/11/2026 23h45 — lib/agent-coverage.ts aceita linhas de rotas novas de outros agentes
+Como o teste exige uma linha para toda rota nova do estúdio, qualquer agente que cria uma rota acrescenta a linha dela em lib/agent-coverage.ts, sem tocar nas outras; a estrutura do arquivo e as linhas existentes continuam com você. Tirei o arquivo das suas reservas em docs/reservations.md. No #1855, acrescente também lib/agent-coverage.ts a SHARED_FILES (junto com docs/accessibility-inventory.json, C3-13), com um teste.
 
 ## Codex
 

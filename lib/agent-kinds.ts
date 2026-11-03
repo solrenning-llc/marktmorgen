@@ -5,13 +5,13 @@
  * back. The book that keeps proposals is lib/agent-book.ts; nothing here runs
  * without the creator's confirmation there.
  *
- * The first kind is a product's long description: a draft (confirmed in a
- * batch is fine), with undo.
+ * The kinds so far: a product's long description and its title, each a draft
+ * (confirmed in a batch is fine), with undo.
  */
 import type { Json, ProposalKind } from "@/lib/agent-proposal-rules";
 import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { setProductAbout, type Store } from "@/lib/store";
-import { readListing } from "@/lib/catalog";
+import { setProductAbout, setProductTitle, type Store } from "@/lib/store";
+import { MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 
@@ -38,17 +38,27 @@ export type AgentKind = ProposalKind & {
  * no prompt of the ready outline left in (lib/product-outline.ts). A hidden
  * product (a draft) may hold either; it is checked again when published.
  */
-export async function descriptionRefusal(store: Store, target: string, value: Json): Promise<string | null> {
-  if (typeof value !== "string") return null;
+export async function wordsRefusal(store: Store, target: string, change: { title?: string; about?: string }): Promise<string | null> {
   // A product that cannot be read is taken as published: a failed read never lets words through.
   const listing = await readListing(store, target).catch(() => null);
   if (listing?.hidden === true) return null;
-  const words = { title: listing?.title ?? "", summary: listing?.summary ?? "", about: cleanAbout(value) };
+  // Each field is checked on its own (fastMoneyRefusal), so the field not being changed was checked when it was saved.
+  const words = { title: change.title ?? listing?.title ?? "", summary: listing?.summary ?? "", about: change.about ?? "" };
   const money = fastMoneyRefusal(words);
   if (money) return `The ${money.field === "about" ? "description" : money.field} says "${money.excerpt}". ${money.why} ${money.fix}`;
   const left = productPromptsLeft(words)[0];
   if (left) return `It still holds a prompt from the ready outline: "${left}". Replace it with the product's own words.`;
   return null;
+}
+
+/** The description's words, checked as wordsRefusal says. */
+export async function descriptionRefusal(store: Store, target: string, value: Json): Promise<string | null> {
+  return typeof value === "string" ? wordsRefusal(store, target, { about: cleanAbout(value) }) : null;
+}
+
+/** The title's words, checked as wordsRefusal says. */
+export async function titleRefusal(store: Store, target: string, value: Json): Promise<string | null> {
+  return typeof value === "string" ? wordsRefusal(store, target, { title: value.trim().slice(0, MAX_TITLE_LENGTH) }) : null;
 }
 
 /** A product's long description, as plain text (lib/product-about.ts). */
@@ -76,4 +86,22 @@ export const PRODUCT_DESCRIPTION: AgentKind = {
   },
 };
 
-export const AGENT_KINDS: ReadonlyMap<string, AgentKind> = new Map([PRODUCT_DESCRIPTION].map((k) => [k.name, k]));
+/** A product's title (631 [AA1] (c)): a draft too, with undo; never empty. Its price and terms are not touched. */
+export const PRODUCT_TITLE: AgentKind = {
+  name: "product.title",
+  scope: "draft",
+  undo: true,
+  maxBytes: MAX_TITLE_LENGTH * 4 * 2 + 64,
+  async current(store, target) {
+    const listing = await readListing(store, target);
+    return listing ? listing.title : null;
+  },
+  refusal: titleRefusal,
+  async write(store, ref, target, value) {
+    if (typeof value !== "string" || !value.trim()) return false;
+    if (await titleRefusal(store, target, value)) return "terms";
+    return (await setProductTitle(ref, target, value)).ok;
+  },
+};
+
+export const AGENT_KINDS: ReadonlyMap<string, AgentKind> = new Map([PRODUCT_DESCRIPTION, PRODUCT_TITLE].map((k) => [k.name, k]));

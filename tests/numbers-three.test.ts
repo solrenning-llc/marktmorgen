@@ -146,7 +146,7 @@ async function main(): Promise<void> {
   const made = await makeKey((await ensureStoreId(OWNER))!.sid, "Claude");
   if (!made.ok) throw new Error("no key made");
   const tools = (await answer({ jsonrpc: "2.0", id: 5, method: "tools/list" }, made.key)).result?.tools as { name: string; annotations: { readOnlyHint: boolean } }[];
-  is("with the key: twenty-two tools, all reading but the one that prepares a change", tools.map((t) => [t.name, t.annotations.readOnlyHint]), [
+  is("with the key: twenty-three tools, all reading but the two that prepare a change", tools.map((t) => [t.name, t.annotations.readOnlyHint]), [
     ["get_numbers", true],
     ["list_products", true],
     ["get_revenue_by_channel", true],
@@ -168,6 +168,7 @@ async function main(): Promise<void> {
     ["get_page_versions", true],
     ["list_saved_blocks", true],
     ["propose_product_description", false],
+    ["propose_product_title", false],
     ["get_store", true],
   ]);
   const call = async (name: string, args: Record<string, unknown> = {}) => {

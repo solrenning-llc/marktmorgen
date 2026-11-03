@@ -3104,6 +3104,18 @@ export async function editProduct(
   return { ok: true, store: result.store, product: result.product };
 }
 
+/**
+ * A product's title alone, for a change the creator confirmed from the AI
+ * agent's proposals (631 [AA1] (c), lib/agent-kinds.ts): its price, terms and
+ * everything else stay exactly as they are. Empty is refused, as on the
+ * studio's own form. The words checks are the caller's (descriptionRefusal).
+ */
+export async function setProductTitle(email: string, id: string, rawTitle: string): Promise<ProductResult> {
+  const title = rawTitle.trim().slice(0, MAX_TITLE_LENGTH);
+  const result = await onProduct<"title">(email, id, (product) => (title ? { ...product, title } : { ok: false, reason: "title" }));
+  return result.ok ? { ok: true, store: result.store, product: result.product } : result;
+}
+
 /** Takes something off the store. Returns the product as it was, for its files. */
 export async function removeProduct(
   email: string,

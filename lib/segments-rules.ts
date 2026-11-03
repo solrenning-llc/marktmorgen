@@ -14,11 +14,24 @@ import { RFM_GROUPS, type RfmGroup } from "@/lib/rfm-rules";
  * (lib/rfm-rules.ts, 270 [GR1], unit 3b), absent otherwise, as on every
  * email, draft and group saved before it.
  */
-export type Narrow = { minSpent: number; channel: string; quietDays: number; group?: RfmGroup };
+export type Narrow = {
+  minSpent: number;
+  channel: string;
+  quietDays: number;
+  group?: RfmGroup;
+  /**
+   * Bought here in the last this many days (one of ACTIVE_DAYS; 461 [EL5],
+   * unit 1): the buyers still active, from the same buyers' ledger as the
+   * others. Absent otherwise, as on every email, draft and group saved before.
+   */
+  activeDays?: number;
+};
 
 export const NO_NARROW: Narrow = { minSpent: 0, channel: "", quietDays: 0 };
 /** The choices offered for "has not bought in the last…", in days. */
 export const QUIET_DAYS = [30, 60, 90, 180, 365] as const;
+/** The choices offered for "bought in the last…", in days. */
+export const ACTIVE_DAYS = [30, 60, 90, 180] as const;
 export const MAX_SEGMENTS = 20;
 export const MAX_SEGMENT_NAME = 60;
 export const MAX_SPENT = 100_000_000;
@@ -36,19 +49,21 @@ export function readNarrow(raw: unknown): Narrow {
   const quiet = Math.round(Number(value.quietDays));
   const channel = typeof value.channel === "string" ? value.channel.trim().toLowerCase() : "";
   const group = RFM_GROUPS.find((g) => g.id === value.group)?.id;
+  const active = Math.round(Number(value.activeDays));
   return {
     minSpent: Number.isFinite(spent) && spent > 0 ? Math.min(spent, MAX_SPENT) : 0,
     channel: CHANNEL.test(channel) ? channel : "",
     quietDays: (QUIET_DAYS as readonly number[]).includes(quiet) ? quiet : 0,
     ...(group ? { group } : {}),
+    ...((ACTIVE_DAYS as readonly number[]).includes(active) ? { activeDays: active } : {}),
   };
 }
 
 export function isNarrowed(narrow: Narrow | null | undefined): narrow is Narrow {
-  return Boolean(narrow && (narrow.minSpent > 0 || narrow.channel || narrow.quietDays > 0 || narrow.group));
+  return Boolean(narrow && (narrow.minSpent > 0 || narrow.channel || narrow.quietDays > 0 || narrow.group || narrow.activeDays));
 }
 
-const NARROW_KEYS = new Set(["minSpent", "channel", "quietDays", "group"]);
+const NARROW_KEYS = new Set(["minSpent", "channel", "quietDays", "group", "activeDays"]);
 
 /**
  * Whether a narrowing sent or kept is exactly the one read from it: a field
@@ -58,7 +73,7 @@ const NARROW_KEYS = new Set(["minSpent", "channel", "quietDays", "group"]);
  */
 export function sameNarrow(raw: Record<string, unknown>, narrow: Narrow): boolean {
   if (!Object.keys(raw).every((key) => NARROW_KEYS.has(key))) return false;
-  return raw.minSpent === narrow.minSpent && raw.channel === narrow.channel && raw.quietDays === narrow.quietDays && (raw.group ?? undefined) === narrow.group;
+  return raw.minSpent === narrow.minSpent && raw.channel === narrow.channel && raw.quietDays === narrow.quietDays && (raw.group ?? undefined) === narrow.group && (raw.activeDays ?? undefined) === narrow.activeDays;
 }
 
 /** Empty/zero means no minimum; malformed or out-of-range text must not broaden an audience. */

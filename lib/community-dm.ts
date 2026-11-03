@@ -424,6 +424,28 @@ export async function forgetDmPerson(id: string, who: string): Promise<number> {
   return pairs.length;
 }
 
+/**
+ * Every private conversation and request one member is in, whole, for the
+ * copy of their data (619 [SZ3], lib/person-copy.ts): the conversations the
+ * erasure deletes. Each message says whether they wrote it; the other
+ * person is not named (their key, handle and address are theirs). Only
+ * reads: no read mark is set.
+ */
+export async function conversationsOf(id: string, who: string): Promise<{ request: boolean; messages: { mine: boolean; fromCreator: boolean; text: string; at: number }[] }[]> {
+  const [mine, asked] = await redisPipeline([["ZRANGEBYSCORE", inboxKey(id, who), "-inf", "+inf"], ["ZRANGEBYSCORE", askedKey(id, who), "-inf", "+inf"]]);
+  const requests = new Set((Array.isArray(asked) ? asked : []).map(String));
+  const pairs = [...new Set([...(Array.isArray(mine) ? mine : []), ...requests].map(String))].filter((p) => p.split(".").includes(who));
+  if (!pairs.length) return [];
+  const lists = await redisPipeline(pairs.map((pair) => ["LRANGE", chatKey(id, pair), 0, -1]));
+  return pairs.map((pair, i) => ({
+    request: requests.has(pair),
+    messages: (Array.isArray(lists[i]) ? (lists[i] as unknown[]) : [])
+      .map(parseMessage)
+      .filter((m): m is Message => m !== null)
+      .map((m) => ({ mine: m.a === who, fromCreator: m.a === CREATOR, text: m.text, at: m.at })),
+  }));
+}
+
 /** How many conversations and requests one member is in: what deleting them goes through (lib/community-erasure.ts). */
 export async function dmCount(id: string, who: string): Promise<number> {
   const [mine, asked] = await redisPipeline([["ZCARD", inboxKey(id, who)], ["ZCARD", askedKey(id, who)]]);

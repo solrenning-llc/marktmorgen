@@ -281,6 +281,34 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
   return gone;
 }
 
+/**
+ * Every certificate of these courses that is a person's, found exactly as the
+ * erasure finds them (their own list, the one standing, and the old ones by
+ * address), withdrawn ones included: for the copy of their data (619 [SZ3]).
+ * Only reads.
+ */
+export async function certificatesOf(courseIds: string[], email: string): Promise<Certificate[]> {
+  if (!courseIds.length || !isRedisConfigured()) return [];
+  const who = emailKey(email);
+  const address = email.trim().toLowerCase();
+  const out: Certificate[] = [];
+  for (const courseId of courseIds) {
+    const [mine, current, size] = await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]);
+    const [all] = Number(size) > 0 && Number(size) <= LEGACY_SCAN ? await redisPipeline([["SMEMBERS", allKey(courseId)]]) : [[]];
+    const ids = new Set<string>([...(Array.isArray(mine) ? mine.map(String) : []), ...(typeof current === "string" ? [current] : [])].filter((id) => CERT_ID_PATTERN.test(id)));
+    const candidates = [...new Set([...ids, ...(Array.isArray(all) ? all.map(String) : []).filter((id) => CERT_ID_PATTERN.test(id))])];
+    for (let i = 0; i < candidates.length; i += 500) {
+      const chunk = candidates.slice(i, i + 500);
+      const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
+      (Array.isArray(rows) ? rows : []).forEach((raw, k) => {
+        const certificate = parseCertificate(raw);
+        if (certificate && (ids.has(chunk[k]) || certificate.email.trim().toLowerCase() === address)) out.push(certificate);
+      });
+    }
+  }
+  return out;
+}
+
 /** How many certificates each course keeps: what deleting a person may read (lib/person-erasure.ts). */
 export async function certificateCount(courseIds: string[]): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;

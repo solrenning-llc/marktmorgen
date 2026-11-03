@@ -14,7 +14,7 @@ export async function checkStoreActivation({browser,LOCAL,fixture,axeSource,is})
  is("HT5 draft before checklist "+width,await draft.evaluate(node=>!!(node.compareDocumentPosition(document.querySelector('[aria-labelledby="start-title"]'))&Node.DOCUMENT_POSITION_FOLLOWING)),true);
  is("HT5 registration clock honest "+width,(await guide.innerText()).includes("This measures store registration, not an earlier sign-in or a sale."),true);
  is("HT5 manual publication step "+width,(await guide.innerText()).includes("Publish your first offer yourself"),true);
- await guide.locator("summary").click();is("HT5 shared checklist "+width,(await guide.innerText()).includes("saved store activation checklist"),true);
+ await guide.locator("summary",{hasText:"Review the saved launch checklist"}).click();is("HT5 shared checklist "+width,(await guide.innerText()).includes("saved store activation checklist"),true);
  await draft.locator("#setup-about").fill("I sell a synthetic lesson checklist.");
  await draft.getByRole("button",{name:"Draft my store",exact:true}).click();
  await draft.getByText("Products, as drafts",{exact:true}).waitFor();

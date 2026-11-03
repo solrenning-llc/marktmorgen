@@ -16,11 +16,20 @@
  * right. A name in a script they do not cover —
  * Chinese, Arabic, Hindi — is not drawn as empty boxes: canDraw says no, and
  * the page, which the browser draws with its own fonts, is the certificate.
+ *
+ * Read aloud as well as seen (630 [HN6](8), unit 1): the file is tagged
+ * (lib/tagged-pdf.ts) with a heading and paragraphs in reading order, the
+ * frame, rule and seal marked as decoration, its language and title set, and
+ * the PDF/UA identification in its metadata. Every line of text is at least
+ * 7:1 against the paper (WCAG 1.4.6): the store's color is darkened for the
+ * store's name only as far as it must be, and kept as it is for the frame.
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PDFDocument, type PDFFont, type PDFPage, degrees, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
+import { PageTagger } from "@/lib/tagged-pdf";
+import { contrast, mix } from "@/lib/store-look";
 
 const W = 792;
 const H = 612;
@@ -69,10 +78,33 @@ export type CertificateSheet = {
   stamp: string;
   /** The store's color, #rrggbb. */
   accent: string;
+  /** The store's language, as a BCP 47 tag ("en", "pt"): what a screen reader reads it in. */
+  lang: string;
 };
 
+/** The paper, the ink and the softer ink the sheet is printed with. */
+export const PAPER = "#fdfcfa";
+export const INK = "#17141f";
+const SOFT = "#5c5a6b";
+/** The contrast every line of text keeps against the paper (WCAG 1.4.6). */
+export const TEXT_CONTRAST = 7;
+
+function hexOf(raw: string): string {
+  return /^#[0-9a-f]{6}$/i.test(raw) ? raw.toLowerCase() : "#5a36ee";
+}
+
+/** `hex` moved toward the ink only as far as it takes to read at 7:1 on the paper. */
+export function readableInk(hex: string): string {
+  const start = hexOf(hex);
+  for (let step = 0; step <= 50; step += 1) {
+    const candidate = mix(start, INK, step / 50);
+    if (contrast(candidate, PAPER) >= TEXT_CONTRAST) return candidate;
+  }
+  return INK;
+}
+
 function color(hex: string) {
-  const value = /^#[0-9a-f]{6}$/i.test(hex) ? hex : "#5a36ee";
+  const value = hexOf(hex);
   return rgb(parseInt(value.slice(1, 3), 16) / 255, parseInt(value.slice(3, 5), 16) / 255, parseInt(value.slice(5, 7), 16) / 255);
 }
 
@@ -82,12 +114,13 @@ function fit(font: PDFFont, text: string, max: number, min: number, width: numbe
   return min;
 }
 
-/** One line, centered, shortened with an ellipsis if even the smallest size is too wide. */
-function centered(page: PDFPage, font: PDFFont, text: string, y: number, max: number, min: number, ink: ReturnType<typeof rgb>, width = W - 200) {
+/** One line, centered, shortened with an ellipsis if even the smallest size is too wide. Returns the line drawn. */
+function centered(page: PDFPage, font: PDFFont, text: string, y: number, max: number, min: number, ink: ReturnType<typeof rgb>, width = W - 200): string {
   const size = fit(font, text, max, min, width);
   let line = text;
   while (line.length > 1 && font.widthOfTextAtSize(line, size) > width) line = `${Array.from(line).slice(0, -2).join("")}…`;
   page.drawText(line, { x: (W - font.widthOfTextAtSize(line, size)) / 2, y, size, font, color: ink });
+  return line;
 }
 
 /** The certificate, drawn as a one-page PDF. */
@@ -95,10 +128,6 @@ export async function certificatePdf(sheet: CertificateSheet): Promise<Uint8Arra
   const loaded = await loadFonts();
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
-  pdf.setTitle(`${sheet.kicker} — ${sheet.name}`);
-  pdf.setAuthor(sheet.storeName);
-  pdf.setCreator(sheet.storeName);
-  pdf.setProducer(sheet.storeName);
   const sans = await pdf.embedFont(loaded.sans, { subset: true });
   const semi = await pdf.embedFont(loaded.semi, { subset: true });
   // Embedded whole: cut to the letters this sheet uses, its glyphs come out
@@ -106,39 +135,57 @@ export async function certificatePdf(sheet: CertificateSheet): Promise<Uint8Arra
   // already reduced to Latin, Greek and Cyrillic, about 160 KB.
   const serif = await pdf.embedFont(loaded.serif, { subset: false });
   const page = pdf.addPage([W, H]);
+  const tag = new PageTagger(pdf, page);
   const accent = color(sheet.accent);
-  const ink = rgb(0.09, 0.08, 0.12);
-  const soft = rgb(0.36, 0.35, 0.42);
+  const accentText = color(readableInk(sheet.accent));
+  const ink = color(INK);
+  const soft = color(readableInk(SOFT));
+  /** A centered line read as `role`; a shortened one is read in full. */
+  const say = (role: "H1" | "P", font: PDFFont, text: string, y: number, max: number, min: number, shade: ReturnType<typeof rgb>) => {
+    let drawn = text;
+    tag.text(role, () => {
+      drawn = centered(page, font, text, y, max, min, shade);
+    });
+    if (drawn !== text) tag.retext(text);
+  };
 
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: rgb(0.992, 0.988, 0.98) });
-  page.drawRectangle({ x: 24, y: 24, width: W - 48, height: H - 48, borderColor: accent, borderWidth: 6 });
-  page.drawRectangle({ x: 38, y: 38, width: W - 76, height: H - 76, borderColor: accent, borderWidth: 1, opacity: 0, borderOpacity: 0.6 });
+  tag.artifact(() => {
+    page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: color(PAPER) });
+    page.drawRectangle({ x: 24, y: 24, width: W - 48, height: H - 48, borderColor: accent, borderWidth: 6 });
+    page.drawRectangle({ x: 38, y: 38, width: W - 76, height: H - 76, borderColor: accent, borderWidth: 1, opacity: 0, borderOpacity: 0.6 });
+  });
 
-  centered(page, semi, sheet.storeName.toLocaleUpperCase(), H - 92, 13, 9, accent);
-  centered(page, serif, sheet.kicker, H - 150, 34, 22, ink);
-  centered(page, sans, sheet.certifies, H - 205, 14, 10, soft);
-  centered(page, serif, sheet.name, H - 265, 44, 22, ink);
-  page.drawLine({ start: { x: W / 2 - 150, y: H - 282 }, end: { x: W / 2 + 150, y: H - 282 }, thickness: 1, color: accent });
-  centered(page, sans, sheet.hasCompleted, H - 318, 14, 10, soft);
-  centered(page, semi, sheet.title, H - 360, 26, 13, ink);
-  centered(page, sans, sheet.taughtBy, H - 396, 13, 9, soft);
+  say("P", semi, sheet.storeName.toLocaleUpperCase(), H - 92, 13, 9, accentText);
+  say("H1", serif, sheet.kicker, H - 150, 34, 22, ink);
+  say("P", sans, sheet.certifies, H - 205, 14, 10, soft);
+  say("P", serif, sheet.name, H - 265, 44, 22, ink);
+  tag.artifact(() => {
+    page.drawLine({ start: { x: W / 2 - 150, y: H - 282 }, end: { x: W / 2 + 150, y: H - 282 }, thickness: 1, color: accent });
+  });
+  say("P", sans, sheet.hasCompleted, H - 318, 14, 10, soft);
+  say("P", semi, sheet.title, H - 360, 26, 13, ink);
+  say("P", sans, sheet.taughtBy, H - 396, 13, 9, soft);
 
-  // The seal: a ring in the store's color with a check mark drawn as two strokes.
+  // The seal: a ring in the store's color with a check mark drawn as two strokes. It only decorates.
   const cx = 120;
   const cy = 108;
-  page.drawCircle({ x: cx, y: cy, size: 34, color: accent });
-  page.drawCircle({ x: cx, y: cy, size: 27, borderColor: rgb(1, 1, 1), borderWidth: 1.5, opacity: 0 });
-  page.drawLine({ start: { x: cx - 12, y: cy }, end: { x: cx - 3, y: cy - 10 }, thickness: 4, color: rgb(1, 1, 1) });
-  page.drawLine({ start: { x: cx - 3, y: cy - 10 }, end: { x: cx + 14, y: cy + 11 }, thickness: 4, color: rgb(1, 1, 1) });
+  tag.artifact(() => {
+    page.drawCircle({ x: cx, y: cy, size: 34, color: accent });
+    page.drawCircle({ x: cx, y: cy, size: 27, borderColor: rgb(1, 1, 1), borderWidth: 1.5, opacity: 0 });
+    page.drawLine({ start: { x: cx - 12, y: cy }, end: { x: cx - 3, y: cy - 10 }, thickness: 4, color: rgb(1, 1, 1) });
+    page.drawLine({ start: { x: cx - 3, y: cy - 10 }, end: { x: cx + 14, y: cy + 11 }, thickness: 4, color: rgb(1, 1, 1) });
+  });
 
   const proofSize = 9.5;
-  page.drawText(sheet.idLine, { x: W - 70 - sans.widthOfTextAtSize(sheet.idLine, proofSize), y: 112, size: proofSize, font: sans, color: soft });
-  page.drawText(sheet.checkLine, { x: W - 70 - sans.widthOfTextAtSize(sheet.checkLine, proofSize), y: 96, size: proofSize, font: sans, color: soft });
+  tag.text("P", () => page.drawText(sheet.idLine, { x: W - 70 - sans.widthOfTextAtSize(sheet.idLine, proofSize), y: 112, size: proofSize, font: sans, color: soft }));
+  tag.text("P", () => page.drawText(sheet.checkLine, { x: W - 70 - sans.widthOfTextAtSize(sheet.checkLine, proofSize), y: 96, size: proofSize, font: sans, color: soft }));
 
   if (sheet.stamp) {
+    // Faint across the sheet, for the eye only: the ID line, at full contrast, already says no student was issued this one.
     const size = 120;
     const width = semi.widthOfTextAtSize(sheet.stamp, size);
-    page.drawText(sheet.stamp, { x: (W - width * 0.8) / 2, y: H / 2 - 120, size, font: semi, color: accent, opacity: 0.12, rotate: degrees(20) });
+    tag.artifact(() => page.drawText(sheet.stamp, { x: (W - width * 0.8) / 2, y: H / 2 - 120, size, font: semi, color: accent, opacity: 0.12, rotate: degrees(20) }));
   }
+  tag.finish({ title: `${sheet.kicker} — ${sheet.name}`, author: sheet.storeName, producer: sheet.storeName, lang: sheet.lang, at: new Date() });
   return pdf.save();
 }

@@ -25,7 +25,8 @@ import { DOWNLOAD_WINDOW_SECONDS, type Order, readOrder } from "@/lib/store-chec
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
-import { canMove, confirmBooking, moveLink } from "@/lib/calls";
+import { canMove, confirmBooking, moveLink, paidCall } from "@/lib/calls";
+import { type DueInPerson, dueLines } from "@/lib/call-deposit";
 import { readableTime, zoneName } from "@/lib/call-setup";
 import { isVideoRoom, roomLabel, roomOf, videoRoomNote } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
@@ -68,6 +69,7 @@ import type { BundleContents } from "@/lib/bundles";
 import { thanksWords } from "@/lib/buyer-words/thanks";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
+import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
 import { speech } from "@/lib/buyer-words";
@@ -410,6 +412,12 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // however many times this page is opened. Confirmed before its link is
   // read, because confirming is what makes a Google Meet or Zoom meeting for
   // it (lib/meet-links.ts), and this page shows that meeting's link.
+  // In person: what is left to pay there and a code taken off the whole price, read from the sale
+  // (lib/call-deposit.ts); undefined when it could not be read, so the confirmation tries again.
+  const due: DueInPerson | null | undefined =
+    sessionId && order.state === "paid" && order.call && order.product.call?.place
+      ? await paidCall(store, sessionId).then((call) => call?.due ?? null, () => undefined)
+      : null;
   if (sessionId && order.state === "paid" && order.call && order.product.call) {
     await confirmBooking({
       store,
@@ -425,6 +433,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       currency: order.currency,
       lead: order.call.lead,
       pi: order.call.pi,
+      due,
       origin: SITE_URL,
     }).catch((error) => console.error("confirming a booking failed", error));
   }
@@ -896,6 +905,10 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   {booked.setup.place ? (
                     <p className="mt-5 text-sm" data-call-place="">{bookingWords(store.language).whereAt(placeLine(booked.setup.place))}</p>
                   ) : null}
+                  {/* The code and what is left to pay in person, as Stripe's page said before paying (lib/call-deposit.ts). */}
+                  {dueLines(bookingWords(store.language), due ?? null, { currency: order.currency || store.currency, locale, storeName: store.name }).map((line) => (
+                    <p key={line} className="mt-2 text-sm" data-call-due="">{line}</p>
+                  ))}
                   {isHouseStore(store) && booked.room ? (
                     // The demo writes to nobody, so it promises no email (lib/house-store.ts).
                     <p className="st-muted mt-5 text-sm">{DEMO_BOOKED_NOTE}</p>
@@ -1068,6 +1081,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                         <p className="st-muted mt-3 text-sm">{t.courseDeviceNote(store.name, order.email ?? t.theAddressYouPaidWith)}</p>
                       ) : null}
                     </form>
+                  ) : wasShipped(order.record) && activeShipping(added.product) ? (
+                    /* A second product shipped in a cart's order: it goes to the address shown above (lib/cart-shipping.ts, shippedFirst). */
+                    <p className="st-muted mt-2 text-sm">{shippingWords(store.language).alsoShips(store.name)}</p>
                   ) : added.link ? (
                     <>
                       <a

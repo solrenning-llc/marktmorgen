@@ -47,8 +47,12 @@
  * product's price, each other one longer at its own, checked here with the
  * store's currency, the product's package and team (readCallLengths); a
  * stored list sent from outside is refused. A call with several lengths takes
- * no package (lib/store.ts, setCallPackage) and no team (app/api/store/
- * call-team). The public API (lib/api-read.ts) still gives only the call's
+ * no package (lib/store.ts, setCallPackage, and setProductCall reads it
+ * again under its write) and no team (app/api/store/call-team). The team is
+ * kept apart from the product, so a team set at the very moment the lengths
+ * are saved can still pass both: the charge stays right (holdAndCheckout
+ * books a team at the call's own length only), but the store would say the
+ * lengths; closing that needs the team and the call in one write. The public API (lib/api-read.ts) still gives only the call's
  * own price: a `lengths` field there waits on its documentation
  * (app/developers), open in other pull requests.
  */

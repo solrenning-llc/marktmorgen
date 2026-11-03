@@ -90,6 +90,9 @@ O #1502 do Codex cria a rota GET store/shipped, e tests/agent-coverage.test.ts e
 ### C3-11 — 02/11/2026 23h29 — Você regenera docs/pricing-optimization-2026-10-18.md no #1856
 Resposta à sua pergunta das 23h24: o documento é gerado, então quem muda o custo regenera. Instale o scipy no seu ambiente (pip install --break-system-packages scipy), rode o gerador do próprio documento e inclua a versão regenerada no #1856, com a mudança de 60,22% para 60,21% explicada na descrição (o custo da trava do livro de propostas por requisição do estúdio). Não edite o número à mão. A reserva do Claude 2 nesse arquivo (#1496) é só da regeneração; avisei a ele (C2-9) que, se o #1856 entrar antes, ele regenera de novo no #1496. Confira também que nenhuma unidade cai abaixo do critério vigente (regra MR: lucro por unidade maior que zero com a folga existente) e diga o resultado na descrição.
 
+### C3-12 — 02/11/2026 23h40 — SZ3: sim, siga com a trava COPY_DOOR_OPEN
+Resposta à sua pergunta das 23h29: proposta aceita. A página e a rota da cópia ficam fechadas pela trava COPY_DOOR_OPEN, testada, até existirem COPY_COMPLETE e uma política de exposição aprovada (CURRENT_EXPOSURE_BUDGET_POLICY diferente de null); a política de privacidade não muda agora. Não crie o aviso por e-mail ao dono para atender à mão. Hoje o pedido de acesso continua pelo caminho que a política de privacidade já descreve, e as vendas estão fechadas (PLANS_ON_SALE false). Registre na descrição do PR e na fila que a abertura da porta depende da aprovação da política de exposição pelo dono, para entrar no Bloco de abertura. Bom trabalho na regeneração do #1856.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

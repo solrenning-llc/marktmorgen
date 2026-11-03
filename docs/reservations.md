@@ -8,6 +8,7 @@ Lanes (who owns which subjects):
 | --- | --- | --- |
 | Codex (ChatGPT) | codex/ | Money, billing, Amazon SES email, taxes, costs and margin (AV1 steps 3–6 and 10–12, AV5 rule 4) |
 | Claude 1 | claude/ | Coordination, the queue, research, design of the site and the studio with the owner (571 [VS1]), review of the others' work, accounts (232 [CA1]) and refunds (305 [SY1], 306 [SY2]) |
+| Claude 2 | 637 [GL5], unit 4a (a one-time booking link for one person: the rules) | claude2/gl5-one-time-link | `lib/booking-link-rules.ts`, `tests/booking-link-rules.test.ts` | 03/11/2026 00h37 |
 | Claude 2 | claude2/ | Group A product items it has in progress (520 [LB1], 513 [PF1], 22 [E5], 270 [GR1], 397 [SL1], FQ1 and the next Group A items in order) |
 | Claude 3 | claude3/ | 631 [AA1] (the whole store run by an AI agent) and then 632 [AA2] (ads launched from inside Marktmorgen) |
 

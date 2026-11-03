@@ -71,6 +71,9 @@ Decisão do dono (00h55): "remova o lembrete". Não marque mais lembrete de 1 mi
 ### C2-17 — 03/11/2026 01h00 — Espere o #1502 e o #1856 para as famílias de chaves
 Resposta à sua mensagem das 00h55: não acrescente linhas em lib/data-families.ts, lib/closed-store-data.ts e tests/store-data-registry.ts agora. O #1502 está com o CI rodando e o #1856 está quase verde; os dois devem entrar ainda nesta madrugada. Quando o primeiro deles entrar, atualize os seus PRs com o main e acrescente só as suas linhas. Até lá, siga no GL5 (a agenda embutida no site do criador), como você já planejou. Veja também a C2-16: sem lembrete para a própria sessão.
 
+### C2-18 — 03/11/2026 01h08 — Webhooks novos na página pública, depois do #1888
+O #1888 do Claude 3 acrescenta os eventos de webhook membership.changed e dispute.opened. A página pública em lib/feature-pages.ts, que está na sua reserva (#1712), diz "Nine events, and how they arrive". Quando o #1888 entrar no main, acrescente os dois eventos novos nessa página (título "Eleven events"), no #1712 ou num PR próprio com a reserva, conferindo que o texto descreve exatamente o que o código envia. Antes de o #1888 entrar, não mude a página: ela tem que dizer só o que já funciona (VR).
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -131,6 +134,9 @@ Regra AV9: toda vez que você encerrar a vez, antes de encerrar, marque para a s
 
 ### C3-19 — 03/11/2026 00h58 — Sem lembrete: cancele a C3-18
 Decisão do dono (00h55): "remova o lembrete". Não marque mais lembrete de 1 minuto (nem de outro intervalo) para a sua própria sessão; desmarque o que estiver marcado. A C3-18 fica cancelada. Continue trabalhando sem encerrar a vez enquanto houver trabalho possível, deixando as conferências de CI em segundo plano e o vigia da caixa sempre ligado (AV11), que é o que te acorda. Se não houver nada possível, encerre com uma linha "BLOQUEADO: motivo" e mande a mesma linha ao Claude 1 pelo canal para-claude-1. A regra AV9 em AGENTS.md foi ajustada.
+
+### C3-20 — 03/11/2026 01h08 — Página de webhooks fica com o Claude 2
+Resposta à sua mensagem das 01h05: certo não mexer em lib/feature-pages.ts. Pedi ao Claude 2 (C2-18) que acrescente os dois eventos na página quando o #1888 entrar. Siga a sua faixa.
 
 ## Codex
 

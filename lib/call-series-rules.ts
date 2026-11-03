@@ -23,9 +23,9 @@
  *     never free. A series with any date that is not free is refused, naming
  *     each date; nothing is booked in part, and no time is hidden to look
  *     busy.
- *   - When a series ends early (cancelled by the buyer within the creator's
+ *   - When a series ends early (canceled by the buyer within the creator's
  *     rules, which the booking unit checks, or by the creator), every
- *     session that has not started yet is cancelled (toCancel), and never
+ *     session that has not started yet is canceled (toCancel), and never
  *     charged (chargeable); one already started at that moment took place.
  *     Sessions are known by their position in the series, never by their
  *     start, so a session moved within the rules keeps its place.
@@ -100,14 +100,14 @@ export function seriesConflicts(setup: CallSetup, now: number, busy: Busy[], sta
   });
 }
 
-/** The positions of the sessions not yet started when a series ends at `at`: each is cancelled, and none is charged. */
+/** The positions of the sessions not yet started when a series ends at `at`: each is canceled, and none is charged. */
 export function toCancel(starts: readonly number[], at: number): number[] {
   return starts.flatMap((start, i) => (start > at ? [i] : []));
 }
 
-/** The positions a series may charge for: every session but the cancelled ones. */
-export function chargeable(count: number, cancelled: readonly number[]): number[] {
-  const gone = new Set(cancelled);
+/** The positions a series may charge for: every session but the canceled ones. */
+export function chargeable(count: number, canceled: readonly number[]): number[] {
+  const gone = new Set(canceled);
   return Array.from({ length: count }, (_, i) => i).filter((i) => !gone.has(i));
 }
 

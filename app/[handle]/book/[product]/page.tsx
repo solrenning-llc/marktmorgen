@@ -67,7 +67,11 @@ export default async function BookPage({ params, searchParams }: Params) {
   const pkg = found && found.bought.s === store.statsId && found.bought.p === product.id ? found : null;
   const pkgState = pkg ? await packageState(pkg.bought) : null;
   const open = canSellProduct(store, product) && !(await isSoon(store, product.id).catch(() => false));
-  const read = open ? await slotsForProduct(store, product) : null;
+  // On a team that lets buyers choose (lib/team-scheduling-rules.ts): who they picked, by position; none is "Any available".
+  const withKey = typeof query.with === "string" && /^[0-5]$/.test(query.with) ? query.with : "";
+  const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null) : null;
+  const hostChoices = (read && "hosts" in read ? read.hosts : null) ?? [];
+  const pickedHost = (read && "picked" in read ? read.picked : null) ?? null;
   const days = read ? read.days : null;
   const starts = days ? days.flatMap((day) => day.starts) : [];
   // Paid calls whose buyer never came back from Stripe get their emails now,
@@ -157,15 +161,35 @@ export default async function BookPage({ params, searchParams }: Params) {
                 words={{ ...sessionWords(store, b, read.sessions, payNow, false), code }}
               />
             ) : (
-              <SlotPicker
-                starts={starts}
-                creatorTz={setup.tz}
-                handle={store.handle}
-                productId={product.id}
-                seatsLeft={setup.seats > 1 ? seatLabels(read.left, b) : undefined}
-                pkg={fromPackage ? pkgToken : undefined}
-                words={{ ...slotWords(store, b, setup.minutes, payNow, false, fromPackage), code }}
-              />
+              <>
+                {hostChoices.length ? (
+                  // A plain form: the times are drawn again for the person chosen, only when the buyer asks (3.2.2).
+                  <form method="get" className="mt-6" data-host-pick="">
+                    {fromPackage ? <input type="hidden" name="pkg" value={pkgToken} /> : null}
+                    <label htmlFor={`host-${product.id}`} className="block font-bold" style={{ color: "var(--st-text)" }}>{b.hostPick}</label>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <select id={`host-${product.id}`} name="with" defaultValue={pickedHost?.key ?? ""} className="st-field min-w-0 flex-1">
+                        <option value="">{b.hostAny}</option>
+                        {hostChoices.map((h) => (
+                          <option key={h.key} value={h.key}>{h.label}</option>
+                        ))}
+                      </select>
+                      <button type="submit" className="btn btn-secondary">{b.hostShow}</button>
+                    </div>
+                    {pickedHost ? <p className="mt-2 text-sm" role="status">{b.withHost(pickedHost.label)}</p> : null}
+                  </form>
+                ) : null}
+                <SlotPicker
+                  starts={starts}
+                  creatorTz={setup.tz}
+                  handle={store.handle}
+                  productId={product.id}
+                  seatsLeft={setup.seats > 1 ? seatLabels(read.left, b) : undefined}
+                  pkg={fromPackage ? pkgToken : undefined}
+                  host={pickedHost}
+                  words={{ ...slotWords(store, b, setup.minutes, payNow, false, fromPackage), code }}
+                />
+              </>
             )}
           </div>
         </div>

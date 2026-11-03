@@ -106,6 +106,7 @@ export function SlotPicker({
   seatsLeft,
   move,
   pkg,
+  host,
   words,
 }: {
   starts: number[];
@@ -118,6 +119,8 @@ export function SlotPicker({
   move?: string;
   /** A package's booking token: the session comes from it, and nothing is charged (lib/call-packages.ts). */
   pkg?: string;
+  /** The host the buyer chose, on a team that lets them (lib/team-scheduling-rules.ts): sent so only they are booked. */
+  host?: { key: string; label: string } | null;
   words: SlotWords;
 }) {
   const { locale } = words;
@@ -160,6 +163,12 @@ export function SlotPicker({
       <input type="hidden" name="product" value={productId} />
       <input type="hidden" name="tz" value={tz} />
       {pkg ? <input type="hidden" name="pkg" value={pkg} /> : null}
+      {host && !move ? (
+        <>
+          <input type="hidden" name="host" value={host.key} />
+          <input type="hidden" name="host_label" value={host.label} />
+        </>
+      ) : null}
 
       {/* A fieldset is as wide as its widest child unless told otherwise,
           which would push the row of days out of the card. */}

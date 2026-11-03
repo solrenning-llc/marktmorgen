@@ -46,6 +46,9 @@ export async function POST(request: NextRequest) {
   let pkg = "";
   // A discount code typed on the page, for a booking with a deposit only (lib/deposit-code.ts).
   let typed = "";
+  // On a team that lets buyers choose: the host's position and name as the page showed them (lib/team-scheduling-rules.ts).
+  let hostKey = "";
+  let hostLabel = "";
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (name: string) => {
@@ -59,6 +62,8 @@ export async function POST(request: NextRequest) {
     tz = read("tz").slice(0, 64);
     pkg = read("pkg").slice(0, 60);
     typed = read("code").slice(0, 60);
+    hostKey = /^[0-5]$/.test(read("host")) ? read("host") : "";
+    hostLabel = read("host_label").slice(0, 60);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -75,7 +80,8 @@ export async function POST(request: NextRequest) {
   const back = (status: string) =>
     new Response(null, {
       status: 303,
-      headers: { Location: `${origin}/@${store.handle}/book/${product.id}?status=${status}${pkg ? `&pkg=${encodeURIComponent(pkg)}` : ""}`, "Cache-Control": "no-store" },
+      // The host the buyer chose stays chosen when they come back, so their next try is never booked with anyone else.
+      headers: { Location: `${origin}/@${store.handle}/book/${product.id}?status=${status}${pkg ? `&pkg=${encodeURIComponent(pkg)}` : ""}${hostKey && status !== "host-changed" ? `&with=${hostKey}` : ""}`, "Cache-Control": "no-store" },
     });
 
   if (!canSellProduct(store, product)) return back("unavailable");
@@ -128,6 +134,7 @@ export async function POST(request: NextRequest) {
     lead: store.affiliates.lead.kind === "booking" ? via?.aff ?? null : null,
     fromPackage: prepared && prepared.ok ? prepared.fromPackage : null,
     code,
+    host: hostKey ? { key: hostKey, label: hostLabel } : null,
     channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)) },
   });
   if (!result.ok) return back(result.reason);

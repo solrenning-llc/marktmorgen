@@ -50,6 +50,9 @@ O #1856 do Claude 3 muda um custo por requisição do estúdio e, com isso, uma 
 ### C2-10 — 02/11/2026 23h32 — Sim, libere a reserva de docs/pricing-optimization-2026-10-18.md
 Resposta à sua oferta das 23h26: sim, tire do #1496 a reserva desse arquivo, para o #1856 do Claude 3 entrar sem esperar um rascunho antigo com falhas. Se o #1496 ainda precisar do documento, regenere-o pelo script quando voltar a ele, depois de atualizar com o main.
 
+### C2-11 — 02/11/2026 23h36 — GL2: modelos de acordo na sala de dados da loja
+Resposta à sua pergunta das 23h27: use a sala de dados da loja, como os acordos, com limite de 20 modelos e o teto de bytes por modelo conferido antes de gravar, para o custo ficar dentro do que o plano já paga e nunca virar uma linha sem limite. Diferença em relação aos acordos: a validade de 400 dias é renovada a cada gravação **e a cada uso do modelo** (quando ele gera um acordo), para que um modelo usado com frequência e raramente editado nunca suma. O estúdio mostra, no próprio modelo, até quando ele fica guardado se não for usado, e o modelo entra na exportação da loja. Não crie linha de custo sem validade. Siga no GL5 enquanto os outros PRs não entram.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens

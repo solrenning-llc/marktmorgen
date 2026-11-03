@@ -113,7 +113,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
         <p className="eyebrow">Reviews</p>
         <h1 className="t-h2 mt-3">What your buyers say</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
-          Only people who paid can review, from their thank-you page, their list of purchases or the one email that asks. Each
+          Only people who paid can review, from their thank-you page, their list of purchases or the email that asks. Each
           review is checked against its order with Stripe and keeps that order, so you can find the payment behind it. Reviews
           go on your product&apos;s page and store card as they arrive; a refund in full takes a review&apos;s stars out of
           the average.
@@ -283,11 +283,11 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
               <div className="mt-3">
                 {/* The email is a store setting (lib/team-roles.ts): the owner and Admins switch it. */}
                 {can(view.role, "settings") ? (
-                  <ReviewAskEditor days={store.reviewAsk.days} canEmail={canWrite(store)} elsewhere={store.reviewAsk.elsewhere?.url ?? ""} />
+                  <ReviewAskEditor days={store.reviewAsk.days} canEmail={canWrite(store)} elsewhere={store.reviewAsk.elsewhere?.url ?? ""} again={store.reviewAsk.again ?? 0} />
                 ) : (
                   <p className="text-sm text-ink-soft">
                     {store.reviewAsk.days > 0
-                      ? `Buyers are emailed once, ${store.reviewAsk.days} days after buying, to ask for a review. The store's owner or an Admin changes this.`
+                      ? `Buyers are emailed ${store.reviewAsk.days} days after buying to ask for a review${store.reviewAsk.again ? `, with one reminder ${store.reviewAsk.again} days later if they have not reviewed` : ", once"}. The store's owner or an Admin changes this.`
                       : "Buyers are not emailed to ask for a review. The store's owner or an Admin can switch it on."}
                   </p>
                 )}

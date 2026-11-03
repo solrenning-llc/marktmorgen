@@ -8,6 +8,7 @@ import { coursesWords } from "@/lib/buyer-words/courses";
 import { parseLanguage } from "@/lib/store-language";
 import { SITE_URL } from "@/lib/site-url";
 import { readCourseListing } from "@/lib/catalog";
+import { monogram } from "@/lib/store-app";
 import { readCourse } from "@/lib/course";
 
 /**
@@ -54,6 +55,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     accent: store.look.accent,
     // What a screen reader reads the file in: the store's language.
     lang: parseLanguage(store.language),
+    // In the store's own look: its letters, its backdrop and its initial (630 [HN6](8), unit 2).
+    look: { font: store.look.font, backdrop: store.look.backdrop },
+    monogram: monogram(store),
   });
   const file = `${certificate.title}-${certificate.name}`.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 80) || "certificate";
   return new Response(new Uint8Array(bytes), {

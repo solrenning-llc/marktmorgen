@@ -17,8 +17,12 @@
  *   call.booked          a call or a seat in a session booked and paid
  *   call.moved           a buyer moved their booking
  *   refund.issued        a refund made on the creator's Stripe account
+ *   membership.changed   a membership moved to another price or quantity on
+ *                        the creator's Stripe account (630 [HN6](18))
+ *   dispute.opened       a buyer disputed a payment the store's checkout made
+ *                        (630 [HN6](18))
  *
- * The first four about money are read from the creator's own Stripe account,
+ * The first four about money, and these last two, are read from the creator's own Stripe account,
  * which is the ledger, by the five-minute job (watchStripe): its events are
  * walked from where the last run stopped, so a refund made in the Stripe
  * dashboard is noticed on the next run, within about five minutes. The other
@@ -80,6 +84,8 @@ export const WEBHOOK_EVENTS = [
   "call.moved",
   "refund.issued",
   "sequence.step",
+  "membership.changed",
+  "dispute.opened",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
@@ -830,11 +836,15 @@ const STRIPE_TYPES = [
   "customer.subscription.updated",
   "customer.subscription.deleted",
   "charge.refunded",
+  "charge.dispute.created",
 ];
+
+/** Our events read from the creator's Stripe account, so a store listening for any of them has its account watched. */
+const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened"];
 
 /** Which of the Stripe-read events an endpoint of this store listens for. */
 function wantsStripe(config: Config): boolean {
-  return config.endpoints.some((e) => e.events.some((t) => t === "sale.completed" || t === "membership.started" || t === "membership.canceled" || t === "refund.issued"));
+  return config.endpoints.some((e) => e.events.some((t) => FROM_STRIPE.includes(t)));
 }
 
 const iso = (seconds: unknown) => (typeof seconds === "number" && seconds > 0 ? new Date(seconds * 1000).toISOString() : null);
@@ -842,7 +852,7 @@ const str = (value: unknown) => (typeof value === "string" && value ? value : nu
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
 /** Turns one Stripe event of this store into ours, if it is one we send. */
-async function fromStripe(store: Store, event: StripeEvent, lookups: { left: number }): Promise<void> {
+async function fromStripe(store: Store, event: StripeEvent, lookups: { left: number; disputes: number }): Promise<void> {
   const object = event.data?.object ?? {};
   const previous = event.data?.previous_attributes ?? {};
   const handles = saleHandles(store);
@@ -936,6 +946,23 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
     const id = str(object.id);
     if (!id) return;
     const ended = event.type === "customer.subscription.deleted";
+    // A move to another price or quantity (an upgrade, a downgrade, another
+    // interval) is its own event, said once per change; the same update may
+    // also set an end, which goes on below as a cancellation.
+    if (!ended && "items" in previous) {
+      const from = planOf(previous.items);
+      const to = planOf(object.items);
+      if (from && to && (from.price !== to.price || from.quantity !== to.quantity)) {
+        await emitEvent(store, "membership.changed", `${id}|${num(event.created)}|${to.price}|${to.quantity}`, {
+          subscription: id,
+          product: await product(meta.product),
+          option: meta.option ?? null,
+          from,
+          to,
+          changed_at: iso(event.created),
+        }, created);
+      }
+    }
     if (!ended) {
       // Only the change that sets an end. A membership with a set number of
       // payments is given its end when it is bought; that is not a cancellation.
@@ -999,7 +1026,57 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
       buyer: { email: str(billing.email) ?? str(object.receipt_email), name: str(billing.name) },
       refunded_at: iso(event.created),
     }, created);
+    return;
   }
+
+  if (event.type === "charge.dispute.created") {
+    const dispute = str(object.id);
+    if (!dispute) return;
+    const intent = str(object.payment_intent);
+    // A dispute carries no store of its own: it is asked about through its
+    // payment, from a budget of its own, so refunds in the same run never
+    // leave a dispute unread. One past that budget is said in the log.
+    if (!intent || !store.stripeAccountId) return;
+    if (lookups.disputes <= 0) {
+      console.error("a store had more disputes in one run than are read; the rest are not sent", store.handle);
+      return;
+    }
+    lookups.disputes -= 1;
+    try {
+      meta = ((await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(intent)}`)).metadata ?? {}) as Record<string, string>;
+    } catch {
+      return;
+    }
+    if (!handles.has(meta.store ?? "")) return;
+    const evidence = (object.evidence_details ?? {}) as { due_by?: unknown };
+    await emitEvent(store, "dispute.opened", dispute, {
+      dispute,
+      charge: str(object.charge),
+      payment_intent: intent,
+      product: await product(meta.product),
+      option: meta.option ?? null,
+      amount_cents: num(object.amount),
+      currency: str(object.currency) ?? "usd",
+      reason: str(object.reason),
+      status: str(object.status),
+      evidence_due_by: iso(evidence.due_by),
+      opened_at: iso(event.created),
+    }, created);
+  }
+}
+
+/** A subscription's first item as a membership's plan: its price, amount, interval and quantity; null when it has none. */
+function planOf(items: unknown): { price: string | null; amount_cents: number; interval: string | null; interval_count: number; quantity: number } | null {
+  const first = ((items as { data?: unknown } | null | undefined)?.data as Record<string, unknown>[] | undefined)?.[0];
+  const price = (first?.price ?? null) as { id?: unknown; unit_amount?: unknown; recurring?: { interval?: unknown; interval_count?: unknown } | null } | null;
+  if (!first || !price) return null;
+  return {
+    price: str(price.id),
+    amount_cents: num(price.unit_amount),
+    interval: str(price.recurring?.interval),
+    interval_count: num(price.recurring?.interval_count) || 1,
+    quantity: num(first.quantity) || 1,
+  };
 }
 
 /** A partial or malformed observation must not advance past unseen events. */
@@ -1024,7 +1101,7 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
   const types = STRIPE_TYPES.map((t, i) => `types[${i}]=${encodeURIComponent(t)}`).join("&");
   const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
   const anchor = typeof anchorRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(anchorRaw) ? anchorRaw : "";
-  const lookups = { left: 10 };
+  const lookups = { left: 10, disputes: 10 };
   let handled = 0;
   const send = async (rows: StripeEvent[]) => {
     // Stripe lists newest first; they are sent in the order they happened.

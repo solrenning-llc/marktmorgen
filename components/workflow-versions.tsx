@@ -65,7 +65,7 @@ export function WorkflowVersions({ flowId, request, onRestored }: { flowId: stri
         Earlier versions
       </h4>
       <p className="mt-1 text-ink-soft">
-        {`Each time you save a change to what this workflow does, the version before it is kept here: the last ${MAX_FLOW_VERSIONS}, while your store has room. Putting one back keeps it switched on or off as it is now. Who is already in it carries on from the step they are at.`}
+        {`Each time you save a change to what this workflow does, the version before it is kept here: the last ${MAX_FLOW_VERSIONS}, while your store has room. Putting one back keeps it switched on or off as it is now. Who is already in it goes on at the same step number in the version you put back; if that version has fewer steps, their run ends there, as when you remove a step.`}
       </p>
       {done ? (
         <p className="notice mt-3" role="status">

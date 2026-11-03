@@ -21649,11 +21649,11 @@ Regra do dono ("recurso bom nunca descartado; vai ao fim"): recursos bons, de be
 5. Conversa 1:1 do criador com um afiliado e mensagem a todos os aprovados pela caixa de entrada (complemento de 412 [AM7]; estende lib/inbox.ts).
 6. Bônus do criador para quem comprou pelo link de um afiliado escolhido, entregue pela loja e mostrado antes da compra (estende lib/affiliates.ts e lib/bundle-rules.ts).
 7. Banco de questões nas provas: ordem aleatória, número de questões por tentativa e espera mínima entre tentativas (estende lib/quiz.ts).
-8. Visual do certificado com logotipo, cor, assinatura e fundo da loja, contraste de 7:1 e PDF/UA (estende lib/certificate.ts e lib/certificate-pdf.ts).
+8. Visual do certificado com logotipo, cor, assinatura e fundo da loja, contraste de 7:1 e PDF/UA (estende lib/certificate.ts e lib/certificate-pdf.ts). Estado (Claude 3, 03/11/2026, C3-23): unidade 1 (PDF marcado) incorporada; unidade 2 (cor, letras, fundo da loja e monograma no selo, sem imagem nova) em PR; envio de logotipo e de assinatura do criador fica como unidade futura deste mesmo item.
 9. Estilo das legendas escolhido pelo aluno (tamanho, cor, fundo, opacidade), guardado no navegador (estende o reprodutor das aulas; AX274 1.4.8).
 10. Trazer vídeos da conta Vimeo do próprio criador pela API oficial, com pastas, títulos e legendas, dentro das horas de vídeo do plano (complemento de 260 [KJ5] e 580 [KB1]).
 11. Compartilhar o acesso com até 3 pessoas da casa, ligado pelo criador por produto, cada uma com entrada e progresso próprios (estende lib/group-buy.ts e lib/group-rules.ts).
-12. Assinatura "tudo incluído" que abre os produtos escolhidos e, se o criador quiser, os que ele publicar depois, com aviso aos membros (complemento de 601 [KB22]; estende lib/membership-access.ts).
+12. Assinatura "tudo incluído" que abre os produtos escolhidos e, se o criador quiser, os que ele publicar depois, com aviso aos membros (complemento de 601 [KB22]; estende lib/membership-access.ts). Estado (C3-23, 03/11/2026): mexe em cobrança de assinatura e liberação de acesso (faixa de dinheiro); espera o #1502 e a faixa do Codex, sem construir antes.
 13. Comprador muda o dia da cobrança da própria assinatura, no máximo uma vez por período, com o valor mostrado antes (estende lib/membership-manage.ts).
 14. Renovação anual recusada: o e-mail de recuperação oferece seguir no preço mensal da mesma assinatura (estende lib/payment-recovery.ts e lib/yearly-price.ts).
 15. Cartão recusado no checkout: o lembrete, só para quem consentiu, mostra o plano de pagamentos que o criador já oferece naquele produto (estende lib/checkout-recovery.ts).

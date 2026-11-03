@@ -75,6 +75,8 @@ async function main(): Promise<void> {
   is("the route starts it after the signature is recorded, with the address it was sent to", route.indexOf("await agreementSigned(store, signed.agreement.email)") > route.indexOf("if (!signed.ok)"), true);
   const studio = readFileSync("components/email-studio.tsx", "utf8");
   is("the studio offers it only on a plan with agreements, and says what it does", [studio.includes('automation.signing || draft.trigger === "signed" ? <option value="signed">Someone who agreed to hear from you signs a proposal or agreement</option>'), studio.includes("Starts when someone who agreed to hear from you signs one of your proposals or agreements")], [true, true]);
+  const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
+  is("the privacy policy says who it starts for, that signing never adds anyone to the list and that nothing new is kept", privacy.includes("An automatic email sequence may start when you sign a creator&apos;s proposal or agreement, or pay a payment request they sent you, for the address it was sent to; it starts only while you are on their list and agreed to hear from them, signing or paying never adds you to the list, and nothing new is kept about you for it beyond the signature or the payment and the sequence&apos;s record."), true);
   is("the check takes the store's public requests first", readFileSync("lib/agreement-flow-trigger.ts", "utf8").includes('if (!(await takePublicRequest(store, "buyer", Date.now(), SIGNED_TRIGGER_UNITS))) {'), true);
 }
 

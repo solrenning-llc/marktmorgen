@@ -1,8 +1,8 @@
 /**
  * Several lengths for one call, each with its own price (637 [GL5], unit 1;
- * added 2 November 2026): the rules, browser-safe. The editor, the booking
- * page and charging the chosen length are the next units, once the open
- * pull requests of 520 [LB1] that change lib/calls.ts are merged.
+ * added 2 November 2026): the rules, browser-safe. Booking and charging the
+ * chosen length are unit 2 (below); the editor and the pages that say each
+ * length come next.
  *
  *   - One to MAX_CALL_LENGTHS lengths, each one of the lengths a call may
  *     have (CALL_LENGTHS in lib/call-setup.ts), none twice, kept shortest
@@ -27,17 +27,23 @@
  *     openSlots) at that length: the same hours, notice, gap and calendar,
  *     so a longer call is only offered where the whole of it is free.
  *
- * What the unit that books them must do, so nothing here is promised that
- * the booking cannot keep (lib/calls.ts): hold and check a new booking at
- * the chosen length, read again under the booking's lock (holdAndCheckout,
- * isBookable); charge the chosen length's price and name the length on the
- * line (callCheckoutBody, lib/verify-stripe.ts); move a paid booking at its
- * own length, whatever the list says now, never at the setup's
- * (moveBooking, slotsForMove, offerFrom); offer the booking page's times
- * and prices per length; say every length where one is said today
- * (lib/page-facts.ts, components/store-product.tsx, components/
- * call-editor.tsx). Already right: the busy times, reminders, invites and
- * calendar feed read each booking's own end.
+ * Unit 2 (3 November 2026) books them (lib/calls.ts): a new booking is held
+ * and checked at the chosen length, read again under the booking's lock, and
+ * charged at that length's price, which the line says and the sale keeps
+ * (holdAndCheckout, callCheckoutBody, bookingLength); a paid booking moves at
+ * its own length, and is offered times at it (moveBooking, slotsForMove,
+ * ownLength). The setup keeps the lengths only in the shape these rules allow
+ * (lib/call-setup.ts, readSetup). Already right: the busy times, reminders,
+ * invites and calendar feed read each booking's own end.
+ *
+ * Before any creator can save several lengths (the editor, the next unit),
+ * every place that says a call's length or price must say each length: the
+ * booking page's times and prices per length (app/[handle]/book/[product]),
+ * the store page and its facts (lib/page-facts.ts, components/
+ * store-product.tsx, the assistant's facts), the thanks page's line for the
+ * order (it says the product's price), the checkout reminder's price
+ * (lib/checkout-recovery.ts) and the editor itself (components/
+ * call-editor.tsx, which saves the product's price as the shortest's).
  */
 import { CALL_LENGTHS, type CallSetup, type Range, openSlots } from "@/lib/call-setup";
 import { type Currency, priceInRange, rangeWords, readMoney } from "@/lib/money";
@@ -124,6 +130,36 @@ export function fromPrice(lengths: readonly CallLength[]): number | null {
 export function chosenLength(lengths: readonly CallLength[], minutes: unknown): CallLength | null {
   const n = typeof minutes === "number" ? minutes : typeof minutes === "string" && WHOLE.test(minutes.trim()) ? Number(minutes.trim()) : NaN;
   return lengths.find((l) => l.minutes === n) ?? null;
+}
+
+/**
+ * The length and price of a new booking of weekly hours, or null when it is
+ * refused. `minutes` is what the booking page sent; none is the setup's own.
+ * Without several lengths, only the setup's own length, at the product's
+ * price. With them, only one of them, and only while the first is still the
+ * setup's own length at the product's own price: a product whose price was
+ * changed elsewhere since sells no length until the lengths are saved again,
+ * so no length is ever charged at a price the creator did not set for it.
+ */
+export function bookingLength(setup: Pick<CallSetup, "kind" | "minutes" | "lengths">, priceCents: number, minutes: unknown): CallLength | null {
+  if (setup.kind !== "weekly") return null;
+  const asked = minutes === undefined || minutes === null || minutes === "" ? setup.minutes : minutes;
+  const lengths = setup.lengths?.length ? setup.lengths : [{ minutes: setup.minutes, cents: priceCents }];
+  if (lengths[0].minutes !== setup.minutes || lengths[0].cents !== priceCents) return null;
+  return chosenLength(lengths, asked);
+}
+
+/**
+ * The length a paid booking keeps when it moves, in minutes: on a call with
+ * several lengths, the one it was paid for, read from its own start and end,
+ * never the setup's now; null on any other call, which moves at the setup's
+ * length as before; "unknown" when the booking's length is not one a call
+ * may have, so it is never moved at a guess.
+ */
+export function ownLength(setup: Pick<CallSetup, "kind" | "lengths">, bookedMs: number): number | null | "unknown" {
+  if (setup.kind !== "weekly" || !setup.lengths?.length) return null;
+  const minutes = bookedMs / 60_000;
+  return (CALL_LENGTHS as readonly number[]).includes(minutes) ? minutes : "unknown";
 }
 
 /** The times offered for one length: the call's own times, at that length. */

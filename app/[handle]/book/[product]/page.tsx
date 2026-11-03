@@ -340,7 +340,7 @@ async function MovePage({
   const notice = moved ? null : b.moveNotices[status] ?? null;
   const blocked = whyNotMove(setup, booking.start, booking.moves);
   const movable = blocked === null;
-  const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start) : null;
+  const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start, booking.end - booking.start) : null;
   const leftMoves = MAX_MOVES - booking.moves;
   const until = movableUntil(setup, booking.start);
   const price = money(product.priceCents);
@@ -425,7 +425,7 @@ async function MovePage({
                 productId={product.id}
                 seatsLeft={setup.seats > 1 ? seatLabels(offer.left, b) : undefined}
                 move={session}
-                words={slotWords(store, b, setup.minutes, price, true, false)}
+                words={slotWords(store, b, setup.lengths?.length ? Math.round((booking.end - booking.start) / 60_000) : setup.minutes, price, true, false)}
               />
             )}
           </>

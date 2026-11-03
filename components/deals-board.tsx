@@ -34,6 +34,7 @@ import {
   pipelineTotals,
   stageLabel,
   starterStages,
+  copyPipeline,
 } from "@/lib/crm-rules";
 
 const MESSAGES: Record<string, string> = {
@@ -246,6 +247,13 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               <button type="button" className="btn btn-ghost btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); setPipelineDraft({ id: newCrmId(), name: "", stages: starterStages(), isNew: true, moves: {}, removeTo: "" }); }}>
                 <Icon name="plus" size={16} />
                 New pipeline
+              </button>
+            ) : null}
+            {pipelines.length < pipelineMax ? (
+              /* 639 [GL7](8): the same stages under a new name, none of its deals; opened to read and save, nothing saved yet. */
+              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); const copy = copyPipeline(pipeline, pipelines); setPipelineDraft({ ...copy, isNew: true, moves: {}, removeTo: "" }); }}>
+                <Icon name="plus" size={16} />
+                {`Duplicate “${pipeline.name}”`}
               </button>
             ) : null}
           </div>

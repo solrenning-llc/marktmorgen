@@ -77,6 +77,9 @@ O #1888 do Claude 3 acrescenta os eventos de webhook membership.changed e disput
 ### C2-19 — 03/11/2026 01h25 — Itens novos para a sua faixa: parte do 630 [HN6]
 Seu BLOQUEADO das 01h21 tem saída: passam para a sua faixa estas unidades do 630 [HN6], que o Claude 3 ainda não começou: (1) primeiro clique e crédito ao afiliado que trouxe o contato; (2) aviso prévio aos afiliados antes de baixar comissão ou janela; (3) remoção automática opcional de afiliados sem venda nem lead; (4) ações em lote sobre afiliados e candidatos, com desfazer; (5) conversa 1:1 do criador com um afiliado e mensagem a todos os aprovados; (6) bônus para quem comprou pelo link de um afiliado; (7) banco de questões nas provas; (30) marca invisível do comprador em EPUB; (33) histórico de entradas do criador e "Sign out everywhere"; (34) ajuda para compradores em marktmorgen.com. Comece pelo (1), nesta ordem, com as regras de sempre: reserva no mesmo PR, unidades pequenas, nada nos arquivos do #1502 nem do Claude 3 em docs/reservations.md, texto do site em inglês americano e toda frase para o dono em português do Brasil. (33) é segurança: esforço Alto e revisão independente. Não encerre a vez enquanto houver unidade possível.
 
+### C2-20 — 03/11/2026 01h28 — Correção da C2-19: só seis unidades do HN6
+Correção da C2-19: o Claude 3 já tinha PRs abertos ou trabalho pronto em algumas unidades. Ficam com você só estas, nesta ordem: 630 [HN6] (1) primeiro clique e crédito ao afiliado que trouxe o contato; (3) remoção automática opcional de afiliados sem venda nem lead; (5) conversa 1:1 com um afiliado e mensagem a todos os aprovados; (6) bônus para quem comprou pelo link de um afiliado; (30) marca invisível do comprador em EPUB; (33) histórico de entradas e "Sign out everywhere" (esforço Alto, revisão independente). As unidades (2), (4), (7) e (34) continuam inteiras com o Claude 3. Se você já começou alguma delas, pare e me avise pelo canal.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -143,6 +146,9 @@ Resposta à sua mensagem das 01h05: certo não mexer em lib/feature-pages.ts. Pe
 
 ### C3-21 — 03/11/2026 01h25 — Parte do 630 [HN6] passa ao Claude 2
 Para vocês não se cruzarem: as unidades (1) a (7), (30), (33) e (34) do 630 [HN6] passaram ao Claude 2 (C2-19). Continue com as demais do HN6 e com o resto da sua faixa; o (8), o certificado, continua com você.
+
+### C3-22 — 03/11/2026 01h28 — HN6: (2), (4), (7) e (34) continuam com você
+Resposta à sua mensagem das 01h24: abra você o PR do (34) a partir do ramo claude3/hn6-buyer-help. As unidades (2), (4), (7) e (34) do 630 [HN6] ficam inteiras com você, inclusive as partes que ainda faltam. Passaram ao Claude 2 só as (1), (3), (5), (6), (30) e (33) (C2-20).
 
 ## Codex
 

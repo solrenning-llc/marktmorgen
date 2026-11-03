@@ -754,6 +754,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:path:@lib/path.ts": { what: "Marktmorgen Path: the owner's four answers, the days they opened it, the best level reached and the last reading of the money (18 October 2026): one slot, at what the record weighs", room: ["lib/path-atomic.ts"] },
   "nl:product:page:@lib/sales-page-store.ts": { what: "Products' and pages' blocks", room: ["lib/sales-page-store.ts"] },
   "nl:product:pages:@lib/sales-page-store.ts": { what: "A page's earlier versions", room: ["lib/sales-page-store.ts"] },
+  "nl:product:landing:@lib/campaign-landing-store.ts": { what: "A product's campaign landing words", room: ["lib/campaign-landing-store.ts"] },
   "nl:product:pics:@lib/sales-page-store.ts": { what: "Which page a picture belongs to", room: ["lib/sales-page-store.ts"] },
   "nl:sblock:uses:@lib/saved-block-store.ts": { what: "The pages carrying a saved section", room: ["lib/sales-page-store.ts"] },
   "nl:sblocks:@lib/saved-block-store.ts": { what: "Saved sections", line: "funnel-share" },

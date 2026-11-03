@@ -16,6 +16,8 @@
  *                                             five saves, newest first, as "<ms>\n<json>"; kept
  *                                             as long as the page (since 18 October 2026: until
  *                                             then forgotten 30 days after the last save)
+ *   nl:product:landing:<statsId>:<productId> -> its campaigns' landing words (lib/campaign-landing-store.ts),
+ *                                             forgotten with the page
  *
  * A page and its earlier versions take room in the store's data room
  * (lib/store-data.ts) before they are written, one slot for the page (with
@@ -29,6 +31,7 @@
  * another page is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { dropLandings } from "@/lib/campaign-landing-store";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
 import { usesCommands } from "@/lib/saved-block-store";
@@ -204,6 +207,8 @@ export async function dropPage(statsId: string | null, productId: string, room: 
   const shown = picturePaths(held);
   await redisPipeline([["DEL", pageKey(statsId, productId), versionsKey(statsId, productId)], ...usesCommands(statsId, productId, sectionsOn(held), [])]);
   await giveData(room, [{ slot: PAGE_SLOT(productId), bytes: 0, set: true }, { slot: VERSIONS_SLOT(productId), bytes: 0, set: true }]);
+  // Its campaigns' landings are its page's words: they go with it (lib/campaign-landing-store.ts).
+  await dropLandings(statsId, productId, room);
   // A test's counts stay until they expire, counted on their own.
   if (held.test) await noteData(room, [endedTest(Date.now())]);
   return releasePictures(statsId, productId, shown);

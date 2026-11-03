@@ -173,8 +173,8 @@ export function SlotPicker({
         <input type="hidden" name="tz" value={tz} />
         {pkg ? <input type="hidden" name="pkg" value={pkg} /> : null}
         {minutes && !move ? <input type="hidden" name="minutes" value={minutes} /> : null}
-      {embed && !move ? <input type="hidden" name="site" value={embed.site} /> : null}
-      {embed?.back && !move ? <input type="hidden" name="return" value={embed.back} /> : null}
+        {embed && !move ? <input type="hidden" name="site" value={embed.site} /> : null}
+        {embed?.back && !move ? <input type="hidden" name="return" value={embed.back} /> : null}
         {host && !move ? (
           <>
             <input type="hidden" name="host" value={host.key} />

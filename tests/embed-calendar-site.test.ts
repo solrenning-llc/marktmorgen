@@ -8,7 +8,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { callCheckoutBody } from "@/lib/calls";
+import { callCheckoutBody, keepEmbedSite } from "@/lib/calls";
 import { readSetup, type CallSetup } from "@/lib/call-setup";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
 import { SlotPicker, type SlotWords } from "@/components/slot-picker";
@@ -20,11 +20,18 @@ const call = readSetup({ kind: "weekly", minutes: 30, tz: NY, weekly: [[], [[540
 const store = { handle: "lena", name: "Lena", language: "en", currency: "usd", hasDiscounts: false, tax: { enabled: false, included: false }, embedSites: ["https://lena.example"] } as unknown as Store;
 const product = { id: "p1", title: "Coaching", summary: "", priceCents: 4500, fields: [], call } as unknown as Product;
 const start = Date.now() + 3 * 86_400_000;
-const body = (extra: Record<string, unknown>) => callCheckoutBody({ store, product, start, end: start + 1_800_000, buyerTz: NY, origin: "https://marktmorgen.com", via: null, fromPackage: null, ...extra });
+const body = (extra: { embedSite?: string; fromPackage?: { id: string; coupon: string; email: string; back: string } }) => {
+  const made = callCheckoutBody({ store, product, start, end: start + 1_800_000, buyerTz: NY, origin: "https://marktmorgen.com", via: null, fromPackage: extra.fromPackage ?? null });
+  keepEmbedSite(made, extra.embedSite, Boolean(extra.fromPackage));
+  return made;
+};
 
 part("Kept on the sale");
 is("a listed site's address, as the card's checkout keeps it", body({ embedSite: "https://lena.example/book" }).get("metadata[embed_site]"), "https://lena.example/book");
 is("nothing without one, or with anything but a secure address", [body({}).has("metadata[embed_site]"), body({ embedSite: "http://lena.example" }).has("metadata[embed_site]"), body({ embedSite: "javascript:alert(1)" }).has("metadata[embed_site]")], [false, false, false]);
+const full = new URLSearchParams(Array.from({ length: 50 }, (_, i) => [`metadata[f${i}]`, "x"]));
+keepEmbedSite(full, "https://lena.example", false);
+is("written last, after the platform's share, and never past Stripe's fifty metadata fields", [readFileSync("lib/calls.ts", "utf8").indexOf("keepEmbedSite(body, input.embedSite") > readFileSync("lib/calls.ts", "utf8").indexOf("applyShare(body, store, { recurring: false"), full.has("metadata[embed_site]")], [true, false]);
 is("never on a session from a package, which pays nothing here", body({ embedSite: "https://lena.example", fromPackage: { id: "cs_test_pkg", coupon: "c1", email: "ana@example.com", back: "https://marktmorgen.com/@lena" } }).has("metadata[embed_site]"), false);
 
 part("Checked against the creator's list again");

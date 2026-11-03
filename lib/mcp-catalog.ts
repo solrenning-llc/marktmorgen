@@ -47,6 +47,7 @@ const TITLES: Readonly<Record<string, string>> = {
   list_saved_blocks: "Saved sections",
   propose_product_description: "Propose a product description",
   propose_product_title: "Propose a product title",
+  propose_product_summary: "Propose a product summary",
   get_store: "Which store",
 };
 
@@ -210,6 +211,21 @@ const DRAFTS: readonly ToolDraft[] = [
         title: { type: "string", description: "The whole new title, on one line." },
       },
       required: ["product", "title"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false },
+  },
+  {
+    name: "propose_product_summary",
+    description:
+      "Prepares a new short summary for one product (the line under its title), for the creator to read beside the current one and confirm in their studio (What the AI proposes). Its price and everything else stay as they are. Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "The product's id, from list_products." },
+        summary: { type: "string", description: "The whole new summary, on one line; empty takes it off." },
+      },
+      required: ["product", "summary"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false },

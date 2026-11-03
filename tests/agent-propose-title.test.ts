@@ -1,10 +1,12 @@
 /**
- * 631 [AA1] (c): propose_product_title, through the real MCP route and the
+ * 631 [AA1] (c): propose_product_title and propose_product_summary, through the real MCP route and the
  * studio's route. A key that only reads is refused; a proposal keeps the
  * title now and the one it would become; nothing changes until the creator
  * confirms; confirming changes the title and nothing else (price, summary);
  * undo puts it back; an empty or too long title, and words the studio
  * refuses on a product on the store, are refused before anything is kept.
+ * propose_product_summary works the same way, and an empty one takes the
+ * summary off.
  */
 import { NextRequest } from "next/server";
 import { makeKey } from "@/lib/api-keys";
@@ -32,12 +34,12 @@ async function main(): Promise<void> {
   const reader = await makeKey(sid, "Reader");
   const drafter = await makeKey(sid, "Drafter", Date.now(), false, "draft");
   if (!reader.ok || !drafter.ok) throw new Error("no keys");
-  const call = async (key: string, args: Record<string, unknown>) =>
+  const call = async (key: string, args: Record<string, unknown>, tool = "propose_product_title") =>
     (await (
       await mcp(new Request("https://marktmorgen.com/api/mcp", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "propose_product_title", arguments: args } }),
+        body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: tool, arguments: args } }),
       }))
     ).json()) as { result?: { content: { text: string }[]; isError: boolean }; error?: { code: number; message: string } };
   const session = await openSession(OWNER);
@@ -70,6 +72,18 @@ async function main(): Promise<void> {
   is("the title changed, and nothing else", [after.title, after.priceCents, after.summary, after.hidden], ["Knife Skills for Home Cooks", before.priceCents, before.summary, before.hidden]);
   is("undone", (await post({ action: "undo", id: proposal })).ok, true);
   is("the title is as it was", (await listing()).title, "Knife Skills");
+
+  part("The summary, the same way");
+  const summaryMoney = await call(drafter.key, { product: id, summary: "Make easy money cutting at home." }, "propose_product_summary");
+  is("a promise of fast or easy money is refused", [summaryMoney.result?.isError, /Nothing was proposed\./.test(summaryMoney.result?.content[0].text ?? "")], [true, true]);
+  is("a summary too long is refused", /at most/.test((await call(drafter.key, { product: id, summary: "x".repeat(301) }, "propose_product_summary")).result?.content[0].text ?? ""), true);
+  const line = await call(drafter.key, { product: id, summary: "Ten lessons, one knife." }, "propose_product_summary");
+  const lineId = (JSON.parse(line.result?.content[0].text ?? "{}") as { proposal?: string }).proposal ?? "";
+  is("kept beside the summary now", (await readBook(statsId)).waiting.map((p) => [p.kind, p.before, p.after]), [["product.summary", "Learn to cut.", "Ten lessons, one knife."]]);
+  is("confirmed: the summary changed, the title and price did not", [(await post({ action: "confirm", ids: [lineId] })).done, (await listing()).summary, (await listing()).title, (await listing()).priceCents], [[lineId], "Ten lessons, one knife.", "Knife Skills", before.priceCents]);
+  const empty = await call(drafter.key, { product: id, summary: "" }, "propose_product_summary");
+  const emptyId = (JSON.parse(empty.result?.content[0].text ?? "{}") as { proposal?: string }).proposal ?? "";
+  is("an empty summary takes it off, once confirmed", [(await post({ action: "confirm", ids: [emptyId] })).done, (await listing()).summary], [[emptyId], ""]);
   done();
 }
 

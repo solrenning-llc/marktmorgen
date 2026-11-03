@@ -38,7 +38,7 @@ export default async function StudioAgentPage({ searchParams }: Params) {
   const titles = new Map((targets.length ? await readListings(store, targets).catch(() => []) : []).map((p) => [p.id, p.title]));
   const product = (target: string) => titles.get(target) ?? "a product you have since removed";
   const label = (kind: string, target: string) =>
-    kind === "product.description" ? `Description of ${product(target)}` : kind === "product.title" ? `Title of ${product(target)}` : kind;
+    kind === "product.description" ? `Description of ${product(target)}` : kind === "product.title" ? `Title of ${product(target)}` : kind === "product.summary" ? `Summary of ${product(target)}` : kind;
   const asked = (by: string) => (by === "mcp" ? "your AI assistant, with an API key" : by === "cli" ? "the command line" : "the assistant in your studio");
   const waiting: ProposalRow[] = (book?.waiting ?? []).map((p) => ({ id: p.id, label: label(p.kind, p.target), asked: asked(p.asked.by), at: day(p.at), before: text(p.before), after: text(p.after) }));
   const history: DoneRow[] = (book?.history ?? []).map((d) => ({ id: d.id, label: label(d.kind, d.target), confirmed: `confirmed ${day(d.confirmed.at)}`, undo: d.undo, undone: d.undone ? day(d.undone.at) : null }));

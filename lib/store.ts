@@ -3116,6 +3116,13 @@ export async function setProductTitle(email: string, id: string, rawTitle: strin
   return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
+/** A product's short summary alone, as setProductTitle: everything else stays. Empty is allowed, as on the studio's form. */
+export async function setProductSummary(email: string, id: string, rawSummary: string): Promise<ProductResult> {
+  const summary = rawSummary.trim().slice(0, MAX_SUMMARY_LENGTH);
+  const result = await onProduct<never>(email, id, (product) => ({ ...product, summary }));
+  return result.ok ? { ok: true, store: result.store, product: result.product } : result;
+}
+
 /** Takes something off the store. Returns the product as it was, for its files. */
 export async function removeProduct(
   email: string,

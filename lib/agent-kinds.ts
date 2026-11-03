@@ -5,13 +5,14 @@
  * back. The book that keeps proposals is lib/agent-book.ts; nothing here runs
  * without the creator's confirmation there.
  *
- * The kinds so far: a product's long description and its title, each a draft
+ * The kinds so far: a product's long description, its title and its short
+ * summary, each a draft
  * (confirmed in a batch is fine), with undo.
  */
 import type { Json, ProposalKind } from "@/lib/agent-proposal-rules";
 import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { setProductAbout, setProductTitle, type Store } from "@/lib/store";
-import { MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
+import { setProductAbout, setProductSummary, setProductTitle, type Store } from "@/lib/store";
+import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 
@@ -38,12 +39,12 @@ export type AgentKind = ProposalKind & {
  * no prompt of the ready outline left in (lib/product-outline.ts). A hidden
  * product (a draft) may hold either; it is checked again when published.
  */
-export async function wordsRefusal(store: Store, target: string, change: { title?: string; about?: string }): Promise<string | null> {
+export async function wordsRefusal(store: Store, target: string, change: { title?: string; summary?: string; about?: string }): Promise<string | null> {
   // A product that cannot be read is taken as published: a failed read never lets words through.
   const listing = await readListing(store, target).catch(() => null);
   if (listing?.hidden === true) return null;
   // Each field is checked on its own (fastMoneyRefusal), so the field not being changed was checked when it was saved.
-  const words = { title: change.title ?? listing?.title ?? "", summary: listing?.summary ?? "", about: change.about ?? "" };
+  const words = { title: change.title ?? listing?.title ?? "", summary: change.summary ?? listing?.summary ?? "", about: change.about ?? "" };
   const money = fastMoneyRefusal(words);
   if (money) return `The ${money.field === "about" ? "description" : money.field} says "${money.excerpt}". ${money.why} ${money.fix}`;
   const left = productPromptsLeft(words)[0];
@@ -54,6 +55,11 @@ export async function wordsRefusal(store: Store, target: string, change: { title
 /** The description's words, checked as wordsRefusal says. */
 export async function descriptionRefusal(store: Store, target: string, value: Json): Promise<string | null> {
   return typeof value === "string" ? wordsRefusal(store, target, { about: cleanAbout(value) }) : null;
+}
+
+/** The summary's words, checked as wordsRefusal says. */
+export async function summaryRefusal(store: Store, target: string, value: Json): Promise<string | null> {
+  return typeof value === "string" ? wordsRefusal(store, target, { summary: value.trim().slice(0, MAX_SUMMARY_LENGTH) }) : null;
 }
 
 /** The title's words, checked as wordsRefusal says. */
@@ -104,4 +110,22 @@ export const PRODUCT_TITLE: AgentKind = {
   },
 };
 
-export const AGENT_KINDS: ReadonlyMap<string, AgentKind> = new Map([PRODUCT_DESCRIPTION, PRODUCT_TITLE].map((k) => [k.name, k]));
+/** A product's short summary, the line under its title (631 [AA1] (c)): a draft, with undo; empty is allowed, as on the studio's form. */
+export const PRODUCT_SUMMARY: AgentKind = {
+  name: "product.summary",
+  scope: "draft",
+  undo: true,
+  maxBytes: MAX_SUMMARY_LENGTH * 4 * 2 + 64,
+  async current(store, target) {
+    const listing = await readListing(store, target);
+    return listing ? listing.summary : null;
+  },
+  refusal: summaryRefusal,
+  async write(store, ref, target, value) {
+    if (typeof value !== "string") return false;
+    if (await summaryRefusal(store, target, value)) return "terms";
+    return (await setProductSummary(ref, target, value)).ok;
+  },
+};
+
+export const AGENT_KINDS: ReadonlyMap<string, AgentKind> = new Map([PRODUCT_DESCRIPTION, PRODUCT_TITLE, PRODUCT_SUMMARY].map((k) => [k.name, k]));

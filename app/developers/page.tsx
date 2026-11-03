@@ -381,7 +381,7 @@ export default function DevelopersPage() {
           the header <code className="font-mono">Authorization: Bearer nl_live_…</code> and one of your keys.
         </p>
         <p>
-          It has twenty-three tools. Two prepare a change: a new description or a new title for a product, each kept as a proposal you read beside the
+          It has twenty-four tools. Three prepare a change: a new description, title or short summary for a product, each kept as a proposal you read beside the
           current one and confirm under What the AI proposes in your studio, with undo; nothing changes until you confirm, and they
           need a key you allowed to prepare changes. The other twenty-one read only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
           your products, revenue by channel read three ways, the funnel from visit to sale, each product&apos;s numbers and

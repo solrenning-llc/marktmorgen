@@ -1,5 +1,5 @@
 import { apiAgent, apiStore } from "@/lib/api-guard";
-import { proposeDescription, proposeTitle } from "@/lib/agent-propose";
+import { proposeDescription, proposeSummary, proposeTitle } from "@/lib/agent-propose";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { readNumbers, summaryOf } from "@/lib/stats-report";
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
 
   // A tool that prepares a change needs a key that may (631 [AA1] (c)); checked instead of the plain read, so the call is counted once.
   const asked = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
-  const prepares = { propose_product_description: proposeDescription, propose_product_title: proposeTitle } as const;
+  const prepares = { propose_product_description: proposeDescription, propose_product_title: proposeTitle, propose_product_summary: proposeSummary } as const;
   if (method === "tools/call" && typeof asked.name === "string" && Object.hasOwn(prepares, asked.name)) {
     const agent = await apiAgent(request, "draft");
     if (agent instanceof Response) {

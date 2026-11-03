@@ -45,7 +45,7 @@ async function main(): Promise<void> {
 
     part("Every tool has a title and a read-only hint (what connector directories ask for)");
     is("tools without a title", MCP_TOOLS.filter((t) => !t.title || t.annotations.title !== t.title).map((t) => t.name), []);
-    is("every tool says it reads only, but those that prepare a change for the creator to confirm", MCP_TOOLS.filter((t) => t.annotations.readOnlyHint !== true).map((t) => t.name), ["propose_product_description", "propose_product_title"]);
+    is("every tool says it reads only, but those that prepare a change for the creator to confirm", MCP_TOOLS.filter((t) => t.annotations.readOnlyHint !== true).map((t) => t.name), ["propose_product_description", "propose_product_title", "propose_product_summary"]);
     is("names are 64 characters or fewer", MCP_TOOLS.every((t) => t.name.length <= 64), true);
 
     part("get_live: right now and today, counted, nobody named");

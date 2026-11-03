@@ -5,11 +5,11 @@
  * the store changes here.
  */
 import type { Store } from "@/lib/store";
-import { MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
+import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH, readListing } from "@/lib/catalog";
 import { MAX_ABOUT_LENGTH, cleanAbout } from "@/lib/product-about";
 import { DataRoomError } from "@/lib/store-data";
 import { BookBusy, addProposal } from "@/lib/agent-book";
-import { type AgentKind, PRODUCT_DESCRIPTION, PRODUCT_TITLE } from "@/lib/agent-kinds";
+import { type AgentKind, PRODUCT_DESCRIPTION, PRODUCT_SUMMARY, PRODUCT_TITLE } from "@/lib/agent-kinds";
 
 type Answer = { content: { type: "text"; text: string }[]; isError: boolean };
 const answer = (value: unknown, isError = false): Answer => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }], isError });
@@ -59,4 +59,13 @@ export async function proposeTitle(store: Store, keyId: string, args: Record<str
   if (!product || !raw) return answer({ error: "Send product (from list_products) and title (the whole new title, not empty)." }, true);
   if (raw.length > MAX_TITLE_LENGTH) return answer({ error: `A title holds at most ${MAX_TITLE_LENGTH} characters.` }, true);
   return keep(store, keyId, PRODUCT_TITLE, product, raw, "title");
+}
+
+/** propose_product_summary: a new short summary (the line under the title) for one product, waiting for the creator. */
+export async function proposeSummary(store: Store, keyId: string, args: Record<string, unknown>): Promise<Answer> {
+  const product = typeof args.product === "string" ? args.product.slice(0, 40) : "";
+  const raw = typeof args.summary === "string" ? args.summary.replace(/\s+/g, " ").trim() : null;
+  if (!product || raw === null) return answer({ error: "Send product (from list_products) and summary (the whole new line; empty takes it off)." }, true);
+  if (raw.length > MAX_SUMMARY_LENGTH) return answer({ error: `A summary holds at most ${MAX_SUMMARY_LENGTH} characters.` }, true);
+  return keep(store, keyId, PRODUCT_SUMMARY, product, raw, "summary");
 }

@@ -28,6 +28,7 @@ import { bookingLength, offeredLengths } from "@/lib/call-lengths";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { chargeNow } from "@/lib/call-deposit";
 import { slotWords } from "@/lib/slot-words";
+import { placeLine } from "@/lib/call-place";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -98,6 +99,9 @@ const CARD_RULES =
 const SEE_THROUGH = `html,body{background:transparent!important;min-height:0!important;height:100%;margin:0}${CARD_RULES}`;
 /** As a page of its own (?mm=page) the card sits in a box of its own height, the picture across its top. */
 const ON_A_PAGE = ".em-cover{display:block}.em-thumb{display:none}.em-sum{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;-webkit-line-clamp:var(--lines,2)}";
+
+/** How tall the frame is asked to be for a call's times (the script takes 160 to 800 pixels): room for a week of times, scrolled inside past that. */
+const TIMES_HEIGHT = 640;
 
 /** Past about this many characters a title takes two lines on the card, and the summary gives one up. */
 const LONG_TITLE = 30;
@@ -190,12 +194,16 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   // site the creator listed, while it may sell there and with no affiliate's code, shows its times in the frame. Anywhere
   // else the card stays a link to the booking page in a new tab, as before, so the calendar never opens on a site off the list.
   const calendar =
-    !plain && open?.mode === "overlay" && open.live && Boolean(open.site) && !open.via && action.kind === "link" &&
+    !plain && open?.mode === "overlay" && open.live && Boolean(open.site) && !open.via && !soon &&
+    action.kind === "link" && action.href === `/@${store.handle}/book/${product.id}` &&
     product.call?.kind === "weekly" && canSellProduct(store, product);
-  // Every parameter the script put on the frame's address is kept: the open, its site and its tags stay as they were checked.
+  // Every parameter the script put on the frame's address is kept, and the listed site with them: a frame that moves on inside
+  // itself is sent by this site's own page, so the site is read again from here, and checked against the list again
+  // (lib/embed-open.ts), as the sign-up form's answer carries it.
   const here = (extra: Record<string, string>, drop: string[] = []) => {
     const next = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) if (typeof value === "string" && !drop.includes(key)) next.set(key, value);
+    if (open?.site) next.set("site", open.site);
     for (const [key, value] of Object.entries(extra)) next.set(key, value);
     return `?${next.toString()}`;
   };
@@ -214,12 +222,19 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     const payNow = say.money(due.rest > 0 ? due.cents : cents);
     const code = due.rest > 0 && store.hasDiscounts ? { label: b.codeLabel, help: b.codeHelp } : undefined;
     const starts = read ? read.days.flatMap((day) => day.starts) : [];
+    // A team that lets the buyer choose who they book with: the choice is on the booking page, never dropped here.
+    const chooses = Boolean(read && "hosts" in read && read.hosts && read.hosts.length);
+    const where = call.call.place ? b.inPersonLine(chosen ? chosen.minutes : call.call.minutes, placeLine(call.call.place)) : null;
     return (
       <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} h-screen overflow-y-auto`} style={lookStyle(store.look) as React.CSSProperties} data-embed-times="">
         <main id="content" className="p-4">
           <h1 className="font-display text-[1.0625rem] font-semibold leading-snug">{product.title}</h1>
           <p className="st-price mt-1 text-sm">{say.money(cents)}</p>
+          {where ? <p className="st-muted mt-1 text-sm font-semibold">{where}</p> : null}
           {due.rest > 0 ? <p className="mt-1 text-sm">{b.depositRest(say.money(due.rest), store.name)}</p> : null}
+          {/* The creator's cancellation deadline and summary, before paying, as the booking page says them. */}
+          {call.call.cancelHours ? <p className="mt-1 text-sm">{b.cancelPolicy(call.call.cancelHours, store.name)}</p> : null}
+          {product.summary ? <p className="st-muted mt-2 text-sm leading-relaxed">{product.summary}</p> : null}
           {chosen ? (
             <div className="mt-4" role="group" aria-labelledby={`length-${product.id}`}>
               <p id={`length-${product.id}`} className="font-bold" style={{ color: "var(--st-text)" }}>{b.lengthPick}</p>
@@ -239,7 +254,11 @@ export default async function EmbedCard({ params, searchParams }: Params) {
               <p className="mt-2 text-sm" role="status">{b.lengthChosen(b.lengthOption(chosen.minutes, say.money(chosen.cents)))}</p>
             </div>
           ) : null}
-          {read === null ? (
+          {chooses ? (
+            <p className="mt-4">
+              <a href={tag(`/@${store.handle}/book/${product.id}`)} {...aside} className="btn st-btn btn-block">{label}</a>
+            </p>
+          ) : read === null ? (
             <div className="st-note mt-4">
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{b.timesUnread}</p>
               <p className="mt-1 text-sm">{b.timesUnreadBody}</p>
@@ -256,11 +275,11 @@ export default async function EmbedCard({ params, searchParams }: Params) {
             />
           )}
           <p className="mt-4 text-center text-sm">
-            <a href={here({}, ["view", "length"])} className="font-semibold underline underline-offset-4">{b.backToCard(product.title)}</a>
+            <a href={here({}, ["view", "length"])} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">{b.backToCard(product.title)}</a>
           </p>
         </main>
         {/* Told what happened on the listed site the frame is on, as the card itself tells it. */}
-        {open.site ? <EmbedMessenger to={open.site} height={product.image ? CARD_HEIGHTS.picture : CARD_HEIGHTS.plain} /> : null}
+        {open.site ? <EmbedMessenger to={open.site} height={TIMES_HEIGHT} /> : null}
       </div>
     );
   }

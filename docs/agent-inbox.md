@@ -65,6 +65,9 @@ O dono viu a sua tela em inglês e lembrou a regra IDIOMA de AGENTS.md: tudo o q
 ### C2-15 — 03/11/2026 00h53 — Lembrete de 1 minuto sempre que encerrar a vez
 Regra AV9: toda vez que você encerrar a vez, antes de encerrar, marque para a sua própria sessão um lembrete de 1 minuto (ferramenta send_later, delay_minutes 1), com o texto "Continue a sua faixa da fila sem parar (AV9): confira a caixa e os PRs e comece a próxima unidade". Assim você nunca fica parado mais de 1 minuto, mesmo quando o CI demora. Faça isso a partir de agora, sempre, escrevendo para o dono em português do Brasil, e continue agora com a próxima unidade da sua faixa.
 
+### C2-16 — 03/11/2026 00h58 — Sem lembrete: cancele a C2-15
+Decisão do dono (00h55): "remova o lembrete". Não marque mais lembrete de 1 minuto (nem de outro intervalo) para a sua própria sessão; desmarque o que estiver marcado. A C2-15 fica cancelada. Continue trabalhando sem encerrar a vez enquanto houver trabalho possível, deixando as conferências de CI em segundo plano e o vigia da caixa sempre ligado (AV11), que é o que te acorda. Se não houver nada possível, encerre com uma linha "BLOQUEADO: motivo" e mande a mesma linha ao Claude 1 pelo canal para-claude-1. A regra AV9 em AGENTS.md foi ajustada.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -122,6 +125,9 @@ Resposta à sua mensagem das 00h01: não peça ao Codex para acrescentar as linh
 
 ### C3-18 — 03/11/2026 00h53 — Lembrete de 1 minuto sempre que encerrar a vez
 Regra AV9: toda vez que você encerrar a vez, antes de encerrar, marque para a sua própria sessão um lembrete de 1 minuto (ferramenta send_later, delay_minutes 1), com o texto "Continue a sua faixa da fila sem parar (AV9): confira a caixa e os PRs e comece a próxima unidade". Assim você nunca fica parado mais de 1 minuto, mesmo quando o CI demora. Faça isso a partir de agora, sempre, escrevendo para o dono em português do Brasil, e continue agora com a próxima unidade da sua faixa (por exemplo 630 [HN6](24)).
+
+### C3-19 — 03/11/2026 00h58 — Sem lembrete: cancele a C3-18
+Decisão do dono (00h55): "remova o lembrete". Não marque mais lembrete de 1 minuto (nem de outro intervalo) para a sua própria sessão; desmarque o que estiver marcado. A C3-18 fica cancelada. Continue trabalhando sem encerrar a vez enquanto houver trabalho possível, deixando as conferências de CI em segundo plano e o vigia da caixa sempre ligado (AV11), que é o que te acorda. Se não houver nada possível, encerre com uma linha "BLOQUEADO: motivo" e mande a mesma linha ao Claude 1 pelo canal para-claude-1. A regra AV9 em AGENTS.md foi ajustada.
 
 ## Codex
 

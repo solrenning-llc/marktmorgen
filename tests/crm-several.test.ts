@@ -37,8 +37,8 @@ is("one that is not is named", flowConfigurationIssues(step("Webinar"), context)
 part("On the contact's record");
 const html = renderToStaticMarkup(createElement(PersonFields, { person: "p".repeat(16), fields: [field], initial: { int001: "Coaching\nTemplates" } }));
 is("a group named by the field", /<fieldset[^>]*>\s*<legend[^>]*>Interested in<\/legend>/.test(html), true);
-is("one box each, labelled by its choice", (html.match(/type="checkbox"/g) ?? []).length === 3 && ["Coaching", "Course", "Templates"].every((o) => html.includes(`<span>${o}</span>`)), true);
-is("the picked ones ticked", (html.match(/checked=""/g) ?? []).length, 2);
+is("one box each, named by its choice", (html.match(/type="checkbox"/g) ?? []).length === 3 && ["Coaching", "Course", "Templates"].every((o) => html.includes(`<span>${o}</span>`)), true);
+is("the picked ones checked", (html.match(/checked=""/g) ?? []).length, 2);
 is("each box a target of 44 px at least", (html.match(/min-h-11/g) ?? []).length >= 3, true);
 
 part("Where the store's fields are made");

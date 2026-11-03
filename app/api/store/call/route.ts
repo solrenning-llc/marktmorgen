@@ -4,7 +4,10 @@ import { type CallSetup, readSetup } from "@/lib/call-setup";
 import { checkCallChange } from "@/lib/calls";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { usableProviders } from "@/lib/meet-connect";
-import { writeTeam } from "@/lib/team-booking";
+import { readTeams, writeTeam } from "@/lib/team-booking";
+import { readCallLengths } from "@/lib/call-lengths";
+import { readProduct } from "@/lib/catalog";
+import { toMajor } from "@/lib/money";
 
 /**
  * Makes a product a paid call, changes its hours, or turns it back.
@@ -34,9 +37,8 @@ export async function POST(request: NextRequest) {
     // A deposit (lib/call-deposit.ts; 520 [LB1] unit 5a) is not offered yet: the booking page, the page after paying
     // and the emails do not say what is left to pay in person, and the editor does not keep it. Refused until they do (5b).
     if (setup.deposit) return Response.json({ ok: false, error: "deposit" }, { status: 400 });
-    // Several lengths (637 [GL5]) are not offered yet: the booking page, the store page, the page after paying and the
-    // checkout reminder say one length and one price, and this route does not yet check them with the store's currency,
-    // the product's price, package and team (lib/call-lengths.ts, readCallLengths). Refused until the editor unit does.
+    // Several lengths (637 [GL5]) come only as the editor sends them, typed, in `lengths` beside the call, and are checked
+    // below with the store's currency, the product's price, package and team; never as a stored list sent from outside.
     if (setup.lengths) return Response.json({ ok: false, error: "lengths" }, { status: 400 });
     // In person chosen with no address (lib/call-place.ts): never saved as a call with no link.
     const asked = (guarded.body.call as { place?: unknown } | null | undefined)?.place;
@@ -50,6 +52,23 @@ export async function POST(request: NextRequest) {
     if (setup) {
       const store = await storeForEmail(guarded.ref);
       if (store) {
+        // Other lengths than the call's own, each with its price (lib/call-lengths.ts): the call's own first, at the product's price.
+        const extra = guarded.body.lengths;
+        if (Array.isArray(extra) && extra.length > 0) {
+          const product = await readProduct(store, id);
+          if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+          const read = readCallLengths([{ minutes: setup.minutes, price: toMajor(product.priceCents, store.currency) }, ...extra], {
+            setup,
+            currency: store.currency,
+            packaged: Boolean(product.callPackage),
+            deposit: setup.deposit ?? null,
+            team: (await readTeams(store)).has(id),
+          });
+          if (!read.ok) return Response.json({ ok: false, error: "lengths", problem: read.problem, ...(read.minutes ? { minutes: read.minutes } : {}) }, { status: 400 });
+          // The call's own length is the shortest: another length is always longer, so the price on the store stays the call's own.
+          if (read.lengths[0].minutes !== setup.minutes) return Response.json({ ok: false, error: "lengths", problem: "shorter" }, { status: 400 });
+          setup = { ...setup, lengths: read.lengths };
+        }
         const checked = await checkCallChange(store, id, setup);
         if (typeof checked === "string") {
           return Response.json({ ok: false, error: checked }, { status: checked === "error" ? 503 : 400 });

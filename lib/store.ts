@@ -2393,9 +2393,11 @@ export async function setPodcastEpisodes(email: string, id: string, episodes: nu
  * (null). Only a call booked in weekly hours: dated live sessions are bought
  * one date at a time.
  */
-export async function setCallPackage(email: string, id: string, pkg: CallPackage | null): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "call" }> {
-  return onProduct<"call">(email, id, (product) => {
+export async function setCallPackage(email: string, id: string, pkg: CallPackage | null): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "call" | "lengths" }> {
+  return onProduct<"call" | "lengths">(email, id, (product) => {
     if (pkg && product.call?.kind !== "weekly") return { ok: false, reason: "call" };
+    // A package's sessions are free once bought, so a call with several lengths (lib/call-lengths.ts) has none: a long one would be had at a short one's price.
+    if (pkg && product.call?.lengths?.length) return { ok: false, reason: "lengths" };
     return { ...product, callPackage: pkg };
   });
 }

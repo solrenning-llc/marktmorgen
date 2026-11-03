@@ -13,6 +13,7 @@ const MESSAGES: Record<string, string> = {
   price: "Type the price of the whole package.",
   days: "Pick how long buyers have to use it.",
   call: "Packages are for calls booked in weekly hours.",
+  lengths: "A call that offers several lengths has no package, because a package's sessions are free once bought. Keep one length first.",
 };
 
 /** A weekly call's package: how many sessions, their price together, and how long to use them. */

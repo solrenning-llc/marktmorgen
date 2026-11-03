@@ -2,6 +2,9 @@
 
 import { MAX_PLACE_LINE, MAX_PLACE_LINES, placeLine } from "@/lib/call-place";
 import { useState, useId } from "react";
+import { useStoreCurrency } from "@/components/store-currency";
+import { type LengthsProblem, MAX_CALL_LENGTHS, lengthsProblemWords } from "@/lib/call-lengths";
+import { type Currency, priceExample, rangeWords, toMajor } from "@/lib/money";
 import { UrlField } from "@/components/url-field";
 import { roomOnLeave } from "@/lib/url-check";
 import { useRouter } from "next/navigation";
@@ -132,6 +135,8 @@ export type Draft = {
   sessions: SessionDraft[];
   /** The cancellation deadline in hours before the start (lib/call-setup.ts, CANCEL_HOURS); 0 is none. */
   cancelHours: number;
+  /** Other lengths than the call's own, each with its price as typed (lib/call-lengths.ts); the call's own is at the product's price. */
+  extra: { minutes: number; price: string }[];
 };
 
 /** A Google Calendar or Zoom account this store can make meetings on, as the studio shows it. */
@@ -318,7 +323,7 @@ function newSession(tz: string, before: SessionDraft | undefined): SessionDraft 
   };
 }
 
-function toDraft(setup: CallSetup | null, kind: "weekly" | "live"): Draft {
+function toDraft(setup: CallSetup | null, kind: "weekly" | "live", currency: Currency): Draft {
   if (setup) {
     const now = Date.now();
     return {
@@ -329,6 +334,7 @@ function toDraft(setup: CallSetup | null, kind: "weekly" | "live"): Draft {
       place: setup.place?.lines.join("\n") ?? "",
       seats: String(setup.seats),
       cancelHours: setup.cancelHours ?? 0,
+      extra: (setup.lengths ?? []).slice(1).map((l) => ({ minutes: l.minutes, price: String(toMajor(l.cents, currency)) })),
       // Sessions that are over are not shown, and are let go when this is saved.
       sessions: setup.sessions
         .filter((s) => s.start + s.minutes * 60_000 > now)
@@ -362,6 +368,7 @@ function toDraft(setup: CallSetup | null, kind: "weekly" | "live"): Draft {
     seats: "1",
     sessions: kind === "live" ? [newSession(tz, undefined)] : [],
     cancelHours: 0,
+    extra: [],
   };
 }
 
@@ -382,11 +389,70 @@ function sessionWhen(start: number, tz: string): string {
   }).format(new Date(start));
 }
 
+const SHORTER_LENGTH = "Each other length has to be longer than the call's own length. Pick a longer one, or make the call's own length shorter.";
+
+/**
+ * Other lengths a one-to-one call may offer, each with its price (637 [GL5],
+ * lib/call-lengths.ts). The call's own length, at this product's price, is
+ * always the first; each other one is longer, so the price on the store is
+ * the call's own. Optional: none keeps the call exactly as it is.
+ */
+function OtherLengths({ draft, setDraft, currency, id }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string }) {
+  const longer = CALL_LENGTHS.filter((m) => m > draft.minutes);
+  const unused = longer.filter((m) => !draft.extra.some((row) => row.minutes === m));
+  const setRow = (index: number, change: Partial<Draft["extra"][number]>) =>
+    setDraft({ ...draft, extra: draft.extra.map((row, i) => (i === index ? { ...row, ...change } : row)) });
+  return (
+    <fieldset aria-describedby={`lengths-hint-${id}`}>
+      <legend className="field-label">Other lengths (optional)</legend>
+      <p id={`lengths-hint-${id}`} className="field-hint">
+        {`Let people choose a longer call at its own price. ${draft.minutes} minutes at this product's price is always the first choice. You can add up to ${MAX_CALL_LENGTHS - 1} more.`}
+      </p>
+      {draft.extra.map((row, index) => (
+        <div key={index} className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
+          <label className="block">
+            <span className="field-label">{`Length ${index + 2}`}</span>
+            <select className="field mt-2" value={row.minutes} onChange={(e) => setRow(index, { minutes: Number(e.target.value) })}>
+              {[row.minutes, ...unused].filter((m, i, all) => all.indexOf(m) === i).sort((a, b) => a - b).map((m) => (
+                <option key={m} value={m}>{`${m} minutes`}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="field-label">{`Price for ${row.minutes} minutes`}</span>
+            <input
+              className="field mt-2"
+              inputMode="decimal"
+              autoComplete="off"
+              required
+              value={row.price}
+              onChange={(e) => setRow(index, { price: e.target.value })}
+              aria-describedby={`lengths-price-${id}`}
+            />
+          </label>
+          <button type="button" className="btn btn-secondary min-h-11" onClick={() => setDraft({ ...draft, extra: draft.extra.filter((_, i) => i !== index) })}>
+            {`Remove ${row.minutes} minutes`}
+          </button>
+        </div>
+      ))}
+      {draft.extra.length ? (
+        <p id={`lengths-price-${id}`} className="field-hint mt-2">{`Type each price ${rangeWords(currency)}, like ${priceExample(currency, 80)}.`}</p>
+      ) : null}
+      {draft.extra.length < MAX_CALL_LENGTHS - 1 && unused.length ? (
+        <button type="button" className="btn btn-secondary mt-3 min-h-11" onClick={() => setDraft({ ...draft, extra: [...draft.extra, { minutes: unused[0], price: "" }] })}>
+          Add a length
+        </button>
+      ) : null}
+    </fieldset>
+  );
+}
+
 /** Selling a product as a paid call: hours or dated sessions, length, seats, and where it happens. */
 export function CallEditor({ product, email, meetings = [] }: { product: Product; email: string; meetings?: MeetAccount[] }) {
   const router = useRouter();
+  const currency = useStoreCurrency();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<Draft>(() => toDraft(product.call, product.call?.kind ?? "weekly"));
+  const [draft, setDraft] = useState<Draft>(() => toDraft(product.call, product.call?.kind ?? "weekly", currency));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -411,11 +477,16 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; problem?: string; minutes?: number };
       if (data.ok) {
         setOpen(false);
         toast(confirmation);
         router.refresh();
+        return;
+      }
+      // The other lengths (lib/call-lengths.ts): what is wrong with them, in the rules' own words.
+      if (data.error === "lengths" && data.problem) {
+        setError(data.problem === "shorter" ? SHORTER_LENGTH : lengthsProblemWords(data.problem as LengthsProblem, currency, data.minutes));
         return;
       }
       setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
@@ -448,7 +519,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         <button
           type="button"
           onClick={() => {
-            setDraft(toDraft(null, "weekly"));
+            setDraft(toDraft(null, "weekly", currency));
             setOpen(true);
           }}
           className="inline-flex min-h-11 -my-2.5 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
@@ -458,7 +529,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         <button
           type="button"
           onClick={() => {
-            setDraft(toDraft(null, "live"));
+            setDraft(toDraft(null, "live", currency));
             setOpen(true);
           }}
           className="inline-flex min-h-11 -my-2.5 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
@@ -513,8 +584,12 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                 ? `In person · ${setup.minutes} minutes${setup.seats > 1 ? ` · up to ${setup.seats} people` : ""} · ${setup.tz}`
                 : setup.seats > 1
                   ? `Group call · ${setup.minutes} minutes · up to ${setup.seats} people · ${setup.tz}`
-                  : `Paid call · ${setup.minutes} minutes · ${setup.tz}`}
+                  : `Paid call · ${setup.lengths?.length ? setup.lengths.map((l) => l.minutes).join(", ") : setup.minutes} minutes · ${setup.tz}`}
             </p>
+            {setup.lengths?.length && setup.lengths[0].cents !== product.priceCents ? (
+              // The price changed since the lengths were saved: only the call's own length sells (lib/call-lengths.ts, bookingLength).
+              <p className="mt-1 text-sm font-semibold text-ink" role="status">You changed this product's price after setting the other lengths, so only the first length is on sale. Open the hours and save them again to offer the others.</p>
+            ) : null}
             <p className="mt-1 text-sm text-ink-soft">{summarise(setup)}</p>
             <p className="mt-1 text-sm text-ink-soft">
               {`At least ${setup.noticeHours === 1 ? "1 hour's" : `${setup.noticeHours} hours'`} notice, up to ${setup.horizonDays} days ahead${setup.bufferMinutes ? `, ${setup.bufferMinutes} minutes between calls` : ""}.`}
@@ -540,7 +615,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
           <button
             type="button"
             onClick={() => {
-              setDraft(toDraft(setup, setup.kind));
+              setDraft(toDraft(setup, setup.kind, currency));
               setOpen(true);
             }}
             className="inline-flex min-h-11 -my-2.5 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
@@ -780,6 +855,8 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
               ...(draft.cancelHours ? { cancelHours: draft.cancelHours } : {}),
               seats: Number(draft.seats),
             },
+            // The other lengths, one person a time only; the server checks each against the store's currency and rules.
+            lengths: Number(draft.seats) === 1 ? draft.extra.map((row) => ({ minutes: row.minutes, price: row.price })) : [],
           },
           saved ? "Hours saved." : "It's now sold as a paid booking.",
         );
@@ -825,6 +902,10 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
           {`1 is a one-to-one call. Up to ${MAX_SEATS} makes it a group call: each time stays open until every seat is taken, and each person pays for their own seat.`}
         </p>
       </div>
+
+      {Number(draft.seats) === 1 ? (
+        <OtherLengths draft={draft} setDraft={setDraft} currency={currency} id={product.id} />
+      ) : null}
 
       <fieldset>
         <legend className="field-label">When people can book, in your time zone</legend>

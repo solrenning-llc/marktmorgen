@@ -38,15 +38,19 @@ export const MAX_DEAL_CENTS = 10_000_000_000;
 export const CRM_ID = /^[a-z0-9]{6}$/;
 export const DEAL_ID = /^[a-z0-9]{10}$/;
 
-export type FieldType = "text" | "number" | "date" | "choice";
+export type FieldType = "text" | "number" | "date" | "choice" | "phone";
 export const FIELD_TYPES: { type: FieldType; label: string }[] = [
   { type: "text", label: "Text" },
   { type: "number", label: "Number" },
   { type: "date", label: "Date" },
   { type: "choice", label: "One of a few choices" },
+  { type: "phone", label: "Phone number (with country code)" },
 ];
 
 export type CrmField = { id: string; name: string; type: FieldType; options: string[] };
+
+/** Whether a kind of field is one a store can keep. */
+export const isFieldType = (value: unknown): value is FieldType => FIELD_TYPES.some((kind) => kind.type === value);
 
 export type StageKind = "open" | "won" | "lost";
 export type Stage = { id: string; name: string; kind: StageKind };
@@ -129,7 +133,34 @@ export function fieldValue(field: CrmField, raw: unknown): string | null {
       return validCrmDate(text) ? text : null;
     case "choice":
       return field.options.includes(text) ? text : null;
+    case "phone":
+      return crmPhone(text);
   }
+}
+
+/**
+ * A phone number as a contact field keeps it: the international form, "+"
+ * then the country code and number, 7 to 15 digits (ITU-T E.164), from what
+ * was typed with spaces, dots, dashes or brackets and a leading "+" or "00".
+ * Without a country code it is refused, since no one could tell which
+ * country it dials; null when it cannot be one.
+ */
+export function crmPhone(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const typed = raw.trim().replace(/[\s().\-]/g, "");
+  const digits = typed.startsWith("+") ? typed.slice(1) : typed.startsWith("00") ? typed.slice(2) : null;
+  return digits !== null && /^[1-9][0-9]{6,14}$/.test(digits) ? "+" + digits : null;
+}
+
+/**
+ * The link that opens a chat with this number in the creator's own WhatsApp
+ * (https://wa.me/<digits>, the form WhatsApp documents for its click to chat
+ * links). It only opens the app: nothing is written or sent for them, and
+ * the store keeps nothing about it. null when the value is not a phone number.
+ */
+export function whatsappLink(value: unknown): string | null {
+  const phone = crmPhone(value);
+  return phone ? "https://wa.me/" + phone.slice(1) : null;
 }
 
 /** A store's stages as stored or sent: each named, once, at least one open, one won and one lost. */

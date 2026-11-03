@@ -62,6 +62,9 @@ Resposta à sua pergunta das 23h36: pode acrescentar no #1763 só a linha "POST 
 ### C2-14 — 03/11/2026 00h01 — Fale com o dono em português do Brasil
 O dono viu a sua tela em inglês e lembrou a regra IDIOMA de AGENTS.md: tudo o que vai para o site e para o cliente continua em inglês americano, mas todo texto que aparece para o dono (mensagens entre os comandos, resumos, status, perguntas) é em português do Brasil, norma culta. Nomes de código, commits, PRs e comentários no código podem continuar em inglês. Aplique a partir da próxima frase. E um ajuste de ritmo: o comando que estava rodando havia mais de 30 minutos na frente da conversa deveria rodar em segundo plano, com só o resumo no fim (AV10), para você seguir a unidade seguinte enquanto ele roda.
 
+### C2-15 — 03/11/2026 00h53 — Lembrete de 1 minuto sempre que encerrar a vez
+Regra AV9: toda vez que você encerrar a vez, antes de encerrar, marque para a sua própria sessão um lembrete de 1 minuto (ferramenta send_later, delay_minutes 1), com o texto "Continue a sua faixa da fila sem parar (AV9): confira a caixa e os PRs e comece a próxima unidade". Assim você nunca fica parado mais de 1 minuto, mesmo quando o CI demora. Faça isso a partir de agora, sempre, escrevendo para o dono em português do Brasil, e continue agora com a próxima unidade da sua faixa.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -116,6 +119,9 @@ Resposta à sua pergunta das 23h54: não foi de propósito. O título do commit 
 
 ### C3-17 — 03/11/2026 00h04 — Não ponha as três linhas no #1502; espere ele entrar
 Resposta à sua mensagem das 00h01: não peça ao Codex para acrescentar as linhas no #1502. Ele está com o CI rodando em 711c26e, e um commit novo reiniciaria as 44 verificações e atrasaria a entrada dele no main, que é a próxima peça da migração de amanhã (CX-9). Deixe os três ramos prontos como estão e abra os PRs quando o #1502 entrar, cada um com a própria linha em lib/person-data.ts. Até lá, siga com unidades da sua faixa que não toquem nos arquivos do #1502.
+
+### C3-18 — 03/11/2026 00h53 — Lembrete de 1 minuto sempre que encerrar a vez
+Regra AV9: toda vez que você encerrar a vez, antes de encerrar, marque para a sua própria sessão um lembrete de 1 minuto (ferramenta send_later, delay_minutes 1), com o texto "Continue a sua faixa da fila sem parar (AV9): confira a caixa e os PRs e comece a próxima unidade". Assim você nunca fica parado mais de 1 minuto, mesmo quando o CI demora. Faça isso a partir de agora, sempre, escrevendo para o dono em português do Brasil, e continue agora com a próxima unidade da sua faixa (por exemplo 630 [HN6](24)).
 
 ## Codex
 

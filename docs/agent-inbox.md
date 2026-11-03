@@ -59,6 +59,9 @@ Resposta à sua pergunta das 23h34: vale a primeira proposta. O arquivo é gerad
 ### C2-13 — 02/11/2026 23h45 — lib/agent-coverage.ts: acrescente só a linha da sua rota
 Resposta à sua pergunta das 23h36: pode acrescentar no #1763 só a linha "POST store/visit-us": row("pages", draft), sem mexer em nenhuma outra linha. Tirei o arquivo das reservas do Claude 3 em docs/reservations.md e registrei a regra: qualquer agente que cria uma rota do estúdio acrescenta a linha dessa rota, e só ela. Atualize o #1763 com o main e siga.
 
+### C2-14 — 03/11/2026 00h01 — Fale com o dono em português do Brasil
+O dono viu a sua tela em inglês e lembrou a regra IDIOMA de AGENTS.md: tudo o que vai para o site e para o cliente continua em inglês americano, mas todo texto que aparece para o dono (mensagens entre os comandos, resumos, status, perguntas) é em português do Brasil, norma culta. Nomes de código, commits, PRs e comentários no código podem continuar em inglês. Aplique a partir da próxima frase. E um ajuste de ritmo: o comando que estava rodando havia mais de 30 minutos na frente da conversa deveria rodar em segundo plano, com só o resumo no fim (AV10), para você seguir a unidade seguinte enquanto ele roda.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -104,6 +107,12 @@ O Claude 2 ficou travado no #1763 porque docs/accessibility-inventory.json estav
 
 ### C3-14 — 02/11/2026 23h45 — lib/agent-coverage.ts aceita linhas de rotas novas de outros agentes
 Como o teste exige uma linha para toda rota nova do estúdio, qualquer agente que cria uma rota acrescenta a linha dela em lib/agent-coverage.ts, sem tocar nas outras; a estrutura do arquivo e as linhas existentes continuam com você. Tirei o arquivo das suas reservas em docs/reservations.md. No #1855, acrescente também lib/agent-coverage.ts a SHARED_FILES (junto com docs/accessibility-inventory.json, C3-13), com um teste.
+
+### C3-15 — 02/11/2026 23h53 — Não encerre a vez esperando CI: corrija #1796 e #1814 e siga
+O dono viu a sua tela parada há 10 minutos. Pela regra AV9, deixar conferências em segundo plano não basta: na mesma vez, comece a próxima unidade. Agora: 1) #1796 ([GL7](8)) tem a verificação "Mobile render (candidate)" falhando e #1814 ([WP11]) tem "Cross-browser (firefox)" falhando; leia o registro de cada uma, corrija a causa num único commit por PR (sem enfraquecer o teste) ou, se for falha de ambiente comprovada, rode de novo só essa verificação e diga o motivo pelo canal para-claude-1. 2) Em seguida, comece a próxima unidade da sua faixa num ramo próprio, com a reserva no mesmo PR. Só encerre a vez com uma linha "BLOQUEADO: motivo", enviada também pelo canal, se não houver absolutamente nada possível.
+
+### C3-16 — 02/11/2026 23h59 — O #1796 foi fechado por engano meu e já está reaberto
+Resposta à sua pergunta das 23h54: não foi de propósito. O título do commit do #1866 tinha a palavra "fix" antes do número 1796, e o GitHub fecha sozinho o PR citado assim quando o commit entra no main. Já reabri o #1796. Siga como planejado: rode de novo só a verificação que falhou e incorpore quando ficar verde.
 
 ## Codex
 

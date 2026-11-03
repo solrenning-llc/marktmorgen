@@ -1029,10 +1029,10 @@ export async function slotsForMove(
   product: CallListing,
   session: string,
   current: number,
-  /** How long the booking is, in milliseconds: a call with several lengths offers times at the booking's own (lib/call-lengths.ts, ownLength). */
-  bookedMs?: number,
+  /** How long the booking is, in milliseconds: times are offered at the booking's own length (lib/call-lengths.ts, ownLength). */
+  bookedMs: number,
 ): Promise<Offer | null> {
-  const kept = ownLength(product.call, bookedMs ?? Number.NaN);
+  const kept = ownLength(product.call, bookedMs);
   if (kept === "unknown") return null;
   if (kept !== null) product = { ...product, call: { ...product.call, minutes: kept } };
   try {
@@ -1134,7 +1134,7 @@ export async function moveBooking(input: {
       ? { start: recorded.s, end: recorded.e, moves: recorded.n }
       : { start: input.booked.start, end: input.booked.end, moves: 0 };
     if (from.moves >= MAX_MOVES) return { ok: false, reason: "limit" };
-    // A call with several lengths moves at the length it was paid for, whatever the list says now (lib/call-lengths.ts, ownLength).
+    // Weekly hours move at the length paid for, whatever the setup says now (lib/call-lengths.ts, ownLength).
     const kept = ownLength(setup, from.end - from.start);
     if (kept === "unknown") return { ok: false, reason: "error" };
     if (kept !== null) end = start + kept * 60_000;

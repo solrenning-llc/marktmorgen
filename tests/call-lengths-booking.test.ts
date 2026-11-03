@@ -1,6 +1,6 @@
 /**
  * A call with several lengths, booked and moved (637 [GL5], unit 2; added
- * 3 November 2026), with Stripe and the email service mocked, on synthetic
+ * 2 November 2026), with Stripe and the email service mocked, on synthetic
  * records only:
  *
  *   - the setup keeps two or three lengths only in the shape the rules allow
@@ -10,7 +10,11 @@
  *     sale; a length the call does not have, a package, a deposit or a code
  *     with another length than the setup's own, and a product whose price
  *     was changed since, are refused before anything is held or opened;
- *   - a paid booking moves at its own length, whatever the setup's is.
+ *   - a paid booking moves at its own length, whatever the setup's is, also
+ *     once the list is gone; a price changed elsewhere sells only the setup's
+ *     own length, at the price now;
+ *   - the studio's save route refuses several lengths until the pages say
+ *     each of them (the editor unit).
  */
 import { MAX_SETUP_LENGTHS, readSetup, type CallSetup, zonedToUtc } from "@/lib/call-setup";
 import { MAX_CALL_LENGTHS, bookingLength, ownLength } from "@/lib/call-lengths";
@@ -84,10 +88,10 @@ async function main(): Promise<void> {
   part("The length of a new booking");
   is("none sent is the setup's own; one of the list at its own price", [bookingLength(kept, 4500, undefined), bookingLength(kept, 4500, ""), bookingLength(kept, 4500, "60"), bookingLength(kept, 4500, 60)], [LENGTHS[0], LENGTHS[0], LENGTHS[1], LENGTHS[1]]);
   is("a length the call does not have is refused", [bookingLength(kept, 4500, "45"), bookingLength(kept, 4500, "60x"), bookingLength(kept, 4500, -60)], [null, null, null]);
-  is("a product whose price was changed elsewhere sells no length", bookingLength(kept, 5000, "60"), null);
+  is("a product whose price was changed elsewhere sells only the setup's own length, at the price now", [bookingLength(kept, 5000, "60"), bookingLength(kept, 5000, undefined)], [null, { minutes: 30, cents: 5000 }]);
   is("a call with one length: its own length at the product's price, and nothing else", [bookingLength(readSetup(weekly) as CallSetup, 4500, undefined), bookingLength(readSetup(weekly) as CallSetup, 4500, "60")], [{ minutes: 30, cents: 4500 }, null]);
   is("dated sessions have their own lengths", bookingLength({ kind: "live", minutes: 30 }, 4500, undefined), null);
-  is("a paid booking keeps its own length when it moves", [ownLength(kept, 3_600_000), ownLength(kept, 1_800_000), ownLength(kept, 61 * 60_000), ownLength(readSetup(weekly) as CallSetup, 3_600_000)], [60, 30, "unknown", null]);
+  is("a paid booking keeps its own length when it moves, with or without the list", [ownLength(kept, 3_600_000), ownLength(kept, 1_800_000), ownLength(kept, 61 * 60_000), ownLength(readSetup(weekly) as CallSetup, 3_600_000), ownLength(readSetup(weekly) as CallSetup, 61 * 60_000), ownLength({ kind: "live" }, 3_600_000)], [60, 30, "unknown", 60, null, null]);
 
   part("Booked and charged at the length chosen");
   const OWNER = "lena@example.com";
@@ -135,7 +139,14 @@ async function main(): Promise<void> {
   const lastStart = Math.max(...(offer?.days ?? []).flatMap((d) => d.starts));
   const dayEnd = (() => { const d = new Date(lastStart); const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d); return Number(p.find((x) => x.type === "hour")!.value) * 60 + Number(p.find((x) => x.type === "minute")!.value); })();
   is("the times offered to move it are a whole hour each: none starts after 4 p.m.", dayEnd <= 16 * 60, true);
-  is("and without its length, none are offered", await slotsForMove(store, listing, long.session, later), null);
+  const { readFileSync } = await import("node:fs");
+  is("the studio's save route refuses several lengths for now", readFileSync("app/api/store/call/route.ts", "utf8").includes('if (setup.lengths) return Response.json({ ok: false, error: "lengths" }, { status: 400 });'), true);
+
+  part("Once the list is gone, a paid hour still moves as an hour");
+  await setProductCall(OWNER, made.product.id, readSetup(weekly) as CallSetup);
+  const plainListing = (await readListing(store, made.product.id)) as CallListing;
+  const again = await moveBooking({ store, product: plainListing, session: long.session, booked: { start: later, end: later + 3_600_000, email: "ana@example.com", buyerTz: NY }, start: at + 3 * 3_600_000, origin: "https://marktmorgen.com" });
+  is("the setup's own is half an hour, the booking stays an hour", again.ok ? again.end - again.start : again, 3_600_000);
 }
 
 void main().then(() => done(), (error) => {

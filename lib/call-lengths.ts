@@ -27,7 +27,7 @@
  *     openSlots) at that length: the same hours, notice, gap and calendar,
  *     so a longer call is only offered where the whole of it is free.
  *
- * Unit 2 (3 November 2026) books them (lib/calls.ts): a new booking is held
+ * Unit 2 (2 November 2026) books them (lib/calls.ts): a new booking is held
  * and checked at the chosen length, read again under the booking's lock, and
  * charged at that length's price, which the line says and the sale keeps
  * (holdAndCheckout, callCheckoutBody, bookingLength); a paid booking moves at
@@ -138,28 +138,34 @@ export function chosenLength(lengths: readonly CallLength[], minutes: unknown): 
  * Without several lengths, only the setup's own length, at the product's
  * price. With them, only one of them, and only while the first is still the
  * setup's own length at the product's own price: a product whose price was
- * changed elsewhere since sells no length until the lengths are saved again,
- * so no length is ever charged at a price the creator did not set for it.
+ * changed elsewhere since sells only the setup's own length, at the price
+ * now, until the lengths are saved again, so no length is ever charged at a
+ * price the creator did not set for it.
  */
 export function bookingLength(setup: Pick<CallSetup, "kind" | "minutes" | "lengths">, priceCents: number, minutes: unknown): CallLength | null {
   if (setup.kind !== "weekly") return null;
   const asked = minutes === undefined || minutes === null || minutes === "" ? setup.minutes : minutes;
-  const lengths = setup.lengths?.length ? setup.lengths : [{ minutes: setup.minutes, cents: priceCents }];
-  if (lengths[0].minutes !== setup.minutes || lengths[0].cents !== priceCents) return null;
+  const own = { minutes: setup.minutes, cents: priceCents };
+  // A price changed elsewhere since the lengths were saved: the setup's own length still sells, at the price now; no other does.
+  const lengths = setup.lengths?.length && setup.lengths[0].minutes === setup.minutes && setup.lengths[0].cents === priceCents ? setup.lengths : [own];
   return chosenLength(lengths, asked);
 }
 
 /**
- * The length a paid booking keeps when it moves, in minutes: on a call with
- * several lengths, the one it was paid for, read from its own start and end,
- * never the setup's now; null on any other call, which moves at the setup's
- * length as before; "unknown" when the booking's length is not one a call
- * may have, so it is never moved at a guess.
+ * The length a paid booking of weekly hours keeps when it moves, in minutes:
+ * the one it was paid for, read from its own start and end, never the
+ * setup's now, so a length taken off the list or changed since never makes a
+ * paid hour half of one, nor half an hour a whole one. Null for dated
+ * sessions, which move between sessions of their own lengths; "unknown" when
+ * the booking's length is not one a call may have, so it is never moved at a
+ * guess. A call with one length whose booking is of no length a call may
+ * have moves at the setup's length, as before.
  */
 export function ownLength(setup: Pick<CallSetup, "kind" | "lengths">, bookedMs: number): number | null | "unknown" {
-  if (setup.kind !== "weekly" || !setup.lengths?.length) return null;
+  if (setup.kind !== "weekly") return null;
   const minutes = bookedMs / 60_000;
-  return (CALL_LENGTHS as readonly number[]).includes(minutes) ? minutes : "unknown";
+  if ((CALL_LENGTHS as readonly number[]).includes(minutes)) return minutes;
+  return setup.lengths?.length ? "unknown" : null;
 }
 
 /** The times offered for one length: the call's own times, at that length. */

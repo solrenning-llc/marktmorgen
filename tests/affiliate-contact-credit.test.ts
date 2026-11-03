@@ -219,7 +219,7 @@ is("and that the lead came before the purchase", /confirmed lead before they bou
   part("The privacy policy says so");
   const privacy = readFileSync(join(process.cwd(), "app/privacy/page.tsx"), "utf8").replace(/\s+/g, " ");
   is("how a purchase was credited includes an earlier lead", privacy.includes("or by the buyer having been that affiliate&apos;s confirmed lead"), true);
-  is("and how the lead is found, with nothing more kept", privacy.includes("the email address the order was paid with is compared with that program&apos;s leads, and nothing is kept for it beyond what any credited purchase keeps"), true);
+  is("and how the lead is found, with nothing more kept", privacy.includes("To find it, we compare the email address the order was paid with against that program&apos;s leads. Nothing is kept for it beyond what any credited purchase keeps."), true);
 
   done();
 }

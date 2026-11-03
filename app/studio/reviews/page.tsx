@@ -12,6 +12,8 @@ import { HIDDEN_RULE, OVERVIEW_READ_MAX, type StudioRow, averageText, reviewsSin
 import { OVERVIEW_MONTHS, byMonth, monthAverage, monthStart } from "@/lib/review-overview";
 import { ReviewAskEditor, ReviewRow, SeenAllButton, type StudioReview } from "@/components/review-studio";
 import { ReviewQr } from "@/components/review-qr";
+import { ReviewThemes } from "@/components/review-themes";
+import { readVoice } from "@/lib/customer-voice";
 import { canRecover } from "@/lib/buyer-orders";
 import { storeBase } from "@/lib/purchase-email";
 import { AiOn } from "@/components/ai-assist";
@@ -273,6 +275,8 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 </>
               )}
             </section>
+
+            <ReviewThemes voice={await readVoice(store).catch(() => null)} studioHome={studioPath(store)} />
 
             <div className="card p-5 sm:p-6">
               <h2 id="asking-for-reviews" tabIndex={-1} className="font-semibold text-ink">Asking for reviews</h2>

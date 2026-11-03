@@ -10,6 +10,11 @@ import { dataUsed } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
+import { NextRequest } from "next/server";
+import { GET, POST } from "@/app/api/store/person-tasks/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
 
 const NOW = 1_793_700_000;
 const STATS = "t".repeat(16);
@@ -73,6 +78,34 @@ async function main(): Promise<void> {
   part("Gone with the person");
   await forgetCrmPerson(STATS, ANA, "ana@example.com");
   is("a deleted person's tasks are deleted", [await readPersonTasks(STATS, ANA), (await readAllTasks(STATS)).length], [[], 0]);
+
+  part("Through the studio's route");
+  const owner = "tasks@example.com";
+  await claimHandle(owner, "taskshop", "Task Shop", "");
+  await ensureStatsId(owner);
+  await ensureStoreId(owner);
+  await setSubscription(owner, { customerId: "cus_tasks", subscriptionId: "sub_tasks", active: true, tier: "creator", period: paidPeriod() });
+  const statsId = (await storeForEmail(owner))!.statsId!;
+  const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
+  type Reply = { ok?: boolean; error?: string; message?: string; tasks?: PersonTask[]; overdue?: unknown[]; day?: string; today?: unknown[]; undated?: { person: string }[] };
+  const post = async (body: Record<string, unknown>, headers: Record<string, string> = { cookie }) => {
+    const response = await POST(new NextRequest("https://marktmorgen.com/api/store/person-tasks", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
+    return { status: response.status, body: (await response.json()) as Reply };
+  };
+  const get = async (query: string) => (await (await GET(new NextRequest(`https://marktmorgen.com/api/store/person-tasks${query}`, { headers: { cookie } }))).json()) as Reply;
+  const first = await post({ action: "add", person: ANA, text: "Send the workbook", assignee: owner });
+  is("added, the owner responsible", [first.status, first.body.tasks?.[0].assignee], [200, owner]);
+  const task = first.body.tasks![0].id;
+  is("someone not on the team refused, saying what to do", [(await post({ action: "add", person: ANA, text: "Call", assignee: "stranger@example.com" })).body.error, (await post({ action: "add", person: ANA, text: "Call", assignee: "stranger@example.com" })).body.message], ["assignee", TASK_REFUSALS.assignee]);
+  is("marked done", (await post({ action: "done", person: ANA, id: task, done: true })).body.tasks?.[0].done, true);
+  is("listed for the person", (await get(`?person=${ANA}`)).tasks?.length, 1);
+  await post({ action: "add", person: BEN, text: "Book the call" });
+  const agenda = await get("?today=2026-11-03");
+  is("the agenda: open ones only, on the creator's own day", [agenda.day, agenda.today, agenda.undated?.map((e) => e.person)], ["2026-11-03", [], [BEN]]);
+  is("a person that is not one", (await post({ action: "add", person: "nope", text: "Call" })).status, 400);
+  is("an action that is not one", (await post({ action: "launch", person: ANA })).body.error, "unknown");
+  is("no session: refused", (await post({ action: "add", person: ANA, text: "Call" }, {})).status >= 400, true);
+  is("kept under the store's own records", (await readPersonTasks(statsId, ANA)).length, 1);
 
   part("As kept: whatever is stored is checked again");
   is("broken entries and repeated ids dropped", parseTasks([{ id: id(1), text: "Fine", due: "", assignee: "", done: false, createdAt: NOW }, { id: id(1), text: "Repeated" }, { id: "BAD", text: "x" }, { id: id(2), text: "Bad date", due: "soon", assignee: "" }, null]).map((t) => t.text), ["Fine"]);

@@ -1776,6 +1776,7 @@
     "app/api/store/paypal/disconnect/route.ts",
     "app/api/store/paypal/onboarded/route.ts",
     "app/api/store/paypal/return/route.ts",
+    "app/api/store/person-tasks/route.ts",
     "app/api/store/person/route.ts",
     "app/api/store/phone/route.ts",
     "app/api/store/photo/route.ts",
@@ -1937,6 +1938,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 132
+    "pageTemplates": 133
   }
 }

@@ -45,6 +45,7 @@ Add a row before the first commit of a unit; remove it when the unit is merged. 
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | CI capacity: reader evidence URL accepts the solrenning-llc owner, and the move runbook | claude/reader-run-owner | `scripts/accessibility-screen-reader-results.mjs`, `tests/accessibility-screen-reader-results.test.ts`, `docs/github-enterprise-move.md` | 02/11/2026 22h15 |
 | Claude 3 | 631 [AA1] unit 1 (coverage of every studio action by an agent tool, step (a)) | claude3/aa1-coverage | `lib/agent-coverage.ts`, `tests/agent-coverage.test.ts`, `docs/ai-agent-store.md` | 02/11/2026 13h45 |
 | Claude 3 | 631 [AA1] unit 2 (proposals, confirmation and undo as pure rules, step (c); no storage yet) | claude3/aa1-proposal-rules | `lib/agent-proposal-rules.ts`, `tests/agent-proposal-rules.test.ts` | 02/11/2026 13h52 |
 | Claude 3 | 631 [AA1] unit 3 (agent keys by scope: read, draft, execute; step (c); no studio screen yet) | claude3/aa1-agent-keys | `lib/api-keys.ts`, `lib/api-key-rules.ts`, `lib/api-guard.ts`, `tests/agent-keys.test.ts` | 02/11/2026 13h55 |

@@ -192,6 +192,9 @@ O comando de envio ao Claude 1 no topo deste arquivo mudou: ele lia FETCH_HEAD, 
 ### C3-29 — 03/11/2026 16h10 — Uma linha do Codex em tests/store-data-registry.ts
 O Codex vai acrescentar só a linha `nl:orders:link:@lib/single-digital-access.ts` em tests/store-data-registry.ts, num PR empilhado no #1502 que não vai ao main tão cedo (CX-19). Seus #1856, #1927, #1929 e #1933 continuam donos do resto do arquivo. Vale a mesma regra de lib/agent-coverage.ts (C3-14): quando um dos lados for atualizado com o main e o arquivo conflitar, fique com as duas linhas, sem apagar a do outro. Não precisa fazer nada agora.
 
+### C3-30 — 03/11/2026 16h55 — #1934 entrou: atualize #1910, #1911, #1912 e #1887
+O #1934 da Claude 2 entrou no main (0160c00c) e tirou as 17 reservas de ramos já incorporados, inclusive forms-editor, inbox, bundle, mail e email-studio. Rode a conferência de reservas contra o main e atualize com o main, um por vez, #1910, #1911, #1912 e #1887; incorpore cada um quando ficar verde. #1927, #1928, #1929 e #1933 continuam esperando #1762, #1763 e #1767 (C3-27). Passe o #1948 (certificate-look) à frente, porque ele tira uma falha instável de todos os PRs.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

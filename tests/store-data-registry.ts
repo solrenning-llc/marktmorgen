@@ -507,6 +507,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:wf:log:@lib/flow-runs.ts": { what: "A run's history", room: ["lib/flows.ts"] },
   "nl:wf:run:@lib/flow-runs.ts": { what: "A run", room: ["lib/flows.ts"] },
   "nl:wf:runs:@lib/flow-runs.ts": { what: "A workflow's runs", room: ["lib/flows.ts"] },
+  "nl:wf:ver:@lib/flow-versions.ts": { what: "A workflow's earlier versions", room: ["lib/flow-versions.ts"] },
   "nl:mail:flowstats:@lib/flow-stats.ts": { what: "A workflow's counts", parts: [capped(20 * KB, "A hash of counts for each of MAX_FLOWS.", src("lib/flow-limits.ts", "MAX_FLOWS"))] },
   "nl:mail:enr:@lib/flows.ts": { what: "Who started a workflow, 400 days", room: ["lib/flows.ts"] },
   "nl:mail:flowq:lease@lib/flows.ts": company("Steps being worked on", "One sorted set, minutes."),

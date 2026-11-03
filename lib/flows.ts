@@ -1,4 +1,5 @@
 import { readFlowListStrict } from "@/lib/flow-list";
+import { dropFlowVersions, keepFlowVersion, readFlowVersions } from "@/lib/flow-versions";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
@@ -326,7 +327,26 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   if (at >= 0) next[at] = flow;
   else next.push(flow);
   await writeFlows(store, store.listId, next);
+  // What it did before this save, kept so it can be put back (lib/flow-versions.ts); never stops the save.
+  if (at >= 0) await keepFlowVersion(store, store.listId, flows[at], flow);
   return { ok: true, flows: next };
+}
+
+export type RestoreResult = FlowResult | { ok: false; reason: "version" };
+
+/**
+ * Puts back one of a workflow's earlier versions (639 [GL7](19)), by when it
+ * was kept: an ordinary save of that version's content, checked whole against
+ * the store as it is now, keeping the workflow's on or off; the version it
+ * replaces is kept in turn, so this can be undone the same way.
+ */
+export async function restoreFlowVersion(store: Store, id: string, at: number): Promise<RestoreResult> {
+  if (!store.listId) return { ok: false, reason: "unknown" };
+  const current = (await readFlowListStrict(store.listId)).find((f) => f.id === id);
+  if (!current) return { ok: false, reason: "unknown" };
+  const version = (await readFlowVersions(store.listId, id)).find((v) => v.at === at);
+  if (!version) return { ok: false, reason: "version" };
+  return saveFlow(store, { ...version.flow, id, active: current.active } as unknown as Record<string, unknown>);
 }
 
 export async function removeFlow(store: Store, id: string): Promise<FlowResult> {
@@ -335,6 +355,7 @@ export async function removeFlow(store: Store, id: string): Promise<FlowResult> 
   if (!flows.some((f) => f.id === id)) return { ok: false, reason: "unknown" };
   const next = flows.filter((f) => f.id !== id);
   await writeFlows(store, store.listId, next);
+  await dropFlowVersions(store, store.listId, id).catch((error) => console.error("forgetting a removed workflow's versions failed", error));
   // Its runs, their history, starts and queued steps: nothing of the people in it is kept.
   await purgeFlow(store, flows.find((f) => f.id === id)!).catch((error) => console.error("erasing a removed workflow's runs failed", error));
   return { ok: true, flows: next };

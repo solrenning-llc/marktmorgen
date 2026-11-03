@@ -29,7 +29,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
   "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:",
   "nl:taxobs:v1:", "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:watch:last:",
-  "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
+  "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wf:ver:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
   "nl:yearly:price:",
 ];
 
@@ -372,7 +372,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:watch:due": I, "nl:watch:folders:": I, "nl:watch:last:": E, "nl:watch:monthly:": C, "nl:watch:opened:": E, "nl:watch:sec:": E,
   "nl:wb:": E, "nl:wb:cursor": C, "nl:wb:link:": T("nl:erase:ix:", 60), "nl:wb:n:": E, "nl:wb:once:": E,
   "nl:weekly:lock": C, "nl:weekly:off": I, "nl:weekly:sent:": Cr(14), "nl:weekly:to:": { how: "erase", by: "handle" },
-  "nl:wf:abandoned:": X(2), "nl:wf:day:": E, "nl:wf:held:": E, "nl:wf:log:": E, "nl:wf:run:": E, "nl:wf:runs:": E,
+  "nl:wf:abandoned:": X(2), "nl:wf:day:": E, "nl:wf:held:": E, "nl:wf:log:": E, "nl:wf:run:": E, "nl:wf:runs:": E, "nl:wf:ver:": E,
   "nl:wl:": E, "nl:wl:jobs": I, "nl:wl:t:": T("nl:erase:ix:", 7),
   "nl:wo:due": I, "nl:wo:n:": E, "nl:wo:r:": E, "nl:wo:start:": E,
   "nl:yearask:": E, "nl:yearask:count:": E, "nl:yearask:cursor": C,

@@ -270,7 +270,7 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
               </div>
             </div>
             {open === form.id ? (
-              <FormAnswers form={form} latest={latest} total={total} canReview={dealStages.some(stage => stage.kind === "open")} blocked={draft !== null || dealDraft !== null} existingDeals={knownDeals} existingDealsAvailable={existingDealsAvailable} onReview={response => response.opportunityRef && setDealDraft({ form, response, responseRef: response.opportunityRef })} />
+              <FormAnswers pdfBase={exportBase.replace("/forms/export?", "/forms/response-pdf?")} form={form} latest={latest} total={total} canReview={dealStages.some(stage => stage.kind === "open")} blocked={draft !== null || dealDraft !== null} existingDeals={knownDeals} existingDealsAvailable={existingDealsAvailable} onReview={response => response.opportunityRef && setDealDraft({ form, response, responseRef: response.opportunityRef })} />
             ) : null}
           </li>
         ))}

@@ -152,6 +152,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/form-opportunity": row("buyers", draft),
   "POST store/forms": row("pages", draft),
   "GET store/forms/export": row("buyers", never(PEOPLE_FILE)),
+  "GET store/forms/response-pdf": row("buyers", never(PEOPLE_FILE)),
   "POST store/funnel": row("offers", draft),
   "GET store/funnel-share": row("pages", read),
   "POST store/funnel-share": row("pages", draft),

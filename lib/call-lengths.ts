@@ -151,9 +151,19 @@ export function bookingLength(setup: Pick<CallSetup, "kind" | "minutes" | "lengt
   return chosenLength(lengths, asked);
 }
 
-/** The lengths a booking page offers: the call's, while the first is still its own at the product's price (bookingLength); none otherwise. */
-export function offeredLengths(setup: Pick<CallSetup, "kind" | "minutes" | "lengths">, priceCents: number): CallLength[] {
+/**
+ * The lengths a booking page offers, so it never offers one that cannot be
+ * booked (holdAndCheckout): the call's, while the first is still its own at
+ * the product's price (bookingLength); none from a package, with a deposit or
+ * on a team of any kind, which book the call's own length only.
+ */
+export function offeredLengths(
+  setup: Pick<CallSetup, "kind" | "minutes" | "lengths" | "deposit">,
+  priceCents: number,
+  context: { pkg: boolean; team: boolean },
+): CallLength[] {
   const lengths = setup.lengths ?? [];
+  if (context.pkg || context.team || setup.deposit) return [];
   return setup.kind === "weekly" && lengths.length > 1 && lengths[0].minutes === setup.minutes && lengths[0].cents === priceCents ? lengths : [];
 }
 

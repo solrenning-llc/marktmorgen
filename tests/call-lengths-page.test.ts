@@ -31,8 +31,10 @@ async function main(): Promise<void> {
   const setup = readSetup({ ...weekly, lengths: LENGTHS }) as CallSetup;
 
   part("The lengths offered");
-  is("the call's, while the first is its own at the product's price", offeredLengths(setup, 4500), LENGTHS);
-  is("none for one length, a price changed since, or dated sessions", [offeredLengths(readSetup(weekly) as CallSetup, 4500), offeredLengths(setup, 5000), offeredLengths({ kind: "live", minutes: 30, lengths: LENGTHS }, 4500)], [[], [], []]);
+  const none = { pkg: false, team: false };
+  is("the call's, while the first is its own at the product's price", offeredLengths(setup, 4500, none), LENGTHS);
+  is("none for one length, a price changed since, or dated sessions", [offeredLengths(readSetup(weekly) as CallSetup, 4500, none), offeredLengths(setup, 5000, none), offeredLengths({ kind: "live", minutes: 30, lengths: LENGTHS }, 4500, none)], [[], [], []]);
+  is("none from a package, with a deposit, or on a team of any kind, which book the call's own length only", [offeredLengths(setup, 4500, { pkg: true, team: false }), offeredLengths({ ...setup, deposit: 2000 }, 4500, none), offeredLengths(setup, 4500, { pkg: false, team: true })], [[], [], []]);
 
   part("The times, at the length chosen");
   const OWNER = "lena@example.com";
@@ -52,6 +54,7 @@ async function main(): Promise<void> {
   is("half an hour: every half hour, the last at 4:30 p.m.", [half.length > 0, half.every((m) => m % 30 === 0), Math.max(...half)], [true, true, 16 * 60 + 30]);
   is("an hour: on the hour, the last at 4 p.m., so the whole of it is inside the hours", [hour.length > 0, hour.every((m) => m % 60 === 0), Math.max(...hour)], [true, true, 16 * 60]);
   is("a length the call does not have draws the call's own times", await at(45), half);
+  is("the page is told the call is no team's, so it may offer lengths", (await slotsForProduct(store, listing, null, 60))?.team, false);
 
   part("The form that books it");
   const words: SlotWords = { locale: "en-US", pickDay: "Pick a day", pickTime: "Pick a time", noneTitle: "None", noneBody: "None", yours: "Times are in your time zone, {zone}.", creators: "", chosen: " · 60 minutes", submit: "Continue", note: "" };
@@ -61,14 +64,14 @@ async function main(): Promise<void> {
   const moving = renderToStaticMarkup(createElement(SlotPicker, { starts: [Date.now() + 3 * 86_400_000], creatorTz: NY, handle: "lena", productId: "p1", minutes: 60, move: "cs_test_x", words }));
   is("and nothing when there is no choice, or when a booking moves at its own length", [plain.includes('name="minutes"'), moving.includes('name="minutes"')], [false, false]);
   const page = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");
-  is("the page asks in a group with its question, each length with its price, and draws the times only when the buyer asks", [page.includes("<fieldset>"), page.includes("<legend"), page.includes('type="radio" name="length"'), page.includes("b.lengthOption(l.minutes, money(l.cents))"), page.includes('<form method="get" className="mt-6" data-length-pick="">')], [true, true, true, true, true]);
-  is("never from a package, with a deposit, or on a team that lets buyers choose", [page.includes("!pkgFirst && !product.call.deposit"), page.includes("const choices = hostChoices.length ? [] : lengths;")], [true, true]);
+  is("each length is a link to its own times in a named group, the one shown marked as current and said", [page.includes('role="group" aria-labelledby={`length-${product.id}`}'), page.includes('href={`?length=${l.minutes}`}'), page.includes('aria-current={l.minutes === chosen.minutes ? "true" : undefined}'), page.includes('role="status">{b.lengthChosen(')], [true, true, true, true]);
+  is("offered from the same rule the booking keeps, with the team the times were read for", page.includes("offeredLengths(product.call, product.priceCents, { pkg: Boolean(pkgToken), team: read.team })"), true);
   is("the price said and the line under the title are the length chosen's", [page.includes("money(chosen ? chosen.cents : product.priceCents)"), page.includes("callLine(chosen ? { ...setup, minutes: chosen.minutes } : setup, b)")], [true, true]);
 
   part("In every language");
   const langs = Object.entries(BOOKING_WORDS);
-  is("a question, a button and each length with its price, all different from the host's", langs.map(([, w]) => [Boolean(w.lengthPick), Boolean(w.lengthShow), w.lengthShow !== w.hostShow, w.lengthOption(60, "$80").includes("60") && w.lengthOption(60, "$80").includes("$80")]), langs.map(() => [true, true, true, true]));
-  is("in US English", [BOOKING_WORDS.en.lengthPick, BOOKING_WORDS.en.lengthShow, BOOKING_WORDS.en.lengthOption(60, "$80.00")], ["How long would you like?", "Show times for this length", "60 minutes, $80.00"]);
+  is("a question, each length with its price, and what is shown", langs.map(([, w]) => [Boolean(w.lengthPick), w.lengthOption(60, "$80").includes("60") && w.lengthOption(60, "$80").includes("$80"), w.lengthChosen("X").includes("X")]), langs.map(() => [true, true, true]));
+  is("in US English", [BOOKING_WORDS.en.lengthPick, BOOKING_WORDS.en.lengthOption(60, "$80.00"), BOOKING_WORDS.en.lengthChosen("60 minutes, $80.00")], ["How long would you like?", "60 minutes, $80.00", "Showing times for 60 minutes, $80.00."]);
 }
 
 void main().then(() => done(), (error) => {

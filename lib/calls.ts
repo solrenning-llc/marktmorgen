@@ -997,16 +997,16 @@ function offerFrom(product: CallListing, now: number, seats: TeamBusy[], session
  * read, and the paid calls read on the way, for catchUpBookings.
  */
 export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null, minutes?: number | null) {
-  // One of a call's lengths (lib/call-lengths.ts): its times, at that length, never on a team, whose hosts' times are read at the setup's own.
+  // One of a call's lengths (lib/call-lengths.ts): its times, at that length. Never on a team, whose hosts' times are read
+  // at the setup's own length: there the length asked is not read, and `team` says so, so the page offers no lengths.
   const atLength = Boolean(minutes && product.call.kind === "weekly" && minutes !== product.call.minutes && product.call.lengths?.some((l) => l.minutes === minutes));
-  if (atLength) product = { ...product, call: { ...product.call, minutes: minutes as number } };
   try {
     const now = Date.now();
     const { busy, paid, blocked, sessions } = await readBusy(store, now);
     const whole = await activeTeam(store, product);
     // A team event type the plan or the team no longer allows: nothing on offer.
-    if (whole === "closed") return { days: [], left: {}, sessions: [], paid };
-    if (whole && atLength) return { days: [], left: {}, sessions: [], paid };
+    if (whole === "closed") return { days: [], left: {}, sessions: [], paid, team: true };
+    if (atLength && !whole) product = { ...product, call: { ...product.call, minutes: minutes as number } };
     if (whole) {
       // A team that lets buyers choose: who they may pick, and only the chosen host's times once they have.
       const hosts = hostChoices(whole);
@@ -1015,9 +1015,9 @@ export async function slotsForProduct(store: Store, product: CallListing, pick?:
       const team = narrowed && narrowed !== "changed" ? narrowed : whole;
       // The page is where each host's calendar is read again, when its last reading is old.
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true });
-      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked };
+      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked, team: true };
     }
-    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid };
+    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid, team: false };
   } catch {
     return null;
   }

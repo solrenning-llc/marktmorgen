@@ -237,7 +237,7 @@ const en = {
   hostShow: "Show their times",
   /** Choosing one of a call's lengths, each with its price (lib/call-lengths.ts). */
   lengthPick: "How long would you like?",
-  lengthShow: "Show times for this length",
+  lengthChosen: (what: string) => `Showing times for ${what}.`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutes, ${price}`,
   withHost: (name: string) => `With ${name}`,
   /** The creator's cancellation deadline (lib/call-setup.ts, cancelHours), said before paying and in the confirmation. */
@@ -442,7 +442,7 @@ const es: BookingWords = {
   hostAny: "Cualquiera disponible",
   hostShow: "Ver sus horarios",
   lengthPick: "¿Cuánto tiempo quieres?",
-  lengthShow: "Ver los horarios de esta duración",
+  lengthChosen: (what: string) => `Horarios para ${what}.`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
@@ -644,7 +644,7 @@ const fr: BookingWords = {
   hostAny: "Toute personne disponible",
   hostShow: "Voir ses horaires",
   lengthPick: `Quelle durée souhaitez-vous${S}?`,
-  lengthShow: "Voir les horaires pour cette durée",
+  lengthChosen: (what: string) => `Horaires pour ${what}.`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutes pour ${price}`,
   withHost: (name) => `Avec ${name}`,
   cancelPolicy: (hours, store) =>
@@ -842,7 +842,7 @@ const de: BookingWords = {
   hostAny: "Wer gerade frei ist",
   hostShow: "Zeiten anzeigen",
   lengthPick: "Wie lange möchten Sie buchen?",
-  lengthShow: "Zeiten für diese Dauer anzeigen",
+  lengthChosen: (what: string) => `Zeiten für ${what}.`,
   lengthOption: (minutes: number, price: string) => `${minutes} Minuten, ${price}`,
   withHost: (name) => `Bei ${name}`,
   cancelPolicy: (hours, store) =>
@@ -1041,8 +1041,8 @@ const it: BookingWords = {
   hostPick: "Con chi vuoi prenotare?",
   hostAny: "Chiunque sia disponibile",
   hostShow: "Mostra i suoi orari",
-  lengthPick: "Quanto tempo desideri?",
-  lengthShow: "Mostra gli orari per questa durata",
+  lengthPick: "Quale durata preferisci?",
+  lengthChosen: (what: string) => `Orari per ${what}.`,
   lengthOption: (minutes: number, price: string) => `${minutes} minuti, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
@@ -1240,8 +1240,8 @@ const nl: BookingWords = {
   hostPick: "Bij wie wil je boeken?",
   hostAny: "Wie er beschikbaar is",
   hostShow: "Toon de tijden",
-  lengthPick: "Hoe lang wilt u boeken?",
-  lengthShow: "Toon de tijden voor deze duur",
+  lengthPick: "Hoe lang wil je boeken?",
+  lengthChosen: (what: string) => `Tijden voor ${what}.`,
   lengthOption: (minutes: number, price: string) => `${minutes} minuten, ${price}`,
   withHost: (name) => `Bij ${name}`,
   cancelPolicy: (hours, store) =>
@@ -1440,8 +1440,8 @@ const pt: BookingWords = {
   hostPick: "Com quem quer marcar?",
   hostAny: "Qualquer pessoa disponível",
   hostShow: "Ver os horários",
-  lengthPick: "Quanto tempo você quer?",
-  lengthShow: "Ver os horários para essa duração",
+  lengthPick: "Que duração prefere?",
+  lengthChosen: (what: string) => `Horários para ${what}.`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Com ${name}`,
   cancelPolicy: (hours, store) =>

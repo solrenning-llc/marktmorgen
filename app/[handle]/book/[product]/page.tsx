@@ -70,17 +70,15 @@ export default async function BookPage({ params, searchParams }: Params) {
   const open = canSellProduct(store, product) && !(await isSoon(store, product.id).catch(() => false));
   // On a team that lets buyers choose (lib/team-scheduling-rules.ts): who they picked, by position; none is "Any available".
   const withKey = typeof query.with === "string" && /^[0-5]$/.test(query.with) ? query.with : "";
-  // One of a call's lengths, each with its price (lib/call-lengths.ts): offered only where it can be booked and charged
-  // (bookingLength), never from a package, with a deposit or on a team that lets buyers choose; none chosen is the call's own.
-  const pkgFirst = Boolean(pkgToken);
-  const lengths = !pkgFirst && !product.call.deposit && product.call.kind === "weekly" ? offeredLengths(product.call, product.priceCents) : [];
+  // One of a call's lengths, each with its price (lib/call-lengths.ts): asked for by its link; the times are read at it,
+  // except on a team, which reads its hosts' times at the call's own length and says so (read.team).
   const asked = typeof query.length === "string" ? query.length : undefined;
-  const length = lengths.length ? bookingLength(product.call, product.priceCents, asked) ?? lengths[0] : null;
-  const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null, length?.minutes ?? null) : null;
+  const askedLength = !pkgToken && product.call.kind === "weekly" ? bookingLength(product.call, product.priceCents, asked) : null;
+  const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null, askedLength?.minutes ?? null) : null;
   const hostChoices = (read && "hosts" in read ? read.hosts : null) ?? [];
-  // A team that lets buyers choose sells the call's own length only (holdAndCheckout): no lengths are offered there.
-  const choices = hostChoices.length ? [] : lengths;
-  const chosen = choices.length ? length : null;
+  // Offered only where each can be booked and charged (holdAndCheckout): never from a package, with a deposit or on a team.
+  const choices = read ? offeredLengths(product.call, product.priceCents, { pkg: Boolean(pkgToken), team: read.team }) : [];
+  const chosen = choices.length ? askedLength ?? choices[0] : null;
   const pickedHost = (read && "picked" in read ? read.picked : null) ?? null;
   const days = read ? read.days : null;
   const starts = days ? days.flatMap((day) => day.starts) : [];
@@ -175,21 +173,25 @@ export default async function BookPage({ params, searchParams }: Params) {
             ) : (
               <>
                 {chosen ? (
-                  // A plain form: the times are drawn again for the length chosen, only when the buyer asks (3.2.2).
-                  <form method="get" className="mt-6" data-length-pick="">
-                    <fieldset>
-                      <legend className="block font-bold" style={{ color: "var(--st-text)" }}>{b.lengthPick}</legend>
-                      <div className="mt-2 grid gap-2">
-                        {choices.map((l) => (
-                          <label key={l.minutes} className="flex min-h-11 items-center gap-3">
-                            <input type="radio" name="length" value={l.minutes} defaultChecked={l.minutes === chosen.minutes} className="h-5 w-5" />
-                            <span>{b.lengthOption(l.minutes, money(l.cents))}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </fieldset>
-                    <button type="submit" className="btn btn-secondary mt-3">{b.lengthShow}</button>
-                  </form>
+                  // Each length is a link to its own times, followed only when the buyer asks (3.2.5): what is marked is
+                  // always what the times below and the button book and charge, never a choice the page has not drawn.
+                  <div className="mt-6" role="group" aria-labelledby={`length-${product.id}`} data-length-pick="">
+                    <p id={`length-${product.id}`} className="font-bold" style={{ color: "var(--st-text)" }}>{b.lengthPick}</p>
+                    <ul className="mt-2 grid gap-2">
+                      {choices.map((l) => (
+                        <li key={l.minutes}>
+                          <a
+                            href={`?length=${l.minutes}`}
+                            aria-current={l.minutes === chosen.minutes ? "true" : undefined}
+                            className={`btn ${l.minutes === chosen.minutes ? "btn-primary" : "btn-secondary"} min-h-11 w-full justify-start`}
+                          >
+                            {b.lengthOption(l.minutes, money(l.cents))}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-sm" role="status">{b.lengthChosen(b.lengthOption(chosen.minutes, money(chosen.cents)))}</p>
+                  </div>
                 ) : null}
                 {hostChoices.length ? (
                   // A plain form: the times are drawn again for the person chosen, only when the buyer asks (3.2.2).

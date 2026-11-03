@@ -135,6 +135,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/discord": row("community", draft),
   "POST store/discord/connect": row("connections", never(CONNECT)),
   "POST store/discount": row("offers", draft, "Discount codes follow 569 [NC1]."),
+  "POST store/member-discount": row("offers", draft, "A code on one member's membership changes what they pay: proposed, then confirmed by the creator (631 (c))."),
   "POST store/disputes": row("buyers", never(WORDS)),
   "POST store/domain": row("settings", draft),
   "POST store/dunning": row("email", draft),

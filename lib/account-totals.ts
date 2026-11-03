@@ -88,10 +88,11 @@ export function sumStores(stores: readonly StoreFigures[]): AccountTotals {
       counts[w].sales += t.sales;
       addMoney(counts[w].money, data.currency, t.cents);
     }
-    if (read.members) {
-      paying += read.members.paying;
-      trialing += read.members.trialing;
-      addMoney(mrr, read.members.currency, read.members.mrr);
+    const club = read.members;
+    if (club) {
+      paying += club.paying;
+      trialing += club.trialing;
+      addMoney(mrr, club.currency, club.mrr);
     }
   }
   const windows = Object.fromEntries(

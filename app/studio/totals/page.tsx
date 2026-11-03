@@ -33,8 +33,8 @@ async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean
     if (!counted.ok) return { state: "paused" };
   }
   try {
-    const [data, members] = await Promise.all([readNumbers(store), membershipNumbers(store).catch(() => null)]);
-    return { state: "ok", data, members: members ? { currency: members.currency, paying: members.paying, trialing: members.trialing, mrr: members.mrr } : null };
+    const [data, club] = await Promise.all([readNumbers(store), membershipNumbers(store).catch(() => null)]);
+    return { state: "ok", data, members: club ? { currency: club.currency, paying: club.paying, trialing: club.trialing, mrr: club.mrr } : null };
   } catch (error) {
     console.error("reading one store's numbers for the totals failed", error);
     return { state: "error" };

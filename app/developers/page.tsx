@@ -82,6 +82,13 @@ export default function DevelopersPage() {
           {` A page holds up to ${API_PAGE} rows. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
         </p>
         <p>
+          To get only some fields of each row, add <code className="font-mono">?fields=</code> with their names,
+          separated by commas, for example <code className="font-mono">/api/v1/leads?fields=email,agreed</code>. The paging
+          fields beside <code className="font-mono">data</code> always stay. A field no row has is answered 400{" "}
+          <code className="font-mono">unknown_field</code>, with its name. This works on every list above, on
+          Store and on Bookings.
+        </p>
+        <p>
           {`Each key may make ${API_RATE} requests a minute. Past that, the answer is 429 with `}
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
@@ -473,6 +480,26 @@ export default function DevelopersPage() {
 200  {"data": {"email": "dana@example.com", "labels": ["vip"]}}
 404  {"error": "not_on_list", "message": "Nobody with this address is on your list."}`}</Code>
         <p>{`A store may add ${ADDS_PER_DAY.toLocaleString("en-US")} new people a day through the API; past that, 429 daily_limit until the next day.`}</p>
+      </LegalSection>
+
+      <LegalSection title="Discount codes">
+        <Endpoint path="/api/v1/codes">
+          Your discount codes, read from your own Stripe account as your studio lists them: what each takes off, how many
+          times it was used, its limit, its smallest order and whether it is live.
+        </Endpoint>
+        <Endpoint method="POST" path="/api/v1/codes">
+          Makes a code on your own Stripe account, checked as in your studio. Send{" "}
+          <code className="font-mono">{`{"code": "LAUNCH20", "percent": 20}`}</code>, or{" "}
+          <code className="font-mono">{`{"code": "TENOFF", "kind": "amount", "amount": "10"}`}</code> in your store&apos;s
+          currency; <code className="font-mono">uses</code> and <code className="font-mono">minimum</code> are optional. A
+          code that cannot be made says why, as <code className="font-mono">error</code> and{" "}
+          <code className="font-mono">message</code>; the same letters twice give 409 <code className="font-mono">taken</code>.
+        </Endpoint>
+        <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
+          Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
+          the list, switched off. Making and switching off need a key that writes; all three answer 409{" "}
+          <code className="font-mono">not_selling</code> while your store is not taking payments.
+        </Endpoint>
       </LegalSection>
 
       <LegalSection title="Writing: giving a product">

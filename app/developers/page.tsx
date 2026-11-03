@@ -82,6 +82,13 @@ export default function DevelopersPage() {
           {` A page holds up to ${API_PAGE} rows. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
         </p>
         <p>
+          To get only some fields of each row, add <code className="font-mono">?fields=</code> with their names,
+          separated by commas, for example <code className="font-mono">/api/v1/leads?fields=email,agreed</code>. The paging
+          fields beside <code className="font-mono">data</code> always stay. A field no row has is answered 400{" "}
+          <code className="font-mono">unknown_field</code>, with its name. This works on every list above, on
+          Store and on Bookings.
+        </p>
+        <p>
           {`Each key may make ${API_RATE} requests a minute. Past that, the answer is 429 with `}
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>

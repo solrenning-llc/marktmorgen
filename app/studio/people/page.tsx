@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
@@ -11,8 +12,9 @@ import { PersonTasks } from "@/components/person-tasks";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
-import { readFields, readPersonTasks, readValues } from "@/lib/crm";
-import type { PersonTask } from "@/lib/person-tasks";
+import { readAllTasks, readFields, readPersonTasks, readValues } from "@/lib/crm";
+import { PERSON_KEY, addressForPerson, agendaGroups, personAddresses } from "@/lib/person-agenda";
+import { type PersonTask, tasksDue } from "@/lib/person-tasks";
 import { readTeam } from "@/lib/team";
 import type { CrmField } from "@/lib/crm-rules";
 import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken } from "@/lib/buyer-profile";
@@ -85,6 +87,8 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
 
   const token = typeof query.p === "string" ? query.p : "";
   const sale = typeof query.sale === "string" && SALE_REFERENCE.test(query.sale) ? query.sale : "";
+  // A person's key, from a task in the agenda below: their address read again from the store's buyers.
+  const who = typeof query.who === "string" && PERSON_KEY.test(query.who) ? query.who : "";
   let email: string | null = null;
   let lookupFailed = false;
   if (token) email = await addressForToken(store, token);
@@ -94,8 +98,14 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       lookupFailed = true;
       return null;
     });
+  } else if (who) {
+    email = await addressForPerson(store, who).catch((error) => {
+      console.error("reading a task's buyer failed", error);
+      lookupFailed = true;
+      return null;
+    });
   }
-  const asked = Boolean(token || sale);
+  const asked = Boolean(token || sale || who);
   const profile = email ? await buyerProfile(store, email) : null;
   // The store's own fields about each person (lib/crm-rules.ts), and this one's answers.
   const fields = profile ? await readFields(store.statsId) : [];
@@ -142,7 +152,9 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                     ? "Stripe could not be read just now. Nothing was changed. Try again in a moment."
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
-                      : "That sale is not one of this store's, or it has no email address on it."}
+                      : who
+                        ? "That person is not among the buyers read from your Stripe account just now. Look their address up below."
+                        : "That sale is not one of this store's, or it has no email address on it."}
                 </p>
               ) : null}
               <section aria-labelledby="find-title" className="card mt-8 p-6 sm:p-8">
@@ -152,12 +164,94 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                   <PersonFind />
                 </div>
               </section>
+              <Suspense fallback={<TasksAgendaWaiting />}>
+                <TasksAgenda store={store} />
+              </Suspense>
               <LatestBuyers store={store} />
             </>
           )}
         </main>
       </StudioStorePin>
     </div>
+  );
+}
+
+/** A calendar date as words, read as the date it is, never moved through a time zone. */
+function dayWords(date: string): string {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
+}
+
+function TasksAgendaWaiting() {
+  return (
+    <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8" aria-busy="true">
+      <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
+      <p className="mt-2 text-sm text-ink-soft" role="status">Reading your team&apos;s tasks…</p>
+    </section>
+  );
+}
+
+/**
+ * Everyone's open tasks (lib/person-tasks.ts), past their date first, each
+ * opening the page of the person it is about (lib/person-agenda.ts).
+ */
+async function TasksAgenda({ store }: { store: Store }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const read = await readAllTasks(store.statsId)
+    .then((tasks) => tasksDue(tasks, today))
+    .catch((error) => {
+      console.error("reading the tasks agenda failed", error);
+      return null;
+    });
+  if (!read) {
+    return (
+      <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
+        <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
+        <p className="notice notice-warn mt-4">Your team&apos;s tasks could not be read just now. Nothing was changed. Try again in a moment.</p>
+      </section>
+    );
+  }
+  const groups = agendaGroups(read, new Map());
+  const persons = new Set(groups.flatMap((group) => group.rows.map((row) => row.person)));
+  const found = await personAddresses(store, persons).catch((error) => {
+    console.error("reading the agenda's buyers failed", error);
+    return null;
+  });
+  const shown = agendaGroups(read, found?.addresses ?? new Map());
+  const open = read.overdue.length + read.today.length + read.upcoming.length + read.undated.length;
+  return (
+    <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
+      <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
+      <p className="mt-2 text-sm text-ink-soft">
+        {open
+          ? `${open} open ${open === 1 ? "task" : "tasks"} across your buyers. Open a person to tick one off or change it.`
+          : "No open tasks. Add one on a person's page, under Tasks."}
+      </p>
+      {!found && open ? <p className="notice notice-warn mt-4">Stripe could not be read just now, so who each task is about is not shown. Try again in a moment.</p> : null}
+      {shown.map((group) => (
+        <div key={group.key} className="mt-6">
+          <h3 className="text-base font-semibold text-ink">{`${group.title} (${group.rows.length + group.more})`}</h3>
+          <ul className="mt-2 divide-y divide-line">
+            {group.rows.map((row) => (
+              <li key={`${row.person}:${row.task.id}`} className="py-3 text-sm">
+                <p className="text-ink [overflow-wrap:anywhere]">{row.task.text}</p>
+                <p className="mt-1 text-xs text-ink-soft">
+                  {row.task.due ? (row.task.due < today ? `Was due ${dayWords(row.task.due)}` : `Due ${dayWords(row.task.due)}`) : "No date"}
+                  {row.task.assignee ? ` · ${row.task.assignee}` : " · Nobody named"}
+                </p>
+                {row.email ? (
+                  <Link href={studioPath(store, `who=${row.person}`, "people")} className="mt-1 inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">
+                    {row.email}
+                  </Link>
+                ) : found ? (
+                  <p className="mt-1 text-xs text-ink-soft">{`About someone not among the buyers read from your Stripe account${found.partial ? " (the oldest are not read)" : ""}: find them by their address above.`}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {group.more ? <p className="mt-2 text-sm text-ink-soft">{`And ${group.more} more ${group.more === 1 ? "task" : "tasks"} in this group, shown as the first ones are done.`}</p> : null}
+        </div>
+      ))}
+    </section>
   );
 }
 

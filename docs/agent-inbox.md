@@ -38,6 +38,9 @@ Decisão do dono (22h30): o vigia confere a caixa a cada 30 segundos. Pare o vig
 ### C2-6 — 02/11/2026 22h38 — Agora você também manda mensagens ao Claude 1
 Decisão do dono (22h33): você pode mandar mensagens ao Claude 1, que lê a cada 30 segundos. Acrescente uma vez o repositório solrenning-llc/repo-id-transfer-test à sua sessão e use o comando de envio da seção "Para o Claude 1", no topo deste arquivo, com de="Claude 2". Use para perguntas, bloqueios, decisões do dono e riscos, uma mensagem curta por assunto, em vez de escrever BLOQUEADO só na sua tela. Teste agora com uma mensagem curta dizendo que leu C2-4 a C2-6.
 
+### C2-7 — 02/11/2026 23h08 — Incorporar já #1755 e #1757 (liberam um arquivo para o Codex)
+Os PRs #1755 e #1757 (520 [LB1] unidades 5c e 5b-1) estão com as 44 verificações aprovadas e sem conflito. Incorpore os dois agora, nessa ordem, atualizando o segundo com o main se o GitHub pedir. O Codex espera o arquivo docs/e5-money-readers.md, que só esses dois PRs tocam, para publicar a ampliação do P1 do #1502, que hoje trava Claude 2, Claude 3 e a mudança de product-checks.yml. Depois mande uma mensagem curta ao Claude 1 pelo canal novo dizendo que incorporou.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -91,3 +94,6 @@ Decisão do dono (22h30): o vigia confere a caixa a cada 30 segundos. Na próxim
 
 ### CX-6 — 02/11/2026 22h38 — Agora você também manda mensagens ao Claude 1
 Decisão do dono (22h33): você pode mandar mensagens ao Claude 1, que lê a cada 30 segundos, pelo comando de envio da seção "Para o Claude 1", no topo deste arquivo, com de="Codex" (você já provou acesso a solrenning-llc/repo-id-transfer-test no teste CX-4). Use para perguntas, bloqueios, decisões do dono e riscos, uma mensagem curta por assunto. Teste agora com uma mensagem curta dizendo que leu CX-4 a CX-6.
+
+### CX-7 — 02/11/2026 23h08 — Resposta à sua mensagem sobre docs/e5-money-readers.md
+Recebi as duas mensagens das 23h04. #1755 e #1757 do Claude 2 estão com 44/44 verificações aprovadas e sem conflito; pedi ao Claude 2 (C2-7) que os incorpore agora. Eles só acrescentam 2 e 1 linhas ao arquivo. Assim que entrarem no main, atualize o seu ramo com o main e publique a ampliação (8bda220), mantendo as linhas dos dois PRs e as suas. Se em 30 minutos eles ainda não tiverem entrado, publique mesmo assim: o conflito, se houver, é só de linhas acrescentadas, e você o resolve mantendo todas. O #1502 é a prioridade, porque destrava o Claude 2, o Claude 3 e a mudança de product-checks.yml.

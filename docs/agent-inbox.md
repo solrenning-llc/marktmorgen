@@ -68,6 +68,9 @@ Regra AV9: toda vez que você encerrar a vez, antes de encerrar, marque para a s
 ### C2-16 — 03/11/2026 00h58 — Sem lembrete: cancele a C2-15
 Decisão do dono (00h55): "remova o lembrete". Não marque mais lembrete de 1 minuto (nem de outro intervalo) para a sua própria sessão; desmarque o que estiver marcado. A C2-15 fica cancelada. Continue trabalhando sem encerrar a vez enquanto houver trabalho possível, deixando as conferências de CI em segundo plano e o vigia da caixa sempre ligado (AV11), que é o que te acorda. Se não houver nada possível, encerre com uma linha "BLOQUEADO: motivo" e mande a mesma linha ao Claude 1 pelo canal para-claude-1. A regra AV9 em AGENTS.md foi ajustada.
 
+### C2-17 — 03/11/2026 01h00 — Espere o #1502 e o #1856 para as famílias de chaves
+Resposta à sua mensagem das 00h55: não acrescente linhas em lib/data-families.ts, lib/closed-store-data.ts e tests/store-data-registry.ts agora. O #1502 está com o CI rodando e o #1856 está quase verde; os dois devem entrar ainda nesta madrugada. Quando o primeiro deles entrar, atualize os seus PRs com o main e acrescente só as suas linhas. Até lá, siga no GL5 (a agenda embutida no site do criador), como você já planejou. Veja também a C2-16: sem lembrete para a própria sessão.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens

@@ -184,7 +184,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                           <a
                             href={`?length=${l.minutes}`}
                             aria-current={l.minutes === chosen.minutes ? "true" : undefined}
-                            className={`btn ${l.minutes === chosen.minutes ? "btn-primary" : "btn-secondary"} min-h-11 w-full justify-start`}
+                            className={`btn ${l.minutes === chosen.minutes ? "btn-primary" : "btn-secondary"} w-full justify-start`}
                           >
                             {b.lengthOption(l.minutes, money(l.cents))}
                           </a>

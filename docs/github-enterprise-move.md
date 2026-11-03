@@ -28,8 +28,17 @@ Motivo: o GitHub Pro permite 40 tarefas simultâneas (5 macOS); o Enterprise, 50
 1. Tipo de conta: **"Enterprise with personal accounts"**. Nunca "Enterprise Managed Users" nem residência de dados (GHE.com), que criam contas novas e impedem repositório público.
 2. Preço: US$ 21 por licença por mês, uma licença (só o dono é membro). Nada a mais marcado (Copilot, Advanced Security).
 3. Levar a organização `solrenning-llc` (criada fora do teste) para o Enterprise e clicar em **"Activate Enterprise"** no mesmo dia: o teste grátis não aumenta o limite de tarefas simultâneas.
-4. Orçamentos de produtos pagos em US$ 0 com bloqueio. Repositório público não paga minutos de Actions.
+4. **Logo depois de "Activate paid GitHub Enterprise", criar orçamentos de US$ 0 com bloqueio** ("stop usage") para Actions, Codespaces, Packages, Git LFS, Copilot e os demais produtos medidos, em Billing and licensing → Budgets and alerts. A própria tela avisa: "If no budget is set, usage for that product is unlimited", e orçamentos não existem durante o teste. Repositório público não paga minutos de Actions; o orçamento é a trava contra uso pago por engano (executor maior, Codespaces, repositório privado).
 5. Não ligar SAML, lista de IPs permitidos nem políticas que restrinjam ações ou aplicativos.
+
+## Conferido em 02/11/2026, depois de criar o teste (só leitura)
+
+- Teste do Enterprise "Solrenning" (github.com/enterprises/solrenning) criado pelo dono às 22h50, tipo "Enterprise with personal accounts", com a organização solrenning-llc dentro; 30 dias; nada ativado.
+- Tela de compra: Enterprise Cloud US$ 21 por licença, Secret Protection US$ 19 e Code Security US$ 30 por pessoa que envia código, todos em 0; total estimado US$ 0,00; dados de cobrança (nome do dono, endereço em Fortaleza, CPF digitado pelo dono) e cartão salvos pelo dono às 23h06.
+- Secret Protection e Code Security desligados no repositório de teste e sem configuração na organização ("Set up Advanced Security" por fazer).
+- Actions, empresa e organização: "Allow all actions and reusable workflows"; executores padrão do GitHub permitidos ("Disable for all organizations" desmarcado); token do CI só leitura; aprovação para quem contribui pela primeira vez; workflows de forks em repositórios privados desligados.
+- Segurança de acesso: 2FA obrigatório, SAML e lista de IPs permitidos, todos desligados.
+- Orçamentos: não existem no teste; criar logo depois da compra (passo 4 acima).
 
 ## No dia da transferência (o Claude 1 conduz)
 

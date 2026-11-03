@@ -104,6 +104,8 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/announcement": row("pages", draft),
   "POST store/answers": row("pages", draft),
   "POST store/api-keys": row("access", never(ACCESS)),
+  "GET store/assistant-memory": row("settings", read),
+  "POST store/assistant-memory": row("settings", draft, "The creator's own notes for their assistant: the agent may propose one, which the creator confirms; it never keeps one by itself."),
   "POST store/assistant-settings": row("settings", draft),
   "POST store/attribution": row("numbers", draft),
   "GET store/audience": row("buyers", never(PEOPLE_FILE)),

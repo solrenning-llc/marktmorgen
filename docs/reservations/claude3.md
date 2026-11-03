@@ -10,3 +10,4 @@ Only Claude 3 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Claude 3 | 639 [GL7](31) unit 1: honest labels on a product card (New, Pre-order, Coming soon, Bundle), pure rules | claude3/gl7-honest-badges | `lib/product-badges.ts`, `tests/product-badges.test.ts` | 03/11/2026 14h00 |
 | Claude 3 | 639 [GL7](40) unit 1: what the creator's assistant remembers (the creator's own notes), pure rules | claude3/gl7-assistant-memory | `lib/assistant-memory-rules.ts`, `tests/assistant-memory-rules.test.ts` | 03/11/2026 14h04 |
 | Claude 3 | 639 [GL7](40) unit 2: where the assistant's notes are kept, room first, forgotten at once | claude3/gl7-memory-store | `lib/assistant-memory-store.ts`, `tests/assistant-memory-store.test.ts` | 03/11/2026 16h22 |
+| Claude 3 | 639 [GL7](40) unit 3: the studio route for the assistant's notes | claude3/gl7-memory-route | `app/api/store/assistant-memory/route.ts`, `tests/assistant-memory-route.test.ts` | 03/11/2026 16h36 |

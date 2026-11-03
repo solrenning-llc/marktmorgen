@@ -357,6 +357,36 @@ export function parsePipelines(raw: unknown): Pipeline[] | null {
   return out;
 }
 
+/**
+ * A copy of a pipeline to start another from (639 [GL7](8); owner's
+ * HighLevel audit): the same stages, names and kinds in the same order, each
+ * with a new id no stage of the store has, and none of its deals. Named
+ * "<name> copy", then "<name> copy 2" and so on, never a name the store
+ * already uses, within MAX_PIPELINE_NAME. Nothing is saved: the board opens
+ * it for the creator to read, change and save as a new pipeline.
+ */
+export function copyPipeline(source: Pipeline, pipelines: readonly Pipeline[], newId: () => string = () => newCrmId()): Pipeline {
+  const taken = new Set(allStages(pipelines).map((s) => s.id));
+  const ids = new Set(pipelines.map((p) => p.id));
+  const fresh = (used: Set<string>) => {
+    for (;;) {
+      const id = newId();
+      if (!used.has(id)) {
+        used.add(id);
+        return id;
+      }
+    }
+  };
+  const names = new Set(pipelines.map((p) => p.name.toLowerCase()));
+  let name = "";
+  for (let n = 1; ; n += 1) {
+    const tail = n === 1 ? " copy" : ` copy ${n}`;
+    name = `${source.name.slice(0, MAX_PIPELINE_NAME - tail.length).trimEnd()}${tail}`;
+    if (!names.has(name.toLowerCase())) break;
+  }
+  return { id: fresh(ids), name, stages: source.stages.map((stage) => ({ id: fresh(taken), name: stage.name, kind: stage.kind })) };
+}
+
 /** Every stage of every pipeline, in order: what a deal's stage is checked against. */
 export const allStages = (pipelines: readonly Pipeline[]): Stage[] => pipelines.flatMap((p) => p.stages);
 

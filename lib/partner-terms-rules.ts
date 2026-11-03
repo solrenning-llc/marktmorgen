@@ -10,15 +10,16 @@
  * never touched: each earning keeps the percentage it was made at.
  *
  * Every step is kept in a short history both of them can read: started,
- * changed, ended, revoked, and a change the partner declined or that expired
- * unanswered.
+ * changed, ended, revoked, a change the store took back, and a change the
+ * partner declined or that expired unanswered.
  *
- * Pure and browser-safe; nothing reads it yet. Unit 2 keeps the waiting
- * change and the history on the partner's record (lib/affiliates.ts), checks
- * the cap again when the partner says yes, and asks the partner on their own
- * page; unit 3 shows it in the studio.
+ * Pure and browser-safe. Unit 2 keeps the waiting change and the history on
+ * the partner's record (lib/affiliates.ts proposePartnerShare and
+ * answerShareChange), checking the cap again when the partner says yes;
+ * unit 3 wires the studio's route and screen and asks the partner on their
+ * own page, together, so no screen says "saved" while a change waits.
  */
-import type { PartnerShare } from "@/lib/partner-share";
+import { type PartnerShare, parsePartnerShare } from "@/lib/partner-share";
 
 /** The latest end a creator may choose, in days from today. */
 export const MAX_TERM_DAYS = 3650;
@@ -84,7 +85,7 @@ export function changeNeeds(current: PartnerShare, next: PartnerShare | null, no
 export type WaitingChange = { share: PartnerShare | null; asked: number };
 
 /** Whether a waiting change can still be answered. */
-export function changeOpen(change: WaitingChange | null, nowSeconds: number): change is WaitingChange {
+export function changeOpen(change: WaitingChange | null, nowSeconds: number): boolean {
   return change !== null && nowSeconds < change.asked + CHANGE_WAITS_SECONDS;
 }
 
@@ -92,14 +93,14 @@ export type TermStep = {
   /** Seconds. */
   at: number;
   by: "creator" | "partner";
-  kind: "started" | "asked" | "changed" | "declined" | "lapsed" | "revoked";
+  kind: "started" | "asked" | "withdrawn" | "changed" | "declined" | "lapsed" | "revoked";
   /** The share after this step, or the one asked for; null when it was ended. */
   percent: number | null;
   products: number;
   until: number | null;
 };
 
-const KINDS = new Set<TermStep["kind"]>(["started", "asked", "changed", "declined", "lapsed", "revoked"]);
+const KINDS = new Set<TermStep["kind"]>(["started", "asked", "withdrawn", "changed", "declined", "lapsed", "revoked"]);
 
 /** One step from a share, for the history. */
 export function stepOf(kind: TermStep["kind"], by: TermStep["by"], share: PartnerShare | null, atSeconds: number): TermStep {
@@ -154,6 +155,8 @@ export function stepWords(step: TermStep): string {
       return `${longDate(step.at)}: started at ${what}.`;
     case "asked":
       return step.percent === null ? `${longDate(step.at)}: ${who} asked to end it.` : `${longDate(step.at)}: ${who} asked to change it to ${what}.`;
+    case "withdrawn":
+      return `${longDate(step.at)}: ${who} took back its request. The terms before it still hold.`;
     case "changed":
       return step.percent === null ? `${longDate(step.at)}: ended, agreed by both.` : `${longDate(step.at)}: changed to ${what}, agreed by both.`;
     case "declined":
@@ -163,4 +166,29 @@ export function stepWords(step: TermStep): string {
     case "revoked":
       return `${longDate(step.at)}: ${who} ended it. What was already earned is still paid.`;
   }
+}
+
+/** What a partner's record keeps about its agreement besides the share itself. */
+export type PartnerTerms = { change: WaitingChange | null; history: TermStep[] };
+
+export const NO_TERMS: PartnerTerms = { change: null, history: [] };
+
+/** Kept terms, made safe. A change whose share does not read is dropped, never guessed. */
+export function readTerms(raw: unknown): PartnerTerms {
+  if (!raw || typeof raw !== "object") return NO_TERMS;
+  const v = raw as { change?: unknown; history?: unknown };
+  let change: WaitingChange | null = null;
+  if (v.change && typeof v.change === "object") {
+    const c = v.change as { share?: unknown; asked?: unknown };
+    const share = c.share === null ? null : parsePartnerShare(c.share);
+    const asked = typeof c.asked === "number" && Number.isSafeInteger(c.asked) && c.asked > 0 ? c.asked : null;
+    if (asked !== null && (c.share === null || share !== null)) change = { share, asked };
+  }
+  return { change, history: readHistory(v.history) };
+}
+
+/** The terms with a change left unanswered past its wait taken off, and the lapse written down. */
+export function settleTerms(terms: PartnerTerms, nowSeconds: number): PartnerTerms {
+  if (terms.change === null || changeOpen(terms.change, nowSeconds)) return terms;
+  return { change: null, history: withStep(terms.history, stepOf("lapsed", "creator", terms.change.share, terms.change.asked + CHANGE_WAITS_SECONDS)) };
 }

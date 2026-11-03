@@ -101,6 +101,7 @@ import {
 import { readListings } from "@/lib/catalog";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
 import { type PartnerShare, parsePartnerShare, shareOn } from "@/lib/partner-share";
+import { NO_TERMS, type PartnerTerms, changeNeeds, changeOpen, readTerms, settleTerms, stepOf, withStep } from "@/lib/partner-terms-rules";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
 import { offerPartnership } from "@/lib/partner-invites";
 import type { Store } from "@/lib/store";
@@ -197,6 +198,12 @@ export type Affiliate = {
    * of this one's own share. Null for everybody else.
    */
   by: { id: string; percent: number } | null;
+  /**
+   * A change to `share` waiting for the partner's yes, and the agreement's
+   * history (630 [HN6](39); lib/partner-terms-rules.ts). Absent when there is
+   * neither, which is everybody before that item.
+   */
+  terms?: PartnerTerms;
 };
 
 /**
@@ -342,6 +349,10 @@ function parseAffiliate(raw: unknown): Affiliate | null {
         const percent = Number(by.percent);
         return Number.isInteger(percent) && percent >= 1 && percent <= MAX_COMMISSION ? { id: by.id, percent } : null;
       })(),
+      ...(() => {
+        const terms = readTerms(value.terms);
+        return terms.change || terms.history.length ? { terms } : {};
+      })(),
     };
   } catch {
     return null;
@@ -380,6 +391,92 @@ export async function setPartnerShare(store: Store, id: string, share: PartnerSh
   const next: Affiliate = { ...affiliate, share };
   await writeAffiliate(store, next);
   return next;
+}
+
+export type ShareProposal = { ok: true; state: "started" | "same" | "applied" | "waiting" } | { ok: false; reason: "unknown" };
+
+/**
+ * The creator setting, changing or ending a partner's share under the rules
+ * of lib/partner-terms-rules.ts (630 [HN6](39), unit 2): a new share starts
+ * at once; ending one that runs until revoked applies at once; every other
+ * change waits for the partner's yes (answerShareChange) and the share in
+ * force stays as it is until then. Saving the share in force again withdraws
+ * a waiting change. The cap on what a product promises away is the caller's,
+ * as with setPartnerShare. `nowSeconds` is the time of the save.
+ */
+export async function proposePartnerShare(store: Store, id: string, next: PartnerShare | null, nowSeconds: number): Promise<ShareProposal> {
+  const affiliate = await readAffiliate(store, id);
+  if (!affiliate) return { ok: false, reason: "unknown" };
+  const terms = settleTerms(affiliate.terms ?? NO_TERMS, nowSeconds);
+  const current = affiliate.share;
+  let share = current;
+  let kept: PartnerTerms;
+  let state: "started" | "same" | "applied" | "waiting";
+  if (current === null) {
+    if (next === null) {
+      kept = { ...terms, change: null };
+      state = "same";
+    } else {
+      share = next;
+      kept = { change: null, history: withStep(terms.history, stepOf("started", "creator", next, nowSeconds)) };
+      state = "started";
+    }
+  } else {
+    const needs = changeNeeds(current, next, nowSeconds);
+    if (needs === "same") {
+      kept = terms.change ? { change: null, history: withStep(terms.history, stepOf("withdrawn", "creator", terms.change.share, nowSeconds)) } : terms;
+      state = "same";
+    } else if (needs === "now") {
+      share = next;
+      kept = { change: null, history: withStep(terms.history, stepOf(next === null ? "revoked" : "changed", "creator", next, nowSeconds)) };
+      state = "applied";
+    } else {
+      kept = { change: { share: next, asked: nowSeconds }, history: withStep(terms.history, stepOf("asked", "creator", next, nowSeconds)) };
+      state = "waiting";
+    }
+  }
+  await writeAffiliate(store, withTerms({ ...affiliate, share }, kept));
+  return { ok: true, state };
+}
+
+export type ShareAnswer = { ok: true; state: "changed" | "declined" } | { ok: false; reason: "none" | "cap" };
+
+/**
+ * The partner answering a change the creator asked for. Yes applies it, after
+ * `allowed` checks the cap again with what the product promises today (a
+ * change asked weeks ago may no longer fit); no keeps the share in force.
+ * Nothing already earned moves either way.
+ */
+export async function answerShareChange(
+  store: Store,
+  id: string,
+  yes: boolean,
+  nowSeconds: number,
+  allowed: (share: PartnerShare) => Promise<boolean>,
+): Promise<ShareAnswer> {
+  const affiliate = await readAffiliate(store, id);
+  if (!affiliate) return { ok: false, reason: "none" };
+  const terms = settleTerms(affiliate.terms ?? NO_TERMS, nowSeconds);
+  const change = terms.change;
+  if (change === null || !changeOpen(change, nowSeconds)) {
+    if (terms !== affiliate.terms && affiliate.terms) await writeAffiliate(store, withTerms(affiliate, terms));
+    return { ok: false, reason: "none" };
+  }
+  if (!yes) {
+    await writeAffiliate(store, withTerms(affiliate, { change: null, history: withStep(terms.history, stepOf("declined", "partner", change.share, nowSeconds)) }));
+    return { ok: true, state: "declined" };
+  }
+  if (change.share !== null && !(await allowed(change.share))) return { ok: false, reason: "cap" };
+  const history = withStep(terms.history, stepOf("changed", "partner", change.share, nowSeconds));
+  await writeAffiliate(store, withTerms({ ...affiliate, share: change.share }, { change: null, history }));
+  return { ok: true, state: "changed" };
+}
+
+/** A record with these terms, or without the field when there is nothing to keep. */
+function withTerms(affiliate: Affiliate, terms: PartnerTerms): Affiliate {
+  const { terms: _old, ...rest } = affiliate;
+  void _old;
+  return terms.change || terms.history.length ? { ...rest, terms } : rest;
 }
 
 /** Everybody in this programme who holds a standing share of something. */
@@ -793,6 +890,11 @@ export async function acceptPartnership(store: Store, email: string, share: Part
   return openAffiliateLink(store, token);
 }
 
+/** A share the partner accepted from an invitation, written as the start of its history; any change waiting is replaced. */
+function startedBy(terms: PartnerTerms, share: PartnerShare): PartnerTerms {
+  return { change: null, history: withStep(terms.history, stepOf("started", "partner", share, Math.floor(Date.now() / 1000))) };
+}
+
 function parseGrant(raw: unknown): LinkGrant | null {
   if (typeof raw !== "string") return null;
   try {
@@ -861,6 +963,8 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
   // them is the creator changing their mind, in their own words.
   if (affiliate && grant.k === 1) {
     affiliate = { ...affiliate, status: "approved", decidedAt: Date.now(), share: grant.p ?? affiliate.share };
+    // The partner said yes to the share the email stated: that is where its history starts.
+    if (grant.p) affiliate = withTerms(affiliate, startedBy(affiliate.terms ?? NO_TERMS, grant.p));
     await writeAffiliate(store, affiliate);
   }
   if (!affiliate) {
@@ -896,6 +1000,7 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
         share: invited ? grant.p ?? null : null,
         cleared: null,
         by,
+        ...(invited && grant.p ? { terms: startedBy(NO_TERMS, grant.p) } : {}),
       };
       await writeAffiliate(store, affiliate);
       created = true;

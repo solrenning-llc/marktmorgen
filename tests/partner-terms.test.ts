@@ -126,6 +126,7 @@ test("every step reads as a plain US English sentence", () => {
   assert.equal(stepWords(stepOf("changed", "partner", { percent: 20, products: [A], until }, at)), "November 3, 2026: changed to 20% of 1 product, through March 4, 2027, agreed by both.");
   assert.equal(stepWords(stepOf("changed", "partner", null, at)), "November 3, 2026: ended, agreed by both.");
   assert.match(stepWords(stepOf("declined", "partner", null, at)), /said no to the change\. The terms before it still hold\.$/);
+  assert.equal(stepWords(stepOf("withdrawn", "creator", null, at)), "November 3, 2026: the store took back its request. The terms before it still hold.");
   assert.match(stepWords(stepOf("lapsed", "creator", null, at)), /not answered in 30 days/);
   assert.match(stepWords(stepOf("revoked", "creator", null, at)), /the store ended it\. What was already earned is still paid\.$/);
   assert.equal(termWords({ percent: 5, products: [A] }, NOW), "Until you or they end it");

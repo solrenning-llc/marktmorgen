@@ -48,13 +48,18 @@ import { storesKnownFor } from "@/lib/buyer-library";
 import { readFlows, flowsStartedFor } from "@/lib/flows";
 import { personOf, readRun } from "@/lib/flow-runs";
 import { storeKey } from "@/lib/learn";
+import { clicksOf } from "@/lib/mail-clicks";
+import { waitlistPlacesOf } from "@/lib/waitlist";
+import { feedsOf } from "@/lib/podcast-access";
+import { remindersOf } from "@/lib/assistant-reminder";
+import { syncJobsOf } from "@/lib/email-sync";
 
 export type CopyHow = "copied" | "marks" | "pending";
 
 /** What the copy does with each module the erasure reaches, said in a few words to the person. */
 export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>> = {
   "lib/flows.ts": { how: "copied", what: "Which of the store's sequences and workflows you are in, and each step taken" },
-  "lib/mail-clicks.ts": { how: "pending", what: "Which links in the store's sequence emails you used" },
+  "lib/mail-clicks.ts": { how: "copied", what: "Which of the store's sequence emails you used a link in" },
   "lib/mail-health.ts": { how: "marks", what: "A mark that your address was counted in this week's delivery checks, with nothing else in it" },
   "lib/crm.ts": { how: "copied", what: "The store's fields about you, and its deals with you" },
   "lib/payment-request-store.ts": { how: "copied", what: "Payment requests the store sent you" },
@@ -68,19 +73,19 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
   "lib/community-erasure.ts": { how: "pending", what: "Your community profile, points, notifications, private messages, what you said in its room and your answers to its events" },
-  "lib/waitlist.ts": { how: "pending", what: "Your places on the store's waitlists" },
+  "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
   "lib/affiliate-leads.ts": { how: "copied", what: "Sign-ups, free products and calls an affiliate was credited for" },
   "lib/imported-purchases.ts": { how: "copied", what: "What an import from another platform, a gift or a PayPal order gave you" },
-  "lib/podcast-access.ts": { how: "pending", what: "Your private podcast feeds" },
+  "lib/podcast-access.ts": { how: "copied", what: "Which products' private podcast feeds you have (the feed's secret address is in the email that sent it)" },
   "lib/welcome-offer-send.ts": { how: "marks", what: "When your welcome offer began, and that its reminder was set" },
   "lib/winback-send.ts": { how: "marks", what: "Marks that you heard a come-back offer about a product" },
   "lib/checkout-recovery.ts": { how: "marks", what: "Marks that you heard a checkout reminder about a product this week" },
-  "lib/assistant-reminder.ts": { how: "pending", what: "A checkout reminder you asked for with the store's assistant box" },
+  "lib/assistant-reminder.ts": { how: "copied", what: "A checkout reminder you asked for with the store's assistant box" },
   "lib/move-members.ts": { how: "copied", what: "Invitations to keep a membership you had elsewhere" },
   "lib/inbox.ts": { how: "copied", what: "Your conversations with the store's inbox" },
   "lib/discord-access.ts": { how: "copied", what: "Your Discord account's link to the store, and its roles" },
-  "lib/email-sync.ts": { how: "pending", what: "The record of sending you to the store's connected email platform" },
+  "lib/email-sync.ts": { how: "copied", what: "The record of sending you to the store's connected email platform" },
   "lib/segments.ts": { how: "marks", what: "A ten-minute copy of the store's buyers, made from its Stripe account" },
   "lib/member-health.ts": { how: "marks", what: "A ten-minute copy of the store's members' scores, made from its Stripe account" },
   "lib/reviews.ts": { how: "copied", what: "Your reviews, and the store's replies to them" },
@@ -247,6 +252,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
+  "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
+  "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
+  "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
+  "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
+  "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),
   "lib/flows.ts": async (s) => {
     const flows = await readFlows(s.listId);
     const started = new Set(await flowsStartedFor(flows, s.email));

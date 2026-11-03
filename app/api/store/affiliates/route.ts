@@ -10,7 +10,12 @@ import {
   MAX_REFERENCE_LENGTH,
   acceptPartnership,
   addPayout,
+  MAX_BULK_DECISIONS,
   decide,
+  decideMany,
+  setRatesMany,
+  undoMany,
+  undoRates,
   invitePartner,
   listPartners,
   readAffiliate,
@@ -21,6 +26,7 @@ import {
 } from "@/lib/affiliates";
 import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes";
 import { leadProblem } from "@/lib/affiliate-lead-rules";
+import { planTerms, readNoticeDays } from "@/lib/affiliate-notice";
 import { MAX_LEAD_DECISIONS, decideLeads } from "@/lib/affiliate-leads";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -68,7 +74,8 @@ export async function POST(request: NextRequest) {
 
   try {
     if (action === "settings") {
-      const setting = parseAffiliateSetting({ ...body, enabled: body.enabled === true });
+      // A pending cut is never taken from the request: it is worked out below.
+      const setting = parseAffiliateSetting({ ...body, enabled: body.enabled === true, pending: null });
       // Out-of-range numbers are refused, not quietly replaced by the defaults.
       if (Number(body.percent) !== setting.percent) return fail("percent");
       if (Number(body.days) !== setting.days) return fail("days");
@@ -83,7 +90,17 @@ export async function POST(request: NextRequest) {
       if (leadRefused) return fail(leadRefused);
       const asked = body.rates && typeof body.rates === "object" ? Object.keys(body.rates as object).length : 0;
       if (asked !== Object.keys(setting.rates).length) return fail("rate");
-      const result = await setAffiliateSetting(guarded.ref, setting);
+      // Notice before a cut (630 [HN6](2), lib/affiliate-notice.ts): none, or 3 to 90 days, refused otherwise.
+      const notice = readNoticeDays(body.notice);
+      if (body.notice !== undefined && body.notice !== null && body.notice !== "" && Number(body.notice) !== 0 && notice === 0) return fail("notice");
+      const before = (await storeForEmail(guarded.ref))?.affiliates ?? null;
+      const terms = (s: { percent: number; rates: Record<string, number>; days: number }) => ({ percent: s.percent, rates: s.rates, days: s.days });
+      // A cut waits the longer of the notice the program had, as its affiliates were told, and the one chosen now;
+      // and never ends before a notice already running.
+      const plan = before
+        ? planTerms(terms(before), terms(setting), Math.max(notice, before.notice ?? 0), Math.floor(Date.now() / 1000), before.pending ?? null)
+        : { current: terms(setting), pending: null };
+      const result = await setAffiliateSetting(guarded.ref, { ...setting, ...plan.current, notice, pending: plan.pending });
       if (!result.ok) return fail(result.reason);
       return Response.json({ ok: true });
     }
@@ -106,6 +123,46 @@ export async function POST(request: NextRequest) {
       // Another decision on this program's leads is being written this moment (MM-SA-09): the studio says to reload and try again.
       if (done.reason === "busy") return fail("busy", 409);
       return fail(done.reason === "reason" ? "lead_reason" : done.reason === "not_ready" ? "lead_not_ready" : "unknown");
+    }
+    // Several applications at once, and their undo (630 [HN6](4); lib/affiliates.ts decideMany, undoMany).
+    if (action === "bulk" || action === "bulk-undo") {
+      const decision = body.decision === "approve" || body.decision === "decline" ? body.decision : null;
+      if (!decision) return fail("unknown");
+      if (action === "bulk") {
+        const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
+        if (!ids.length) return fail("unknown");
+        const before = await decideMany(store, ids, decision);
+        return Response.json({ ok: true, before });
+      }
+      const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
+      const before = sent.flatMap((raw: unknown) => {
+        const v = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+        const id = text(v.id, 20);
+        const decidedAt = Number(v.decidedAt);
+        // Only a pending application goes back: nothing else was decided in bulk.
+        return id && v.status === "pending" && Number.isSafeInteger(decidedAt) && decidedAt >= 0 ? [{ id, status: "pending" as const, decidedAt }] : [];
+      });
+      const undone = await undoMany(store, before, decision);
+      return Response.json({ ok: true, undone });
+    }
+    // The share of several affiliates at once, and its undo (630 [HN6](4) unit 2).
+    if (action === "bulk-rate" || action === "bulk-rate-undo") {
+      const rate = body.rate === null || body.rate === "" ? null : Number(body.rate);
+      if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return fail("rate");
+      if (action === "bulk-rate") {
+        const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
+        if (!ids.length) return fail("unknown");
+        const before = await setRatesMany(store, ids, rate);
+        return before ? Response.json({ ok: true, before }) : fail("rate");
+      }
+      const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
+      const before = sent.flatMap((raw: unknown) => {
+        const v = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+        const id = text(v.id, 20);
+        const was = v.rate === null ? null : Number(v.rate);
+        return id && (was === null || (Number.isInteger(was) && was >= MIN_COMMISSION && was <= MAX_COMMISSION)) ? [{ id, rate: was }] : [];
+      });
+      return Response.json({ ok: true, undone: await undoRates(store, before, rate) });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
       const done = await decide(store, text(body.id, 20), action);

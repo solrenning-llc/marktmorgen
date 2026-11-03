@@ -47,6 +47,7 @@
  *   nl:keys:<store>:<product>:info     hash key -> who, when, which sale, revoked
  *   nl:keys:<store>:<product>:waiting  hash sale reference -> buyer waiting for a key
  *   nl:keys:<store>:<product>:warned   set once the low-pool email has gone
+ *   nl:keys:<store>:<product>:dev:<h>  hash device fingerprint -> first activated (seconds), for the key whose hash is h (610 [WP9])
  *
  * <store> is the store's statsId, which follows it through a new address and
  * a new sign-in email.
@@ -58,6 +59,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { createHash } from "node:crypto";
+import { CREATE_FORM_OPPORTUNITY as SET_IF_ROOM } from "@/lib/form-opportunity";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
@@ -622,6 +625,87 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
 }
 
 export type KeyCheck = "valid" | "revoked" | "unknown";
+
+// ---------------------------------------------------------------- devices (610 [WP9])
+
+/** The longest device id the creator's software may send; anything longer is refused, never cut. */
+export const MAX_DEVICE_ID = 200;
+/** A device id: printable, no spaces, as an app's machine id or a random id it keeps. */
+export const DEVICE_ID = /^[\x21-\x7e]{1,200}$/;
+
+const keyHash = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 24);
+const devKey = (store: Store, product: Pick<Listing, "id">, key: string) => `${base(store, product)}:dev:${keyHash(key)}`;
+const devSlot = (product: Pick<Listing, "id">, key: string) => `lk:dev:${product.id}:${keyHash(key)}`;
+
+/**
+ * A one-way fingerprint of a device for one product: the id the creator's
+ * software sent is never kept, and the same machine gives a different
+ * fingerprint in another product or store.
+ */
+export function deviceFingerprint(store: Pick<Store, "statsId">, product: Pick<Listing, "id">, device: string): string {
+  return createHash("sha256").update(`${store.statsId}|${product.id}|${device}`).digest("hex").slice(0, 32);
+}
+
+/** What `devices` activated devices of a key weigh in the store's data room: the record's name, then each fingerprint and its date. */
+export function devicesBytes(count: number): number {
+  // The record's name at its longest: "nl:keys:", the store's 32-character id, a product id of up to 40, ":dev:" and the key's 24-character hash.
+  return count > 0 ? dataBytes(["x".repeat(8 + 32 + 1 + 40 + 5 + 24)]) + count * dataBytes(["0".repeat(32), "1700000000"]) : 0;
+}
+
+/** How many devices this key is activated on now. */
+export async function devicesOf(store: Store, product: Listing, key: string): Promise<number> {
+  if (!store.statsId || !isRedisConfigured()) return 0;
+  const [length] = await redisPipeline([["HLEN", devKey(store, product, key)]]);
+  return Number(length) || 0;
+}
+
+export type Activation =
+  /** This device already had the key, or has it now; `used` of `limit` devices. */
+  | { state: "active"; used: number; limit: number }
+  /** Every place is taken by other devices. */
+  | { state: "full"; used: number; limit: number };
+
+/**
+ * Activates a good key on one device, within the product's limit: the same
+ * device asking again takes no new place. Checked and written in one Redis
+ * operation, so two new devices at once cannot both take the last place;
+ * the store's data room is taken for the new place first (DataRoomError when
+ * it does not fit) and given back when no place was taken. The caller has
+ * already found the key good (checkKey).
+ */
+export async function activateDevice(store: Store, product: Listing, key: string, device: string, limit: number, now = Date.now()): Promise<Activation> {
+  const record = devKey(store, product, key);
+  const fingerprint = deviceFingerprint(store, product, device);
+  const [had, length] = await redisPipeline([["HEXISTS", record, fingerprint], ["HLEN", record]]);
+  const used = Number(length) || 0;
+  if (Number(had) === 1) return { state: "active", used, limit };
+  if (used >= limit) return { state: "full", used, limit };
+  const slot = devSlot(product, key);
+  await needData(store, [{ slot, bytes: devicesBytes(used + 1), set: true }], now);
+  const [reply] = await redisPipeline([["EVAL", SET_IF_ROOM, 1, record, fingerprint, String(Math.floor(now / 1000)), limit]]);
+  const state = Array.isArray(reply) ? Number(reply[0]) : NaN;
+  const after = await devicesOf(store, product, key);
+  if (state !== 1) await giveData(store, [{ slot, bytes: devicesBytes(after), set: true }], now);
+  if (state === 1 || state === 0) return { state: "active", used: after, limit };
+  if (state === -1) return { state: "full", used: after, limit };
+  throw new Error("a device could not be activated");
+}
+
+/** Frees every device a key is activated on (the creator, from the studio): its places open again. */
+export async function freeDevices(store: Store, product: Listing, key: string, now = Date.now()): Promise<number> {
+  if (!store.statsId || !isRedisConfigured()) return 0;
+  const record = devKey(store, product, key);
+  const [length] = await redisPipeline([["HLEN", record], ["DEL", record]]);
+  await giveData(store, [{ slot: devSlot(product, key), bytes: 0, set: true }], now);
+  return Number(length) || 0;
+}
+
+/** The devices of each of these keys, in one round trip, for the studio's list. */
+export async function devicesOfKeys(store: Store, product: Listing, keys: string[]): Promise<number[]> {
+  if (!store.statsId || !isRedisConfigured() || keys.length === 0) return keys.map(() => 0);
+  const replies = await redisPipeline(keys.map((key) => ["HLEN", devKey(store, product, key)]));
+  return keys.map((_, i) => Number(replies[i]) || 0);
+}
 
 /**
  * What the public check answers about a key: given and good, given and

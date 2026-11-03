@@ -14,6 +14,11 @@ export const MAX_GROUP_LENGTH = 8;
 /** The pool size under which the creator is warned, by default and at most. */
 export const DEFAULT_LOW_AT = 20;
 export const MAX_LOW_AT = 1_000;
+/**
+ * The most devices one key may be activated on (610 [WP9]); 0 is no limit,
+ * as every key was before the limit existed.
+ */
+export const MAX_DEVICES = 10;
 
 export type KeySource = "pool" | "generated";
 
@@ -26,9 +31,11 @@ export type KeySetup = {
   groupLength: number;
   /** For a pool: the count at or under which the creator is warned. */
   lowAt: number;
+  /** How many devices one key may be activated on, 1 to MAX_DEVICES; 0 for no limit. */
+  devices: number;
 };
 
-export const DEFAULT_KEYS: KeySetup = { source: "generated", prefix: "", groups: 4, groupLength: 4, lowAt: DEFAULT_LOW_AT };
+export const DEFAULT_KEYS: KeySetup = { source: "generated", prefix: "", groups: 4, groupLength: 4, lowAt: DEFAULT_LOW_AT, devices: 0 };
 
 function wholeIn(raw: unknown, min: number, max: number): number | null {
   const n = typeof raw === "string" && raw.trim() ? Number(raw.trim()) : raw;
@@ -52,10 +59,11 @@ export function parseKeySetup(raw: unknown): KeySetup | null {
     groups: wholeIn(value.groups, MIN_GROUPS, MAX_GROUPS) ?? DEFAULT_KEYS.groups,
     groupLength: wholeIn(value.groupLength, MIN_GROUP_LENGTH, MAX_GROUP_LENGTH) ?? DEFAULT_KEYS.groupLength,
     lowAt: wholeIn(value.lowAt, 0, MAX_LOW_AT) ?? DEFAULT_LOW_AT,
+    devices: wholeIn(value.devices, 0, MAX_DEVICES) ?? 0,
   };
 }
 
-export type SetupProblem = "source" | "prefix" | "groups" | "length" | "low";
+export type SetupProblem = "source" | "prefix" | "groups" | "length" | "low" | "devices";
 
 /** Reads the studio's form, and says which field is wrong when one is. */
 export function readKeySetup(raw: Record<string, unknown>): KeySetup | SetupProblem {
@@ -69,7 +77,9 @@ export function readKeySetup(raw: Record<string, unknown>): KeySetup | SetupProb
   if (groupLength === null) return "length";
   const lowAt = wholeIn(raw.lowAt === "" ? DEFAULT_LOW_AT : raw.lowAt, 0, MAX_LOW_AT);
   if (lowAt === null) return "low";
-  return { source, prefix, groups, groupLength, lowAt };
+  const devices = wholeIn(raw.devices === undefined || raw.devices === "" ? 0 : raw.devices, 0, MAX_DEVICES);
+  if (devices === null) return "devices";
+  return { source, prefix, groups, groupLength, lowAt, devices };
 }
 
 /** Which products may hand out keys: paid, sold once, and delivering a file or a link. */

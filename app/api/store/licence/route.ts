@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { createHash } from "node:crypto";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
-import { MAX_KEY_LENGTH, checkKey } from "@/lib/licence-keys";
+import { DEVICE_ID, MAX_DEVICE_ID, MAX_KEY_LENGTH, activateDevice, checkKey } from "@/lib/licence-keys";
+import { DataRoomError } from "@/lib/store-data";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { clientIp } from "@/lib/visit";
 import { readListing } from "@/lib/catalog";
@@ -20,6 +21,15 @@ import { readListing } from "@/lib/catalog";
  * connection may ask 120 times a minute per store, which a real app never
  * comes near and which makes guessing keys pointless on top of their 60 bits
  * or more.
+ *
+ * A product whose keys are limited to a number of devices (610 [WP9]) is
+ * asked with `&device=<an id the app keeps for this machine>` as well: a
+ * good key on a device it already has, or on a new one while a place is
+ * free, answers `valid`, with `devices: { used, limit }`; with every place
+ * taken by other devices it answers `{ "status": "device_limit" }`, and
+ * without a device `{ "status": "device_required" }`. A revoked or unknown
+ * key never takes a place. The device id itself is never kept: only a
+ * one-way fingerprint of it for this product (lib/licence-keys.ts).
  */
 const LIMIT = 120;
 const WINDOW_SECONDS = 60;
@@ -44,6 +54,8 @@ export async function GET(request: NextRequest) {
   const handle = normaliseHandle(q.get("store") ?? "");
   const productId = (q.get("product") ?? "").slice(0, 40);
   const key = (q.get("key") ?? "").trim().slice(0, MAX_KEY_LENGTH + 1);
+  const device = (q.get("device") ?? "").trim().slice(0, MAX_DEVICE_ID + 1);
+  if (device && !DEVICE_ID.test(device)) return answer(400, { error: `Send device as up to ${MAX_DEVICE_ID} letters, digits or symbols, without spaces.` });
   if (!handle || !productId || !key) {
     return answer(400, { error: "Send store, product and key." });
   }
@@ -65,8 +77,15 @@ export async function GET(request: NextRequest) {
     // One of the store's public requests for its window (lib/traffic.ts).
     if (!(await takePublicRequest(store, "buyer"))) return answer(429, { error: "Too many checks for this store right now. Try again later." });
     const status = await checkKey(store, product, key);
-    return answer(200, { valid: status === "valid", status });
+    // The limit the product has now, also for keys it gave before it stopped handing them out.
+    const limit = product.keys?.devices ?? 0;
+    if (status !== "valid" || limit === 0) return answer(200, { valid: status === "valid", status });
+    if (!device) return answer(200, { valid: false, status: "device_required" });
+    const activation = await activateDevice(store, product, key, device, limit);
+    const devices = { used: activation.used, limit };
+    return activation.state === "active" ? answer(200, { valid: true, status: "valid", devices }) : answer(200, { valid: false, status: "device_limit", devices });
   } catch (error) {
+    if (error instanceof DataRoomError) return answer(503, { error: "This store cannot take a new device right now. Ask the seller." });
     console.error("checking a license key failed", error);
     return answer(502, { error: "Could not check right now." });
   }

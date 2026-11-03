@@ -35,7 +35,8 @@ is("your software's check answers valid, revoked or unknown", [/return "unknown"
 part("The answers");
 const now = keyBeginnerQuestions(false);
 const later = keyBeginnerQuestions(true, TRIAL_DAYS);
-is("four questions", now.map((x) => x.q), ["What is a license key here?", "How do I turn on license keys?", "Can I try license keys before paying?", "Do license keys work?"]);
+is("five questions", now.map((x) => x.q), ["What is a license key here?", "How do I turn on license keys?", "Can a key work on only a few computers?", "Can I try license keys before paying?", "Do license keys work?"]);
+is("devices: the editor's own words, and the id never kept (610 [WP9])", ["“Devices per key”", "“Free its devices”", "from 1 to 10", "only a one-way fingerprint"].every((w) => answer(now, "Can a key work on only a few computers?").includes(w)) && ["Devices per key", "Free its devices"].every((w) => read("components/licence-key-editor.tsx").includes(w)), true);
 is("start: the editor's own words, in order", (() => { const a = answer(now, "How do I turn on license keys?"); const at = [KEY_WORDS.start, KEY_WORDS.source, KEY_WORDS.made, KEY_WORDS.list, KEY_WORDS.save, KEY_WORDS.upload, KEY_WORDS.paste].map((w) => a.indexOf(`“${w}”`)); return at.every((x, k) => x >= 0 && (k === 0 || x > at[k - 1])); })(), true);
 is("start: what takes no keys of its own, as the rule has it", ["that you do not ship", "Memberships, calls, courses, shipped products and bundles do not take keys of their own", "a bundle hands out the keys of the products in it", "until there are some, the product shows as sold out"].every((w) => answer(now, "How do I turn on license keys?").includes(w)), true);
 is("try before paying: the one shared answer, in license keys' words", [answer(now, "Can I try license keys before paying?"), answer(later, "Can I try license keys before paying?")], [tryBeforePaying("License keys", "license keys on a product", false), tryBeforePaying("License keys", "license keys on a product", true, TRIAL_DAYS)]);
@@ -46,7 +47,7 @@ is("no number of keys or sales, no percent, no result promised", /\b\d+\s+(keys|
 
 part("On the license keys page");
 const faq = (findPage("platform", "license-keys")?.blocks ?? []).find((b) => (b as { kind?: string }).kind === "faq") as { title: string; items: { q: string }[] } | undefined;
-is("first in the page's own Questions block", faq?.items.slice(0, 4).map((x) => x.q), now.map((x) => x.q));
+is("first in the page's own Questions block", faq?.items.slice(0, now.length).map((x) => x.q), now.map((x) => x.q));
 is("no question asked twice", new Set(faq?.items.map((x) => x.q)).size, faq?.items.length);
 
 done();

@@ -8,7 +8,10 @@ import {
   MAX_KEY_LENGTH,
   activeKeys,
   addKeys,
+  checkKey,
   clearPool,
+  devicesOfKeys,
+  freeDevices,
   issuedKeys,
   keyCounts,
   readKeyList,
@@ -46,8 +49,11 @@ export async function GET(request: NextRequest) {
     const setup = activeKeys(product);
     if (!setup) return Response.json({ ok: true, on: false }, { headers: { "Cache-Control": "private, no-store" } });
     const [counts, list] = await Promise.all([keyCounts(store, product), issuedKeys(store, product, query, 50)]);
+    // Each listed key's devices, when the product limits them (610 [WP9]).
+    const devices = setup.devices > 0 ? await devicesOfKeys(store, product, list.keys.map((k) => k.key)) : null;
+    const keys = devices ? list.keys.map((k, i) => ({ ...k, devices: devices[i] })) : list.keys;
     return Response.json(
-      { ok: true, on: true, setup, sample: sampleKey(setup), counts, keys: list.keys, matching: list.total },
+      { ok: true, on: true, setup, sample: sampleKey(setup), counts, keys, matching: list.total },
       { headers: { "Cache-Control": "private, no-store" } },
     );
   } catch (error) {
@@ -105,6 +111,14 @@ export async function POST(request: NextRequest) {
       const done = await setRevoked(store, product, key, body.revoked === true);
       if (!done) return Response.json({ ok: false, error: "unknown_key" }, { status: 404 });
       return Response.json({ ok: true });
+    }
+
+    if (action === "free") {
+      // Every device the key was activated on, freed: the buyer moved to a new computer (610 [WP9]).
+      const key = text(body.key, MAX_KEY_LENGTH);
+      if (!key || (await checkKey(store, product, key)) === "unknown") return Response.json({ ok: false, error: "unknown_key" }, { status: 404 });
+      const freed = await freeDevices(store, product, key);
+      return Response.json({ ok: true, freed });
     }
 
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });

@@ -27,6 +27,10 @@ export function keyBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_D
       a: `In your studio, on a paid product sold once that you do not ship, press “${w.start}”. Under “${w.source}”, choose “${w.made}” or “${w.list}”, and press “${w.save}”. For a list, then press “${w.upload}” or “${w.paste}”; until there are some, the product shows as sold out. Memberships, calls, courses, shipped products and bundles do not take keys of their own; a bundle hands out the keys of the products in it.`,
     },
     {
+      q: "Can a key work on only a few computers?",
+      a: "Yes, if your software checks keys from the app. In the key settings, choose “Devices per key”, from 1 to 10. Your app sends an id it keeps for the computer or phone with each check; a new device past the limit is told no. You can free a key's devices for a buyer with “Free its devices” on its row in the list of keys. The id itself is never kept, only a one-way fingerprint of it.",
+    },
+    {
       q: "Can I try license keys before paying?",
       a: tryBeforePaying("License keys", "license keys on a product", onSale, trialDays),
     },

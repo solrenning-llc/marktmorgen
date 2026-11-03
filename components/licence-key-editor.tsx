@@ -12,6 +12,7 @@ import {
   MAX_GROUPS,
   MAX_GROUP_LENGTH,
   MAX_KEY_FILE_BYTES,
+  MAX_DEVICES,
   MAX_LOW_AT,
   MAX_POOL_KEYS,
   MAX_PREFIX_LENGTH,
@@ -34,6 +35,7 @@ const MESSAGES: Record<string, string> = {
   groups: `Choose ${MIN_GROUPS} to ${MAX_GROUPS} groups.`,
   length: `Choose ${MIN_GROUP_LENGTH} to ${MAX_GROUP_LENGTH} characters in each group.`,
   low: `Type a number from 0 to ${MAX_LOW_AT.toLocaleString("en-US")}.`,
+  devices: `Choose no limit, or 1 to ${MAX_DEVICES} devices.`,
   kind: "License keys work only on paid products sold once, not on free products, memberships, calls, courses or bundles.",
   unknown: "This product was not found. It may have been deleted; reload the page.",
   too_big: `That file is too big to read. Split it into files of up to ${MAX_UPLOAD_KEYS.toLocaleString("en-US")} keys.`,
@@ -50,7 +52,7 @@ type Loaded = {
   setup: KeySetup;
   sample: string;
   counts: KeyCounts;
-  keys: IssuedKey[];
+  keys: (IssuedKey & { devices?: number })[];
   matching: number;
 };
 
@@ -345,6 +347,7 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
                         entry.at ? DAY.format(new Date(entry.at * 1000)) : null,
                         entry.reference,
                         entry.revokedBy === "refund" ? "Revoked: refunded in full" : null,
+                        setup.devices > 0 && entry.devices !== undefined ? `On ${entry.devices} of ${setup.devices} ${setup.devices === 1 ? "device" : "devices"}` : null,
                       ]
                         .filter(Boolean)
                         .join(" · ")}
@@ -363,6 +366,22 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
                   >
                     {entry.revokedAt ? "Restore" : "Revoke"}
                   </button>
+                  {setup.devices > 0 && (entry.devices ?? 0) > 0 ? (
+                    <ConfirmAction
+                      className={quiet}
+                      disabled={busy}
+                      question={`Free the ${entry.devices} ${entry.devices === 1 ? "device" : "devices"} this key is on? The buyer can then use it on new ones, up to ${setup.devices}.`}
+                      yes="Yes, free them"
+                      onConfirm={async () => {
+                        const data = await post({ action: "free", key: entry.key });
+                        if (!data.ok) return;
+                        toast("Devices freed.");
+                        await load(query);
+                      }}
+                    >
+                      Free its devices
+                    </ConfirmAction>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -385,7 +404,12 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
           <code className="font-mono">valid</code>, <code className="font-mono">revoked</code> or{" "}
           <code className="font-mono">unknown</code>, and nothing about the buyer. Up to 120 checks a minute from one IP address.
         </p>
-        <code className="mt-2 block break-all rounded-[var(--r-sm)] bg-sand px-3 py-2 font-mono text-xs text-ink">{`GET ${checkUrl}THE-KEY`}</code>
+        <code className="mt-2 block break-all rounded-[var(--r-sm)] bg-sand px-3 py-2 font-mono text-xs text-ink">{`GET ${checkUrl}THE-KEY${setup.devices > 0 ? "&device=THE-DEVICE-ID" : ""}`}</code>
+        {setup.devices > 0 ? (
+          <p className="mt-2 text-ink-soft">
+            {`Each key works on up to ${setup.devices} ${setup.devices === 1 ? "device" : "devices"}. Send an id your app keeps for the computer or phone as device. A new device past the limit is answered device_limit; a check without a device is answered device_required. The id itself is never kept, only a one-way fingerprint of it.`}
+          </p>
+        ) : null}
       </details>
 
       <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
@@ -449,6 +473,7 @@ function SetupForm({
   const [groups, setGroups] = useState(String(initial.groups));
   const [length, setLength] = useState(String(initial.groupLength));
   const [lowAt, setLowAt] = useState(String(initial.lowAt ?? DEFAULT_LOW_AT));
+  const [devices, setDevices] = useState(String(initial.devices ?? 0));
 
   if (loading) {
     return (
@@ -469,7 +494,7 @@ function SetupForm({
       className="mt-3 rounded-[var(--r-sm)] border border-line bg-white p-4"
       onSubmit={(event) => {
         event.preventDefault();
-        onSave({ source, prefix, groups, groupLength: length, lowAt });
+        onSave({ source, prefix, groups, groupLength: length, lowAt, devices });
       }}
     >
       <fieldset>
@@ -525,6 +550,19 @@ function SetupForm({
           </span>
         </label>
       )}
+
+      <label className="mt-4 block">
+        <span className="field-label">Devices per key</span>
+        <select className="field mt-2 w-48" value={devices} onChange={(event) => setDevices(event.target.value)} aria-describedby="key-devices-help">
+          <option value="0">No limit</option>
+          {Array.from({ length: MAX_DEVICES }, (_, i) => i + 1).map((n) => (
+            <option key={n} value={String(n)}>{`${n} ${n === 1 ? "device" : "devices"}`}</option>
+          ))}
+        </select>
+        <span id="key-devices-help" className="mt-2 block text-xs text-ink-soft">
+          For software that checks keys from the app. A key then works on this many computers or phones; you can free them for a buyer here.
+        </span>
+      </label>
 
       {error ? (
         <p className="notice notice-error mt-3" role="alert">

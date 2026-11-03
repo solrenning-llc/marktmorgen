@@ -996,6 +996,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/declines/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/declines",
+      "parameters": []
+    },
+    {
       "source": "app/studio/discord/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/discord",

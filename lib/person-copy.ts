@@ -67,6 +67,14 @@ import { keysOf } from "@/lib/licence-keys";
 import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
 import { toldOf } from "@/lib/closing-buyers";
+import { paidCheckoutsOf } from "@/lib/person-copy-stripe";
+import { readGift } from "@/lib/gifts";
+import { isGroupJob, readGroup } from "@/lib/group-buy";
+import { packagesKey, readBought } from "@/lib/call-packages";
+import { readShipped } from "@/lib/shipments";
+import { callScope, readRecords } from "@/lib/meet-records";
+import { heldPaymentsOf } from "@/lib/closing-holds";
+import type { PaidCheckout } from "@/lib/person-copy-stripe";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 
@@ -110,14 +118,14 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/community-dm.ts": { how: "marks", what: "Another member's choice not to get your messages, which is theirs and names nobody's address" },
   "lib/paypal-sales.ts": { how: "copied", what: "Your PayPal orders: the product, the amount, the date and the box you checked before paying" },
   "lib/licence-keys.ts": { how: "copied", what: "License keys you bought, and the sale each came from" },
-  "lib/gifts.ts": { how: "pending", what: "Gifts you bought or were given" },
-  "lib/group-buy.ts": { how: "pending", what: "Places bought for a group that you bought or were given" },
+  "lib/gifts.ts": { how: "copied", what: "Gifts you bought or were given" },
+  "lib/group-buy.ts": { how: "copied", what: "Places bought for a group that you bought or were given" },
   "lib/preorders.ts": { how: "copied", what: "Your pre-orders and what became of them" },
-  "lib/call-packages.ts": { how: "pending", what: "Packages of calls you bought, and the sessions left" },
-  "lib/meet-records.ts": { how: "pending", what: "Your place on a booked group call's guest list" },
-  "lib/shipments.ts": { how: "pending", what: "When your physical orders were shipped, and their tracking links" },
+  "lib/call-packages.ts": { how: "copied", what: "Packages of calls you bought, and the sessions left" },
+  "lib/meet-records.ts": { how: "copied", what: "Your place on a booked group call's guest list" },
+  "lib/shipments.ts": { how: "copied", what: "When your physical orders were shipped, and their tracking links" },
   "lib/closing-buyers.ts": { how: "copied", what: "While the store is closing: that you were emailed it closes" },
-  "lib/closing-holds.ts": { how: "pending", what: "While the store is closing: your membership's last payment, kept to give back the time you paid for" },
+  "lib/closing-holds.ts": { how: "copied", what: "While the store is closing: your membership's last payment, kept to give back the time you paid for" },
   "lib/closing-plan-guard.ts": { how: "marks", what: "Nothing about buyers: only the creator's own plan, if one was paid while the store was closing" },
   "lib/stripe-account.ts": { how: "elsewhere", what: "Your payments are on the creator's own Stripe account, not kept by Marktmorgen: your receipts and the store can give you them" },
   "lib/contacts.ts": { how: "copied", what: "Your place on the store's list: your address, name, labels, what you asked for or bought, and whether you agreed to hear from it" },
@@ -143,6 +151,23 @@ const iso = (seconds: number) => (seconds > 0 ? new Date(seconds * 1000).toISOSt
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 type Copier = (scope: ErasureScope) => Promise<unknown[]>;
+
+/** The person's paid checkouts in this store, read once per copy from the creator's Stripe account; a copy that cannot read them whole fails. */
+const checkoutsRead = new WeakMap<ErasureScope, Promise<PaidCheckout[]>>();
+function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
+  let read = checkoutsRead.get(s);
+  if (!read) {
+    read = paidCheckoutsOf(s.store, s.email).then((list) => {
+      if (list === null) throw new Error("the person's payments could not be read in full from the store's Stripe account");
+      return list;
+    });
+    checkoutsRead.set(s, read);
+  }
+  return read;
+}
+
+/** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
+const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]);
 
 /** One reader per copied module, each only reading. */
 export const COPIERS: Readonly<Record<string, Copier>> = {
@@ -329,6 +354,65 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const told = await toldOf(s.store, s.email);
     return told ? [{ toldTheStoreCloses: told.toldAt ? iso(told.toldAt) : "not yet" }] : [];
   },
+  "lib/gifts.ts": async (s) => {
+    const bought = (await checkoutsOf(s)).map((c) => c.meta.gift).filter((id): id is string => Boolean(id));
+    const received = (await grantsOf(s)).map((g) => g.job).filter((job) => job.startsWith("gift:")).map((job) => job.slice(5));
+    const out: unknown[] = [];
+    for (const id of [...new Set(bought)]) {
+      const gift = await readGift(id);
+      // A gift they bought: they typed who it was for.
+      if (gift) out.push({ youBought: true, product: gift.p, to: gift.to, from: gift.from, message: gift.message, at: iso(gift.at), ...(gift.given ? { given: iso(gift.given) } : {}), ...(gift.revoked ? { refunded: iso(gift.revoked) } : {}) });
+    }
+    for (const id of [...new Set(received)]) {
+      const gift = await readGift(id);
+      // A gift to them: the name and words the giver chose to send, not the giver's payment.
+      if (gift) out.push({ youReceived: true, product: gift.p, from: gift.from, message: gift.message, at: iso(gift.at), ...(gift.given ? { given: iso(gift.given) } : {}), ...(gift.revoked ? { refunded: iso(gift.revoked) } : {}) });
+    }
+    return out;
+  },
+  "lib/group-buy.ts": async (s) => {
+    const bought = (await checkoutsOf(s)).map((c) => c.meta.group).filter((id): id is string => Boolean(id));
+    const taken = (await grantsOf(s)).map((g) => g.job).filter(isGroupJob).map((job) => job.slice(6));
+    const out: unknown[] = [];
+    // Who took the places they bought are those people's addresses, not theirs: the number is given.
+    for (const id of [...new Set(bought)]) {
+      const group = await readGroup(id);
+      if (group) out.push({ youBought: true, product: group.p, places: group.people, at: iso(group.at), ...(group.paid ? { paid: iso(group.paid) } : {}) });
+    }
+    for (const id of [...new Set(taken)]) {
+      const group = await readGroup(id);
+      if (group) out.push({ youTookAPlace: true, product: group.p, at: iso(group.at) });
+    }
+    return out;
+  },
+  "lib/call-packages.ts": async (s) => {
+    const [raw] = await redisPipeline([["SMEMBERS", packagesKey(s.statsId)]]);
+    const out: unknown[] = [];
+    for (const checkout of (Array.isArray(raw) ? raw : []).map(String)) {
+      const bought = await readBought(checkout);
+      // The booking link's token is a key, left out: they have it in the email that sent it.
+      if (bought && same(bought.e, s.email)) out.push({ product: bought.p, sessions: bought.total, bought: iso(bought.at), bookBy: iso(bought.until), booked: bought.holds });
+    }
+    return out;
+  },
+  "lib/shipments.ts": async (s) => {
+    const sessions = (await checkoutsOf(s)).map((c) => c.id);
+    const shipped = sessions.length ? await readShipped(sessions) : new Map();
+    return [...shipped.entries()].map(([checkout, record]) => ({ checkout, ...record }));
+  },
+  "lib/meet-records.ts": async (s) => {
+    const callsId = s.store.callsId;
+    if (!callsId) return [];
+    const scopes = (await checkoutsOf(s)).flatMap((c) => {
+      const start = Number(c.meta.start);
+      if (!c.meta.product || !Number.isFinite(start) || start <= 0) return [];
+      return [callScope(callsId, { group: false, session: c.id, product: c.meta.product, start }), callScope(callsId, { group: true, session: c.id, product: c.meta.product, start })];
+    });
+    if (!scopes.length) return [];
+    // Only that they are on the guest list, never the other guests.
+    return (await readRecords(scopes)).flatMap((record) => (record && record.guests.some((g) => same(g, s.email)) ? [{ product: record.product, group: record.group, link: record.link }] : []));
+  },
+  "lib/closing-holds.ts": async (s) => heldPaymentsOf(s.store, s.email),
   "lib/flows.ts": async (s) => {
     const flows = await readFlows(s.listId);
     const started = new Set(await flowsStartedFor(flows, s.email));

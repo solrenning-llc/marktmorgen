@@ -13,6 +13,10 @@ import { OWNER, makeWorld, seedPerson } from "./erasure-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
+// The store's Stripe account answers that the person paid nothing there: the world's records are all kept here.
+process.env.STRIPE_SECRET_KEY = "sk_test_person_copy_world_only";
+globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 })) as typeof fetch;
+
 async function main(): Promise<void> {
   redis.clear();
   const world = await makeWorld("copy-world");
@@ -45,7 +49,7 @@ async function main(): Promise<void> {
 }
 
 /** Modules seedPerson writes nothing to for a person (see the log line above). */
-const EXPECTED_EMPTY: string[] = ["lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/assistant-reminder.ts", "lib/paypal-sales.ts", "lib/licence-keys.ts", "lib/preorders.ts", "lib/closing-buyers.ts"];
+const EXPECTED_EMPTY: string[] = ["lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/assistant-reminder.ts", "lib/paypal-sales.ts", "lib/licence-keys.ts", "lib/gifts.ts", "lib/group-buy.ts", "lib/preorders.ts", "lib/call-packages.ts", "lib/meet-records.ts", "lib/shipments.ts", "lib/closing-buyers.ts", "lib/closing-holds.ts"];
 
 main().catch((error) => {
   console.error(error);

@@ -41,8 +41,8 @@ async function main(): Promise<void> {
   is("and no line names a module that keeps nothing about people", Object.keys(COPY_PLAN).filter((m) => !erased.includes(m) && !kept.includes(m)), []);
   is("each module the copy reads has its reader", Object.entries(COPY_PLAN).filter(([m, p]) => p.how === "copied" && !COPIERS[m]).map(([m]) => m), []);
   is("each line says what it is, in words", Object.values(COPY_PLAN).every((p) => p.what.length > 10), true);
-  is("pending modules remain, so the copy is not complete yet", COPY_COMPLETE, false);
-  is("and no page gives it to anybody while it is not", [existsSync("app/privacy/copy/page.tsx"), existsSync("app/api/privacy/copy/route.ts")], [false, false]);
+  is("nothing is pending: the copy is complete", COPY_COMPLETE, true);
+  is("no page gives it out yet (its door is the next unit)", [existsSync("app/privacy/copy/page.tsx"), existsSync("app/api/privacy/copy/route.ts")], [false, false]);
 
   redis.clear();
   await claimHandle(OWNER, "copyshop", "Copy Shop", "");

@@ -13,11 +13,13 @@ import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { readProduct } from "@/lib/catalog";
+import { chargeNow } from "@/lib/call-deposit";
+import { type DepositFigures, depositWithCode, readDepositCode } from "@/lib/deposit-code";
 
 /** The checkout this browser last opened for a call, so going back frees it. */
 const HOLD_COOKIE = "nl_call_hold";
 
-const MAX_BODY_BYTES = 1_000;
+const MAX_BODY_BYTES = 1_200;
 
 /**
  * A buyer picked a time. It is checked again, held, and the buyer is sent to
@@ -42,6 +44,8 @@ export async function POST(request: NextRequest) {
   let tz = "";
   // A session of a package already paid for (lib/call-packages.ts).
   let pkg = "";
+  // A discount code typed on the page, for a booking with a deposit only (lib/deposit-code.ts).
+  let typed = "";
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (name: string) => {
@@ -54,6 +58,7 @@ export async function POST(request: NextRequest) {
     start = /^\d{12,14}$/.test(rawStart) ? Number(rawStart) : NaN;
     tz = read("tz").slice(0, 64);
     pkg = read("pkg").slice(0, 60);
+    typed = read("code").slice(0, 60);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -83,6 +88,24 @@ export async function POST(request: NextRequest) {
 
   // A buyer who went back from Stripe's page to pick again lets go of the
   // time they were holding, after that checkout is closed at Stripe.
+  // A discount code on a booking with a deposit: Stripe's own box would take it
+  // off the deposit alone, so it is read here, from the creator's own account,
+  // and taken off the whole price; the deposit is never more than what is left
+  // (the owner's decision of 2 November 2026). Refused before any time is held.
+  let code: { id: string; code: string; figures: DepositFigures } | null = null;
+  if (typed.trim() && !pkg && store.hasDiscounts) {
+    const due = chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call.deposit ?? null, inPerson: Boolean(product.call.place) });
+    if (due.rest > 0) {
+      const found = store.stripeAccountId ? await readDepositCode(store.stripeAccountId, typed) : null;
+      if (!found) return back("code-unknown");
+      const figured = depositWithCode(found, { priceCents: product.priceCents, deposit: due.cents, currency: store.currency, nowSeconds: Math.floor(Date.now() / 1000) });
+      if (!figured.ok) return back(`code-${figured.why}`);
+      code = { id: found.id, code: found.code, figures: figured.figures };
+    }
+  }
+  // Typed but not usable here (the deposit or the store's codes changed since the page was drawn): said, never dropped quietly.
+  if (typed.trim() && !pkg && !code) return back("code-unknown");
+
   const previous = request.cookies.get(HOLD_COOKIE)?.value ?? "";
   if (previous) await releaseOwnHold(store, previous).catch(() => {});
 
@@ -104,6 +127,7 @@ export async function POST(request: NextRequest) {
     // Where the store pays per call that takes place, the same affiliate is carried for the lead, whatever the share.
     lead: store.affiliates.lead.kind === "booking" ? via?.aff ?? null : null,
     fromPackage: prepared && prepared.ok ? prepared.fromPackage : null,
+    code,
     channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)) },
   });
   if (!result.ok) return back(result.reason);

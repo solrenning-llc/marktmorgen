@@ -12,6 +12,7 @@ import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type CallListing, canMove, catchUpBookings, icsLink, isCallProduct, slotsForMove, slotsForProduct, whyNotMove } from "@/lib/calls";
+import { chargeNow } from "@/lib/call-deposit";
 import { type CallSetup, MAX_MOVES, MEET_NAMES, movableUntil, readableTime, zoneName } from "@/lib/call-setup";
 import { isVideoRoom, roomLabel, roomOf } from "@/lib/call-rooms";
 import { readOrder } from "@/lib/store-checkout";
@@ -76,6 +77,14 @@ export default async function BookPage({ params, searchParams }: Params) {
   const live = setup.kind === "live";
   const price = money(product.priceCents);
   const fromPackage = Boolean(pkg && pkgState && pkgState.left > 0);
+  // A booking with a deposit: a discount code is typed here and taken off the whole price (lib/deposit-code.ts),
+  // shown only when the checkout would charge a deposit, as app/api/store/book reads it.
+  // A deposit on an in-person booking (lib/call-deposit.ts): what is paid now and what is left, as the checkout will charge it.
+  const due = fromPackage ? null : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: setup.deposit ?? null, inPerson: Boolean(setup.place) });
+  const deposit = due && due.rest > 0 ? due : null;
+  // The button says what is paid now: the deposit, never the whole price, when only the deposit is charged.
+  const payNow = deposit ? money(deposit.cents) : price;
+  const code = deposit && store.hasDiscounts ? { label: b.codeLabel, help: b.codeHelp } : undefined;
 
   return (
     <Shell store={store}>
@@ -104,6 +113,7 @@ export default async function BookPage({ params, searchParams }: Params) {
               <p className="st-price text-base">{price}</p>
             </div>
             <p className="st-muted mt-2 text-sm font-semibold">{callLine(setup, b)}</p>
+            {deposit ? <p className="mt-2 text-sm" data-call-due="">{b.depositRest(money(deposit.rest), store.name)}</p> : null}
             {product.summary ? <p className="st-muted mt-3 leading-relaxed">{product.summary}</p> : null}
 
             {pkgState ? (
@@ -144,7 +154,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                 creatorTz={setup.tz}
                 handle={store.handle}
                 productId={product.id}
-                words={sessionWords(store, b, read.sessions, price, false)}
+                words={{ ...sessionWords(store, b, read.sessions, payNow, false), code }}
               />
             ) : (
               <SlotPicker
@@ -154,7 +164,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                 productId={product.id}
                 seatsLeft={setup.seats > 1 ? seatLabels(read.left, b) : undefined}
                 pkg={fromPackage ? pkgToken : undefined}
-                words={slotWords(store, b, setup.minutes, price, false, fromPackage)}
+                words={{ ...slotWords(store, b, setup.minutes, payNow, false, fromPackage), code }}
               />
             )}
           </div>

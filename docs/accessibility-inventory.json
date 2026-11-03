@@ -1186,6 +1186,12 @@
       "parameters": []
     },
     {
+      "source": "app/transparency/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/transparency",
+      "parameters": []
+    },
+    {
       "source": "app/unsubscribe/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/unsubscribe",

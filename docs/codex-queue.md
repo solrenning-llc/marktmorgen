@@ -21825,7 +21825,7 @@ Regra do dono ("recurso bom nunca descartado; vai ao fim"): recursos bons, de be
 16. Ligação com o Google Postmaster Tools e o Microsoft SNDS do domínio do criador, depois de 356 [ES2] (estende lib/mail-health.ts).
 17. Página pública mensal com a entregabilidade real da plataforma (entregues, devoluções, reclamações), só com números medidos e acima de mínimos (estende lib/platform-proof.ts; complemento de 570 [DR1]).
 18. Assinatura de e-mail por pessoa da equipe nas respostas da caixa de entrada (estende lib/inbox.ts e lib/mail-from.ts).
-19. Histórico de versões das automações, com restauração, como já existe nas páginas (estende lib/flows.ts e lib/autosave-rules.ts).
+19. Histórico de versões das automações, com restauração, como já existe nas páginas (estende lib/flows.ts e lib/autosave-rules.ts). Estado (Claude 3, 03/11/2026): unidades 1 e 2 (versões guardadas a cada mudança, até 10, com restauração que também pode ser desfeita, e a lista no estúdio de e-mail) em commits locais no ramo claude3/gl7-flow-versions, a enviar quando a mudança de organização for liberada (C3-24).
 20. Mais dados estruturados (Course, Event, ProfilePage e PodcastSeries), conferidos na documentação oficial do schema.org e do Google (estende lib/page-structured-data.ts).
 21. Biblioteca maior de ícones e ilustrações de licença livre, com texto alternativo (estende lib/sales-page-icons.ts).
 22. Cartão de visita digital do criador com "Save contact" (vCard) e formulário de troca de contato com consentimento (estende lib/site-pages.ts e lib/forms.ts).

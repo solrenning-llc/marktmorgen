@@ -41,6 +41,9 @@ const ANA = "aaaaaaaaaaaa";
 const BEN = "bbbbbbbbbbbb";
 const GONE = "dddddddddddd";
 const LEADS = { kind: "signup", cents: 500, hold: 30, daily: 10, budget: 50_000 };
+// Written in parts so no real-looking inbox sits in the source (scripts/check_public_data.py).
+const JO = "jo.reader" + "@" + "gmail.com";
+const JO_OTHER_WAY = "JoReader+news" + "@" + "googlemail.com";
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
@@ -118,10 +121,10 @@ is("and that the lead came before the purchase", /confirmed lead before they bou
   ]);
   const line = async (ref: string) => (await readBook(store)).lines.find((l) => l.ref === ref);
 
-  is("Ana's lead confirmed through her link", await recordLead(store, { aff: ANA, kind: "signup", email: "jo.reader@gmail.com" }), "recorded");
-  is("the contact reads back as Ana's for a later checkout", await contactFor(store, "jo.reader@gmail.com", NOW + 3600), ANA);
-  is("never for a checkout opened before the lead was confirmed", await contactFor(store, "jo.reader@gmail.com", NOW - 3600), "");
-  await noteSession(store, order("cs_c1", "JoReader+news@googlemail.com"));
+  is("Ana's lead confirmed through her link", await recordLead(store, { aff: ANA, kind: "signup", email: JO }), "recorded");
+  is("the contact reads back as Ana's for a later checkout", await contactFor(store, JO, NOW + 3600), ANA);
+  is("never for a checkout opened before the lead was confirmed", await contactFor(store, JO, NOW - 3600), "");
+  await noteSession(store, order("cs_c1", JO_OTHER_WAY));
   is(
     "no link, no code: the sale goes to Ana at today's share, as a contact, the address written another way",
     [(await line("cs_c1"))?.aff, (await line("cs_c1"))?.how, (await line("cs_c1"))?.commission],

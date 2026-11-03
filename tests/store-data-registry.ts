@@ -309,6 +309,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:lib:link:@lib/buyer-library.ts": short("A library link, a day", "access", 1, LINK_BYTES, MAIL("library")),
   "nl:listed:@lib/buyer-list.ts": short("An order put on the list", "order", 8, MARK),
   "nl:orders:link:@lib/buyer-orders.ts": short("A buyer's purchases link, a day", "access", 1, LINK_BYTES, MAIL("orders")),
+  "nl:orders:link:@lib/single-digital-access.ts": company("Inactive protected use of the existing buyer-link family, not a second token ledger", "The same account/address JSON and hashed-token key expire after 86400 seconds; a renewal activates them only at eligible dispatch. The explicit singleDigitalAccessEvidence/singleDigitalRenewalEvidence review must fund issuance, failed guards, key/value and Redis overhead, copies, and the complete 24-hour tail even after the protected origin releases its pool hold. LINK_BYTES is the legacy declared ceiling, not a newly verified price or bound for this writer. Actual policy remains null: full-lifetime funding and worst-case byte coverage are unknown/rejected, never zero; this descriptive entry does not approve activation."),
   "nl:rl:orders:addr:@lib/buyer-orders.ts": short("Purchase links per address, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:rl:orders:ip:@lib/buyer-orders.ts": short("Purchase links per connection, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:person:@lib/buyer-profile.ts": { what: "Notes about people", room: ["lib/buyer-profile.ts"] },

@@ -35,10 +35,10 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | FOLLOW-UP-CHARGE | 8 |
 | NEW-CHARGE | 13 |
 | TOTALS | 34 |
-| PAST-SALE | 10 |
+| PAST-SALE | 11 |
 | SETTING | 41 |
 | OTHER | 1 |
-| All | 107 |
+| All | 108 |
 
 ## The files
 
@@ -100,6 +100,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/store-alerts.ts` | TOTALS | 205/209: daily alerts against the goal in the store's currency | partly |
 | `lib/tax-threshold.ts` | TOTALS | 119: the text scan also matches `s.currency` inside `totals.currency`; this is the supplied tax ledger's currency, not the store setting | yes: the ledger is totalled in its own currency, the threshold requires its rule currency, and incomplete or mismatched evidence stays unknown; no conversion or sales approval |
 | `app/studio/people/page.tsx` | PAST-SALE | 200: a buyer's sale in the sale's own currency | yes |
+| `lib/single-digital-access.ts` | PAST-SALE | current paid-session, line, payment and charge currencies are checked against the sealed original sale; the receipt uses that sale's currency | yes: no conversion or relabelling with the current store currency; file updates still require a live grant and current paid proof |
 | `lib/ad-events.ts` | PAST-SALE | 575/719: the session's or invoice's currency, else the store's | yes |
 | `lib/api-read.ts` | PAST-SALE | 189: the bookings API labels a paid call with the store's currency; 44/59 settings | no (189) |
 | `lib/course-paid-observation.ts` | PAST-SALE | 71–76: the paid session, line item, payment and charge must match the original receipt currency | yes: compares the paid currency with the frozen original, without conversion or borrowing the current store setting |

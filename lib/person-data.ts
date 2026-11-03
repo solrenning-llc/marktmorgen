@@ -146,6 +146,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/free.ts", how: "expires", days: 1, what: "Counts that limit how often one address may ask, as one-way hashes, for an hour" },
   { file: "lib/store-join.ts", how: "erased", via: "lib/erasure-index.ts", what: "Their sign-up confirmation links" },
   { file: "lib/buyer-orders.ts", how: "expires", days: 1, what: "A link to their purchases already emailed works for 24 hours" },
+  { file: "lib/single-digital-access.ts", how: "expires", days: 1, what: "An inactive protected renewal issuer uses the existing buyer-link family and its 24-hour expiry; actual funding policy remains null" },
   { file: "lib/membership-manage.ts", how: "expires", days: 1, what: "A link to manage their membership already emailed works for an hour" },
   { file: "lib/request-guard.ts", how: "expires", days: 32, what: "Counts that limit how often one address may ask for things, kept as one-way hashes for at most 32 days" },
   { file: "lib/buyer-library.ts", how: "erased", what: "The note that they bought from your store, used for their library across stores" },

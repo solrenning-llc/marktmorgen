@@ -53,3 +53,6 @@ Se o seu ambiente permitir manter um processo em segundo plano durante a vez, li
 
 Lida em 02/11/2026 19h48 (Fortaleza)
 
+### CX-4 — 02/11/2026 21h50 — Teste rápido de acesso a um repositório da organização (Médio, poucos minutos)
+O dono criou a organização solrenning-llc no GitHub e instalou nela o ChatGPT Codex Connector (com acesso a todos os repositórios dela). Para provar, antes de qualquer migração, que você consegue trabalhar num repositório da organização: (1) clone ou abra solrenning-llc/repo-id-transfer-test (repositório de teste vazio, privado, só com o ramo access-test e um README); (2) crie o ramo codex/access-test a partir de access-test, com um único arquivo codex-access.txt contendo a linha "Codex can read and push here." e (3) envie esse ramo. Não abra PR, não mexa no Marktmorgen nem em configurações, não crie ambiente novo se não for preciso. Se não conseguir acessar o repositório, escreva a mensagem de erro exata na linha "Lida" desta mensagem no próximo PR de documentação que já for abrir. O Claude 1 confere sozinho se o ramo apareceu.
+

@@ -1296,6 +1296,7 @@
     "components/exit-offer.tsx",
     "components/fair-price-editor.tsx",
     "components/faq-editor.tsx",
+    "components/faq-from-inbox.tsx",
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",

@@ -23,6 +23,7 @@
 
 import { type LeadSetting, NO_LEADS, parseLeadSetting } from "@/lib/affiliate-lead-rules";
 import { type PendingTerms, readNoticeDays, readPending } from "@/lib/affiliate-notice";
+import { readIdleDays } from "@/lib/affiliate-idle-rules";
 
 /**
  * Which affiliate a sale belongs to when the buyer followed more than one
@@ -178,6 +179,15 @@ export type AffiliateSetting = {
    */
   notice?: number;
   /**
+   * Days without a sale or a lead after which an approved affiliate is
+   * removed, always after a warning (630 [HN6](3), lib/affiliate-idle-rules.ts):
+   * 0 for never, else 90 to 730. Missing on every program saved before it
+   * existed: never.
+   */
+  idle?: number;
+  /** When `idle` was last switched on or changed, in seconds: a warning older than that is set aside. */
+  idleOn?: number;
+  /**
    * A cut announced and not yet in force: the whole set of terms that takes
    * over on its day. Until then `percent`, `rates` and `days` are the old
    * ones; read on or after the day, they are these (parseAffiliateSetting).
@@ -332,6 +342,8 @@ export function parseAffiliateSetting(raw: unknown, now: number = Date.now()): A
     // Missing on every programme saved before it existed: no lead commission.
     lead: parseLeadSetting(value.lead),
     notice: readNoticeDays(value.notice),
+    idle: readIdleDays(value.idle),
+    idleOn: Number.isInteger(value.idleOn) && Number(value.idleOn) > 0 ? Number(value.idleOn) : 0,
     pending: null,
   };
   // A cut whose day has come is the terms from then on; before it, the old ones hold.

@@ -114,6 +114,7 @@ import { readMoves } from "@/lib/call-records";
 import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { formatMoney } from "@/lib/money";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
+import { idleStep, readIdleDays } from "@/lib/affiliate-idle-rules";
 
 /** How long the emailed link to apply or sign in keeps working. */
 export const AFFILIATE_LINK_SECONDS = 24 * 60 * 60;
@@ -198,6 +199,11 @@ export type Affiliate = {
    * of this one's own share. Null for everybody else.
    */
   by: { id: string; percent: number } | null;
+  /**
+   * When they were last warned that they would be removed for bringing no
+   * sale and no lead (630 [HN6](3), idleSweep), in seconds; 0 if never.
+   */
+  warned?: number;
 };
 
 /**
@@ -346,6 +352,7 @@ function parseAffiliate(raw: unknown): Affiliate | null {
         const percent = Number(by.percent);
         return Number.isInteger(percent) && percent >= 1 && percent <= MAX_COMMISSION ? { id: by.id, percent } : null;
       })(),
+      warned: Number.isInteger(value.warned) && Number(value.warned) > 0 ? Number(value.warned) : 0,
     };
   } catch {
     return null;
@@ -2298,4 +2305,101 @@ export async function programNumbers(store: Store): Promise<ProgramNumbers | nul
       .reduce((sum, p) => sum + p.cents, 0),
     since: approved.reduce((first, a) => (first === 0 || (a.decidedAt > 0 && a.decidedAt < first) ? a.decidedAt : first), 0),
   };
+}
+
+/** The most warnings and removals one store's sweep does in one run; the rest wait for the next day. */
+export const MAX_IDLE_STEPS = 25;
+
+/**
+ * Removing approved affiliates who bring nothing, where the creator asked for
+ * it (630 [HN6](3), lib/affiliate-idle-rules.ts idleStep): run once a day by
+ * the affiliates' schedule (app/api/cron/affiliates).
+ *
+ * What it reads, three commands for the whole store: the affiliates, the
+ * sales and the leads, already kept and bounded by the store's data room. A
+ * sale counts from when it was credited, unless it was the affiliate's own
+ * purchase; a lead from when it was confirmed, whatever was decided on it
+ * later, so a refund or a reversal never brings an old warning back to life.
+ *
+ * What it does, at most MAX_IDLE_STEPS a run: the warning first, by email in
+ * the store's language, from the store's own emails (sendEmail refuses past
+ * the store's figure, and then nobody is warned or removed that day); only a
+ * warning that went out is written down, on the affiliate's own record, read
+ * again just before so a decision the creator made meanwhile is never undone.
+ * Then, once the date it named has come with still nothing, the same removal
+ * as the creator's "Remove" (decide): their record stays, and the creator can
+ * restore them, which starts the count again.
+ */
+export async function idleSweep(store: Store, nowMs: number = Date.now()): Promise<{ warned: number; removed: number }> {
+  const done = { warned: 0, removed: 0 };
+  const days = readIdleDays(store.affiliates.idle);
+  if (days === 0 || !affiliatesOn(store)) return done;
+  const statsId = store.statsId as string;
+  const now = Math.floor(nowMs / 1000);
+  const [peopleReply, salesReply, leadsReply] = await redisPipeline([
+    ["HGETALL", peopleKey(statsId)],
+    ["HGETALL", salesKey(statsId)],
+    ["HGETALL", leadsKey(statsId)],
+  ]);
+  const lastSale = new Map<string, number>();
+  for (const [, raw] of pairs(salesReply)) {
+    const sale = parseReferral(raw);
+    if (!sale || sale.self) continue;
+    lastSale.set(sale.aff, Math.max(lastSale.get(sale.aff) ?? 0, sale.at));
+  }
+  const lastLead = new Map<string, number>();
+  for (const [, raw] of pairs(leadsReply)) {
+    const lead = parseLead(raw);
+    if (lead) lastLead.set(lead.aff, Math.max(lastLead.get(lead.aff) ?? 0, lead.at));
+  }
+  const people = pairs(peopleReply)
+    .map(([, raw]) => parseAffiliate(raw))
+    .filter((a): a is Affiliate => a !== null && a.status === "approved");
+  const a = affiliatesWords(store.language);
+  const locale = LANGUAGES[parseLanguage(store.language)].locale;
+  let steps = 0;
+  for (const affiliate of people) {
+    if (steps >= MAX_IDLE_STEPS) break;
+    const step = idleStep(
+      {
+        status: affiliate.status,
+        since: affiliate.decidedAt,
+        lastSale: lastSale.get(affiliate.id) ?? 0,
+        lastLead: lastLead.get(affiliate.id) ?? 0,
+        warnedAt: affiliate.warned ?? 0,
+        onSince: store.affiliates.idleOn ?? 0,
+      },
+      days,
+      now,
+    );
+    if (step.do === "warn") {
+      if (!isSenderConfigured()) continue;
+      steps += 1;
+      const date = new Date(step.removeOn * 1000).toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+      const sent = await sendEmail({
+        meter: { by: "store", store, kind: "email" },
+        from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
+        to: affiliate.email,
+        subject: a.idleSubject(store.name, date),
+        text: [a.idleBody(store.name, days, date), "", a.approvedPage(`${SITE_URL}/@${store.handle}/affiliates`)].join("\n"),
+      }).catch((error) => {
+        console.error("warning an idle affiliate failed", error);
+        return false;
+      });
+      // Refused past the store's emails, or not delivered: nobody is warned, so nobody is removed.
+      if (sent !== true) continue;
+      const fresh = await readAffiliate(store, affiliate.id);
+      if (fresh && fresh.status === "approved" && fresh.decidedAt === affiliate.decidedAt) {
+        await writeAffiliate(store, { ...fresh, warned: now });
+        done.warned += 1;
+      }
+    } else if (step.do === "remove") {
+      steps += 1;
+      const fresh = await readAffiliate(store, affiliate.id);
+      // Only the very affiliate who was warned: restored or decided on since, the count is theirs again.
+      if (!fresh || fresh.status !== "approved" || fresh.decidedAt !== affiliate.decidedAt || (fresh.warned ?? 0) !== (affiliate.warned ?? 0)) continue;
+      if (await decide(store, affiliate.id, "remove")) done.removed += 1;
+    }
+  }
+  return done;
 }

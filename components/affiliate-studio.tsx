@@ -42,12 +42,14 @@ import { MAX_LEAD_BUDGET_CENTS, MAX_LEAD_CAP, MAX_LEAD_CENTS, MAX_LEAD_HOLD_DAYS
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 import { MAX_NOTICE_DAYS, MIN_NOTICE_DAYS, noticeLines } from "@/lib/affiliate-notice";
+import { IDLE_WARN_DAYS, MAX_IDLE_DAYS, MIN_IDLE_DAYS } from "@/lib/affiliate-idle-rules";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   percent: `Type a whole share from ${MIN_COMMISSION} to ${MAX_COMMISSION} percent.`,
   days: `Type a whole number of days from ${MIN_COOKIE_DAYS} to ${MAX_COOKIE_DAYS}.`,
   notice: `Type a whole number of days of notice from ${MIN_NOTICE_DAYS} to ${MAX_NOTICE_DAYS}, or leave it empty for none.`,
+  idle_days: `Pick never, or a number of days from ${MIN_IDLE_DAYS} to ${MAX_IDLE_DAYS}.`,
   rate: `A product's own share is a whole number from 0 to ${MAX_COMMISSION}; 0 leaves it out.`,
   rule: "Pick whether the first or the last link a buyer followed earns the sale.",
   share_percent: SHARE_PROBLEMS.percent,
@@ -638,6 +640,9 @@ function Terms({
   const [kit, setKit] = useState(setting.kit);
   const [lifetime, setLifetime] = useState(setting.lifetime);
   const [contacts, setContacts] = useState(setting.contacts === true);
+  const [idle, setIdle] = useState(String(setting.idle ?? 0));
+  // The usual choices, and the one saved if it is another (set through the API).
+  const idleChoices = [...new Set([0, 90, 180, 365, setting.idle ?? 0])].sort((x, y) => x - y);
   const [recurringMonths, setRecurringMonths] = useState(String(setting.recurring));
   const [paidSearch, setPaidSearch] = useState(setting.paidSearch);
   const [secondTier, setSecondTier] = useState(String(setting.secondTier));
@@ -686,6 +691,7 @@ function Terms({
               lifetime,
               // Only a program that pays per lead has confirmed contacts to credit (lib/affiliate-setting.ts creditsContacts).
               contacts: lead.kind !== "none" && contacts,
+              idle: Number(idle),
               recurring: Number(recurringMonths),
               paidSearch,
               secondTier: Number(secondTier),
@@ -1158,6 +1164,21 @@ function Terms({
             </span>
           </label>
         ) : null}
+
+        {/* Removing affiliates who bring nothing (630 [HN6](3), lib/affiliates.ts idleSweep). */}
+        <label className="mt-5 block" htmlFor="aff-idle">
+          <span className="field-label">Remove affiliates who bring nothing</span>
+          <select id="aff-idle" value={idle} onChange={(e) => setIdle(e.target.value)} aria-describedby="aff-idle-help" className="field max-w-[16rem]">
+            {idleChoices.map((n) => (
+              <option key={n} value={String(n)}>
+                {n === 0 ? "Never" : `After ${n} days with no sale and no lead`}
+              </option>
+            ))}
+          </select>
+          <span id="aff-idle-help" className="mt-1 block text-xs text-ink-soft">
+            {`An approved affiliate whose link brings no sale and no lead in that time is emailed ${IDLE_WARN_DAYS} days before, with the date, and removed on it if still nothing comes. One sale or one lead keeps them in. Their record stays, and you can add them back. Changing this sends a fresh warning before anyone is removed.`}
+          </span>
+        </label>
 
         <label className="mt-5 flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
           <input

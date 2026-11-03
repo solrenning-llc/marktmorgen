@@ -74,6 +74,7 @@ import {
 } from "@/lib/community-text";
 import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import { indexBytes, indexPost, partsOf, unindexPost } from "@/lib/community-search";
+import { TRACED_SINCE, TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 import { type DataStore, needData, giveData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { indexMember } from "@/lib/community-index";
@@ -220,7 +221,6 @@ const dirKey = (id: string) => `${base(id)}:dir`;
 const reportsKey = (id: string) => `${base(id)}:rep`;
 const reportersKey = (id: string, target: string) => `${base(id)}:rep:${target}`;
 const rateKey = (id: string, who: string, kind: string) => `nl:cm:rl:${id}:${who}:${kind}`;
-
 /** How long who-reported-what is kept, so the same member cannot report twice. */
 const REPORTERS_SECONDS = 90 * 86_400;
 
@@ -236,7 +236,6 @@ const POST_SLOT = (post: string) => `cm:p:${post}`;
 const MEMBERS_SLOT = "cm:m";
 /** A like, a vote or a member key in a set: its member and Redis's own. */
 export const SET_ENTRY_BYTES = 96;
-
 /** What a post counts for: its record, its two places in the feeds, and its words. */
 function postBytes(post: Post): number {
   return dataBytes([JSON.stringify(post)], 3) + indexBytes([post.title, post.text]);
@@ -679,11 +678,13 @@ export async function createPost(id: string, input: NewPost, room: DataStore): P
     poll: input.poll,
   };
   // Its room first: refused here, nothing is written (DataRoomError).
-  await needData(room, [{ slot: POST_SLOT(post.id), bytes: postBytes(post), set: true }]);
+  const traced = post.a !== CREATOR;
+  await needData(room, [{ slot: POST_SLOT(post.id), bytes: postBytes(post), set: true }, ...(traced ? [TRACE_ENTRY] : [])]);
   await redisPipeline([
     ["SET", postKey(id, post.id), JSON.stringify(post)],
     ["ZADD", feedKey(id), post.n, post.id],
     ["ZADD", spaceKey(id, post.sp), post.n, post.id],
+    ...(traced ? [["SADD", traceKey(id, post.a), `p:${post.id}`]] : []),
   ]);
   await reindex(id, post, []);
   return { ok: true, post };
@@ -763,7 +764,9 @@ export async function deletePost(id: string, post: Post, room: DataStore): Promi
     ["ZREM", feedKey(id), post.id],
     ["ZREM", spaceKey(id, post.sp), post.id],
     ["ZREM", reportsKey(id), `p:${post.id}`, ...commentIds.map((c) => `c:${post.id}:${c}`)],
+    ...(post.a !== CREATOR ? [["SREM", traceKey(id, post.a), `p:${post.id}`]] : []),
   ]);
+  if (post.a !== CREATOR) await giveData(room, [TRACE_ENTRY]);
   await unindexPost(id, post.id).catch((error) => {
     console.error("taking a deleted post out of the search index failed", error);
   });
@@ -829,23 +832,25 @@ export async function postNumbers(
 
 /** One like per member per post: a second press takes it back. */
 export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<boolean> {
-  return toggleIn(likesKey(id, post), post, who, room);
+  return toggleIn(id, likesKey(id, post), `l:${post}`, post, who, room);
 }
 
 /** Adds `who` to a set of likes, or takes them out when they were in it: its room is taken first and given back after. */
-async function toggleIn(key: string, post: string, who: string, room: DataStore): Promise<boolean> {
+async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean> {
   const [held] = await redisPipeline([["SISMEMBER", key, who]]);
-  if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }]);
-  const [added] = await redisPipeline([["SADD", key, who]]);
+  // The like and its entry in the member's trace (traceKey) take their room first.
+  if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
+  const [added] = await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]);
   if (Number(added) === 1) return true;
-  await redisPipeline([["SREM", key, who]]);
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: Number(held) === 1 ? SET_ENTRY_BYTES : 2 * SET_ENTRY_BYTES }]);
+  await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]);
+  const times = Number(held) === 1 ? 1 : 2;
+  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
   return false;
 }
 
 /** The same for a comment: one like per member, a second press takes it back. */
 export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<boolean> {
-  return toggleIn(commentLikesKey(id, post, comment), post, who, room);
+  return toggleIn(id, commentLikesKey(id, post, comment), `lc:${post}:${comment}`, post, who, room);
 }
 
 /** How many liked each comment under a post, and whether this member did. */
@@ -941,8 +946,9 @@ export async function addComment(
     parent = above.parent || above.id;
   }
   const comment: Comment = { id: newItemId(), parent, a: input.author, text: input.text, at: now(), hid: false, ed: 0 };
-  await needData(room, [{ slot: POST_SLOT(post), bytes: commentBytes(comment) }]);
-  await redisPipeline([["HSET", commentsKey(id, post), comment.id, JSON.stringify(comment)]]);
+  const traced = comment.a !== CREATOR;
+  await needData(room, [{ slot: POST_SLOT(post), bytes: commentBytes(comment) }, ...(traced ? [TRACE_ENTRY] : [])]);
+  await redisPipeline([["HSET", commentsKey(id, post), comment.id, JSON.stringify(comment)], ...(traced ? [["SADD", traceKey(id, comment.a), `c:${post}:${comment.id}`]] : [])]);
   await reindexComments(id, post);
   return { ok: true, comment };
 }
@@ -974,8 +980,10 @@ export async function deleteComment(id: string, post: string, comment: Comment, 
     ["DEL", ...gone.map((c) => commentLikesKey(id, post, c))],
     ["ZREM", reportsKey(id), ...gone.map((c) => `c:${post}:${c}`)],
     ...gone.map((c) => ["DEL", reportersKey(id, `c:${post}:${c}`)]),
+    ...[comment, ...all].filter((c) => c.a !== CREATOR).map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
   ]);
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: freed }]);
+  const traced = [comment, ...all].filter((c) => c.a !== CREATOR).length;
+  await giveData(room, [{ slot: POST_SLOT(post), bytes: freed }, ...(traced ? [{ ...TRACE_ENTRY, bytes: traced * TRACE_ENTRY.bytes }] : [])]);
   await reindexComments(id, post);
 }
 
@@ -1001,12 +1009,16 @@ export function parseTarget(raw: string): ReportTarget | null {
  * A member flags a post or a comment for the creator. Counted once per
  * member; the queue keeps the most recent MAX_REPORT_QUEUE.
  */
-export async function report(id: string, target: ReportTarget, who: string): Promise<"added" | "again"> {
+export async function report(id: string, target: ReportTarget, who: string, room: DataStore): Promise<"added" | "again"> {
   const key = targetKey(target);
-  const [added] = await redisPipeline([
+  // Its entry in the member's trace (traceKey) takes its room first; given back when it was a report made before.
+  await needData(room, [TRACE_ENTRY]);
+  const [added, , traced] = await redisPipeline([
     ["SADD", reportersKey(id, key), who],
     ["EXPIRE", reportersKey(id, key), REPORTERS_SECONDS],
+    ["SADD", traceKey(id, who), `r:${key}`],
   ]);
+  if (Number(traced) !== 1) await giveData(room, [TRACE_ENTRY]);
   if (Number(added) !== 1) return "again";
   await redisPipeline([
     ["ZADD", reportsKey(id), Date.now(), key],
@@ -1084,6 +1096,58 @@ export type MemberTraces = {
  * Only reads.
  */
 export async function memberTraces(id: string, who: string): Promise<MemberTraces> {
+  if (!isRedisConfigured()) return { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
+  // Read from the member's own trace when every post the community keeps is
+  // from after the trace began; otherwise the whole community, as before it.
+  const [oldestIds] = await redisPipeline([["ZRANGEBYSCORE", feedKey(id), "-inf", "+inf", "LIMIT", 0, 1]]);
+  const oldestId = Array.isArray(oldestIds) && oldestIds.length ? String(oldestIds[0]) : "";
+  const oldest = oldestId ? await readPost(id, oldestId) : null;
+  if (oldestId && (!oldest || oldest.at < TRACED_SINCE)) return scanTraces(id, who);
+  return tracedOf(id, who);
+}
+
+/** What the member's trace names (lib/community-trace.ts), each checked against what is kept now. */
+async function tracedOf(id: string, who: string): Promise<MemberTraces> {
+  const out: MemberTraces = { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
+  const [raw] = await redisPipeline([["SMEMBERS", traceKey(id, who)]]);
+  const refs = (Array.isArray(raw) ? raw : []).map(String).sort();
+  const parts = refs.map((ref) => ref.split(":"));
+  const postIds = [...new Set(parts.filter((p) => p[0] === "p" && p.length === 2).map((p) => p[1]))];
+  const posts: Post[] = [];
+  for (let i = 0; i < postIds.length; i += TRACE_BATCH) posts.push(...(await readPosts(id, postIds.slice(i, i + TRACE_BATCH))));
+  for (const post of posts) {
+    if (post.a === who) out.posts.push({ post: post.id, space: post.sp, title: post.title, text: post.text, at: post.at, edited: post.ed, hidden: post.hid });
+  }
+  const comments = parts.filter((p) => p[0] === "c" && p.length === 3);
+  const likes = parts.filter((p) => p[0] === "l" && p.length === 2);
+  const commentLikes = parts.filter((p) => p[0] === "lc" && p.length === 3);
+  const reports = parts.filter((p) => p[0] === "r" && p.length >= 3).map((p) => p.slice(1).join(":"));
+  const commands: (string | number)[][] = [
+    ...comments.map(([, post, comment]) => ["HGET", commentsKey(id, post), comment]),
+    ...likes.map(([, post]) => ["SISMEMBER", likesKey(id, post), who]),
+    ...commentLikes.map(([, post, comment]) => ["SISMEMBER", commentLikesKey(id, post, comment), who]),
+    ...reports.map((target) => ["SISMEMBER", reportersKey(id, target), who]),
+  ];
+  const replies: unknown[] = [];
+  for (let i = 0; i < commands.length; i += TRACE_BATCH) replies.push(...(await redisPipeline(commands.slice(i, i + TRACE_BATCH))));
+  let at = 0;
+  for (const [, post] of comments) {
+    const comment = parseComment(replies[at++]);
+    if (comment && comment.a === who) out.comments.push({ post, comment: comment.id, text: comment.text, at: comment.at, edited: comment.ed, hidden: comment.hid });
+  }
+  for (const [, post] of likes) if (Number(replies[at++]) === 1) out.likedPosts.push(post);
+  for (const [, post, comment] of commentLikes) if (Number(replies[at++]) === 1) out.likedComments.push({ post, comment });
+  for (const target of reports) {
+    if (Number(replies[at++]) !== 1) continue;
+    const [kind, post, comment] = target.split(":");
+    out.reported.push(kind === "p" ? `post ${post}` : `comment ${comment} under post ${post}`);
+  }
+  out.pollPosts = [...new Set(parts.filter((p) => p[0] === "v" && p.length === 2).map((p) => p[1]))];
+  return out;
+}
+
+/** The whole community, read for one member: for a community with posts from before the trace began. */
+async function scanTraces(id: string, who: string): Promise<MemberTraces> {
   const out: MemberTraces = { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
   if (!isRedisConfigured()) return out;
   const [raw] = await redisPipeline([["ZREVRANGE", feedKey(id), 0, MAX_POSTS - 1]]);

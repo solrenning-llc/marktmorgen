@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
@@ -28,6 +29,7 @@ export default async function StudioDisputesPage({ searchParams }: Params) {
         <h1 className="t-h2 mt-3">Review one disputed purchase</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">Check a payment on this store&apos;s Stripe account before preparing your response. This page only reads the purchase record; it does not send evidence or promise a result.</p>
         <DisputePurchaseReviewPanel connected={Boolean(store.stripeAccountId)} />
+        <p className="mt-8 text-sm text-ink-soft">Payments that never went through are elsewhere: <Link href={studioPath(store, "", "declines")} className="underline underline-offset-4">Payments that did not go through</Link></p>
       </main>
     </StudioStorePin>
   </div>;

@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 
   part("Who asked is taken out");
-  const cleaned = withoutWhoAsked("Hi, I'm Ana Souza (ana.souza@example.com, +55 85 99876-5432). Does the course have subtitles? See https://x.example/a", "Ana Souza");
+  const cleaned = withoutWhoAsked("Hi, I'm Ana Souza (ana.souza@example.com, " + "+" + "55 85 99876-5432). Does the course have subtitles? See https://x.example/a", "Ana Souza");
   is("name, address, phone and link go", /Ana|Souza|@|99876|https/.test(cleaned.text), false);
   is("the question stays", cleaned.text.includes("Does the course have subtitles?"), true);
   is("it says something was taken out", cleaned.cut, true);

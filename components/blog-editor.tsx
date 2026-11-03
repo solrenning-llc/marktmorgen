@@ -1,7 +1,7 @@
 "use client";
 
 import { ConfirmAction } from "@/components/confirm-action";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AiAssist } from "@/components/ai-assist";
 import { Icon } from "@/components/icons";
@@ -10,6 +10,7 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { PostBody } from "@/components/blog-body";
+import { BLOG_OUTLINES, OUTLINE_LEFT_MESSAGE, outlinePromptsLeft } from "@/lib/blog-outline";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 
@@ -24,6 +25,7 @@ const MESSAGES: Record<string, string> = {
   unknown: "That post is no longer there. Reload the page.",
   none: "This account has no store yet.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  outline_left: OUTLINE_LEFT_MESSAGE,
 };
 
 export type EditedPost = { id: string | null; title: string; body: string; product: string | null; draft: boolean; href: string | null };
@@ -44,6 +46,12 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
   // The preview starts at a phone's width, where most posts are read (487 [IT4], pattern 7).
   const [phone, setPhone] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [outline, setOutline] = useState(BLOG_OUTLINES[0].id);
+  // Offered on a new, empty post only, decided when it opens: it never comes and goes while the creator types.
+  const [offerOutline, setOfferOutline] = useState(() => !post.id && !post.body.trim());
+  // Each refusal counts, so the same words said again are announced again.
+  const [tries, setTries] = useState(0);
+  const bodyField = useRef<HTMLTextAreaElement>(null);
   // A post written and not saved is never lost to a click away (487 [IT4], item 6): leaving asks first, as the email studio does.
   const [done, setDone] = useState(false);
   // What a confirmed save sent, until the saved post comes back: what is typed after it stays guarded, and is kept.
@@ -74,6 +82,7 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; post?: { id: string } };
       if (!data.ok) {
         setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+        setTries((n) => n + 1);
         return null;
       }
       return data;
@@ -86,6 +95,13 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
   }
 
   async function save(draft: boolean) {
+    // Said at once, before asking the server, which refuses it too.
+    const left = draft ? [] : outlinePromptsLeft(title, body);
+    if (left.length) {
+      setError(`${OUTLINE_LEFT_MESSAGE} The first one left: ${left[0]}`);
+      setTries((n) => n + 1);
+      return;
+    }
     const data = await send({ action: "save", id: post.id, title, body, product: product || null, draft }, draft ? "draft" : "publish");
     if (!data) return;
     setSent({ title, body, product });
@@ -150,6 +166,45 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
         }}
         done="Drafted. Read it, make it yours, then publish it or keep it as a draft."
       />
+      {/* A ready outline for an empty post (487 [IT4], item 5): its parts in [brackets] are the creator's to write. */}
+      {offerOutline ? (
+        <div className="rounded-[var(--r-sm)] border border-line bg-white p-4" data-blog-outline="">
+          <p className="font-semibold text-ink">Or start from an outline</p>
+          <p className="mt-1 text-sm text-ink-soft" id="post-outline-hint">It sets out the parts of a post. Replace each part in [brackets], brackets and all, with your own words. It cannot be published until every one is replaced; you can save it as a draft any time.</p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div>
+              <label htmlFor="post-outline" className="field-label">Outline</label>
+              <select id="post-outline" className="field" value={outline} onChange={(e) => setOutline(e.target.value)} aria-describedby="post-outline-hint">
+                {BLOG_OUTLINES.map((o) => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={Boolean(body.trim())}
+              onClick={() => {
+                // Only into an empty post: nothing typed is replaced.
+                if (body.trim()) return;
+                const chosen = (BLOG_OUTLINES.find((o) => o.id === outline) ?? BLOG_OUTLINES[0]).body;
+                setBody(chosen);
+                setOfferOutline(false);
+                // The button goes with the box: the focus moves to the words, with the first part to replace selected.
+                requestAnimationFrame(() => {
+                  const field = bodyField.current;
+                  if (!field) return;
+                  field.focus();
+                  const start = chosen.indexOf("[");
+                  if (start >= 0) field.setSelectionRange(start, chosen.indexOf("]", start) + 1);
+                });
+              }}
+            >
+              Use this outline
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div>
         <label htmlFor="post-title" className="field-label">
           Title
@@ -162,7 +217,7 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
         </label>
         <div className="grid min-w-0 gap-4 xl:grid-cols-2">
           <div className="min-w-0">
-            <textarea id="post-body" className="field font-[inherit]" rows={18} maxLength={MAX_BODY} value={body} onChange={(e) => setBody(e.target.value)} aria-describedby="post-body-hint" />
+            <textarea ref={bodyField} id="post-body" className="field font-[inherit]" rows={18} maxLength={MAX_BODY} value={body} onChange={(e) => setBody(e.target.value)} aria-describedby="post-body-hint" />
             <p id="post-body-hint" className="field-hint mt-1">
               {`A blank line starts a paragraph, a line starting with “## ” is a heading, one starting with “- ” is a point in a list, and a written-out https address becomes a link. ${(MAX_BODY - body.length).toLocaleString("en-US")} characters left.`}
             </p>
@@ -190,7 +245,7 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
         <p className="field-hint mt-1">Its card, with today&apos;s picture and price, after the last line. Products among the first 24 on your store page can be shown.</p>
       </div>
       {error ? (
-        <p className="notice notice-error" role="alert">
+        <p key={tries} className="notice notice-error" role="alert">
           {error}
         </p>
       ) : null}

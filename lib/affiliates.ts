@@ -1096,6 +1096,82 @@ export async function decide(store: Store, id: string, decision: Decision): Prom
   return next;
 }
 
+// ---- Several decisions at once, with undo (630 [HN6](4), unit 1) ----------
+
+/** The most applications one press decides, and how long its undo lasts. */
+export const MAX_BULK_DECISIONS = 100;
+export const BULK_UNDO_MS = 10 * 60_000;
+
+/** How one affiliate stood before a decision in bulk: what an undo puts back. */
+export type Before = { id: string; status: AffiliateStatus; decidedAt: number };
+
+/**
+ * Approves or declines several pending applications, one by one through
+ * decide (each approval emails its link, as one at a time). Only pending
+ * ones are touched; anybody already decided is left as they are. Returns how
+ * each stood before, for an undo.
+ */
+export async function decideMany(store: Store, ids: string[], decision: "approve" | "decline"): Promise<Before[]> {
+  const before: Before[] = [];
+  for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
+    const affiliate = await readAffiliate(store, id);
+    if (!affiliate || affiliate.status !== "pending") continue;
+    const done = await decide(store, id, decision);
+    if (done) before.push({ id, status: affiliate.status, decidedAt: affiliate.decidedAt });
+  }
+  return before;
+}
+
+/**
+ * Puts back how each affiliate stood before a decision in bulk, for those
+ * still exactly as that decision left them and within BULK_UNDO_MS of it: a
+ * later decision by hand is never overwritten. An approval email already
+ * sent is not taken back; the studio says so. Returns how many were put back.
+ */
+export async function undoMany(store: Store, before: Before[], decision: "approve" | "decline", now = Date.now()): Promise<number> {
+  const left: AffiliateStatus = decision === "approve" ? "approved" : "declined";
+  let undone = 0;
+  for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
+    if (entry.status !== "pending") continue;
+    const affiliate = await readAffiliate(store, entry.id);
+    if (!affiliate || affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt) continue;
+    await writeAffiliate(store, { ...affiliate, status: entry.status, decidedAt: entry.decidedAt });
+    undone += 1;
+  }
+  return undone;
+}
+
+/** How one affiliate's own share stood before a change in bulk: what an undo puts back. */
+export type RateBefore = { id: string; rate: number | null };
+
+/**
+ * Sets, or clears with null, the share of several approved affiliates at
+ * once (630 [HN6](4), unit 2), each through setAffiliateRate: it applies to
+ * sales from now on, and a sale keeps the share it was made at. Returns how
+ * each stood before, leaving out those already at it.
+ */
+export async function setRatesMany(store: Store, ids: string[], rate: number | null): Promise<RateBefore[] | null> {
+  if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
+  const before: RateBefore[] = [];
+  for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
+    const affiliate = await readAffiliate(store, id);
+    if (!affiliate || affiliate.status !== "approved" || affiliate.rate === rate) continue;
+    if (await setAffiliateRate(store, id, rate)) before.push({ id, rate: affiliate.rate });
+  }
+  return before;
+}
+
+/** Puts back each share still exactly as the change left it; one changed by hand since is never overwritten. */
+export async function undoRates(store: Store, before: RateBefore[], rate: number | null): Promise<number> {
+  let undone = 0;
+  for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
+    const affiliate = await readAffiliate(store, entry.id);
+    if (!affiliate || affiliate.rate !== rate) continue;
+    if (await setAffiliateRate(store, entry.id, entry.rate)) undone += 1;
+  }
+  return undone;
+}
+
 export async function addPayout(
   store: Store,
   input: { aff: string; cents: number; currency: string; date: string; reference: string },

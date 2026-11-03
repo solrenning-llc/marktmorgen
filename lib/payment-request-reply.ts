@@ -1,6 +1,6 @@
 import { ID_PATTERN } from "@/lib/payment-request-rules";
 
-export type RequestAction = "create" | "remind" | "cancel" | "delete";
+export type RequestAction = "create" | "remind" | "cancel" | "delete" | "outside";
 export type RequestActionReply = { ok: boolean; message?: string; sent?: boolean };
 
 /** An HTTP error or an incomplete receipt never confirms a request action. */

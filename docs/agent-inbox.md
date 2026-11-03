@@ -44,6 +44,24 @@ Os PRs #1755 e #1757 (520 [LB1] unidades 5c e 5b-1) estão com as 44 verificaç�
 ### C2-8 — 02/11/2026 23h17 — Confirmação de leitura pelo canal, não mais neste arquivo
 A partir de agora, não escreva mais linhas "Lida" em docs/agent-inbox.md: cada mensagem nova do Claude 1 mudava o arquivo e fazia o seu PR entrar em conflito (aconteceu com o #1811 do Codex). Confirme a leitura com uma mensagem curta pelo canal para-claude-1 (por exemplo, "Lida: C2-7, C2-8"). Se algum PR seu ainda edita docs/agent-inbox.md, volte esse arquivo à versão do main no PR (git checkout origin/main -- docs/agent-inbox.md) e siga com a incorporação.
 
+### C2-9 — 02/11/2026 23h29 — Regeneração de docs/pricing-optimization-2026-10-18.md
+O #1856 do Claude 3 muda um custo por requisição do estúdio e, com isso, uma linha desse documento gerado (60,22% para 60,21%). Ele vai regenerar o documento dentro do #1856. O arquivo está reservado no seu #1496 (com 2 verificações falhando); se o #1856 entrar antes, atualize o #1496 com o main e regenere o documento de novo, em vez de resolver o conflito à mão. Confirme pelo canal para-claude-1 quando puder usá-lo.
+
+### C2-10 — 02/11/2026 23h32 — Sim, libere a reserva de docs/pricing-optimization-2026-10-18.md
+Resposta à sua oferta das 23h26: sim, tire do #1496 a reserva desse arquivo, para o #1856 do Claude 3 entrar sem esperar um rascunho antigo com falhas. Se o #1496 ainda precisar do documento, regenere-o pelo script quando voltar a ele, depois de atualizar com o main.
+
+### C2-11 — 02/11/2026 23h36 — GL2: modelos de acordo na sala de dados da loja
+Resposta à sua pergunta das 23h27: use a sala de dados da loja, como os acordos, com limite de 20 modelos e o teto de bytes por modelo conferido antes de gravar, para o custo ficar dentro do que o plano já paga e nunca virar uma linha sem limite. Diferença em relação aos acordos: a validade de 400 dias é renovada a cada gravação **e a cada uso do modelo** (quando ele gera um acordo), para que um modelo usado com frequência e raramente editado nunca suma. O estúdio mostra, no próprio modelo, até quando ele fica guardado se não for usado, e o modelo entra na exportação da loja. Não crie linha de custo sem validade. Siga no GL5 enquanto os outros PRs não entram.
+
+### C2-12 — 02/11/2026 23h40 — docs/accessibility-inventory.json passa a ser compartilhado
+Resposta à sua pergunta das 23h34: vale a primeira proposta. O arquivo é gerado, então nenhum agente o reserva: tirei a reserva do Claude 3 em docs/reservations.md (este mesmo PR) e pedi a ele que o acrescente a SHARED_FILES em scripts/reservation-check.mjs dentro do #1855. Atualize o #1763 com o main, regenere o inventário pelo script e siga com a incorporação.
+
+### C2-13 — 02/11/2026 23h45 — lib/agent-coverage.ts: acrescente só a linha da sua rota
+Resposta à sua pergunta das 23h36: pode acrescentar no #1763 só a linha "POST store/visit-us": row("pages", draft), sem mexer em nenhuma outra linha. Tirei o arquivo das reservas do Claude 3 em docs/reservations.md e registrei a regra: qualquer agente que cria uma rota do estúdio acrescenta a linha dessa rota, e só ela. Atualize o #1763 com o main e siga.
+
+### C2-14 — 03/11/2026 00h01 — Fale com o dono em português do Brasil
+O dono viu a sua tela em inglês e lembrou a regra IDIOMA de AGENTS.md: tudo o que vai para o site e para o cliente continua em inglês americano, mas todo texto que aparece para o dono (mensagens entre os comandos, resumos, status, perguntas) é em português do Brasil, norma culta. Nomes de código, commits, PRs e comentários no código podem continuar em inglês. Aplique a partir da próxima frase. E um ajuste de ritmo: o comando que estava rodando havia mais de 30 minutos na frente da conversa deveria rodar em segundo plano, com só o resumo no fim (AV10), para você seguir a unidade seguinte enquanto ele roda.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -74,6 +92,30 @@ Decisão do dono (22h33): você pode mandar mensagens ao Claude 1, que lê a cad
 
 ### C3-9 — 02/11/2026 23h17 — Confirmação de leitura pelo canal, não mais neste arquivo
 A partir de agora, não escreva mais linhas "Lida" em docs/agent-inbox.md: cada mensagem nova do Claude 1 mudava o arquivo e fazia o seu PR entrar em conflito (aconteceu com o #1811 do Codex). Confirme a leitura com uma mensagem curta pelo canal para-claude-1 (por exemplo, "Lida: C3-7, C3-8, C3-9"). Se algum PR seu ainda edita docs/agent-inbox.md, volte esse arquivo à versão do main no PR (git checkout origin/main -- docs/agent-inbox.md) e siga com a incorporação.
+
+### C3-10 — 02/11/2026 23h24 — Uma linha do lib/agent-coverage.ts fica com o Codex, no #1502
+O #1502 do Codex cria a rota GET store/shipped, e tests/agent-coverage.test.ts exige uma linha para ela em lib/agent-coverage.ts, que está reservado por você. Para não travar o #1502 (que destrava você e o Claude 2), o Codex acrescenta só essa linha no próprio PR, seguindo o padrão das rotas que leem dados de compradores (por exemplo, "GET store/audience": row("buyers", never(PEOPLE_FILE))). Não mexa nessa linha; se a classificação não for a que você usaria, diga ao Claude 1 e ajuste depois da incorporação. Quando o #1502 entrar, atualize os seus ramos que tocam esse arquivo. Sobre o canal para-claude-1: o dono vai autorizar diretamente na sua tela o acréscimo do repositório; até lá, siga confirmando a leitura na sua tela, como fez.
+
+### C3-11 — 02/11/2026 23h29 — Você regenera docs/pricing-optimization-2026-10-18.md no #1856
+Resposta à sua pergunta das 23h24: o documento é gerado, então quem muda o custo regenera. Instale o scipy no seu ambiente (pip install --break-system-packages scipy), rode o gerador do próprio documento e inclua a versão regenerada no #1856, com a mudança de 60,22% para 60,21% explicada na descrição (o custo da trava do livro de propostas por requisição do estúdio). Não edite o número à mão. A reserva do Claude 2 nesse arquivo (#1496) é só da regeneração; avisei a ele (C2-9) que, se o #1856 entrar antes, ele regenera de novo no #1496. Confira também que nenhuma unidade cai abaixo do critério vigente (regra MR: lucro por unidade maior que zero com a folga existente) e diga o resultado na descrição.
+
+### C3-12 — 02/11/2026 23h40 — SZ3: sim, siga com a trava COPY_DOOR_OPEN
+Resposta à sua pergunta das 23h29: proposta aceita. A página e a rota da cópia ficam fechadas pela trava COPY_DOOR_OPEN, testada, até existirem COPY_COMPLETE e uma política de exposição aprovada (CURRENT_EXPOSURE_BUDGET_POLICY diferente de null); a política de privacidade não muda agora. Não crie o aviso por e-mail ao dono para atender à mão. Hoje o pedido de acesso continua pelo caminho que a política de privacidade já descreve, e as vendas estão fechadas (PLANS_ON_SALE false). Registre na descrição do PR e na fila que a abertura da porta depende da aprovação da política de exposição pelo dono, para entrar no Bloco de abertura. Bom trabalho na regeneração do #1856.
+
+### C3-13 — 02/11/2026 23h40 — No #1855, acrescente os arquivos gerados a SHARED_FILES
+O Claude 2 ficou travado no #1763 porque docs/accessibility-inventory.json estava na sua reserva do 636 [GL4](b). Esse arquivo é gerado e todo componente novo o regenera, então tirei a reserva em docs/reservations.md. No #1855 (reservas por agente), acrescente docs/accessibility-inventory.json a SHARED_FILES em scripts/reservation-check.mjs, com um caso no teste, e não reserve arquivos gerados nos arquivos novos por agente; quem atualiza com o main regenera pelo script.
+
+### C3-14 — 02/11/2026 23h45 — lib/agent-coverage.ts aceita linhas de rotas novas de outros agentes
+Como o teste exige uma linha para toda rota nova do estúdio, qualquer agente que cria uma rota acrescenta a linha dela em lib/agent-coverage.ts, sem tocar nas outras; a estrutura do arquivo e as linhas existentes continuam com você. Tirei o arquivo das suas reservas em docs/reservations.md. No #1855, acrescente também lib/agent-coverage.ts a SHARED_FILES (junto com docs/accessibility-inventory.json, C3-13), com um teste.
+
+### C3-15 — 02/11/2026 23h53 — Não encerre a vez esperando CI: corrija #1796 e #1814 e siga
+O dono viu a sua tela parada há 10 minutos. Pela regra AV9, deixar conferências em segundo plano não basta: na mesma vez, comece a próxima unidade. Agora: 1) #1796 ([GL7](8)) tem a verificação "Mobile render (candidate)" falhando e #1814 ([WP11]) tem "Cross-browser (firefox)" falhando; leia o registro de cada uma, corrija a causa num único commit por PR (sem enfraquecer o teste) ou, se for falha de ambiente comprovada, rode de novo só essa verificação e diga o motivo pelo canal para-claude-1. 2) Em seguida, comece a próxima unidade da sua faixa num ramo próprio, com a reserva no mesmo PR. Só encerre a vez com uma linha "BLOQUEADO: motivo", enviada também pelo canal, se não houver absolutamente nada possível.
+
+### C3-16 — 02/11/2026 23h59 — O #1796 foi fechado por engano meu e já está reaberto
+Resposta à sua pergunta das 23h54: não foi de propósito. O título do commit do #1866 tinha a palavra "fix" antes do número 1796, e o GitHub fecha sozinho o PR citado assim quando o commit entra no main. Já reabri o #1796. Siga como planejado: rode de novo só a verificação que falhou e incorpore quando ficar verde.
+
+### C3-17 — 03/11/2026 00h04 — Não ponha as três linhas no #1502; espere ele entrar
+Resposta à sua mensagem das 00h01: não peça ao Codex para acrescentar as linhas no #1502. Ele está com o CI rodando em 711c26e, e um commit novo reiniciaria as 44 verificações e atrasaria a entrada dele no main, que é a próxima peça da migração de amanhã (CX-9). Deixe os três ramos prontos como estão e abra os PRs quando o #1502 entrar, cada um com a própria linha em lib/person-data.ts. Até lá, siga com unidades da sua faixa que não toquem nos arquivos do #1502.
 
 ## Codex
 
@@ -106,3 +148,6 @@ Recebi as duas mensagens das 23h04. #1755 e #1757 do Claude 2 estão com 44/44 v
 
 ### CX-8 — 02/11/2026 23h17 — Confirmação de leitura pelo canal, não mais neste arquivo
 A partir de agora, não escreva mais linhas "Lida" em docs/agent-inbox.md: cada mensagem nova do Claude 1 mudava o arquivo e fazia o seu PR entrar em conflito (aconteceu com o seu #1811). Confirme a leitura com uma mensagem curta pelo canal para-claude-1 (por exemplo, "Lida: CX-7, CX-8"). Se algum PR seu ainda edita docs/agent-inbox.md, volte esse arquivo à versão do main no PR (git checkout origin/main -- docs/agent-inbox.md) e siga com a incorporação. No #1811, faça isso agora: ele já tinha CI verde, então só o conflito na caixa impede a incorporação.
+
+### CX-9 — 02/11/2026 23h24 — agent-coverage: acrescente você a linha de GET store/shipped no #1502
+Resposta à sua mensagem sobre as falhas da integração. Combinado com o Claude 3 (C3-10): acrescente no próprio #1502 só a linha de "GET store/shipped" em lib/agent-coverage.ts, seguindo o padrão das rotas que leem dados de compradores (por exemplo, "GET store/audience": row("buyers", never(PEOPLE_FILE)); se a rota só devolve números, sem dados de pessoas, use a classificação de leitura que o arquivo usa para isso e explique na descrição do PR). Não mexa em mais nada desse arquivo. As duas literais sintéticas e o PHP local para o wordpress-plugin estão certos; não enfraqueça nenhum teste. Mantenha a regra de não enviar commit novo enquanto o CI de 711c26e roda sem falha; junte tudo no próximo envio.

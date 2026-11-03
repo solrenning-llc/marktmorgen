@@ -43,7 +43,8 @@
  * booking also takes its hosts' time on every store at once, atomically
  * (lib/host-claims.ts), under the same lock as everything here.
  */
-import { chargeNow } from "@/lib/call-deposit";
+import type { DepositFigures } from "@/lib/deposit-code";
+import { chargeNow, creatorDueLine, type DueInPerson, dueLines, readDue } from "@/lib/call-deposit";
 import { type CallPlace, placeIcsLines, placeLine, whereOf } from "@/lib/call-place";
 import { admitOrders } from "@/lib/order-admission";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
@@ -95,7 +96,7 @@ import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { codesMayTakeOff } from "@/lib/discount";
 import { hostId, isClaimId, isHostId, newClaimId } from "@/lib/host-claims";
-import { parseTeamSetup, teamBookable } from "@/lib/team-scheduling-rules";
+import { chosenTeam, hostChoices, parseTeamSetup, teamBookable } from "@/lib/team-scheduling-rules";
 import {
   type TeamBusy,
   activeTeam,
@@ -246,6 +247,8 @@ export async function paidCalls(store: Store): Promise<
     /** The affiliate a lead is credited to once the call has taken place (lib/affiliate-leads.ts), and the payment; empty otherwise. */
     lead: string;
     pi: string;
+    /** What is left to pay in person, and a code taken off the whole price, as the sale keeps them (lib/call-deposit.ts). */
+    due: DueInPerson | null;
   }[]
 > {
   return (await readCallSessions(store)).paid;
@@ -294,6 +297,7 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
     pi: paymentOf(row.payment_intent),
+    due: readDue(meta),
   };
 }
 
@@ -524,6 +528,7 @@ export async function catchUpBookings(store: Store, paid: PaidCall[], origin: st
       currency: call.currency,
       lead: call.lead,
       pi: call.pi,
+      due: call.due,
       origin,
     }).catch((error) => console.error("catching up a booking failed", error));
   }
@@ -643,7 +648,7 @@ function writesAboutBookings(store: Store): boolean {
 
 export type HoldResult =
   | { ok: true; url: string; session: string }
-  | { ok: false; reason: "taken" | "invalid" | "unavailable" | "error" };
+  | { ok: false; reason: "taken" | "invalid" | "unavailable" | "error" | "host-changed" };
 
 
 /**
@@ -675,6 +680,12 @@ export function callCheckoutBody(input: {
   team?: { hosts: string[]; claim: string } | null;
   /** The affiliate a lead is credited to once the call takes place, where the store pays per booking (lib/affiliate-leads.ts). */
   lead?: string | null;
+  /**
+   * A discount code on a booking with a deposit (lib/deposit-code.ts): off
+   * the whole price, already read and figured; the deposit is never more
+   * than the discounted price, and the rest is what is left of it.
+   */
+  code?: { id: string; code: string; figures: DepositFigures } | null;
 }): URLSearchParams {
   const { store, product, start, end, buyerTz, origin } = input;
   const pkg = input.fromPackage;
@@ -684,7 +695,12 @@ export function callCheckoutBody(input: {
   const lang = LANGUAGES[parseLanguage(store.language)];
   const when = `${readableTime(start, buyerTz, lang.locale)} (${zoneName(start, buyerTz, lang.locale)})`;
   // Never from a package: the package was the payment.
-  const due = pkg ? { cents: product.priceCents, rest: 0 } : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
+  const code = pkg ? null : input.code ?? null;
+  const due = pkg
+    ? { cents: product.priceCents, rest: 0 }
+    : code
+      ? { cents: code.figures.charged, rest: code.figures.rest }
+      : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
   const name = `${product.title} \u2014 ${when}`;
   const body = new URLSearchParams({
     mode: "payment",
@@ -711,16 +727,27 @@ export function callCheckoutBody(input: {
     cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
-  if (due.rest > 0) {
+  if (due.rest > 0 || code) {
     // Said on Stripe's own page, before paying, and kept on the sale for the creator.
     const said = formatMoney(due.rest, store.currency, lang.locale);
+    const bw = bookingWords(store.language);
     // The creator's own summary first, then the sentence, kept whole within Stripe's 500 characters.
-    const sentence = bookingWords(store.language).depositRest(said, store.name);
+    // With a code, what it took off the whole price is said too (the owner's decision of 2 November 2026).
+    const sentence = [code ? bw.codeOffPrice(code.code, formatMoney(code.figures.off, store.currency, lang.locale)) : "", due.rest > 0 ? bw.depositRest(said, store.name) : ""].filter(Boolean).join(" ");
     const summary = product.summary ? product.summary.slice(0, Math.max(0, 500 - sentence.length - 3)) : "";
     body.set("line_items[0][price_data][product_data][description]", summary ? `${summary} \u2014 ${sentence}` : sentence.slice(0, 500));
-    body.set("metadata[deposit]", String(due.cents));
-    body.set("metadata[rest]", String(due.rest));
-    body.set("payment_intent_data[metadata][rest]", String(due.rest));
+    if (due.rest > 0) {
+      body.set("metadata[deposit]", String(due.cents));
+      body.set("metadata[rest]", String(due.rest));
+      body.set("payment_intent_data[metadata][rest]", String(due.rest));
+    }
+    if (code) {
+      // The whole price, the code and what it took off, on the sale for the creator's orders.
+      body.set("metadata[price]", String(product.priceCents));
+      body.set("metadata[code]", code.code);
+      body.set("metadata[code_off]", String(code.figures.off));
+      body.set("payment_intent_data[metadata][code]", code.code);
+    }
   }
   if (input.team) {
     body.set("metadata[hosts]", input.team.hosts.join(","));
@@ -733,8 +760,8 @@ export function callCheckoutBody(input: {
     body.set("cancel_url", pkg.back);
     // Nothing is paid, so Stripe makes no payment of it to carry these.
     for (const key of [...body.keys()]) if (key.startsWith("payment_intent_data")) body.delete(key);
-  } else if (store.hasDiscounts && due.rest === 0) body.set("allow_promotion_codes", "true");
-  // With a deposit, a code would come off the deposit alone, and its minimum be checked against it: no code box until that is decided (520 [LB1], 5b).
+  } else if (store.hasDiscounts && due.rest === 0 && !code) body.set("allow_promotion_codes", "true");
+  // With a deposit, Stripe's box would take a code off the deposit alone: the code is typed on the booking page instead and taken off the whole price (lib/deposit-code.ts).
   // Sent by an affiliate: credited to them, at today's share (lib/affiliates.ts).
   // A booking is one product, with nothing else able to ride along, so a
   // share of nothing is a sale that earns nothing and is not written down.
@@ -771,6 +798,14 @@ export async function holdAndCheckout(input: {
   start: number;
   buyerTz: string;
   origin: string;
+  /**
+   * On a team that lets buyers choose (lib/team-scheduling-rules.ts,
+   * chosenTeam): the host's position and name as the page showed them; only
+   * that host is held, or the booking is refused as "host-changed".
+   */
+  host?: { key: string; label: string } | null;
+  /** A discount code on a booking with a deposit, already read and figured (lib/deposit-code.ts). */
+  code?: { id: string; code: string; figures: DepositFigures } | null;
   /** The affiliate whose link the buyer followed, and the share it earns. */
   via?: { aff: string; rate: number } | null;
   /** The affiliate a lead is credited to once the call takes place (callCheckoutBody). */
@@ -793,8 +828,12 @@ export async function holdAndCheckout(input: {
   const end = start + length;
   const buyerTz = isTimeZone(input.buyerTz) ? input.buyerTz : setup.tz;
 
-  const team = await activeTeam(store, product).catch(() => "closed" as const);
-  if (team === "closed") return { ok: false, reason: "unavailable" };
+  const whole = await activeTeam(store, product).catch(() => "closed" as const);
+  if (whole === "closed") return { ok: false, reason: "unavailable" };
+  // The host the buyer chose, never anyone else: a team edited since the page was drawn is said, not guessed.
+  const chosen = whole && input.host?.key ? chosenTeam(whole, input.host.key, input.host.label) : null;
+  if (chosen === "changed") return { ok: false, reason: "host-changed" };
+  const team = chosen ?? whole;
 
   // Counted as orders, admitted before anything is held or opened: nobody is stopped while paying.
   const admitted = await admitOrders(store, CALL_ORDER_UNITS);
@@ -833,11 +872,12 @@ export async function holdAndCheckout(input: {
     }
 
     const pkg = input.fromPackage ?? null;
-    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, lead: input.lead ?? null });
+    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, lead: input.lead ?? null, code: input.code ?? null });
     // The share of the sale, when the store's plan has one (lib/platform-share.ts).
     // A session from a package pays nothing here: its share was taken on the package.
     if (!pkg) {
-      const mayComeOff = store.hasDiscounts && shareBps(store) > 0 ? await codesMayTakeOff(store.stripeAccountId, store.currency) : [];
+      // A code typed on the booking page is already off the amount, and Stripe's page offers none then.
+      const mayComeOff = store.hasDiscounts && shareBps(store) > 0 && !input.code ? await codesMayTakeOff(store.stripeAccountId, store.currency) : [];
       applyShare(body, store, { recurring: false, least: leastPaid(linesTotal(body).cents, mayComeOff) });
     }
 
@@ -915,17 +955,22 @@ function offerFrom(product: CallListing, now: number, seats: TeamBusy[], session
  * Every open time or session for a call product, or null when it cannot be
  * read, and the paid calls read on the way, for catchUpBookings.
  */
-export async function slotsForProduct(store: Store, product: CallListing) {
+export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null) {
   try {
     const now = Date.now();
     const { busy, paid, blocked, sessions } = await readBusy(store, now);
-    const team = await activeTeam(store, product);
+    const whole = await activeTeam(store, product);
     // A team event type the plan or the team no longer allows: nothing on offer.
-    if (team === "closed") return { days: [], left: {}, sessions: [], paid };
-    if (team) {
+    if (whole === "closed") return { days: [], left: {}, sessions: [], paid };
+    if (whole) {
+      // A team that lets buyers choose: who they may pick, and only the chosen host's times once they have.
+      const hosts = hostChoices(whole);
+      const picked = pick?.key ? hosts.find((h) => h.key === pick.key) ?? null : null;
+      const narrowed = picked ? chosenTeam(whole, picked.key, picked.label) : null;
+      const team = narrowed && narrowed !== "changed" ? narrowed : whole;
       // The page is where each host's calendar is read again, when its last reading is old.
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true });
-      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid };
+      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked };
     }
     return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid };
   } catch {
@@ -1334,10 +1379,31 @@ export async function confirmBooking(input: {
   /** The affiliate a lead is credited to (metadata lead_via), and the booking's payment, which a refund is made against. */
   lead?: string;
   pi?: string;
+  /**
+   * What is left to pay in person and the code taken off the whole price
+   * (lib/call-deposit.ts, readDue): null when nothing is; left out when not
+   * read, and then read from the sale here for an in-person booking.
+   */
+  due?: DueInPerson | null;
   origin: string;
 }): Promise<void> {
   const { store, product, session, start, end, buyerEmail, origin } = input;
   if (!isRedisConfigured() || !store.callsId) return;
+  // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
+  // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
+  // (catchUpBookings, the daily job), which carries it, instead of sending both emails without it.
+  let due = input.due;
+  if (due === undefined) {
+    if (whereOf(product.call).kind !== "place") due = null;
+    else {
+      try {
+        due = (await paidCall(store, session))?.due ?? null;
+      } catch (error) {
+        console.error("reading what is left to pay in person failed; confirmed later", error);
+        return;
+      }
+    }
+  }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;
   // Booked: the orders it was admitted as are the window's (lib/orders.ts), once, by the checkout.
@@ -1410,6 +1476,7 @@ export async function confirmBooking(input: {
   const place = whereOf(setup).kind === "place" ? setup.place! : null;
   const room = place ? null : await roomOf(store.callsId, { product: product.id, setup, session, start, end });
   const video = isVideoRoom(room);
+  const paidIn = input.currency || store.currency;
   const invite = (note: string, words?: BookingWords) =>
     Buffer.from(
       callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, place, note, sequence: (input.moves ?? 0) + (meeting?.updates ?? 0), words }),
@@ -1433,6 +1500,8 @@ export async function confirmBooking(input: {
         `${readableTime(start, buyerTz, locale)} (${zoneName(start, buyerTz, locale)})`,
         "",
         place ? b.whereAt(placeLine(place)) : room ? b.joinAtThatTime(room) : b.willSendLink(store.name),
+        // The same sentences Stripe's page showed before paying: the code, and what is left to pay in person.
+        ...dueLines(b, due, { currency: paidIn, locale, storeName: store.name }),
         ...(video ? [b.videoRoomNote] : []),
         "",
         // The reminders planned above: each only while it is at least an hour away (lib/call-records.ts).
@@ -1474,6 +1543,8 @@ export async function confirmBooking(input: {
           : `They were given your meeting link: ${room}`
         : `You have not set a meeting link, so send them one before the call${buyerEmail ? ` at ${buyerEmail}` : ""}.`,
       ...(meeting && !meeting.made && video ? [VIDEO_ROOM_NOTE] : []),
+      // What is left to collect in person, whatever the booking is now, so the creator never misses it.
+      ...(due ? [creatorDueLine(due, { paidCents: input.amountCents, currency: paidIn })] : []),
       "",
       `${
         theirs

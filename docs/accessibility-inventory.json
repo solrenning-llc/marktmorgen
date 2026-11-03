@@ -1444,6 +1444,7 @@
     "components/review-qr.tsx",
     "components/review-stars.tsx",
     "components/review-studio.tsx",
+    "components/review-themes.tsx",
     "components/sale-editor.tsx",
     "components/sales-blocks.tsx",
     "components/sales-goal-card.tsx",

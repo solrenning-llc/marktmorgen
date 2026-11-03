@@ -36,6 +36,8 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
+import { twoStepOn } from "@/lib/two-step";
+import { listPasskeys } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
@@ -81,7 +83,16 @@ export type Invite = {
   expiresAt: number;
 };
 
-export type Team = { members: Member[]; invites: Invite[] };
+export type Team = {
+  members: Member[];
+  invites: Invite[];
+  /**
+   * The owner requires two-step sign-in (an authenticator app or a passkey)
+   * of everybody on the team before they open the studio (612 [WP11]).
+   * Absent is off. Kept by every save of the team (saveTeam).
+   */
+  requireTwoStep?: boolean;
+};
 
 export type LogLine = {
   /** ISO time. */
@@ -119,7 +130,8 @@ function parseTeam(raw: unknown): Team {
         expiresAt: typeof i.expiresAt === "number" ? i.expiresAt : 0,
       });
     }
-    return { members: members.slice(0, MAX_TEAM), invites: invites.slice(0, MAX_TEAM) };
+    const required = (value as { requireTwoStep?: unknown }).requireTwoStep === true;
+    return { members: members.slice(0, MAX_TEAM), invites: invites.slice(0, MAX_TEAM), ...(required ? { requireTwoStep: true } : {}) };
   } catch {
     return { members: [], invites: [] };
   }
@@ -132,11 +144,48 @@ export async function readTeam(sid: string): Promise<Team> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return { ...EMPTY };
   const [raw] = await redisPipeline([["GET", teamKey(sid)]]);
   const team = parseTeam(raw);
-  return { members: team.members, invites: team.invites.filter((i) => i.expiresAt > now()) };
+  return { members: team.members, invites: team.invites.filter((i) => i.expiresAt > now()), ...(team.requireTwoStep ? { requireTwoStep: true } : {}) };
 }
 
+/**
+ * Writes a team. Every change is made with the team's lock held, so the
+ * owner's two-step requirement is read back here and kept unless the change
+ * itself says otherwise: a member joining or leaving never switches it off.
+ */
 async function saveTeam(sid: string, team: Team): Promise<void> {
-  await redisPipeline([["SET", teamKey(sid), JSON.stringify(team)]]);
+  let required = team.requireTwoStep;
+  if (required === undefined) {
+    const [raw] = await redisPipeline([["GET", teamKey(sid)]]);
+    required = parseTeam(raw).requireTwoStep === true;
+  }
+  const kept: Team = { members: team.members, invites: team.invites, ...(required ? { requireTwoStep: true } : {}) };
+  await redisPipeline([["SET", teamKey(sid), JSON.stringify(kept)]]);
+}
+
+/**
+ * Whether the team must use two-step sign-in, and, for one person, whether
+ * they may open the studio under it: the owner always may (the requirement is
+ * theirs to set); anybody else only with an authenticator app turned on or a
+ * passkey (lib/two-step.ts, lib/passkeys.ts). Read only when it is on.
+ */
+export async function teamTwoStepBlocks(store: Store, email: string, role: Role): Promise<boolean> {
+  if (role === "owner" || !store.sid) return false;
+  const team = await readTeam(store.sid);
+  if (!team.requireTwoStep) return false;
+  const [app, keys] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
+  return !app && keys.length === 0;
+}
+
+/** The owner turns the requirement on or off; written into the team's activity log. */
+export async function setRequireTwoStep(store: Store, on: boolean, by: string): Promise<boolean> {
+  if (!store.sid) return false;
+  const sid = store.sid;
+  await withTeam(sid, async () => {
+    const team = await readTeam(sid);
+    await saveTeam(sid, { ...team, requireTwoStep: on });
+  });
+  await logTeam(sid, { who: by, role: "owner", what: on ? "Required two-step sign-in for the team" : "Stopped requiring two-step sign-in for the team" });
+  return true;
 }
 
 /**

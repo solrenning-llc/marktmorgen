@@ -61,7 +61,7 @@ import { DetailsForm } from "@/components/details-form";
 import { SocialsEditor } from "@/components/socials-editor";
 import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
-import { type PaidCall, catchUpBookings, paidCalls } from "@/lib/calls";
+import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
 import { productsInStats, reachProducts, readAllTimeSales, readSales, readStats, studioStats } from "@/lib/stats";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
@@ -141,6 +141,8 @@ import { ProductEditor } from "@/components/product-editor";
 import { PaymentsPanel } from "@/components/payments-panel";
 import { chargeableCurrencies, readWaysToPay } from "@/lib/payment-methods";
 import { formatMoney } from "@/lib/money";
+import { TodayPanel } from "@/components/today-panel";
+import { bookingCounts, salesCounts, todayView, type TodayCounts, type TodayId } from "@/lib/today-rules";
 import { LinkEditor } from "@/components/link-editor";
 import { JoinBoxEditor } from "@/components/join-box-editor";
 import { ContactBoxEditor } from "@/components/contact-box-editor";
@@ -759,6 +761,11 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+/** Now, in milliseconds, for the "Today" counts. */
+function todayNow(): number {
+  return Date.now();
+}
+
 /** The first and last days the numbers' chart can show, in UTC: the 90 days up to today. */
 function chartDays(): [string, string] {
   const now = Date.now();
@@ -975,10 +982,11 @@ export default async function StudioPage({
   // Booked calls are read from the creator's Stripe account, the ledger, and
   // only asked for when the store sells calls at all.
   const callProducts = store ? await readKind(store, "call") : [];
-  const paidList =
+  const paidRead =
     current && current.stripeAccountId && callProducts.length > 0 && may("orders")
-      ? await paidCalls(current).catch(() => null)
+      ? await paidCallsRead(current).catch(() => null)
       : null;
+  const paidList = paidRead ? paidRead.paid : null;
   const calls = paidList && store ? upcoming(paidList, callProducts) : null;
   // The room of each booked time: the one made for it, or the creator's own link.
   const callRooms =
@@ -1062,6 +1070,18 @@ export default async function StudioPage({
   // The biggest buyers carry their addresses, so only whoever may read orders
   // with the buyer's address sees them (lib/team-roles.ts, "orders").
   const numbers = counted && may("orders") ? { ...counted, topBuyers: salesRead?.value?.buyers?.top ?? [] } : counted;
+  // "Today" (484 [IT1], complement item 1, unit 2a): from readings this page already made, each counted only
+  // where its place on this page is shown, so every line leads somewhere; the rest is not on this screen yet.
+  const today = current ? todayNow() : 0;
+  const todayCounts: TodayCounts = {
+    ...(current && numbers && salesRead ? salesCounts(salesRead, (cents) => formatMoney(cents, current.currency), today) : {}),
+    ...(current && callProducts.length > 0 && may("orders") ? (current.stripeAccountId ? bookingCounts(paidRead, today) : { bookingsToday: 0, bookingsTomorrow: 0 }) : {}),
+  };
+  const todayHrefs: Partial<Record<TodayId, string>> = {
+    ...(todayCounts.salesToday !== undefined ? { sales: "#numbers" } : {}),
+    ...(todayCounts.bookingsToday !== undefined ? { calls: "#calls-title" } : {}),
+  };
+  const todayScreen = current ? todayView(todayCounts, may) : null;
   // The list of products: all of a short one, a page of a long one, found by
   // name when the creator searched (lib/catalog.ts reads only that page in full).
   const shelf = store ? await studioShelf(store, params) : null;
@@ -1245,6 +1265,7 @@ export default async function StudioPage({
               <StoreSetupAi currency={store.currency} left={ai.left} hasFaq={store.faq.length > 0} storeName={store.name} />
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.hint})), "store")} /> : null}
+            {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.left} /> : null}
@@ -1620,7 +1641,7 @@ export default async function StudioPage({
 
             {callProducts.length > 0 && may("orders") ? (
               <section className="card mt-8 p-6 sm:p-8" aria-labelledby="calls-title">
-                <h2 id="calls-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                <h2 id="calls-title" className="scroll-mt-32 text-lg font-semibold tracking-[-0.02em] text-ink">
                   Upcoming calls
                 </h2>
                 {!current?.stripeAccountId ? (

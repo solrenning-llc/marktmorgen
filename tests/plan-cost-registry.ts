@@ -895,6 +895,7 @@ export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
+  FREE_CALL_HOLDS_PER_DAY: "A pace on how often one email address may hold a free intro call's time in one store in a day (lib/free-call-rules.ts, 551 [FB1]): every hold is first taken from the plan's own monthly orders as FREE_CALL_ORDER_UNITS, before any email, so it adds no cost and only refuses.",
   BUYER_CAP_MONTHS: "Queue item 307 EC1: the cap on one closing's buyers (lib/closing-buyers-rules.ts, buyerNoticeCap), a post-cancellation funded exposure of docs/funded-exposure-review.md (closingBuyersCost above), the company's, not a plan's line.",
   BUYER_PAGES_PER_RUN: "Pages of a closing store's checkouts read in one run of the daily closing job (lib/closing-buyers.ts): inside the same exposure, bounded by its cap.",
   HOLD_PAGES_PER_RUN: "Pages of a closing store's memberships held, released or ended in one run (lib/closing-holds.ts): inside the same exposure.",
@@ -907,6 +908,7 @@ export const NOT_A_COST: Record<string, string> = {
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   MAX_PAGES_PER_STORE: "Pages of Stripe sessions the five-minute job reads per store per run: a scheduled job, bounded by its schedule (a company fixed cost).",
+  TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   QUIET_PER_HOUR: "Sale notifications to the creator's phone: one per counted order at most, inside the order's compute.",
   VERCEL_CPU_MICRO_USD_PER_HOUR: "A rate, not a cap.",
   ASKS_PER_TEN_MINUTES: "A burst limit under ANSWERS_MONTHLY (line ai).",

@@ -22,6 +22,7 @@
  */
 
 import { type LeadSetting, NO_LEADS, parseLeadSetting } from "@/lib/affiliate-lead-rules";
+import { type PendingTerms, readNoticeDays, readPending } from "@/lib/affiliate-notice";
 
 /**
  * Which affiliate a sale belongs to when the buyer followed more than one
@@ -160,6 +161,18 @@ export type AffiliateSetting = {
    * share of each sale. Off ("none") for every programme before it.
    */
   lead: LeadSetting;
+  /**
+   * Days of notice before a lower commission or a shorter window applies
+   * (630 [HN6](2), lib/affiliate-notice.ts): 0 for none, else 3 to 90.
+   * Missing on every program saved before it existed: none, as they were.
+   */
+  notice?: number;
+  /**
+   * A cut announced and not yet in force: the whole set of terms that takes
+   * over on its day. Until then `percent`, `rates` and `days` are the old
+   * ones; read on or after the day, they are these (parseAffiliateSetting).
+   */
+  pending?: PendingTerms | null;
 };
 
 /** The choices for the second tier, in percent; 0 is "none". */
@@ -235,6 +248,8 @@ export const NO_AFFILIATES: AffiliateSetting = {
   paidSearch: false,
   secondTier: 0,
   lead: NO_LEADS,
+  notice: 0,
+  pending: null,
 };
 
 /** The goals as given, each whole and in range, the fewest sales first; null when any is not. */
@@ -260,7 +275,7 @@ const whole = (value: unknown, min: number, max: number): number | null => {
 };
 
 /** Whatever came back from storage or from the studio, made safe to use. */
-export function parseAffiliateSetting(raw: unknown): AffiliateSetting {
+export function parseAffiliateSetting(raw: unknown, now: number = Date.now()): AffiliateSetting {
   if (!raw || typeof raw !== "object") return { ...NO_AFFILIATES, rates: {} };
   const value = raw as Record<string, unknown>;
   const rates: Record<string, number> = {};
@@ -271,7 +286,7 @@ export function parseAffiliateSetting(raw: unknown): AffiliateSetting {
       if (/^[a-z0-9]{6,40}$/.test(id) && n !== null) rates[id] = n;
     }
   }
-  return {
+  const setting: AffiliateSetting = {
     enabled: value.enabled === true,
     percent: whole(value.percent, MIN_COMMISSION, MAX_COMMISSION) ?? NO_AFFILIATES.percent,
     days: whole(value.days, MIN_COOKIE_DAYS, MAX_COOKIE_DAYS) ?? NO_AFFILIATES.days,
@@ -301,7 +316,13 @@ export function parseAffiliateSetting(raw: unknown): AffiliateSetting {
     secondTier: (SECOND_TIER_OPTIONS as readonly number[]).includes(Number(value.secondTier)) ? Number(value.secondTier) : 0,
     // Missing on every programme saved before it existed: no lead commission.
     lead: parseLeadSetting(value.lead),
+    notice: readNoticeDays(value.notice),
+    pending: null,
   };
+  // A cut whose day has come is the terms from then on; before it, the old ones hold.
+  const pending = readPending(value.pending, { minPercent: MIN_COMMISSION, maxPercent: MAX_COMMISSION, minDays: MIN_COOKIE_DAYS, maxDays: MAX_COOKIE_DAYS });
+  if (pending && now / 1000 >= pending.from) return { ...setting, percent: pending.percent, rates: { ...pending.rates }, days: pending.days };
+  return { ...setting, pending };
 }
 
 /** "1st", "2nd", "23rd" — the day as it is said in American English. */

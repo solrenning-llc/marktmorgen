@@ -180,3 +180,9 @@ export async function forgetNoticesPerson(id: string, who: string): Promise<numb
   const [gone] = await redisPipeline([["DEL", ...noticeKeys(id, who)]]);
   return Number(gone) || 0;
 }
+
+/** Every notice one member has, newest first, for the copy of their data (619 [SZ3]); only reads, never marks them seen. */
+export async function allNoticesOf(id: string, who: string): Promise<Notice[]> {
+  const [raw] = await redisPipeline([["ZREVRANGE", listKey(id, who), 0, MAX_NOTICES - 1]]);
+  return (Array.isArray(raw) ? raw : []).map(parse).filter((n): n is Notice => n !== null);
+}

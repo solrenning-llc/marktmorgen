@@ -699,6 +699,11 @@ export function callCheckoutBody(input: {
    * the line and kept on the sale. None: the product's own price.
    */
   length?: { minutes: number; cents: number } | null;
+  /**
+   * The listed site a calendar embedded there booked from (app/embed), already checked against the creator's list:
+   * kept on the sale as the card's checkout keeps it, so the receipt page sends the buyer back and the webhook names it.
+   */
+  embedSite?: string | null;
 }): URLSearchParams {
   const { store, product, start, end, buyerTz, origin } = input;
   const pkg = input.fromPackage;
@@ -816,6 +821,10 @@ export function callCheckoutBody(input: {
   // the hold is counted from after, and lasts a minute longer, so the time
   // is never released while the page that pays for it is still open.
   body.set("expires_at", String(checkoutClosesAt()));
+  // Written last, and only while Stripe's fifty metadata fields have room, as lib/store-checkout.ts writes it: never what stops a booking.
+  if (input.embedSite && /^https:\/\//.test(input.embedSite) && !pkg && [...body.keys()].filter((key) => key.startsWith("metadata[")).length < 49) {
+    body.set("metadata[embed_site]", input.embedSite.slice(0, 300));
+  }
   return body;
 }
 
@@ -850,6 +859,8 @@ export async function holdAndCheckout(input: {
   channel?: Record<string, string>;
   /** The length the buyer chose, in minutes, on a call with several (lib/call-lengths.ts); none is the setup's own. */
   minutes?: unknown;
+  /** The listed site the calendar embedded there booked from, already checked against the creator's list (app/api/store/book). */
+  embedSite?: string | null;
 }): Promise<HoldResult> {
   const { store, product, start, origin } = input;
   if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
@@ -913,7 +924,7 @@ export async function holdAndCheckout(input: {
     }
 
     const pkg = input.fromPackage ?? null;
-    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, length: booked, lead: input.lead ?? null, code: input.code ?? null });
+    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, length: booked, embedSite: input.embedSite ?? null, lead: input.lead ?? null, code: input.code ?? null });
     // The share of the sale, when the store's plan has one (lib/platform-share.ts).
     // A session from a package pays nothing here: its share was taken on the package.
     if (!pkg) {

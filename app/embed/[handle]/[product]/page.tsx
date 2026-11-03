@@ -271,6 +271,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
               productId={product.id}
               minutes={chosen ? chosen.minutes : undefined}
               newTab
+              embed={open.site ? { site: open.site, back: open.back ?? null } : null}
               words={{ ...slotWords(store, b, chosen ? chosen.minutes : call.call.minutes, payNow, false, false), code }}
             />
           )}

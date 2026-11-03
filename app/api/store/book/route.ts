@@ -7,6 +7,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { canSellProduct } from "@/lib/store-checkout";
 import { holdAndCheckout, isCallProduct, releaseOwnHold } from "@/lib/calls";
+import { listedReturn, listedSite } from "@/lib/embed-sites";
 import { countHit } from "@/lib/visit";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
@@ -51,6 +52,9 @@ export async function POST(request: NextRequest) {
   let hostLabel = "";
   // On a call with several lengths: the one chosen, in minutes (lib/call-lengths.ts); its price is read from the creator's record, never from the form.
   let minutes = "";
+  // Booked from the calendar on the creator's own site (app/embed): which listed site, and where to send the buyer back to.
+  let siteAsked = "";
+  let returnAsked = "";
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (name: string) => {
@@ -67,6 +71,8 @@ export async function POST(request: NextRequest) {
     hostKey = /^[0-5]$/.test(read("host")) ? read("host") : "";
     hostLabel = read("host_label").slice(0, 60);
     minutes = read("minutes").slice(0, 4);
+    siteAsked = read("site").slice(0, 300);
+    returnAsked = read("return").slice(0, 700);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -139,6 +145,8 @@ export async function POST(request: NextRequest) {
     code,
     host: hostKey ? { key: hostKey, label: hostLabel } : null,
     minutes,
+    // Checked against the creator's list again here, as the card's checkout checks it (app/api/store/checkout).
+    embedSite: listedReturn(store.embedSites, returnAsked) ?? listedSite(store.embedSites, siteAsked) ?? null,
     channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)) },
   });
   if (!result.ok) return back(result.reason);

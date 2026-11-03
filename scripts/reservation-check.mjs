@@ -79,7 +79,11 @@ export function reservations(text, owner = null) {
   });
 }
 
-/** Every reservation: the old table in docs/reservations.md while it exists, then each agent's own file. */
+/**
+ * Every reservation: the old table in docs/reservations.md while it exists, then each agent's own file.
+ * @param {string} text
+ * @param {{ path: string, text: string }[]} [agentFiles]
+ */
 export function allReservations(text, agentFiles = []) {
   const lanes = lanePrefixes(text);
   return [
@@ -97,6 +101,7 @@ export function allReservations(text, agentFiles = []) {
  * on the base branch: a file that does not exist there yet may be made (so
  * moving the rows into their files could be done in one PR). Empty means the
  * PR may proceed.
+ * @param {{ text: string, branch: string, changed: string[], agentFiles?: { path: string, text: string }[] }} input
  */
 export function conflicts({ text, branch, changed, agentFiles = [] }) {
   const lanes = lanePrefixes(text);

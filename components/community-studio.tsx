@@ -27,6 +27,7 @@ import {
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_SLOW } from "@/lib/community-chat-rules";
 import { LEVELS, MAX_LEVEL, type Reward, levelOf } from "@/lib/community-levels";
+import { startersAddedWords, startersToAdd } from "@/lib/community-starter";
 
 export type QueueRow = {
   key: string;
@@ -153,7 +154,8 @@ export function CommunityStudio({
       setError({ where, text: MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error });
       return answer;
     }
-    toast(done);
+    // A step of several says nothing on its own; the last one says what was done (lib/community-starter.ts).
+    if (done) toast(done);
     router.refresh();
     return answer;
   }
@@ -890,6 +892,49 @@ function Levels({
   );
 }
 
+/**
+ * While a community has only its first space, a ready set to add with one
+ * press (487 [IT4], item 5; lib/community-starter.ts): each through the
+ * studio's own "Add a space", one after another, stopping at the first
+ * refusal; each can then be renamed, moved or removed like any other.
+ */
+function StarterSpaces({ spaces, busy, run }: { spaces: CommunityConfig["spaces"]; busy: string | null; run: Runner }) {
+  const starters = startersToAdd(spaces);
+  if (!starters.length) return null;
+  async function addAll() {
+    let added = 0;
+    for (let i = 0; i < starters.length; i += 1) {
+      const last = i === starters.length - 1;
+      const answer = await run("space-starters", { action: "space-add", name: starters[i].name, about: starters[i].about, creatorOnly: false, only: [], level: 0 }, last ? startersAddedWords(starters.length) : "");
+      if (!answer.ok) {
+        // The refusal is shown in the Spaces section; what was added before it is said too.
+        if (added) toast(startersAddedWords(added));
+        break;
+      }
+      added += 1;
+    }
+    // The box and its button go with the first space added: the focus moves to the list's heading, whatever happened.
+    requestAnimationFrame(() => document.getElementById("cm-spaces-title")?.focus());
+  }
+  return (
+    <div className="mt-5 rounded-[var(--r-md)] bg-paper p-4" data-community-starters="">
+      <h3 id="cm-starters-title" className="font-semibold text-ink">Or start with a ready set of spaces</h3>
+      <ul className="mt-2 space-y-1 text-sm text-ink-soft" aria-labelledby="cm-starters-title">
+        {starters.map((s) => (
+          <li key={s.name}>
+            <span className="font-semibold text-ink">{s.name}</span>
+            {`: ${s.about}`}
+          </li>
+        ))}
+      </ul>
+      <p id="cm-starters-help" className="mt-2 text-sm text-ink-soft">Each is open to every member. You can rename, move or remove any of them in the Spaces list. This does not switch your community on or off.</p>
+      <button type="button" className="btn btn-secondary btn-sm mt-3" disabled={busy !== null} aria-busy={busy === "space-starters"} aria-describedby="cm-starters-help" onClick={() => void addAll()}>
+        {busy === "space-starters" ? "Adding…" : starters.length === 1 ? "Add this space" : `Add these ${starters.length} spaces`}
+      </button>
+    </div>
+  );
+}
+
 function Spaces({
   config,
   products,
@@ -913,7 +958,7 @@ function Spaces({
   return (
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-spaces-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="cm-spaces-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Spaces</h2>
+        <h2 id="cm-spaces-title" tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">Spaces</h2>
         <span className="tag">{`${config.spaces.length} of ${MAX_SPACES}`}</span>
       </div>
       <p className="mt-2 text-ink-soft">
@@ -978,6 +1023,9 @@ function Spaces({
         </form>
       ) : null}
       {problem("space-add")}
+      <StarterSpaces spaces={config.spaces} busy={busy} run={run} />
+      {/* Here, not in the ready set's box, which goes once a space is added: a refusal on a later one is still seen. */}
+      {problem("space-starters")}
     </section>
   );
 }

@@ -567,6 +567,45 @@ export async function studioReviews(
   return { rows, total: Number(total) || 0, unseen: Number(unseen) || 0 };
 }
 
+/** The most reviews the studio's overview reads at once (636 [GL4](c)). */
+export const OVERVIEW_READ_MAX = 1_000;
+
+/**
+ * Every review written since `since` (milliseconds), newest first, for the
+ * studio's overview by month (lib/review-overview.ts): at most
+ * OVERVIEW_READ_MAX, with `complete` false when there were more. Throws when
+ * the index or a record cannot be read, so a gap is never shown as no reviews.
+ */
+export async function reviewsSince(statsId: string | null, since: number): Promise<{ reviews: Review[]; complete: boolean }> {
+  if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) throw new Error("Review list unavailable");
+  const [members] = await redisPipeline([["ZREVRANGEBYSCORE", allKey(statsId), "+inf", since, "LIMIT", 0, OVERVIEW_READ_MAX + 1]]);
+  if (!Array.isArray(members)) throw new Error("Review index unavailable");
+  const complete = members.length <= OVERVIEW_READ_MAX;
+  const byProduct = new Map<string, string[]>();
+  for (const member of members.slice(0, OVERVIEW_READ_MAX)) {
+    if (typeof member !== "string") throw new Error("Review index unreadable");
+    const [product, id, ...extra] = member.split("|");
+    if (extra.length || !PRODUCT_ID_PATTERN.test(product) || !REVIEW_ID_PATTERN.test(id)) throw new Error("Review reference unreadable");
+    byProduct.set(product, [...(byProduct.get(product) ?? []), id]);
+  }
+  const products = [...byProduct.entries()];
+  const read = products.length ? await redisPipeline(products.map(([productId, ids]) => ["HMGET", productKey(statsId, productId), ...ids])) : [];
+  if (!Array.isArray(read) || read.length !== products.length) throw new Error("Review records incomplete");
+  const reviews: Review[] = [];
+  read.forEach((values, group) => {
+    const [productId, ids] = products[group];
+    if (!Array.isArray(values) || values.length !== ids.length) throw new Error("Review records incomplete");
+    for (const value of values) {
+      const review = parseReview(value);
+      // A record gone since the index was read (its buyer deleted it) is simply not there.
+      if (value === null) continue;
+      if (!review || review.productId !== productId) throw new Error("Review record unreadable");
+      reviews.push(review);
+    }
+  });
+  return { reviews: reviews.sort((a, b) => b.createdAt - a.createdAt), complete };
+}
+
 /** Forgets every review of a product that is gone. Returns their photos' paths, for the caller to delete. */
 export async function dropReviews(statsId: string | null, productId: string): Promise<string[]> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return [];

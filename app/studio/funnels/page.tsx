@@ -102,6 +102,9 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
       id: p.id,
       title: p.title,
       priceCents: p.priceCents,
+      // For the ready path only (lib/funnel-starter.ts): it never picks a bundle or a draft.
+      bundle: Boolean(p.bundle),
+      draft: p.hidden,
     }));
   const pictures = listings
     .filter((p) => p.image)

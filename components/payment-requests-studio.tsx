@@ -18,6 +18,8 @@ import {
   REMIND_EVERY_DAYS,
   DRAFT_PROBLEMS,
   STATUS_WORDS,
+  MAX_OUTSIDE_NOTE,
+  OUTSIDE_WORDS,
   type DraftProblem,
   type PaymentRequest,
   type RequestDraft,
@@ -182,6 +184,28 @@ export function PaymentRequestsStudio({
       return;
     }
     toast(action === "remind" && answer.sent === false ? "The reminder did not go. Your store's emails for this month may be used." : done);
+    router.refresh();
+  }
+
+  // Paid outside Stripe (639 [GL7](30)): which request's form is open, and what it says.
+  const [outsideFor, setOutsideFor] = useState("");
+  const [outsideMethod, setOutsideMethod] = useState<"cash" | "transfer" | "other">("transfer");
+  const [outsideDate, setOutsideDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [outsideNote, setOutsideNote] = useState("");
+
+  async function markOutside(id: string) {
+    if (busy) return;
+    setBusy(`outside:${id}`);
+    const answer = await call({ action: "outside", id, method: outsideMethod, date: outsideDate, note: outsideNote });
+    setBusy("");
+    if (!answer.ok) {
+      toast(answer.message ?? "The result could not be confirmed. Reload to check the request before trying again.");
+      router.refresh();
+      return;
+    }
+    setOutsideFor("");
+    setOutsideNote("");
+    toast("Marked as paid. Its page now shows it as paid, as the buyer's receipt.");
     router.refresh();
   }
 
@@ -351,7 +375,7 @@ export function PaymentRequestsStudio({
                     status === "open" ? `link works until ${day(r.expiresAt)}` : "",
                     r.sent.length ? `emailed ${r.sent.length} of ${MAX_SENDS} times, last ${day(r.sent[r.sent.length - 1])}` : "not emailed yet",
                     next !== null ? `next reminder ${day(next)}` : "",
-                    status === "paid" || status === "refunded" ? `paid ${its(r.amountPaid || r.total)} on ${day(r.paidAt)}` : "",
+                    status === "paid" || status === "refunded" ? `paid ${its(r.amountPaid || r.total)} on ${day(r.paidAt)}${r.outside ? ` outside Stripe (${OUTSIDE_WORDS[r.outside.method]}${r.outside.note ? `: ${r.outside.note}` : ""})` : ""}` : "",
                     r.refunded > 0 ? `${its(r.refunded)} refunded` : "",
                   ].filter(Boolean).join(" · ")}
                 </p>
@@ -381,6 +405,11 @@ export function PaymentRequestsStudio({
                       Cancel
                     </button>
                   ) : null}
+                  {canSend && r.state === "open" ? (
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== ""} aria-expanded={outsideFor === r.id} aria-controls={`outside-${r.id}`} onClick={() => setOutsideFor(outsideFor === r.id ? "" : r.id)}>
+                      Mark as paid outside Stripe
+                    </button>
+                  ) : null}
                   {canSend && status !== "open" ? (
                     <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== ""} onClick={() => void act("delete", r.id, "Request deleted. Any payment stays on your Stripe account.")} aria-label={`Delete the request to ${r.email}`}>
                       <Icon name="trash" size={15} /> Delete
@@ -388,6 +417,40 @@ export function PaymentRequestsStudio({
                   ) : null}
                   {status === "open" && !again.ok && canSend ? <span className="text-xs text-ink-soft">{again.why}</span> : null}
                 </div>
+                {outsideFor === r.id && r.state === "open" ? (
+                  <fieldset id={`outside-${r.id}`} className="mt-3 rounded-[10px] px-4 py-3 ring-1 ring-line" disabled={busy !== ""}>
+                    <legend className="px-1 text-sm font-semibold text-ink">{`Paid outside Stripe: ${its(r.total)}`}</legend>
+                    <p className="text-xs text-ink-soft">
+                      For money you received yourself. Nothing is charged; its payment page closes, and if the buyer already paid there it is marked as paid online instead. The request&apos;s page then shows it as paid, as their receipt.
+                    </p>
+                    <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                      <label className="block" htmlFor={`outside-method-${r.id}`}>
+                        <span className="field-label">How</span>
+                        <select id={`outside-method-${r.id}`} className="field" value={outsideMethod} onChange={(e) => setOutsideMethod(e.target.value as "cash" | "transfer" | "other")}>
+                          <option value="transfer">{OUTSIDE_WORDS.transfer}</option>
+                          <option value="cash">{OUTSIDE_WORDS.cash}</option>
+                          <option value="other">{OUTSIDE_WORDS.other}</option>
+                        </select>
+                      </label>
+                      <label className="block" htmlFor={`outside-date-${r.id}`}>
+                        <span className="field-label">Day paid</span>
+                        <input id={`outside-date-${r.id}`} type="date" className="field" value={outsideDate} onChange={(e) => setOutsideDate(e.target.value)} />
+                      </label>
+                      <label className="block" htmlFor={`outside-note-${r.id}`}>
+                        <span className="field-label">Note (optional)</span>
+                        <input id={`outside-note-${r.id}`} className="field" maxLength={MAX_OUTSIDE_NOTE} value={outsideNote} onChange={(e) => setOutsideNote(e.target.value)} placeholder="Reference or who received it" />
+                      </label>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button type="button" className="btn btn-primary btn-sm" aria-busy={busy === `outside:${r.id}`} onClick={() => void markOutside(r.id)}>
+                        Mark as paid
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOutsideFor("")}>
+                        Cancel
+                      </button>
+                    </div>
+                  </fieldset>
+                ) : null}
               </li>
             );
           })}

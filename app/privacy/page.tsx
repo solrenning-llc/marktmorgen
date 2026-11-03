@@ -1337,8 +1337,10 @@ export default function PrivacyPage() {
           Deleting the product deletes its reviews.
           If the creator switches on the email that asks for a review, we put
           each paid order on a list with when it was paid, send its buyer one
-          email on the creator&apos;s behalf, and keep a mark that its buyer
-          was asked, for 120 days. The link in that email, tied to the order and
+          email on the creator&apos;s behalf and, only if the creator chose
+          it and the buyer has not reviewed yet, one reminder 3 to 14 days
+          later, and keep a mark that its buyer was asked (and reminded), for
+          120 days. The link in that email, tied to the order and
           the address it went to, works for 60 days; its link to stop being
           asked works for 400 days, and pressing it keeps a
           one-way hash of the address for that store for good, so that store

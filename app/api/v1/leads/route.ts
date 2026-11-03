@@ -1,4 +1,5 @@
 import { apiAdder, apiError, apiOk, apiStore } from "@/lib/api-guard";
+import { apiOkFields } from "@/lib/api-fields";
 import { leads } from "@/lib/api-read";
 import { WRITE_ERRORS, addLead, roomFor } from "@/lib/api-write";
 
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
   if (store instanceof Response) return store;
   const params = new URL(request.url).searchParams;
   try {
-    return apiOk(await leads(store, params.get("cursor"), params.get("agreed") === "true"));
+    return apiOkFields(request, await leads(store, params.get("cursor"), params.get("agreed") === "true"));
   } catch (error) {
     console.error("api: leads failed", error);
     return apiError(502, "unavailable", "The list could not be read just now. Try again in a moment.");

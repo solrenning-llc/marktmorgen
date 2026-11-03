@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="October 31, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 2, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -249,7 +249,7 @@ export default function TermsPage() {
           <strong className="text-black">
             Ad pixels, and purchases sent to ad platforms.
           </strong>{" "}
-          When you add a Meta, Google, TikTok or Pinterest pixel to your store,
+          When you add a Meta, Google, TikTok, Pinterest, X or Reddit pixel to your store,
           or give us an access token so that purchases, membership payments and
           sign-ups are also sent to that platform from our server, you are instructing us to send that data to
           that platform on your behalf, and you are responsible for doing so

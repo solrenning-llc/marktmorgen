@@ -209,3 +209,23 @@ export async function forgetPointsPerson(id: string, who: string, now = Date.now
   ]);
   return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
 }
+
+/**
+ * One member's points, for the copy of their data (619 [SZ3],
+ * lib/person-copy.ts): the all-time total, each kept day's, and the rewards
+ * unlocked. The same records the erasure deletes. Only reads.
+ */
+export async function pointsRecordOf(id: string, who: string, now = Date.now()): Promise<{ total: number; days: { day: number; points: number }[]; rewards: Record<string, string> }> {
+  if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return { total: 0, days: [], rewards: {} };
+  const today = dayOf(now);
+  const dayList = Array.from({ length: DAYS_KEPT + 1 }, (_, i) => today - i);
+  const [total, unlocked, ...days] = await redisPipeline([["ZSCORE", allKey(id), who], ["HGETALL", unlockedKey(id, who)], ...dayList.map((day) => ["ZSCORE", dayKey(id, day), who])]);
+  const flat = Array.isArray(unlocked) ? unlocked.map(String) : [];
+  const rewards: Record<string, string> = {};
+  for (let i = 0; i + 1 < flat.length; i += 2) rewards[flat[i]] = flat[i + 1];
+  return {
+    total: Math.max(0, Number(total) || 0),
+    days: dayList.flatMap((day, i) => (days[i] === null || days[i] === undefined ? [] : [{ day, points: Number(days[i]) || 0 }])),
+    rewards,
+  };
+}

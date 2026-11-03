@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   is("a closed disclosure, opened by the creator", /<details[^>]*data-faq-from-inbox/.test(html) && !/<details[^>]*open/.test(html) && html.includes("<summary"), true);
   is("the words come ready to check", html.includes(">Do you ship to Canada?</textarea>") && html.includes("Yes, we ship to Canada in 5 to 8 days."), true);
   is("it says what was taken out and asks to check", html.includes("Their name, email addresses, links and phone numbers were taken out.") && html.includes("change anything that could say who asked"), true);
-  is("each field is labelled and tied to its count", (html.match(/<label/g) ?? []).length === 2 && /aria-describedby="[^"]*-q"/.test(html) && html.includes(`of ${MAX_FAQ_Q} characters`), true);
+  is("each field has a label tied to its count", (html.match(/<label/g) ?? []).length === 2 && /aria-describedby="[^"]*-q"/.test(html) && html.includes(`of ${MAX_FAQ_Q} characters`), true);
   is("nothing is published on its own: one button", (html.match(/type="submit"/g) ?? []).length === 1 && html.includes("Publish on my store page"), true);
   is("a full page says so instead of a form", render(0).includes(FAQ_ADD_WORDS.full.replace(/"/g, "&quot;")) && !render(0).includes("<form"), true);
   is("nothing to offer when nothing was answered", renderToStaticMarkup(createElement(FaqFromInbox, { messages: [{ from: "visitor", text: "Hi?" }], name: "", room: 3, studioHref: "/studio" })), "");

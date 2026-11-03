@@ -6,6 +6,7 @@ import { physicalPaidFixture, originId, confirmationLocalPipeline } from './orde
 import { createCheckout } from '@/lib/store-checkout';
 import { readConfirmationOrigin, runOrderConfirmationMail, confirmationOriginRowKey } from '@/lib/order-confirmation-outbox';
 import { COMMIT_ORDER_CONFIRMATION } from '@/lib/orders';
+import {createLocalRedisPool} from './redis-connection-pool';
 
 const now = 1_800_000_000_000;
 const recovery = () => ({
@@ -232,15 +233,20 @@ test('normal physical workers recover original cap holds through real Lua and fi
 
 /** Each opt-in owns only its captured keys, never a database-wide reset. */
 async function isolatedRecoveryProof(body:(pipeline:typeof confirmationLocalPipeline,pool:string,all:string)=>Promise<void>) {
+ const local=createLocalRedisPool();
+ try{
  const pool='nl:ship:mail:pool',all='nl:ship:mail:all';
- const [prior,items,bytes,count]=await confirmationLocalPipeline([['HGETALL',pool],['HGET',pool,'items'],['HGET',pool,'bytes'],['SCARD',all]]);
+ const [prior,items,bytes,count]=await local.pipeline([['HGETALL',pool],['HGET',pool,'items'],['HGET',pool,'bytes'],['SCARD',all]]);
  assert.ok(Array.isArray(prior));assert.equal(count,0);assert.ok(items===null||items==='0');assert.ok(bytes===null||bytes==='0');
  const made=new Set([pool,all]);
  const pipeline:typeof confirmationLocalPipeline=async commands=>{
   for(const c of commands){if(c[0]==='EVAL')c.slice(3,3+Number(c[2])).forEach(k=>made.add(String(k)));else if(['SET','HSET','SADD','ZADD'].includes(String(c[0])))made.add(String(c[1]));}
-  return confirmationLocalPipeline(commands);
+  return local.pipeline(commands);
  };
+ // Cleanup uses its own connection even if the proof's scoped transport has
+ // failed closed; this never replays any of the proof's uncertain commands.
  try {await body(pipeline,pool,all);}finally{await confirmationLocalPipeline([['DEL',...made]]);if(prior.length)await confirmationLocalPipeline([['HSET',pool,...prior.map(String)]]);}
+ }finally{local.close();}
 }
 const redisOptIn=process.env.MARKTMORGEN_REDIS_INTEGRATION!=='1'||!process.env.CONFIRMATION_ORIGIN_REDIS_PORT;
 

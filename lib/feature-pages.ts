@@ -1538,7 +1538,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "receipt", title: "sale.completed and refund.issued", body: "A paid checkout of any product, each one-click offer taken after it, and a refund, even one made in your Stripe dashboard." },
           { icon: "repeat", title: "membership.started and membership.canceled", body: "A membership bought, and a membership set to end or ended." },
           { icon: "refresh", title: "membership.changed", body: "A membership moved to another price or quantity on your Stripe account, such as an upgrade or a switch to yearly: what it was and what it is now." },
-          { icon: "alert", title: "dispute.opened", body: "A buyer disputed a payment made at your checkout: the amount, the reason their bank gave and the date your answer is due." },
+          { icon: "alert", title: "dispute.opened", body: "A buyer disputed a payment made at your checkout: the amount, the reason Stripe reports and, when Stripe gives one, the date your answer is due." },
           { icon: "gift", title: "lead.captured", body: "Someone confirmed their address for a free product." },
           { icon: "mail", title: "list.joined", body: "Someone confirmed their address to join your email list, from your store page, a form or the checkout script on your own site." },
           { icon: "calendar", title: "call.booked and call.moved", body: "A call or a seat in a session booked and paid, and a booking the buyer moved." },

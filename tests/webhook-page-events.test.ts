@@ -28,9 +28,12 @@ is("each named once", named.length, new Set(named).size);
 part("The two newest say what they carry");
 const code = readFileSync("lib/webhooks.ts", "utf8");
 const body = (e: string) => block?.items.find((i) => i.title === e)?.body ?? "";
-const payload = (e: string) => code.slice(code.indexOf(`emitEvent(store, "${e}"`), code.indexOf(`emitEvent(store, "${e}"`) + 600);
+const payload = (e: string) => {
+  const at = code.indexOf(`emitEvent(store, "${e}"`);
+  return at < 0 ? "" : code.slice(at, code.indexOf("}, created)", at));
+};
 is("membership.changed: what it was and what it is now", [body("membership.changed").includes("what it was and what it is now"), /\bfrom,\s*\n\s*to,/.test(payload("membership.changed"))], [true, true]);
-is("dispute.opened: amount, reason and the date the answer is due", [/amount.*reason.*due/.test(body("dispute.opened")), ["amount_cents", "reason", "evidence_due_by"].every((k) => payload("dispute.opened").includes(k))], [true, true]);
+is("dispute.opened: amount, reason and the date the answer is due", [["the amount", "the reason Stripe reports", "when Stripe gives one, the date your answer is due"].every((w) => body("dispute.opened").includes(w)), ["amount_cents", "reason", "evidence_due_by"].every((k) => payload("dispute.opened").includes(k))], [true, true]);
 is("the introduction says disputes too", page?.intro.includes("refunds and disputes"), true);
 
 done();

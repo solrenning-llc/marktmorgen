@@ -16,12 +16,12 @@
  *   - Whether a session was charged is read from its charge's own record,
  *     never from the time it was due: the unit that charges reads the
  *     session again under a lock right before charging, and never charges
- *     one cancelled (toStop); a series that ends early stops every session
+ *     one canceled (toStop); a series that ends early stops every session
  *     not yet charged.
  *   - A charge that fails (a card refused, or the bank asking the buyer to
  *     confirm): the buyer is emailed a link to pay with the card in hand
  *     until PAY_BY_HOURS before the session; unpaid by then, the session is
- *     cancelled, its time freed, and nothing is charged (failedCharge).
+ *     canceled, its time freed, and nothing is charged (failedCharge).
  *   - A session charged and not yet held when the series ends: the creator
  *     ending it refunds it in full; the buyer ending it is refunded in full
  *     when they end it before the deadline (which is when it is charged, so
@@ -33,7 +33,7 @@
  *     booking's. Each session's price is the length chosen (lib/call-lengths.ts).
  *   - The words a buyer agrees to before booking (seriesChargeWords) say the
  *     card is saved and charged later without them, each amount and when,
- *     the total, what happens when a charge fails and how cancelling works.
+ *     the total, what happens when a charge fails and how canceling works.
  *     Before they are shown, the booking unit checks against Stripe's and the
  *     card networks' official, dated rules what an agreement to future
  *     charges on a saved card must say, and adds it.
@@ -64,12 +64,12 @@ export function seriesCharges(starts: readonly number[], cents: number, bookedAt
   return starts.map((start, index) => ({ index, at: index === 0 ? bookedAt : Math.max(bookedAt, start - lead), cents }));
 }
 
-/** The sessions that must never be charged: every one cancelled and not yet charged (its record says so). */
-export function toStop(cancelled: readonly number[], charged: ReadonlySet<number>): number[] {
-  return cancelled.filter((index) => !charged.has(index));
+/** The sessions that must never be charged: every one canceled and not yet charged (its record says so). */
+export function toStop(canceled: readonly number[], charged: ReadonlySet<number>): number[] {
+  return canceled.filter((index) => !charged.has(index));
 }
 
-/** What a failed charge comes to: paid with the card in hand until PAY_BY_HOURS before the session, or the session cancelled and its time freed. */
+/** What a failed charge comes to: paid with the card in hand until PAY_BY_HOURS before the session, or the session canceled and its time freed. */
 export function failedCharge(start: number, now: number): "pay_by_link" | "cancel" {
   return now < start - PAY_BY_HOURS * HOUR ? "pay_by_link" : "cancel";
 }
@@ -117,7 +117,7 @@ export function seriesChargeWords(input: { count: number; price: string; total: 
   return [
     `You book ${input.count} sessions for ${input.total} in all: ${input.dates.join("; ")}.`,
     `Your card is saved with ${input.store}'s payment account and charged ${input.price} for each session, without you there: the first now, and each other one ${when}.`,
-    `If a charge does not go through, we email you a link to pay it yourself until ${PAY_BY_HOURS} hours before that session. If it is not paid by then, that session is cancelled and you are not charged for it.`,
+    `If a charge does not go through, we email you a link to pay it yourself until ${PAY_BY_HOURS} hours before that session. If it is not paid by then, that session is canceled and you are not charged for it.`,
     deadline
       ? `Cancel a session before it is charged and you never pay for it. Once charged, it is not refunded. The first session is charged now and is not refunded.`
       : `Cancel a session before it is charged and you never pay for it. Once charged, a session is not refunded by itself; ask ${input.store}.`,

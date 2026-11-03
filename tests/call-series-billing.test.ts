@@ -22,12 +22,12 @@ is("refused: an amount that is not a whole positive one, below the currency's sm
 
 part("Charged by its record, never by the time it was due");
 const ended = starts[1] + HOUR;
-const cancelled = toCancel(starts, ended);
-is("ended early: every session cancelled and not yet charged is never charged, even one past its due time", toStop(cancelled, new Set([0, 1])), [2, 3]);
+const canceled = toCancel(starts, ended);
+is("ended early: every session canceled and not yet charged is never charged, even one past its due time", toStop(canceled, new Set([0, 1])), [2, 3]);
 is("a session due a minute ago and not yet charged is stopped too", toStop([2, 3], new Set([0, 1])), [2, 3]);
 
 part("A charge that fails");
-is("paid with the card in hand until two hours before the session; then cancelled, its time freed, nothing charged", [failedCharge(starts[2], starts[2] - (PAY_BY_HOURS + 1) * HOUR), failedCharge(starts[2], starts[2] - PAY_BY_HOURS * HOUR), failedCharge(starts[2], starts[2] - HOUR)], ["pay_by_link", "cancel", "cancel"]);
+is("paid with the card in hand until two hours before the session; then canceled, its time freed, nothing charged", [failedCharge(starts[2], starts[2] - (PAY_BY_HOURS + 1) * HOUR), failedCharge(starts[2], starts[2] - PAY_BY_HOURS * HOUR), failedCharge(starts[2], starts[2] - HOUR)], ["pay_by_link", "cancel", "cancel"]);
 
 part("Refunds when a series ends");
 const charged = deadline.slice(0, 3);
@@ -41,7 +41,7 @@ is("refused, each said", [seriesBillingProblem({ deposit: true, code: false, fro
 
 part("What the buyer agrees to before booking");
 const said = seriesChargeWords({ count: 4, price: "$80", total: "$320", dates: ["Friday, November 6 at 9:00 AM EST", "Friday, November 13 at 9:00 AM EST", "Friday, November 20 at 9:00 AM EST", "Friday, November 27 at 9:00 AM EST"], store: "Lena Coaching", deadlineHours: 48 });
-is("the total and each date, that the card is saved and charged without them, each amount and when, a failed charge, and cancelling", [said.startsWith("You book 4 sessions for $320 in all: Friday, November 6"), said.includes("Your card is saved with Lena Coaching's payment account and charged $80 for each session, without you there: the first now, and each other one 48 hours before it starts."), said.includes("If a charge does not go through, we email you a link to pay it yourself until 2 hours before that session."), said.includes("The first session is charged now and is not refunded.")], [true, true, true, true]);
+is("the total and each date, that the card is saved and charged without them, each amount and when, a failed charge, and canceling", [said.startsWith("You book 4 sessions for $320 in all: Friday, November 6"), said.includes("Your card is saved with Lena Coaching's payment account and charged $80 for each session, without you there: the first now, and each other one 48 hours before it starts."), said.includes("If a charge does not go through, we email you a link to pay it yourself until 2 hours before that session."), said.includes("The first session is charged now and is not refunded.")], [true, true, true, true]);
 is("with no deadline, a session charged is the creator's to refund", seriesChargeWords({ count: 2, price: "$80", total: "$160", dates: ["a", "b"], store: "Lena Coaching" }).endsWith("Once charged, a session is not refunded by itself; ask Lena Coaching."), true);
 
 done();

@@ -5,7 +5,7 @@ import { useLeaveGuard } from "@/components/leave-guard";
 import { crmAnswer } from "@/lib/crm-response";
 import { NewTab } from "@/components/new-tab";
 import { toast } from "@/components/toast";
-import { type CrmField, crmPhone, crmUrl, MAX_FIELD_VALUE, whatsappLink } from "@/lib/crm-rules";
+import { type CrmField, crmPhone, crmUrl, MAX_FIELD_VALUE, severalPicked, whatsappLink } from "@/lib/crm-rules";
 
 /**
  * The store's own fields for one person (lib/crm-rules.ts), each saved as
@@ -75,6 +75,36 @@ export function PersonFields({ person, fields, initial }: { person: string; fiel
           const value = values[field.id] ?? "";
           const change = (next: string) => setValues((v) => ({ ...v, [field.id]: next }));
           return (
+            field.type === "several" ? (
+              // Several of a few choices (639 [GL7](2)): one box each, saved as it is ticked.
+              <fieldset key={field.id} className="block min-w-0">
+                <legend className="field-label">{field.name}</legend>
+                <div className="mt-2 grid gap-1">
+                  {field.options.map((option) => {
+                    const picked = severalPicked(value);
+                    const on = picked.includes(option);
+                    return (
+                      <label key={option} className="flex min-h-11 items-center gap-3">
+                        <input
+                          type="checkbox"
+                          className="h-5 w-5"
+                          checked={on}
+                          onChange={() => {
+                            const next = field.options.filter((o) => (o === option ? !on : picked.includes(o))).join("\n");
+                            change(next);
+                            void save(field, next);
+                          }}
+                        />
+                        <span>{option}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {(saved[field.id] ?? "") !== value ? (
+                  <button type="button" className="btn btn-secondary mt-2" disabled={writeUnconfirmed} onClick={() => void save(field, value)}>Save {field.name}</button>
+                ) : null}
+              </fieldset>
+            ) : (
             <div key={field.id} className="block">
               <label htmlFor={id} className="field-label">{field.name}</label>
               {field.type === "choice" ? (
@@ -114,6 +144,7 @@ export function PersonFields({ person, fields, initial }: { person: string; fiel
                 <button type="button" className="btn btn-secondary mt-2" disabled={writeUnconfirmed} onClick={() => void save(field, value)}>Save {field.name}</button>
               ) : null}
             </div>
+            )
           );
         })}
       </fieldset>

@@ -15,6 +15,7 @@ import {
   type CrmField,
   type Deal,
   FIELD_TYPES,
+  hasChoices,
   type FieldType,
   MAX_CRM_FIELDS,
   MAX_DEAL_NOTE,
@@ -558,7 +559,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => setFieldDraft(fieldDraft.filter((_, j) => j !== i))} aria-label={`Remove field ${i + 1}`}>
                     <Icon name="minus" size={16} />
                   </button>
-                  {field.type === "choice" ? (
+                  {hasChoices(field.type) ? (
                     <label className="block min-w-0 sm:col-span-3">
                       <span className="text-sm text-ink-soft">Choices, separated by commas</span>
                       <input
@@ -586,7 +587,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                 disabled={locked || writeUnconfirmed}
                 onClick={() =>
                   void run(
-                    { action: "fields", fields: fieldDraft.map(({ optionsText, ...f }) => ({ ...f, options: f.type === "choice" ? optionsText.split(",").map((o) => o.trim()).filter(Boolean) : [] })) },
+                    { action: "fields", fields: fieldDraft.map(({ optionsText, ...f }) => ({ ...f, options: hasChoices(f.type) ? optionsText.split(",").map((o) => o.trim()).filter(Boolean) : [] })) },
                     "Fields saved.",
                     () => setFieldDraft(null),
                   )

@@ -38,7 +38,7 @@ export const MAX_DEAL_CENTS = 10_000_000_000;
 export const CRM_ID = /^[a-z0-9]{6}$/;
 export const DEAL_ID = /^[a-z0-9]{10}$/;
 
-export type FieldType = "text" | "number" | "date" | "choice" | "phone" | "url";
+export type FieldType = "text" | "number" | "date" | "choice" | "phone" | "url" | "several";
 export const FIELD_TYPES: { type: FieldType; label: string }[] = [
   { type: "text", label: "Text" },
   { type: "number", label: "Number" },
@@ -46,7 +46,11 @@ export const FIELD_TYPES: { type: FieldType; label: string }[] = [
   { type: "choice", label: "One of a few choices" },
   { type: "phone", label: "Phone number (with country code)" },
   { type: "url", label: "Web address" },
+  { type: "several", label: "Several of a few choices" },
 ];
+
+/** Whether a kind of field holds a list of choices (one, or several). */
+export const hasChoices = (type: FieldType): boolean => type === "choice" || type === "several";
 
 export type CrmField = { id: string; name: string; type: FieldType; options: string[] };
 
@@ -110,10 +114,10 @@ export function parseFields(raw: unknown): CrmField[] {
     const type = FIELD_TYPES.find((t) => t.type === value.type)?.type;
     if (!id || !name || !type || out.some((f) => f.id === id || f.name.toLowerCase() === name.toLowerCase())) continue;
     const options =
-      type === "choice"
+      hasChoices(type)
         ? [...new Set((Array.isArray(value.options) ? value.options : []).map((o) => oneLine(o, MAX_FIELD_OPTION)).filter(Boolean))].slice(0, MAX_FIELD_OPTIONS)
         : [];
-    if (type === "choice" && options.length < 2) continue;
+    if (hasChoices(type) && options.length < 2) continue;
     out.push({ id, name, type, options });
   }
   return out;
@@ -121,6 +125,7 @@ export function parseFields(raw: unknown): CrmField[] {
 
 /** A value for a field as typed, made what the field keeps; "" clears it, null when it cannot be one. */
 export function fieldValue(field: CrmField, raw: unknown): string | null {
+  if (field.type === "several") return severalValue(field, raw);
   const text = oneLine(raw, MAX_FIELD_VALUE);
   if (!text) return "";
   switch (field.type) {
@@ -141,6 +146,23 @@ export function fieldValue(field: CrmField, raw: unknown): string | null {
       return crmUrl(raw);
   }
 }
+
+/**
+ * Several of a field's choices (639 [GL7](2)), as a list or as lines of text,
+ * kept one per line in the field's own order: a choice never holds a line
+ * break, so the lines always read back the same. "" when none is picked;
+ * null when one is not among the field's choices.
+ */
+export function severalValue(field: Pick<CrmField, "options">, raw: unknown): string | null {
+  const pieces = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split("\n") : null;
+  if (pieces === null) return null;
+  const picked = new Set(pieces.map((p) => oneLine(p, MAX_FIELD_OPTION)).filter(Boolean));
+  if ([...picked].some((p) => !field.options.includes(p))) return null;
+  return field.options.filter((o) => picked.has(o)).join("\n");
+}
+
+/** The choices a value of several holds. */
+export const severalPicked = (value: string): string[] => value.split("\n").filter(Boolean);
 
 /**
  * A web address as a contact field keeps it (639 [GL7](2)): http or https

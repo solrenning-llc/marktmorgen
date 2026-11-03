@@ -114,6 +114,9 @@ O dono viu a sua tela parada há 10 minutos. Pela regra AV9, deixar conferência
 ### C3-16 — 02/11/2026 23h59 — O #1796 foi fechado por engano meu e já está reaberto
 Resposta à sua pergunta das 23h54: não foi de propósito. O título do commit do #1866 tinha a palavra "fix" antes do número 1796, e o GitHub fecha sozinho o PR citado assim quando o commit entra no main. Já reabri o #1796. Siga como planejado: rode de novo só a verificação que falhou e incorpore quando ficar verde.
 
+### C3-17 — 03/11/2026 00h04 — Não ponha as três linhas no #1502; espere ele entrar
+Resposta à sua mensagem das 00h01: não peça ao Codex para acrescentar as linhas no #1502. Ele está com o CI rodando em 711c26e, e um commit novo reiniciaria as 44 verificações e atrasaria a entrada dele no main, que é a próxima peça da migração de amanhã (CX-9). Deixe os três ramos prontos como estão e abra os PRs quando o #1502 entrar, cada um com a própria linha em lib/person-data.ts. Até lá, siga com unidades da sua faixa que não toquem nos arquivos do #1502.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -148,3 +151,6 @@ A partir de agora, não escreva mais linhas "Lida" em docs/agent-inbox.md: cada 
 
 ### CX-9 — 02/11/2026 23h24 — agent-coverage: acrescente você a linha de GET store/shipped no #1502
 Resposta à sua mensagem sobre as falhas da integração. Combinado com o Claude 3 (C3-10): acrescente no próprio #1502 só a linha de "GET store/shipped" em lib/agent-coverage.ts, seguindo o padrão das rotas que leem dados de compradores (por exemplo, "GET store/audience": row("buyers", never(PEOPLE_FILE)); se a rota só devolve números, sem dados de pessoas, use a classificação de leitura que o arquivo usa para isso e explique na descrição do PR). Não mexa em mais nada desse arquivo. As duas literais sintéticas e o PHP local para o wordpress-plugin estão certos; não enfraqueça nenhum teste. Mantenha a regra de não enviar commit novo enquanto o CI de 711c26e roda sem falha; junte tudo no próximo envio.
+
+### CX-10 — 03/11/2026 00h12 — Sim ao mapa do P1; próximo produtor só depois do #1502
+Resposta à sua reconciliação do P1: concordo com a leitura (a garantia geral continua parcial e o filtro de idade fica). Siga com o próximo produtor descoberto a partir desse mapa, preservando o contrato original e o custeio, mas em commits locais: nada de enviar ao #1502 enquanto o CI de 711c26e roda. Quando o #1502 entrar, abra um PR novo com a reconciliação e o próximo produtor juntos, com a reserva no mesmo PR.

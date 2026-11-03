@@ -244,7 +244,7 @@ async function isolatedRecoveryProof(body:(pipeline:typeof confirmationLocalPipe
 }
 const redisOptIn=process.env.MARKTMORGEN_REDIS_INTEGRATION!=='1'||!process.env.CONFIRMATION_ORIGIN_REDIS_PORT;
 
-test('both normal workers complete an explicitly funded hundred-origin snapshot with each original message once', {skip:redisOptIn}, async()=>{
+for (const first of ['shipment','confirmation'] as const) test(`both normal workers complete an explicitly funded hundred-origin snapshot with each original message once (${first} first)`, {skip:redisOptIn}, async()=>{
  await isolatedRecoveryProof(async(pipeline,pool,all)=>{
   const clock=Date.now(),old={...shipmentPolicy(clock),maximumChecks:1};
   const runtime={lifecycle:'active' as const,policy:old,pipeline,now:()=>clock};
@@ -265,6 +265,17 @@ test('both normal workers complete an explicitly funded hundred-origin snapshot 
   const renewed={...runtime,policy:{...old,reviewId:'SYNTHETIC_HUNDRED_RENEWED',continuedReviewIds:[old.reviewId],maximumChecks:2,
    recovery:{...recovery(),startsAt:clock-1000,until:clock+3600000,maximumOrigins:100,
     maximumAttempts:1000,maximumCommandUnits:64000,maximumReadBytes:1048576000,maximumTriggerInvocations:1000}}};
+  if(first==='confirmation'){
+   // Real Redis may receive this worker first even when Promise.all lists
+   // shipment first. It must wait for the capture's shipment-family turn.
+   await runOrderConfirmationMail(clock+30000,async()=>{throw Error('There is no confirmation source');},renewed);
+   const [raw]=await pipeline([['HGET',pool,'pendingRecovery']]);
+   const held=JSON.parse(String(raw));
+   assert.equal(held.phase,'capturing');assert.equal(held.attempts,0);
+   assert.equal(held.units,0);assert.equal(held.readBytes,0);
+   assert.equal(held.owner,'');assert.equal(held.leaseUntil,0);
+   assert.equal((await pipeline([['SCARD',all]]))[0],100);
+  }
   const sent=new Set<string>();let accepted=0,complete:Record<string,unknown>|undefined;
   for(let pass=0;pass<250;pass++){
    const results=await Promise.all([

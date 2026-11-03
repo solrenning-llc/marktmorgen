@@ -441,7 +441,10 @@ if op=='next' then
   end
   replaced=true
  end
- if (c.phase=='active' or c.phase=='continuing') and c.family~=family then
+ -- Capture starts in the shipment family too. A confirmation trigger arriving
+ -- first must take the same held path, not spend discovery capacity capturing
+ -- a snapshot for which it cannot receive a ticket.
+ if (c.phase=='capturing' or c.phase=='active' or c.phase=='continuing') and c.family~=family then
   if replaced and not save() then return {'unknown'} end
   return {'held'}
  end

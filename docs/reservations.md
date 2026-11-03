@@ -44,6 +44,7 @@ Add a row before the first commit of a unit; remove it when the unit is merged.
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Codex | 309 [EM1], #1502 P1: recovery capture worker-order regression | codex/list-mail-ses-only | `lib/shipment-mail-outbox.ts`, `tests/pending-mail-recovery.test.ts` | 02/11/2026 22h10 |
 | Codex | 309 [EM1], #1502: integrate partial retained origin with accepted-notice repair | codex/list-mail-ses-only | `lib/store-checkout.ts`, `lib/order-confirmation-outbox.ts`, `lib/shipment-mail-outbox.ts`, `lib/purchase-email.ts`, `tests/single-digital-confirmation.test.ts`, `tests/single-digital-confirmation-world.ts`, `scripts/test_single_digital_confirmation_redis.py`, `docs/reservations.md`, `docs/codex-queue.md`, `docs/e5-money-readers.md` | 02/11/2026 |
 | Codex | 309 [EM1], #1502: preserve legacy recovery grant bytes when origin coverage is omitted | codex/list-mail-ses-only | `lib/shipment-mail-outbox.ts`, `docs/reservations.md` | 02/11/2026 |
 | Codex | 309 [EM1], #1502: record partial retention and exact integration evidence | codex/list-mail-ses-only | `docs/codex-queue.md`, `docs/reservations.md` | 02/11/2026 |

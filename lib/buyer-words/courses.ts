@@ -241,6 +241,10 @@ const en = {
   sampleTitle: "A sample",
   sampleBody:
     "This is what a student who finishes the course gets, with the name they type. Theirs has an address of its own that anyone can open to check it.",
+  /** A certificate that stays valid for a time (639 [GL7](32)). */
+  validUntil: (date: string) => `Valid until ${date}.`,
+  expiredOn: (date: string) => `This certificate expired on ${date}.`,
+  expiredBody: (creator: string) => `It certified the course until that day. To renew it, ask ${creator}.`,
   withdrawnOn: (date: string) => `This certificate was withdrawn on ${date}.`,
   withdrawnBody: (creator: string) =>
     `${creator} withdrew it, so it no longer certifies anything. If it is yours, the course page lets you issue it again.`,
@@ -527,6 +531,9 @@ const es: CoursesWords = {
   sampleTitle: "Un ejemplo",
   sampleBody:
     "Esto es lo que recibe un estudiante que termina el curso, con el nombre que escriba. El suyo tiene su propia dirección, que cualquiera puede abrir para comprobarlo.",
+  validUntil: (date) => `Válido hasta el ${date}.`,
+  expiredOn: (date) => `Este certificado venció el ${date}.`,
+  expiredBody: (creator) => `Certificó el curso hasta ese día. Para renovarlo, pregunta a ${creator}.`,
   withdrawnOn: (date) => `Este certificado se retiró el ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} lo retiró, así que ya no certifica nada. Si es tuyo, desde la página del curso puedes volver a emitirlo.`,
@@ -808,6 +815,9 @@ const fr: CoursesWords = {
   sampleTitle: "Un exemple",
   sampleBody:
     "Voici ce que reçoit un participant qui termine la formation, avec le nom qu'il saisit. Le sien a sa propre adresse, que n'importe qui peut ouvrir pour le vérifier.",
+  validUntil: (date) => `Valable jusqu'au ${date}.`,
+  expiredOn: (date) => `Ce certificat a expiré le ${date}.`,
+  expiredBody: (creator) => `Il a certifié la formation jusqu'à ce jour. Pour le renouveler, adressez-vous à ${creator}.`,
   withdrawnOn: (date) => `Ce certificat a été retiré le ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'a retiré, il ne certifie donc plus rien. S'il est à vous, la page de la formation vous permet de le délivrer à nouveau.`,
@@ -1085,6 +1095,9 @@ const de: CoursesWords = {
   sampleTitle: "Ein Muster",
   sampleBody:
     "So sieht das Zertifikat aus, das Teilnehmende erhalten, wenn sie den Kurs abschließen, mit dem Namen, den sie eingeben. Ihres hat eine eigene Adresse, die jeder öffnen kann, um es zu prüfen.",
+  validUntil: (date) => `Gültig bis ${date}.`,
+  expiredOn: (date) => `Dieses Zertifikat ist am ${date} abgelaufen.`,
+  expiredBody: (creator) => `Es hat den Kurs bis zu diesem Tag bestätigt. Für eine Erneuerung wende dich an ${creator}.`,
   withdrawnOn: (date) => `Dieses Zertifikat wurde am ${date} zurückgezogen.`,
   withdrawnBody: (creator) =>
     `${creator} hat es zurückgezogen, es bescheinigt also nichts mehr. Wenn es Ihres ist, können Sie es auf der Kursseite erneut ausstellen.`,
@@ -1363,6 +1376,9 @@ const it: CoursesWords = {
   sampleTitle: "Un esempio",
   sampleBody:
     "Questo è ciò che riceve uno studente che completa il corso, con il nome che scrive. Il suo ha un indirizzo proprio che chiunque può aprire per verificarlo.",
+  validUntil: (date) => `Valido fino al ${date}.`,
+  expiredOn: (date) => `Questo attestato è scaduto il ${date}.`,
+  expiredBody: (creator) => `Ha attestato il corso fino a quel giorno. Per rinnovarlo, chiedi a ${creator}.`,
   withdrawnOn: (date) => `Questo attestato è stato revocato il ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'ha revocato, quindi non attesta più nulla. Se è tuo, dalla pagina del corso puoi farlo rilasciare di nuovo.`,
@@ -1642,6 +1658,9 @@ const nl: CoursesWords = {
   sampleTitle: "Een voorbeeld",
   sampleBody:
     "Dit krijgt een cursist die de cursus afrondt, met de naam die hij of zij invult. Dat certificaat heeft een eigen adres dat iedereen kan openen om het te controleren.",
+  validUntil: (date) => `Geldig tot ${date}.`,
+  expiredOn: (date) => `Dit certificaat is verlopen op ${date}.`,
+  expiredBody: (creator) => `Het certificeerde de cursus tot die dag. Vraag ${creator} om het te vernieuwen.`,
   withdrawnOn: (date) => `Dit certificaat is ingetrokken op ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} heeft het ingetrokken, dus het bevestigt niets meer. Is het van jou, dan kun je het via de cursuspagina opnieuw laten uitreiken.`,
@@ -1921,6 +1940,9 @@ const pt: CoursesWords = {
   sampleTitle: "Um exemplo",
   sampleBody:
     "É isto que recebe um aluno que conclui o curso, com o nome que introduzir. O dele tem um endereço próprio que qualquer pessoa pode abrir para o verificar.",
+  validUntil: (date) => `Válido até ${date}.`,
+  expiredOn: (date) => `Este certificado caducou a ${date}.`,
+  expiredBody: (creator) => `Certificou o curso até esse dia. Para o renovar, contacte ${creator}.`,
   withdrawnOn: (date) => `Este certificado foi retirado a ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} retirou-o, por isso já não certifica nada. Se for seu, pode voltar a emiti-lo na página do curso.`,

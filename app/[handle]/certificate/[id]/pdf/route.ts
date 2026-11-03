@@ -48,7 +48,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     certifies: w.certifies,
     hasCompleted: w.hasCompleted,
     taughtBy: w.taughtBy(certificate.creator, said.date(certificate.issuedAt * 1000)),
-    idLine: sample ? w.sampleId : w.certId(certificate.id),
+    // A certificate that expires says until when, on the file too (639 [GL7](32)).
+    idLine: sample ? w.sampleId : certificate.validUntil ? `${w.certId(certificate.id)} · ${w.validUntil(said.date(certificate.validUntil * 1000))}` : w.certId(certificate.id),
     checkLine: sample ? w.sampleCheck : w.checkAt(`${SITE_URL}${page}`.replace(/^https?:\/\//, "")),
     stamp: sample ? w.stampSample : "",
     accent: store.look.accent,

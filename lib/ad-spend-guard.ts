@@ -17,7 +17,7 @@
  *     worst case never passes the limit: the pause is a second wall, not the
  *     only one.
  */
-import { type CampaignPlan, MAX_DAILY_CENTS, worstCaseCents } from "@/lib/ad-campaign-plan";
+import { type CampaignPlan, dailyBudgetAllowed, worstCaseCents } from "@/lib/ad-campaign-plan";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const dayNumber = (date: string): number | null => {
@@ -43,7 +43,7 @@ export function changeBudget(
   const first = dayNumber(plan.start);
   if (from === null || last === null || first === null) return { ok: false, error: "dates", fix: "The dates could not be read." };
   if (from > last) return { ok: false, error: "ended", fix: "This campaign has ended; start a new one." };
-  if (!Number.isSafeInteger(newDailyCents) || newDailyCents <= 0 || newDailyCents > MAX_DAILY_CENTS) return { ok: false, error: "budget", fix: "Choose a daily budget above zero." };
+  if (!dailyBudgetAllowed(newDailyCents)) return { ok: false, error: "budget", fix: "Choose a daily budget above zero." };
   if (!Number.isSafeInteger(spentCents) || spentCents < 0) return { ok: false, error: "spent", fix: "What was spent could not be read; try again once the platform reports it." };
   const start = Math.max(from, first);
   const left = last - start + 1;

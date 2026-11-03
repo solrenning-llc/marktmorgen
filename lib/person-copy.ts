@@ -11,6 +11,8 @@
  *   marks     it keeps only marks with nothing in them to read (that a
  *             reminder was sent, a link that still works, a ten-minute
  *             cache made from Stripe), so the copy says what is held;
+ *   elsewhere it is not kept by Marktmorgen at all but on the creator's own
+ *             account elsewhere (Stripe), and the copy says where to ask;
  *   pending   it keeps something the copy cannot read yet. While any module
  *             is pending, COPY_COMPLETE is false and no door gives the copy
  *             to anybody: a copy that leaves things out is not the copy the
@@ -33,13 +35,13 @@ import { readForms, readResponses } from "@/lib/form-store";
 import { listRequests } from "@/lib/payment-request-store";
 import { listAgreements, readVersion } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
-import { passedQuizzes } from "@/lib/quiz";
+import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { submissionsOf } from "@/lib/assignment";
-import { certificateOf } from "@/lib/certificate";
+import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
-import { bondFor } from "@/lib/affiliate-bond";
+import { bondRecordOf } from "@/lib/affiliate-bond";
 import { readLeads } from "@/lib/affiliate-leads";
-import { importedFor } from "@/lib/imported-purchases";
+import { importedFrom, importedKey } from "@/lib/imported-purchases";
 import { inviteField, readInvite } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
@@ -53,8 +55,16 @@ import { waitlistPlacesOf } from "@/lib/waitlist";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
 import { syncJobsOf } from "@/lib/email-sync";
+import { memberTraces, readMember as readCommunityMember } from "@/lib/community";
+import { pointsRecordOf } from "@/lib/community-points";
+import { allNoticesOf } from "@/lib/community-notify";
+import { deviceCount } from "@/lib/community-push";
+import { conversationsOf } from "@/lib/community-dm";
+import { chatMessagesOf } from "@/lib/community-chat";
+import { rsvpsOf } from "@/lib/community-events";
+import { votesOf } from "@/lib/community-polls";
 
-export type CopyHow = "copied" | "marks" | "pending";
+export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 
 /** What the copy does with each module the erasure reaches, said in a few words to the person. */
 export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>> = {
@@ -66,13 +76,13 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/agreement-store.ts": { how: "copied", what: "Proposals and agreements the store sent you, each version's text, and your signature" },
   "lib/buyer-profile.ts": { how: "copied", what: "Notes the store's team wrote about you" },
   "lib/form-store.ts": { how: "copied", what: "Your answers to the store's forms" },
-  "lib/learn.ts": { how: "copied", what: "Your progress in the store's courses" },
+  "lib/learn.ts": { how: "copied", what: "Your progress in the store's courses: when you began and came back, and the lessons you finished. The browsers let in with your address and the drip emails already sent are kept as marks" },
   "lib/course-finish.ts": { how: "marks", what: "Marks that you opened and finished a course; the lessons you finished are in your course progress" },
-  "lib/quiz.ts": { how: "copied", what: "The quizzes you passed" },
+  "lib/quiz.ts": { how: "copied", what: "Your quiz tries, answers, results and passes" },
   "lib/assignment.ts": { how: "copied", what: "Work you handed in, and the store's feedback on it" },
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
-  "lib/community-erasure.ts": { how: "pending", what: "Your community profile, points, notifications, private messages, what you said in its room and your answers to its events" },
+  "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
   "lib/affiliate-leads.ts": { how: "copied", what: "Sign-ups, free products and calls an affiliate was credited for" },
@@ -91,6 +101,21 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/reviews.ts": { how: "copied", what: "Your reviews, and the store's replies to them" },
   "lib/buyer-library.ts": { how: "copied", what: "The note that you bought from or joined the store, for your library" },
   "lib/erasure-index.ts": { how: "marks", what: "Links the store emailed you that still work (stop, waitlist, review, free-product and sign-up links)" },
+  // What the erasure keeps on purpose (lib/person-data.ts, "kept"): still theirs to see.
+  "lib/affiliates.ts": { how: "marks", what: "Commissions an affiliate earned on your purchases, which name the sale and not you" },
+  "lib/community-dm.ts": { how: "marks", what: "Another member's choice not to get your messages, which is theirs and names nobody's address" },
+  "lib/paypal-sales.ts": { how: "pending", what: "Your PayPal orders: the product, the amount, the date and the box you checked before paying" },
+  "lib/licence-keys.ts": { how: "pending", what: "License keys you bought, and the sale each came from" },
+  "lib/gifts.ts": { how: "pending", what: "Gifts you bought or were given" },
+  "lib/group-buy.ts": { how: "pending", what: "Places bought for a group that you bought or were given" },
+  "lib/preorders.ts": { how: "pending", what: "Your pre-orders and what became of them" },
+  "lib/call-packages.ts": { how: "pending", what: "Packages of calls you bought, and the sessions left" },
+  "lib/meet-records.ts": { how: "pending", what: "Your place on a booked group call's guest list" },
+  "lib/shipments.ts": { how: "pending", what: "When your physical orders were shipped, and their tracking links" },
+  "lib/closing-buyers.ts": { how: "pending", what: "While the store is closing: that you were emailed it closes" },
+  "lib/closing-holds.ts": { how: "pending", what: "While the store is closing: your membership's last payment, kept to give back the time you paid for" },
+  "lib/closing-plan-guard.ts": { how: "marks", what: "Nothing about buyers: only the creator's own plan, if one was paid while the store was closing" },
+  "lib/stripe-account.ts": { how: "elsewhere", what: "Your payments are on the creator's own Stripe account, not kept by Marktmorgen: your receipts and the store can give you them" },
   "lib/contacts.ts": { how: "copied", what: "Your place on the store's list: your address, name, labels, what you asked for or bought, and whether you agreed to hear from it" },
 };
 
@@ -106,6 +131,8 @@ export type PersonCopy = {
   sections: CopySection[];
   /** What is held only as marks, said in words. */
   marks: string[];
+  /** What is held elsewhere, not by Marktmorgen, and where. */
+  elsewhere: string[];
 };
 
 const iso = (seconds: number) => (seconds > 0 ? new Date(seconds * 1000).toISOString() : "");
@@ -175,7 +202,9 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const out: unknown[] = [];
     for (const c of s.courses) {
       const passed = await passedQuizzes(c.courseId, s.learner);
-      if (passed.size) out.push({ course: c.productId, quizzesPassed: [...passed] });
+      const attempts = await Promise.all(c.lessonIds.map((lessonId) => attemptOf(c.courseId, lessonId, s.learner)));
+      const tried = c.lessonIds.flatMap((lessonId, i) => (attempts[i].used > 0 || attempts[i].last ? [{ lesson: lessonId, tries: attempts[i].used, best: attempts[i].best, passed: attempts[i].passed, last: attempts[i].last }] : []));
+      if (passed.size || tried.length) out.push({ course: c.productId, quizzesPassed: [...passed], attempts: tried });
     }
     return out;
   },
@@ -190,14 +219,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
-  "lib/certificate.ts": async (s) => {
-    const out: unknown[] = [];
-    for (const c of s.courses) {
-      const cert = await certificateOf(c.courseId, s.learner);
-      if (cert) out.push(cert);
-    }
-    return out;
-  },
+  // Withdrawn ones too: the erasure deletes them, so they are kept about the person.
+  "lib/certificate.ts": async (s) => certificatesOf(s.courses.map((c) => c.courseId), s.email),
   "lib/lesson-comments.ts": async (s) => {
     const out: unknown[] = [];
     for (const c of s.courses) {
@@ -209,11 +232,12 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/affiliate-bond.ts": async (s) => {
-    const affiliate = await bondFor(s.store, s.email);
+    const affiliate = await bondRecordOf(s.statsId, s.email);
     return affiliate ? [{ affiliate }] : [];
   },
   "lib/affiliate-leads.ts": async (s) => (await readLeads(s.store)).filter((l) => l.email && same(l.email, s.email)),
-  "lib/imported-purchases.ts": async (s) => importedFor(s.store, s.email),
+  // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
+  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
     for (const productId of s.productIds) {
@@ -257,6 +281,43 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
   "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),
+  "lib/community-erasure.ts": async (s) => {
+    const id = s.communityId;
+    if (!id) return [];
+    const who = s.learner;
+    const member = await readCommunityMember(id, who);
+    const [points, notices, devices, conversations, room, events, traces] = await Promise.all([
+      pointsRecordOf(id, who),
+      allNoticesOf(id, who),
+      deviceCount(id, who),
+      conversationsOf(id, who),
+      chatMessagesOf(id, who),
+      rsvpsOf(id, who),
+      memberTraces(id, who),
+    ]);
+    const votes = await votesOf(id, who, traces.pollPosts);
+    const { pollPosts: _polls, ...wrote } = traces;
+    void _polls;
+    const record = {
+      // The link in their announcement emails is a key, left out: they have it in those emails.
+      profile: member ? { email: member.e, name: member.n, handle: member.h, inDirectory: member.dir, announcementEmails: member.mail, joined: iso(member.at), lastSeen: iso(member.seen), muted: member.muted } : null,
+      points,
+      // What happened, on which post, and when; not who did it, which is theirs.
+      notifications: notices.map((n) => ({ kind: n.kind, post: n.post, ...(n.comment ? { comment: n.comment } : {}), at: iso(n.at) })),
+      devicesNotified: devices,
+      privateMessages: conversations.map((c) => ({ request: c.request, messages: c.messages.map((m) => ({ from: m.mine ? "you" : m.fromCreator ? "the creator" : "the other member", text: m.text, at: iso(m.at) })) })),
+      room: room.map((m) => ({ text: m.text, at: iso(m.at) })),
+      events: events.map((e) => ({ event: e.event, at: iso(e.at) })),
+      posts: wrote.posts.map((p) => ({ ...p, at: iso(p.at), edited: iso(p.edited) })),
+      comments: wrote.comments.map((c) => ({ ...c, at: iso(c.at), edited: iso(c.edited) })),
+      likedPosts: wrote.likedPosts,
+      likedComments: wrote.likedComments,
+      reported: wrote.reported,
+      votes,
+    };
+    const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !votes.length && Object.values(wrote).every((list) => !list.length);
+    return empty ? [] : [record];
+  },
   "lib/flows.ts": async (s) => {
     const flows = await readFlows(s.listId);
     const started = new Set(await flowsStartedFor(flows, s.email));
@@ -285,7 +346,8 @@ export async function copyPerson(scope: ErasureScope, now = Date.now()): Promise
     if (records.length) sections.push({ module, what: plan.what, records });
   }
   const marks = Object.values(COPY_PLAN).filter((p) => p.how === "marks").map((p) => p.what);
-  return { store: { name: scope.store.name, handle: scope.store.handle }, email: scope.email, made: new Date(now).toISOString(), sections, marks };
+  const elsewhere = Object.values(COPY_PLAN).filter((p) => p.how === "elsewhere").map((p) => p.what);
+  return { store: { name: scope.store.name, handle: scope.store.handle }, email: scope.email, made: new Date(now).toISOString(), sections, marks, elsewhere };
 }
 
 export type { Store };

@@ -1060,3 +1060,69 @@ export async function forgetMemberRecord(id: string, who: string): Promise<Membe
   ]);
   return member;
 }
+
+/** Commands sent at once while reading a whole community for one member's copy. */
+const TRACE_BATCH = 500;
+
+export type MemberTraces = {
+  posts: { post: string; space: string; title: string; text: string; at: number; edited: number; hidden: boolean }[];
+  comments: { post: string; comment: string; text: string; at: number; edited: number; hidden: boolean }[];
+  likedPosts: string[];
+  likedComments: { post: string; comment: string }[];
+  reported: string[];
+  /** The posts that carry a poll, for reading their votes (lib/community-polls.ts, votesOf). */
+  pollPosts: string[];
+};
+
+/**
+ * What one member wrote and did in the community, for the copy of their data
+ * (619 [SZ3], lib/person-copy.ts): their posts and comments (their own words
+ * only, never the replies under them), the posts and comments they liked and
+ * what they reported. These stay in the community after an erasure, without
+ * their name (lib/person-data.ts, "open"), and are theirs to see all the
+ * same. Reads every post the community keeps, at most MAX_POSTS, in batches.
+ * Only reads.
+ */
+export async function memberTraces(id: string, who: string): Promise<MemberTraces> {
+  const out: MemberTraces = { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
+  if (!isRedisConfigured()) return out;
+  const [raw] = await redisPipeline([["ZREVRANGE", feedKey(id), 0, MAX_POSTS - 1]]);
+  const ids = (Array.isArray(raw) ? raw : []).map(String);
+  for (let i = 0; i < ids.length; i += TRACE_BATCH) {
+    const batch = ids.slice(i, i + TRACE_BATCH);
+    const posts = await readPosts(id, batch);
+    const replies = await redisPipeline(
+      posts.flatMap((p) => [
+        ["HGETALL", commentsKey(id, p.id)],
+        ["SISMEMBER", likesKey(id, p.id), who],
+        ["SISMEMBER", reportersKey(id, `p:${p.id}`), who],
+      ]),
+    );
+    const theirComments: { post: string; comment: Comment }[] = [];
+    const everyComment: { post: string; comment: Comment }[] = [];
+    posts.forEach((p, k) => {
+      if (p.a === who) out.posts.push({ post: p.id, space: p.sp, title: p.title, text: p.text, at: p.at, edited: p.ed, hidden: p.hid });
+      if (p.poll) out.pollPosts.push(p.id);
+      if (Number(replies[k * 3 + 1]) === 1) out.likedPosts.push(p.id);
+      if (Number(replies[k * 3 + 2]) === 1) out.reported.push(`post ${p.id}`);
+      const flat = replies[k * 3];
+      const values = Array.isArray(flat) ? flat.filter((_, n) => n % 2 === 1) : flat && typeof flat === "object" ? Object.values(flat as Record<string, string>) : [];
+      for (const value of values) {
+        const comment = parseComment(value);
+        if (!comment) continue;
+        everyComment.push({ post: p.id, comment });
+        if (comment.a === who) theirComments.push({ post: p.id, comment });
+      }
+    });
+    for (const { post, comment } of theirComments) out.comments.push({ post, comment: comment.id, text: comment.text, at: comment.at, edited: comment.ed, hidden: comment.hid });
+    for (let c = 0; c < everyComment.length; c += TRACE_BATCH) {
+      const slice = everyComment.slice(c, c + TRACE_BATCH);
+      const marks = await redisPipeline(slice.flatMap(({ post, comment }) => [["SISMEMBER", commentLikesKey(id, post, comment.id), who], ["SISMEMBER", reportersKey(id, `c:${post}:${comment.id}`), who]]));
+      slice.forEach(({ post, comment }, k) => {
+        if (Number(marks[k * 2]) === 1) out.likedComments.push({ post, comment: comment.id });
+        if (Number(marks[k * 2 + 1]) === 1) out.reported.push(`comment ${comment.id} under post ${post}`);
+      });
+    }
+  }
+  return out;
+}

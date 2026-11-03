@@ -229,3 +229,18 @@ export function pollWhen(poll: Poll, at = Math.floor(Date.now() / 1000)): string
   const days = Math.round(left / 86_400);
   return `Closes in ${days} ${days === 1 ? "day" : "days"}`;
 }
+
+/** One member's votes in the polls on these posts, for the copy of their data (619 [SZ3]): the options they picked, by post. Only reads. */
+export async function votesOf(id: string, who: string, postIds: string[]): Promise<{ post: string; picked: string[] }[]> {
+  if (!postIds.length) return [];
+  const out: { post: string; picked: string[] }[] = [];
+  for (let i = 0; i < postIds.length; i += 500) {
+    const batch = postIds.slice(i, i + 500);
+    const replies = await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who]));
+    batch.forEach((post, k) => {
+      const raw = replies[k];
+      if (typeof raw === "string" && raw) out.push({ post, picked: raw.split(",").filter(Boolean) });
+    });
+  }
+  return out;
+}

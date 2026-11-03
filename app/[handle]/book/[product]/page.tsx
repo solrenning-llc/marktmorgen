@@ -11,7 +11,7 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
-import { ownLength } from "@/lib/call-lengths";
+import { bookingLength, offeredLengths, ownLength } from "@/lib/call-lengths";
 import { type CallListing, canMove, catchUpBookings, icsLink, isCallProduct, slotsForMove, slotsForProduct, whyNotMove } from "@/lib/calls";
 import { chargeNow } from "@/lib/call-deposit";
 import { type CallSetup, MAX_MOVES, MEET_NAMES, movableUntil, readableTime, zoneName } from "@/lib/call-setup";
@@ -70,8 +70,17 @@ export default async function BookPage({ params, searchParams }: Params) {
   const open = canSellProduct(store, product) && !(await isSoon(store, product.id).catch(() => false));
   // On a team that lets buyers choose (lib/team-scheduling-rules.ts): who they picked, by position; none is "Any available".
   const withKey = typeof query.with === "string" && /^[0-5]$/.test(query.with) ? query.with : "";
-  const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null) : null;
+  // One of a call's lengths, each with its price (lib/call-lengths.ts): offered only where it can be booked and charged
+  // (bookingLength), never from a package, with a deposit or on a team that lets buyers choose; none chosen is the call's own.
+  const pkgFirst = Boolean(pkgToken);
+  const lengths = !pkgFirst && !product.call.deposit && product.call.kind === "weekly" ? offeredLengths(product.call, product.priceCents) : [];
+  const asked = typeof query.length === "string" ? query.length : undefined;
+  const length = lengths.length ? bookingLength(product.call, product.priceCents, asked) ?? lengths[0] : null;
+  const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null, length?.minutes ?? null) : null;
   const hostChoices = (read && "hosts" in read ? read.hosts : null) ?? [];
+  // A team that lets buyers choose sells the call's own length only (holdAndCheckout): no lengths are offered there.
+  const choices = hostChoices.length ? [] : lengths;
+  const chosen = choices.length ? length : null;
   const pickedHost = (read && "picked" in read ? read.picked : null) ?? null;
   const days = read ? read.days : null;
   const starts = days ? days.flatMap((day) => day.starts) : [];
@@ -80,7 +89,7 @@ export default async function BookPage({ params, searchParams }: Params) {
   if (read && read.paid.length) after(() => catchUpBookings(store, read.paid, SITE_URL));
   const setup = product.call;
   const live = setup.kind === "live";
-  const price = money(product.priceCents);
+  const price = money(chosen ? chosen.cents : product.priceCents);
   const fromPackage = Boolean(pkg && pkgState && pkgState.left > 0);
   // A booking with a deposit: a discount code is typed here and taken off the whole price (lib/deposit-code.ts),
   // shown only when the checkout would charge a deposit, as app/api/store/book reads it.
@@ -117,7 +126,7 @@ export default async function BookPage({ params, searchParams }: Params) {
               </h1>
               <p className="st-price text-base">{price}</p>
             </div>
-            <p className="st-muted mt-2 text-sm font-semibold">{callLine(setup, b)}</p>
+            <p className="st-muted mt-2 text-sm font-semibold">{callLine(chosen ? { ...setup, minutes: chosen.minutes } : setup, b)}</p>
             {deposit ? <p className="mt-2 text-sm" data-call-due="">{b.depositRest(money(deposit.rest), store.name)}</p> : null}
             {/* The creator's cancellation deadline (lib/call-setup.ts), before paying; a session from a package pays nothing here. */}
             {setup.cancelHours && !fromPackage ? <p className="mt-2 text-sm" data-call-cancel="">{b.cancelPolicy(setup.cancelHours, store.name)}</p> : null}
@@ -165,6 +174,23 @@ export default async function BookPage({ params, searchParams }: Params) {
               />
             ) : (
               <>
+                {chosen ? (
+                  // A plain form: the times are drawn again for the length chosen, only when the buyer asks (3.2.2).
+                  <form method="get" className="mt-6" data-length-pick="">
+                    <fieldset>
+                      <legend className="block font-bold" style={{ color: "var(--st-text)" }}>{b.lengthPick}</legend>
+                      <div className="mt-2 grid gap-2">
+                        {choices.map((l) => (
+                          <label key={l.minutes} className="flex min-h-11 items-center gap-3">
+                            <input type="radio" name="length" value={l.minutes} defaultChecked={l.minutes === chosen.minutes} className="h-5 w-5" />
+                            <span>{b.lengthOption(l.minutes, money(l.cents))}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <button type="submit" className="btn btn-secondary mt-3">{b.lengthShow}</button>
+                  </form>
+                ) : null}
                 {hostChoices.length ? (
                   // A plain form: the times are drawn again for the person chosen, only when the buyer asks (3.2.2).
                   <form method="get" className="mt-6" data-host-pick="">
@@ -190,7 +216,8 @@ export default async function BookPage({ params, searchParams }: Params) {
                   seatsLeft={setup.seats > 1 ? seatLabels(read.left, b) : undefined}
                   pkg={fromPackage ? pkgToken : undefined}
                   host={pickedHost}
-                  words={{ ...slotWords(store, b, setup.minutes, payNow, false, fromPackage), code }}
+                  minutes={chosen ? chosen.minutes : undefined}
+                  words={{ ...slotWords(store, b, chosen ? chosen.minutes : setup.minutes, payNow, false, fromPackage), code }}
                 />
               </>
             )}

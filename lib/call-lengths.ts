@@ -151,6 +151,12 @@ export function bookingLength(setup: Pick<CallSetup, "kind" | "minutes" | "lengt
   return chosenLength(lengths, asked);
 }
 
+/** The lengths a booking page offers: the call's, while the first is still its own at the product's price (bookingLength); none otherwise. */
+export function offeredLengths(setup: Pick<CallSetup, "kind" | "minutes" | "lengths">, priceCents: number): CallLength[] {
+  const lengths = setup.lengths ?? [];
+  return setup.kind === "weekly" && lengths.length > 1 && lengths[0].minutes === setup.minutes && lengths[0].cents === priceCents ? lengths : [];
+}
+
 /**
  * The length a paid booking of weekly hours keeps when it moves, in minutes:
  * the one it was paid for, read from its own start and end, never the

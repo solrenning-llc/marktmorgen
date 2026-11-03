@@ -996,13 +996,17 @@ function offerFrom(product: CallListing, now: number, seats: TeamBusy[], session
  * Every open time or session for a call product, or null when it cannot be
  * read, and the paid calls read on the way, for catchUpBookings.
  */
-export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null) {
+export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null, minutes?: number | null) {
+  // One of a call's lengths (lib/call-lengths.ts): its times, at that length, never on a team, whose hosts' times are read at the setup's own.
+  const atLength = Boolean(minutes && product.call.kind === "weekly" && minutes !== product.call.minutes && product.call.lengths?.some((l) => l.minutes === minutes));
+  if (atLength) product = { ...product, call: { ...product.call, minutes: minutes as number } };
   try {
     const now = Date.now();
     const { busy, paid, blocked, sessions } = await readBusy(store, now);
     const whole = await activeTeam(store, product);
     // A team event type the plan or the team no longer allows: nothing on offer.
     if (whole === "closed") return { days: [], left: {}, sessions: [], paid };
+    if (whole && atLength) return { days: [], left: {}, sessions: [], paid };
     if (whole) {
       // A team that lets buyers choose: who they may pick, and only the chosen host's times once they have.
       const hosts = hostChoices(whole);

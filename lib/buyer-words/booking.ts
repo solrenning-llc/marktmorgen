@@ -235,6 +235,10 @@ const en = {
   hostPick: "Who would you like to book with?",
   hostAny: "Any available",
   hostShow: "Show their times",
+  /** Choosing one of a call's lengths, each with its price (lib/call-lengths.ts). */
+  lengthPick: "How long would you like?",
+  lengthShow: "Show times for this length",
+  lengthOption: (minutes: number, price: string) => `${minutes} minutes, ${price}`,
   withHost: (name: string) => `With ${name}`,
   /** The creator's cancellation deadline (lib/call-setup.ts, cancelHours), said before paying and in the confirmation. */
   cancelPolicy: (hours: number, store: string) =>
@@ -437,6 +441,9 @@ const es: BookingWords = {
   hostPick: "¿Con quién quieres reservar?",
   hostAny: "Cualquiera disponible",
   hostShow: "Ver sus horarios",
+  lengthPick: "¿Cuánto tiempo quieres?",
+  lengthShow: "Ver los horarios de esta duración",
+  lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
     `Cancela con al menos ${hours} horas de antelación, respondiendo a tu correo de confirmación, y ${store} te devuelve lo que pagaste en línea. Si cancelas más tarde o no vienes, ${store} no tiene que devolverlo. Si ${store} cancela, se te devuelve todo. Esto no afecta a tus derechos según la ley.`,
@@ -636,6 +643,9 @@ const fr: BookingWords = {
   hostPick: `Avec qui voulez-vous réserver${S}?`,
   hostAny: "Toute personne disponible",
   hostShow: "Voir ses horaires",
+  lengthPick: `Quelle durée souhaitez-vous${S}?`,
+  lengthShow: "Voir les horaires pour cette durée",
+  lengthOption: (minutes: number, price: string) => `${minutes} minutes, ${price}`,
   withHost: (name) => `Avec ${name}`,
   cancelPolicy: (hours, store) =>
     `Annulez au moins ${hours} heures avant le début, en répondant à votre e-mail de confirmation, et ${store} rembourse ce que vous avez payé en ligne. Si vous annulez plus tard ou ne venez pas, ${store} n'est pas tenu de le rembourser. Si ${store} annule, tout vous est remboursé. Cela ne change rien à vos droits prévus par la loi.`,
@@ -831,6 +841,9 @@ const de: BookingWords = {
   hostPick: "Bei wem möchten Sie buchen?",
   hostAny: "Wer gerade frei ist",
   hostShow: "Zeiten anzeigen",
+  lengthPick: "Wie lange möchten Sie buchen?",
+  lengthShow: "Zeiten für diese Dauer anzeigen",
+  lengthOption: (minutes: number, price: string) => `${minutes} Minuten, ${price}`,
   withHost: (name) => `Bei ${name}`,
   cancelPolicy: (hours, store) =>
     `Stornieren Sie mindestens ${hours} Stunden vor Beginn, indem Sie auf Ihre Bestätigungs-E-Mail antworten, dann erstattet ${store}, was Sie online bezahlt haben. Stornieren Sie später oder kommen Sie nicht, muss ${store} es nicht erstatten. Sagt ${store} ab, bekommen Sie alles zurück. Ihre gesetzlichen Rechte bleiben unberührt.`,
@@ -1028,6 +1041,9 @@ const it: BookingWords = {
   hostPick: "Con chi vuoi prenotare?",
   hostAny: "Chiunque sia disponibile",
   hostShow: "Mostra i suoi orari",
+  lengthPick: "Quanto tempo desideri?",
+  lengthShow: "Mostra gli orari per questa durata",
+  lengthOption: (minutes: number, price: string) => `${minutes} minuti, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
     `Annulla almeno ${hours} ore prima dell'inizio, rispondendo alla tua email di conferma, e ${store} ti rimborsa quanto pagato online. Se annulli oltre questo termine o non vieni, ${store} non è tenuto a rimborsarlo. Se ${store} annulla, ti viene restituito tutto. Questo non tocca i tuoi diritti di legge.`,
@@ -1224,6 +1240,9 @@ const nl: BookingWords = {
   hostPick: "Bij wie wil je boeken?",
   hostAny: "Wie er beschikbaar is",
   hostShow: "Toon de tijden",
+  lengthPick: "Hoe lang wilt u boeken?",
+  lengthShow: "Toon de tijden voor deze duur",
+  lengthOption: (minutes: number, price: string) => `${minutes} minuten, ${price}`,
   withHost: (name) => `Bij ${name}`,
   cancelPolicy: (hours, store) =>
     `Annuleer minstens ${hours} uur voor de start, door te antwoorden op je bevestigingsmail, en ${store} betaalt terug wat je online betaalde. Annuleer je later of kom je niet, dan hoeft ${store} het niet terug te betalen. Annuleert ${store}, dan krijg je alles terug. Dit doet niets af aan je wettelijke rechten.`,
@@ -1421,6 +1440,9 @@ const pt: BookingWords = {
   hostPick: "Com quem quer marcar?",
   hostAny: "Qualquer pessoa disponível",
   hostShow: "Ver os horários",
+  lengthPick: "Quanto tempo você quer?",
+  lengthShow: "Ver os horários para essa duração",
+  lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Com ${name}`,
   cancelPolicy: (hours, store) =>
     `Cancele com pelo menos ${hours} horas de antecedência, respondendo ao seu e-mail de confirmação, e ${store} reembolsa o que pagou online. Se cancelar mais tarde ou faltar, ${store} não tem de o reembolsar. Se ${store} cancelar, recebe tudo de volta. Isto não afeta os seus direitos previstos na lei.`,

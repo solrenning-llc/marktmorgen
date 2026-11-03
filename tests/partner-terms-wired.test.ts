@@ -9,10 +9,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
-import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { affiliateCookieName, readAffiliate } from "@/lib/affiliates";
 import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
+import { offerWords } from "@/lib/partner-invites";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
 import { POST as answerRoute } from "@/app/api/store/affiliates/partner-answer/route";
 import { store as redis } from "./redis-stub";
@@ -21,8 +23,22 @@ import { paidPeriod } from "./billing-period-fixture";
 
 const A = "prodaaaaaa";
 
+// A stand-in for the email service: what an invitation says is read from here.
+const mails: { to: string; text: string }[] = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  if (url.hostname === "api.resend.com") {
+    const body = JSON.parse(String(init?.body)) as { to: string | string[]; text: string };
+    mails.push({ to: [body.to].flat()[0], text: body.text });
+    return new Response(JSON.stringify({ id: `email_${mails.length}` }));
+  }
+  return realFetch(input, init);
+}) as typeof fetch;
+
 async function main(): Promise<void> {
   redis.clear();
+  process.env.RESEND_API_KEY = "re_test_partner_terms_stand_in";
   const owner = "termswired@example.com";
   await claimHandle(owner, "termswired", "Terms Wired", "");
   const statsId = (await ensureStatsId(owner))!.statsId!;
@@ -78,8 +94,22 @@ async function main(): Promise<void> {
     "started:creator", "asked:creator", "asked:creator", "declined:partner", "asked:creator", "changed:partner",
   ]);
 
+  part("An invitation says how long it runs");
+  // The program switched on, which an invitation needs (lib/affiliates.ts affiliatesOn).
+  await setAffiliateSetting(owner, parseAffiliateSetting({ enabled: true, percent: 20, days: 30 }));
+  is("an end that is not after today is refused", (await post({ action: "invite", email: "newpartner@example.com", percent: 10, products: [A], ends: "2020-01-01" })).error, "share_ends");
+  const sentBefore = mails.length;
+  const invited = await post({ action: "invite", email: "newpartner@example.com", percent: 10, products: [A], ends: future(90) });
+  const mail = mails.slice(sentBefore).find((m) => m.to === "newpartner@example.com");
+  is("sent, and the email states the last day", [invited.ok, /It runs through [A-Z][a-z]+ \d{1,2}, \d{4}\./.test(mail?.text ?? "")], [true, true]);
+  const open = await post({ action: "invite", email: "openpartner@example.com", percent: 10, products: [A] });
+  const openMail = mails.find((m) => m.to === "openpartner@example.com");
+  is("without one, it says it runs until either side ends it", [open.ok, (openMail?.text ?? "").includes("It runs until you or the store end it.")], [true, true]);
+  is("a creator already here reads the same in their studio", offerWords({ id: "a1b2c3d4e5f6", sid: "s", storeName: "Terms Wired", handle: "termswired", share: { percent: 10, products: [A], until: Date.UTC(2027, 2, 5) / 1000 }, titles: ["Book"], at: 0 }).endsWith("It runs through March 4, 2027."), true);
+
   part("The screens");
   const studio = readFileSync("components/affiliate-studio.tsx", "utf8");
+  is("the invitation has its own labeled end date", studio.includes('htmlFor="partner-ends"') && studio.includes('aria-describedby="partner-ends-help"') && studio.includes("ends: inviteEnds"), true);
   is("a labeled end date with its rule", studio.includes("Last day it earns (optional)") && studio.includes("aria-describedby={`${where}-ends-help`}") && studio.includes("is sent to them to accept first"), true);
   is("the studio says when a change waits and how to take it back", studio.includes("Waiting for their yes") && studio.includes("Save their current share again to take the request back."), true);
   is("and keeps the history readable", studio.includes("History of this partnership") && studio.includes("stepWords(step)"), true);

@@ -1746,6 +1746,8 @@ function PartnerInvite({
   const [email, setEmail] = useState("");
   const [percent, setPercent] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
+  // An end the partner agrees to with the rest, or empty for until either side ends it (630 [HN6](39)).
+  const [inviteEnds, setInviteEnds] = useState("");
   const share = Number(percent.trim());
 
   if (!open) {
@@ -1773,7 +1775,7 @@ function PartnerInvite({
           e.preventDefault();
           const done = await act(
             "invite",
-            { action: "invite", email: email.trim(), percent: share, products: chosen },
+            { action: "invite", email: email.trim(), percent: share, products: chosen, ends: inviteEnds },
             "Invitation sent. They become a partner when they open it.",
           );
           if (done) {
@@ -1781,6 +1783,7 @@ function PartnerInvite({
             setEmail("");
             setPercent("");
             setChosen([]);
+            setInviteEnds("");
           }
         }}
       >
@@ -1839,6 +1842,21 @@ function PartnerInvite({
             })}
           </ul>
         </fieldset>
+
+        <label className="mt-4 block" htmlFor="partner-ends">
+          <span className="field-label">Last day it earns (optional)</span>
+          <input
+            id="partner-ends"
+            type="date"
+            value={inviteEnds}
+            onChange={(e) => setInviteEnds(e.target.value)}
+            aria-describedby="partner-ends-help"
+            className="field w-48"
+          />
+          <span id="partner-ends-help" className="mt-1 block text-xs text-ink-soft">
+            Empty: it runs until you or they end it. With a date, it earns on sales through that day, the email says so, and you cannot end it sooner without their yes.
+          </span>
+        </label>
 
         <p className="mt-3 text-xs text-ink-soft">
           {`The email states the share and the products, and opening it is how they accept — so what you type here is what they are agreeing to. Partners and the affiliate commission together cannot pass ${MAX_COMMITTED_SHARE}% of a sale. "You keep" already counts the affiliate commission on that product, and Stripe's fee comes out of your part. A refunded sale earns them nothing.`}

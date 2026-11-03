@@ -868,6 +868,8 @@ export async function invitePartner(input: {
         "",
         ...listed.map((title) => `  • ${title}`),
         "",
+        a.partnerRuns(share.until === undefined ? null : lastDayIn(store, share.until)),
+        "",
         a.partnerInStudio,
         "",
         `${SITE_URL}/studio/affiliates`,
@@ -892,6 +894,8 @@ export async function invitePartner(input: {
       ...listed.map((title) => `  • ${title}`),
       "",
       a.partnerTerms(share.percent),
+      // How long it runs, which they agree to by opening it (630 [HN6](39)).
+      a.partnerRuns(share.until === undefined ? null : lastDayIn(store, share.until)),
       "",
       a.partnerOpen,
       "",
@@ -921,6 +925,11 @@ export async function acceptPartnership(store: Store, email: string, share: Part
   const grant: LinkGrant = { s: store.statsId as string, e: normaliseEmail(email), n: "Accepted a partnership", k: 1, p: share };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", 600]]);
   return openAffiliateLink(store, token);
+}
+
+/** The last day a share earns on, in the store's language: the day before its end. */
+function lastDayIn(store: Store, until: number): string {
+  return new Date((until - 24 * 60 * 60) * 1000).toLocaleDateString(LANGUAGES[parseLanguage(store.language)].locale, { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
 /** A share the partner accepted from an invitation, written as the start of its history; any change waiting is replaced. */

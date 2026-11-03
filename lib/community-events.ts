@@ -830,6 +830,16 @@ export async function forgetRsvpsPerson(id: string, who: string, email: string):
   return replies.slice(0, events.length).reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
 }
 
+/** The live events one member said they are coming to, and when they said it, for the copy of their data (619 [SZ3]). Only reads. */
+export async function rsvpsOf(id: string, who: string): Promise<{ event: string; at: number }[]> {
+  if (!isRedisConfigured()) return [];
+  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]);
+  const events = (Array.isArray(raw) ? raw : []).map(String).slice(0, MAX_KEPT_EVENTS);
+  if (!events.length) return [];
+  const replies = await redisPipeline(events.map((e) => ["HGET", rsvpKey(id, e), who]));
+  return events.flatMap((event, i) => (replies[i] === null || replies[i] === undefined ? [] : [{ event, at: Number(replies[i]) || 0 }]));
+}
+
 /** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts). */
 export async function eventCount(id: string): Promise<number> {
   if (!isRedisConfigured()) return 0;

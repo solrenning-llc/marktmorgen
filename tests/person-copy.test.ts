@@ -15,6 +15,7 @@ import { readStages, writeDeal } from "@/lib/crm";
 import { fileContact, readInbox, replyTo } from "@/lib/inbox";
 import { ERASERS, erasureScope } from "@/lib/person-erasure";
 import { COPIERS, COPY_COMPLETE, COPY_PLAN, copyPerson } from "@/lib/person-copy";
+import { PERSON_DATA } from "@/lib/person-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -34,12 +35,14 @@ redis.run = (command: (string | number)[]) => {
 async function main(): Promise<void> {
   part("Every module the erasure reaches is said");
   const erased = ERASERS.map((e) => e.module);
+  const kept = [...new Set(PERSON_DATA.filter((d) => d.how === "kept").map((d) => d.file))];
   is("each eraser's module has a line in the copy's plan", erased.filter((m) => !COPY_PLAN[m]), []);
-  is("and no line names a module the erasure does not reach", Object.keys(COPY_PLAN).filter((m) => !erased.includes(m)), []);
+  is("and so does each module that keeps something on purpose", kept.filter((m) => !COPY_PLAN[m]), []);
+  is("and no line names a module that keeps nothing about people", Object.keys(COPY_PLAN).filter((m) => !erased.includes(m) && !kept.includes(m)), []);
   is("each module the copy reads has its reader", Object.entries(COPY_PLAN).filter(([m, p]) => p.how === "copied" && !COPIERS[m]).map(([m]) => m), []);
   is("each line says what it is, in words", Object.values(COPY_PLAN).every((p) => p.what.length > 10), true);
-  is("pending modules remain, so the copy is not complete yet", COPY_COMPLETE, false);
-  is("and no page gives it to anybody while it is not", [existsSync("app/privacy/copy/page.tsx"), existsSync("app/api/privacy/copy/route.ts")], [false, false]);
+  is("nothing is pending: the copy is complete", COPY_COMPLETE, true);
+  is("no page gives it out yet (its door is the next unit)", [existsSync("app/privacy/copy/page.tsx"), existsSync("app/api/privacy/copy/route.ts")], [false, false]);
 
   redis.clear();
   await claimHandle(OWNER, "copyshop", "Copy Shop", "");

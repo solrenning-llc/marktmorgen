@@ -154,7 +154,8 @@ export function linesTotal(lines: AgreementLine[]): number | null {
   return Number.isSafeInteger(total) ? total : null;
 }
 
-const clean = (value: unknown, max: number) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "");
+/** One line of words as an agreement keeps it: spaces made one, trimmed, cut at `max` (exported for lib/agreement-template-rules.ts). */
+export const clean = (value: unknown, max: number) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "");
 /** Plain text as typed: line breaks kept, carriage returns made plain, at most two blank lines in a row, no control characters. */
 export function plainText(value: unknown, max: number): string {
   if (typeof value !== "string") return "";

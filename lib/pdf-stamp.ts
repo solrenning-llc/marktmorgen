@@ -180,13 +180,20 @@ export async function stampedCopy(
   }
   try {
     const key = copyKey(sale.reference, file);
+    const epub = isEpub(file);
     if (isRedisConfigured()) {
-      const [cached] = await redisPipeline([["GET", key]]);
+      const [cached, noted] = await redisPipeline([["GET", key], ["GET", problemKey(file.pathname)]]);
       if (typeof cached === "string") {
         try {
           return JSON.parse(cached) as ProductFile;
         } catch {}
       }
+      // An EPUB refused for what it is (signed, encrypted, unreadable) is
+      // refused again by the same bytes: it is handed over as uploaded without
+      // being read and opened on every download. The note is per path, and a
+      // new file is a new path. A size note is not trusted this way, since a
+      // failed read is noted as one too.
+      if (epub && (noted === "signed" || noted === "encrypted" || noted === "unreadable")) return null;
     }
     const original = await readWhole(file.pathname, MAX_STAMP_BYTES);
     if (!original) {
@@ -194,7 +201,6 @@ export async function stampedCopy(
       return null;
     }
     const line = stampLine(sale.email, sale.reference, new Date((sale.paidAt || Date.now() / 1000) * 1000));
-    const epub = isEpub(file);
     let stamped: Uint8Array;
     if (epub) {
       const result = stampEpub(original, line);

@@ -13,7 +13,7 @@ const MESSAGES: Record<string, string> = {
   unknown: "This product was not found. It may have been deleted; reload the page.",
   none: "This account has no store yet.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
-  server_error: "We could not confirm whether your PDF marking setting was saved. Reload this page to check before trying again.",
+  server_error: "We could not confirm whether your marking setting was saved. Reload this page to check before trying again.",
 };
 
 type Problem = { name: string; bytes: number; kind?: "pdf" | "epub"; reason: "too_big" | "unreadable" | "signed" | "encrypted" };
@@ -28,6 +28,8 @@ export function PdfStampToggle({ product }: { product: Product }) {
   const files = [product.file, ...product.options.map((o) => o.file)].filter((f): f is NonNullable<typeof f> => f !== null);
   const pdfs = files.filter(isPdf);
   const epubs = files.filter(isEpub);
+  // What the box is about, in its own words: an EPUB-only product's box says EPUB.
+  const kind = pdfs.length === 0 && epubs.length > 0 ? "EPUB" : "PDF";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -69,7 +71,7 @@ export function PdfStampToggle({ product }: { product: Product }) {
         setError(data.ok === false && !response.ok && Object.prototype.hasOwnProperty.call(MESSAGES, reason) ? MESSAGES[reason] : MESSAGES.server_error);
         return;
       }
-      toast(next ? "PDF marking setting saved." : "PDF marking switched off.");
+      toast(next ? `${kind} marking setting saved.` : `${kind} marking switched off.`);
       router.refresh();
     } catch {
       setError(MESSAGES.server_error);
@@ -130,7 +132,7 @@ export function PdfStampToggle({ product }: { product: Product }) {
                   : problem.reason === "encrypted"
                     ? " is encrypted (DRM), so buyers get it unstamped."
                     : problem.kind === "epub"
-                      ? " could not be stamped — it is damaged, or built in a way the mark does not read — so buyers get it unstamped. Export it again from your writing app to stamp it."
+                      ? " could not be stamped — it is damaged, holds more inside than can be marked, or is built in a way the mark does not read — so buyers get it unstamped."
                       : " could not be stamped — it is locked with a password or damaged — so buyers get it unstamped. Save it again without a password to stamp it."}
             </li>
           ))}

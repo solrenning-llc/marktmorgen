@@ -26,6 +26,7 @@ const FOLDER = "0123456789abcdef0123456789abcdef";
 
 const objects = new Map<string, { bytes: Uint8Array; type: string }>();
 let puts = 0;
+let reads = 0;
 const md5 = (bytes: Uint8Array) => createHash("md5").update(bytes).digest("hex");
 const xml = (body: string, status = 200) => new Response(`<?xml version="1.0" encoding="UTF-8"?>${body}`, { status, headers: { "content-type": "application/xml" } });
 
@@ -59,6 +60,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     for (const k of keys) objects.delete(k);
     return xml(`<DeleteResult>${keys.map((k) => `<Deleted><Key>${k}</Key></Deleted>`).join("")}</DeleteResult>`);
   }
+  reads += 1;
   return new Response(found.bytes as BodyInit, { status: 200, headers: about });
 }) as typeof fetch;
 
@@ -149,6 +151,8 @@ async function main() {
   is("each is handed over as uploaded", [await stampedCopy(signed, sale, store), await stampedCopy(locked, sale, store), await stampedCopy(broken, sale, store), await stampedCopy(huge, sale, store)], [null, null, null, null]);
   const notes = await stampProblems([file, signed, locked, broken, huge]);
   is("and the studio is told which, and why", [notes.get(file.pathname), notes.get(signed.pathname), notes.get(locked.pathname), notes.get(broken.pathname), notes.get(huge.pathname)], [undefined, "signed", "encrypted", "unreadable", "too_big"]);
+  const read = reads;
+  is("a book refused for what it is is handed over again without being read", [await stampedCopy(signed, { ...sale, reference: "cs_test_n3W5a1E2b3C4" }, store), await stampedCopy(locked, sale, store), await stampedCopy(broken, sale, store), reads], [null, null, null, read]);
   is("an EPUB's other reasons read as one the studio explains", [epubProblem("not_epub"), epubProblem("zip64"), epubProblem("part_too_big"), epubProblem("encoding"), epubProblem("unreadable"), epubProblem("too_big")], ["unreadable", "unreadable", "unreadable", "unreadable", "unreadable", "too_big"]);
 
   part("Deleting the file deletes its copies");

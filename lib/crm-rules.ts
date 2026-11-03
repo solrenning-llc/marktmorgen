@@ -38,13 +38,14 @@ export const MAX_DEAL_CENTS = 10_000_000_000;
 export const CRM_ID = /^[a-z0-9]{6}$/;
 export const DEAL_ID = /^[a-z0-9]{10}$/;
 
-export type FieldType = "text" | "number" | "date" | "choice" | "phone";
+export type FieldType = "text" | "number" | "date" | "choice" | "phone" | "url";
 export const FIELD_TYPES: { type: FieldType; label: string }[] = [
   { type: "text", label: "Text" },
   { type: "number", label: "Number" },
   { type: "date", label: "Date" },
   { type: "choice", label: "One of a few choices" },
   { type: "phone", label: "Phone number (with country code)" },
+  { type: "url", label: "Web address" },
 ];
 
 export type CrmField = { id: string; name: string; type: FieldType; options: string[] };
@@ -135,7 +136,35 @@ export function fieldValue(field: CrmField, raw: unknown): string | null {
       return field.options.includes(text) ? text : null;
     case "phone":
       return crmPhone(text);
+    case "url":
+      // Read whole, never cut: a web address cut short is another address.
+      return crmUrl(raw);
   }
+}
+
+/**
+ * A web address as a contact field keeps it (639 [GL7](2)): http or https
+ * only, with a real host, as the browser reads it; "example.com/page" is
+ * read as https. Nothing else (a mailto, a javascript: address, a bare word)
+ * is ever kept, since the contact's record shows it as a link.
+ */
+export function crmUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const typed = raw.trim();
+  if (!typed || typed.length > MAX_FIELD_VALUE || /\s/.test(typed)) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(typed) ? typed : `https://${typed}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  if (url.username || url.password) return null;
+  // A host with a dot and letters in its last part (example.com), not a bare word or an address by numbers.
+  if (!/\.[a-z]{2,}$/i.test(url.hostname.replace(/\.$/, ""))) return null;
+  const kept = url.toString();
+  return kept.length <= MAX_FIELD_VALUE ? kept : null;
 }
 
 /**

@@ -8,6 +8,7 @@ import { readListings } from "@/lib/catalog";
 import { answerInvite, waitingOne } from "@/lib/partner-invites";
 import {
   MAX_REFERENCE_LENGTH,
+  idleRemovalAllowed,
   acceptPartnership,
   addPayout,
   MAX_BULK_DECISIONS,
@@ -110,8 +111,11 @@ export async function POST(request: NextRequest) {
         ? planTerms(terms(before), terms(setting), Math.max(notice, before.notice ?? 0), Math.floor(Date.now() / 1000), before.pending ?? null)
         : { current: terms(setting), pending: null };
       // Not sent: kept as it was. Switched on or changed: a warning given before now is set aside (idleStep).
-      const idle = body.idle === undefined ? (before?.idle ?? 0) : readIdleDays(body.idle);
-      const idleOn = idle > 0 && idle !== (before?.idle ?? 0) ? Math.floor(Date.now() / 1000) : idle > 0 ? (before?.idleOn ?? 0) : 0;
+      // Never while the program credits memberships, whose sales are not written down (idleRemovalAllowed).
+      const idle = !idleRemovalAllowed(setting) ? 0 : body.idle === undefined ? (before?.idle ?? 0) : readIdleDays(body.idle);
+      // Switched on, changed, or the program switched back on after a pause (when no link could earn): the count starts now.
+      const restart = idle !== (before?.idle ?? 0) || (setting.enabled && before?.enabled === false);
+      const idleOn = idle > 0 ? (restart ? Math.floor(Date.now() / 1000) : (before?.idleOn ?? 0)) : 0;
       const result = await setAffiliateSetting(guarded.ref, { ...setting, ...plan.current, notice, pending: plan.pending, idle, idleOn });
       if (!result.ok) return fail(result.reason);
       return Response.json({ ok: true });

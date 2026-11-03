@@ -691,7 +691,8 @@ function Terms({
               lifetime,
               // Only a program that pays per lead has confirmed contacts to credit (lib/affiliate-setting.ts creditsContacts).
               contacts: lead.kind !== "none" && contacts,
-              idle: Number(idle),
+              // Not while memberships are credited: their sales are read from Stripe, never written down (idleRemovalAllowed).
+              idle: recurringOn ? 0 : Number(idle),
               recurring: Number(recurringMonths),
               paidSearch,
               secondTier: Number(secondTier),
@@ -1166,6 +1167,12 @@ function Terms({
         ) : null}
 
         {/* Removing affiliates who bring nothing (630 [HN6](3), lib/affiliates.ts idleSweep). */}
+        {recurringOn ? (
+          <p className="mt-5 text-xs text-ink-soft">
+            Removing affiliates who bring nothing is not available while memberships and payment plans earn commission: their payments
+            are read from Stripe each time, so a link that brings only members would look idle.
+          </p>
+        ) : (
         <label className="mt-5 block" htmlFor="aff-idle">
           <span className="field-label">Remove affiliates who bring nothing</span>
           <select id="aff-idle" value={idle} onChange={(e) => setIdle(e.target.value)} aria-describedby="aff-idle-help" className="field max-w-[16rem]">
@@ -1176,9 +1183,10 @@ function Terms({
             ))}
           </select>
           <span id="aff-idle-help" className="mt-1 block text-xs text-ink-soft">
-            {`An approved affiliate whose link brings no sale and no lead in that time is emailed ${IDLE_WARN_DAYS} days before, with the date, and removed on it if still nothing comes. One sale or one lead keeps them in. Their record stays, and you can add them back. Changing this sends a fresh warning before anyone is removed.`}
+            {`Counted from today when you switch it on. An approved affiliate whose link brings no sale${lead.kind !== "none" ? " and no lead" : ""} in that time is emailed ${IDLE_WARN_DAYS} days before, with the date, and removed on it if still nothing comes. Never a partner, and never anybody you may still owe: they stay until you have paid them. Their record stays, and you can add them back.`}
           </span>
         </label>
+        )}
 
         <label className="mt-5 flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
           <input

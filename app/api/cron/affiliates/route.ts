@@ -11,6 +11,9 @@ import { storesAfter } from "@/lib/store";
 /** Long enough to walk every store, short enough to end before the platform does. */
 const RUN_MS = 50_000;
 
+/** The platform stops the function past this, so RUN_MS stays under it. */
+export const maxDuration = 60;
+
 /**
  * Run on a schedule by Vercel: first writes into each book what PayPal says
  * it paid from creators' own PayPal (lib/paypal-payouts.ts); then, on the
@@ -60,7 +63,7 @@ async function idleAll(deadline: number): Promise<{ warned: number; removed: num
       if (readIdleDays(store.affiliates.idle) === 0) continue;
       if (Date.now() >= deadline) return out;
       try {
-        const done = await idleSweep(store);
+        const done = await idleSweep(store, Date.now(), deadline);
         out.warned += done.warned;
         out.removed += done.removed;
       } catch (error) {

@@ -261,11 +261,16 @@ const en = {
     `A one-time purchase made through it within ${days} ${days === 1 ? "day" : "days"} of a click earns you ${percent}% of what the buyer paid before tax${hasRates ? " (some products earn a different share; your page lists them)" : ""}. Memberships and payment plans do not earn, and a refunded sale earns nothing.`,
   approvedPage: (url: string) => `Your clicks, sales and earnings: ${url}`,
   /** Said on the affiliate page before anyone applies, when the program removes affiliates who bring nothing. */
-  termIdle: (days: number, warn: number) => `An affiliate whose link brings no sale and no lead for ${days} days is removed from the program, after an email ${warn} days before with the date. One sale or one lead before then keeps them in.`,
+  termIdle: (days: number, warn: number, withLeads: boolean) =>
+    withLeads
+      ? `An affiliate whose link brings no sale and no lead for ${days} days is removed from the program, after an email ${warn} days before with the date. One sale or one lead before then keeps them in.`
+      : `An affiliate whose link brings no sale for ${days} days is removed from the program, after an email ${warn} days before with the date. One sale before then keeps them in.`,
   /** The warning before an affiliate who brings nothing is removed (630 [HN6](3), lib/affiliates.ts idleSweep). `date` is said in the store's language. */
   idleSubject: (store: string, date: string) => `Your affiliate link with ${store} ends on ${date}`,
-  idleBody: (store: string, days: number, date: string) =>
-    `${store} removes affiliates whose link brings no sale and no lead for ${days} days. Yours has brought none in that time, so you will be removed from the program on ${date}. One sale or one lead through your link before then keeps you in. Your record of clicks, sales and payments stays as it is.`,
+  idleBody: (store: string, days: number, date: string, withLeads: boolean) =>
+    withLeads
+      ? `${store} removes affiliates whose link brings no sale and no lead for ${days} days. If yours brings neither before ${date}, you will be removed from the program on that day. One sale or one lead through your link before then keeps you in. Your record of clicks, sales and payments stays as it is.`
+      : `${store} removes affiliates whose link brings no sale for ${days} days. If yours brings none before ${date}, you will be removed from the program on that day. One sale through your link before then keeps you in. Your record of clicks, sales and payments stays as it is.`,
 
   // ---- Emails to an invited partner ---------------------------------------------------------------
   partnerSubject: (store: string) => `${store} wants you as a partner`,
@@ -545,10 +550,15 @@ const es: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Una compra única hecha a través de él dentro de ${days} ${plural(days, "día", "días")} desde un clic te hace ganar el ${percent}${S}% de lo que pagó el comprador antes de impuestos${hasRates ? " (algunos productos generan una parte distinta; tu página los indica)" : ""}. Las membresías y los pagos a plazos no generan nada, y una venta reembolsada no genera nada.`,
   approvedPage: (url) => `Tus clics, ventas y ganancias: ${url}`,
-  termIdle: (days, warn) => `Un afiliado cuyo enlace no trae ninguna venta ni ningún lead durante ${days} días sale del programa, tras un correo ${warn} días antes con la fecha. Una venta o un lead antes de esa fecha lo mantiene dentro.`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Un afiliado cuyo enlace no trae ninguna venta ni ningún lead durante ${days} días sale del programa, tras un correo ${warn} días antes con la fecha. Una venta o un lead antes de esa fecha lo mantiene dentro.`
+      : `Un afiliado cuyo enlace no trae ninguna venta durante ${days} días sale del programa, tras un correo ${warn} días antes con la fecha. Una venta antes de esa fecha lo mantiene dentro.`,
   idleSubject: (store, date) => `Tu enlace de afiliado de ${store} termina el ${date}`,
-  idleBody: (store, days, date) =>
-    `${store} retira a los afiliados cuyo enlace no trae ninguna venta ni ningún lead durante ${days} días. El tuyo no ha traído ninguno en ese tiempo, así que saldrás del programa el ${date}. Una venta o un lead a través de tu enlace antes de esa fecha te mantiene dentro. Tu historial de clics, ventas y pagos se conserva tal como está.`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} retira a los afiliados cuyo enlace no trae ninguna venta ni ningún lead durante ${days} días. Si el tuyo no trae ninguno antes del ${date}, saldrás del programa ese día. Una venta o un lead a través de tu enlace antes de esa fecha te mantiene dentro. Tu historial de clics, ventas y pagos se conserva tal como está.`
+      : `${store} retira a los afiliados cuyo enlace no trae ninguna venta durante ${days} días. Si el tuyo no trae ninguna antes del ${date}, saldrás del programa ese día. Una venta a través de tu enlace antes de esa fecha te mantiene dentro. Tu historial de clics, ventas y pagos se conserva tal como está.`,
 
   partnerSubject: (store) => `${store} te quiere como socio`,
   partnerOffer: (store, percent) => `${store} te ofrece el ${percent}${S}% de cada venta de:`,
@@ -819,10 +829,15 @@ const fr: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Un achat unique effectué via ce lien au plus ${days}${S}${pluralFr(days, "jour", "jours")} après un clic vous rapporte ${percent}${S}% de ce que l'acheteur a payé hors taxes${hasRates ? ` (certains produits rapportent une part différente${S}; votre page les indique)` : ""}. Les abonnements et les paiements échelonnés ne rapportent rien, et une vente remboursée ne rapporte rien.`,
   approvedPage: (url) => `Vos clics, ventes et gains${S}: ${url}`,
-  termIdle: (days, warn) => `Un affilié dont le lien n'apporte aucune vente ni aucun lead pendant ${days} jours est retiré du programme, après un e-mail envoyé ${warn} jours avant avec la date. Une vente ou un lead d'ici là le maintient.`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Un affilié dont le lien n'apporte aucune vente ni aucun lead pendant ${days} jours est retiré du programme, après un e-mail envoyé ${warn} jours avant avec la date. Une vente ou un lead d'ici là le maintient.`
+      : `Un affilié dont le lien n'apporte aucune vente pendant ${days} jours est retiré du programme, après un e-mail envoyé ${warn} jours avant avec la date. Une vente d'ici là le maintient.`,
   idleSubject: (store, date) => `Votre lien d'affilié de ${store} prend fin le ${date}`,
-  idleBody: (store, days, date) =>
-    `${store} retire les affiliés dont le lien n'apporte aucune vente ni aucun lead pendant ${days} jours. Le vôtre n'en a apporté aucun pendant cette période${S}: vous quitterez donc le programme le ${date}. Une vente ou un lead par votre lien d'ici là vous y maintient. Votre historique de clics, de ventes et de paiements reste tel quel.`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} retire les affiliés dont le lien n'apporte aucune vente ni aucun lead pendant ${days} jours. Si le vôtre n'en apporte aucun avant le ${date}, vous quitterez le programme ce jour-là. Une vente ou un lead par votre lien d'ici là vous y maintient. Votre historique de clics, de ventes et de paiements reste tel quel.`
+      : `${store} retire les affiliés dont le lien n'apporte aucune vente pendant ${days} jours. Si le vôtre n'en apporte aucune avant le ${date}, vous quitterez le programme ce jour-là. Une vente par votre lien d'ici là vous y maintient. Votre historique de clics, de ventes et de paiements reste tel quel.`,
 
   partnerSubject: (store) => `${store} vous propose de devenir partenaire`,
   partnerOffer: (store, percent) => `${store} vous propose ${percent}${S}% de chaque vente de${S}:`,
@@ -1098,10 +1113,15 @@ const de: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Ein Einmalkauf, der innerhalb von ${days} ${plural(days, "Tag", "Tagen")} nach einem Klick darüber getätigt wird, bringt Ihnen ${percent}${S}% dessen ein, was der Käufer vor Steuern gezahlt hat${hasRates ? " (einige Produkte bringen einen anderen Anteil; Ihre Seite listet sie auf)" : ""}. Mitgliedschaften und Ratenzahlungen bringen nichts ein, und ein erstatteter Verkauf bringt nichts ein.`,
   approvedPage: (url) => `Ihre Klicks, Verkäufe und Einnahmen: ${url}`,
-  termIdle: (days, warn) => `Ein Affiliate, dessen Link ${days} Tage lang keinen Verkauf und keinen Lead bringt, wird aus dem Programm entfernt, nach einer E-Mail ${warn} Tage vorher mit dem Datum. Ein Verkauf oder ein Lead bis dahin hält ihn im Programm.`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Ein Affiliate, dessen Link ${days} Tage lang keinen Verkauf und keinen Lead bringt, wird aus dem Programm entfernt, nach einer E-Mail ${warn} Tage vorher mit dem Datum. Ein Verkauf oder ein Lead bis dahin hält ihn im Programm.`
+      : `Ein Affiliate, dessen Link ${days} Tage lang keinen Verkauf bringt, wird aus dem Programm entfernt, nach einer E-Mail ${warn} Tage vorher mit dem Datum. Ein Verkauf bis dahin hält ihn im Programm.`,
   idleSubject: (store, date) => `Ihr Affiliate-Link für ${store} endet am ${date}`,
-  idleBody: (store, days, date) =>
-    `${store} entfernt Affiliates, deren Link ${days} Tage lang keinen Verkauf und keinen Lead bringt. Ihrer hat in dieser Zeit keinen gebracht, deshalb werden Sie am ${date} aus dem Programm entfernt. Ein Verkauf oder ein Lead über Ihren Link vor diesem Datum hält Sie im Programm. Ihre Klicks, Verkäufe und Zahlungen bleiben unverändert gespeichert.`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} entfernt Affiliates, deren Link ${days} Tage lang keinen Verkauf und keinen Lead bringt. Wenn Ihrer bis zum ${date} weder einen Verkauf noch einen Lead bringt, werden Sie an diesem Tag aus dem Programm entfernt. Ein Verkauf oder ein Lead über Ihren Link vor diesem Datum hält Sie im Programm. Ihre Klicks, Verkäufe und Zahlungen bleiben unverändert gespeichert.`
+      : `${store} entfernt Affiliates, deren Link ${days} Tage lang keinen Verkauf bringt. Wenn Ihrer bis zum ${date} keinen Verkauf bringt, werden Sie an diesem Tag aus dem Programm entfernt. Ein Verkauf über Ihren Link vor diesem Datum hält Sie im Programm. Ihre Klicks, Verkäufe und Zahlungen bleiben unverändert gespeichert.`,
 
   partnerSubject: (store) => `${store} möchte Sie als Partner`,
   partnerOffer: (store, percent) => `${store} bietet Ihnen ${percent}${S}% jedes Verkaufs von:`,
@@ -1377,10 +1397,15 @@ const it: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Un acquisto singolo fatto tramite il link entro ${days} ${plural(days, "giorno", "giorni")} da un clic ti fa guadagnare il ${percent}${S}% di quanto l'acquirente ha pagato al netto delle tasse${hasRates ? " (alcuni prodotti fanno guadagnare una quota diversa; la tua pagina li elenca)" : ""}. Abbonamenti e pagamenti rateali non fanno guadagnare, e una vendita rimborsata non fa guadagnare nulla.`,
   approvedPage: (url) => `I tuoi clic, vendite e guadagni: ${url}`,
-  termIdle: (days, warn) => `Un affiliato il cui link non porta nessuna vendita né nessun lead per ${days} giorni viene rimosso dal programma, dopo un'email inviata ${warn} giorni prima con la data. Una vendita o un lead prima di allora lo mantiene nel programma.`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Un affiliato il cui link non porta alcuna vendita né alcun lead per ${days} giorni viene rimosso dal programma, dopo un'email inviata ${warn} giorni prima con la data. Una vendita o un lead prima di allora lo mantiene nel programma.`
+      : `Un affiliato il cui link non porta alcuna vendita per ${days} giorni viene rimosso dal programma, dopo un'email inviata ${warn} giorni prima con la data. Una vendita prima di allora lo mantiene nel programma.`,
   idleSubject: (store, date) => `Il tuo link di affiliato di ${store} termina il ${date}`,
-  idleBody: (store, days, date) =>
-    `${store} rimuove gli affiliati il cui link non porta nessuna vendita né nessun lead per ${days} giorni. Il tuo non ne ha portati in questo periodo, quindi uscirai dal programma il ${date}. Una vendita o un lead tramite il tuo link prima di quella data ti mantiene nel programma. Il tuo storico di clic, vendite e pagamenti resta com'è.`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} rimuove gli affiliati il cui link non porta alcuna vendita né alcun lead per ${days} giorni. Se il tuo non ne porta prima del ${date}, uscirai dal programma quel giorno. Una vendita o un lead tramite il tuo link prima di quella data ti mantiene nel programma. Il tuo storico di clic, vendite e pagamenti resta com'è.`
+      : `${store} rimuove gli affiliati il cui link non porta alcuna vendita per ${days} giorni. Se il tuo non ne porta prima del ${date}, uscirai dal programma quel giorno. Una vendita tramite il tuo link prima di quella data ti mantiene nel programma. Il tuo storico di clic, vendite e pagamenti resta com'è.`,
 
   partnerSubject: (store) => `${store} ti vuole come partner`,
   partnerOffer: (store, percent) => `${store} ti offre il ${percent}${S}% di ogni vendita di:`,
@@ -1653,10 +1678,15 @@ const nl: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Een eenmalige aankoop via die link binnen ${days} ${plural(days, "dag", "dagen")} na een klik levert je ${percent}${S}% op van wat de koper vóór belasting betaalde${hasRates ? " (sommige producten leveren een ander aandeel op; je pagina noemt ze)" : ""}. Lidmaatschappen en betalingen in termijnen leveren niets op, en een terugbetaalde verkoop levert niets op.`,
   approvedPage: (url) => `Je klikken, verkopen en verdiensten: ${url}`,
-  termIdle: (days, warn) => `Een affiliate van wie de link ${days} dagen lang geen verkoop en geen lead oplevert, wordt uit het programma verwijderd, na een e-mail ${warn} dagen vooraf met de datum. Eén verkoop of één lead vóór die tijd houdt hem erin.`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Een affiliate van wie de link ${days} dagen lang geen verkoop en geen lead oplevert, wordt uit het programma verwijderd, na een e-mail ${warn} dagen vooraf met de datum. Eén verkoop of één lead vóór die tijd houdt hem erin.`
+      : `Een affiliate van wie de link ${days} dagen lang geen verkoop oplevert, wordt uit het programma verwijderd, na een e-mail ${warn} dagen vooraf met de datum. Eén verkoop vóór die tijd houdt hem erin.`,
   idleSubject: (store, date) => `Je affiliatelink bij ${store} stopt op ${date}`,
-  idleBody: (store, days, date) =>
-    `${store} verwijdert affiliates van wie de link ${days} dagen lang geen verkoop en geen lead oplevert. Die van jou heeft in die tijd niets opgeleverd, dus je wordt op ${date} uit het programma verwijderd. Eén verkoop of één lead via je link vóór die datum houdt je erin. Je overzicht van klikken, verkopen en betalingen blijft zoals het is.`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} verwijdert affiliates van wie de link ${days} dagen lang geen verkoop en geen lead oplevert. Als die van jou vóór ${date} niets oplevert, word je die dag uit het programma verwijderd. Eén verkoop of één lead via je link vóór die datum houdt je erin. Je overzicht van klikken, verkopen en betalingen blijft zoals het is.`
+      : `${store} verwijdert affiliates van wie de link ${days} dagen lang geen verkoop oplevert. Als die van jou vóór ${date} geen verkoop oplevert, word je die dag uit het programma verwijderd. Eén verkoop via je link vóór die datum houdt je erin. Je overzicht van klikken, verkopen en betalingen blijft zoals het is.`,
 
   partnerSubject: (store) => `${store} wil je als partner`,
   partnerOffer: (store, percent) => `${store} biedt je ${percent}${S}% van elke verkoop van:`,
@@ -1935,10 +1965,15 @@ const pt: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Uma compra única feita através dela no prazo de ${days} ${plural(days, "dia", "dias")} após um clique dá-lhe ${percent}${S}% do que o comprador pagou antes de impostos${hasRates ? " (alguns produtos geram uma parte diferente; a sua página indica-os)" : ""}. Subscrições e pagamentos em prestações não geram nada, e uma venda reembolsada não gera nada.`,
   approvedPage: (url) => `Os seus cliques, vendas e ganhos: ${url}`,
-  termIdle: (days, warn) => `Um afiliado cuja ligação não traz nenhuma venda nem nenhum lead durante ${days} dias sai do programa, depois de um e-mail enviado ${warn} dias antes com a data. Uma venda ou um lead antes disso mantém-no no programa.`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Um afiliado cuja ligação não traz nenhuma venda nem nenhum lead durante ${days} dias sai do programa, depois de um e-mail enviado ${warn} dias antes com a data. Uma venda ou um lead antes disso mantém-no no programa.`
+      : `Um afiliado cuja ligação não traz nenhuma venda durante ${days} dias sai do programa, depois de um e-mail enviado ${warn} dias antes com a data. Uma venda antes disso mantém-no no programa.`,
   idleSubject: (store, date) => `A sua ligação de afiliado de ${store} termina em ${date}`,
-  idleBody: (store, days, date) =>
-    `${store} retira os afiliados cuja ligação não traz nenhuma venda nem nenhum lead durante ${days} dias. A sua não trouxe nenhum nesse período, por isso sairá do programa em ${date}. Uma venda ou um lead através da sua ligação antes dessa data mantém-no no programa. O seu histórico de cliques, vendas e pagamentos fica como está.`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} retira os afiliados cuja ligação não traz nenhuma venda nem nenhum lead durante ${days} dias. Se a sua não trouxer nenhum antes de ${date}, sairá do programa nesse dia. Uma venda ou um lead através da sua ligação antes dessa data mantém-no no programa. O seu histórico de cliques, vendas e pagamentos fica como está.`
+      : `${store} retira os afiliados cuja ligação não traz nenhuma venda durante ${days} dias. Se a sua não trouxer nenhuma antes de ${date}, sairá do programa nesse dia. Uma venda através da sua ligação antes dessa data mantém-no no programa. O seu histórico de cliques, vendas e pagamentos fica como está.`,
 
   partnerSubject: (store) => `${store} quer tê-lo como parceiro`,
   partnerOffer: (store, percent) => `${store} oferece-lhe ${percent}${S}% de cada venda de:`,

@@ -516,7 +516,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                         : []),
                       ...(terms.paidSearch ? [] : [a.termNoPaidSearch(store.name)]),
                       // Removing affiliates who bring nothing (630 [HN6](3)): said before anyone applies.
-                      ...(readIdleDays(terms.idle) > 0 ? [a.termIdle(readIdleDays(terms.idle), IDLE_WARN_DAYS)] : []),
+                      ...(readIdleDays(terms.idle) > 0 ? [a.termIdle(readIdleDays(terms.idle), IDLE_WARN_DAYS, terms.lead.kind !== "none")] : []),
                       attribution(terms),
                       a.termRefunds,
                       a.termDisclose,

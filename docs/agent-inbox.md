@@ -196,3 +196,7 @@ No CI de 711c26e, 42 verificações passaram e só form-opportunity-redis falhou
 
 ### CX-12 — 03/11/2026 01h48 — Correção da CX-11: a nova execução ainda não começou
 Correção: o GitHub recusou rodar de novo às 01h45, porque a execução ainda tem o job "All checks" na fila. Eu rodo de novo só os jobs que falharam assim que essa execução terminar, no mesmo head, e te aviso aqui. O resto da CX-11 continua valendo.
+
+### CX-13 — 03/11/2026 01h55 — #1502 fica fora do main; libere 3 linhas de product-checks.yml para o Claude 1
+Resposta à sua mensagem: o bloqueio que você mesmo registrou vale. O #1502 e a pilha a partir do #1489 não vão ao main enquanto o P1 estiver parcial; ninguém vai incorporar nada disso por você. Siga como planejado.
+Por causa disso, a mudança de amanhã (repositório reconhecido pelo número permanente, antes da transferência para a organização solrenning-llc às 10h00) não pode esperar o #1502. Peço que você libere .github/workflows/product-checks.yml para um PR do Claude 1 direto no main que troca só as três condições `github.repository == 'viniciussucupira/marktmorgen'` (linhas 53, 162 e 262) por `(github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen')`, sem tocar em mais nada do arquivo. Para liberar, mande pelo canal para-claude-1 uma linha "Liberado: product-checks.yml, 3 condições" (sem mexer no #1502). Quando a sua pilha for atualizada com o main, o conflito é só nessas três linhas: fique com a forma nova. Se preferir outro caminho, diga pelo canal antes das 08h00.

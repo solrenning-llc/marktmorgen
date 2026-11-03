@@ -42,8 +42,17 @@ export type CampaignInput = {
 
 /** The longest campaign planned here, in days. */
 export const MAX_CAMPAIGN_DAYS = 366;
-/** The largest daily budget accepted here, in the smallest unit: a wall against a typo. */
-export const MAX_DAILY_CENTS = 10_000_000;
+/**
+ * The largest daily budget accepted here, in the smallest unit: a wall against
+ * a typo, not a cost of Marktmorgen (the money is the creator's, on their own
+ * ad account). Kept inside this file; others ask dailyBudgetAllowed.
+ */
+const MAX_DAILY_CENTS = 10_000_000;
+
+/** Whether a daily budget is one this code takes: whole cents, above zero, within the wall. */
+export function dailyBudgetAllowed(cents: number): boolean {
+  return Number.isSafeInteger(cents) && cents > 0 && cents <= MAX_DAILY_CENTS;
+}
 
 /** Worst case per day and per period, as numerator/denominator, from the official check. */
 const CEILINGS: Readonly<Record<Exclude<AdPlatform, "tiktok">, { day: [number, number]; period: "week" | "month"; periodTimes: [number, number] }>> = {
@@ -108,7 +117,7 @@ export function planCampaign(input: CampaignInput): { ok: true; plan: CampaignPl
   if (last < first) return { ok: false, error: "order", fix: "The last day must not be before the first." };
   const days = last - first + 1;
   if (days > MAX_CAMPAIGN_DAYS) return { ok: false, error: "too_long", fix: `Plan at most ${MAX_CAMPAIGN_DAYS} days; start another campaign after.` };
-  if (!Number.isSafeInteger(input.dailyBudgetCents) || input.dailyBudgetCents <= 0 || input.dailyBudgetCents > MAX_DAILY_CENTS) return { ok: false, error: "budget", fix: "Choose a daily budget above zero." };
+  if (!dailyBudgetAllowed(input.dailyBudgetCents)) return { ok: false, error: "budget", fix: "Choose a daily budget above zero." };
   if (!Number.isSafeInteger(input.creatorTotalLimitCents) || input.creatorTotalLimitCents <= 0) return { ok: false, error: "limit", fix: "Choose the most this campaign may spend in all." };
   const maxSpendCents = worstCaseCents(input.platform, input.dailyBudgetCents, first, days);
   if (maxSpendCents > input.creatorTotalLimitCents) {

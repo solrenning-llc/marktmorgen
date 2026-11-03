@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useId, useMemo, useState, useSyncExternalStore } from "react";
 
 const noop = () => () => {};
 
@@ -53,7 +53,38 @@ export type SlotWords = {
   chosen: string;
   submit: string;
   note: string;
+  /** A booking with a deposit: the field for a discount code, off the whole price (lib/deposit-code.ts). */
+  code?: CodeWords;
 };
+
+/** The discount code field's label and help, in the store's language. */
+export type CodeWords = { label: string; help: string };
+
+/**
+ * A discount code typed on the booking page, for a booking with a deposit
+ * only (lib/deposit-code.ts): optional, labeled, with its help read with it.
+ * Sent with the form; the server reads it from the creator's own account.
+ */
+export function CodeField({ words }: { words: CodeWords }) {
+  const id = useId();
+  return (
+    <div className="mt-6">
+      <label htmlFor={id} className="field-label">{words.label}</label>
+      <input
+        id={id}
+        name="code"
+        type="text"
+        autoComplete="off"
+        autoCapitalize="characters"
+        spellCheck={false}
+        maxLength={40}
+        className="st-field mt-1"
+        aria-describedby={`${id}-help`}
+      />
+      <p id={`${id}-help`} className="st-muted mt-1 text-sm">{words.help}</p>
+    </div>
+  );
+}
 
 /**
  * The times a buyer may book, shown in the buyer's own time zone.
@@ -75,6 +106,7 @@ export function SlotPicker({
   seatsLeft,
   move,
   pkg,
+  host,
   words,
 }: {
   starts: number[];
@@ -87,6 +119,8 @@ export function SlotPicker({
   move?: string;
   /** A package's booking token: the session comes from it, and nothing is charged (lib/call-packages.ts). */
   pkg?: string;
+  /** The host the buyer chose, on a team that lets them (lib/team-scheduling-rules.ts): sent so only they are booked. */
+  host?: { key: string; label: string } | null;
   words: SlotWords;
 }) {
   const { locale } = words;
@@ -129,6 +163,12 @@ export function SlotPicker({
       <input type="hidden" name="product" value={productId} />
       <input type="hidden" name="tz" value={tz} />
       {pkg ? <input type="hidden" name="pkg" value={pkg} /> : null}
+      {host && !move ? (
+        <>
+          <input type="hidden" name="host" value={host.key} />
+          <input type="hidden" name="host_label" value={host.label} />
+        </>
+      ) : null}
 
       {/* A fieldset is as wide as its widest child unless told otherwise,
           which would push the row of days out of the card. */}
@@ -188,6 +228,8 @@ export function SlotPicker({
           {(local ? words.yours : words.creators).replace("{zone}", zoneLabel(day.starts[0], tz, locale))}
         </p>
       </fieldset>
+
+      {words.code && !move && !pkg ? <CodeField words={words.code} /> : null}
 
       <div className="mt-6">
         {chosen ? (

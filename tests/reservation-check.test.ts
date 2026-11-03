@@ -77,6 +77,11 @@ test("changing another agent's reservations file fails; one's own, a new one and
   assert.equal(conflicts({ text: lanesOnly, branch: "claude3/y", changed: ["docs/reservations/codex.md"], agentFiles: files }).found.length, 0);
 });
 
+test("a generated file never blocks, even when a row names it (inbox C3-13)", () => {
+  const reserved = [{ path: "docs/reservations/claude3.md", text: own("Claude 3", "| Claude 3 | x | claude3/x | `docs/accessibility-inventory.json` | 02/11/2026 |\n") }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "claude2/y", changed: ["docs/accessibility-inventory.json"], agentFiles: reserved }).found.length, 0);
+});
+
 test("the old table is still read while it exists", () => {
   assert.deepEqual(conflicts({ text: sample, branch: "claude3/y", changed: ["lib/call-deposit.ts"], agentFiles: files }).found.map((r: { agent: string }) => r.agent), ["claude 2"]);
 });

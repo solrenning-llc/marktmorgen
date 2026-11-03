@@ -9,8 +9,12 @@
 // pull request; locally: node scripts/reservation-check.mjs <branch> <base>.
 import { execFileSync } from "node:child_process";
 
-/** Files every agent edits through its own small docs PRs (see docs/reservations.md). */
-export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md"]);
+/**
+ * Files every agent edits: the queue and the lanes through their own small
+ * docs PRs, and generated files every new component regenerates by its
+ * script (inbox C3-13), which are never reserved.
+ */
+export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json"]);
 
 /** The folder of each agent's own reservations file. */
 export const RESERVATIONS_DIR = "docs/reservations/";

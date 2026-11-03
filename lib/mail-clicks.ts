@@ -130,3 +130,14 @@ export async function forgetClicksPerson(listId: string | null, rawEmail: string
   const [gone] = await redisPipeline([["DEL", ...keys]]);
   return Number(gone) || 0;
 }
+
+/**
+ * Which of the store's sequence emails a person used a link in, for the copy
+ * of their data (619 [SZ3], lib/person-copy.ts): the emails' ids, as they are
+ * kept. Only reads.
+ */
+export async function clicksOf(listId: string | null, rawEmail: string): Promise<string[]> {
+  if (!listId || !isRedisConfigured()) return [];
+  const [members] = await redisPipeline([["SMEMBERS", usedKey(listId, normaliseEmail(rawEmail))]]);
+  return (Array.isArray(members) ? members : []).map(String).sort();
+}

@@ -4,8 +4,18 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import type { Product } from "@/lib/store";
-import { MAX_STAMP_BYTES, isPdf, readableSize } from "@/lib/product-file";
+import { MAX_STAMP_BYTES, isMarkable, readableSize } from "@/lib/product-file";
+import { STAMP_WORDS } from "@/lib/pdf-stamp-faq";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+
+/** Why one file is handed over as uploaded, in the studio's words. */
+function problemWords(problem: Problem): string {
+  if (problem.reason === "too_big") return ` is ${readableSize(problem.bytes)}, over the ${readableSize(MAX_STAMP_BYTES)} that can be marked, so buyers get it unmarked.`;
+  if (!problem.epub) return " could not be stamped — it is locked with a password or damaged — so buyers get it unstamped. Save it again without a password to stamp it.";
+  if (problem.reason === "protected") return " has copy protection (DRM), so the mark cannot be written into it and buyers get it unmarked.";
+  if (problem.reason === "unsupported") return " is saved in a way the mark cannot be written into (a page too large, text that is not UTF-8, or a ZIP64 file), so buyers get it unmarked. Export it again from your writing app to mark it.";
+  return " could not be marked — it is damaged or is not a complete EPUB — so buyers get it unmarked. Export it again from your writing app to mark it.";
+}
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -13,19 +23,21 @@ const MESSAGES: Record<string, string> = {
   unknown: "This product was not found. It may have been deleted; reload the page.",
   none: "This account has no store yet.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
-  server_error: "We could not confirm whether your PDF marking setting was saved. Reload this page to check before trying again.",
+  server_error: "We could not confirm whether your PDF and EPUB marking setting was saved. Reload this page to check before trying again.",
 };
 
-type Problem = { name: string; bytes: number; reason: "too_big" | "unreadable" };
+type Problem = { name: string; bytes: number; reason: "too_big" | "unreadable" | "protected" | "unsupported"; epub?: boolean };
 
 /**
- * Stamping the buyer's email on every page of a product's PDFs. Shown on a
- * product that delivers at least one PDF, or that has it switched on.
+ * Marking a product's files with the buyer's email: on every page of a PDF,
+ * and inside an EPUB where reading apps do not show it (630 [HN6](30)).
+ * Shown on a product that delivers at least one PDF or EPUB, or that has it
+ * switched on.
  */
 export function PdfStampToggle({ product }: { product: Product }) {
   const router = useRouter();
   const files = [product.file, ...product.options.map((o) => o.file)].filter((f): f is NonNullable<typeof f> => f !== null);
-  const pdfs = files.filter(isPdf);
+  const marked = files.filter(isMarkable);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -48,7 +60,7 @@ export function PdfStampToggle({ product }: { product: Product }) {
     };
   }, [on, product.id, product.file, product.options]);
 
-  if (pdfs.length === 0 && !on) return null;
+  if (marked.length === 0 && !on) return null;
 
   async function change(next: boolean) {
     if (busy) return;
@@ -67,7 +79,7 @@ export function PdfStampToggle({ product }: { product: Product }) {
         setError(data.ok === false && !response.ok && Object.prototype.hasOwnProperty.call(MESSAGES, reason) ? MESSAGES[reason] : MESSAGES.server_error);
         return;
       }
-      toast(next ? "PDF marking setting saved." : "PDF marking switched off.");
+      toast(next ? "PDF and EPUB marking setting saved." : "PDF and EPUB marking switched off.");
       router.refresh();
     } catch {
       setError(MESSAGES.server_error);
@@ -89,25 +101,24 @@ export function PdfStampToggle({ product }: { product: Product }) {
           className="mt-0.5 h-4 w-4 shrink-0 accent-violet-brand"
           aria-describedby={`${id}-hint`}
         />
-        Stamp each buyer&apos;s email on every page of the PDF
+        {STAMP_WORDS.box}
       </label>
       <p id={`${id}-hint`} className="mt-2 text-sm text-ink-soft">
-        When a buyer downloads it, each page carries one small line along the bottom, like{" "}
+        When a buyer downloads a PDF, each page carries one small line along the bottom, like{" "}
         <span className="break-words font-mono text-xs text-ink">Sold to maya@example.com on Sep 26, 2026 · order …E54F2A · for personal use</span>
-        . It makes a shared copy traceable to its buyer; it cannot stop anyone from sharing. PDFs up to{" "}
-        {readableSize(MAX_STAMP_BYTES)}; a bigger one, or one locked with a password, is handed over as you uploaded it.
+        . An EPUB gets the same line written inside the book, where reading apps do not show it but every copy carries it.
+        It makes a shared copy traceable to its buyer; it cannot stop anyone from sharing. Files up to{" "}
+        {readableSize(MAX_STAMP_BYTES)}; a bigger one, a PDF locked with a password or an EPUB with copy protection (DRM) is handed over as you uploaded it.
       </p>
-      {on && pdfs.length === 0 ? (
-        <p className="mt-2 text-sm text-ink-soft">There is no PDF on this product right now, so nothing is stamped.</p>
+      {on && marked.length === 0 ? (
+        <p className="mt-2 text-sm text-ink-soft">There is no PDF or EPUB on this product right now, so nothing is marked.</p>
       ) : null}
       {on && problems.length ? (
         <ul className="notice notice-warn mt-3 space-y-1 text-sm" role="status">
           {problems.map((problem) => (
             <li key={`${problem.name}-${problem.bytes}`}>
               <strong>{problem.name}</strong>
-              {problem.reason === "too_big"
-                ? ` is ${readableSize(problem.bytes)}, over the ${readableSize(MAX_STAMP_BYTES)} that can be stamped, so buyers get it unstamped.`
-                : " could not be stamped — it is locked with a password or damaged — so buyers get it unstamped. Save it again without a password to stamp it."}
+              {problemWords(problem)}
             </li>
           ))}
         </ul>

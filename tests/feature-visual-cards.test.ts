@@ -208,7 +208,7 @@ function main(): void {
   is("on one line, shrunk to fit, in the plain font the PDF uses, with no rule above it", [st.includes("whitespace-nowrap font-sans"), /font-mono[^"]*">Sold to/.test(st), /border-t[^"]*">Sold to/.test(st)], [true, false, false]);
   is("the switch apart, said to be in the studio: the buyer never sees it", [sp.includes("In the studio, on the product"), sp.indexOf("In the studio, on the product") > sp.indexOf(stamped)], [true, true]);
   is("the card reads the line without the PDF library", [read("components/feature-visuals.tsx").includes('from "@/lib/pdf-stamp-line"'), read("components/feature-visuals.tsx").includes('from "@/lib/pdf-stamp"')], [true, false]);
-  is("the product's switch and its honest limit, in the editor's words", [sp.includes("Stamp each buyer's email on every page of the PDF"), toggle.includes("Stamp each buyer&apos;s email on every page of the PDF"), sp.includes("It makes a shared copy traceable to its buyer; it cannot stop anyone from sharing."), toggle.includes("It makes a shared copy traceable to its buyer; it cannot stop anyone from sharing.")], [true, true, true, true]);
+  is("the product's switch and its honest limit, in the editor's words", [sp.includes("Mark each buyer's PDF or EPUB with their email"), toggle.includes("{STAMP_WORDS.box}") && read("lib/pdf-stamp-faq.ts").includes(`box: "Mark each buyer's PDF or EPUB with their email"`), sp.includes("It makes a shared copy traceable to its buyer; it cannot stop anyone from sharing."), toggle.includes("It makes a shared copy traceable to its buyer; it cannot stop anyone from sharing.")], [true, true, true, true]);
   is("drawn, hidden, beside its caption", hidden(st), true);
 
   part("Ways to pay");

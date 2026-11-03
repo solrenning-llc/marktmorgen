@@ -1171,14 +1171,16 @@ export default function PrivacyPage() {
           deleted when the creator disconnects the server.
         </p>
         <p id="stamping">
-          <strong className="text-black">Stamped PDFs.</strong> When a creator
+          <strong className="text-black">Stamped PDFs and marked EPUBs.</strong> When a creator
           switches on stamping for a product, every page of the PDF a buyer
           downloads carries the buyer&apos;s email address, the date and the
-          end of the order number. The stamped copy is made by our own code, is
+          end of the order number, and an EPUB a buyer downloads carries the
+          same line written inside the book, where reading apps do not show it. The stamped copy is made by our own code, is
           kept privately beside the creator&apos;s file so a later download
           gets the same copy, and is deleted with that file; a note of which
           copy belongs to which sale is kept for about 400 days. Anyone the
-          buyer passes the file to can read that line.
+          buyer passes the file to can read that line; in an EPUB, by opening
+          the book&apos;s files.
         </p>
         <p id="teams">
           <strong className="text-black">A store&apos;s team.</strong> A

@@ -23,6 +23,15 @@
  * told in the studio rather than the buyer being refused a file they paid for:
  * one over MAX_STAMP_BYTES (50 MB), and one pdf-lib cannot write to —
  * password-protected, or damaged.
+ *
+ * The same switch marks an EPUB (630 [HN6](30), unit 2; added 3 November
+ * 2026): the same line, written inside the book where reading apps do not
+ * show it (lib/epub-stamp.ts), kept as one copy per sale beside the original
+ * exactly as a PDF's, under the same records. An EPUB the mark cannot be
+ * written into is handed over as uploaded, with the reason in the studio:
+ * over 50 MB, under DRM ("protected"), in a form the mark does not read
+ * ("unsupported": ZIP64, a page too large opened, not UTF-8), or not a
+ * readable EPUB.
  */
 import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
@@ -30,7 +39,8 @@ import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { MAX_STAMP_BYTES, type ProductFile, isPdf } from "@/lib/product-file";
+import { MAX_STAMP_BYTES, type ProductFile, isEpub, isMarkable, isPdf } from "@/lib/product-file";
+import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
 import { type DataStore, keepFor } from "@/lib/store-data";
 
@@ -46,7 +56,16 @@ const PROBLEM_SECONDS = 60 * 24 * 60 * 60;
 export const copyKey = (reference: string, file: Pick<ProductFile, "pathname" | "addedAt">) => `nl:stamp:copy:${sha(`${reference}|${file.pathname}|${file.addedAt}`).slice(0, 40)}`;
 export const problemKey = (pathname: string) => `nl:stamp:problem:${sha(pathname).slice(0, 40)}`;
 
-export type StampProblem = "too_big" | "unreadable";
+export type StampProblem = "too_big" | "unreadable" | "protected" | "unsupported";
+const PROBLEMS: readonly StampProblem[] = ["too_big", "unreadable", "protected", "unsupported"];
+
+/** Why an EPUB was handed over unmarked, in the studio's few reasons. */
+export function epubProblem(why: EpubProblem): StampProblem {
+  if (why === "too_big") return "too_big";
+  if (why === "encrypted") return "protected";
+  if (why === "zip64" || why === "part_too_big" || why === "encoding") return "unsupported";
+  return "unreadable";
+}
 
 /** The line printed on every page (lib/pdf-stamp-line.ts, which pages that only show it read without the PDF library). */
 export { stampLine };
@@ -98,9 +117,9 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
   return doc.save();
 }
 
-/** Whether a product's file is one that stamping applies to at all. */
+/** Whether a product's file is one that stamping applies to at all: a PDF or an EPUB. */
 export function wantsStamp(stamp: boolean, file: ProductFile): boolean {
-  return stamp && isPdf(file);
+  return stamp && isMarkable(file);
 }
 
 async function noteProblem(pathname: string, problem: StampProblem): Promise<void> {
@@ -112,13 +131,14 @@ async function noteProblem(pathname: string, problem: StampProblem): Promise<voi
 export async function stampProblems(files: ProductFile[]): Promise<Map<string, StampProblem>> {
   const found = new Map<string, StampProblem>();
   for (const file of files) {
-    if (isPdf(file) && file.bytes > MAX_STAMP_BYTES) found.set(file.pathname, "too_big");
+    if (isMarkable(file) && file.bytes > MAX_STAMP_BYTES) found.set(file.pathname, "too_big");
   }
-  const rest = files.filter((file) => !found.has(file.pathname) && isPdf(file));
+  const rest = files.filter((file) => !found.has(file.pathname) && isMarkable(file));
   if (rest.length === 0 || !isRedisConfigured()) return found;
   const rows = await redisPipeline(rest.map((file) => ["GET", problemKey(file.pathname)]));
   rows.forEach((raw, i) => {
-    if (raw === "too_big" || raw === "unreadable") found.set(rest[i].pathname, raw);
+    const problem = PROBLEMS.find((p) => p === raw);
+    if (problem) found.set(rest[i].pathname, problem);
   });
   return found;
 }
@@ -152,7 +172,8 @@ export async function stampedCopy(
   sale: { reference: string; email: string; paidAt: number },
   store: DataStore,
 ): Promise<ProductFile | null> {
-  if (!isPdf(file) || !sale.reference || !sale.email) return null;
+  const epub = isEpub(file);
+  if (!(epub || isPdf(file)) || !sale.reference || !sale.email) return null;
   if (file.bytes > MAX_STAMP_BYTES) {
     await noteProblem(file.pathname, "too_big");
     return null;
@@ -172,25 +193,36 @@ export async function stampedCopy(
       await noteProblem(file.pathname, "too_big");
       return null;
     }
+    const line = stampLine(sale.email, sale.reference, new Date((sale.paidAt || Date.now() / 1000) * 1000));
     let stamped: Uint8Array;
-    try {
-      stamped = await stampPdf(original, stampLine(sale.email, sale.reference, new Date((sale.paidAt || Date.now() / 1000) * 1000)));
-    } catch (error) {
-      console.error("a PDF could not be stamped; handing over the original", error);
-      await noteProblem(file.pathname, "unreadable");
-      return null;
+    if (epub) {
+      const marked = stampEpub(original, line);
+      if (!marked.ok) {
+        await noteProblem(file.pathname, epubProblem(marked.why));
+        return null;
+      }
+      stamped = marked.bytes;
+    } else {
+      try {
+        stamped = await stampPdf(original, line);
+      } catch (error) {
+        console.error("a PDF could not be stamped; handing over the original", error);
+        await noteProblem(file.pathname, "unreadable");
+        return null;
+      }
     }
+    const contentType = epub ? "application/epub+zip" : "application/pdf";
     // In the store that charges nothing to send, a path is plain characters
     // only (lib/vault-rules.ts); the name the buyer saves it under is kept
     // beside the path, as it is for the original.
     const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
     const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
-    await writeFileWhole(pathname, stamped, "application/pdf");
+    await writeFileWhole(pathname, stamped, contentType);
     const copy: ProductFile = {
       pathname,
       name: file.name,
       bytes: stamped.byteLength,
-      contentType: "application/pdf",
+      contentType,
       addedAt: new Date().toISOString(),
     };
     // Its record is kept only while the store's data room has space for it
@@ -211,7 +243,7 @@ export async function stampedCopy(
  * Best effort, like every other clean-up of storage here.
  */
 export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | "contentType">): Promise<void> {
-  if (!isPdf(file)) return;
+  if (!isMarkable(file)) return;
   try {
     const copies = await listFiles(copyFolder(file));
     for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000));

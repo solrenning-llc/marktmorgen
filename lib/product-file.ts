@@ -67,6 +67,20 @@ export function isPdf(file: Pick<ProductFile, "contentType" | "name">): boolean 
   return file.contentType === "application/pdf" || (!file.contentType && /\.pdf$/i.test(file.name));
 }
 
+/** Whether a stored file is an EPUB book, by the type storage measured when it arrived (630 [HN6](30)). */
+export function isEpub(file: Pick<ProductFile, "contentType" | "name">): boolean {
+  return file.contentType === "application/epub+zip" || (!file.contentType && /\.epub$/i.test(file.name));
+}
+
+/**
+ * Whether a product's marking switch applies to a file: a PDF gets the line on
+ * every page (lib/pdf-stamp.ts), an EPUB the same line inside the book where
+ * reading apps do not show it (lib/epub-stamp.ts).
+ */
+export function isMarkable(file: Pick<ProductFile, "contentType" | "name">): boolean {
+  return isPdf(file) || isEpub(file);
+}
+
 /**
  * What a creator may sell.
  *

@@ -216,6 +216,11 @@ is("and that the lead came before the purchase", /confirmed lead before they bou
   is("the second tier counts it as a sale brought", /const BROUGHT: readonly Credit\[\] = \[[^\]]*"contact"/.test(source), true);
   is("a contact is read only after a click, a code and a bond found nobody", /bondFor\(store, buyer\);[\s\S]{0,900}contactFor\(store, buyer, at, session\.id\)/.test(source), true);
 
+  part("The privacy policy says so");
+  const privacy = readFileSync(join(process.cwd(), "app/privacy/page.tsx"), "utf8").replace(/\s+/g, " ");
+  is("how a purchase was credited includes an earlier lead", privacy.includes("or by the buyer having been that affiliate&apos;s confirmed lead"), true);
+  is("and how the lead is found, with nothing more kept", privacy.includes("the email address the order was paid with is compared with that program&apos;s leads, and nothing is kept for it beyond what any credited purchase keeps"), true);
+
   done();
 }
 

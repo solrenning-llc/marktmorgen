@@ -243,3 +243,26 @@ export async function queuedCopies(limit = 50): Promise<{ sid: string; person: s
   }
   return out;
 }
+
+/**
+ * Deletes a person's made copy and their waiting request in one store, with
+ * the erasure (lib/person-erasure.ts): a copy of someone's data is their
+ * data. Wired into the erasure, and named in lib/person-data.ts, once
+ * #1502 frees those files.
+ */
+export async function forgetCopiesPerson(sid: string, email: string): Promise<number> {
+  if (!STORE_ID.test(sid) || !isRedisConfigured()) return 0;
+  const person = personOf(sid, email);
+  const [head] = await redisPipeline([["GET", madeKey(sid, person)]]);
+  let parts = 0;
+  try {
+    parts = typeof head === "string" ? Math.min(MAX_COPY_PARTS, Number((JSON.parse(head) as { n?: unknown }).n) || 0) : 0;
+  } catch {
+    parts = MAX_COPY_PARTS;
+  }
+  const [gone] = await redisPipeline([
+    ["DEL", madeKey(sid, person), askKey(sid, person), ...Array.from({ length: parts }, (_, i) => `${madeKey(sid, person)}:${i}`)],
+    ["ZREM", QUEUE, `${sid}|${person}`],
+  ]);
+  return Number(gone) || 0;
+}

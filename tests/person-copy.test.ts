@@ -42,7 +42,8 @@ async function main(): Promise<void> {
   is("each module the copy reads has its reader", Object.entries(COPY_PLAN).filter(([m, p]) => p.how === "copied" && !COPIERS[m]).map(([m]) => m), []);
   is("each line says what it is, in words", Object.values(COPY_PLAN).every((p) => p.what.length > 10), true);
   is("nothing is pending: the copy is complete", COPY_COMPLETE, true);
-  is("no page gives it out yet (its door is the next unit)", [existsSync("app/privacy/copy/page.tsx"), existsSync("app/api/privacy/copy/route.ts")], [false, false]);
+  // The door exists, closed until the company's exposure for copies is approved (lib/copy-request.ts, COPY_DOOR_OPEN; inbox C3-12).
+  is("its door answers only behind its gate", [existsSync("app/privacy/copy/page.tsx"), existsSync("app/api/privacy/copy/route.ts")], [true, true]);
 
   redis.clear();
   await claimHandle(OWNER, "copyshop", "Copy Shop", "");

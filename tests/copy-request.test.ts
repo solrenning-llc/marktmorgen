@@ -10,7 +10,7 @@ import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail 
 import { importContactRows } from "@/lib/contacts";
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
-import { COPY_DOOR_OPEN, copyFor, queuedCopies, readCopyLink, requestCopyLink } from "@/lib/copy-request";
+import { COPY_DOOR_OPEN, copyFor, forgetCopiesPerson, queuedCopies, readCopyLink, requestCopyLink } from "@/lib/copy-request";
 import { COPY_COMPLETE } from "@/lib/person-copy";
 import { CURRENT_EXPOSURE_BUDGET_POLICY } from "@/lib/exposure-budget-policy";
 import { POST as copyRoute } from "@/app/api/privacy/copy/route";
@@ -82,6 +82,11 @@ async function main(): Promise<void> {
   if (made.state !== "ready") throw new Error("no copy");
   is("it is their place on the list", made.copy.sections.some((s) => s.module === "lib/contacts.ts"), true);
   is("a store that is not on the link: nothing", (await copyFor(token, "0".repeat(32), asked)).state, "gone");
+
+  part("Deleted with the person");
+  is("the made copy goes with the erasure", await forgetCopiesPerson(store.sid, PERSON) > 0, true);
+  let remade = 0;
+  is("asked after: a new copy, from a new reservation", [(await copyFor(token, store.sid, asked + 8 * 86_400_000, async () => (remade++, true))).state, remade], ["ready", 1]);
 
   part("As JSON and as a spreadsheet");
   is("JSON reads back to the same copy", JSON.parse(copyJson(made.copy)), made.copy);

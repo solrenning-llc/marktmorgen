@@ -17,7 +17,9 @@
  * before it is sent (one of the month's AI jobs).
  *
  * What it never does: write to anybody but the person who wrote first, and
- * only in answer to them; send a visitor's address or name to the writing
+ * only in answer to them, except one of the store's own approved affiliates,
+ * to whom the creator may write first (630 [HN6](5), lib/inbox.ts
+ * writeToAffiliate); send a visitor's address or name to the writing
  * help (addresses, phone numbers and links are taken out first); keep a
  * conversation past KEEP_DAYS after its last message.
  *

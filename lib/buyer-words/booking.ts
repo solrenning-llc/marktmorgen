@@ -420,7 +420,7 @@ const es: BookingWords = {
   depositRest: (amount, store) => `Un depósito para reservar tu hora. El resto, ${amount}, se paga en persona a ${store}.`,
   codeLabel: "Código de descuento (opcional)",
   codeHelp: "Se descuenta del precio completo. Lo que queda después del depósito se paga en persona.",
-  codeOffPrice: (code, amount) => `Código ${code}: ${amount} menos sobre el precio completo.`,
+  codeOffPrice: (code, amount) => `Código ${code}: ${amount} de descuento sobre el precio total.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sesión", "sesiones")}`,
   packageDescription: (sessions, limit) =>
@@ -796,7 +796,7 @@ const de: BookingWords = {
   depositRest: (amount, store) => `Eine Anzahlung, um Ihren Termin zu sichern. Den Rest, ${amount}, zahlen Sie vor Ort an ${store}.`,
   codeLabel: "Rabattcode (optional)",
   codeHelp: "Er gilt für den ganzen Preis. Was nach der Anzahlung bleibt, zahlen Sie vor Ort.",
-  codeOffPrice: (code, amount) => `Code ${code}: ${amount} weniger auf den ganzen Preis.`,
+  codeOffPrice: (code, amount) => `Code ${code}: ${amount} Rabatt auf den Gesamtpreis.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "Termin", "Termine")}`,
   packageDescription: (sessions, limit) =>

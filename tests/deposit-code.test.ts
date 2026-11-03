@@ -193,7 +193,7 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");
   is(
     "the page shows the field only when the checkout would charge a deposit, as the route reads it",
-    [page.includes("!fromPackage && store.hasDiscounts && chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: setup.deposit ?? null, inPerson: Boolean(setup.place) }).rest > 0"), (page.match(/, code \}\}/g) ?? []).length],
+    [page.includes("const due = fromPackage ? null : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: setup.deposit ?? null, inPerson: Boolean(setup.place) });") && page.includes("const deposit = due && due.rest > 0 ? due : null;") && page.includes("const code = deposit && store.hasDiscounts ? { label: b.codeLabel, help: b.codeHelp } : undefined;"), (page.match(/, code \}\}/g) ?? []).length],
     [true, 2],
   );
   const field = renderToStaticMarkup(createElement(CodeField, { words: { label: "Discount code (optional)", help: "It comes off the whole price." } }));

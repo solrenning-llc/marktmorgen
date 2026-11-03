@@ -44,7 +44,7 @@
  * (lib/host-claims.ts), under the same lock as everything here.
  */
 import type { DepositFigures } from "@/lib/deposit-code";
-import { chargeNow } from "@/lib/call-deposit";
+import { chargeNow, creatorDueLine, type DueInPerson, dueLines, readDue } from "@/lib/call-deposit";
 import { type CallPlace, placeIcsLines, placeLine, whereOf } from "@/lib/call-place";
 import { admitOrders } from "@/lib/order-admission";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
@@ -247,6 +247,8 @@ export async function paidCalls(store: Store): Promise<
     /** The affiliate a lead is credited to once the call has taken place (lib/affiliate-leads.ts), and the payment; empty otherwise. */
     lead: string;
     pi: string;
+    /** What is left to pay in person, and a code taken off the whole price, as the sale keeps them (lib/call-deposit.ts). */
+    due: DueInPerson | null;
   }[]
 > {
   return (await readCallSessions(store)).paid;
@@ -295,6 +297,7 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
     pi: paymentOf(row.payment_intent),
+    due: readDue(meta),
   };
 }
 
@@ -525,6 +528,7 @@ export async function catchUpBookings(store: Store, paid: PaidCall[], origin: st
       currency: call.currency,
       lead: call.lead,
       pi: call.pi,
+      due: call.due,
       origin,
     }).catch((error) => console.error("catching up a booking failed", error));
   }
@@ -1360,10 +1364,31 @@ export async function confirmBooking(input: {
   /** The affiliate a lead is credited to (metadata lead_via), and the booking's payment, which a refund is made against. */
   lead?: string;
   pi?: string;
+  /**
+   * What is left to pay in person and the code taken off the whole price
+   * (lib/call-deposit.ts, readDue): null when nothing is; left out when not
+   * read, and then read from the sale here for an in-person booking.
+   */
+  due?: DueInPerson | null;
   origin: string;
 }): Promise<void> {
   const { store, product, session, start, end, buyerEmail, origin } = input;
   if (!isRedisConfigured() || !store.callsId) return;
+  // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
+  // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
+  // (catchUpBookings, the daily job), which carries it, instead of sending both emails without it.
+  let due = input.due;
+  if (due === undefined) {
+    if (whereOf(product.call).kind !== "place") due = null;
+    else {
+      try {
+        due = (await paidCall(store, session))?.due ?? null;
+      } catch (error) {
+        console.error("reading what is left to pay in person failed; confirmed later", error);
+        return;
+      }
+    }
+  }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;
   // Booked: the orders it was admitted as are the window's (lib/orders.ts), once, by the checkout.
@@ -1436,6 +1461,7 @@ export async function confirmBooking(input: {
   const place = whereOf(setup).kind === "place" ? setup.place! : null;
   const room = place ? null : await roomOf(store.callsId, { product: product.id, setup, session, start, end });
   const video = isVideoRoom(room);
+  const paidIn = input.currency || store.currency;
   const invite = (note: string, words?: BookingWords) =>
     Buffer.from(
       callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, place, note, sequence: (input.moves ?? 0) + (meeting?.updates ?? 0), words }),
@@ -1459,6 +1485,8 @@ export async function confirmBooking(input: {
         `${readableTime(start, buyerTz, locale)} (${zoneName(start, buyerTz, locale)})`,
         "",
         place ? b.whereAt(placeLine(place)) : room ? b.joinAtThatTime(room) : b.willSendLink(store.name),
+        // The same sentences Stripe's page showed before paying: the code, and what is left to pay in person.
+        ...dueLines(b, due, { currency: paidIn, locale, storeName: store.name }),
         ...(video ? [b.videoRoomNote] : []),
         "",
         // The reminders planned above: each only while it is at least an hour away (lib/call-records.ts).
@@ -1500,6 +1528,8 @@ export async function confirmBooking(input: {
           : `They were given your meeting link: ${room}`
         : `You have not set a meeting link, so send them one before the call${buyerEmail ? ` at ${buyerEmail}` : ""}.`,
       ...(meeting && !meeting.made && video ? [VIDEO_ROOM_NOTE] : []),
+      // What is left to collect in person, whatever the booking is now, so the creator never misses it.
+      ...(due ? [creatorDueLine(due, { paidCents: input.amountCents, currency: paidIn })] : []),
       "",
       `${
         theirs

@@ -1238,6 +1238,7 @@
     "components/call-editor.tsx",
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
+    "components/cart-link-builder.tsx",
     "components/certificate-actions.tsx",
     "components/chat-summary-editor.tsx",
     "components/checkout-extras.tsx",

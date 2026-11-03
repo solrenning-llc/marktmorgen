@@ -21,7 +21,8 @@
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import type { Product, Store } from "@/lib/store";
-import { KIND, readListings } from "@/lib/catalog";
+import { KIND, idsOfKind, readListings } from "@/lib/catalog";
+import { soonState } from "@/lib/preorders";
 import { BUMP_KEYS, MIN_BUNDLE_ITEMS, bundleMeta, deliverableItems } from "@/lib/bundle-rules";
 import { type SaleCandidate, saleOff, salePrice } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
@@ -32,10 +33,10 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { isHouseStore } from "@/lib/house-store";
-import { CART_OFFER_META, MAX_CART, dealOff } from "@/lib/cart-rules";
+import { CART_OFFER_META, MAX_CART, cartable, dealOff } from "@/lib/cart-rules";
 import { RECOVERY_OPEN_SECONDS, applyRecovery, recoveryOn, refusedRecovery, withoutRecovery } from "@/lib/recovery-setting";
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
-import { codesMayTakeOff } from "@/lib/discount";
+import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { CONSENT_META, type DigitalConsent, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
 import { applyCartShipping, cartItemOf, cartShipping, shippedFirst, shipsWithOnline } from "@/lib/cart-shipping";
 
@@ -77,6 +78,21 @@ export function cartPrice(store: Pick<Store, "sale" | "fair">, product: SaleCand
   return { cents: salePrice(product.priceCents, off), off };
 }
 
+/**
+ * The products a ready cart link may hold (624 [SZ8](23)), for the studio's
+ * link builder: what the cart route takes today, listed and paid, sold once
+ * at one price, not coming soon. A read that fails lists nothing.
+ */
+export async function cartLinkProducts(store: Store): Promise<{ id: string; title: string }[]> {
+  try {
+    const coming = await soonState(store).catch(() => ({ soon: new Set<string>() }));
+    const listed = await readListings(store, idsOfKind(store, "paid"));
+    return listed.filter((p) => cartable(p) && !coming.soon.has(p.id)).map((p) => ({ id: p.id, title: p.title }));
+  } catch {
+    return [];
+  }
+}
+
 /** Opens one checkout for every product in a cart, in its order. The caller has checked each can go in one. */
 export async function createCartCheckout(
   store: Store,
@@ -93,6 +109,12 @@ export async function createCartCheckout(
     channel?: Record<string, string>;
     /** The affiliate whose link the buyer followed, still inside the store's window (lib/affiliates.ts). */
     via?: { aff: string; rate: number; own?: number | null } | null;
+    /**
+     * A discount code that came in a link to this store (lib/code-link.ts),
+     * applied by Stripe only if it is one of the creator's live codes, and
+     * only when nothing else was taken off (624 [SZ8](23)).
+     */
+    code?: string;
     /** The buyer checked the Store assistant's box for one reminder (lib/assistant-reminder.ts): the checkout closes after an hour. */
     remind?: boolean;
     /** The buyer's yes to access at once (lib/digital-consent.ts), needed when anything in the cart is handed over digitally. */
@@ -201,7 +223,15 @@ export async function createCartCheckout(
   }
   // One discount at a time, as everywhere here: a code box only when nothing was taken off already.
   const box = !discounted && store.hasDiscounts;
-  if (box) body.set("allow_promotion_codes", "true");
+  // A code from a link goes on by itself, as on one product's checkout
+  // (lib/store-checkout.ts); Stripe takes an applied discount or the box,
+  // never both, so it is one or the other. Either is one of the store's own
+  // codes, so what may come off below is the same.
+  const promotion = box && extras.code ? await livePromotionId(store.stripeAccountId, extras.code) : null;
+  if (promotion) {
+    body.set("discounts[0][promotion_code]", promotion);
+    body.set("metadata[code]", extras.code as string);
+  } else if (box) body.set("allow_promotion_codes", "true");
   // The share of the sale, when the store's plan has one (lib/platform-share.ts):
   // the lines are already at the price the store set, and a code typed in the
   // box may take off as much as the largest the store has.
@@ -242,6 +272,16 @@ export async function createCartCheckout(
       if (named && error instanceof StripeError && error.status === 400) {
         body.delete(DISPLAY_NAME);
         named = false;
+        continue;
+      }
+      if (body.has("discounts[0][promotion_code]") && error instanceof StripeError && error.status === 400 && /promotion|coupon|discount/i.test(error.message)) {
+        // The code from the link is real but not for this cart (a minimum, a
+        // first order only, other products): the buyer is not turned away for
+        // it, and the checkout opens with the box, as it would have.
+        console.error("a code from a link did not fit this cart; opened with the box instead", error);
+        body.delete("discounts[0][promotion_code]");
+        body.delete("metadata[code]");
+        body.set("allow_promotion_codes", "true");
         continue;
       }
       if (asking && refusedRecovery(error)) {

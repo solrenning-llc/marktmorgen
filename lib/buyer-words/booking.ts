@@ -645,7 +645,7 @@ const fr: BookingWords = {
   hostShow: "Voir ses horaires",
   lengthPick: `Quelle durée souhaitez-vous${S}?`,
   lengthShow: "Voir les horaires pour cette durée",
-  lengthOption: (minutes: number, price: string) => `${minutes} minutes, ${price}`,
+  lengthOption: (minutes: number, price: string) => `${minutes} minutes pour ${price}`,
   withHost: (name) => `Avec ${name}`,
   cancelPolicy: (hours, store) =>
     `Annulez au moins ${hours} heures avant le début, en répondant à votre e-mail de confirmation, et ${store} rembourse ce que vous avez payé en ligne. Si vous annulez plus tard ou ne venez pas, ${store} n'est pas tenu de le rembourser. Si ${store} annule, tout vous est remboursé. Cela ne change rien à vos droits prévus par la loi.`,

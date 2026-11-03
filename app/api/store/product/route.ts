@@ -38,6 +38,7 @@ import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { idsOfKind, readAllListings, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
+import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
 import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
@@ -178,6 +179,9 @@ export async function POST(request: NextRequest) {
     const published = action === "add" || (await readListing(guarded.store, id).catch(() => null))?.hidden !== true;
     const refused = published ? fastMoneyRefusal({ title, summary, about: about ?? "" }) : null;
     if (refused) return Response.json({ ok: false, error: "fast_money", passage: refused }, { status: 409 });
+    // Nor with a prompt of the ready outline still in it (lib/product-outline.ts); a draft may keep them.
+    const promptLeft = published ? productPromptsLeft({ title, summary, about: about ?? "" })[0] : undefined;
+    if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft }, { status: 409 });
   }
 
   // A membership's introductory price (lib/intro-price.ts) and its yearly
@@ -341,6 +345,8 @@ export async function POST(request: NextRequest) {
           const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
           const refused = fastMoneyRefusal({ title: draft.title, summary: draft.summary, about: words }) ?? (shownPage ? fastMoneyOnPage(pageWords(shownPage)) : null);
           if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
+          const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
+          if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
           // A course from a ready structure is published only once its example titles are replaced (540 [CU1]).
           if (draft.course) {
             const course = await readCourse(draft.course.id);

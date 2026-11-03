@@ -18,8 +18,16 @@ const REASONS: Record<string, string> = {
 };
 
 const placeName = (place: string) => POST_PLACES.find((p) => p.place === place)?.label ?? "Somewhere else";
-const targetValue = (t: LinkTarget) => (t.kind === "store" ? "store" : `product:${t.id}`);
-const targetFrom = (value: string): LinkTarget => (value.startsWith("product:") ? { kind: "product", id: value.slice(8) } : { kind: "store" });
+const targetValue = (t: LinkTarget) => (t.kind === "store" ? "store" : t.kind === "product" ? `product:${t.id}` : `cart:${t.ids.join(",")}:${t.code ?? ""}`);
+/** A ready cart (made under "A link to a ready cart", 624 [SZ8](23)) is kept as it is when it stays chosen; the list offers it only as the link's own. */
+const targetFrom = (value: string): LinkTarget => {
+  if (value.startsWith("product:")) return { kind: "product", id: value.slice(8) };
+  if (value.startsWith("cart:")) {
+    const [ids = "", code = ""] = value.slice(5).split(":");
+    return code ? { kind: "cart", ids: ids.split(","), code } : { kind: "cart", ids: ids.split(",") };
+  }
+  return { kind: "store" };
+};
 
 function save(blob: Blob, name: string) {
   const href = URL.createObjectURL(blob);
@@ -136,7 +144,12 @@ export function ShortLinks({
     }
   }
 
-  const where = (t: LinkTarget) => (t.kind === "store" ? "Your store" : products.find((p) => p.id === t.id)?.title ?? "A product no longer listed");
+  const where = (t: LinkTarget) =>
+    t.kind === "store"
+      ? "Your store"
+      : t.kind === "product"
+        ? products.find((p) => p.id === t.id)?.title ?? "A product no longer listed"
+        : `a ready cart of ${t.ids.length} products${t.code ? ` with the code ${t.code}` : ""}`;
 
   return (
     <section className="mt-6" aria-labelledby="short-links-title" data-short-links>
@@ -225,6 +238,7 @@ export function ShortLinks({
                         <option key={p.id} value={`product:${p.id}`}>{p.title}</option>
                       ))}
                       {link.target.kind === "product" && !products.some((p) => p.id === (link.target as { id: string }).id) ? <option value={targetValue(link.target)}>A product no longer listed</option> : null}
+                      {link.target.kind === "cart" ? <option value={targetValue(link.target)}>{`A ready cart of ${link.target.ids.length} products`}</option> : null}
                     </select>
                   </label>
                   <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void send({ action: "remove", code: link.code }, "Ended. The link now says so.")} aria-label={`End the link for ${link.name}`}>

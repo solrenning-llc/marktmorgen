@@ -21565,7 +21565,7 @@ Regra do dono ("recurso bom nunca descartado; vai ao fim"): recursos bons, de be
 20. Etiqueta de devolução pela conta Shippo do criador e janela de devolução por produto (complemento de 516 [PF4] e 205 [SH2]).
 21. Lista de separação, guia de remessa e documentos imprimíveis do pedido físico, em PDF marcado (complemento de 513–519 [PF1–PF7] e 601 [KB22]).
 22. Bloqueio de caixa postal e valor mínimo ou máximo do pedido físico (complemento de 515 [PF3]).
-23. Link de carrinho pronto com vários produtos e cupom, para posts e e-mails (estende lib/cart-checkout.ts e lib/short-links.ts). Estado (Claude 3, 03/11/2026): unidades 1 e 2 (cupom do link aplicado também no checkout do carrinho, e o montador do link no estúdio) em commits locais no ramo claude3/sz8-cart-link, a enviar quando a mudança de organização for liberada (C3-24); o link curto (lib/short-links.ts) fica como unidade futura deste item.
+23. Link de carrinho pronto com vários produtos e cupom, para posts e e-mails (estende lib/cart-checkout.ts e lib/short-links.ts). Estado (Claude 3, 03/11/2026): unidades 1 a 3 (cupom do link aplicado também no checkout do carrinho, o montador do link no estúdio e o link curto de um post que abre o carrinho) em commits locais no ramo claude3/sz8-cart-link, a enviar quando a mudança de organização for liberada (C3-24).
 24. Gorjeta opcional no próprio checkout, além da gorjeta avulsa (estende lib/store-tips.ts e lib/store-checkout.ts).
 25. Mensagem de parcelamento do Stripe na página ("or 4 payments of $X") só quando o criador ligou BNPL no Stripe (estende lib/payment-methods.ts).
 26. Seção de produtos mais vendidos e novidades preenchida sozinha no e-mail (complemento de 546 [EB1]).

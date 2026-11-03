@@ -307,4 +307,42 @@ export const MAIL_TEMPLATES: { id: string; label: string; hint: string; blocks: 
       { kind: "button", label: "⟦See it⟧", href: "https://" },
     ],
   },
+  // Seasonal (624 [SZ8](29)): the occasion is the creator's to name, and only
+  // what is true is asked for: the real prices, an end date only if the sale
+  // has one. Nothing in them hurries the reader (tests/mail-body.test.ts).
+  {
+    id: "sale",
+    label: "A sale (Black Friday, a season's end)",
+    hint: "What is on sale, its price before and during the sale, and the day it ends if you set one.",
+    blocks: [
+      { kind: "heading", text: "⟦What is on sale⟧" },
+      { kind: "text", text: "⟦Why there is a sale now: Black Friday, a birthday, the end of a season.⟧" },
+      { kind: "list", items: ["⟦A product, its sale price and its usual price⟧", "⟦Another product, its sale price and its usual price⟧"] },
+      { kind: "text", text: "⟦The day the sale ends, as set in your store. Leave this out if it has no end.⟧" },
+      { kind: "button", label: "⟦See the sale⟧", href: "https://" },
+    ],
+  },
+  {
+    id: "year-end",
+    label: "End of the year",
+    hint: "A thank-you, what you made this year, and what comes next. No sale needed.",
+    blocks: [
+      { kind: "heading", text: "⟦Thank you for this year⟧" },
+      { kind: "text", text: "⟦What you made or learned this year, in a few sentences.⟧" },
+      { kind: "list", items: ["⟦Something you are glad you made⟧", "⟦Something readers asked for, and what you did⟧"] },
+      { kind: "text", text: "⟦What comes next year, if you know.⟧" },
+      { kind: "button", label: "⟦Read more⟧", href: "https://" },
+    ],
+  },
+  {
+    id: "back-to-school",
+    label: "Back to learning",
+    hint: "For a new school year or season: what they can learn with you, and where to start.",
+    blocks: [
+      { kind: "heading", text: "⟦A new season to learn something⟧" },
+      { kind: "text", text: "⟦Who this is for, and what they can learn with you.⟧" },
+      { kind: "list", items: ["⟦A course or guide, and what it teaches⟧", "⟦Another one, and what it teaches⟧"] },
+      { kind: "button", label: "⟦Where to start⟧", href: "https://" },
+    ],
+  },
 ];

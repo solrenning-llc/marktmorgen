@@ -21,6 +21,7 @@ const WHY: Record<string, string> = {
   changed_since: "it was changed since it was proposed, so it was not carried out",
   unknown: "it is not waiting any more",
   failed: "it could not be carried out just now",
+  terms: "its words are not allowed on a product that is on the store (a promise of fast or easy money, or a ready outline's prompt left in), so it was not carried out; decline it",
   unknown_kind: "this kind of change is not available",
   one_at_a_time: "it has to be confirmed on its own",
   batch_too_large: "too many at once",

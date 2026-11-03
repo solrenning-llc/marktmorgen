@@ -155,13 +155,14 @@ export function declineProposal(store: DataStore & { statsId: string }, id: stri
   );
 }
 
-export type Confirmed = { done: string[]; refused: { id: string; why: ConfirmRefusal | "failed" }[] };
+export type Confirmed = { done: string[]; refused: { id: string; why: ConfirmRefusal | "failed" | "terms" }[] };
 
 /**
  * The creator's confirmation: each proposal the rules let through is carried
  * out by `apply`, in order, and written into the history only when it was
  * (apply answers false when it could not be: it stays waiting, said as
- * "failed"). All under the lock, so the same proposal is never carried out
+ * "failed"; "terms" when its words are not allowed there now, also left
+ * waiting, for the creator to decline). All under the lock, so the same proposal is never carried out
  * twice.
  */
 export function confirmProposals(
@@ -169,7 +170,7 @@ export function confirmProposals(
   ids: string[],
   kinds: ReadonlyMap<string, ProposalKind>,
   current: (proposal: Proposal) => Json,
-  apply: (proposal: Proposal) => Promise<boolean>,
+  apply: (proposal: Proposal) => Promise<boolean | "terms">,
   who: string,
   now = Date.now(),
 ): Promise<Confirmed> {
@@ -180,10 +181,11 @@ export function confirmProposals(
       let next = book;
       const result: Confirmed = { done: [], refused: [...plan.refused] };
       for (const proposal of plan.apply) {
-        if (await apply(proposal)) {
+        const applied = await apply(proposal);
+        if (applied === true) {
           next = recordDone(next, proposal, kinds.get(proposal.kind)!, who, now);
           result.done.push(proposal.id);
-        } else result.refused.push({ id: proposal.id, why: "failed" });
+        } else result.refused.push({ id: proposal.id, why: applied === "terms" ? "terms" : "failed" });
       }
       return { book: result.done.length ? next : null, result };
     },

@@ -29,7 +29,7 @@ export async function confirmFor(store: Store & { statsId: string }, ref: string
     ids,
     AGENT_KINDS,
     (p) => (now.has(p.id) ? (now.get(p.id) as Json) : null),
-    async (p) => (await AGENT_KINDS.get(p.kind)?.write(store, ref, p.target, p.after)) === true,
+    async (p) => (await AGENT_KINDS.get(p.kind)?.write(store, ref, p.target, p.after)) ?? false,
     who,
   );
 }

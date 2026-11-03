@@ -3,13 +3,14 @@
  * route. An agent's key prepares a description (the MCP tool); nothing
  * changes until the creator, signed in to the studio, confirms it; a declined
  * one changes nothing; a confirmed one is in the history and can be put back;
- * an agent's own key never reaches this route; the page is drawn.
+ * an agent's own key never reaches this route; words a product on the store
+ * may not hold are never carried out; the page is drawn.
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { makeKey } from "@/lib/api-keys";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductHidden, setSubscription } from "@/lib/store";
 import { readAbout } from "@/lib/product-about";
 import { readBook } from "@/lib/agent-book";
 import { AGENT_COVERAGE } from "@/lib/agent-coverage";
@@ -20,6 +21,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 const OWNER = "confirm@example.com";
+const proposalsSource = () => readFileSync("components/agent-proposals.tsx", "utf8");
 
 async function main(): Promise<void> {
   redis.clear();
@@ -73,6 +75,18 @@ async function main(): Promise<void> {
   is("put back", [undone.status, undone.data.ok], [200, true]);
   is("the description is as it was", await readAbout(statsId, product.product.id), "");
   is("undoing twice is said", (await post({ action: "undo", id: first })).data.error, "already_undone");
+
+  part("Words a product on the store may not hold are never carried out");
+  // Proposed while the product was a draft, which may hold them; published since.
+  is("hidden while it is a draft", (await setProductHidden(OWNER, other.product.id, true)).ok, true);
+  const late = await propose(other.product.id, "Make easy money rolling pasta at home.");
+  is("a draft may be proposed such words", typeof late === "string" && late.length > 0, true);
+  is("published again", (await setProductHidden(OWNER, other.product.id, false)).ok, true);
+  const blocked = await post({ action: "confirm", ids: [late] });
+  is("confirming it is refused for its words, and it stays waiting to be declined", [blocked.data.done, blocked.data.refused, (await readBook(statsId)).waiting.map((p) => p.id)], [[], [{ id: late, why: "terms" }], [late]]);
+  is("the product's description is unchanged", await readAbout(statsId, other.product.id), "");
+  is("the studio says why", proposalsSource().includes("terms: \"its words are not allowed on a product that is on the store"), true);
+  is("declined", (await post({ action: "decline", id: late })).data.ok, true);
 
   part("Bad requests");
   is("nothing chosen", (await post({ action: "confirm", ids: ["not-an-id"] })).data.error, "ids");

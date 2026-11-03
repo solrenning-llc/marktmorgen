@@ -3,11 +3,13 @@
  * route: propose_product_description. A key that only reads is refused; a
  * key allowed to prepare changes keeps a proposal in the store's book with
  * what the description is now and what it would become; nothing on the
- * store changes; the same text is "no change"; an unknown product is said.
+ * store changes; the same text is "no change"; an unknown product is said;
+ * words the studio refuses on a product on the store are refused here too.
  */
 import { makeKey } from "@/lib/api-keys";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription } from "@/lib/store";
 import { readAbout } from "@/lib/product-about";
+import { PRODUCT_OUTLINE_PROMPTS } from "@/lib/product-outline";
 import { readBook } from "@/lib/agent-book";
 import { POST as mcp } from "@/app/api/mcp/route";
 import { store as redis } from "./redis-stub";
@@ -52,6 +54,13 @@ async function main(): Promise<void> {
   const unknown = await call(drafter.key, { product: "nosuchproduct", description: "x" });
   is("an unknown product is said", [unknown.result?.isError, /no such product/.test(unknown.result?.content[0].text ?? "")], [true, true]);
   is("still one proposal waiting", (await readBook(statsId)).waiting.length, 1);
+
+  part("The words the studio refuses are refused here too");
+  const money = await call(drafter.key, { product: product.product.id, description: "Make easy money cutting at home." });
+  is("a promise of fast or easy money on a product on the store", [money.result?.isError, /Nothing was proposed\./.test(money.result?.content[0].text ?? ""), /easy money/i.test(money.result?.content[0].text ?? "")], [true, true, true]);
+  const outline = await call(drafter.key, { product: product.product.id, description: `Intro\n${PRODUCT_OUTLINE_PROMPTS[0]}` });
+  is("a prompt of the ready outline left in", [outline.result?.isError, /ready outline/.test(outline.result?.content[0].text ?? "")], [true, true]);
+  is("neither was kept", (await readBook(statsId)).waiting.length, 1);
   done();
 }
 

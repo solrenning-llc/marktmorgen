@@ -23,6 +23,9 @@ export async function proposeDescription(store: Store, keyId: string, args: Reco
   const listing = await readListing(store, product);
   if (!listing || !store.statsId) return answer({ error: "There is no such product in this store. Use list_products for the ids." }, true);
   const after = cleanAbout(raw);
+  // The words the studio would refuse on this product are refused here too, before the creator ever sees them.
+  const refused = await PRODUCT_DESCRIPTION.refusal?.(store, product, after);
+  if (refused) return answer({ error: `${refused} Nothing was proposed.` }, true);
   try {
     const before = await PRODUCT_DESCRIPTION.current(store, product);
     const made = await addProposal({ ...store, statsId: store.statsId }, PRODUCT_DESCRIPTION, { target: product, before, after, asked: { by: "mcp", who: keyId } });

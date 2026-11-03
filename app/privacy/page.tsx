@@ -1051,9 +1051,10 @@ export default function PrivacyPage() {
           their page keeps a cookie named <code>nl_aff_</code> followed by the
           store&apos;s address, for 30 days. Where a creator chooses to take
           out affiliates with no sale and no lead for a time they set, we keep
-          when each affiliate was last warned: an affiliate it applies to is
-          emailed at the address they joined with at least {IDLE_WARN_DAYS} days before, and one taken
-          out keeps their records like any affiliate the creator removes. Where a creator pays affiliates
+          the date each affiliate was last warned. Before an affiliate is taken
+          out, we email them at the address they joined with, at least {IDLE_WARN_DAYS} days
+          ahead. An affiliate taken out keeps their records, as when a creator
+          removes them by hand. Where a creator pays affiliates
           per lead (since October 18, 2026) &mdash; an email sign-up to their
           list the person confirmed, a free product claimed from its emailed
           link, or a booked call that took place &mdash; the affiliate the

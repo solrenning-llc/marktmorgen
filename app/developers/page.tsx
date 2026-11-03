@@ -494,9 +494,36 @@ export default function DevelopersPage() {
       </LegalSection>
 
       <LegalSection title="Sales and refunds">
+        <Endpoint path="/api/v1/sales">
+          Your store&apos;s paid checkouts, newest first, read from your own Stripe account as your studio&apos;s list of
+          sales reads them, in the same shape as the <code className="font-mono">sale.completed</code> webhook. Up to 100
+          checkouts are read per call; a page can be empty and still have a <code className="font-mono">next</code>, when
+          those checkouts were not this store&apos;s. What a buyer typed at checkout is not included. 409 with{" "}
+          <code className="font-mono">not_selling</code> while the store is not taking payments.
+        </Endpoint>
+        <Code>{`{
+  "data": [
+    {
+      "checkout_session": "cs_live_a1B2c3",
+      "kind": "one_time",
+      "product": { "id": "k3j9x2p1ab", "title": "The 7-Day Reset" },
+      "option": null,
+      "amount_cents": 4900,
+      "discount_cents": 0,
+      "currency": "usd",
+      "buyer": { "email": "dana@example.com", "name": "Dana Ortiz" },
+      "paid_at": "2026-09-20T09:41:10.000Z",
+      "trial": false,
+      "source": { "utm_source": "newsletter", "utm_medium": "email", "utm_campaign": null, "utm_content": null, "site": null }
+    }
+  ],
+  "next": "cs_live_a1B2c3",
+  "refunds_checked": false
+}`}</Code>
         <p>
-          Sales, subscriptions and refunds are charged on your own Stripe account, so Stripe&apos;s own API is where to
-          read them, with your own Stripe key. To be told about each one as it happens, add a webhook in your studio.
+          Refunds are not read per sale (<code className="font-mono">refunds_checked</code> says so): add the{" "}
+          <code className="font-mono">refund.issued</code> webhook in your studio to be told of each one, or read them in
+          Stripe&apos;s own API with your own Stripe key.
         </p>
       </LegalSection>
 

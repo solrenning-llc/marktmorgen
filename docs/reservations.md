@@ -8,7 +8,6 @@ Lanes (who owns which subjects):
 | --- | --- | --- |
 | Codex (ChatGPT) | codex/ | Money, billing, Amazon SES email, taxes, costs and margin (AV1 steps 3–6 and 10–12, AV5 rule 4) |
 | Claude 1 | claude/ | Coordination, the queue, research, design of the site and the studio with the owner (571 [VS1]), review of the others' work, accounts (232 [CA1]) and refunds (305 [SY1], 306 [SY2]) |
-| Claude 2 | 637 [GL5], unit 4a (a one-time booking link for one person: the rules) | claude2/gl5-one-time-link | `lib/booking-link-rules.ts`, `tests/booking-link-rules.test.ts` | 03/11/2026 00h37 |
 | Claude 2 | claude2/ | Group A product items it has in progress (520 [LB1], 513 [PF1], 22 [E5], 270 [GR1], 397 [SL1], FQ1 and the next Group A items in order) |
 | Claude 3 | claude3/ | 631 [AA1] (the whole store run by an AI agent) and then 632 [AA2] (ads launched from inside Marktmorgen) |
 
@@ -66,3 +65,4 @@ Generated files are shared (Claude 1, 02/11/2026 23h38): `docs/accessibility-inv
 | Claude 3 | 631 [AA1] unit 8 (MCP tools get_live and get_numbers_for_days, a title on every tool; stacked on unit 5) | claude3/aa1-read-tools | `lib/mcp-tools.ts`, `lib/mcp-catalog.ts`, `app/api/mcp/route.ts`, `app/developers/page.tsx`, `tests/mcp-read-tools.test.ts`, `tests/mcp-dispatch.test.ts` | 02/11/2026 14h19 |
 | Claude 3 | 630 [HN6](8) certificate, unit 1 (the PDF tagged for screen readers: structure, language, title and PDF/UA metadata; text at 7:1) | claude3/hn6-certificate-tags | `lib/tagged-pdf.ts`, `lib/certificate-pdf.ts`, `app/[handle]/certificate/[id]/pdf/route.ts`, `tests/certificate-pdf.test.ts`, `tests/tagged-pdf.test.ts` | 02/11/2026 16h34 |
 | Claude 3 | 616 [WP15](8) a creator's discount code put on one member's running membership from the studio | claude3/wp15-member-discount | `lib/member-discount.ts`, `app/api/store/member-discount/route.ts`, `components/member-discount.tsx`, `app/studio/memberships/page.tsx`, `tests/email-field-keyboards.test.ts` (its count), `lib/agent-coverage.ts` (one entry), `docs/accessibility-inventory.json`, `tests/member-discount.test.ts` | 02/11/2026 20h36 |
+| Claude 2 | 637 [GL5], unit 4a (a one-time booking link for one person: the rules) | claude2/gl5-one-time-link | `lib/booking-link-rules.ts`, `tests/booking-link-rules.test.ts` | 03/11/2026 00h37 |

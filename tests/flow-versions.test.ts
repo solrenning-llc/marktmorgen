@@ -11,7 +11,11 @@
  *   - an unknown version or workflow is refused; a removed workflow's
  *     versions go with it.
  */
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
+import { WorkflowVersions } from "@/components/workflow-versions";
 import { readFlows, removeFlow, saveFlow, setFlowActive } from "@/lib/flows";
 import { MAX_FLOW_VERSIONS, readFlowVersions } from "@/lib/flow-versions";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -78,6 +82,17 @@ async function main(): Promise<void> {
   is(`only the newest ${MAX_FLOW_VERSIONS}`, [kept.length, kept[0].flow.steps[0].subject], [MAX_FLOW_VERSIONS, `Subject ${MAX_FLOW_VERSIONS + 1}`]);
   await removeFlow(await store(), id);
   is("a removed workflow's versions are gone", [(await readFlowVersions(list, id)).length, (await redis.pipeline([["LLEN", `nl:wf:ver:${list}:${id}`]]))[0]], [0, 0]);
+
+  part("The studio");
+  const drawn = renderToStaticMarkup(createElement(WorkflowVersions, { flowId: id, request: async () => ({ ok: true, versions: [] }), onRestored: () => undefined }));
+  is("a named section that says what is kept and how putting one back works", [drawn.includes("<h4"), drawn.includes("Earlier versions"), drawn.includes(`the last ${MAX_FLOW_VERSIONS}, while your store has room`), drawn.includes("keeps it switched on or off as it is now")], [true, true, true, true]);
+  is("it says it is reading, in a status", drawn.includes('role="status"') && drawn.includes("Reading the earlier versions"), true);
+  const source = readFileSync("components/workflow-versions.tsx", "utf8");
+  is("each version has a button whose name starts with its visible words", source.includes("Put this version back</") || source.includes("Put this version back\n"), true);
+  is("and its accessible name adds the date after them", source.includes("aria-label={`Put this version back: ${when(v.at)}`}"), true);
+  const studio = readFileSync("components/email-studio.tsx", "utf8");
+  is("the workflow list opens it with a toggle that says whether it is open", studio.includes("aria-expanded={versionsOpen === f.id}") && studio.includes("<WorkflowVersions flowId={f.id} request={call} onRestored={refreshFlows} />"), true);
+  is("putting one back is a sequence write, so an unconfirmed one is said as such", studio.includes('"flow-resolve", "flow-restore"].includes'), true);
   done();
 }
 

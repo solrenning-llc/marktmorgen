@@ -1524,6 +1524,7 @@
     "components/welcome-offer-editor.tsx",
     "components/winback-editor.tsx",
     "components/workflow-tools.tsx",
+    "components/workflow-versions.tsx",
     "components/yearly-ask-editor.tsx"
   ],
   "apiRouteSources": [

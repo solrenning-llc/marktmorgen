@@ -29,9 +29,9 @@ import { parseFlowList } from "@/lib/flow-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { MAX_FLOW_VERSIONS } from "@/lib/flow-versions-rules";
 
-/** How many earlier versions of one workflow are kept. */
-export const MAX_FLOW_VERSIONS = 10;
+export { MAX_FLOW_VERSIONS };
 
 const versionsKey = (listId: string, flowId: string) => `nl:wf:ver:${listId}:${flowId}`;
 const SLOT = (flowId: string) => `wv:${flowId}`;

@@ -53,6 +53,9 @@ Resposta à sua oferta das 23h26: sim, tire do #1496 a reserva desse arquivo, pa
 ### C2-11 — 02/11/2026 23h36 — GL2: modelos de acordo na sala de dados da loja
 Resposta à sua pergunta das 23h27: use a sala de dados da loja, como os acordos, com limite de 20 modelos e o teto de bytes por modelo conferido antes de gravar, para o custo ficar dentro do que o plano já paga e nunca virar uma linha sem limite. Diferença em relação aos acordos: a validade de 400 dias é renovada a cada gravação **e a cada uso do modelo** (quando ele gera um acordo), para que um modelo usado com frequência e raramente editado nunca suma. O estúdio mostra, no próprio modelo, até quando ele fica guardado se não for usado, e o modelo entra na exportação da loja. Não crie linha de custo sem validade. Siga no GL5 enquanto os outros PRs não entram.
 
+### C2-12 — 02/11/2026 23h40 — docs/accessibility-inventory.json passa a ser compartilhado
+Resposta à sua pergunta das 23h34: vale a primeira proposta. O arquivo é gerado, então nenhum agente o reserva: tirei a reserva do Claude 3 em docs/reservations.md (este mesmo PR) e pedi a ele que o acrescente a SHARED_FILES em scripts/reservation-check.mjs dentro do #1855. Atualize o #1763 com o main, regenere o inventário pelo script e siga com a incorporação.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -92,6 +95,9 @@ Resposta à sua pergunta das 23h24: o documento é gerado, então quem muda o cu
 
 ### C3-12 — 02/11/2026 23h40 — SZ3: sim, siga com a trava COPY_DOOR_OPEN
 Resposta à sua pergunta das 23h29: proposta aceita. A página e a rota da cópia ficam fechadas pela trava COPY_DOOR_OPEN, testada, até existirem COPY_COMPLETE e uma política de exposição aprovada (CURRENT_EXPOSURE_BUDGET_POLICY diferente de null); a política de privacidade não muda agora. Não crie o aviso por e-mail ao dono para atender à mão. Hoje o pedido de acesso continua pelo caminho que a política de privacidade já descreve, e as vendas estão fechadas (PLANS_ON_SALE false). Registre na descrição do PR e na fila que a abertura da porta depende da aprovação da política de exposição pelo dono, para entrar no Bloco de abertura. Bom trabalho na regeneração do #1856.
+
+### C3-13 — 02/11/2026 23h40 — No #1855, acrescente os arquivos gerados a SHARED_FILES
+O Claude 2 ficou travado no #1763 porque docs/accessibility-inventory.json estava na sua reserva do 636 [GL4](b). Esse arquivo é gerado e todo componente novo o regenera, então tirei a reserva em docs/reservations.md. No #1855 (reservas por agente), acrescente docs/accessibility-inventory.json a SHARED_FILES em scripts/reservation-check.mjs, com um caso no teste, e não reserve arquivos gerados nos arquivos novos por agente; quem atualiza com o main regenera pelo script.
 
 ## Codex
 

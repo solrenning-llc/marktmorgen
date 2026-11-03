@@ -437,7 +437,9 @@ export default function PrivacyPage() {
           most four emails in all, never two within a day, and none once it is
           paid, withdrawn or expired), and what became of it: the checkout
           opened for it, whether it was paid, the payment&apos;s reference and
-          any refund Stripe reports. It is kept for 400 days from the day it
+          any refund Stripe reports, or, when the creator marks it as paid
+          outside Stripe, how (cash, bank transfer or another way), the day
+          and a short note of theirs. It is kept for 400 days from the day it
           was made and then deleted by itself; the creator can delete it
           sooner. Deleting yourself from that store (the privacy link at the
           foot of its pages) deletes every request of yours there and withdraws

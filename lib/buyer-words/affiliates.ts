@@ -232,6 +232,9 @@ const en = {
       ? `${rule} None of that applies once a sale has been credited: from then on the buyer stays with that affiliate, and everything the person buys afterward earns them, with no time limit, on any device, with no cookie involved at all.`
       : rule;
   },
+  /** Added when the program credits its affiliates' confirmed leads (lib/affiliate-setting.ts, creditsContacts and CONTACTS_RULE). */
+  contactsRule:
+    "A one-off purchase not credited to an affiliate's link, an affiliate's code or an earlier purchase goes to the affiliate who brought the buyer as a confirmed lead before they bought, on any device and with no cookie involved.",
   /** When the creator pays (lib/affiliate-setting.ts, payoutPromise): `n` the day of the month, 0 for none; `days` the wait. */
   payoutPromise: (store: string, n: number, days: number) => {
     const wait = days > 0 ? ` A sale is payable ${days} ${days === 1 ? "day" : "days"} after it is made, so a refund in that time comes off it first.` : "";
@@ -511,6 +514,8 @@ const es: AffiliatesWords = {
       ? `${rule} Nada de eso se aplica una vez que se ha acreditado una venta: desde entonces el comprador se queda con ese afiliado, y todo lo que esa persona compre después le hace ganar, sin límite de tiempo, en cualquier dispositivo y sin ninguna cookie de por medio.`
       : rule;
   },
+  contactsRule:
+    "Una compra única que no se atribuye a ningún enlace ni código de afiliado ni a una compra anterior va al afiliado que trajo al comprador como lead confirmado antes de que comprara, en cualquier dispositivo y sin ninguna cookie de por medio.",
   payoutPromise: (store, n, days) => {
     const wait = days > 0 ? ` Una venta se puede pagar ${days} ${plural(days, "día", "días")} después de hacerse, así que un reembolso en ese tiempo se descuenta primero.` : "";
     if (n < 1) return `${store} no ha fijado un día de pago, y paga cuando decide.${wait}`;
@@ -776,6 +781,8 @@ const fr: AffiliatesWords = {
       ? `${rule} Rien de tout cela ne s'applique une fois qu'une vente a été attribuée${S}: dès lors, l'acheteur reste lié à cet affilié, et tout ce que cette personne achète ensuite lui rapporte, sans limite de durée, sur n'importe quel appareil, sans aucun cookie.`
       : rule;
   },
+  contactsRule:
+    "Un achat unique qui n'est attribué à aucun lien ni code d'affilié ni à un achat précédent revient à l'affilié qui a amené l'acheteur comme lead confirmé avant son achat, sur n'importe quel appareil et sans aucun cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0
@@ -1047,6 +1054,8 @@ const de: AffiliatesWords = {
       ? `${rule} Nichts davon gilt mehr, sobald ein Verkauf gutgeschrieben wurde: Ab dann bleibt der Käufer diesem Affiliate zugeordnet, und alles, was die Person danach kauft, bringt ihm etwas ein, ohne Zeitlimit, auf jedem Gerät und ganz ohne Cookie.`
       : rule;
   },
+  contactsRule:
+    "Ein einmaliger Kauf, der keinem Affiliate-Link, keinem Affiliate-Code und keinem früheren Kauf zugeordnet ist, geht an den Affiliate, der den Käufer vor dem Kauf als bestätigten Lead gebracht hat, auf jedem Gerät und ganz ohne Cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0
@@ -1322,6 +1331,8 @@ const it: AffiliatesWords = {
       ? `${rule} Niente di tutto questo vale più una volta che una vendita è stata accreditata: da quel momento l'acquirente resta legato a quell'affiliato, e tutto ciò che la persona acquista in seguito gli fa guadagnare, senza limiti di tempo, su qualsiasi dispositivo, senza alcun cookie.`
       : rule;
   },
+  contactsRule:
+    "Un acquisto singolo non attribuito a nessun link né codice di affiliato né a un acquisto precedente va all'affiliato che ha portato l'acquirente come lead confermato prima dell'acquisto, su qualsiasi dispositivo e senza alcun cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0
@@ -1591,6 +1602,8 @@ const nl: AffiliatesWords = {
       ? `${rule} Niets daarvan geldt meer zodra een verkoop is toegekend: vanaf dan blijft de koper bij die affiliate, en alles wat die persoon daarna koopt, levert die affiliate iets op, zonder tijdslimiet, op elk apparaat, helemaal zonder cookie.`
       : rule;
   },
+  contactsRule:
+    "Een eenmalige aankoop die niet aan een affiliatelink, een affiliatecode of een eerdere aankoop is toegekend, gaat naar de affiliate die de koper vóór de aankoop als bevestigde lead heeft aangebracht, op elk apparaat en helemaal zonder cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0
@@ -1868,6 +1881,8 @@ const pt: AffiliatesWords = {
       ? `${rule} Nada disso se aplica depois de uma venda ser creditada: a partir daí, o comprador fica associado a esse afiliado, e tudo o que essa pessoa comprar depois gera ganhos para ele, sem limite de tempo, em qualquer dispositivo, sem nenhum cookie envolvido.`
       : rule;
   },
+  contactsRule:
+    "Uma compra avulsa não atribuída a nenhuma ligação nem código de afiliado nem a uma compra anterior vai para o afiliado que trouxe o comprador como lead confirmado antes de comprar, em qualquer dispositivo e sem nenhum cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0

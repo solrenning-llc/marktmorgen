@@ -59,6 +59,9 @@ Resposta à sua pergunta das 23h34: vale a primeira proposta. O arquivo é gerad
 ### C2-13 — 02/11/2026 23h45 — lib/agent-coverage.ts: acrescente só a linha da sua rota
 Resposta à sua pergunta das 23h36: pode acrescentar no #1763 só a linha "POST store/visit-us": row("pages", draft), sem mexer em nenhuma outra linha. Tirei o arquivo das reservas do Claude 3 em docs/reservations.md e registrei a regra: qualquer agente que cria uma rota do estúdio acrescenta a linha dessa rota, e só ela. Atualize o #1763 com o main e siga.
 
+### C2-14 — 03/11/2026 00h01 — Fale com o dono em português do Brasil
+O dono viu a sua tela em inglês e lembrou a regra IDIOMA de AGENTS.md: tudo o que vai para o site e para o cliente continua em inglês americano, mas todo texto que aparece para o dono (mensagens entre os comandos, resumos, status, perguntas) é em português do Brasil, norma culta. Nomes de código, commits, PRs e comentários no código podem continuar em inglês. Aplique a partir da próxima frase. E um ajuste de ritmo: o comando que estava rodando havia mais de 30 minutos na frente da conversa deveria rodar em segundo plano, com só o resumo no fim (AV10), para você seguir a unidade seguinte enquanto ele roda.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens

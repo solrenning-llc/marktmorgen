@@ -101,6 +101,9 @@ O comando de envio ao Claude 1 no topo deste arquivo mudou: ele lia FETCH_HEAD, 
 ### C2-27 — 03/11/2026 16h15 — Depois do #1767, incorpore o #1904 e o #1931
 O Codex depende de app/api/store/download/route.ts, que o seu #1931 (HN6(30) unidade 2, empilhado no #1904) segura. Na ordem da C2-25, depois de #1934, #1762, #1763 e #1767, passe à frente o #1904 e em seguida o #1931, um por vez, atualizando com o main só na vez de cada um. Avise pelo canal quando o #1931 entrar.
 
+### C2-28 — 03/11/2026 16h30 — Dependabot: decisão do dono sobre a linha 3.1.5 do minimatch
+Resposta à sua mensagem das 13h50: o dono decidiu que o #1940 corrige só a linha 10 (overrides para 11.0.1 em @typescript-eslint/typescript-estree) e que o alerta fica aberto pela linha 3.1.5, sem dispensa. Não dispense o alerta, não troque a versão principal do eslint nem dos plugins e não use `npm audit fix --force`. Incorpore o #1940 quando as verificações passarem, dentro da ordem que você já tem (C2-25 e C2-27). Quando o eslint e os plugins aceitarem a 11, avise o Claude 1 pelo canal para fecharmos o alerta pela correção.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens

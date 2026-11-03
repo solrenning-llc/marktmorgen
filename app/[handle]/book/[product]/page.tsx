@@ -12,6 +12,7 @@ import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { bookingLength, offeredLengths, ownLength } from "@/lib/call-lengths";
+import { slotWords } from "@/lib/slot-words";
 import { type CallListing, canMove, catchUpBookings, icsLink, isCallProduct, slotsForMove, slotsForProduct, whyNotMove } from "@/lib/calls";
 import { chargeNow } from "@/lib/call-deposit";
 import { type CallSetup, MAX_MOVES, MEET_NAMES, movableUntil, readableTime, zoneName } from "@/lib/call-setup";
@@ -19,7 +20,7 @@ import { isVideoRoom, roomLabel, roomOf } from "@/lib/call-rooms";
 import { readOrder } from "@/lib/store-checkout";
 import { SITE_URL } from "@/lib/site-url";
 import { imageUrl } from "@/lib/product-image";
-import { SlotPicker, type SlotWords } from "@/components/slot-picker";
+import { SlotPicker } from "@/components/slot-picker";
 import { type SessionChoice, SessionPicker, type SessionWords } from "@/components/session-picker";
 import { StoreTracking } from "@/components/store-tracking";
 import { readListing } from "@/lib/catalog";
@@ -236,22 +237,6 @@ export default async function BookPage({ params, searchParams }: Params) {
 function movesAt(setup: CallListing["call"], booking: { start: number; end: number }): number {
   const kept = ownLength(setup, booking.end - booking.start);
   return typeof kept === "number" ? kept : setup.minutes;
-}
-
-function slotWords(store: Store, b: BookingWords, minutes: number, price: string, move: boolean, fromPackage: boolean): SlotWords {
-  const { w, lang } = speech(store);
-  return {
-    locale: lang.locale,
-    pickDay: b.pickDay,
-    pickTime: w.pickTime,
-    noneTitle: move ? b.noOtherTimes : b.noTimes,
-    noneBody: move ? b.noOtherTimesBody : b.noTimesBody,
-    yours: b.timesInYours("{zone}"),
-    creators: b.timesInCreators("{zone}"),
-    chosen: b.chosenLength(minutes),
-    submit: move ? b.moveToTime : fromPackage ? b.bookFromPackage : b.continueToPay(price),
-    note: move ? b.moveNoCharge : fromPackage ? b.packageNoCharge : b.timeKept,
-  };
 }
 
 /** What the session picker says, for this page, in the store's language. */

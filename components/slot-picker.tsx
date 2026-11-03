@@ -108,6 +108,7 @@ export function SlotPicker({
   pkg,
   host,
   minutes,
+  newTab,
   words,
 }: {
   starts: number[];
@@ -124,6 +125,8 @@ export function SlotPicker({
   host?: { key: string; label: string } | null;
   /** On a call with several lengths: the one chosen, in minutes, sent so it is booked and charged (lib/call-lengths.ts). */
   minutes?: number;
+  /** Inside a frame on the creator's own site (app/embed): Stripe's page opens in a new tab, never in the frame. */
+  newTab?: boolean;
   words: SlotWords;
 }) {
   const { locale } = words;
@@ -160,7 +163,7 @@ export function SlotPicker({
   }
 
   return (
-    <form action={move ? "/api/store/book/move" : "/api/store/book"} method="post" target="_top" className="mt-6" {...(move ? {} : { "data-checkout": "" })}>
+    <form action={move ? "/api/store/book/move" : "/api/store/book"} method="post" target={newTab && !move ? "_blank" : "_top"} rel={newTab && !move ? "noopener" : undefined} className="mt-6" {...(move ? {} : { "data-checkout": "" })}>
       <input type="hidden" name="handle" value={handle} />
       {move ? <input type="hidden" name="session" value={move} /> : null}
       <input type="hidden" name="product" value={productId} />

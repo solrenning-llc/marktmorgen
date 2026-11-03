@@ -22,6 +22,12 @@ import { speech } from "@/lib/buyer-words";
 import { scriptMode, withTags } from "@/lib/embed-sites";
 import { type ScriptOpen, readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
+import { SlotPicker } from "@/components/slot-picker";
+import { type CallListing, slotsForProduct } from "@/lib/calls";
+import { bookingLength, offeredLengths } from "@/lib/call-lengths";
+import { bookingWords } from "@/lib/buyer-words/booking";
+import { chargeNow } from "@/lib/call-deposit";
+import { slotWords } from "@/lib/slot-words";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -180,6 +186,84 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     const extra = new URLSearchParams({ ...(open.site ? { site: open.site } : {}), ...(open.back ? { return: open.back } : {}) }).toString();
     return `${path}${path.includes("?") ? "&" : "?"}${extra}${hash ? `#${hash}` : ""}`;
   };
+  // The calendar embedded in the creator's own site (637 [GL5], unit 6): a call the checkout script opened in a frame, on a
+  // site the creator listed, while it may sell there and with no affiliate's code, shows its times in the frame. Anywhere
+  // else the card stays a link to the booking page in a new tab, as before, so the calendar never opens on a site off the list.
+  const calendar =
+    !plain && open?.mode === "overlay" && open.live && Boolean(open.site) && !open.via && action.kind === "link" &&
+    product.call?.kind === "weekly" && canSellProduct(store, product);
+  // Every parameter the script put on the frame's address is kept: the open, its site and its tags stay as they were checked.
+  const here = (extra: Record<string, string>, drop: string[] = []) => {
+    const next = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) if (typeof value === "string" && !drop.includes(key)) next.set(key, value);
+    for (const [key, value] of Object.entries(extra)) next.set(key, value);
+    return `?${next.toString()}`;
+  };
+  if (calendar && query.view === "times") {
+    const call = product as CallListing;
+    const b = bookingWords(store.language);
+    const say = speech(store);
+    // One of a call's lengths, by its link, as on the booking page; read at it, and offered only where it can be booked (holdAndCheckout).
+    const asked = typeof query.length === "string" ? query.length : undefined;
+    const askedLength = bookingLength(call.call, product.priceCents, asked);
+    const read = await slotsForProduct(store, call, null, askedLength?.minutes ?? null);
+    const choices = read ? offeredLengths(call.call, product.priceCents, { pkg: false, team: read.team }) : [];
+    const chosen = choices.length ? askedLength ?? choices[0] : null;
+    const cents = chosen ? chosen.cents : product.priceCents;
+    const due = chargeNow({ priceCents: cents, currency: store.currency, deposit: call.call.deposit ?? null, inPerson: Boolean(call.call.place) });
+    const payNow = say.money(due.rest > 0 ? due.cents : cents);
+    const code = due.rest > 0 && store.hasDiscounts ? { label: b.codeLabel, help: b.codeHelp } : undefined;
+    const starts = read ? read.days.flatMap((day) => day.starts) : [];
+    return (
+      <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} h-screen overflow-y-auto`} style={lookStyle(store.look) as React.CSSProperties} data-embed-times="">
+        <main id="content" className="p-4">
+          <h1 className="font-display text-[1.0625rem] font-semibold leading-snug">{product.title}</h1>
+          <p className="st-price mt-1 text-sm">{say.money(cents)}</p>
+          {due.rest > 0 ? <p className="mt-1 text-sm">{b.depositRest(say.money(due.rest), store.name)}</p> : null}
+          {chosen ? (
+            <div className="mt-4" role="group" aria-labelledby={`length-${product.id}`}>
+              <p id={`length-${product.id}`} className="font-bold" style={{ color: "var(--st-text)" }}>{b.lengthPick}</p>
+              <ul className="mt-2 grid gap-2">
+                {choices.map((l) => (
+                  <li key={l.minutes}>
+                    <a
+                      href={here({ length: String(l.minutes) })}
+                      aria-current={l.minutes === chosen.minutes ? "true" : undefined}
+                      className={`btn ${l.minutes === chosen.minutes ? "btn-primary" : "btn-secondary"} min-h-11 w-full justify-start`}
+                    >
+                      {b.lengthOption(l.minutes, say.money(l.cents))}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-sm" role="status">{b.lengthChosen(b.lengthOption(chosen.minutes, say.money(chosen.cents)))}</p>
+            </div>
+          ) : null}
+          {read === null ? (
+            <div className="st-note mt-4">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{b.timesUnread}</p>
+              <p className="mt-1 text-sm">{b.timesUnreadBody}</p>
+            </div>
+          ) : (
+            <SlotPicker
+              starts={starts}
+              creatorTz={call.call.tz}
+              handle={store.handle}
+              productId={product.id}
+              minutes={chosen ? chosen.minutes : undefined}
+              newTab
+              words={{ ...slotWords(store, b, chosen ? chosen.minutes : call.call.minutes, payNow, false, false), code }}
+            />
+          )}
+          <p className="mt-4 text-center text-sm">
+            <a href={here({}, ["view", "length"])} className="font-semibold underline underline-offset-4">{b.backToCard(product.title)}</a>
+          </p>
+        </main>
+        {/* Told what happened on the listed site the frame is on, as the card itself tells it. */}
+        {open.site ? <EmbedMessenger to={open.site} height={product.image ? CARD_HEIGHTS.picture : CARD_HEIGHTS.plain} /> : null}
+      </div>
+    );
+  }
   const testMode = selling && sellsInTestMode(store);
   const { w, num, lang } = speech(store);
   const note = testMode
@@ -265,6 +349,11 @@ export default async function EmbedCard({ params, searchParams }: Params) {
               {fields}
             </form>
           )
+        ) : calendar ? (
+          // The call's times, drawn in this same frame (unit 6), never a new tab.
+          <a href={here({ view: "times" })} className="btn st-btn btn-block mt-3" data-embed-calendar="">
+            {label}
+          </a>
         ) : action.kind === "link" ? (
           <a href={action.href === "#buy" ? toBuyBox(into(action.href)) : into(action.href)} {...aside} className="btn st-btn btn-block mt-3">
             {label}

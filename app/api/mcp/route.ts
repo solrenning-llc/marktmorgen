@@ -1,4 +1,5 @@
-import { apiStore } from "@/lib/api-guard";
+import { apiAgent, apiStore } from "@/lib/api-guard";
+import { proposeDescription } from "@/lib/agent-propose";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { readNumbers, summaryOf } from "@/lib/stats-report";
@@ -88,6 +89,17 @@ export async function POST(request: Request) {
     });
   }
   if (method === "ping") return result(id, {});
+
+  // A tool that prepares a change needs a key that may (631 [AA1] (c)); checked instead of the plain read, so the call is counted once.
+  const asked = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
+  if (method === "tools/call" && asked.name === "propose_product_description") {
+    const agent = await apiAgent(request, "draft");
+    if (agent instanceof Response) {
+      const refusal = (await agent.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof refusal?.message === "string" ? refusal.message : "This key cannot prepare changes for you to confirm.");
+    }
+    return result(id, await proposeDescription(agent.store, agent.keyId, asked.arguments ?? {}));
+  }
 
   const store = await apiStore(request);
   if (store instanceof Response) {

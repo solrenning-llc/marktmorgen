@@ -42,8 +42,8 @@ Motivo: o GitHub Pro permite 40 tarefas simultâneas (5 macOS); o Enterprise, 50
 
 ## No dia da transferência (o Claude 1 conduz)
 
-1. Mensagem na caixa pedindo que Claude 2, Claude 3 e Codex parem de enviar commits e PRs até a liberação.
-2. Escolher um momento com a fila do CI baixa. Ainda não verificado: o que acontece com execuções na fila no momento da transferência; rodar de novo o que for cancelado.
+1. Começar à noite, longe das 02h37 (o agendamento diário dos 9 workflows, cron 37 5 * * * em UTC). Mensagem na caixa pedindo que Claude 2, Claude 3 e Codex continuem trabalhando e fazendo commits nos próprios ramos, mas sem enviar ao GitHub nem abrir PR até a liberação.
+2. Esperar a fila zerar sozinha, sem cancelar nada (cerca de 2.500 execuções processadas por dia em 02/11/2026; uma fila de ~340 escoa em 3 a 4 horas). Transferir só com 0 execuções na fila e 0 rodando (decisão do dono, 02/11/2026 23h33: "diga o mais seguro para evitar problema"). Não verificado e por isso evitado: o que acontece com execuções na fila no momento da transferência.
 3. O dono transfere `viniciussucupira/marktmorgen` para `solrenning-llc` e faz o "Confirm access".
 4. Conferir que o número continua 1334793724 e que o endereço antigo redireciona.
 5. Vercel, projeto `marktmorgen`: Settings → Git. Se a ligação caiu, "Reconnect" e escolher `solrenning-llc/marktmorgen`. Conferir com uma publicação de teste (prévia de um PR de documentação). O site no ar não cai durante isso.

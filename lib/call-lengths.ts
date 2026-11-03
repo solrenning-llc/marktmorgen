@@ -1,8 +1,8 @@
 /**
  * Several lengths for one call, each with its own price (637 [GL5], unit 1;
  * added 2 November 2026): the rules, browser-safe. Booking and charging the
- * chosen length are unit 2 (below); the editor and the pages that say each
- * length come next.
+ * chosen length are unit 2, the pages that say each length units 2b and 2c
+ * (below); the editor comes next.
  *
  *   - One to MAX_CALL_LENGTHS lengths, each one of the lengths a call may
  *     have (CALL_LENGTHS in lib/call-setup.ts), none twice, kept shortest
@@ -36,14 +36,18 @@
  * (lib/call-setup.ts, readSetup). Already right: the busy times, reminders,
  * invites and calendar feed read each booking's own end.
  *
- * Before any creator can save several lengths (the editor, the next unit),
- * every place that says a call's length or price must say each length: the
- * booking page's times and prices per length (app/[handle]/book/[product]),
- * the store page and its facts (lib/page-facts.ts, components/
- * store-product.tsx, the assistant's facts), the thanks page's line for the
- * order (it says the product's price), the checkout reminder's price
- * (lib/checkout-recovery.ts) and the editor itself (components/
- * call-editor.tsx, which saves the product's price as the shortest's).
+ * The booking page offers each length with its price (unit 2b,
+ * offeredLengths), and the store says them wherever it says a call's length
+ * or price (unit 2c, listedLengths): the card, its price and button, the
+ * page's facts, the Store assistant's facts (lib/answers.ts), the product
+ * page's structured data and the checkout reminder.
+ *
+ * Still to come, before any creator can save several lengths (the studio's
+ * save route refuses them until then, app/api/store/call): the editor
+ * (components/call-editor.tsx), which checks them with readCallLengths and
+ * saves the product's price as the shortest's; and the team route, which must
+ * refuse a team for a call with several lengths, as readCallLengths refuses
+ * lengths for a team.
  */
 import { CALL_LENGTHS, type CallSetup, type Range, openSlots } from "@/lib/call-setup";
 import { type Currency, priceInRange, rangeWords, readMoney } from "@/lib/money";
@@ -165,6 +169,23 @@ export function offeredLengths(
   const lengths = setup.lengths ?? [];
   if (context.pkg || context.team || setup.deposit) return [];
   return setup.kind === "weekly" && lengths.length > 1 && lengths[0].minutes === setup.minutes && lengths[0].cents === priceCents ? lengths : [];
+}
+
+/**
+ * The lengths a store's pages say a call has (its card, price, facts, the
+ * assistant's facts, its structured data): the ones its booking page offers
+ * a buyer who is not booking from a package (offeredLengths). A call with
+ * several lengths is never a team event (readCallLengths refuses it, and the
+ * team route must too), so none is said for one that cannot be booked.
+ */
+export function listedLengths(setup: Pick<CallSetup, "kind" | "minutes" | "lengths" | "deposit">, priceCents: number): CallLength[] {
+  return offeredLengths(setup, priceCents, { pkg: false, team: false });
+}
+
+/** The lengths in minutes as the store's language lists them: "30 or 60", "30, 45 or 60". */
+export function lengthList(lengths: readonly CallLength[], locale: string): string {
+  const numbers = new Intl.NumberFormat(locale);
+  return new Intl.ListFormat(locale, { type: "disjunction" }).format(lengths.map((l) => numbers.format(l.minutes)));
 }
 
 /**

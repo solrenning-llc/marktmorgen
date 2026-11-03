@@ -59,6 +59,7 @@ export function flowConfigurationIssues(flow: Flow, context: FlowReviewContext):
     }
     if (action?.do === "deal" && !context.stages.some(stage => stage.id === action.stage)) issues.push(prefix + "The deal stage is unavailable. Choose a current stage.");
     if (action?.do === "assign" && context.assignees && !context.assignees.includes(action.assignee)) issues.push(prefix + "This teammate can no longer be responsible for deals. Choose someone on your team who can see orders.");
+    if (action?.do === "rotate" && context.assignees && context.assignees.length < 2) issues.push(prefix + "No one besides you can be responsible for deals, so every deal goes to you. Add a teammate who can see orders.");
     if (step.next && step.next !== END && !flow.steps.some(target => target.id === step.next)) issues.push(prefix + "The step it goes to next was removed. Choose a later step, or the end.");
   });
   return issues;

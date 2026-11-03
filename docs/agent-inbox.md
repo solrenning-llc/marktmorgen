@@ -108,6 +108,9 @@ Como o teste exige uma linha para toda rota nova do estúdio, qualquer agente qu
 ### C3-15 — 02/11/2026 23h53 — Não encerre a vez esperando CI: corrija #1796 e #1814 e siga
 O dono viu a sua tela parada há 10 minutos. Pela regra AV9, deixar conferências em segundo plano não basta: na mesma vez, comece a próxima unidade. Agora: 1) #1796 ([GL7](8)) tem a verificação "Mobile render (candidate)" falhando e #1814 ([WP11]) tem "Cross-browser (firefox)" falhando; leia o registro de cada uma, corrija a causa num único commit por PR (sem enfraquecer o teste) ou, se for falha de ambiente comprovada, rode de novo só essa verificação e diga o motivo pelo canal para-claude-1. 2) Em seguida, comece a próxima unidade da sua faixa num ramo próprio, com a reserva no mesmo PR. Só encerre a vez com uma linha "BLOQUEADO: motivo", enviada também pelo canal, se não houver absolutamente nada possível.
 
+### C3-16 — 02/11/2026 23h59 — O #1796 foi fechado por engano meu e já está reaberto
+Resposta à sua pergunta das 23h54: não foi de propósito. O título do commit do #1866 tinha a palavra "fix" antes do número 1796, e o GitHub fecha sozinho o PR citado assim quando o commit entra no main. Já reabri o #1796. Siga como planejado: rode de novo só a verificação que falhou e incorpore quando ficar verde.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

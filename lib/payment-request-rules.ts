@@ -84,7 +84,29 @@ export type PaymentRequest = {
   /** What was refunded of it, as Stripe says. */
   refunded: number;
   closedAt: number;
+  /**
+   * Paid outside Stripe, as the creator marked it (639 [GL7](30)): how, and
+   * a note of theirs. Absent for every request paid through its checkout.
+   */
+  outside?: { method: OutsideMethod; note: string };
 };
+
+/** How a request was paid outside Stripe. */
+export type OutsideMethod = "cash" | "transfer" | "other";
+export const OUTSIDE_METHODS: readonly OutsideMethod[] = ["cash", "transfer", "other"];
+export const MAX_OUTSIDE_NOTE = 200;
+/** How each is said in the studio, in US English. */
+export const OUTSIDE_WORDS: Record<OutsideMethod, string> = { cash: "Cash", transfer: "Bank transfer", other: "Another way" };
+
+/** A mark of payment outside Stripe as sent or kept, or null when it does not read whole. */
+export function readOutside(raw: unknown): { method: OutsideMethod; note: string } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = raw as Record<string, unknown>;
+  const method = OUTSIDE_METHODS.find((m) => m === v.method);
+  if (!method) return null;
+  const note = typeof v.note === "string" ? v.note.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_OUTSIDE_NOTE) : "";
+  return { method, note };
+}
 
 /** Open requests a store may have at once, and requests it keeps in all (open or not), by plan. */
 export const REQUEST_LIMITS: Record<Tier, { open: number; kept: number }> = {
@@ -301,6 +323,11 @@ export function parseRequest(raw: unknown): PaymentRequest | null {
     payment: str(v.payment, 255),
     refunded: num(v.refunded),
     closedAt: num(v.closedAt),
+    ...(() => {
+      // Only a paid request carries it.
+      const outside = state === "paid" ? readOutside(v.outside) : null;
+      return outside ? { outside } : {};
+    })(),
   };
 }
 

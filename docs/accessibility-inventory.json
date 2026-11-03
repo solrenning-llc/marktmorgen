@@ -530,6 +530,17 @@
       ]
     },
     {
+      "source": "app/[handle]/policies/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/policies",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/renew/[product]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/renew/[product]",

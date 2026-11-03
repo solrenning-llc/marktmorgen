@@ -496,6 +496,7 @@ export const FAMILIES: Record<string, Family> = {
       per("monthly", 401, MARK, "A link in a monthly email noted."),
     ],
   },
+  "nl:teamwork:@lib/team-work.ts": room("What each person on a store's team did, month by month: three numbers a person, thirteen months (639 [GL7](37))", "lib/team-work.ts"),
   "nl:erase:link:@lib/erasure-request.ts": company("A person's link to delete themselves from the stores they ask, an hour", "A person's, across stores, behind a per-address limit."),
   "nl:exposure:v1:YYYY-MM@lib/exposure-budget-policy.ts": company("The exposure ledger's name", "The company's ledger."),
   "nl:exposure:v1:@lib/exposure-budget.ts": company("The company's exposure ledger, a month", "The company's ledger, carried by its fixed costs."),

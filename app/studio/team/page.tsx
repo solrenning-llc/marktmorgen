@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -53,6 +54,13 @@ export default async function StudioTeamPage({
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
           <p className="eyebrow">Team</p>
           <h1 className="t-h2 mt-3">People who help run {store.name}</h1>
+          {view.role === "owner" || view.role === "admin" ? (
+            <p className="mt-3">
+              <Link href={studioPath(store, "", "team-work")} className="link">
+                What your team did, month by month
+              </Link>
+            </p>
+          ) : null}
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`Up to ${MAX_TEAM} people, each with a role that decides what they can do here. They log in with their own email, never yours, and every change they make is written in the activity log below.`}
           </p>

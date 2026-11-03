@@ -21,6 +21,7 @@
  * record the page already has, and only a visitor who opens it and writes, or
  * comes back to a conversation they started, reaches these keys.
  */
+import { noteReply } from "@/lib/team-work";
 import { takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { randomBytes } from "node:crypto";
@@ -385,6 +386,8 @@ export async function replyTo(store: Store, id: string, by: string, textRaw: unk
   if (!(await withinLimit("inbox-reply", statsId, 400, 86_400))) return { ok: false, reason: "limited" };
   const message: Message = { at: now, from: "store", text, by };
   const next = await write(store, statsId, store.handle, { ...conversation, lastAt: now, lastFrom: "store", unread: 0 }, message, true, now);
+  // Who answered, and how long the buyer waited when this answers them (639 [GL7](37)); never holds up the reply.
+  await noteReply(store, by, conversation.lastFrom === "visitor" ? now - conversation.lastAt : null, now);
   const w = chatWords(store.language);
   const link = chatOpen(store) && next.token ? `${SITE_URL}/@${store.handle}?chat=${next.token}` : "";
   const emailed = isSenderConfigured()

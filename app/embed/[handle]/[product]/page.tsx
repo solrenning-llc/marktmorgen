@@ -200,12 +200,13 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   // Every parameter the script put on the frame's address is kept, and the listed site with them: a frame that moves on inside
   // itself is sent by this site's own page, so the site is read again from here, and checked against the list again
   // (lib/embed-open.ts), as the sign-up form's answer carries it.
-  const here = (extra: Record<string, string>, drop: string[] = []) => {
+  // `to` is the part of the page it lands on, so focus follows the change (2.4.3).
+  const here = (extra: Record<string, string>, drop: string[] = [], to?: string) => {
     const next = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) if (typeof value === "string" && !drop.includes(key)) next.set(key, value);
     if (open?.site) next.set("site", open.site);
     for (const [key, value] of Object.entries(extra)) next.set(key, value);
-    return `?${next.toString()}`;
+    return `?${next.toString()}${to ? `#${to}` : ""}`;
   };
   if (calendar && query.view === "times") {
     const call = product as CallListing;
@@ -213,7 +214,10 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     const say = speech(store);
     // One of a call's lengths, by its link, as on the booking page; read at it, and offered only where it can be booked (holdAndCheckout).
     const asked = typeof query.length === "string" ? query.length : undefined;
-    const askedLength = bookingLength(call.call, product.priceCents, asked);
+    // Read at the length asked for only where lengths are offered at all (offeredLengths): with a deposit, for one, the
+    // frame books the call's own length, so it shows that length's times, as the booking page does.
+    const offerable = offeredLengths(call.call, product.priceCents, { pkg: false, team: false }).length > 0;
+    const askedLength = offerable ? bookingLength(call.call, product.priceCents, asked) : null;
     const read = await slotsForProduct(store, call, null, askedLength?.minutes ?? null);
     const choices = read ? offeredLengths(call.call, product.priceCents, { pkg: false, team: read.team }) : [];
     const chosen = choices.length ? askedLength ?? choices[0] : null;
@@ -228,7 +232,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     return (
       <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} h-screen overflow-y-auto`} style={lookStyle(store.look) as React.CSSProperties} data-embed-times="">
         <main id="content" className="p-4">
-          <h1 className="font-display text-[1.0625rem] font-semibold leading-snug">{product.title}</h1>
+          {/* Where focus starts once the times open in the frame (2.4.3): the frame's address names it. */}
+          <h1 id="times-title" tabIndex={-1} className="font-display text-[1.0625rem] font-semibold leading-snug">{product.title}</h1>
           <p className="st-price mt-1 text-sm">{say.money(cents)}</p>
           {where ? <p className="st-muted mt-1 text-sm font-semibold">{where}</p> : null}
           {due.rest > 0 ? <p className="mt-1 text-sm">{b.depositRest(say.money(due.rest), store.name)}</p> : null}
@@ -242,7 +247,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
                 {choices.map((l) => (
                   <li key={l.minutes}>
                     <a
-                      href={here({ length: String(l.minutes) })}
+                      href={here({ length: String(l.minutes) }, [], "times")}
                       aria-current={l.minutes === chosen.minutes ? "true" : undefined}
                       className={`btn ${l.minutes === chosen.minutes ? "btn-primary" : "btn-secondary"} w-full justify-start`}
                     >
@@ -251,7 +256,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-sm" role="status">{b.lengthChosen(b.lengthOption(chosen.minutes, say.money(chosen.cents)))}</p>
+              <p className="mt-2 text-sm">{b.lengthChosen(b.lengthOption(chosen.minutes, say.money(chosen.cents)))}</p>
             </div>
           ) : null}
           {chooses ? (
@@ -264,15 +269,20 @@ export default async function EmbedCard({ params, searchParams }: Params) {
               <p className="mt-1 text-sm">{b.timesUnreadBody}</p>
             </div>
           ) : (
+            <>
+            {/* A length's link lands here, on the times it changed (2.4.3). */}
+            <span id="times" />
             <SlotPicker
               starts={starts}
               creatorTz={call.call.tz}
               handle={store.handle}
               productId={product.id}
               minutes={chosen ? chosen.minutes : undefined}
+              shownCents={chosen ? chosen.cents : undefined}
               newTab
               words={{ ...slotWords(store, b, chosen ? chosen.minutes : call.call.minutes, payNow, false, false), code }}
             />
+            </>
           )}
           <p className="mt-4 text-center text-sm">
             <a href={here({}, ["view", "length"])} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">{b.backToCard(product.title)}</a>
@@ -370,7 +380,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
           )
         ) : calendar ? (
           // The call's times, drawn in this same frame (unit 6), never a new tab.
-          <a href={here({ view: "times" })} className="btn st-btn btn-block mt-3" data-embed-calendar="">
+          <a href={here({ view: "times" }, [], "times-title")} className="btn st-btn btn-block mt-3" data-embed-calendar="">
             {label}
           </a>
         ) : action.kind === "link" ? (

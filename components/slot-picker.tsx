@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState, useSyncExternalStore } from "react";
+import { NewTab } from "@/components/new-tab";
 
 const noop = () => () => {};
 
@@ -251,6 +252,8 @@ export function SlotPicker({
           ) : null}
           <button type="submit" className="btn st-btn btn-lg btn-block">
             {words.submit}
+            {/* In a frame, Stripe's page opens in a new tab: said in the button's name, in the page's language (3.2.5, G201). */}
+            {newTab && !move ? <NewTab /> : null}
           </button>
           <p className="st-muted mt-3 text-center text-xs">{words.note}</p>
         </div>

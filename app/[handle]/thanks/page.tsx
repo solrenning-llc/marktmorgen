@@ -25,7 +25,9 @@ import { DOWNLOAD_WINDOW_SECONDS, type Order, readOrder } from "@/lib/store-chec
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
-import { canMove, confirmBooking, moveLink } from "@/lib/calls";
+import { canMove, confirmBooking, moveLink, paidCall } from "@/lib/calls";
+import { type DueInPerson, dueLines } from "@/lib/call-deposit";
+import type { CancelPromise } from "@/lib/call-setup";
 import { readableTime, zoneName } from "@/lib/call-setup";
 import { isVideoRoom, roomLabel, roomOf, videoRoomNote } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
@@ -411,6 +413,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // however many times this page is opened. Confirmed before its link is
   // read, because confirming is what makes a Google Meet or Zoom meeting for
   // it (lib/meet-links.ts), and this page shows that meeting's link.
+  // In person: what is left to pay there and a code taken off the whole price, read from the sale
+  // (lib/call-deposit.ts); undefined when it could not be read, so the confirmation tries again.
+  // The cancellation deadline promised when paying is read with it, from the same sale.
+  const sale =
+    sessionId && order.state === "paid" && order.call && (order.product.call?.place || order.product.call?.cancelHours)
+      ? await paidCall(store, sessionId).then((call) => call, () => undefined)
+      : null;
+  const due: DueInPerson | null | undefined = sale === undefined ? undefined : sale?.due ?? null;
+  const cancel: CancelPromise | null | undefined = sale === undefined ? undefined : sale?.cancel ?? null;
   if (sessionId && order.state === "paid" && order.call && order.product.call) {
     await confirmBooking({
       store,
@@ -426,6 +437,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       currency: order.currency,
       lead: order.call.lead,
       pi: order.call.pi,
+      due,
+      cancel,
       origin: SITE_URL,
     }).catch((error) => console.error("confirming a booking failed", error));
   }
@@ -896,6 +909,16 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   {/* In person (lib/call-place.ts): where, as text the buyer can copy, and no link. */}
                   {booked.setup.place ? (
                     <p className="mt-5 text-sm" data-call-place="">{bookingWords(store.language).whereAt(placeLine(booked.setup.place))}</p>
+                  ) : null}
+                  {/* The code and what is left to pay in person, as Stripe's page said before paying (lib/call-deposit.ts). */}
+                  {dueLines(bookingWords(store.language), due ?? null, { currency: order.currency || store.currency, locale, storeName: store.name }).map((line) => (
+                    <p key={line} className="mt-2 text-sm" data-call-due="">{line}</p>
+                  ))}
+                  {/* The cancellation deadline promised when paying (lib/call-setup.ts, readCancelPromise). */}
+                  {cancel ? (
+                    <p className="mt-2 text-sm" data-call-cancel="">
+                      {cancel.late ? bookingWords(store.language).cancelTooLate(cancel.hours, store.name) : bookingWords(store.language).cancelPolicy(cancel.hours, store.name)}
+                    </p>
                   ) : null}
                   {isHouseStore(store) && booked.room ? (
                     // The demo writes to nobody, so it promises no email (lib/house-store.ts).

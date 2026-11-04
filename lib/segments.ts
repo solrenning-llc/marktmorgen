@@ -35,7 +35,7 @@ import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { MAX_SEGMENTS, MAX_SEGMENT_NAME, type Narrow, type Segment, isNarrowed, readNarrow } from "@/lib/segments-rules";
 
-export { type Narrow, NO_NARROW, QUIET_DAYS, MAX_SEGMENTS, MAX_SEGMENT_NAME, type Segment, readNarrow, isNarrowed } from "@/lib/segments-rules";
+export { type Narrow, NO_NARROW, QUIET_DAYS, ACTIVE_DAYS, MAX_SEGMENTS, MAX_SEGMENT_NAME, type Segment, readNarrow, isNarrowed } from "@/lib/segments-rules";
 
 const LEDGER_SECONDS = 600;
 const SEGMENT_ID = /^[0-9a-f]{12}$/;
@@ -176,6 +176,8 @@ export function keeps(narrow: Narrow, ledger: Ledger, now = Date.now()): (email:
     if (narrow.channel && (!row || row.channel !== narrow.channel)) return false;
     // Has bought, and not in these days: the ones who went quiet, not the ones who never bought.
     if (narrow.quietDays > 0 && (!row || row.last >= now - narrow.quietDays * 86_400_000)) return false;
+    // Bought here in these days (461 [EL5]): the buyers still active. Never someone who never bought.
+    if (narrow.activeDays && (!row || !row.last || row.last < now - narrow.activeDays * 86_400_000)) return false;
     // One group of the store's buyers (lib/rfm-rules.ts, 270 [GR1], unit 3b), worked out from the same row.
     if (narrow.group && (!row || rfmGroup(row, now) !== narrow.group)) return false;
     return true;

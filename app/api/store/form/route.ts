@@ -7,7 +7,7 @@ import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readForm, addResponse } from "@/lib/form-store";
 import { enroll } from "@/lib/flows";
-import { FORM_ID, outcomeOf, readAnswers, scoreOf, scoreQuery } from "@/lib/forms";
+import { FORM_ID, formOpen, outcomeOf, readAnswers, scoreOf, scoreQuery } from "@/lib/forms";
 import { askToJoin } from "@/lib/store-join";
 import { leadAffiliate, visitCookies } from "@/lib/affiliate-leads";
 import { funnelMark } from "@/lib/page-funnel";
@@ -59,6 +59,8 @@ export async function POST(request: NextRequest) {
 
   const def = store.suspended ? null : await readForm(store.statsId, formId).catch(() => null);
   if (!def || !store.statsId) return back("closed");
+  // Before it opens or after it closes, nothing is taken (639 [GL7](26)).
+  if (formOpen(def, Math.floor(Date.now() / 1000)) !== "open") return back("closed");
   const statsId = store.statsId;
   // A scored quiz's total rides along in the address, as the result does: numbers the page checks, never anybody's answers.
   const done = (outcome: string, joined: boolean, scored = "") =>

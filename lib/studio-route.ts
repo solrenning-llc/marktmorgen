@@ -36,7 +36,7 @@ import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { LOCKED_NEEDS, lockedUntil } from "@/lib/two-step";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
-import { logTeam, memberStores, roleIn } from "@/lib/team";
+import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
 import { withinEssentialLimit } from "@/lib/request-guard";
 import { takeAllowance } from "@/lib/store-allowance";
 import { refreshPeriod } from "@/lib/billing-sync";
@@ -84,7 +84,7 @@ export type Creator = Access & {
  * `locked`: a session let in without its second step, for what waits until two-step login turns off (lib/two-step.ts).
  * `used`: the store's studio requests for its window are used (lib/store-allowance-rules.ts).
  */
-export type Refusal = "signed_out" | "no_store" | "forbidden" | "gone" | "locked" | "used";
+export type Refusal = "signed_out" | "no_store" | "forbidden" | "gone" | "locked" | "used" | "two_step";
 
 /**
  * What a check asks of a role: one permission, or "member" — any role at all
@@ -146,6 +146,10 @@ export async function resolveAccess(
     }
   }
   if (!access) return { ok: false, reason: "no_store" };
+  // 612 [WP11]: the owner may require two-step sign-in of the whole team; a
+  // member without an authenticator app or a passkey opens nothing of this
+  // store until they set one up (their own account settings stay open).
+  if (await teamTwoStepBlocks(access.store, email, access.role)) return { ok: false, reason: "two_step", store: access.store };
   if (need && need !== "member" && !can(access.role, need)) return { ok: false, reason: "forbidden", store: access.store };
   return { ok: true, access };
 }
@@ -241,6 +245,8 @@ export function refusedJson(reason: Refusal, message = ""): Response {
       return Response.json({ ok: false, error: "store_gone" }, { status: 409 });
     case "locked":
       return Response.json({ ok: false, error: "locked" }, { status: 403 });
+    case "two_step":
+      return Response.json({ ok: false, error: "two_step_required" }, { status: 403 });
   }
 }
 
@@ -266,6 +272,7 @@ export async function creatorFrom(
     if (result.reason === "no_store") return away(origin, "/studio?stripe=nostore");
     if (result.reason === "gone") return away(origin, "/studio?team=gone");
     if (result.reason === "locked") return away(origin, "/studio?two-step=locked");
+    if (result.reason === "two_step") return away(origin, "/studio?two-step=required#two-step");
     if (result.reason === "used") return away(origin, studioPath(result.store ?? { sid: "" }, `why=${result.why ?? "used"}`, "paused"));
     return away(origin, studioPath(result.store ?? { sid: "" }, "team=forbidden"));
   }

@@ -355,3 +355,19 @@ export async function forgetWaitlistPerson(sid: string | null, productIds: strin
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
   return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
 }
+
+/**
+ * A person's places on the store's waitlists, for the copy of their data
+ * (619 [SZ3], lib/person-copy.ts): when they joined, when they confirmed,
+ * and whether they also asked to hear from the creator. The secret in their
+ * waitlist link is left out. Only reads.
+ */
+export async function waitlistPlacesOf(sid: string | null, productIds: string[], email: string): Promise<{ product: string; joined: number; confirmed: number; news: boolean }[]> {
+  if (!sid || !productIds.length || !isRedisConfigured()) return [];
+  const address = normaliseEmail(email);
+  const replies = await redisPipeline(productIds.map((p) => ["HGET", listKey(sid, p), address]));
+  return productIds.flatMap((product, i) => {
+    const entry = parseEntry(replies[i]);
+    return entry ? [{ product, joined: entry.at, confirmed: entry.ok, news: entry.c }] : [];
+  });
+}

@@ -47,6 +47,16 @@ import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
 
+/**
+ * The help center's questions a feature page asks too, word for word, so
+ * renaming one here renames it there (lib/feature-pages.ts, helpAnswer).
+ */
+export const SHARED_QUESTIONS = {
+  address: "Can I change my store address later?",
+  domain: "Can I use my own domain?",
+  refunds: "Who handles refunds and disputes?",
+} as const;
+
 /** An anchor for one answer, from its question. */
 export function answerId(q: string): string {
   return q.toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -301,7 +311,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Who handles refunds and disputes?",
+        q: SHARED_QUESTIONS.refunds,
         a: [
           "You do, in your own Stripe dashboard, with the same tools any business has. Because the charge was made on your account, a refund is a refund you issue, not a request you file with us.",
         ],
@@ -898,7 +908,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Can I use my own domain?",
+        q: SHARED_QUESTIONS.domain,
         a: [
           ...(isDomainsConfigured()
             ? [
@@ -908,7 +918,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Can I change my store address later?",
+        q: SHARED_QUESTIONS.address,
         a: [
           "Yes, whenever you want, from your studio. Nobody has to be asked and there is nothing to wait for.",
           "Your store does not move: same page, same name, same description, same products. Only the address changes.",
@@ -1036,3 +1046,14 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
 ];
 
+/**
+ * A help-center answer as one paragraph, for a feature page that asks the very
+ * same question (534 [FQ1] unit 44), so a question has one answer wherever it
+ * is asked (tests/distinct-questions.test.ts). Throws when the question is not
+ * in the help center, so a renamed one cannot slip by.
+ */
+export function helpAnswer(q: string): string {
+  const item = HELP_SECTIONS.flatMap((section) => section.items).find((x) => x.q === q);
+  if (!item) throw new Error(`No help answer for "${q}"`);
+  return item.a.join(" ");
+}

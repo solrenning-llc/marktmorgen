@@ -31,6 +31,8 @@
  * the studio can import it.
  */
 
+import { type LanguageCode, isLanguage } from "@/lib/store-language";
+
 /** The most blocks one page may have. */
 export const MAX_BLOCKS = 30;
 /** The most questions one block of questions may have. */
@@ -469,7 +471,13 @@ export const BLOCK_SHOWS: { value: BlockShow | "all"; label: string }[] = [
  */
 export const SAVED_BLOCK_ID = /^[a-z0-9]{10}$/;
 
-export type PageBlock = { screens?: BlockShow; saved?: string } & (
+/**
+ * `lang`, on a block: the language its words are in, when it is not the
+ * page's own (a block a translation had to leave as it was, lib/page-translate.ts,
+ * keepEveryBlock). The page draws it with that lang so a screen reader reads
+ * it in its own language (WCAG 3.1.2). Never guessed: absent when unknown.
+ */
+export type PageBlock = { screens?: BlockShow; saved?: string; lang?: LanguageCode } & (
   | FeatureBlock
   | FitBlock
   | StepsBlock
@@ -497,6 +505,13 @@ export type PageBlock = { screens?: BlockShow; saved?: string } & (
 
 export type SalesPage = {
   blocks: PageBlock[];
+  /**
+   * The language the page's words are in, when it is known: set when the
+   * page is made in the studio (the store's language) and when it is
+   * translated (the language asked for). A page made before has none, and
+   * nothing is guessed for it.
+   */
+  lang?: LanguageCode;
   /** The title a search engine and a shared link show; empty is "<product> — <store>". */
   seoTitle: string;
   /** The line under it; empty is the product's summary or the start of its description. */
@@ -1174,6 +1189,8 @@ function parseBlocks(list: unknown, pictures: Set<string>): PageBlock[] {
     if (block.kind !== "hero" && (screens === "phone" || screens === "computer")) block.screens = screens;
     const saved = (entry as { saved?: unknown }).saved;
     if (block.kind !== "hero" && typeof saved === "string" && SAVED_BLOCK_ID.test(saved)) block.saved = saved;
+    const lang = (entry as { lang?: unknown }).lang;
+    if (isLanguage(lang)) block.lang = lang;
     if (block.kind === "hero" && blocks.length > 0) continue;
     if (block.kind === "reviews") {
       if (reviews) continue;
@@ -1235,6 +1252,7 @@ export function parsePage(raw: unknown): SalesPage {
     hidden: value.hidden === true,
     // Only for a hidden page, and only a moment a clock can hold.
     showFrom: value.hidden === true ? parseUntil(value.showFrom) : 0,
+    ...(isLanguage(value.lang) ? { lang: value.lang } : {}),
   };
 }
 

@@ -213,6 +213,8 @@ const waitKey = (statsId: string) => `nl:hooks:wait:${statsId}`;
 const givenUpDayKey = (statsId: string, day: number, endpoint: string) => `nl:hooks:wait:${statsId}:day:${day}:${endpoint}`;
 /** The endpoints of a store told of passed-over events on one UTC day, at most MAX_ENDPOINTS, so removing and adding endpoints makes no more day sets. */
 const givenUpEndpointsKey = (statsId: string, day: number) => `nl:hooks:wait:${statsId}:eps:${day}`;
+/** How many passed-over events a store has placed in a UTC day: each one's own number, so no two share a place. */
+const givenUpSeqKey = (statsId: string, day: number) => `nl:hooks:wait:${statsId}:seq:${day}`;
 const testsKey = (statsId: string) => `nl:rl:hooks:test:${statsId}`;
 const POSITION_KEY = "nl:hooks:pos";
 
@@ -1405,7 +1407,12 @@ async function pushMissing(statsId: string, ids: string[], known: string[] = [])
  * line of that endpoint, rewritten with its count. Which is which is the
  * event's place in the endpoint's sorted set of the day (ZADD NX: a repeat
  * keeps its first place), so a visit that dies half way, or a store read
- * again, never counts an event twice.
+ * again, never counts an event twice. The place is the order the events
+ * were passed over in: the time to the millisecond, times a thousand, and
+ * the store's own number for the day after it (givenUpSeqKey). Every event
+ * of one visit shares that visit's time, and on the time alone two events
+ * would tie and be put in order by their ids, so a later one could take an
+ * earlier one's own line.
  *
  * Written once, and never lost: each line's id is made from the event and
  * the endpoint (the summary's from the day and the endpoint), so a repeat
@@ -1440,10 +1447,14 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
     console.error("more endpoints of a store were to be told of passed-over Stripe events today than it can have; said here only", statsId, stripeEvent, over.map(({ endpoint }) => endpoint.id));
   }
   const listening = hearing.filter((at) => !over.includes(at));
+  // Its own number for the day, so no two events share a place (a repeat's ZADD NX keeps its first one).
+  const [seq] = listening.length ? await redisPipeline([["INCR", givenUpSeqKey(statsId, day)], ["EXPIREAT", givenUpSeqKey(statsId, day), (day + 2) * 86400]]) : [0];
+  if (listening.length && (!Number.isSafeInteger(Number(seq)) || Number(seq) < 1)) throw new Error("the day's passed-over events could not be numbered");
+  const order = now * 1000 + (Number(seq) % 1000);
   const placed = listening.length ? await redisPipeline(listening.flatMap(({ endpoint }) => {
     const key = givenUpDayKey(statsId, day, endpoint.id);
     // Gone at the end of the next UTC day: two days' sets an endpoint at most.
-    return [["ZADD", key, "NX", now, eventId], ["ZCARD", key], ["ZREVRANK", key, eventId], ["EXPIREAT", key, (day + 2) * 86400]];
+    return [["ZADD", key, "NX", order, eventId], ["ZCARD", key], ["ZREVRANK", key, eventId], ["EXPIREAT", key, (day + 2) * 86400]];
   })) : [];
   const own: typeof listening = [];
   const summed: { endpoint: Endpoint; type: WebhookEvent; more: number }[] = [];

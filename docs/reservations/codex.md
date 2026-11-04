@@ -7,3 +7,19 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |
+| Codex F | 309 [EM1], CX-85: campaign prototype regression; lib/mail-revenue.ts shared with #2192 by explicit inbox exception | codex/f-mail-revenue-proto | `tests/mail-revenue-proto.test.ts` | 04/11/2026 |
+
+| Codex principal | CX-56(3): prove lost-dispute application fee reversal using pinned dispute list | codex/share-lost-dispute-proof | `lib/share-settle.ts`, `tests/share-lost-dispute.test.ts`, `tests/platform-share.test.ts`, `docs/share-lost-dispute-proof.md` | 04/11/2026 |
+| Codex F | 309 [EM1], CX-89: erasure delivery fixture waits for the observed completion; production erasure untouched | codex/f-erasure-delivery-wait | `tests/erasure-request-full.test.ts` | 04/11/2026 |
+
+| Codex C | 465 [MR2]: complete protocol infrastructure profiles | codex/c-mr2-protocol-evidence | `lib/spend-cost-table.ts`, `tests/protocol-infrastructure-cost.test.ts`, `tests/contract-protocol-cost.test.ts` | 04/11/2026 |
+| Codex C | 473 [TX3]: serializable own sales evidence | codex/c-tx3-sales-evidence | `lib/tax-sales-counter.ts`, `tests/tax-sales-counter.test.ts` | 04/11/2026 |
+| Codex C | 472 [TX2]: complete explicit incoming-exchange evidence | codex/c-tx2-exchange-evidence | `lib/receiving-costs.ts`, `tests/receiving-most-correct.test.ts` | 04/11/2026 |
+| Codex I | Reviewer 3 C79: all unowned buyer orders findings (CX-95) | codex/i-c79-orders | `app/[handle]/orders/page.tsx`, `components/bundle-delivery.tsx`, `tests/orders-page-bounds.test.ts`, `tests/bundle-delivery-regions.test.ts` (app/globals.css compartilhado sem reserva, só o bloco de foco da loja — CX-95/CX-97), `lib/buyer-words/orders.ts`, `tests/e2e/orders-list-actions.mjs`, `tests/e2e/accessibility-buyer-actions.mjs` | 04/11/2026 |
+| Codex F | 309 [EM1], CX-89: erasure delivery fixture waits for the observed completion; production erasure untouched | codex/f-erasure-delivery-wait | `tests/erasure-request-full.test.ts` | 04/11/2026 |
+| Codex D | 474 [TX4]: official U.S. federal filing evidence | codex/d-tx4-us-filing-evidence | `docs/llc-fixed-costs-2026-10-22.md`, `tests/tx4-us-filing-evidence.test.ts` | 04/11/2026 |
+| Codex H | 310 [AX2]: copied answer links preserve native modified navigation | codex/h-copy-link-native | `components/copy-link.tsx`, `tests/copy-link-native.test.ts` | 04/11/2026 |
+| Codex F | 476 [TX6]: residual tax risks, aggravating facts and design mitigations; historical research preserved | codex/f-tax-residual-risks | `docs/tax-uncertainty.md`, `tests/tax-residual-risks.test.ts` | 04/11/2026 |
+| Codex F | 630 [HN6](28), CX-99: replace transferred #1913 and correct complete/partial and financial evidence; generated inventory/review digest and own test-config wiring shared without exclusive reservation | codex/f-hn6-declines | `app/studio/declines/page.tsx`, `app/studio/disputes/page.tsx`, `lib/declines-rules.ts`, `lib/declines.ts`, `tests/declines.test.ts`, `tests/declines-page.test.ts`, `tests/declines-page-world.ts` | 04/11/2026 |
+| Codex E | 465 [MR2]: deterministic private presentation envelope for the monthly company margin report | codex/e-mr2-monthly-report-presentation | `lib/company-margin-report.ts`, `tests/company-margin-report-presentation.test.ts`, `docs/company-margin-report.md` | 04/11/2026 |
+| Codex H | 570 [DR1] unit 1: per-email delivery, permanent/temporary bounce and complaint events | codex/h-dr1-mail-events | `lib/mail.ts`, `lib/mail-health.ts`, `lib/mail-report.ts`, `lib/sns.ts`, `app/api/mail/ses/route.ts`, `app/api/mail/inbound/route.ts`, `tests/mail-report-events.test.ts`, `docs/ses-delivery-events.md` | 04/11/2026 |

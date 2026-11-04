@@ -8,24 +8,24 @@
  * There are two senders. Amazon SES is the cheaper by nine times (lib/ses.ts
  * has the prices and the date they were read), and is used whenever Amazon
  * says the account may write to the public. Resend is the one this site
- * started on, and stays underneath as the floor: every email Amazon does not
- * take — the account is still being looked at, is paused, has used its day,
- * is not answering — can go through Resend. An uncertain once-only claim
+ * started on. Fallback requires a reviewed account-wide paid budget for both
+ * sent and received emails; missing proof reports unavailability. Durable
+ * order work waits for SES above that fallback quota. An uncertain once-only claim
  * holds both senders and reports failure instead of risking a second send.
- * With Amazon's settings absent,
- * everything goes through Resend exactly as before.
  *
  * Nobody chooses between them by hand. Which one sends is decided here, for
  * each email, from what Amazon last said.
  */
-import { createHash } from "node:crypto";
-import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { createHash, randomBytes } from "node:crypto";
+import { currentResendFallbackProofIsMissing, guardedResendPost, type ResendTransportRuntime } from "@/lib/resend-fallback-transport";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { atSiteAddress, creatorDomain, domainOf } from "@/lib/mail-from";
 import { countSesSent, isSesConfigured, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
+import { allowanceWindow } from "@/lib/allowance-window";
+import type { ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
 
 /**
  * What an email is counted against (added 17 October 2026), said by every
@@ -53,13 +53,58 @@ export type EmailMeter =
   | { by: "monthly" }
   | { by: "store"; store: AllowanceStore; kind: "email" | "transactional"; asked?: boolean };
 
-/** Takes a store's figure for `n` emails before they go; true for the meters already counted elsewhere. */
-async function metered(meter: EmailMeter, n: number): Promise<boolean> {
+/** A funded cohort must be admitted even before a provider usage read. */
+async function meterCohortReady(meter: EmailMeter): Promise<boolean> {
   if (meter.by !== "store") return true;
   if (meter.store.period?.funded===true && (!meter.store.tier || !(await reservePaidResourceWindow({...meter.store,tier:meter.store.tier,statsId:meter.store.statsId??null})))) return false;
+  return true;
+}
+
+/** Takes a store's figure for `n` emails before they go; true for the meters already counted elsewhere. */
+async function metered(meter: EmailMeter, n: number): Promise<boolean> {
+  if (!(await meterCohortReady(meter))) return false;
+  return takeMeteredAllowance(meter, n);
+}
+async function takeMeteredAllowance(meter: EmailMeter, n: number): Promise<boolean> {
+  if (meter.by !== "store") return true;
   const taken = await takeAllowance(meter.store, meter.kind, n, Date.now(), meter.asked === true);
   if (!taken.ok) console.error(`an email was not sent: the store's ${meter.kind} figure (${taken.reason})`);
   return taken.ok;
+}
+
+type MeterAuthorization = { preflight: () => Promise<boolean>; beforePost: () => Promise<boolean> };
+/** Memoize only the debit of this invocation's original store/window. A
+ * later variant must still prove current funding and the SAME window.
+ * Refusal/throw/unknown stays sticky; this is not a durable retry receipt. */
+function lazyMeter(meter: EmailMeter, n: number): MeterAuthorization {
+  const selected: EmailMeter = meter.by === "store" ? { ...meter, store: { ...meter.store,
+    ...(meter.store.period ? { period: { ...meter.store.period } } : {}),
+  } } : { ...meter };
+  const original = selected.by === "store" ? allowanceWindow(selected.store) : null;
+  let debit: Promise<boolean> | undefined, refused = false;
+  const sameWindow = () => {
+    if (selected.by !== "store") return true;
+    const current = allowanceWindow(selected.store);
+    return Boolean(original && current && current.id === original.id && current.start === original.start &&
+      current.end === original.end && current.billing === original.billing);
+  };
+  const preflight = async () => {
+    if (refused) return false;
+    try {
+      if (sameWindow() && await meterCohortReady(selected) && sameWindow()) return true;
+    } catch { /* No new debit may follow unknown authorization. */ }
+    refused = true;
+    return false;
+  };
+  return { preflight, beforePost: async () => {
+    if (!(await preflight())) return false;
+    try {
+      debit ??= takeMeteredAllowance(selected, n);
+      if (await debit === true && sameWindow()) return true;
+    } catch { /* Keep the rejected debit promise and any committed effect. */ }
+    refused = true;
+    return false;
+  } };
 }
 
 // Local tests may point this at a mock server on 127.0.0.1; nothing else is
@@ -67,7 +112,6 @@ async function metered(meter: EmailMeter, n: number): Promise<boolean> {
 const BASE = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.RESEND_API_BASE ?? "")
   ? `${process.env.RESEND_API_BASE}`
   : "https://api.resend.com";
-const API = `${BASE}/emails`;
 
 /** Where the sender's API is, for the one other file that reads from it (lib/inbound-mail.ts). */
 export const RESEND_BASE = BASE;
@@ -125,6 +169,11 @@ function getKey(): string | null {
   return key ? key : null;
 }
 
+/** The account usage API needs full access, which a domain-restricted send key need not have. */
+function usageKey(): string | null {
+  return process.env.RESEND_READ_API_KEY?.trim() || getKey();
+}
+
 /** Whether an email is from an address on the creators' domain (lib/mail-from.ts). */
 function isCreators(from: string): boolean {
   const creators = creatorDomain(NIMBUS_FROM);
@@ -147,39 +196,54 @@ export function isSenderConfigured(): boolean {
   return getKey() !== null || isSesConfigured();
 }
 
+/** A known global refusal, independent of any recipient or account lookup.
+ * No IO, reservation or readiness check: false means unknown, never proof of
+ * SES availability, a valid Resend review/binding or remaining fallback quota.
+ * The actual send must still pass the existing provider and budget guards.
+ */
+export function serviceMailKnownUnavailable(runtime: ResendTransportRuntime = {}): boolean {
+  return !isSesConfigured() && (!getKey() || currentResendFallbackProofIsMissing(runtime));
+}
+
 /** Whether Resend is there to send what Amazon does not take. */
 export function hasResend(): boolean {
   return getKey() !== null;
 }
 
 /**
- * Says so, once a day, to the site's own inbox when Amazon refuses to send
- * for the account's own sake: nothing is lost by it, because Resend takes
- * over at once, but each of those emails costs nine times as much, and what
- * Amazon wants — a domain proved again, a review answered — is for the
- * owner to do.
+ * Tells the site's inbox once a day when Amazon refuses account sending.
+ * The notice describes the available routes without claiming that a
+ * recipient's email was delivered or that list mail used the fallback.
  */
 async function tellAmazonIsDown(why: string): Promise<void> {
   try {
+    console.error("Amazon SES account sending is unavailable", why || "(no reason given)");
     const day = new Date().toISOString().slice(0, 10);
-    const [first] = await redisPipeline([["SET", `nl:ses:told:${day}`, "1", "NX", "EX", 2 * 86_400]]);
-    if (first === null || !hasResend()) return;
-    await viaResend({
+    const key = `nl:ses:told:${day}`;
+    const read: unknown = await redisPipeline([["GET", key]]);
+    if (!Array.isArray(read)) return;
+    const length = Object.getOwnPropertyDescriptor(read, "length");
+    if (!length || !("value" in length) || length.value !== 1) return;
+    const previous = Object.getOwnPropertyDescriptor(read, "0");
+    // Only confirmed absence permits a send; an unknown read is not absence.
+    if (!previous || !("value" in previous) || previous.value !== null || !hasResend()) return;
+    const accepted = await viaResend({
       meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
-      subject: "Amazon SES is not sending: email is going out through Resend",
+      subject: "Amazon SES is not sending: check the account",
       text: [
-        "Amazon SES refused to send an email, for a reason that is the account's and not the email's:",
+        "Amazon SES refused account sending. Check its current account status and sending identity.",
         "",
-        why || "(no reason given)",
-        "",
-        "Nothing was lost: that email, and every one since, went out through Resend instead, which costs about nine times as much for each.",
-        "Amazon is asked again every ten minutes, and sending moves back to it by itself as soon as it answers yes.",
+        "Service email can use Resend only while the account review, credential binding and paid fallback quota are confirmed. Missing proof blocks that route. List-only email waits for SES; this notice does not confirm delivery.",
+        "The account is checked again automatically. Sending resumes only when its current status allows it.",
         "",
         "What to look at: the Amazon SES console, under Account dashboard (is the account paused or under review?) and Identities (is the sending domain still verified?).",
       ].join("\n"),
-    });
+    }, key);
+    // A failed/uncertain send consumes no notice period. The stable sender
+    // identity also protects a retry if this additional write loses its ACK.
+    if (accepted === true) await redisPipeline([["SET", key, "1", "NX", "EX", 2 * 86_400]]);
   } catch (error) {
     console.error("telling the inbox Amazon SES is down failed", error);
   }
@@ -246,15 +310,15 @@ const onceKey = (key: string) => `nl:ses:once:${createHash("sha256").update(key)
 
 /**
  * One email through Amazon, when Amazon may be used. True when Amazon took
- * it (or an existing claim was confirmed under the same key); false when
- * fallback is allowed; null when claim ownership or SES acceptance is unknown. A claim is
+ * it; false when fallback is allowed; null when claim ownership or SES
+ * acceptance is unknown, including a pre-existing legacy claim. A claim is
  * not proof of delivery, nor a source-funded lifetime reservation.
  */
-async function viaAmazon(message: OneMessage, to: string): Promise<boolean | null> {
+async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey: string | undefined): Promise<boolean | null> {
   const config = sesConfig();
   if (!config || !(await sesReady())) return false;
   // Amazon keeps no record of a key, so the once-only promise is kept here.
-  const once = message.idempotencyKey ? onceKey(message.idempotencyKey) : null;
+  const once = originalIdempotencyKey ? onceKey(originalIdempotencyKey) : null;
   if (once) {
     try {
       const reply: unknown = await redisPipeline([["SET", once, "1", "NX", "EX", 86_400]]);
@@ -264,7 +328,9 @@ async function viaAmazon(message: OneMessage, to: string): Promise<boolean | nul
       if (!length || !("value" in length) || length.value !== 1) return null;
       const fresh = Object.getOwnPropertyDescriptor(reply, "0");
       if (!fresh || !("value" in fresh)) return null;
-      if (fresh.value === null) return true;
+      // This legacy marker records only a claim, not a provider ACK. It can
+      // remain after a lost SET reply before any POST, so replay is unknown.
+      if (fresh.value === null) return null;
       if (fresh.value !== "OK") return null;
     } catch {
       // SET may have committed. Keep the claim; neither sender may proceed.
@@ -308,20 +374,63 @@ async function viaAmazon(message: OneMessage, to: string): Promise<boolean | nul
   return false;
 }
 
-export async function sendEmail(message: OneMessage): Promise<boolean> {
+export async function sendEmail(message: OneMessage, runtime: ResendTransportRuntime = {}): Promise<boolean> {
   const to = oneAddress(message.to);
   if (!to) return false;
-  if (!isSenderConfigured() || !(await metered(message.meter, 1))) return false;
+  if (!isSenderConfigured() || serviceMailKnownUnavailable(runtime)) return false;
+  // Keep one identity across awaits and both routes. Preserve the original
+  // string and the existing structural contract, including inherited keys.
+  const originalIdempotencyKey = message.idempotencyKey;
   if (isSesConfigured()) {
-    const amazon = await viaAmazon(message, to);
+    if (!(await metered(message.meter, 1))) return false;
+    const amazon = await viaAmazon(message, to, originalIdempotencyKey);
     if (amazon === true) return true;
     if (amazon === null) return false;
+    return viaResend(message, originalIdempotencyKey, runtime); // The existing SES path already took its allowance.
   }
-  return viaResend(message);
+  return viaResend(message, originalIdempotencyKey, runtime, lazyMeter(message.meter, 1));
 }
 
+/** Durable shipment work owns its lifetime claim in the outbox, not the
+ * legacy one-day SES marker. The confirmed barrier immediately precedes the
+ * one provider POST. Until fallback funding is verified this work waits for
+ * SES; it never opens another route after an uncertain response.
+ */
+export function queuedShipmentMailSender(runtime: ResendTransportRuntime = {}): ShipmentMailDispatch {
+  return async (message, beforePost, context) => {
+    const usageCredential = usageKey() ?? "";
+    const to = oneAddress(message.to);
+    if (!to) return "refused";
+    const config = sesConfig();
+    if (!config || !(await sesReady())) {
+      const result = await guardedResendPost({
+        base: BASE, path: "/emails", credential: keyFor(message.from) ?? "", usageCredential,
+        body: JSON.stringify({ from: fromLine(message.from), to: [to], subject: headerText(message.subject), text: message.text,
+          ...(oneAddress(message.replyTo) ? { reply_to: oneAddress(message.replyTo) } : {}) }),
+        idempotencyKey: `shipment:${context.id}`, recipients: 1, beforePost,
+      }, runtime);
+      if (result.kind === "accepted_receipt") return await beforePost() === true ? "accepted" : "unknown";
+      if (result.kind === "blocked") return "waiting";
+      if (result.kind !== "response") return "unknown";
+      if (result.response.ok) { await countSent(1); return "accepted"; }
+      return result.response.status === 429 ? "not_accepted" : "refused";
+    }
+    if (!(await beforePost())) return "unknown";
+    const result = await sesSend(config, {
+      from: fromLine(message.from), to, subject: headerText(message.subject),
+      text: message.text, replyTo: oneAddress(message.replyTo),
+    });
+    if (result.uncertain === true) return "unknown";
+    if (result.outcome === "sent") { await countSesSent(1); return "accepted"; }
+    if (result.outcome === "account") await sesDown(result.why);
+    return result.outcome === "refused" ? "refused" : "not_accepted";
+  };
+}
+export const sendQueuedShipmentMail: ShipmentMailDispatch = queuedShipmentMailSender();
+
 /** One email through Resend: the first sender, and the floor under the other. */
-async function viaResend(message: OneMessage): Promise<boolean> {
+async function viaResend(message: OneMessage, originalIdempotencyKey: string | undefined, runtime: ResendTransportRuntime = {}, authorization?: MeterAuthorization): Promise<boolean> {
+  const usageCredential = usageKey() ?? "";
   const key = keyFor(message.from);
   if (!key) return false;
   const to = oneAddress(message.to);
@@ -332,39 +441,34 @@ async function viaResend(message: OneMessage): Promise<boolean> {
   // Sent again from the site's own address if Resend will not take the
   // creators' domain: see lib/mail-from.ts.
   let from = message.from;
-  let under = message.idempotencyKey;
-  const body = () => JSON.stringify({
-    from: fromLine(from),
+  // Separate intentional service calls with identical text; retries within
+  // this invocation keep one stable provider key and budget identity.
+  let under = originalIdempotencyKey?.trim() ? originalIdempotencyKey : `nimbus-service:${randomBytes(16).toString("hex")}`;
+  const payload = {
     to: [to],
     subject: headerText(message.subject),
     text: message.text,
     ...(message.html ? { html: message.html } : {}),
-    ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+    ...(message.attachments?.length ? { attachments: message.attachments.map(file => ({...file})) } : {}),
     ...(replyTo ? { reply_to: replyTo } : {}),
     ...(headers ? { headers } : {}),
-  });
+  };
+  const body = () => JSON.stringify({ from: fromLine(from), ...payload });
   let auth = key;
   // A sign-in link or a receipt must not be lost because the sender was busy
   // with a creator's newsletter a second earlier: asked to slow down, it
   // waits a moment and tries again.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      // Given up after RESEND_TIMEOUT_MS (lib/fetch-timeout.ts): not sent,
-      // as far as the caller knows. A message that must go out once carries
-      // an idempotency key, so trying it again later cannot send it twice.
-      const response = await timed(RESEND_TIMEOUT_MS, (signal) =>
-        fetch(API, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${auth}`,
-            "Content-Type": "application/json",
-            ...(under ? { "Idempotency-Key": under.slice(0, 256) } : {}),
-          },
-          body: body(),
-          cache: "no-store",
-          signal,
-        }),
-      );
+      if (authorization && !(await authorization.preflight())) return false;
+      const result = await guardedResendPost({
+        base: BASE, path: "/emails", credential: auth,
+        usageCredential, body: body(),
+        ...(under ? { idempotencyKey: under } : {}), recipients: 1, ...(authorization ? { beforePost: authorization.beforePost } : {}),
+      }, runtime);
+      if (result.kind === "accepted_receipt") return true;
+      if (result.kind !== "response") return false;
+      const response = result.response;
       if (response.ok) {
         await countSent(1);
         return true;
@@ -437,16 +541,51 @@ export async function sendBatch(
    * the choice is made here.
    */
   only?: "resend" | "amazon",
+  runtime: ResendTransportRuntime = {},
 ): Promise<"sent" | "retry" | "refused"> {
-  if (!isSenderConfigured()) return "retry";
+  const result = await dispatchBatch(messages, batchKey, meter, only, false, runtime);
+  return result === "waiting" ? "retry" : result;
+}
+
+/** List mail waits for SES; a known no-send result is distinct from unknown acceptance. */
+export async function sendListBatch(
+  messages: BatchMessage[], batchKey: string, meter: EmailMeter,
+): Promise<"sent" | "waiting" | "retry" | "refused"> {
+  if (messages.length === 0) return "sent";
+  return dispatchBatch(messages, batchKey, meter, "amazon", true);
+}
+
+async function dispatchBatch(
+  messages: BatchMessage[], batchKey: string, meter: EmailMeter,
+  only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime = {},
+): Promise<"sent" | "waiting" | "retry" | "refused"> {
+  if (!isSenderConfigured()) return listOnly ? "waiting" : "retry";
   if (messages.length === 0) return "sent";
   // What actually goes: a message with no address that can be written to is
   // left out below, and is not counted as sent either.
   let going = messages.slice(0, 100).filter((m) => oneAddress(m.to) !== null);
-  if (going.length && !(await metered(meter, going.length))) return "refused";
-  let idempotencyKey = batchKey;
   const config = sesConfig();
-  if (only === "amazon" && !(config && isSesConfigured())) return "retry";
+  // Decide only a known unavailable selected route before taking its figure.
+  // These synchronous observations grant no quota or provider permission.
+  if (only === "amazon" && !(config && isSesConfigured())) return listOnly ? "waiting" : "retry";
+  if (going.length && (only === "resend"
+    ? currentResendFallbackProofIsMissing(runtime)
+    : serviceMailKnownUnavailable(runtime))) return "retry";
+  const resendSelected = only === "resend" || !(config && isSesConfigured());
+  let authorization: MeterAuthorization | undefined;
+  if (going.length) {
+    if (resendSelected) {
+      // Keep the same recipients/content through tags/domain variants and
+      // bind the lazy debit to their filtered, bounded occurrence count.
+      going = going.map(message => ({ ...message,
+        ...(message.headers ? { headers: { ...message.headers } } : {}),
+        ...(message.tags ? { tags: { ...message.tags } } : {}),
+      }));
+      authorization = lazyMeter(meter, going.length);
+      if (!(await authorization.preflight())) return "refused";
+    } else if (!(await metered(meter, going.length))) return "refused";
+  }
+  let idempotencyKey = batchKey;
   if (config && isSesConfigured() && only !== "resend") {
     const all = going.length;
     // Whoever Amazon already took under this key, in a batch that was then
@@ -474,13 +613,15 @@ export async function sendBatch(
     } catch {
       return "retry";
     }
+    if (listOnly && toResend && going.length) return "retry"; // A prior provider handoff needs reconciliation, not another sender.
     const state = going.length && !toResend ? await sesReady() : null;
     // Many at a time use Amazon's day only up to a share of it; past that
     // they go through Resend, and the rest of the day is kept for the
     // emails that go one at a time (lib/ses.ts).
     const room = state ? await sesBulkRoom(state) : null;
     // Unknown usage cannot authorize SES or a fallback provider attempt.
-    if (state && room === null) return "retry";
+    if (state && room === null) return listOnly ? "waiting" : "retry";
+    if (listOnly && going.length && (!state || room === null || room < going.length)) return "waiting";
     if (state && room !== null && room >= going.length) {
       const result = await sesBatch(
         config,
@@ -506,6 +647,13 @@ export async function sendBatch(
       // its caller without another SES wave or a switch to Resend. A durable
       // caller checkpoint is still needed before a later invocation.
       if (result.uncertain === true) return "retry";
+      // SES excludes definitively refused recipients from both accepted and
+      // pending lists. Missing recipients cannot establish a completed list.
+      if (listOnly && result.taken.length + result.left.length < going.length) {
+        // Accepted-recipient markers are not an acknowledged durable receipt.
+        // A partial send must hold the caller, never authorize automatic replay.
+        return result.taken.length > 0 ? "retry" : "refused";
+      }
       going = result.left.map((m) => m.original);
     }
     if (going.length === 0) return "sent";
@@ -529,41 +677,38 @@ export async function sendBatch(
     }
   }
   // A batch is one store's, so one address it is all from.
+  const usageCredential = usageKey() ?? "";
   const key = going.length ? keyFor(going[0].from) : getKey();
   if (!key) return "retry";
   const tagged = going.some((m) => cleanTags(m.tags).length > 0);
-  const post = (withTags: boolean, under: string, auth: string = key, fromSite = false) =>
-    // Given up after RESEND_TIMEOUT_MS: "retry", with the same key next time.
-    timed(RESEND_TIMEOUT_MS, (signal) => fetch(`${BASE}/emails/batch`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${auth}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": under.slice(0, 256),
-      },
-      body: JSON.stringify(
-        going
-          .map((m) => {
-            const replyTo = oneAddress(m.replyTo);
-            const headers = cleanHeaders(m.headers);
-            const tags = withTags ? cleanTags(m.tags) : [];
-            return {
-              from: fromLine(fromSite ? atSiteAddress(m.from, NIMBUS_FROM) : m.from),
-              to: [oneAddress(m.to) as string],
-              subject: headerText(m.subject),
-              text: m.text,
-              html: m.html,
-              ...(replyTo ? { reply_to: replyTo } : {}),
-              ...(headers ? { headers } : {}),
-              ...(tags.length ? { tags } : {}),
-            };
-          }),
-      ),
-      cache: "no-store",
-      signal,
-    }));
+  let firstPost = true;
+  const post = async (withTags: boolean, under: string, auth: string = key, fromSite = false): Promise<Response | "accepted_receipt" | null> => {
+    // The first Resend-selected preflight immediately precedes this path;
+    // every known-refusal variant must independently precede its usage GET.
+    if (!firstPost && authorization && !(await authorization.preflight())) return null;
+    firstPost = false;
+    const result = await guardedResendPost({
+      base: BASE, path: "/emails/batch", credential: auth, usageCredential,
+      idempotencyKey: under, recipients: going.length, ...(authorization ? { beforePost: authorization.beforePost } : {}),
+      body: JSON.stringify(going.map((m) => {
+        const replyTo = oneAddress(m.replyTo);
+        const headers = cleanHeaders(m.headers);
+        const tags = withTags ? cleanTags(m.tags) : [];
+        return {
+          from: fromLine(fromSite ? atSiteAddress(m.from, NIMBUS_FROM) : m.from),
+          to: [oneAddress(m.to) as string], subject: headerText(m.subject),
+          text: m.text, html: m.html,
+          ...(replyTo ? { reply_to: replyTo } : {}), ...(headers ? { headers } : {}),
+          ...(tags.length ? { tags } : {}),
+        };
+      })),
+    }, runtime);
+    return result.kind === "accepted_receipt" ? "accepted_receipt" : result.kind === "response" ? result.response : null;
+  };
   try {
     let response = await post(true, idempotencyKey);
+    if (response === "accepted_receipt") return "sent";
+    if (!response) return "retry";
     if (!response.ok && tagged && (response.status === 400 || response.status === 422)) {
       // The tags are for us, not for the reader: they say whose email it was
       // on the day one bounces (lib/mail-health.ts). If the sender will not
@@ -572,6 +717,8 @@ export async function sendBatch(
       // because it is no longer the same request.
       console.error("batch refused with its tags; sending it without them", response.status);
       response = await post(false, `${idempotencyKey}:plain`);
+      if (response === "accepted_receipt") return "sent";
+      if (!response) return "retry";
     }
     const site = getKey();
     if (!response.ok && notThisDomain(response.status) && site && going.some((m) => isCreators(m.from))) {
@@ -580,6 +727,8 @@ export async function sendBatch(
       // under a key of their own because it is no longer the same request.
       console.error("Resend refused the creators' domain for a batch; sending it from the site's own address", response.status);
       response = await post(true, `${idempotencyKey}:site`, site, true);
+      if (response === "accepted_receipt") return "sent";
+      if (!response) return "retry";
     }
     if (response.ok) {
       await countSent(going.length);

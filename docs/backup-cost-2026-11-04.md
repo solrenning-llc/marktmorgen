@@ -14,7 +14,7 @@ Code read: `origin/main` at `fcd1617ac` (4 November 2026): `lib/backup-run.ts`, 
 | Size per run | at most 4 MiB of sealed JSON (`BACKUP_MAX_BYTES` = 4,194,304 bytes); stored object at most that + 65,536 bytes of seal room = **4,259,840 bytes** (`objectBound`) | `lib/backup-run.ts` |
 | R2 operations per run | 1 `PutObject` with `If-None-Match: *` (Class A; a 412 is also billed as Class A) + 1 `GetObject` read-back (Class B). No delete, no list | `r2BackupStore`, `verifyBackupRoundtrip` |
 | Runs | at most 1 per UTC day (`SET nl:backup:ran:<day> NX`), so at most **31 a month**; a second call the same day costs 1 command and stops | `runBackup` |
-| Retention | Not in code: a lifecycle rule the owner sets on the bucket. `validReview` demands `(retentionDays + 1) × objectBound ≤ maxStoredBytes` | `validReview` |
+| Retention | Not in code: a lifecycle rule the owner sets on the bucket. `validReview` demands `(retentionDays + 2)` since #2219 (was `(retentionDays + 1)` × objectBound ≤ maxStoredBytes` | `validReview` |
 | Daily report reads | `backupStale()` 1 `GET` + `backupLastFailure()` 1 `GET` | `lib/backup-run.ts` |
 | Schedule and route | None yet; no `maxDuration` exists for the run | `vercel.json` unchanged |
 
@@ -145,7 +145,7 @@ None of this switches the backup on (docs/backup.md): `BACKUP_COST_REVIEW` is st
 - **Privacy:** a backup keeps a person's data after it is erased on the site. A shorter retention lets that copy go sooner, and the privacy text that must be published when the backup is switched on (docs/backup.md, prerequisite 7) can say "up to 30 days".
 - **Recovery:** 30 daily copies are enough to notice a mistake and go back to before it within a month. Upstash's own provider backup keeps 1 or 3 days (docs/backup.md, provider research), so this is the only longer history.
 - **Rule for the owner:** in the bucket `marktmorgen-backup`, an object lifecycle rule that deletes objects with prefix `backups/` **30 days** after they were created. The code has no delete (`lib/backup-store.ts`), so this rule is the only retention.
-- **Matching review figures:** `retentionDays` 30; `maxStoredBytes` = (30 + 1) × 4,259,840 = **132,055,040 bytes**, which `validReview` accepts, because (retentionDays + 1) × objectBound ≤ maxStoredBytes holds with equality.
+- **Matching review figures** (superseded by section 5b: (30 + 2) × the set's bound): `retentionDays` 30; `maxStoredBytes` = (30 + 1) × 4,259,840 = **132,055,040 bytes**, which `validReview` accepts, because (retentionDays + 1) × objectBound ≤ maxStoredBytes holds with equality.
 
 **Retention approved** (owner, MR; inbox C4-27, 4 November 2026): 30 days, `maxStoredBytes` 132,055,040.
 

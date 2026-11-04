@@ -277,6 +277,12 @@ Ele confirmou também os pontos que você já conhecia nas unidades 2 e 3 (o `??
 
 **Rede liberada:** às 00h49 o dono acrescentou ao seu ambiente os 11 domínios que você pediu (developers.facebook.com, developers.google.com, business-api.tiktok.com, ads.tiktok.com, knowledge.hubspot.com, developers.hubspot.com, schema.org, docs.bunny.net, w3.org, learn.microsoft.com, linkedin.com). Pode retomar o estudo do 632 [AA2] e o GL7(10) e o GL7(20) com as páginas oficiais; se algum ainda recusar, me diga qual.
 
+### C3-43 — 04/11/2026 01h20 — #1973: segure; dois achados do revisor (a minha C3-39 fica suspensa)
+O Revisor 2 achou dois problemas no #1973 (head e64cbdd) que a minha aprovação da C3-39 deixou passar. **Não incorpore o #1973 até corrigi-los:**
+1) **Médio (VR, item 2: frase falsa ao criador), components/review-ai-summaries.tsx:18:** a mensagem de falha diz "Nothing was counted", mas o motivo "failed" só sai de counted() depois do INCRBY, e lib/ai.ts:386-388 mantém a tentativa contada de propósito. Reproduzido: com o modelo respondendo 500, makeReviewSummary devolve {ok:false, reason:"failed"} e o contador do mês vai de 2 para 3. Correção: trocar o texto (por exemplo, "The summary could not be made just now. This try counts as one of this month's AI jobs.") e um teste que confira o contador no caso de falha.
+2) **Leve (a política promete mais do que o código faz), lib/review-ai-summary-rules.ts:39:** só tira link com http(s):// ou www.; um endereço sem prefixo ("more at janesmith.dev") vai à Anthropic, e a frase nova da política promete "any ... web address taken out". Correção: tirar também domínio sem prefixo (por exemplo `[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(/\S*)?`), com teste, mantendo a frase da política.
+Com as duas corrigidas e o CI verde, pode incorporar sem nova conferência minha. O revisor viu a mesma frase "Nothing was counted" no main em components/outreach-studio.tsx:43 e components/inbox-studio.tsx:28, e o mesmo padrão de link em lib/customer-voice.ts:101: confira se vêm do mesmo counted() e, se sim, registre um item na fila (docs/codex-queue.md) com os três lugares, sem corrigir neste PR.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

@@ -370,6 +370,30 @@ try {
   await page.waitForTimeout(200);
   is("a refused move of a deal now in another pipeline names it, and focus goes to the stage's heading", [await page.locator("#deal-board-alert").textContent(), await active()], ["This deal changed a moment ago and is now in Coaching, so it was not moved. Open Coaching to check it.", "deal-column-lead00"]);
 
+  // C3-118: a removal question left unanswered closes for good once its deal leaves the board (hidden by a search or a filter,
+  // the agenda shown, or the deal moved): it never comes back by itself on the card, and focus stays where the person put it.
+  await mount(world());
+  const question = async (id) => [await page.locator("#deal-confirm-" + id).count(), await attr("deal-remove-" + id, "aria-expanded"), await attr("deal-remove-" + id, "aria-controls")];
+  await press("deal-remove-dealaaaaa1");
+  is("Remove opens the question on the deal", await question("dealaaaaa1"), [1, "true", "deal-confirm-dealaaaaa1"]);
+  await page.locator("#deal-search").fill("Ben");
+  await page.waitForFunction(() => !document.getElementById("deal-remove-dealaaaaa1"));
+  await page.locator("#deal-search").fill("");
+  await page.waitForFunction(() => !!document.getElementById("deal-remove-dealaaaaa1"));
+  is("hidden by a search and shown again, the deal's question stays closed; focus stays in the search", [...await question("dealaaaaa1"), await active()], [0, "false", null, "deal-search"]);
+  await press("deal-remove-dealaaaaa1");
+  await page.locator("button", { hasText: "Agenda" }).click();
+  await page.locator("button", { hasText: "Board" }).click();
+  await page.waitForFunction(() => !!document.getElementById("deal-remove-dealaaaaa1"));
+  is("the agenda shown and the board again: the question stays closed", await question("dealaaaaa1"), [0, "false", null]);
+  await press("deal-remove-dealaaaaa1");
+  await page.locator("#deal-stage-dealaaaaa1").selectOption("talk00");
+  await press("deal-move-dealaaaaa1");
+  await page.waitForFunction(() => window.harness.world.deals.find((d) => d.id === "dealaaaaa1").stage === "talk00");
+  await settled();
+  await page.waitForFunction(() => document.activeElement?.id === "deal-stage-dealaaaaa1", null, { timeout: 5000 }).catch(() => {});
+  is("moved with the question open: the question is closed in its new stage, and focus is on its stage select", [...await question("dealaaaaa1"), await active(), await page.locator("section:has(#deal-column-talk00) #deal-stage-dealaaaaa1").count()], [0, "false", null, "deal-stage-dealaaaaa1", 1]);
+
   // 639 [GL7](7): a pipeline this person may only see says so once, at the top of the board.
   await mount(world({ viewOnly: ["sales0"] }));
   is("the view-only notice is shown once, at the top of the board, and no change control is drawn", [await page.evaluate(() => document.body.innerText.split("You can see this pipeline but not change it.").length - 1), await page.locator("#deal-board-view-only").count(), await page.locator('[id^="deal-remove-"], [id^="deal-edit-"], #deal-new').count()], [1, 1, 0]);

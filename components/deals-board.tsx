@@ -144,8 +144,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   // What is wrong in the open editor, tied to each control it is about (3.3.1, 3.3.3): those controls are
   // aria-invalid, point to the words beside the first one, and the first one gets focus.
   const [invalid, setInvalid] = useState<{ ids: string[]; message: string } | null>(null);
-  // The deal whose removal is waiting for "Remove deal" or "Keep deal" (3.3.6): nothing is removed before.
-  const [confirming, setConfirming] = useState<string | null>(null);
+  // The deal whose removal is waiting for "Remove deal" or "Keep deal" (3.3.6), and the stage it was in when asked: nothing is removed before.
+  const [confirming, setConfirming] = useState<{ id: string; stage: string } | null>(null);
   const clearMessages = () => { setError(null); setInvalid(null); setLost(null); setConfirming(null); };
   const openDraft = (deal: Deal, from: string) => { opener.current = from; const base = draftFromDeal(deal, currency); clearMessages(); setDraft({ ...base, base, version: versions[deal.id] ?? "", conflicts: [] }); };
   const dealNameInput = useRef<HTMLInputElement>(null);
@@ -203,6 +203,11 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const totals = boardTotals(stages, pipelineDeals);
   const visibleDeals = orderDeals(scopedDeals.filter(d => !visibleIds || visibleIds.has(d.id)), order);
   const columns = boardTotals(stages, visibleDeals);
+  // The question stays open only while its deal is on the board where it was asked: hidden by a search or a filter, the agenda
+  // shown, another pipeline chosen or the deal moved, it closes for good, so it never comes back by itself on the card (3.2.5).
+  // Cleared while rendering, never shown for a frame: focus is not inside it then (it is on the control that hid or moved the deal).
+  const confirmingId = confirming && view === "board" && visibleDeals.some(d => d.id === confirming.id && d.stage === confirming.stage) ? confirming.id : null;
+  if (confirming && !confirmingId) setConfirming(null);
   const selectionChanged = !!search || responsible !== "all" || filter !== "all" || order !== (view === "agenda" ? "due" : "current");
   const open = totals.filter((t) => t.stage.kind === "open");
   const won = totals.filter((t) => t.stage.kind === "won");
@@ -715,7 +720,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                           Edit
                         </button>
                         {/* Removing asks first (3.3.6): nothing is removed until "Remove deal" is pressed. */}
-                        <button type="button" id={`deal-remove-${deal.id}`} className="btn btn-secondary btn-sm" {...offProps(paused, WHY_ID)} aria-expanded={confirming === deal.id} aria-controls={confirming === deal.id ? `deal-confirm-${deal.id}` : undefined} onClick={() => { if (paused) return; setError(null); setConfirming(deal.id); moveFocus(`deal-confirm-${deal.id}`); }} aria-label={`Remove ${deal.title}`}>
+                        <button type="button" id={`deal-remove-${deal.id}`} className="btn btn-secondary btn-sm" {...offProps(paused, WHY_ID)} aria-expanded={confirmingId === deal.id} aria-controls={confirmingId === deal.id ? `deal-confirm-${deal.id}` : undefined} onClick={() => { if (paused) return; setError(null); setConfirming({ id: deal.id, stage: deal.stage }); moveFocus(`deal-confirm-${deal.id}`); }} aria-label={`Remove ${deal.title}`}>
                           <Icon name="minus" size={16} />
                         </button>
                           </>
@@ -729,7 +734,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                           </a>
                         ) : null}
                       </div>
-                      {confirming === deal.id && canChange ? (
+                      {confirmingId === deal.id && canChange ? (
                         <div id={`deal-confirm-${deal.id}`} role="group" tabIndex={-1} aria-labelledby={`deal-confirm-${deal.id}-title`} aria-describedby={`deal-confirm-${deal.id}-text`} className="mt-3 rounded-xl bg-sand p-3" onKeyDown={e => { if (e.key === "Escape" && !locked) keepDeal(deal.id); }}>
                           <p id={`deal-confirm-${deal.id}-title`} className="font-semibold text-ink [overflow-wrap:anywhere]">{`Remove “${deal.title}”?`}</p>
                           <p id={`deal-confirm-${deal.id}-text`} className="mt-1 text-ink-soft">This deletes the deal and its note. You cannot get it back.</p>

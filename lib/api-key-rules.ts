@@ -45,3 +45,27 @@ export const agentMay = (scope: AgentScope, need: "draft" | "execute"): boolean 
 
 /** A stored or sent value as a scope; anything else is "none". */
 export const agentScopeOf = (raw: unknown): AgentScope => (raw === "draft" || raw === "execute" ? raw : "none");
+
+/**
+ * A key as the studio's panel shows it, with what the team's two-step rule
+ * did to it (owner C3-100, 4 November 2026): whether it is paused, who made
+ * it in words, and whether the person looking may turn it back on.
+ */
+export type ShownKey = ApiKey & {
+  /** Paused by the team's two-step rule: every request with it is refused until it is turned back on. Never deleted. */
+  paused: boolean;
+  /** Who made it, in words: "you", "the owner", a teammate's address, or that it is not known. */
+  maker: string;
+  /** Whether the person looking may turn it back on (with a second step, in the route). */
+  mayTurnOn: boolean;
+};
+
+/** The words for a key whose maker was never recorded: every key made before 4 November 2026. */
+export const MAKER_UNRECORDED = "someone not recorded";
+/** The words for a key whose maker is no longer on the team. */
+export const MAKER_FORMER = "someone no longer on the team";
+
+/** One line of the review before the team's two-step switch is saved: whose keys, how many, and whether they will be emailed. */
+export type PauseLine = { who: string; count: number; emailed: boolean };
+/** The API keys that will pause when the team's two-step switch is turned on (lib/api-key-pause.ts pausePreview). */
+export type PausePreview = { total: number; people: PauseLine[] };

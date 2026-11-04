@@ -4,6 +4,10 @@ import { redirect } from "next/navigation";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { TeamManager } from "@/components/team-manager";
+import { type OwnerStep, TeamTwoStepSwitch } from "@/components/team-two-step-switch";
+import { pausePreview } from "@/lib/api-key-pause";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { MAX_TEAM, readLog, readTeam } from "@/lib/team";
 import { ROLE_NAMES } from "@/lib/team-roles";
@@ -31,7 +35,8 @@ export default async function StudioTeamPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const params = await searchParams;
-  const found = await studioView(await cookies(), typeof params.store === "string" ? params.store : undefined, "team");
+  const cookieStore = await cookies();
+  const found = await studioView(cookieStore, typeof params.store === "string" ? params.store : undefined, "team");
   if (!found.ok) {
     if (found.reason === "signed_out") redirect("/signin");
     redirect(found.store ? studioPath(found.store, "team=forbidden") : "/studio");
@@ -39,6 +44,22 @@ export default async function StudioTeamPage({
   const { view } = found;
   const { store } = view;
   const [team, log] = await Promise.all([readTeam(store.sid), readLog(store.sid)]);
+  // The two-step switch (612 [WP11], owner C3-100) is the owner's alone: how
+  // their own session stands, who on the team has no second step yet, and
+  // which API keys would pause, for the review before it is saved.
+  const owner = view.role === "owner";
+  const [ownerStep, ready, preview] = owner
+    ? await Promise.all([
+        (async (): Promise<OwnerStep> =>
+          (await liveSecondStep(view.email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) !== null
+            ? "live"
+            : (await hasSecondStep(view.email).catch(() => true))
+              ? "other_session"
+              : "none")(),
+        Promise.all(team.members.map((m) => hasSecondStep(m.email).catch(() => false))),
+        pausePreview(store).catch(() => null),
+      ])
+    : (["other_session", [], null] as const);
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -65,6 +86,26 @@ export default async function StudioTeamPage({
               max={MAX_TEAM}
             />
           </div>
+
+          {owner ? (
+            <section className="card mt-8 p-6 sm:p-8" aria-labelledby="two-step-title">
+              <h2 id="two-step-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                Two-step login for the team
+              </h2>
+              <div className="mt-3">
+                {preview ? (
+                  <TeamTwoStepSwitch
+                    on={team.requireTwoStep === true}
+                    ownerStep={ownerStep}
+                    waiting={team.members.filter((_, i) => ready[i] !== true).map((m) => m.email)}
+                    preview={preview}
+                  />
+                ) : (
+                  <p className="text-sm text-ink-soft">This cannot be changed right now. Reload the page in a moment.</p>
+                )}
+              </div>
+            </section>
+          ) : null}
 
           <section className="card mt-8 p-6 sm:p-8" aria-labelledby="log-title">
             <h2 id="log-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">

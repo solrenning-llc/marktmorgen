@@ -33,7 +33,17 @@
  * Kept, all under the store's own id:
  *
  *   nl:api:k:<sha256>        { sid, id } — the lookup a request makes
- *   nl:api:keys:<sid>        the store's keys, by id: name, made, last used
+ *   nl:api:keys:<sid>        the store's keys, by id: name, made, last used,
+ *                            and who made it in which kind of session
+ *   nl:api:hold:<sid>        by key id: "paused" or "vouched" (lib/api-key-pause.ts)
+ *
+ * Who made a key (owner C3-100, 4 November 2026) is written once, when it is
+ * made: whether by the store's owner, a one-way fingerprint of the teammate's
+ * sign-in address otherwise, and whether that session was opened with a
+ * second step. A key made before then has none of it. Whether a key is paused
+ * is kept apart from its record, in the store's hold, because the record is
+ * written again each time the key is used ("last used"): a pause written into
+ * it could be undone by a request that read the record a moment before.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -46,9 +56,33 @@ const SID_PATTERN = /^[0-9a-f]{32}$/;
 
 const lookupKey = (hash: string) => `nl:api:k:${hash}`;
 const listKey = (sid: string) => `nl:api:keys:${sid}`;
+const holdKey = (sid: string) => `nl:api:hold:${sid}`;
 const hashOf = (key: string) => createHash("sha256").update(key).digest("hex");
 
-type Stored = ApiKey & { hash: string };
+/**
+ * Who made a key, written once when it is made (owner C3-100): `owner`, made
+ * by the store's owner; `by`, otherwise, a one-way fingerprint of the
+ * teammate's sign-in address (lib/api-key-pause.ts makerPrint); `step`,
+ * whether that session was opened with a second step (lib/second-step-gate.ts
+ * liveSecondStep). Absent on every key made before 4 November 2026.
+ */
+export type KeyMaker = { owner: boolean; by: string; step: boolean };
+
+/** A key's record with who made it and its hold, never the key or its fingerprint. */
+export type KeyRecord = ApiKey & { maker: KeyMaker | null; hold: "paused" | "vouched" | null };
+
+type Stored = ApiKey & { hash: string; maker?: KeyMaker };
+
+const PRINT_PATTERN = /^[0-9a-f]{40}$/;
+
+function makerOf(raw: unknown): KeyMaker | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const v = raw as Partial<KeyMaker>;
+  const owner = v.owner === true;
+  const by = typeof v.by === "string" && PRINT_PATTERN.test(v.by) ? v.by : "";
+  if (!owner && !by) return undefined;
+  return { owner, by, step: v.step === true };
+}
 
 function parseStored(raw: unknown): Stored | null {
   if (typeof raw !== "string") return null;
@@ -65,6 +99,7 @@ function parseStored(raw: unknown): Stored | null {
       usedAt: typeof v.usedAt === "number" ? v.usedAt : 0,
       write: v.write === true,
       agent: agentScopeOf(v.agent),
+      ...(makerOf(v.maker) ? { maker: makerOf(v.maker) } : {}),
     };
   } catch {
     return null;
@@ -94,7 +129,8 @@ export type MakeResult = { ok: true; key: string; made: ApiKey } | { ok: false; 
  * (631 [AA1] (c)) says what an AI agent holding it may prepare for the
  * creator to confirm; left out, nothing.
  */
-export async function makeKey(sid: string, rawName: unknown, now = Date.now(), write = false, agentRaw: AgentScope = "none"): Promise<MakeResult> {
+export async function makeKey(sid: string, rawName: unknown, now = Date.now(), write = false, agentRaw: AgentScope = "none", makerRaw?: KeyMaker): Promise<MakeResult> {
+  const maker = makerOf(makerRaw);
   const agent = agentScopeOf(agentRaw);
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
   const name = clean(rawName);
@@ -105,7 +141,7 @@ export async function makeKey(sid: string, rawName: unknown, now = Date.now(), w
   const key = `${KEY_PREFIX}${randomBytes(20).toString("hex")}`;
   const id = randomBytes(6).toString("hex");
   const hash = hashOf(key);
-  const stored: Stored = { id, hash, name, hint: key.slice(KEY_PREFIX.length, KEY_PREFIX.length + 6), madeAt: Math.floor(now / 1000), usedAt: 0, write, agent };
+  const stored: Stored = { id, hash, name, hint: key.slice(KEY_PREFIX.length, KEY_PREFIX.length + 6), madeAt: Math.floor(now / 1000), usedAt: 0, write, agent, ...(maker ? { maker } : {}) };
   const [, , after] = await redisPipeline([
     ["SET", lookupKey(hash), JSON.stringify({ sid, id })],
     ["HSET", listKey(sid), id, JSON.stringify(stored)],
@@ -129,9 +165,47 @@ export async function revokeKey(sid: string, id: string): Promise<boolean> {
   if (!stored) return false;
   // The lookup first: from this moment the key opens nothing, whatever
   // happens to the second write.
-  await redisPipeline([["DEL", lookupKey(stored.hash)], ["HDEL", listKey(sid), id]]);
+  await redisPipeline([["DEL", lookupKey(stored.hash)], ["HDEL", listKey(sid), id], ["HDEL", holdKey(sid), id]]);
   return true;
 }
+
+/** Every key of a store with who made it and its hold, oldest first, for lib/api-key-pause.ts. */
+export async function keyRecords(sid: string): Promise<KeyRecord[]> {
+  if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
+  const [raw, holds] = await redisPipeline([["HGETALL", listKey(sid)], ["HGETALL", holdKey(sid)]]);
+  const held = new Map<string, string>();
+  const flatHolds = flatOf(holds);
+  for (let i = 0; i + 1 < flatHolds.length; i += 2) held.set(String(flatHolds[i]), String(flatHolds[i + 1]));
+  const flat = flatOf(raw);
+  const out: KeyRecord[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    const s = parseStored(flat[i + 1]);
+    if (!s) continue;
+    const hold = held.get(s.id);
+    out.push({ id: s.id, name: s.name, hint: s.hint, madeAt: s.madeAt, usedAt: s.usedAt, write: s.write, agent: s.agent, maker: s.maker ?? null, hold: hold === "paused" || hold === "vouched" ? hold : null });
+  }
+  return out.sort((a, b) => a.madeAt - b.madeAt);
+}
+
+/**
+ * Pauses keys, or marks them vouched for (turned back on by their maker in a
+ * session with a second step, so no later switch pauses them again). Only
+ * ids that are still the store's keys are written, so a key revoked before
+ * leaves nothing behind (one revoked in the very same instant may leave a
+ * mark of a few bytes, which opens nothing and goes with the store).
+ */
+export async function holdKeys(sid: string, ids: string[], state: "paused" | "vouched"): Promise<string[]> {
+  if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
+  const wanted = ids.filter((id) => ID_PATTERN.test(id));
+  if (!wanted.length) return [];
+  const present = await redisPipeline(wanted.map((id) => ["HEXISTS", listKey(sid), id]));
+  const kept = wanted.filter((_, i) => Number(present[i]) === 1);
+  if (kept.length) await redisPipeline([["HSET", holdKey(sid), ...kept.flatMap((id) => [id, state])]]);
+  return kept;
+}
+
+const flatOf = (raw: unknown): unknown[] =>
+  Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.entries(raw as Record<string, unknown>).flat() : [];
 
 /**
  * Takes every key of a store away, for a store that is deleted (added
@@ -147,7 +221,7 @@ export async function revokeAllKeys(sid: string): Promise<number> {
     if (stored) hashes.push(stored.hash);
   }
   if (hashes.length) await redisPipeline(hashes.map((hash) => ["DEL", lookupKey(hash)]));
-  await redisPipeline([["DEL", listKey(sid)]]);
+  await redisPipeline([["DEL", listKey(sid)], ["DEL", holdKey(sid)]]);
   return hashes.length;
 }
 
@@ -160,7 +234,7 @@ const TOUCH_SECONDS = 60;
  * Checked against both records, so a key whose lookup survived a revocation
  * that was cut short still opens nothing.
  */
-export async function resolveKey(presented: string, now = Date.now()): Promise<{ sid: string; id: string; write: boolean; agent: AgentScope } | null> {
+export async function resolveKey(presented: string, now = Date.now()): Promise<{ sid: string; id: string; write: boolean; agent: AgentScope; paused: boolean } | null> {
   if (!KEY_PATTERN.test(presented) || !isRedisConfigured()) return null;
   const hash = hashOf(presented);
   const [raw] = await redisPipeline([["GET", lookupKey(hash)]]);
@@ -174,15 +248,17 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   const sid = typeof found.sid === "string" && SID_PATTERN.test(found.sid) ? found.sid : "";
   const id = typeof found.id === "string" && ID_PATTERN.test(found.id) ? found.id : "";
   if (!sid || !id) return null;
-  const [listed] = await redisPipeline([["HGET", listKey(sid), id]]);
+  const [listed, hold] = await redisPipeline([["HGET", listKey(sid), id], ["HGET", holdKey(sid), id]]);
   const stored = parseStored(listed);
   if (!stored || stored.hash !== hash) return null;
+  // Paused by the team's two-step rule (lib/api-key-pause.ts): known, and refused, and not counted as used.
+  if (hold === "paused") return { sid, id, write: stored.write, agent: stored.agent, paused: true };
 
   const seconds = Math.floor(now / 1000);
   if (seconds - stored.usedAt >= TOUCH_SECONDS) {
     await redisPipeline([["HSET", listKey(sid), id, JSON.stringify({ ...stored, usedAt: seconds })]]).catch(() => {});
   }
-  return { sid, id, write: stored.write, agent: stored.agent };
+  return { sid, id, write: stored.write, agent: stored.agent, paused: false };
 }
 
 /** Reads the key from an Authorization header: "Bearer nl_live_…". */

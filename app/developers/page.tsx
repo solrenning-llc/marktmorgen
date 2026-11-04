@@ -143,10 +143,17 @@ export default function DevelopersPage() {
 400  {"error": "fields", "message": "“bad-name” cannot be a field name. Use letters, digits and underscores, at most 30 fields."}
 429  {"error": "no_place", "message": "Stores without a paid plan are full for this month, so this can't run right now. …"}
 409  {"error": "store_full", "message": "Your store's data room is full, so nothing was added. …"}
+403  {"error": "key_paused", "message": "This key is paused: the store's team now logs in with a second step, and the key was made without one. …"}
 409  {"error": "paused_unpaid", "message": "Nothing was read: your plan's renewal payment did not go through, …"}
 409  {"error": "paused_unpaid", "message": "Nothing was changed: your plan's renewal payment did not go through, …"}
 502  {"error": "unavailable", "message": "… could not be read just now. Try again in a moment."}`}</Code>
         <p>A missing, mistyped and revoked key all get the same 401.</p>
+        <p>
+          A key made by a team member who logged in without a second step is paused when the store&apos;s owner starts
+          asking the team for one. Every request with it is answered 403 <code className="font-mono">key_paused</code>{" "}
+          until whoever made it logs in with a passkey or an authenticator app&apos;s code and turns it back on under API
+          keys in the studio. A paused key is never deleted.
+        </p>
         <p>
           {"While the store's plan renewal is unpaid, reads answer 409 "}
           <code className="font-mono">paused_unpaid</code>

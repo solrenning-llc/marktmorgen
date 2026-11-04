@@ -112,7 +112,7 @@ import { TaxEditor } from "@/components/tax-editor";
 import { StoreLanguageEditor } from "@/components/store-language-editor";
 import { RecoveryEditor } from "@/components/recovery-editor";
 import { ApiKeyEditor } from "@/components/api-key-editor";
-import { listKeys } from "@/lib/api-keys";
+import { shownKeys } from "@/lib/api-key-pause";
 import { INVITE_SHARE_PERCENT, INVITE_PROGRAM_OPEN } from "@/lib/creator-invite-rules";
 import { SaveOfferEditor } from "@/components/save-offer-editor";
 import { PauseEditor } from "@/components/pause-editor";
@@ -1041,7 +1041,7 @@ export default async function StudioPage({
   // first time there is a call to put in it, and the busy times are read (from
   // the ten-minute copy, usually) to point out a dated session that clashes.
   if (current && callProducts.length > 0 && may("settings")) await ensureFeedToken(current).catch(() => {});
-  const apiKeys = current && may("export") ? await listKeys(current.sid).catch(() => []) : null;
+  const apiKeys = current && may("export") ? await shownKeys(current, email, role).catch(() => []) : null;
   const [calendar, calendarBusyTimes, hooks] = current
     ? await Promise.all([
         callProducts.length > 0 && may("settings") ? calendarView(current).catch(() => null) : Promise.resolve(null),

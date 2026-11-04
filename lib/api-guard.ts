@@ -132,6 +132,11 @@ async function apiKeyed(
   // Missing, malformed, unknown and revoked all get the same answer, so the
   // API cannot be used to learn which keys ever existed.
   if (!found) return unauthorized();
+  // Paused by the team's two-step rule (owner C3-100, lib/api-key-pause.ts):
+  // the key is real and kept, so its holder is told why and what to do.
+  if (found.paused) {
+    return apiError(403, "key_paused", "This key is paused: the store's team now logs in with a second step, and the key was made without one. Whoever made it can turn it back on under API keys in the studio, after logging in with a passkey or an authenticator app's code.");
+  }
   if (!(await withinLimit("api", found.id, API_RATE, 60))) {
     return apiError(429, "rate_limited", `At most ${API_RATE} requests a minute per key. Try again in a minute.`, { "Retry-After": "60" });
   }

@@ -281,6 +281,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ask:missed:@lib/answers.ts": { what: "Questions a page did not answer, for the creator", parts: [capped(100 * KB, "The newest MISSED_KEPT, trimmed on every write.", src("lib/answers.ts", "MISSED_KEPT", "LTRIM"))] },
   "nl:api:k:@lib/api-keys.ts": { what: "The lookup an API request makes", parts: [capped(20 * KEY, "A key's lookup for each of the store's keys (MAX_KEYS).", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
   "nl:api:keys:@lib/api-keys.ts": { what: "The store's API keys", parts: [capped(20 * KB, "MAX_KEYS records.", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
+  "nl:api:hold:@lib/api-keys.ts": { what: "Which of the store's API keys the team's two-step rule paused, or their makers turned back on (owner C3-100)", parts: [capped(1 * KB, "One short mark for each of MAX_KEYS keys; a revoked key's mark goes with it.", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
   "nl:course:@lib/assignment.ts": { what: "A course's assignments, the work handed in and what came back", room: ["lib/assignment.ts"], parts: [per("studio", 1, KEY, "The creator told of new work, an hour.")] },
   "nl:tasks:bytes:@lib/assignment.ts": { what: "What a store's students keep handed in, in bytes", parts: [capped(KEY, "One count a store.")] },
   "nl:tasks:doors@lib/assignment.ts": company("Hand-in doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's (priced in buyer-actions), gone within two days."),

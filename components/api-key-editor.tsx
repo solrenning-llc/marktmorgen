@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
-import { type ApiKey, MAX_KEY_NAME, MAX_KEYS } from "@/lib/api-key-rules";
+import { MAKER_UNRECORDED, MAX_KEY_NAME, MAX_KEYS, type ShownKey } from "@/lib/api-key-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -16,6 +16,13 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   role: "Only the store's owner and Admins can make a key that writes.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
+  second_step:
+    "You logged in this time with the emailed link alone, and your account has a passkey or an authenticator app. Log in again with your passkey, or with the emailed link and your app's code, then make the key. Nothing was made.",
+  second_step_on:
+    "To turn a key back on, log in with a second step: your passkey, or the emailed link and your authenticator app's code. No second step yet? Add a passkey or turn on an app under Two-step login, then log in again with it.",
+  not_yours: "Only whoever made this key can turn it back on. You can revoke it instead.",
+  two_step_required: "This store's owner asks everyone on the team to log in with a second step. Log in again with your passkey, or with the emailed link and your app's code, then try again.",
+  not_paused: "That key is already on. Reload the page.",
 };
 
 /** When, in the creator's own time zone: this runs in their browser. */
@@ -31,11 +38,11 @@ function when(seconds: number): string {
  * a fingerprint of it, so there is nothing here to show a second time and
  * nothing in the database for anybody to lift.
  */
-export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
-  const [keys, setKeys] = useState<ApiKey[]>(first);
+export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
+  const [keys, setKeys] = useState<ShownKey[]>(first);
   const [name, setName] = useState("");
   const [write, setWrite] = useState(false);
-  const [made, setMade] = useState<{ key: string; name: string } | null>(null);
+  const [made, setMade] = useState<{ key: string; name: string; paused: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +59,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; key?: string; keys?: ApiKey[] };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; key?: string; paused?: boolean; keys?: ShownKey[] };
       if (!data.ok) {
         setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
         return null;
@@ -71,7 +78,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
     event.preventDefault();
     const data = await send({ action: "make", name, write }, "make");
     if (data?.key) {
-      setMade({ key: data.key, name: name.trim() });
+      setMade({ key: data.key, name: name.trim(), paused: data.paused === true });
       setName("");
       setWrite(false);
       setCopied(false);
@@ -84,6 +91,12 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
       setRevoking(null);
       toast("Key revoked. Anything still using it is refused from now on.");
     }
+  }
+
+  // A key the team's two-step rule paused (owner C3-100), turned back on by whoever made it.
+  async function turnOn(id: string) {
+    const data = await send({ action: "turn_on", id }, `on:${id}`);
+    if (data) toast("Key turned back on. Anything using it works again.");
   }
 
   async function copy() {
@@ -123,6 +136,11 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
             Shown this once. Keep it where only your tool can read it, and never in a web page: anybody who opens the page
             could copy it.
           </p>
+          {made.paused ? (
+            <p className="mt-1 text-sm font-semibold text-ink">
+              It is paused: the team now logs in with a second step. Log in again with yours, then press Turn back on below.
+            </p>
+          ) : null}
           <div className="mt-3 flex flex-col gap-2 sm:flex-row">
             <label htmlFor="api-key" className="sr-only">API key</label>
             <input id="api-key" readOnly value={made.key} onFocus={(e) => e.currentTarget.select()} className="field min-w-0 flex-1 font-mono text-sm" />
@@ -146,8 +164,18 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
                   <span className="block font-semibold text-ink">{key.name}</span>
                   <span className="mt-1 block text-sm text-ink-soft">
                     <span className="font-mono">{`nl_live_${key.hint}…`}</span>
-                    {` · ${key.write ? "Reads and writes" : "Reads only"} · Made ${when(key.madeAt)} · ${key.usedAt ? `Last used ${when(key.usedAt)}` : "Never used"}`}
+                    {` · ${key.write ? "Reads and writes" : "Reads only"} · ${key.maker === MAKER_UNRECORDED ? `Made ${when(key.madeAt)} (who made it was not recorded)` : `Made by ${key.maker} on ${when(key.madeAt)}`} · ${key.usedAt ? `Last used ${when(key.usedAt)}` : "Never used"}`}
                   </span>
+                  {key.paused ? (
+                    <span className="mt-1 block text-sm">
+                      <span className="font-semibold text-ink">Paused.</span>{" "}
+                      <span className="text-ink-soft">
+                        {key.mayTurnOn
+                          ? "The team now logs in with a second step, and this key was made without one. Anything using it is refused until you turn it back on."
+                          : "The team now logs in with a second step, and this key was made without one. Anything using it is refused until whoever made it turns it back on."}
+                      </span>
+                    </span>
+                  ) : null}
                 </span>
                 {revoking === key.id ? (
                   <span className="flex flex-wrap items-center gap-2 text-sm">
@@ -158,9 +186,16 @@ export function ApiKeyEditor({ keys: first }: { keys: ApiKey[] }) {
                     <button type="button" onClick={() => setRevoking(null)} className="btn btn-ghost btn-sm">Keep it</button>
                   </span>
                 ) : (
-                  <button type="button" onClick={() => setRevoking(key.id)} disabled={busy !== null} className="btn btn-secondary btn-sm">
-                    Revoke
-                  </button>
+                  <span className="flex flex-wrap items-center gap-2">
+                    {key.mayTurnOn ? (
+                      <button type="button" onClick={() => turnOn(key.id)} disabled={busy !== null} aria-busy={busy === `on:${key.id}`} className="btn btn-primary btn-sm">
+                        {busy === `on:${key.id}` ? "Turning on…" : "Turn back on"}
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={() => setRevoking(key.id)} disabled={busy !== null} className="btn btn-secondary btn-sm">
+                      Revoke
+                    </button>
+                  </span>
                 )}
               </div>
             </li>

@@ -38,7 +38,7 @@ export function homeQuestions(): HomeQuestion[] {
     {
       q: "How long does it take to open a store?",
       a: "There is no set time. You pick your store address, add what you sell and connect your own Stripe account.",
-      links: [{ label: "See the live demo store", href: "/demo" }],
+      links: [{ label: "The longer answer, on the pricing page", href: "/pricing" }],
     },
     {
       q: "How much does it cost?",

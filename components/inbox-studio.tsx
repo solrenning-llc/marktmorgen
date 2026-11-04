@@ -1,7 +1,9 @@
 "use client";
 
+import { useHydrated } from "@/components/use-hydrated";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/toast";
+import { FaqFromInbox } from "@/components/faq-from-inbox";
 import {
   type Conversation,
   type InboxSetting,
@@ -42,6 +44,20 @@ async function post(body: Record<string, unknown>): Promise<Record<string, unkno
 
 const fail = (error: unknown) => toast(REASONS[String(error)] ?? "That did not work. Check your connection and try again.");
 
+/** Times the list is asked again by itself for one opening of the page, one a minute while the tab is in view. */
+export const INBOX_AUTO_CHECKS = 30;
+
+/** What the inbox says once it stops asking by itself. */
+export const INBOX_PAUSED_WORDS = "Automatic checks paused after 30 minutes. Press Check for new messages or reload the page.";
+
+/** What the inbox says when a check did not answer; the last time stays. */
+export const CHECK_FAILED_WORDS = "We could not check for new messages just now. Try again in a moment.";
+
+/** "Checked for new messages at 6:03 PM.", in the creator's own clock. */
+export function checkedWords(at: number): string {
+  return `Checked for new messages at ${new Date(at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.`;
+}
+
 /**
  * The studio's inbox (lib/inbox.ts): the conversations on the left, the one
  * chosen on the right with its answer box, saved replies, the person it is
@@ -56,6 +72,8 @@ export function InboxStudio({
   ai,
   canSettings,
   chatBlock,
+  readAt,
+  faq = null,
 }: {
   me: string;
   initial: Conversation[];
@@ -64,8 +82,12 @@ export function InboxStudio({
   setting: InboxSetting;
   ai: { on: boolean; left: number };
   canSettings: boolean;
+  /** For whoever may edit the store page: how many more questions it can show, and the studio home where they are edited (630 [HN6](32)). */
+  faq?: { room: number; href: string } | null;
   /** Why the chat cannot be turned on: "demo" for the demo store, "setup" for a store not ready yet, "" when it can. */
   chatBlock: "" | "demo" | "setup";
+  /** When the server read the conversations on the page, in milliseconds: the first "checked at" said. */
+  readAt: number;
 }) {
   const [list, setList] = useState(initial);
   const [thread, setThread] = useState<Thread | null>(first);
@@ -75,20 +97,44 @@ export function InboxStudio({
   const [left, setLeft] = useState(ai.left);
   const [setting, setSetting] = useState(givenSetting);
 
-  const refresh = useCallback(async () => {
+  // When the list was last read (484 [IT1], item 5): the page's own reading first, then each check that answered.
+  // The list on the page was read by the server at readAt: that is the first check said, once the browser has drawn it.
+  const [checkedAt, setCheckedAt] = useState<number>(readAt);
+  // Read out only when it says something new to someone who asked, or what stopped: never every minute.
+  const [said, setSaid] = useState("");
+  const hydrated = useHydrated();
+  const [checkFailed, setCheckFailed] = useState(false);
+  const [paused, setPaused] = useState(false);
+
+  const refresh = useCallback(async (asked: boolean) => {
     const answer = await post({ action: "list" });
-    if (answer.ok && Array.isArray(answer.conversations)) setList(answer.conversations as Conversation[]);
+    if (answer.ok && Array.isArray(answer.conversations)) {
+      const at = Date.now();
+      setList(answer.conversations as Conversation[]);
+      setCheckedAt(at);
+      setCheckFailed(false);
+      if (asked) setSaid(checkedWords(at));
+    } else {
+      setCheckFailed(true);
+      setSaid(CHECK_FAILED_WORDS);
+    }
   }, []);
 
   // New messages while the inbox is open: the list is asked again every minute, while the tab is in view,
   // thirty times at the most for one opening of the page: each is one of the store's studio requests.
+  // When it stops, the page says so, so nobody waits for messages that are no longer being looked for.
   useEffect(() => {
     let asked = 0;
     const timer = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      if (asked >= 30) return window.clearInterval(timer);
       asked += 1;
-      void refresh();
+      void refresh(false);
+      // Paused, and said, right after the last one: never a minute late.
+      if (asked >= INBOX_AUTO_CHECKS) {
+        window.clearInterval(timer);
+        setPaused(true);
+        setSaid(INBOX_PAUSED_WORDS);
+      }
     }, 60_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
@@ -221,9 +267,16 @@ export function InboxStudio({
               {filter === "open" ? "Nothing waiting. Messages from your chat and your contact form land here." : "Nothing here."}
             </p>
           )}
-          <button type="button" className="btn btn-ghost btn-sm mt-3 ring-1 ring-line" onClick={() => void refresh()}>
+          <button type="button" className="btn btn-ghost btn-sm mt-3 ring-1 ring-line" onClick={() => void refresh(true)}>
             Check for new messages
           </button>
+          {/* When the list was last read, and when automatic checks stopped: always there to read, never announced each minute. */}
+          <p className="mt-2 px-1 text-sm text-ink-soft" data-inbox-checked="">
+            {!hydrated ? "" : checkFailed ? CHECK_FAILED_WORDS : checkedWords(checkedAt)}
+            {paused ? ` ${INBOX_PAUSED_WORDS}` : ""}
+          </p>
+          {/* Read out politely, never taking the focus (3.2.5): a check someone asked for, a failure, the pause. */}
+          <p className="sr-only" role="status" aria-live="polite">{said}</p>
         </section>
 
         <section aria-label="The conversation" className="card p-5" data-inbox-thread>
@@ -311,6 +364,7 @@ export function InboxStudio({
                   answers and this conversation; their address, phone numbers and links are taken out before it is written.
                 </p>
               </form>
+              {faq ? <FaqFromInbox key={`${c.id}-${thread.messages.length}`} messages={thread.messages} name={c.name} room={faq.room} studioHref={faq.href} /> : null}
             </>
           ) : (
             <p className="text-ink-soft">Choose a conversation to read and answer it.</p>

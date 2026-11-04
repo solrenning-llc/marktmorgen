@@ -126,7 +126,7 @@ export async function runJourney(is: Check, sent: Sent[], counted: { commands: n
   const left = [...after].filter(([key, value]) => marks(statsId, tess).some((m) => key.includes(m) || value.includes(m)));
   is("no key or value names them, by address or by any key made from it, but the CRM's mark that they were deleted", left.map(([key]) => key).filter((key) => !CRM_ERASED.test(key)), []);
   const crmMarks = left.filter(([key]) => CRM_ERASED.test(key));
-  is("that mark holds nothing but that it happened, never the address", [crmMarks.length, crmMarks.every(([, value]) => value === JSON.stringify("1"))], [1, true]);
+  is("that mark holds nothing but when it happened, never the address", [crmMarks.length, crmMarks.every(([, value]) => /^"\d{13}"$/.test(value))], [1, true]);
   is("and goes by itself within ERASED_MARK_SECONDS", await Promise.all(crmMarks.map(async ([key]) => { const [ttl] = await redisPipeline([["TTL", key]]); return typeof ttl === "number" && ttl > 0 && ttl <= ERASED_MARK_SECONDS; })), [true]);
   const suppressionOnly = [...after].filter(([key]) => /^nl:erased:/.test(key));
   is("only a fingerprint is kept, under the store's list", suppressionOnly.map(([key, value]) => [key, (JSON.parse(value) as string[]).length]), [[`nl:erased:${listId}`, 1]]);

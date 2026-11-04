@@ -77,6 +77,11 @@ const STATUS_WORDS: Record<ProfileMembership["status"], string> = {
  * sale in the studio (?sale=<Stripe reference>), or from the search on this
  * page (?p=<token>); with neither, the search and the latest buyers.
  */
+/** Now, in milliseconds: when the page read the person. */
+function readNow(): number {
+  return Date.now();
+}
+
 export default async function StudioPeoplePage({ searchParams }: Params) {
   const query = await searchParams;
   const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "orders");
@@ -110,6 +115,9 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
     });
   }
   const asked = Boolean(token || sale || who);
+  // When this page reads the person (ms), before it reads them: a field saved from it is refused if they are deleted
+  // after (lib/crm.ts, setValue).
+  const readAt = readNow();
   const profile = email ? await buyerProfile(store, email) : null;
   // The store's own fields about each person (lib/crm-rules.ts), and this one's answers.
   const fields = profile ? await readFields(store.statsId) : [];
@@ -136,7 +144,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
           <p className="eyebrow">Buyers</p>
           {profile ? (
-            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} />
+            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} readAt={readAt} />
           ) : (
             <>
               {erased ? (
@@ -279,7 +287,7 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken, tasks, assignees }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null }) {
+function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, readAt }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null; readAt: number }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
@@ -457,7 +465,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
             {fields.length ? "Change the fields" : "Make your first field"}
           </Link>
         </p>
-        {profile.person && fields.length ? <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} /> : null}
+        {profile.person && fields.length ? <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} preparedAt={readAt} /> : null}
       </section>
 
       <section aria-labelledby="tasks-title" className="card mt-8 p-6 sm:p-8">

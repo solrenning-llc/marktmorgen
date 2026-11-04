@@ -11,8 +11,8 @@
  *   nl:crm:deals:<statsId>           hash  deal id -> deal (JSON)
  *   nl:crm:tasks:<statsId>           hash  person -> their tasks (JSON, lib/person-tasks.ts), gone with the person;
  *                                    and TASK_COUNT_FIELD -> how many tasks the store keeps in all
- *   nl:crm:tasklock:<statsId>        one change of the store's tasks, or of a person's value, at a time (lib/redis-lock.ts),
- *                                    ten seconds at the most
+ *   nl:crm:tasklock:<statsId>        one change of the store's tasks at a time (lib/redis-lock.ts), ten seconds at the most
+ *   nl:crm:erased:<statsId>:<person> when a person was deleted (ms), ERASED_MARK_SECONDS: a value prepared before is refused
  *   nl:crm:taskrecount:<statsId>     one paid recount of the store's tasks at a time (lib/redis-lock.ts), thirty seconds at the most
  *
  * A value is kept under the person's key, never the address (as a note
@@ -24,7 +24,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
-import { type Held, LockBusyError, holdLock, lockTriesWithin, withLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
   type CrmField,
@@ -91,9 +91,6 @@ const TASKS_SLOT = "crm:tasks";
  * changes it and writes it back whole, so two at once (two quick clicks, two
  * teammates) would each write what they read and one change would be lost.
  * The whole store, not one person, so the store's cap is counted exactly too.
- * Setting a person's value takes it as well (setValue), and so does deleting
- * a person (forgetCrmPerson): a value set while its person is deleted is
- * always set first and deleted after, never left behind.
  */
 const tasksLockKey = (statsId: string) => `nl:crm:tasklock:${statsId}`;
 const TASKS_LOCK_SECONDS = 10;
@@ -154,25 +151,32 @@ export const TASKS_RECOUNT_BYTES = MAX_STORE_TASKS * (TASK_KEPT_BYTES + TASK_PER
 const PERSON = /^[0-9a-f]{32}$/;
 /**
  * A person deleted from the store (forgetCrmPerson): one key under their
- * person key (lib/person-key.ts, a one-way hash, never the address), so a
- * value set late is refused in the same step as its write (SET_CRM_VALUE).
+ * person key (lib/person-key.ts, a one-way hash, never the address), holding
+ * only the time of the deletion in milliseconds. A value set by a request
+ * prepared before that time (a page opened, a workflow step taken) is refused
+ * in the same step as its write (SET_CRM_VALUE); one prepared after it, for
+ * someone who came back, is written and takes the mark away.
  */
 const erasedKey = (statsId: string, person: string) => `nl:crm:erased:${statsId}:${person}`;
 /**
- * How long that mark is kept: at least the longest a value about the person
- * can still arrive after their deletion, which is the longest of
+ * How long that mark is kept: at least the longest a request prepared before
+ * the deletion can still arrive, which is the longest of
  *   - a studio page opened before the deletion (the person's page carries
- *     their key) and saved while its session lasts: SESSION_TTL_SECONDS,
- *     30 days (lib/auth.ts);
+ *     their key and the time it was drawn) and saved while its session
+ *     lasts: SESSION_TTL_SECONDS, 30 days (lib/auth.ts);
  *   - a workflow step already taken when the deletion removed the person's
  *     queued and waiting steps (lib/flows.ts, forgetWorkflowPerson): its
- *     lease, LEASE_SECONDS, 15 minutes; it is never tried again after;
- *   - a change waiting for the people lock, then holding it:
- *     TASKS_LOCK_WAIT_MS and TASKS_LOCK_SECONDS, twelve seconds.
+ *     lease, LEASE_SECONDS, 15 minutes; it is never tried again after.
  * Thirty days, and one more: 31 days (tests/crm-person-room.test.ts holds it
- * above each). A value set after that is a new one, as for anyone.
+ * above each).
  */
 export const ERASED_MARK_SECONDS = 31 * 86_400;
+/**
+ * Clocks differ between the servers that draw a page and that delete a
+ * person: a request prepared less than this after a deletion is taken as
+ * prepared before it (refused, never written).
+ */
+export const ERASED_CLOCK_MS = 5_000;
 /** Where people's field values are counted in the store's data room (lib/store-data.ts). */
 const VALUES_SLOT = "crm:v";
 /** Where the pipelines are counted in it: one slot, at what their record weighs. */
@@ -236,84 +240,77 @@ export async function readValues(statsId: string | null, person: string, fields:
  * line), at three bytes a UTF-16 unit, the most any takes.
  */
 export const CRM_VALUE_MOST_BYTES = 3 * Math.max(MAX_FIELD_VALUE, MAX_FIELD_OPTIONS * MAX_FIELD_OPTION + MAX_FIELD_OPTIONS - 1);
-/** Tries for the store's people lock, at the most, when it stays taken for the whole wait (lib/redis-lock.ts). */
-export const CRM_VALUE_LOCK_TRIES = lockTriesWithin(TASKS_LOCK_WAIT_MS);
 /**
- * What setValue sends to the database, at the most: each try for the lock;
- * then the room taken, the write (SET_CRM_VALUE), the room given back and the
- * lock let go.
+ * What setValue sends to the database, at the most, one trip each: the room
+ * taken, the write (SET_CRM_VALUE), the room given back. No lock, no wait.
  */
-export const CRM_VALUE_SET_COMMANDS = CRM_VALUE_LOCK_TRIES + 4;
+export const CRM_VALUE_SET_COMMANDS = 3;
 /**
- * The bytes it moves through the database, at the most: each try's key,
- * token and options (128); the value written and the one it replaced read
- * back (CRM_VALUE_MOST_BYTES each), with the script, its three keys, the
- * token and the person's key (1,024); and the room's two scripts and the
- * lock's release, with their keys and answers (1,024 each).
+ * The bytes it moves through the database, at the most: the value written
+ * and the one it replaced read back (CRM_VALUE_MOST_BYTES each), with the
+ * script, its two keys, the person's key and the times (1,024); and the
+ * room's two scripts, with their keys and answers (1,024 each).
  */
-export const CRM_VALUE_SET_BYTES = CRM_VALUE_LOCK_TRIES * 128 + 2 * CRM_VALUE_MOST_BYTES + 1_024 + 3 * 1_024;
-/**
- * Studio requests a value set is counted as, taken by its caller before it is
- * called, beside the request that asked (a studio save, or a workflow's step):
- * its wait for the lock, its commands and its bytes (tests/plan-cost-registry.ts,
- * CRM_VALUE_SET, held under them in tests/plan-cost-registry.test.ts).
- */
-export const CRM_VALUE_SET_UNITS = 2;
+export const CRM_VALUE_SET_BYTES = 2 * CRM_VALUE_MOST_BYTES + 3 * 1_024;
 
 /**
  * Sets one person's value of one field, or clears it with "", in one step on
- * the Redis side, and only while the store's people lock (tasksLockKey) is
- * still the caller's: 0, and nothing written, when it is not; 2, and nothing
- * written, when the person was deleted (erasedKey); {1, before} with what it
- * replaced, or {1} when there was nothing.
+ * the Redis side: 2, and nothing written, when the person was deleted at or
+ * after the time the request was prepared (ARGV[3], less ERASED_CLOCK_MS);
+ * otherwise the mark of an earlier deletion goes (they came back), the value
+ * is written, and the answer is {1, before} with what it replaced, or {1}.
  */
-export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v2
-if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
-if redis.call("EXISTS", KEYS[3]) == 1 then return 2 end
-local before = redis.call("HGET", KEYS[2], ARGV[2])
-if ARGV[3] == "" then redis.call("HDEL", KEYS[2], ARGV[2]) else redis.call("HSET", KEYS[2], ARGV[2], ARGV[3]) end
+export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v3
+local erased = redis.call("GET", KEYS[2])
+if erased then
+  local at = tonumber(erased)
+  if not at or tonumber(ARGV[3]) < at + tonumber(ARGV[4]) then return 2 end
+  redis.call("DEL", KEYS[2])
+end
+local before = redis.call("HGET", KEYS[1], ARGV[1])
+if ARGV[2] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[2]) end
 if before then return {1, before} end
 return {1}`;
 
 /**
  * Sets one value for one person; "" clears it. False when it is not a value the field keeps.
  *
- * Under the store's people lock, which deleting a person takes too (forgetCrmPerson): a deletion that starts while a
- * value is being set waits for it and then deletes it, so a value set at the same time as its person's deletion never
- * outlives the deletion. The new value's whole room is taken first (DataRoomError, and nothing written, when it does
- * not fit); the write answers what it replaced, in the same step, and that room is given back after. So what is
- * counted is exactly what is kept, whatever ran before. A person deleted from the store in the last ERASED_MARK_SECONDS
- * is refused in the same step (CrmPersonGone), so a value set late never puts anything about them back. LockBusyError,
- * with nothing written, when the lock stays taken past TASKS_LOCK_WAIT_MS or is lost before the write.
+ * `preparedAt` is when the request was prepared, in milliseconds: when the studio drew the person's page, or when a
+ * workflow took the step. A person deleted at or after it (forgetCrmPerson) is refused in the same step as the write
+ * (CrmPersonGone), so a request prepared before a deletion never puts anything about them back; one prepared after it,
+ * for someone who came back (a new purchase, a new sign-up, the creator adding them again), is written as for anyone.
+ * The deletion leaves its mark before it takes the values away, and each value is taken in one script that answers
+ * what it removed, so a write is either refused or deleted with the rest. The new value's whole room is taken first
+ * (DataRoomError, and nothing written, when it does not fit); the write answers what it replaced, in the same step,
+ * and that room is given back after. So what is counted is exactly what is kept, whatever ran at the same time.
  *
- * Its work is priced at CRM_VALUE_SET_UNITS studio requests, which each caller takes before calling it
- * (app/api/store/crm/route.ts, lib/flows.ts; tests/plan-cost-registry.ts, CRM_VALUE_SET).
+ * Its three trips fit in the request that asked (tests/plan-cost-registry.ts, CRM_VALUE_SET, held in
+ * tests/plan-cost-registry.test.ts and measured in tests/crm-person-room.test.ts and tests/crm-contact-writes.test.ts).
  */
-export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore): Promise<boolean> {
+export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore, preparedAt: number): Promise<boolean> {
   if (!PERSON.test(person)) return false;
   const value = fieldValue(field, raw);
   if (value === null) return false;
+  // A time that is not one is the oldest there is: refused wherever a deletion was.
+  const prepared = Number.isSafeInteger(preparedAt) && preparedAt > 0 ? Math.min(preparedAt, Date.now()) : 0;
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([person, v], 1) : 0);
-  await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, async (held) => {
-    const charged = weight(value);
-    if (charged > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: charged }]);
-    let answer: unknown;
-    try {
-      const response = await redisPipeline([["EVAL", SET_CRM_VALUE, 3, held.key, valuesKey(statsId, field.id), erasedKey(statsId, person), held.token, person, value]]);
-      answer = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
-    } catch { throw new CrmValueWriteUnconfirmed(); }
-    if (answer === 0 || answer === 2) {
-      // The lock ran out before the write (a stalled request), or the person was deleted: nothing was written, so the
-      // room taken goes back.
-      if (charged > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: charged }]).catch(() => {});
-      throw answer === 2 ? new CrmPersonGone() : new LockBusyError();
-    }
-    // Any other answer may or may not have landed: the room taken stays counted, never less than what is kept.
-    if (!Array.isArray(answer) || answer[0] !== 1 || answer.length > 2 || (answer.length === 2 && typeof answer[1] !== "string")) throw new CrmValueWriteUnconfirmed();
-    const freed = weight(answer[1]);
-    // The value replaced gives its room back; one that cannot be given back now stays counted (more, never less, than kept).
-    if (freed > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: freed }]).catch(() => {});
-  });
+  const charged = weight(value);
+  if (charged > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: charged }]);
+  let answer: unknown;
+  try {
+    const response = await redisPipeline([["EVAL", SET_CRM_VALUE, 2, valuesKey(statsId, field.id), erasedKey(statsId, person), person, value, prepared, ERASED_CLOCK_MS]]);
+    answer = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
+  } catch { throw new CrmValueWriteUnconfirmed(); }
+  if (answer === 2) {
+    // The person was deleted after this request was prepared: nothing was written, so the room taken goes back.
+    if (charged > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: charged }]).catch(() => {});
+    throw new CrmPersonGone();
+  }
+  // Any other answer may or may not have landed: the room taken stays counted, never less than what is kept.
+  if (!Array.isArray(answer) || answer[0] !== 1 || answer.length > 2 || (answer.length === 2 && typeof answer[1] !== "string")) throw new CrmValueWriteUnconfirmed();
+  const freed = weight(answer[1]);
+  // The value replaced gives its room back; one that cannot be given back now stays counted (more, never less, than kept).
+  if (freed > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: freed }]).catch(() => {});
   return true;
 }
 
@@ -683,9 +680,10 @@ return value`;
  */
 export async function forgetCrmPerson(statsId: string | null, person: string, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
-  // First the mark that they were deleted, before anything is taken away: a value being set now, or late from a page
-  // opened before, is refused from here on (SET_CRM_VALUE). An erasure whose mark is not confirmed fails, to be run again.
-  const marked = await redisPipeline([["SET", erasedKey(statsId, person), "1", "EX", ERASED_MARK_SECONDS]]);
+  // First the mark of when they were deleted, before anything is taken away: a value set from here on by a request
+  // prepared before now (a page opened, a workflow step taken) is refused (SET_CRM_VALUE), and one written before the
+  // mark is taken away below. An erasure whose mark is not confirmed fails, to be run again.
+  const marked = await redisPipeline([["SET", erasedKey(statsId, person), String(Date.now()), "EX", ERASED_MARK_SECONDS]]);
   if (!Array.isArray(marked) || marked.length !== 1 || marked[0] !== "OK") throw new CrmValueWriteUnconfirmed();
   const fields = await readFields(statsId);
   const address = email.trim().toLowerCase();
@@ -697,30 +695,36 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     const deal = json(value) as { email?: unknown } | null;
     return typeof deal?.email === "string" && deal.email.trim().toLowerCase() === address;
   }).map(([id]) => id);
-  // Each deal deleted on its own: what goes back to the store's data room is exactly what was removed.
-  const dealReplies = theirs.length ? await redisPipeline(theirs.map((id) => ["HDEL", dealsKey(statsId), id])) : [];
-  const dealsGone = theirs.filter((_, i) => dealReplies[i] === 1);
-  let records = dealsGone.length;
-  if (room && dealsGone.length) await giveData(room, dealsGone.map((id) => ({ slot: dealSlot(id), bytes: 0, set: true })));
-  // Their values and their tasks (639 [GL7](6)) go under the store's people
-  // lock, which setting a value and changing tasks take too: a value being set
-  // when the deletion starts is set first and deleted here after, never left
-  // behind, and a change of tasks read before the deletion cannot write them
-  // back after it. Each value is taken out in one script that answers what it
-  // deleted, so what goes back to the room is exactly what was removed. A lock
-  // still taken after the wait throws (LockBusyError): the deletion fails and
-  // says so, never skips them.
+  // Each value taken out in one script that answers what it deleted, each deal
+  // deleted on its own: what goes back to the store's data room is exactly
+  // what was removed, even with a change of the same value at the same time.
+  const commands: (string | number)[][] = [
+    ...fields.map((f) => ["EVAL", TAKE_CRM_VALUE, 1, valuesKey(statsId, f.id), person]),
+    ...theirs.map((id) => ["HDEL", dealsKey(statsId), id]),
+  ];
+  const replies = commands.length ? await redisPipeline(commands) : [];
+  let records = 0;
+  let valuesFreed = 0;
+  fields.forEach((_, i) => {
+    const taken = replies[i];
+    if (typeof taken !== "string") return;
+    records += 1;
+    if (taken) valuesFreed += dataBytes([person, taken], 1);
+  });
+  const dealsGone = theirs.filter((_, i) => replies[fields.length + i] === 1);
+  records += dealsGone.length;
+  if (room && (valuesFreed > 0 || dealsGone.length)) {
+    await giveData(room, [
+      ...(valuesFreed > 0 ? [{ slot: VALUES_SLOT, bytes: valuesFreed }] : []),
+      ...dealsGone.map((id) => ({ slot: dealSlot(id), bytes: 0, set: true })),
+    ]);
+  }
+  // Their tasks (639 [GL7](6)) go with them, under the tasks' lock, so a
+  // change read before the deletion cannot write them back after it; their
+  // values and deals above never wait on it. A lock still taken after the
+  // wait throws (LockBusyError): the deletion fails and says so, never skips
+  // them.
   records += await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, async () => {
-    const replies = fields.length ? await redisPipeline(fields.map((f) => ["EVAL", TAKE_CRM_VALUE, 1, valuesKey(statsId, f.id), person])) : [];
-    let valuesTaken = 0;
-    let valuesFreed = 0;
-    fields.forEach((_, i) => {
-      const value = replies[i];
-      if (typeof value !== "string") return;
-      valuesTaken += 1;
-      if (value) valuesFreed += dataBytes([person, value], 1);
-    });
-    if (room && valuesFreed > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: valuesFreed }]);
     // Read first, for how many tasks the store's count loses; then one
     // script deletes them and answers what it deleted, so what is given back
     // is what the deletion removed. Should their tasks have changed between
@@ -731,7 +735,7 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     if (!Array.isArray(taken) || taken.length !== 2 || typeof taken[0] !== "string" || (taken[1] !== 0 && taken[1] !== 1)) throw new CrmValueWriteUnconfirmed();
     const freed = taskWeight(person, taken[0]) + (taken[1] === 1 ? TASK_COUNT_WEIGHT : 0);
     if (freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
-    return valuesTaken + (taken[0] ? 1 : 0);
+    return taken[0] ? 1 : 0;
   });
   return records;
 }

@@ -14,7 +14,8 @@ import { type CrmField, crmPhone, crmUrl, MAX_FIELD_VALUE, severalPicked, whatsa
  * kept in its international form and, once saved, offers a link that opens a
  * chat with that number in the creator's own WhatsApp; nothing is sent for them.
  */
-export function PersonFields({ person, fields, initial }: { person: string; fields: CrmField[]; initial: Record<string, string> }) {
+/** `preparedAt`: when the page read the person (ms), sent with every save, so a person deleted since is never written again. */
+export function PersonFields({ person, fields, initial, preparedAt }: { person: string; fields: CrmField[]; initial: Record<string, string>; preparedAt: number }) {
   const [values, setValues] = useState(initial);
   const [saved, setSaved] = useState(initial);
 
@@ -38,7 +39,7 @@ export function PersonFields({ person, fields, initial }: { person: string; fiel
       const response = await fetch("/api/store/crm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "value", person, field: field.id, value }),
+        body: JSON.stringify({ action: "value", person, field: field.id, value, preparedAt }),
       });
       const answer = crmAnswer(response.ok, await response.json().catch(() => null));
       if (answer.ok) {
@@ -55,9 +56,7 @@ export function PersonFields({ person, fields, initial }: { person: string; fiel
         setMessage(
           answer.error === "value"
             ? "This field cannot keep that value. Your entry is still here; correct it and try again."
-            : answer.error === "busy"
-              ? "Another change to your contacts was being saved at the same moment, so this one was not saved. Your entry is still here; try again in a moment."
-              : answer.error === "unknown"
+            : answer.error === "unknown"
                 ? "This person or this field is no longer in your store, so nothing was saved. Reload the page to see your contacts as they are now."
                 : answer.error === "studio_used"
                   ? "Your studio has no requests left this month, so nothing was saved. Your entry is still here."

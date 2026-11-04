@@ -4,12 +4,11 @@
  * so a store that deletes buyers is never left paying for records it no
  * longer keeps.
  */
-import { CRM_VALUE_LOCK_TRIES, CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS, CrmPersonGone, ERASED_MARK_SECONDS, SET_CRM_VALUE, TASKS_LOCK_WAIT_MS, forgetCrmPerson, readFields, readValues, setValue, writeDeal, writeFields } from "@/lib/crm";
+import { CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS, CrmPersonGone, ERASED_CLOCK_MS, ERASED_MARK_SECONDS, forgetCrmPerson, readFields, readValues, setValue, writeDeal, writeFields } from "@/lib/crm";
 import { SESSION_TTL_SECONDS } from "@/lib/auth";
 import { LEASE_SECONDS } from "@/lib/flows";
 import { utf8Length } from "@/lib/store-data-rules";
 import { DEFAULT_STAGES, type Deal, MAX_DEALS } from "@/lib/crm-rules";
-import { LockBusyError } from "@/lib/redis-lock";
 import { dataUsed } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { advance, store as redis } from "./redis-stub";
@@ -33,11 +32,11 @@ async function main(): Promise<void> {
   const fields = await readFields(STATS);
   is("two fields kept", fields.length, 2);
   // Ben first, so the room's own slots already exist and Ana's records are all that changes.
-  await setValue(STATS, BEN, fields[0], "Contoso", ROOM);
+  await setValue(STATS, BEN, fields[0], "Contoso", ROOM, Date.now());
   await writeDeal(STATS, deal("dealcccccc", "ben@example.com"), ROOM);
   const withBen = await used();
-  await setValue(STATS, ANA, fields[0], "Northwind Traders", ROOM);
-  await setValue(STATS, ANA, fields[1], "A course for her whole team", ROOM);
+  await setValue(STATS, ANA, fields[0], "Northwind Traders", ROOM, Date.now());
+  await setValue(STATS, ANA, fields[1], "A course for her whole team", ROOM, Date.now());
   await writeDeal(STATS, deal("dealaaaaaa", "ana@example.com"), ROOM);
   await writeDeal(STATS, deal("dealbbbbbb", "Ana@Example.com "), ROOM);
   const withAna = await used();
@@ -69,53 +68,59 @@ async function main(): Promise<void> {
   part("A value set while its person is deleted: never left behind, and the room is exactly what is kept");
   const original = redis.pipeline;
   const outcome = async (run: () => Promise<boolean>): Promise<unknown> => {
-    try { return await run(); } catch (error) { return error instanceof CrmPersonGone ? "gone" : error instanceof LockBusyError ? "busy" : String(error); }
+    try { return await run(); } catch (error) { return error instanceof CrmPersonGone ? "gone" : String(error); }
+  };
+  // A mark's time put back, as if the deletion were a minute old (the clock of a test does not move by itself).
+  const markAgo = async (person: string, ms: number) => {
+    const key = `nl:crm:erased:${STATS}:${person}`;
+    const [at] = await redis.pipeline([["GET", key]]);
+    await redis.pipeline([["SET", key, String(Number(at) - ms), "EX", ERASED_MARK_SECONDS]]);
   };
   try {
     const empty = await used();
-    await setValue(STATS, CAL, fields[0], "Northwind", ROOM);
+    await setValue(STATS, CAL, fields[0], "Northwind", ROOM, Date.now());
     is("Cal's first value takes its room", await used(), empty + dataBytes([CAL, "Northwind"], 1));
-    await setValue(STATS, CAL, fields[0], "Northwind Traders", ROOM);
+    await setValue(STATS, CAL, fields[0], "Northwind Traders", ROOM, Date.now());
     is("a value replaced counts only what is kept", await used(), empty + dataBytes([CAL, "Northwind Traders"], 1));
-    // The reviewer's order: the change has started (its room is being taken), the deletion runs, then the change writes.
+    // The reviewer's order: the page was drawn, the save has started (its room is being taken), the deletion runs to its
+    // end, then the save writes.
+    const drawn = Date.now();
     let armed = true;
-    let erasure: Promise<number> | null = null;
     redis.pipeline = async (commands) => {
       if (armed && roomOnly(commands)) {
         armed = false;
-        erasure = forgetCrmPerson(STATS, CAL, "cal@example.com", ROOM);
-        // The deletion runs to its end here, unless it has to wait for the change.
-        await Promise.race([erasure, new Promise((resolve) => setTimeout(resolve, 300))]);
+        await forgetCrmPerson(STATS, CAL, "cal@example.com", ROOM);
       }
       return original.call(redis, commands);
     };
-    is("the change, which reached its write after the deletion began, is refused: the person is gone", await outcome(() => setValue(STATS, CAL, fields[0], "Northwind Traders International, ".repeat(12), ROOM)), "gone");
+    is("the save, prepared before the deletion, is refused: the person is gone", await outcome(() => setValue(STATS, CAL, fields[0], "Northwind Traders International, ".repeat(12), ROOM, drawn)), "gone");
     is("the deletion ran in between", armed, false);
-    await erasure;
     redis.pipeline = original;
     is("the value is not there after the deletion", (await readValues(STATS, CAL, fields)).fielda, undefined);
     is("and the room counted is exactly what is kept: nothing of Cal's", await used(), empty);
 
-    part("A value set after the deletion finished never puts anything back");
-    is("refused: the person is gone", await outcome(() => setValue(STATS, CAL, fields[1], "Back again", ROOM)), "gone");
-    is("a cleared value too", await outcome(() => setValue(STATS, CAL, fields[0], "", ROOM)), "gone");
+    part("A save prepared before the deletion, arriving after it finished, never puts anything back");
+    is("refused: the person is gone", await outcome(() => setValue(STATS, CAL, fields[1], "Back again", ROOM, drawn)), "gone");
+    is("a cleared value too", await outcome(() => setValue(STATS, CAL, fields[0], "", ROOM, drawn)), "gone");
+    is("one with no time is taken as prepared before", await outcome(() => setValue(STATS, CAL, fields[1], "Back again", ROOM, Number.NaN)), "gone");
+    is("so is one prepared within the clocks' difference of it", await outcome(() => setValue(STATS, CAL, fields[1], "Back again", ROOM, Date.now())), "gone");
     is("nothing of Cal's is kept", await readValues(STATS, CAL, fields), {});
     is("and the room taken first is given back", await used(), empty);
-    // The mark lasts as long as a late save can still arrive: a studio page's session, a workflow step's lease, the lock's wait.
-    is("the mark outlasts a studio session, a workflow step's lease and the lock", [ERASED_MARK_SECONDS >= SESSION_TTL_SECONDS, ERASED_MARK_SECONDS >= LEASE_SECONDS, ERASED_MARK_SECONDS >= TASKS_LOCK_WAIT_MS / 1000 + 10], [true, true, true]);
-    is("and is kept that long", (await redis.pipeline([["TTL", `nl:crm:erased:${STATS}:${CAL}`]]))[0], ERASED_MARK_SECONDS);
+    // The mark lasts as long as a save prepared before can still arrive: a studio page's session, a workflow step's lease.
+    is("the mark outlasts a studio session and a workflow step's lease", [ERASED_MARK_SECONDS >= SESSION_TTL_SECONDS, ERASED_MARK_SECONDS >= LEASE_SECONDS], [true, true]);
+    const [mark] = await redis.pipeline([["GET", `nl:crm:erased:${STATS}:${CAL}`]]);
+    is("it holds only when they were deleted, and is kept that long", [/^\d{13}$/.test(String(mark)), (await redis.pipeline([["TTL", `nl:crm:erased:${STATS}:${CAL}`]]))[0]], [true, ERASED_MARK_SECONDS]);
 
-    part("A change whose lock ran out before its write writes nothing, and gives its room back");
-    await setValue(STATS, DAN, fields[0], "Contoso", ROOM);
-    const withDan = await used();
-    redis.pipeline = async (commands) => {
-      if (commands.some((c) => c[0] === "EVAL" && c[1] === SET_CRM_VALUE)) await original.call(redis, [["DEL", `nl:crm:tasklock:${STATS}`]]);
-      return original.call(redis, commands);
-    };
-    is("LockBusyError", await outcome(() => setValue(STATS, DAN, fields[0], "Contoso Pharmaceuticals, ".repeat(12), ROOM)), "busy");
-    redis.pipeline = original;
-    is("the value is as it was", (await readValues(STATS, DAN, fields)).fielda, "Contoso");
-    is("and so is the room", await used(), withDan);
+    part("Someone who came back: a save prepared after the deletion is written, and the mark goes");
+    await markAgo(CAL, ERASED_CLOCK_MS + 60_000);
+    const stale = Number((await redis.pipeline([["GET", `nl:crm:erased:${STATS}:${CAL}`]]))[0]) - 1;
+    is("a page drawn before is still refused", await outcome(() => setValue(STATS, CAL, fields[0], "Stale", ROOM, stale)), "gone");
+    is("a page drawn after writes", await outcome(() => setValue(STATS, CAL, fields[0], "Returned customer", ROOM, Date.now())), true);
+    is("and is kept", (await readValues(STATS, CAL, fields)).fielda, "Returned customer");
+    is("the mark is gone", (await redis.pipeline([["EXISTS", `nl:crm:erased:${STATS}:${CAL}`]]))[0], 0);
+    is("its room counted", await used(), empty + dataBytes([CAL, "Returned customer"], 1));
+    is("Cal deleted again", await forgetCrmPerson(STATS, CAL, "cal@example.com", ROOM), 1);
+    is("with his room", await used(), empty);
 
     part("What a value set sends, held under its cost line (tests/plan-cost-registry.ts, CRM_VALUE_SET)");
     let commands = 0;
@@ -124,27 +129,16 @@ async function main(): Promise<void> {
     redis.pipeline = async (sent) => {
       commands += sent.length;
       const replies = await original.call(redis, sent);
-      bytes += size(sent.map((c) => c.filter((part) => part !== SET_CRM_VALUE && !String(part).startsWith("-- marktmorgen:store-data:")))) + size(replies);
+      bytes += size(sent.map((c) => c.filter((part) => !String(part).startsWith("-- marktmorgen:")))) + size(replies);
       return replies;
     };
-    const widest = "\u20ac".repeat(200);
-    await setValue(STATS, DAN, fields[0], widest, ROOM);
-    await setValue(STATS, DAN, fields[0], "\u00e9".repeat(200), ROOM);
+    await setValue(STATS, DAN, fields[0], "\u20ac".repeat(200), ROOM, Date.now());
+    const first = commands;
+    await setValue(STATS, DAN, fields[0], "\u00e9".repeat(200), ROOM, Date.now());
     redis.pipeline = original;
-    is("two sets, each within its commands and bytes", [commands <= 2 * CRM_VALUE_SET_COMMANDS, bytes <= 2 * CRM_VALUE_SET_BYTES], [true, true]);
-    // The lock taken by another for the whole wait: every try counted, nothing written, its room untouched.
-    const beforeBusy = await used();
-    await redis.pipeline([["SET", `nl:crm:tasklock:${STATS}`, "someone-else", "EX", 10]]);
-    let tries = 0;
-    redis.pipeline = async (sent) => {
-      tries += sent.filter((c) => c[0] === "SET" && c[1] === `nl:crm:tasklock:${STATS}` && c[3] === "NX").length;
-      return original.call(redis, sent);
-    };
-    is("a lock taken for the whole wait: busy", await outcome(() => setValue(STATS, DAN, fields[0], "Initech", ROOM)), "busy");
-    redis.pipeline = original;
-    is("its tries are within CRM_VALUE_LOCK_TRIES", [tries >= 2, tries <= CRM_VALUE_LOCK_TRIES], [true, true]);
-    is("nothing written, no room taken", [(await readValues(STATS, DAN, fields)).fielda, await used()], ["\u00e9".repeat(200), beforeBusy]);
-    await redis.pipeline([["DEL", `nl:crm:tasklock:${STATS}`]]);
+    is("a new value: the room taken and the write", first, 2);
+    is("one replaced: and its room given back, CRM_VALUE_SET_COMMANDS in all", commands - first, CRM_VALUE_SET_COMMANDS);
+    is(`within its bytes (${bytes} for both)`, bytes <= 2 * CRM_VALUE_SET_BYTES, true);
     is("Dan deleted", await forgetCrmPerson(STATS, DAN, "dan@example.com", ROOM), 1);
     is("with his room", await used(), empty);
   } finally {
@@ -169,10 +163,12 @@ async function main(): Promise<void> {
   is("and the deal is not there again", (await redis.pipeline([["HEXISTS", `nl:crm:deals:${STATS}`, kept.id]]))[0], 0);
   await redis.pipeline([["HDEL", `nl:crm:deals:${STATS}`, ...others]]);
 
-  part("Once the mark has gone, a value set is a new one, as for anyone");
+  part("Once the mark has gone by itself, any save is written, as for anyone");
+  await forgetCrmPerson(STATS, CAL, "cal@example.com", ROOM);
+  const before = Date.now() - 60_000;
   advance(ERASED_MARK_SECONDS * 1000 + 1_000);
   is("the mark is gone", (await redis.pipeline([["EXISTS", `nl:crm:erased:${STATS}:${CAL}`]]))[0], 0);
-  is("a value is set", await setValue(STATS, CAL, fields[0], "Returned customer", ROOM), true);
+  is("a value is set", await setValue(STATS, CAL, fields[0], "Returned customer", ROOM, before), true);
   is("and kept", (await readValues(STATS, CAL, fields)).fielda, "Returned customer");
 
   part("Without a room nothing is counted, and nothing breaks");

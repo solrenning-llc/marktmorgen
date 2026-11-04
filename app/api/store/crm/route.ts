@@ -1,10 +1,8 @@
 import type { NextRequest } from "next/server";
 import { StoreFullError } from "@/lib/store-full";
 import { guardStoreWrite } from "@/lib/store-request";
-import { countStudio, refusedJson } from "@/lib/studio-route";
-import { studioRefusal } from "@/lib/person-tasks";
+import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { LockBusyError } from "@/lib/redis-lock";
 import { ensureStatsId } from "@/lib/store";
 import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
 import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
@@ -12,7 +10,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CRM_VALUE_SET_UNITS, CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
+import { CrmFieldsKept, CrmPersonGone, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -23,7 +21,9 @@ const MAX_BODY_BYTES = 20_000;
  *
  *   { action: "fields", fields }               saves the fields; a field taken away takes its answers
  *                                              (not from a session let in without its second step)
- *   { action: "value", person, field, value }   one person's answer to one field; "" clears it
+ *   { action: "value", person, field, value, preparedAt }
+ *                                              one person's answer to one field; "" clears it. preparedAt is when the
+ *                                              page was drawn (ms): a person deleted since is 404 unknown
  *   { action: "stages", stages }               saves the first pipeline's stages (older studio pages)
  *   { action: "pipeline", pipeline, moves }     saves one pipeline, or adds one with a new id;
  *                                              `moves` names where each removed stage's deals go
@@ -62,14 +62,8 @@ export async function POST(request: NextRequest) {
     if (body.action === "value") {
       const field = (await readFields(statsId)).find((f) => f.id === body.field);
       if (!field) return refuse("unknown", 404);
-      // A value set waits for the store's people lock and writes in one script: its work is counted as
-      // CRM_VALUE_SET_UNITS more studio requests, taken before it is written (tests/plan-cost-registry.ts, CRM_VALUE_SET).
-      const counted = await countStudio(store, null, CRM_VALUE_SET_UNITS);
-      if (!counted.ok) {
-        const refused = studioRefusal(counted.reason, counted.message);
-        return Response.json(refused.body, { status: refused.status });
-      }
-      const ok = await setValue(statsId, typeof body.person === "string" ? body.person : "", field, body.value, counted.store ?? store);
+      // When the page was drawn (preparedAt, milliseconds): a person deleted since is never written again (lib/crm.ts).
+      const ok = await setValue(statsId, typeof body.person === "string" ? body.person : "", field, body.value, store, typeof body.preparedAt === "number" ? body.preparedAt : 0);
       return ok ? Response.json({ ok: true }) : refuse("value");
     }
     if (body.action === "stages") {
@@ -172,9 +166,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof CrmFieldsKept) return refusedJson("locked");
     if (error instanceof CrmDealReadUnavailable) return refuse("crm_deal_read_unavailable", 503);
     if (error instanceof CrmDealWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
-    // A value set while the person's other changes, or their deletion, held the store's people lock: nothing written.
-    if (error instanceof LockBusyError) return refuse("busy", 409);
-    // A person deleted from the store: nothing about them is written again, as for anything that is gone.
+    // A person deleted from the store after the page was drawn: nothing about them is written again, as for anything gone.
     if (error instanceof CrmPersonGone) return refuse("unknown", 404);
     console.error("saving a store's fields or deals failed", error);
     return refuse("server_error", 500);

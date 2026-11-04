@@ -67,9 +67,8 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CRM_VALUE_SET_UNITS, CrmDealReadUnavailable, CrmPersonGone, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
-import { takeAllowance } from "@/lib/store-allowance";
-import { type Held, LockBusyError, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
+import { CrmDealReadUnavailable, CrmPersonGone, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
 import { readForm } from "@/lib/form-store";
@@ -612,7 +611,7 @@ const each = (emails: string[], state: Acted["state"], note: string): Acted[] =>
  * sequence that starts with it, and nobody is started twice. A write whose
  * answer is lost is "uncertain": the run is held, never repeated by itself.
  */
-async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number }): Promise<Acted[]> {
+async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; takenAt: number }): Promise<Acted[]> {
   const listId = store.listId;
   if (!listId || !emails.length) return [];
   if (action.do === "wait") return each(emails, "confirmed", "Waited.");
@@ -733,7 +732,7 @@ async function actOnPeople(
   store: Store,
   action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" | "rotate" }>,
   emails: string[],
-  at: { flow: Flow; step: FlowStep; index: number },
+  at: { flow: Flow; step: FlowStep; index: number; takenAt: number },
 ): Promise<Acted[]> {
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
@@ -743,21 +742,12 @@ async function actOnPeople(
     const out: Acted[] = [];
     for (const email of emails) {
       try {
-        // The value set's own work (the people lock, its script) is counted on the store's studio figure first, as from the
-        // studio (tests/plan-cost-registry.ts, CRM_VALUE_SET): nothing is written when it is not taken.
-        const counted = await takeAllowance(store, "studio", CRM_VALUE_SET_UNITS);
-        if (!counted.ok) {
-          out.push({ email, state: "failed", note: `“${field.name}” was not set: ${counted.reason === "used" ? "the studio has no requests left this month." : "the studio's requests could not be counted right now."}` });
-          continue;
-        }
-        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
+        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store, at.takenAt * 1000)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: `“${field.name}” was not set: the store's data room is full.` });
-        // The person was deleted from the store (lib/crm.ts, setValue): nothing about them is written again.
+        // The person was deleted from the store after this step was taken (lib/crm.ts, setValue): nothing about them is written again.
         else if (error instanceof CrmPersonGone) out.push({ email, state: "failed", note: `“${field.name}” was not set: this person was deleted from your store.` });
-        // Another change of the store's people held their lock past the wait (lib/crm.ts, setValue): nothing was written.
-        else if (error instanceof LockBusyError) out.push({ email, state: "failed", note: `“${field.name}” was not set: another change to your contacts was being saved at the same moment.` });
         else out.push({ email, state: "uncertain", note: `Whether “${field.name}” was set could not be confirmed.` });
       }
     }
@@ -838,7 +828,7 @@ async function actOnDeals(
   statsId: string,
   action: Extract<FlowAction, { do: "deal" | "assign" | "next" | "rotate" }>,
   emails: string[],
-  at: { flow: Flow; step: FlowStep; index: number },
+  at: { flow: Flow; step: FlowStep; index: number; takenAt: number },
   held: Held | null,
 ): Promise<Acted[]> {
   const pipelines = await readPipelines(statsId);
@@ -1249,7 +1239,7 @@ export async function sendDueSteps(
       // A step that acts instead of writing: done for everyone it is for, then
       // on to where it leads, its wait counted from now.
       if (step.action) {
-        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index, takenAt: now }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
         // Anybody act did not answer for has no known outcome.
         const answered = new Set(outcomes.map((o) => o.email));
         const all = [...outcomes, ...each(going.filter((e) => !answered.has(e)), "uncertain", "The outcome of this action could not be confirmed.")];

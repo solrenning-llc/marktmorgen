@@ -48,7 +48,7 @@ is("a value it cannot keep is named", flowConfigurationIssues(step("call me"), c
 is("an unknown kind is still flagged", flowConfigurationIssues(step("x"), { ...context, fields: [{ ...phone, type: "fax" }] }).some((i) => i.includes("could not be checked")), true);
 
 part("On the contact's record");
-const render = (initial: Record<string, string>) => renderToStaticMarkup(createElement(PersonFields, { person: "p".repeat(16), fields: [phone], initial }));
+const render = (initial: Record<string, string>) => renderToStaticMarkup(createElement(PersonFields, { person: "p".repeat(16), fields: [phone], initial, preparedAt: 1 }));
 const empty = render({});
 is("the field is a phone input with the phone keyboard", /type="tel"/.test(empty) && /inputMode="tel"|inputmode="tel"/.test(empty), true);
 is("it says how to type the number, tied to the field", /aria-describedby="pf-ph0001-hint"/.test(empty) && /id="pf-ph0001-hint"[^>]*>Start with \+ and the country code/.test(empty), true);

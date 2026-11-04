@@ -1,6 +1,6 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
-import { CRM_VALUE_SET, CRM_VALUE_SET_SECONDS } from "./plan-cost-registry";
+import { CRM_VALUE_SET, CRM_VALUE_SET_SECONDS, SHAPES } from "./plan-cost-registry";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
 import { TEST_SALES_PAGES } from "@/lib/broadcasts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
@@ -31,8 +31,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
-import { CRM_VALUE_LOCK_TRIES, CRM_VALUE_MOST_BYTES, CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS, CRM_VALUE_SET_UNITS, TASKS_LOCK_WAIT_MS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
-import { lockTriesWithin } from "@/lib/redis-lock";
+import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_FIELD_OPTION, MAX_FIELD_OPTIONS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
@@ -273,21 +272,21 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   }
   assert.ok(TASKS_RECOUNT_UNITS * UNIT_COST.studio >= request("studio", 4, TASKS_RECOUNT_BYTES));
   console.log(`a recount of a store's tasks: ${TASKS_RECOUNT_BYTES} bytes at most, ${TASKS_RECOUNT_UNITS} studio requests at most, once a store`);
-  // A contact value set (lib/crm.ts, setValue; C3-119): its wait for the people lock, every trip one after another, its
-  // commands and its bytes are priced at CRM_VALUE_SET; the studio request that asked (1.5 s, twenty commands) does not hold a
-  // two-second wait, nor a workflow step's queue commands an action's, so each caller takes CRM_VALUE_SET_UNITS studio
-  // requests first, more than it costs.
-  assert.ok(CRM_VALUE_SET_UNITS * UNIT_COST.studio >= CRM_VALUE_SET, `${CRM_VALUE_SET_UNITS} x ${UNIT_COST.studio} < ${CRM_VALUE_SET}`);
-  assert.ok(CRM_VALUE_SET > UNIT_COST.studio - request("studio", 0), "a value set does not fit inside the studio request that asked: it is counted on its own");
-  assert.equal(CRM_VALUE_LOCK_TRIES, lockTriesWithin(TASKS_LOCK_WAIT_MS));
-  assert.deepEqual([lockTriesWithin(0), lockTriesWithin(20), lockTriesWithin(59), lockTriesWithin(60), lockTriesWithin(2_000)], [1, 2, 2, 3, 11]);
-  assert.equal(CRM_VALUE_SET_COMMANDS, CRM_VALUE_LOCK_TRIES + 4);
+  // A contact value set (lib/crm.ts, setValue; C3-119, C3-123): no lock and no wait, three trips (the room taken, the write,
+  // the room given back). It fits in the studio request its save already takes, in time (at the review ceiling of a trip),
+  // commands and bytes, so no studio request more is taken for it; and it sends no more than the set it replaced (a read, the
+  // room, a write), so a workflow's field step sends no more than before (tests/crm-person-room.test.ts measures both).
+  const studioShape = request("studio", 20 + TAKE_COMMANDS, 50_000);
+  assert.equal(UNIT_COST.studio, studioShape);
+  assert.ok(CRM_VALUE_SET <= UNIT_COST.studio, `${CRM_VALUE_SET} > ${UNIT_COST.studio}`);
+  assert.ok(CRM_VALUE_SET_SECONDS <= SHAPES.studio.seconds, `${CRM_VALUE_SET_SECONDS} s > ${SHAPES.studio.seconds} s`);
+  assert.ok(CRM_VALUE_SET_COMMANDS <= 20 + TAKE_COMMANDS && CRM_VALUE_SET_BYTES <= 50_000);
+  assert.equal(CRM_VALUE_SET_SECONDS, CRM_VALUE_SET_COMMANDS * ROUND_TRIP_SECONDS);
+  assert.ok(CRM_VALUE_SET_COMMANDS <= 3, "a value set sends no more than the read, room and write it replaced");
   assert.ok(CRM_VALUE_MOST_BYTES >= 3 * MAX_FIELD_VALUE && CRM_VALUE_MOST_BYTES >= 3 * (MAX_FIELD_OPTIONS * MAX_FIELD_OPTION + MAX_FIELD_OPTIONS - 1));
-  assert.ok(CRM_VALUE_SET_BYTES >= 2 * CRM_VALUE_MOST_BYTES + CRM_VALUE_LOCK_TRIES * 128);
-  assert.ok(CRM_VALUE_SET_SECONDS >= TASKS_LOCK_WAIT_MS / 1000 + CRM_VALUE_SET_COMMANDS * ROUND_TRIP_SECONDS);
-  assert.ok(read("app/api/store/crm/route.ts").includes("countStudio(store, null, CRM_VALUE_SET_UNITS)"), "the studio's value save takes them before it writes");
-  assert.ok(read("lib/flows.ts").includes('takeAllowance(store, "studio", CRM_VALUE_SET_UNITS)'), "a workflow's field step takes them before it writes");
-  console.log(`a contact value set: $${CRM_VALUE_SET.toFixed(6)} at most (${CRM_VALUE_SET_COMMANDS} commands, ${CRM_VALUE_SET_BYTES} bytes, ${CRM_VALUE_SET_SECONDS} s), counted as ${CRM_VALUE_SET_UNITS} studio requests at $${UNIT_COST.studio.toFixed(6)}`);
+  assert.ok(CRM_VALUE_SET_BYTES >= 2 * CRM_VALUE_MOST_BYTES);
+  for (const file of ["app/api/store/crm/route.ts", "lib/flows.ts"]) assert.ok(!/CRM_VALUE_SET_UNITS|takeAllowance\(store, "studio"/.test(read(file)), `${file} takes no studio request more for a value set`);
+  console.log(`a contact value set: $${CRM_VALUE_SET.toFixed(6)} at most (${CRM_VALUE_SET_COMMANDS} commands, ${CRM_VALUE_SET_BYTES} bytes, ${CRM_VALUE_SET_SECONDS} s), inside its studio request at $${UNIT_COST.studio.toFixed(6)}`);
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
   assert.ok(UNIT_COST.buyer >= UNIT_COST.integration && UNIT_COST.buyer >= UNIT_COST.webhook);
 });

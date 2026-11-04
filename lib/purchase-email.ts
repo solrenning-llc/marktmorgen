@@ -54,6 +54,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
+import { selectedPhysicalOption } from "@/lib/physical-option-confirmation";
 import { canUseDomain } from "@/lib/domains";
 import { canManage } from "@/lib/membership-manage";
 import { DEMO_CONNECTED_ACCOUNT } from "@/lib/demo-account";
@@ -201,9 +202,11 @@ export function confirmationFor(
  * Payment and source binding must be independently checked by its worker.
  */
 export function originalPhysicalConfirmation(store: Store, session: SessionRecord, product: Listing): Confirmation | null {
+  const selected = product.options.length > 0 ? selectedPhysicalOption(product, session.metadata?.option) : null;
+  if (product.options.length > 0 && !selected || product.options.length === 0 && session.metadata?.option !== undefined) return null;
   if (store.stripeAccountId === DEMO_CONNECTED_ACCOUNT || session.metadata?.mm_order_origin !== "physical-v1" || !wasShipped(session) || !product.shipping ||
       product.call || product.course || product.podcast || product.recurring || product.bundle || product.keys || product.note ||
-      product.file || product.link || product.plan || product.pwyw || product.callPackage || product.options.length !== 0 ||
+      product.file || product.link || product.plan || product.pwyw || product.callPackage ||
       !Number.isSafeInteger(session.amount_total) || Number(session.amount_total) < 0 ||
       session.payment_status === "no_payment_required" && session.amount_total !== 0 ||
       typeof session.currency !== "string" || !/^[a-z]{3}$/.test(session.currency)) return null;
@@ -270,6 +273,8 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   const paid =
     firstChargeAt && amount === 0
       ? words.movedToday(speaking(store, currency).money(0))
+      : !ageLimited && wasShipped(session) && option?.priceCents === 0 && amount === 0
+      ? words.paidOnce(said.money(0))
       : paidLine(store, product, amount, currency, plan, trialDays, endsAfter, intro, every);
   const lines: string[] = [
     words.confirmIntro(name),

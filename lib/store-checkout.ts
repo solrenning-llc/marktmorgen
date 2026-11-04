@@ -8,6 +8,7 @@
  * page is this file.
  */
 import { singleDigitalAccessCovered } from "@/lib/single-digital-access";
+import { selectedPhysicalOption } from "@/lib/physical-option-confirmation";
 import { canRecover } from "@/lib/buyer-orders";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
@@ -748,8 +749,9 @@ export async function createCheckout(
   // First durable category: a single physical item without expiring access,
   // mutable checkout variants or coupled fulfillment. Other producers remain
   // explicit follow-up work; none are silently relabeled as durable here.
+  const physicalOption = shipping && chosen ? selectedPhysicalOption({ options: [chosen] }, chosen.id) : null;
   const simplePhysical = Boolean(store.stripeAccountId !== DEMO_CONNECTED_ACCOUNT && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated" && shipping && !product.bundle && !product.course && !product.podcast && !product.keys && !product.note &&
-    !product.callPackage && !product.recurring && !product.plan && !product.pwyw && !product.file && !product.link && product.options.length === 0 &&
+    !product.callPackage && !product.recurring && !product.plan && !product.pwyw && !product.file && !product.link && (product.options.length === 0 || physicalOption !== null) &&
     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email && !extras.buyerKey &&
     !extras.upsellKey && !extras.news && !extras.held && !extras.remind && !recovering && !named && !store.tax.ids && !store.tax.invoices &&
     !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) && !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
@@ -769,9 +771,9 @@ export async function createCheckout(
         previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], stripeAccountId: accountId,
         statsId: store.statsId, currency: store.currency, language: store.language, domain: null,
         affiliates: { enabled: false, buyers: false }, tax: { enabled: store.tax.enabled, included: store.tax.included } },
-        product: { id: product.id, title: product.title, priceCents: product.priceCents, options: [], call: null,
+        product: { id: product.id, title: product.title, priceCents: product.priceCents, options: physicalOption ? [physicalOption] : [], call: null,
           recurring: null, course: null, podcast: null, shipping: product.shipping, bundle: null, note: false, keys: null,
-          ...(singleDigital ? { file: product.file, link: null, fields: [], stamp: product.stamp } : {}) },
+          ...(singleDigital ? { file: product.file, link: null, fields: [], stamp: product.stamp } : physicalOption ? { file: null, link: null, fields: [] } : {}) },
         ...(singleDigital ? { rights: { priceCents: product.priceCents, currency: store.currency, consent: body.get("metadata[dc]") } } : {}) },
     }, confirmationRuntime);
     if (!reserved.ok) throw new Error("The payment page could not be opened");

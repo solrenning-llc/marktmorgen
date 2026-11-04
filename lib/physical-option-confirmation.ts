@@ -54,7 +54,7 @@ export function physicalOptionBodyMatches(value:unknown,maximumBytes:unknown):bo
 /** Isolated structural coverage test only. A caller still owes authenticated
  * source ownership, complete cohort checks, shipping/paid reconciliation and
  * real reviewed funding. This function neither creates nor authorizes them. */
-export function physicalOptionCovered(value:unknown,policy:unknown,now=Date.now()):boolean{
- const p=shipmentMailPolicy(policy,now);
+export function physicalOptionCovered(value:unknown,policy:unknown,now=Date.now(),admission=true):boolean{
+ const p=shipmentMailPolicy(policy,now,admission);
  return Boolean(p?.coveredOrigins?.includes('physical-option-confirmation')&&physicalOptionBodyMatches(value,p.maxPayloadBytes));
 }

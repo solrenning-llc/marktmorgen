@@ -123,3 +123,9 @@ test('coverage inspection neither executes policy getters nor modifies the origi
  const encoded=JSON.stringify(p),body=f.body.toString();Object.freeze(p.coveredOrigins);Object.freeze(p);
  assert.equal(physicalOptionCovered(f.value(),p,now),true);assert.equal(JSON.stringify(p),encoded);assert.equal(f.body.toString(),body);
 });
+test('closing admissions does not remove express lifetime coverage from existing pending work',()=>{
+ const f=original(),now=Date.now(),p={...shipmentPolicy(now),coveredOrigins:['physical-option-confirmation']},later=now+73*3600000;
+ assert.equal(physicalOptionCovered(f.value(),p,later),false,'no new admission after the original deadline');
+ assert.equal(physicalOptionCovered(f.value(),p,later,false),true,'same reviewed pending lifetime can continue');
+ assert.equal(physicalOptionCovered(f.value(),{...p,coveredOrigins:undefined},later,false),false);
+});

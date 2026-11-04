@@ -326,13 +326,18 @@ export async function reserveSingleDigitalConfirmationOrigin(input: Parameters<t
 
 /** Preserve the existing physical producer contract. Course bodies cannot
  * downgrade to a physical source and bypass explicit course funding/isolation. */
+function hasPhysicalOption(value: unknown): boolean {
+  const own = data(value), snapshot = data(own?.snapshot), product = data(snapshot?.product);
+  return typeof own?.body === "string" && (new URLSearchParams(own.body).has("metadata[option]") ||
+    product?.options !== undefined && array(product.options, 1)?.length !== 0);
+}
+function physicalOriginCovered(found: { row: ConfirmationOrigin; payload: ConfirmationOriginPayload }, policy: ShipmentMailPolicy | null, now: number): boolean {
+  return Boolean(policy && (found.row.originKind !== undefined || !hasPhysicalOption(found.payload) || physicalOptionCovered(found.payload, policy, now, false)));
+}
 export async function reserveConfirmationOrigin(input: Parameters<typeof reserveOrigin>[0], runtime: ShipmentMailRuntime = {}): Promise<{ ok: true; id: string } | { ok: false }> {
   const value = data(input);
   if (!value || typeof value.body !== "string" || new URLSearchParams(value.body).get("metadata[mm_order_origin]") !== "physical-v1") return { ok: false };
-  const snapshot = data(value.snapshot), product = data(snapshot?.product);
-  const selected = new URLSearchParams(value.body).has("metadata[option]") ||
-    product?.options !== undefined && array(product.options, 1)?.length !== 0;
-  if (selected && !physicalOptionCovered(value, confirmationOutboxPolicy(runtime), (runtime.now ?? Date.now)())) return { ok: false };
+  if (hasPhysicalOption(value) && !physicalOptionCovered(value, confirmationOutboxPolicy(runtime), (runtime.now ?? Date.now)())) return { ok: false };
   return reserveOrigin(value as Parameters<typeof reserveOrigin>[0], runtime);
 }
 
@@ -408,7 +413,7 @@ export async function claimConfirmationCreation(id: string, runtime: ShipmentMai
   if (!found) return null;
   try {
     const pipeline = runtime.pipeline ?? redisPipeline, policy = confirmationOutboxPolicy(runtime, false), owner = randomBytes(24).toString("hex");
-    if (!policy) return null;
+    if (!physicalOriginCovered(found, policy, (runtime.now ?? Date.now)())) return null;
     const started = performance.now();
     const reply = array(await pipeline([["EVAL", CONFIRMATION_ORIGIN_SCRIPT, 10, ...keys(found.row), "create", found.raw, "", (runtime.now ?? Date.now)(), owner, JSON.stringify(policy)]]));
     const receipt = reply?.length === 1 ? array(reply[0], 4) : null;
@@ -552,7 +557,7 @@ async function recoverCreation(found: NonNullable<Awaited<ReturnType<typeof read
  */
 async function confirmationUrlPermission(found: NonNullable<Awaited<ReturnType<typeof readConfirmationOrigin>>>, runtime: ConfirmationOriginRuntime): Promise<boolean> {
   const policy = confirmationOutboxPolicy(runtime, false);
-  if (!policy) return false;
+  if (!physicalOriginCovered(found, policy, (runtime.now ?? Date.now)())) return false;
   try {
     const started = performance.now(), pipeline = runtime.pipeline ?? redisPipeline;
     const requestedAt = (runtime.now ?? Date.now)();
@@ -583,13 +588,15 @@ export async function openConfirmationOrigin(id: string, runtime: ConfirmationOr
   if (!confirmationOutboxPolicy(runtime, false)) return null;
   let found = await readConfirmationOrigin(id, runtime);
   if (!found || found.row.originKind === "single_digital" && !singleDigitalAccessCovered(confirmationOutboxPolicy(runtime, false))) return null;
+  if (!physicalOriginCovered(found, confirmationOutboxPolicy(runtime, false), (runtime.now ?? Date.now)())) return null;
   let bound = winner(found);
   if (!bound) {
     const claim = await claimConfirmationCreation(id, runtime);
     if (claim) {
       let created: Record<string, unknown> | null = null;
       try {
-        if ((runtime.now ?? Date.now)() >= claim.sendBeforeMs || performance.now() >= claim.sendBeforeMonotonicMs) return null;
+        if ((runtime.now ?? Date.now)() >= claim.sendBeforeMs || performance.now() >= claim.sendBeforeMonotonicMs ||
+            !physicalOriginCovered(claim, confirmationOutboxPolicy(runtime, false), (runtime.now ?? Date.now)())) return null;
         created = await (runtime.provider ?? onAccount)("POST", claim.row.accountId, "/checkout/sessions", new URLSearchParams(claim.payload.body), undefined, `confirmation-origin:${claim.row.id}`);
       } catch { /* Unknown stays charged; the next attempt reads/replays only the original source. */ }
       if (typeof created?.id === "string") {
@@ -786,6 +793,7 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
     }
     if (found?.row.originKind === "course") { counts.unknown++; continue; }
     if (!found || found.row.accountId === DEMO_CONNECTED_ACCOUNT) { counts.unknown++; continue; }
+    if (!physicalOriginCovered(found, p, now())) { counts.unknown++; continue; }
     if (found.row.originKind === "single_digital" && (!p.coveredOrigins?.includes("single-digital-confirmation") || now() >= found.row.expiresAt)) { counts.unknown++; continue; }
     // A previous accepted outcome is never dispatched again. Its complete
     // protected source survives until original accounting is acknowledged.
@@ -833,12 +841,13 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       `checkout:${found.row.session}`, found.payload.settlementToken!, found.payload.paidCents!, { now, pipeline });
     let barrier = false;
     const beforePost = async () => {
-      if (barrier || expired() || !confirmationOutboxPolicy(runtime, false)) return false;
+      if (barrier || expired() || !physicalOriginCovered(found!, confirmationOutboxPolicy(runtime, false), now())) return false;
       // A queued email may have waited through a refund. Recheck the original
       // account immediately before its permanent dispatch barrier; never use
       // the old paid checkout status alone as present refund evidence.
       const current = await readProviderSession(found!, found!.row.session, runtime, true);
       if (!current || current.id !== found!.row.session || !knownPhysicalPayment(current) || current.amount_total !== found!.payload.paidCents || expired()) return false;
+      if (!physicalOriginCovered(found!, confirmationOutboxPolicy(runtime, false), now())) return false;
       if (found!.row.originKind === "single_digital") {
         if (typeof found!.payload.accessUrl !== "string") return false;
         const url = new URL(found!.payload.accessUrl);

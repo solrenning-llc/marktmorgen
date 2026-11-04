@@ -1223,7 +1223,7 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
   return out;
 }
 
-async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[] }> {
+async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[]; invoices: Record<string, unknown>[] }> {
   const invoices: Record<string, unknown>[] = [];
   let after = "";
   const seen = new Set<string>();
@@ -1242,7 +1242,12 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
     if (!after) break;
     if (page === pages - 1) partial = true;
   }
-  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries: renewalEntries(store, invoices) };
+  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries: renewalEntries(store, invoices), invoices };
+}
+
+/** The renewals made from paid invoices as read (renewalsFrom, renewalEntries), for numbers made from inputs kept apart. Pure. */
+export function renewalsFromInvoices(store: Store, invoices: Record<string, unknown>[], partial: boolean, now: number): SalesStats["renewals"] & { entries: Entry[]; invoices: Record<string, unknown>[] } {
+  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries: renewalEntries(store, invoices), invoices };
 }
 
 /** One paid renewal of this store's memberships and payment plans, for the buyer ledger (lib/segments.ts, 270 [GR1] unit 2). */
@@ -1344,7 +1349,7 @@ export function readStoreDisputes(store: Store, since: number, pages = DISPUTE_P
 }
 
 /** One dispute as Stripe lists it, only in a state that takes the money (DISPUTE_TAKES). */
-export type DisputeRow = { created: number; cents: number; currency: string; paymentIntent: string };
+export type DisputeRow = { created: number; cents: number; currency: string; paymentIntent: string; /** Stripe's id, so a kept reading brought up to date counts it once (C4-36 (B)). */ id?: string };
 
 /** How many pages of a hundred disputes are read for the numbers; the affiliate book reads as many. */
 const DISPUTE_PAGES = 3;
@@ -1372,7 +1377,7 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
       const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
       if (!cents) continue;
-      out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency: currencyOf(row), paymentIntent: pi });
+      out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency: currencyOf(row), paymentIntent: pi, ...(typeof row.id === "string" ? { id: row.id } : {}) });
     }
     if (!list.has_more) break;
     const last = rows[rows.length - 1];
@@ -1384,7 +1389,7 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
 }
 
 /** One refund as Stripe lists it: when, how much, in what, and the payment it gave back. */
-export type RefundRow = { created: number; cents: number; currency: string; paymentIntent: string };
+export type RefundRow = { created: number; cents: number; currency: string; paymentIntent: string; /** Stripe's or PayPal's id, so a kept reading brought up to date counts it once (C4-36 (B)). */ id?: string };
 
 /** The refunds made on the creator's account since `since` (seconds) that went through; at most `pages` pages of a hundred. */
 async function readRefunds(store: Store, since: number, pages: number): Promise<{ rows: RefundRow[]; partial: boolean }> {
@@ -1406,6 +1411,7 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
         cents: typeof row.amount === "number" ? row.amount : 0,
         currency: currencyOf(row),
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
+        ...(typeof row.id === "string" ? { id: row.id } : {}),
       });
     }
     if (!list.has_more) break;
@@ -1447,7 +1453,7 @@ export async function readLifeRecord(statsId: string | null): Promise<Map<string
 export type SalesInputs = {
   read: Sale[];
   readPartial: boolean;
-  renewalRead: (SalesStats["renewals"] & { entries: Entry[] }) | undefined;
+  renewalRead: (SalesStats["renewals"] & { entries: Entry[]; invoices: Record<string, unknown>[] }) | undefined;
   refundRead: { rows: RefundRow[]; partial: boolean } | null;
   disputeRead: { rows: DisputeRow[]; partial: boolean } | null;
 };
@@ -1480,7 +1486,7 @@ export async function readSalesInputs(store: Store, now = Date.now()): Promise<S
       const paypal = await readPayPalRefundsWithCoverage(store.statsId, since).catch(() => null);
       if (paypal === null) return null;
       return {
-        rows: [...stripe.rows, ...paypal.rows.map((r) => ({ created: r.at * 1000, cents: r.cents, currency: r.currency, paymentIntent: paypalPaymentId(r.capture) }))],
+        rows: [...stripe.rows, ...paypal.rows.map((r) => ({ created: r.at * 1000, cents: r.cents, currency: r.currency, paymentIntent: paypalPaymentId(r.capture), id: `paypal-refund:${r.capture}` }))],
         partial: stripe.partial || paypal.partial,
       };
     })(),

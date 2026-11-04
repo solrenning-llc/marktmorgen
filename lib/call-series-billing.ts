@@ -157,7 +157,10 @@
  *     again, and create only when chargeAttempt, asked again, finds nothing
  *     open left; never a create while an old PaymentIntent may still be
  *     confirmed.
- *   - On every move, run afterMove first (kept, attemptFailed cleared).
+ *   - On every move, run afterMove first (kept; attemptFailed stays, tied
+ *     to its plan by attemptAt).
+ *   - Take a move's movedAt under the series lock, so no attempt of the
+ *     plan before it starts after movedAt and is read as the new plan's.
  *   - Store the PaymentIntent a 402 decline carries (createErrorStep
  *     "record_intent"), never attemptFailed for it.
  *   - Start each attempt with startAttempt (its parameters on the
@@ -568,11 +571,14 @@ export function keptOnMove(series: SeriesKey, record: ChargeRecord, found: reado
 
 /**
  * The record once a session is moved, before anything else is decided for
- * it: `kept` from keptOnMove, and attemptFailed back to false (a refusal
- * belongs to the plan it was made for; the new plan tries again).
+ * it: `kept` from keptOnMove. attemptFailed is kept as it was: a refusal
+ * belongs to the plan it was made for, which chargeAttempt reads from
+ * attemptAt (only one made at or after the new charge.at counts), so the new
+ * plan tries again; clearing it would make the refused attempt look in
+ * flight and send its key again with the old plan's body.
  */
 export function afterMove(series: SeriesKey, record: ChargeRecord, found: readonly FoundIntent[], charge: SeriesCharge): ChargeRecord {
-  return { ...record, kept: keptOnMove(series, record, found, charge), attemptFailed: false };
+  return { ...record, kept: keptOnMove(series, record, found, charge) };
 }
 
 /**
@@ -1070,7 +1076,7 @@ export function moveCase(series: SeriesKey, record: ChargeRecord, found: readonl
   // Moved by the creator to a start whose deadline had passed: its cancelBy is its start.
   const creatorInside = charge.movedBy === "creator" && charge.way === "hold" && deadlineHours > 0 && charge.captureAt === start && charge.cancelBy === start;
   const best = live[0];
-  // A refusal with no PaymentIntent belongs to the plan before the move (afterMove clears it): the new plan is tried again, as said below.
+  // A refusal with no PaymentIntent belongs to the plan before the move (its attemptAt is before the new charge.at): the new plan is tried again, as said below.
   if (best && best.status !== "requires_capture" && best.status !== "processing") {
     // A failed payment (chargeAttempt): charged now when the buyer moved it inside the deadline; planned again when its time is later, or when a hold now replaces a failed charge; otherwise its pay link, until payBy of the step that failed.
     if (buyerInside(charge)) return at("charged_now");

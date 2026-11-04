@@ -404,7 +404,10 @@ part("The buyer moving a session inside its deadline after a failed payment");
 const failedCharge2 = rec(2, "requires_payment_method", {}, auto);
 is("a failed charge (its link open until the start): canceled, and the session charged now, as said", [chargeAttempt(SER, failedCharge2, [], go(buyerInside, NOW)), mc(buyerInside, failedCharge2, NOW + 30 * HOUR, 48)], [{ do: "create", attempt: 2, key: "series:s1:2:2", capture: "automatic", close: [cancel("pi_2")] }, "charged_now"]);
 const refusedBefore = rec(2, null, { attempt: 1, attemptAt: NOW - HOUR, attemptBody: body, attemptFailed: true });
-is("a create refused before the move: the new plan is tried, charged now, as said; the move clears the refusal", [chargeAttempt(SER, refusedBefore, [], go(buyerInside, NOW)), mc(buyerInside, refusedBefore, NOW + 30 * HOUR, 48), recordAfterMove(SER, refusedBefore, [], buyerInside).attemptFailed], [{ do: "create", attempt: 2, key: "series:s1:2:2", capture: "automatic", close: [] }, "charged_now", false]);
+const refusedMoved = recordAfterMove(SER, refusedBefore, [], buyerInside);
+is("a create refused before the move: the new plan is tried, charged now, as said; the refusal stays with its plan (afterMove runs first, as the route does)", [chargeAttempt(SER, refusedMoved, [], go(buyerInside, NOW)), mc(buyerInside, refusedMoved, NOW + 30 * HOUR, 48), refusedMoved.attemptFailed], [{ do: "create", attempt: 2, key: "series:s1:2:2", capture: "automatic", close: [] }, "charged_now", true]);
+const creatorLater = sessionCharge(2, NOW + 100 * HOUR, BOOKED, 8000, 48, NOW, "creator");
+is("a charge refused before the creator moved the session later: waits for the new plan's time, never sends the old key again with the old plan's body", [creatorLater.at, chargeAttempt(SER, recordAfterMove(SER, refusedBefore, [], creatorLater), [], go(creatorLater, NOW)).do], [NOW + 28 * HOUR, "wait"]);
 const holdDue = sessionCharge(2, NOW + 60 * HOUR, BOOKED, 8000, 48, NOW, "buyer");
 is("a failed charge moved to where a hold is due and the deadline still ahead: canceled, a hold placed now, never a payment before the deadline", [holdDue.way, chargeAttempt(SER, failedCharge2, [], go(holdDue, NOW)), mc(holdDue, failedCharge2, NOW + 60 * HOUR, 48)], ["hold", { do: "create", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [cancel("pi_2")] }, "planned"]);
 

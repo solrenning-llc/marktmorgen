@@ -43,6 +43,19 @@ import { type BackdropId, type FontId, contrast, mix } from "@/lib/store-look";
 const W = 792;
 const H = 612;
 
+/**
+ * What one file costs to draw, in its store's public requests, all taken
+ * before it is drawn (app/[handle]/certificate/[id]/pdf/route.ts): one
+ * before the certificate is read, the rest before the file is made. Measured
+ * on 4 November 2026 at 81 ms of CPU and 107 KB a file, at most 0.56 s cold
+ * and 146 KB with the longest words in every look; priced at a second of
+ * CPU, four seconds held and CERTIFICATE_PDF_MAX_BYTES sent, which
+ * tests/plan-cost-registry.test.ts holds these requests above.
+ */
+export const CERTIFICATE_PDF_UNITS = 2;
+/** The most one file weighs, with room over the heaviest measured (tests/certificate-pdf-ceiling.test.ts draws it). */
+export const CERTIFICATE_PDF_MAX_BYTES = 256_000;
+
 type Fonts = { sans: Uint8Array; semi: Uint8Array; serif: Uint8Array };
 let fonts: Promise<Fonts> | null = null;
 

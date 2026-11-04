@@ -1438,9 +1438,22 @@ export async function readLifeRecord(statsId: string | null): Promise<Map<string
   return new Map(pairs(raw));
 }
 
-/** Sales in the last STATS_DAYS days, by day, by product, and for each window. */
-export async function readSales(store: Store, now = Date.now()): Promise<SalesStats | null> {
-  if (!readsSales(store)) return null;
+/**
+ * What the sales numbers are made from, as read (C4-36 (B)): the paid sales of
+ * the last 2 x STATS_DAYS days, the renewals, refunds and disputes of the last
+ * STATS_DAYS. salesFromInputs makes the numbers from them, so a reading kept
+ * from earlier and brought up to date gives the same numbers as a whole one.
+ */
+export type SalesInputs = {
+  read: Sale[];
+  readPartial: boolean;
+  renewalRead: (SalesStats["renewals"] & { entries: Entry[] }) | undefined;
+  refundRead: { rows: RefundRow[]; partial: boolean } | null;
+  disputeRead: { rows: DisputeRow[]; partial: boolean } | null;
+};
+
+/** Everything the sales numbers are made from, read whole. */
+export async function readSalesInputs(store: Store, now = Date.now()): Promise<SalesInputs> {
   const since = Math.floor(now / 1000) - STATS_DAYS * 86400;
   // Twice as far back for the sales, so each window can be set beside the
   // stretch before it; twice the pages, so the 90 days themselves reach as far
@@ -1479,6 +1492,12 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
         })
       : Promise.resolve({ rows: [] as DisputeRow[], partial: false }),
   ]);
+  return { read, readPartial, renewalRead, refundRead, disputeRead };
+}
+
+/** The sales numbers, made from what was read (pure: no reading here). */
+export function salesFromInputs(store: Store, inputs: SalesInputs, now = Date.now()): SalesStats {
+  const { read, readPartial, renewalRead, refundRead, disputeRead } = inputs;
   const renewalEntryRows = renewalRead?.entries ?? [];
   let renewals: SalesStats["renewals"] = undefined;
   if (renewalRead) {
@@ -1689,6 +1708,12 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     d90: stretch(dayKey(now - (2 * STATS_DAYS - 1) * 86400_000), cut90),
   };
   return out;
+}
+
+/** Sales in the last STATS_DAYS days, by day, by product, and for each window. */
+export async function readSales(store: Store, now = Date.now()): Promise<SalesStats | null> {
+  if (!readsSales(store)) return null;
+  return salesFromInputs(store, await readSalesInputs(store, now), now);
 }
 
 /** Checkouts by hour of the week in UTC, Sunday 0:00 first, 168 hours: how many and the money. Pure. */

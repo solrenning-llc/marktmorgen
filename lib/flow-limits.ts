@@ -94,7 +94,10 @@ export const MAX_RETRIES_BY_YOU = 1;
 /** Ceilings for the margin review's per-run arithmetic. */
 export const RUN_START_COMMANDS = 8;
 export const HISTORY_COMMANDS_PER_STEP = 9;
-export const QUEUE_COMMANDS_PER_STEP = 6;
+// The queue's own commands for one person's step: the scan, the take from the queue, the lease, the person's row, the lease entry read with
+// it (since 4 November 2026: a stop step of another workflow may have removed it), the next step queued while leased, and the lease let go: 7.
+// The actions' own commands (a deal read and moved, a rotate's lock, a stop's removal) are not in it yet: measured and added in the follow-up on workflow step costs.
+export const QUEUE_COMMANDS_PER_STEP = 7;
 /**
  * One wait, at the most, for a batch of one person (the dearest case; a
  * batch shares its reads): the job's queue scans, take and lease (6), the

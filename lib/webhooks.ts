@@ -1160,7 +1160,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
   const handles = saleHandles(store);
   let meta = (object.metadata ?? {}) as Record<string, string>;
   // The order's own title (meta.title) stands in only for its own product when its listing is gone, never for a
-  // product in a bundle or ticked at checkout, which it does not name.
+  // product in a bundle or checked at checkout, which it does not name.
   const product = async (id: string | undefined) => {
     const found = id ? await readListing(store, id) : null;
     return { id: id ?? null, title: found?.title ?? (id === meta.product ? meta.title : null) ?? null };

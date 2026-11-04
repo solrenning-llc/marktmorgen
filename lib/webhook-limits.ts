@@ -21,7 +21,7 @@ export const MESSAGE_TEXT_MAX = 256;
  * data registry prices a delivery at this (tests/store-data-registry.ts) and
  * the recent events read up to LOG_SIZE of them (lib/api-read-rules.ts,
  * eventsWork). The largest message the code makes is a sale of a bundle of
- * MAX_BUNDLE_ITEMS with three products ticked at checkout, each a bundle of
+ * MAX_BUNDLE_ITEMS with three products checked at checkout, each a bundle of
  * as many: with every text at its longest in the character that escapes
  * worst once cleaned (a quotation mark, four bytes kept), about 45 KB kept;
  * with titles in a three-byte script, about 30 KB

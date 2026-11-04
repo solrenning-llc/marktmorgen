@@ -889,7 +889,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hooks:d:@lib/webhooks.ts": { what: "One delivery and how it went, a week", parts: [
     // Bounded where it is made (lib/webhooks.ts, emitEvent: every text cleaned and cut at MESSAGE_TEXT_MAX, a message past
     // the bound kept as a line that says so). The largest message the code makes, a sale of a full bundle with three full
-    // bundles ticked at checkout, every text at its longest in quotation marks, is about 45 KB (tests/api-events-measured.test.ts).
+    // bundles checked at checkout, every text at its longest in quotation marks, is about 45 KB (tests/api-events-measured.test.ts).
     // A message is kept only by a delivery the month counted: made with the month's deliveries used it is a line, and a
     // try refused for them drops it (attempt).
     per("webhook", 7, DELIVERY_MAX_BYTES, "One delivery and how it went, a week, at the most a delivery is kept at (DELIVERY_MAX_BYTES)"),

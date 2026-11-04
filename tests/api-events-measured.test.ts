@@ -3,7 +3,7 @@
  * get_emails pay for what they really read and send, measured before they
  * read it, and a webhook delivery is bounded where it is made.
  *
- * A sale of a bundle of twenty products, with three products ticked at
+ * A sale of a bundle of twenty products, with three products checked at
  * checkout that are each a bundle of twenty, every title eighty characters of
  * a three-byte script, is kept at about 30 KB a delivery: fifty of them are
  * what the events read. The route used to take a flat count priced at 4 KB a
@@ -102,7 +102,7 @@ async function main(): Promise<void> {
   const key = made.key;
   is("an endpoint hears sales", (await addEndpoint(await mine(), "https://hooks.example.net/in", ["sale.completed"])).ok, true);
 
-  part("The largest sale the code makes: a bundle of twenty, three ticked at checkout, each a bundle of twenty, every title 80 characters of a three-byte script");
+  part("The largest sale the code makes: a bundle of twenty, three checked at checkout, each a bundle of twenty, every title 80 characters of a three-byte script");
   const ids: string[] = [];
   for (let i = 0; i < 84; i += 1) {
     const added = await addProduct(OWNER, `${"€".repeat(78)}${String(i).padStart(2, "0")}`, "", "10");
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
   const largest = Math.max(...sizes);
   console.log(`  a delivery of this sale is kept at ${largest.toLocaleString("en-US")} bytes; the ${LOG_SIZE} at ${sizes.reduce((a, b) => a + b, 0).toLocaleString("en-US")}`);
   const sample = (await recentMessages(await mine(), "sale.completed", 1))[0] as { data: { bundle_items: unknown[]; order_bumps: { bundle_items: unknown[] }[] } };
-  is("the message names the bundle and every product ticked, each with its own bundle", [sample.data.bundle_items.length, sample.data.order_bumps.length, sample.data.order_bumps.map((b) => b.bundle_items.length)], [20, 3, [20, 20, 20]]);
+  is("the message names the bundle and every product checked, each with its own bundle", [sample.data.bundle_items.length, sample.data.order_bumps.length, sample.data.order_bumps.map((b) => b.bundle_items.length)], [20, 3, [20, 20, 20]]);
   is("far past the 4 KB a delivery was priced at", largest > 7 * 4 * 1024, true);
   is("inside the bound a delivery is made under, with the room its tries write later", largest <= DELIVERY_WRITE_MAX_BYTES, true);
   const family = FAMILIES["nl:hooks:d:@lib/webhooks.ts"];
@@ -257,7 +257,7 @@ async function main(): Promise<void> {
   const gone = (await recentMessages(await mine(), "sale.completed", 10)).find((m) => (m.data as { checkout_session: string }).checkout_session === "cs_BigSale900")!.data as {
     product: { title: string | null }; bundle_items: { title: string | null }[]; order_bump: { title: string | null; bundle_items: { title: string | null }[] };
   };
-  is("its own product: the order's title; a bundle's product or one ticked: none", [gone.product.title, gone.bundle_items[0].title, gone.order_bump.title, gone.order_bump.bundle_items[0].title], ["The order's own title", null, null, null]);
+  is("its own product: the order's title; a bundle's product or one checked: none", [gone.product.title, gone.bundle_items[0].title, gone.order_bump.title, gone.order_bump.bundle_items[0].title], ["The order's own title", null, null, null]);
 
   part("get_emails with a kept copy of what they sold of 172 KB: measured, set aside and settled at it");
   const store = await mine();

@@ -251,6 +251,9 @@ O #1502 do Codex adapta tests/workflow-retries.test.ts (fixture SES, perda de AC
 ### C2-76 — 04/11/2026 08h15 — Sim: 'erase' em LOCKED_NEEDS (risco de segurança)
 Faça agora, como primeira prioridade: acrescente 'erase' em LOCKED_NEEDS (lib/two-step.ts:192), num PR pequeno com teste que falha antes (sessão bloqueada pela recuperação de conta recebe recusa em app/api/store/person/route.ts e nada é apagado). Confira em docs/reservations/ se lib/two-step.ts ou o teste estão reservados por outro agente; se estiverem, combine pela caixa antes, mas não espere mais que uma rodada. Procure também outras permissões sem volta (apagar loja, apagar arquivos, reembolso, exportar dados) fora de LOCKED_NEEDS e liste no PR o que achar; corrija na mesma linha de raciocínio, com teste.
 
+### C2-77 — 04/11/2026 08h30 — URGENTE: uso da semana em 91%, renova só quinta 13h00 — desacelere já (AV10)
+O dono viu agora (06h25): sua conta está com **91% do uso semanal**, a sessão em 68%, e o aviso diz que nesse ritmo o limite acaba **hoje à noite**, antes da renovação de quinta-feira, 05/11, às 13h00 (~31 h). Acabar antes deixa você parada (AV10). A partir de agora, até a renovação: (1) **no máximo 2 subagentes** (1 construindo, 1 lendo/revisando) e esforço **Médio**, exceto código de dinheiro e segurança; (2) **nenhuma unidade nova grande**: use o que resta para levar ao main o que já está quase pronto, nesta ordem: a correção de segurança do 'erase' (C2-76), o #1853 e a correção do quadro, o PF1 (C2-63/C2-70), o #1496, o #2061 e os leves da C2-73/C2-74; (3) revisões independentes grandes podem ficar com o Revisor 1 na nuvem, que já vigia os seus ramos; (4) confira o uso a cada 2 horas e mantenha o ritmo para chegar a quinta 13h00 entre 95% e 100%, sem zerar antes. Se o uso cair abaixo do orçamento, suba de novo. Depois da renovação, volte aos 6 subagentes.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens

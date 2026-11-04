@@ -66,6 +66,30 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
   return clean;
 }
 
+/**
+ * A teammate who moved their sign-in to another address keeps exactly the
+ * restrictions they had: the field is moved as it is, unreadable or not. If
+ * it cannot be moved, the new address gets a field that cannot be read, which
+ * opens nothing (accessOf), never one that reads as no restriction.
+ */
+export async function movePipelineAccess(statsId: string | null, from: string, to: string): Promise<void> {
+  if (!statsId || !isRedisConfigured()) return;
+  const before = normaliseEmail(from);
+  const after = normaliseEmail(to);
+  if (before === after) return;
+  try {
+    const [raw] = await redisPipeline([["HGET", accessKey(statsId), before]]);
+    if (raw === null || raw === undefined || raw === "") return;
+    await redisPipeline([
+      ["HSET", accessKey(statsId), after, String(raw)],
+      ["HDEL", accessKey(statsId), before],
+    ]);
+  } catch (error) {
+    await redisPipeline([["HSET", accessKey(statsId), after, "unreadable"]]).catch(() => {});
+    throw error;
+  }
+}
+
 /** A teammate who left: their restrictions go with them. */
 export async function forgetPipelineAccess(statsId: string | null, email: string): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;

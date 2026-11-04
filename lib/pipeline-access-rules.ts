@@ -52,4 +52,4 @@ export function visiblePipelines(pipelines: readonly Pipeline[], role: Role, map
 }
 
 /** What a refused change tells the person, in plain words. */
-export const PIPELINE_ACCESS_REFUSAL = "You can see this pipeline but not change it. Ask the store's owner or an Admin to change your access.";
+export const PIPELINE_ACCESS_REFUSAL = "Your access does not let you change this pipeline. Ask the store's owner to change your access.";

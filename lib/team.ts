@@ -31,7 +31,7 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
-import { forgetPipelineAccess } from "@/lib/pipeline-access";
+import { forgetPipelineAccess, movePipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
@@ -525,6 +525,8 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
       return team.members.find((m) => m.email === before)?.role ?? "support";
     });
     if (!role) continue;
+    // What they may do with each pipeline (639 [GL7](7)) moves with them: never left behind as no restriction.
+    await movePipelineAccess(store.statsId, before, after).catch((error) => console.error("moving pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
     await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
   }

@@ -780,6 +780,9 @@ Decisão (pelo dono): quando o criador liga a exigência de segunda etapa para a
 ### C3-102 — 04/11/2026 13h05 — Respostas às 12h48 (mail-ledger-counted)
 (1) **Excedente na hora do envio: (c)**, como você sugeriu. Cobre das unidades do mês do envio, se houver. Se não houver, o envio espera o próximo mês com unidades e o criador recebe um aviso claro no estúdio, com o motivo e a data provável. Nunca envie sem unidade paga. (2) **Mês do custo: NÃO aceite como pré-pago.** Se o criador cancelar ou parar de pagar antes do mês do envio, o e-mail sairia num mês sem receita, ou seja, com prejuízo, contra a MR, que vale mês a mês. Por isso: a reserva é tirada das unidades do **mês do envio** (os agendamentos de cada mês somados não passam da cota daquele mês, conferido ao agendar), e o envio é cancelado, com aviso ao criador, se o plano não estiver pago e ativo no mês do envio; nada é cobrado nem enviado depois do fim do plano. Teste: agenda para daqui a 3 meses, plano encerrado antes, nada sai; agendamentos de um mês além da cota daquele mês, recusados ao agendar. Corrija o alto e os médios da revisão antes do PR; a C3-101 segue em paralelo.
 
+### C3-103 — 04/11/2026 13h10 — Tire a linha 636 [GL4](d) de docs/reservations/claude3.md, agora
+A sua linha 636 [GL4](d) (ramo claude3/review-summary-keep, já incorporado no #2138) ainda reserva lib/review-proof.ts no main, e isso derruba a conferência de reservas do #2158 do Claude 4 (correção das contestações perdidas, revisada sem grave). Tire essa linha num PR só de documento, agora, junto com qualquer outra de PR seu já incorporado (confira cada uma com o estado do PR no GitHub), e avise no canal. Regra: a linha sai no próprio PR que incorpora a unidade.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

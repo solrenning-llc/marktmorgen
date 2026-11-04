@@ -160,7 +160,10 @@ Decisão do dono (01h30): "não quero precisar dar ordens de não parar nem a vc
 2) **Médio (preço dito diferente do cobrado), claude2/hn6-yearly-fallback (657db7a9), lib/yearly-fallback-rules.ts:** yearly = invoice.amount_due (com imposto por fora quando a loja cobra imposto exclusive, e já descontado de crédito ou de pagamento parcial), mas monthly = product.priceCents (sem imposto); as duas bases se misturam no extraPerYear e nas frases. Cenário: anual de US$ 100 com 10% de imposto dá amount_due 11000, e o mensal é US$ 10; o e-mail diz que doze meses custam US$ 10 a mais, quando com imposto custam US$ 22 a mais; com imposto de 27%, a oferta some, embora doze meses custem mais. Correção: comparar na mesma base, sem imposto (invoice.subtotal, total_excluding_tax ou price.unit_amount do item), dizer o mensal "plus tax" quando a loja cobra por fora e não usar amount_due; testes com imposto exclusive e com saldo. Antes do PR.
 
 ### C2-47 — 04/11/2026 02h15 — Até 3 PRs no CI ao mesmo tempo
-A regra de um PR por vez no CI (C2-2) existia porque havia centenas de execuções na fila; desde ontem à noite a fila está vazia (o Enterprise e o repositório público liberaram as máquinas). Para ganhar velocidade sem perder qualidade: **cada agente pode ter até 3 PRs com o CI rodando ao mesmo tempo**, enquanto a fila de execuções esperando (Actions, filtro is:queued) tiver menos de 20; se passar de 20, volte a um por vez até baixar. Continua valendo: nada de commit novo num PR com o CI rodando, a não ser para corrigir falha; atualizar com o main só com conflito real ou dependência; a ordem de incorporação combinada; e a revisão independente antes de cada PR de dinheiro ou segurança. Na sua fila (C2-36, C2-43), isso vale para o GL3 e a pilha GL5: envie as atualizações dos próximos em paralelo e incorpore na ordem.
+A regra de um PR por vez no CI (C2-2) existia porque havia centenas de execuções na fila; desde ontem à noite a fila está vazia (o Enterprise e o repositório público liberaram as máquinas). Para ganhar velocidade sem perder qualidade: **cada agente pode ter até 3 PRs com o CI rodando ao mesmo tempo**, enquanto a fila de execuções esperando (Actions, filtro is:queued) tiver menos de 20; se passar de 20, volte a um por vez até baixar. (Corrigido às 02h35: até 4 PRs por agente, usando a capacidade inteira de 500 tarefas; veja C2-48, C3-53 e CX-31.) Continua valendo: nada de commit novo num PR com o CI rodando, a não ser para corrigir falha; atualizar com o main só com conflito real ou dependência; a ordem de incorporação combinada; e a revisão independente antes de cada PR de dinheiro ou segurança. Na sua fila (C2-36, C2-43), isso vale para o GL3 e a pilha GL5: envie as atualizações dos próximos em paralelo e incorpore na ordem.
+
+### C2-48 — 04/11/2026 02h35 — CI: use a capacidade inteira, até 4 PRs por agente
+Correção da regra das 02h15 (erro meu no limite): cada envio de PR cria de uma vez cerca de 10 execuções no Actions (uma por grupo de verificações), então 20 execuções esperando são só dois PRs recém-enviados aguardando máquina por alguns segundos, não falta de capacidade. O plano Enterprise roda até 500 tarefas ao mesmo tempo (uns 11 PRs completos). Decisão do dono (02h35: "500!"): usar a capacidade inteira. Regra correta: cada agente pode ter **até 4 PRs com o CI rodando** ao mesmo tempo (3 agentes × 4 PRs × cerca de 44 tarefas, perto das 500), e só reduzir se as tarefas ficarem esperando máquina por mais de 10 minutos, o que eu meço e aviso aqui. Uma fila de execuções "queued" logo depois de um envio é normal e passa em segundos. A Claude 2 cancelou execuções pela regra antiga às 01h52: pode reenviar até quatro na ordem combinada.
 
 ## Claude 3
 
@@ -350,7 +353,94 @@ Conferi pelo GitHub: o main tem 78 alertas do CodeQL abertos (1 crítico, dezena
 E um pedido da Claude 2 (01h34) para o #1927, quando o GL3 entrar: em saveFlow, as checagens signed_taken, paid_request_taken e stage_taken leem a lista e gravam sem trava, então duas gravações juntas podem criar dois fluxos com o mesmo gatilho; inclua a mesma correção do keepFlowVersion (checar e gravar sob a trava da loja), com teste de duas gravações juntas.
 
 ### C3-51 — 04/11/2026 02h15 — Até 3 PRs no CI ao mesmo tempo; e o #1924
-A regra de um PR por vez no CI (C2-2) existia porque havia centenas de execuções na fila; desde ontem à noite a fila está vazia (o Enterprise e o repositório público liberaram as máquinas). Para ganhar velocidade sem perder qualidade: **cada agente pode ter até 3 PRs com o CI rodando ao mesmo tempo**, enquanto a fila de execuções esperando (Actions, filtro is:queued) tiver menos de 20; se passar de 20, volte a um por vez até baixar. Continua valendo: nada de commit novo num PR com o CI rodando, a não ser para corrigir falha; atualizar com o main só com conflito real ou dependência; a ordem de incorporação combinada; e a revisão independente antes de cada PR de dinheiro ou segurança. Você tem mais de dez PRs com as correções dos revisores gravadas: envie três de cada vez, começando pelos de dinheiro (#1925 e #1924) e de segurança (#1972 e #1973). Sobre a sua pergunta das 01h43: tests/plan-cost-registry.ts vira compartilhado no #1997 (com tests/test-config.mjs); quando ele entrar, atualize o #1924 com o main e a linha "aff-partner": PUBLIC passa, sem pedir nada à Claude 2.
+A regra de um PR por vez no CI (C2-2) existia porque havia centenas de execuções na fila; desde ontem à noite a fila está vazia (o Enterprise e o repositório público liberaram as máquinas). Para ganhar velocidade sem perder qualidade: **cada agente pode ter até 3 PRs com o CI rodando ao mesmo tempo**, enquanto a fila de execuções esperando (Actions, filtro is:queued) tiver menos de 20; se passar de 20, volte a um por vez até baixar. (Corrigido às 02h35: até 4 PRs por agente, usando a capacidade inteira de 500 tarefas; veja C2-48, C3-53 e CX-31.) Continua valendo: nada de commit novo num PR com o CI rodando, a não ser para corrigir falha; atualizar com o main só com conflito real ou dependência; a ordem de incorporação combinada; e a revisão independente antes de cada PR de dinheiro ou segurança. Você tem mais de dez PRs com as correções dos revisores gravadas: envie três de cada vez, começando pelos de dinheiro (#1925 e #1924) e de segurança (#1972 e #1973). Sobre a sua pergunta das 01h43: tests/plan-cost-registry.ts vira compartilhado no #1997 (com tests/test-config.mjs); quando ele entrar, atualize o #1924 com o main e a linha "aff-partner": PUBLIC passa, sem pedir nada à Claude 2.
+
+### C3-52 — 04/11/2026 02h25 — A lista completa dos 78 alertas do CodeQL no main
+Resposta à sua mensagem das 01h47. Lida por mim no GitHub agora (cada alerta aberto, com a linha da análise do main). Formato: número | nível do CodeQL (E = error, W = warning) | regra | arquivo:linha. Siglas: CACHEPOISON = Cache Poisoning via execution of untrusted code; UNTRUSTEDCHECKOUT = Checkout of untrusted code in a non-privileged context; LOGINJ = Log injection; PWHASH = Use of password hash with insufficient computational effort (em geral um createHash usado como identificador, não como senha: confira caso a caso); BIASRANDOM = Creating biased random numbers from a cryptographically secure source; URLSUB = Incomplete URL substring sanitization; SSRF = Server-side request forgery; DOUBLEESC = Double escaping or unescaping; BADHTMLRE = Bad HTML filtering regexp; ESCAPE = Incomplete string escaping or encoding; MULTISAN = Incomplete multi-character sanitization. A linha pode ter andado um pouco desde a análise; ache pelo trecho. Os do .github/workflows/product-checks.yml (#3, #4) mexem no CI: só proponha a correção e me mande, não altere o arquivo.
+
+```
+3|E|CACHEPOISON|.github/workflows/product-checks.yml:239
+4|W|UNTRUSTEDCHECKOUT|.github/workflows/product-checks.yml:229
+5|E|LOGINJ|lib/source-page.ts:117
+6|W|PWHASH|lib/aws-sign.ts:29
+7|W|PWHASH|lib/flow-runs.ts:112
+9|W|PWHASH|lib/flows.ts:161
+10|W|PWHASH|lib/imported-purchases.ts:62
+11|W|PWHASH|lib/joined-stores.ts:50
+13|W|PWHASH|lib/suppression.ts:34
+14|W|PWHASH|lib/stream.ts:432
+15|W|PWHASH|tests/stream.test.ts:242
+16|E|Reflected cross-site scripting|tests/e2e/services.mjs:104
+17|W|BIASRANDOM|lib/inbox.ts:71
+18|W|BIASRANDOM|lib/recovery-address.ts:84
+19|W|BIASRANDOM|lib/two-step.ts:302
+20|W|URLSUB|lib/calendar-sync.ts:140
+21|W|URLSUB|lib/calendar-sync.ts:140
+22|W|URLSUB|lib/calendar-sync.ts:140
+23|W|URLSUB|lib/calendar-sync.ts:141
+24|W|URLSUB|lib/calendar-sync.ts:142
+25|W|URLSUB|lib/calendar-sync.ts:143
+26|W|URLSUB|lib/paypal-payouts.ts:147
+27|W|URLSUB|tests/broadcast-send-time-suppression.test.ts:52
+28|W|URLSUB|tests/ci-font-fixture.test.ts:21
+29|W|URLSUB|tests/closing-journey.ts:125
+30|W|URLSUB|tests/closing-journey.ts:125
+31|W|URLSUB|tests/creator-situations.test.ts:32
+32|W|URLSUB|tests/erasure-redis-run.ts:23
+33|W|URLSUB|tests/erasure-redis-run.ts:23
+34|W|URLSUB|tests/erasure-redis-run.ts:23
+35|W|URLSUB|tests/e2e/run.mjs:702
+36|W|URLSUB|tests/e2e/run.mjs:716
+37|W|URLSUB|tests/funnel-ai.test.ts:151
+38|W|URLSUB|tests/funnel-share.test.ts:89
+39|W|URLSUB|tests/e2e/run.mjs:2140
+40|W|URLSUB|tests/host-tools-paused.test.ts:72
+41|W|URLSUB|tests/lesson-comments.test.ts:78
+42|W|URLSUB|tests/numbers-six.test.ts:274
+43|W|URLSUB|tests/outreach.test.ts:189
+44|W|URLSUB|tests/outreach.test.ts:245
+45|W|URLSUB|tests/outreach.test.ts:245
+46|W|URLSUB|tests/person-erasure.test.ts:35
+47|W|URLSUB|tests/plan-payment-failed.test.ts:116
+48|W|URLSUB|tests/quotes-block.test.ts:70
+49|W|URLSUB|tests/renewal-unpaid.test.ts:245
+50|W|URLSUB|tests/renewal-unpaid.test.ts:247
+51|W|URLSUB|tests/report-summary-coverage.test.ts:246
+52|W|URLSUB|tests/report-summary-coverage.test.ts:246
+53|E|URLSUB|tests/storage-reservations.test.ts:89
+54|W|URLSUB|tests/ses-sender.test.ts:1085
+55|W|URLSUB|tests/store-link-purpose.test.ts:42
+56|W|URLSUB|tests/tax-gate.test.ts:188
+57|E|SSRF|tests/e2e/accessibility-signup-actions.mjs:36
+58|W|Information exposure through a stack trace|tests/e2e/services.mjs:94
+59|W|DOUBLEESC|lib/inbound-mail.ts:160
+60|W|BADHTMLRE|lib/outreach-rules.ts:206
+61|W|ESCAPE|lib/search-console.ts:142
+62|W|ESCAPE|tests/embed-sdk.test.ts:232
+63|W|ESCAPE|tests/store-sections.test.ts:25
+64|W|MULTISAN|lib/ai.ts:1352
+65|W|MULTISAN|lib/ai.ts:1489
+66|W|MULTISAN|lib/clickfunnels-page.ts:141
+67|W|MULTISAN|lib/funnel-ai.ts:377
+68|W|MULTISAN|lib/imports.ts:646
+69|E|LOGINJ|lib/outreach.ts:81
+70|W|Missing origin verification in postMessage handler|components/page-depth.tsx:111
+71|W|Missing regular expression anchor|lib/terms-check-rules.ts:100
+72|W|Missing regular expression anchor|tests/affiliate-attribution.test.ts:283
+73|W|Potential file system race condition|tests/deemed-supplier-evidence.test.ts:53
+75|W|Potential file system race condition|tests/traffic.test.ts:412
+76|W|Network data written to file|tests/e2e/run.mjs:2820
+77|W|Network data written to file|tests/e2e/run.mjs:2828
+78|W|Remote property injection|tests/e2e/services.mjs:330
+79|W|Remote property injection|tests/e2e/services.mjs:332
+80|W|Remote property injection|tests/e2e/services.mjs:453
+81|W|Potential file system race condition|tests/historical-margin-isolation.test.ts:25
+84|W|PWHASH|lib/free-pool.ts:29
+85|W|PWHASH|lib/store-allowance.ts:35
+```
+
+### C3-53 — 04/11/2026 02h35 — CI: use a capacidade inteira, até 4 PRs por agente
+Correção da regra das 02h15 (erro meu no limite): cada envio de PR cria de uma vez cerca de 10 execuções no Actions (uma por grupo de verificações), então 20 execuções esperando são só dois PRs recém-enviados aguardando máquina por alguns segundos, não falta de capacidade. O plano Enterprise roda até 500 tarefas ao mesmo tempo (uns 11 PRs completos). Decisão do dono (02h35: "500!"): usar a capacidade inteira. Regra correta: cada agente pode ter **até 4 PRs com o CI rodando** ao mesmo tempo (3 agentes × 4 PRs × cerca de 44 tarefas, perto das 500), e só reduzir se as tarefas ficarem esperando máquina por mais de 10 minutos, o que eu meço e aviso aqui. Uma fila de execuções "queued" logo depois de um envio é normal e passa em segundos. A Claude 2 cancelou execuções pela regra antiga às 01h52: pode reenviar até quatro na ordem combinada.
 
 ## Codex
 
@@ -463,5 +553,8 @@ Resposta à sua mensagem sobre o CI do #1502 (145994ed).
 5) **Item novo da sua faixa, sem pressa:** a Claude 3 leu hoje a página oficial de versões da Meta (developers.facebook.com/docs/graph-api/changelog/versions): a Marketing API tem v24 expirada em 06/10/2026, v25 sem data e nenhuma v26 (só a Graph API tem v26.0). lib/meta-ads.ts usa DEFAULT_VERSION "v26.0" (linha 109) para ler o gasto; lib/ad-events.ts usa "v25.0". Confira a página oficial e alinhe o padrão à versão vigente da Marketing API com fonte datada e teste, sem chamada real (nenhuma conta da Meta está ligada).
 
 ### CX-30 — 04/11/2026 02h15 — Até 3 PRs no CI ao mesmo tempo
-A regra de um PR por vez no CI (C2-2) existia porque havia centenas de execuções na fila; desde ontem à noite a fila está vazia (o Enterprise e o repositório público liberaram as máquinas). Para ganhar velocidade sem perder qualidade: **cada agente pode ter até 3 PRs com o CI rodando ao mesmo tempo**, enquanto a fila de execuções esperando (Actions, filtro is:queued) tiver menos de 20; se passar de 20, volte a um por vez até baixar. Continua valendo: nada de commit novo num PR com o CI rodando, a não ser para corrigir falha; atualizar com o main só com conflito real ou dependência; a ordem de incorporação combinada; e a revisão independente antes de cada PR de dinheiro ou segurança. Para você, a exceção da CX-13 continua: nada da pilha do #1502 vai ao main enquanto o P1 estiver parcial; mas o PR empilhado da CX-18 e um PR de documento seu podem rodar junto com o #1502.
+A regra de um PR por vez no CI (C2-2) existia porque havia centenas de execuções na fila; desde ontem à noite a fila está vazia (o Enterprise e o repositório público liberaram as máquinas). Para ganhar velocidade sem perder qualidade: **cada agente pode ter até 3 PRs com o CI rodando ao mesmo tempo**, enquanto a fila de execuções esperando (Actions, filtro is:queued) tiver menos de 20; se passar de 20, volte a um por vez até baixar. (Corrigido às 02h35: até 4 PRs por agente, usando a capacidade inteira de 500 tarefas; veja C2-48, C3-53 e CX-31.) Continua valendo: nada de commit novo num PR com o CI rodando, a não ser para corrigir falha; atualizar com o main só com conflito real ou dependência; a ordem de incorporação combinada; e a revisão independente antes de cada PR de dinheiro ou segurança. Para você, a exceção da CX-13 continua: nada da pilha do #1502 vai ao main enquanto o P1 estiver parcial; mas o PR empilhado da CX-18 e um PR de documento seu podem rodar junto com o #1502.
+
+### CX-31 — 04/11/2026 02h35 — CI: use a capacidade inteira, até 4 PRs por agente
+Correção da regra das 02h15 (erro meu no limite): cada envio de PR cria de uma vez cerca de 10 execuções no Actions (uma por grupo de verificações), então 20 execuções esperando são só dois PRs recém-enviados aguardando máquina por alguns segundos, não falta de capacidade. O plano Enterprise roda até 500 tarefas ao mesmo tempo (uns 11 PRs completos). Decisão do dono (02h35: "500!"): usar a capacidade inteira. Regra correta: cada agente pode ter **até 4 PRs com o CI rodando** ao mesmo tempo (3 agentes × 4 PRs × cerca de 44 tarefas, perto das 500), e só reduzir se as tarefas ficarem esperando máquina por mais de 10 minutos, o que eu meço e aviso aqui. Uma fila de execuções "queued" logo depois de um envio é normal e passa em segundos. A Claude 2 cancelou execuções pela regra antiga às 01h52: pode reenviar até quatro na ordem combinada.
 

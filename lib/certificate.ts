@@ -267,7 +267,9 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
   const found = await readCertificate(id);
   if (!found || found.courseId !== courseId) return false;
   if (!found.withdrawnAt) {
-    await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) })]]);
+    // XX: only while it is still there, so a withdrawal racing the person's deletion never writes it back.
+    const [written] = await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]);
+    if (written === null) return false;
   }
   const who = emailKey(found.email);
   const [current] = await redisPipeline([["HGET", indexKey(courseId), who]]);
@@ -300,25 +302,25 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
       });
     }
     const list = [...ids].filter((id) => CERT_ID_PATTERN.test(id));
-    // What each took when it was issued (the record as made, withdrawnAt 0), read before it goes, to give back to the course's slot.
+    // Each record taken out with GETDEL, so only the deletion that removed it
+    // gives back what it took when issued (the record as made, withdrawnAt 0):
+    // two deletions at once never give the same room back twice.
     let freed = 0;
-    if (room) {
-      for (let i = 0; i < list.length; i += 500) {
-        const chunk = list.slice(i, i + 500);
-        const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
-        for (const raw of Array.isArray(rows) ? rows : []) {
-          if (typeof raw !== "string") continue;
-          try {
-            const value = JSON.parse(raw) as Record<string, unknown>;
-            if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0 })], 3);
-          } catch {
-            // Unreadable: nothing is known of what it took, so nothing is given back for it.
-          }
+    for (let i = 0; i < list.length; i += 500) {
+      const chunk = list.slice(i, i + 500);
+      const rows = await redisPipeline(chunk.map((id) => ["GETDEL", certKey(id)]));
+      for (const raw of rows) {
+        if (typeof raw !== "string") continue;
+        try {
+          const value = JSON.parse(raw) as Record<string, unknown>;
+          if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0 })], 3);
+        } catch {
+          // Unreadable: nothing is known of what it took, so nothing is given back for it.
         }
       }
     }
     await redisPipeline([
-      ["DEL", byKey(courseId, who), ...list.map(certKey)],
+      ["DEL", byKey(courseId, who)],
       ["HDEL", indexKey(courseId), who],
       ...(list.length ? [["SREM", allKey(courseId), ...list]] : []),
     ]);

@@ -436,6 +436,15 @@ export class MemoryRedis {
           }
           return n;
         }
+        if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
+          const listKey = args[1];
+          this.live(listKey);
+          const list = this.list(listKey);
+          list.unshift(args[2]);
+          const out: string[] = [];
+          while (list.length > Number(args[3])) out.push(list.pop()!);
+          return out;
+        }
         if (key.startsWith("-- marktmorgen:form-forget:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);

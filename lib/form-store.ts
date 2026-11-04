@@ -16,7 +16,7 @@
  * its room back. The forms themselves are few and bounded (MAX_FORMS).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type FormDef, type FormResponse, FORM_RESPONSE_ID, FORM_ID, KEPT_RESPONSES, MAX_FORMS, parseForm } from "@/lib/forms";
 
@@ -88,16 +88,33 @@ export async function dropForm(statsId: string, id: string, room: DataStore): Pr
 
 const ANSWERS_SLOT = (formId: string) => `fr:${formId}`;
 
-/** Keeps one response, the newest first, and lets the oldest go past KEPT_RESPONSES. */
+/** One response kept, the newest first, and the ones past ARGV[2] let go, answered: what was really let go. */
+export const KEEP_FORM_RESPONSE = `-- marktmorgen:form-keep:v1
+redis.call("LPUSH", KEYS[1], ARGV[1])
+local out = {}
+while redis.call("LLEN", KEYS[1]) > tonumber(ARGV[2]) do
+  table.insert(out, redis.call("RPOP", KEYS[1]))
+end
+return out`;
+
+/**
+ * Keeps one response, the newest first, and lets the oldest go past
+ * KEPT_RESPONSES. The room is taken first from what is read (the new one
+ * less the oldest that should go), then set right from what the keep really
+ * let go, in one script, so a deletion of the person's responses at the same
+ * time, or another response, never leaves the room counting less than is kept.
+ */
 export async function addResponse(statsId: string, formId: string, response: FormResponse, room: DataStore): Promise<void> {
   const json = JSON.stringify(response);
   const [kept, oldest] = await redisPipeline([["LLEN", responsesKey(statsId, formId)], ["LINDEX", responsesKey(statsId, formId), -1]]);
-  const dropped = Number(kept) >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
-  await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: dataBytes([json], 1) - dropped }]);
-  await redisPipeline([
-    ["LPUSH", responsesKey(statsId, formId), json],
-    ["LTRIM", responsesKey(statsId, formId), 0, KEPT_RESPONSES - 1],
-  ]);
+  const guessed = Number(kept) >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
+  const charged = dataBytes([json], 1) - guessed;
+  await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
+  const [gone] = await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]);
+  const dropped = (Array.isArray(gone) ? gone : []).reduce<number>((sum, raw) => sum + (typeof raw === "string" ? dataBytes([raw], 1) : 0), 0);
+  const off = dataBytes([json], 1) - dropped - charged;
+  if (off > 0) await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: off }]);
+  else if (off < 0) await giveData(room, [{ slot: ANSWERS_SLOT(formId), bytes: -off }]);
 }
 
 function parseResponse(raw: unknown): FormResponse | null {

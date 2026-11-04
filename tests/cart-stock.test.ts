@@ -13,6 +13,9 @@
  *     hold cannot be written is closed at Stripe; a provisional hold that
  *     lapsed is let go without asking Stripe;
  *   - a cart of unlimited products takes no lock and holds nothing;
+ *   - a product bought alone (withStockHold) takes the same lock and the
+ *     same provisional hold as a cart, so the two never both get the last
+ *     unit, even when its lock runs out while Stripe opens its checkout;
  *   - going back from Stripe and paying again closes the old checkout first
  *     and hands its units back; a paid one is never handed back, nor one
  *     Stripe will not close because it was just paid;
@@ -28,7 +31,7 @@ import { NextRequest } from "next/server";
 import { cartable } from "@/lib/cart-rules";
 import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
-import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds, withStockHold } from "@/lib/stock";
 import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { GET as readCart, POST as payCart } from "@/app/api/store/cart/route";
 import { NO_DEAL } from "@/lib/cart-rules";
@@ -117,13 +120,53 @@ async function main(): Promise<void> {
   });
   const locks = await redis.pipeline([["GET", `nl:stock:lock:${creator.statsId}:print4`], ["GET", `nl:stock:lock:${creator.statsId}:print5`]]);
   is("a checkout that fails to open holds nothing and lets every lock go", [failed, locks, await stockLeft(creator, limited("print4", 5))], ["Stripe said no", [null, null], 5]);
-  is("a count that cannot be read opens nothing", await withCartStockHolds({ statsId: null } as unknown as Store, [a], async () => ({ id: "x" })), { ok: false, reason: "busy" });
+  is("a store whose counts have nowhere to be read opens nothing", await withCartStockHolds({ statsId: null } as unknown as Store, [a], async () => ({ id: "x" })), { ok: false, reason: "busy" });
+  await redis.pipeline([["HSET", `nl:stock:${creator.statsId}:print13`, "cs_test_cartstockjunk0002", "not a hold"]]);
+  let unreadOpened = 0;
+  const unreadable = await withCartStockHolds(creator, [limited("print14", 3), limited("print13", 3)], async () => {
+    unreadOpened += 1;
+    return { id: "cs_test_cartstockunread01" };
+  }).then(() => "opened", (error: Error) => error.message);
+  const unreadLocks = await redis.pipeline([["GET", `nl:stock:lock:${creator.statsId}:print13`], ["GET", `nl:stock:lock:${creator.statsId}:print14`]]);
+  is("a count that cannot be read opens nothing, holds nothing and lets every lock go", [unreadable, unreadOpened, unreadLocks, await stockLeft(creator, limited("print14", 3))], ["Stock reading unavailable", 0, [null, null], 3]);
   told = null;
   const free = await withCartStockHolds({ statsId: null } as unknown as Store, [plain("guide1"), plain("guide2")], async (held) => {
     told = held;
     return { id: "cs_test_cartstockplain01" };
   });
   is("a cart of unlimited products holds nothing and takes no lock", [free.ok, told], [true, false]);
+
+  part("One product bought alone and the same product in a cart");
+  // The last unit, bought alone while Stripe is slow to open its checkout: the lock it took runs out meanwhile (as one of
+  // 15 s does against Stripe's 20 s tries), and a cart with the same product is paid for in that time.
+  const last = limited("print20", 1);
+  const lockOf = (id: string) => `nl:stock:lock:${creator.statsId}:${id}`;
+  let cartWhileSlow: Awaited<ReturnType<typeof withCartStockHolds>> | null = null;
+  const alone = await withStockHold(creator, last, async () => {
+    await redis.pipeline([["DEL", lockOf("print20")]]);
+    cartWhileSlow = await withCartStockHolds(creator, [plain("guide1"), last], async () => ({ id: "cs_test_cartstockrace0001" }));
+    return { id: "cs_test_alonestockrace001" };
+  });
+  is("a product bought alone and a cart never both get the last unit", [alone.ok, (cartWhileSlow as { ok: boolean } | null)?.ok, await stockLeft(creator, last)], [true, false, 0]);
+  // The other way round: the cart holds the last unit first, and the one bought alone finds it gone.
+  const last2 = limited("print21", 1);
+  const cartFirst = await withCartStockHolds(creator, [last2], async () => ({ id: "cs_test_cartstockrace0002" }));
+  let aloneOpened = 0;
+  const aloneAfter = await withStockHold(creator, last2, async () => {
+    aloneOpened += 1;
+    return { id: "cs_test_alonestockrace002" };
+  });
+  is("a cart that holds the last unit first leaves none for the product bought alone", [cartFirst.ok, aloneAfter, aloneOpened], [true, { ok: false, reason: "soldout" }, 0]);
+  // At the same instant, each slow to open: exactly one gets it.
+  const last3 = limited("print22", 1);
+  const slow = (id: string) => async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    return { id };
+  };
+  const both = await Promise.all([withStockHold(creator, last3, slow("cs_test_alonestockrace003")), withCartStockHolds(creator, [last3], slow("cs_test_cartstockrace0003"))]);
+  is("pressed at the same instant, exactly one of them gets the last unit", [both.filter((one) => one.ok).length, await stockLeft(creator, last3)], [1, 0]);
+  const leftLocks = await redis.pipeline([["GET", lockOf("print20")], ["GET", lockOf("print21")], ["GET", lockOf("print22")]]);
+  is("and no lock is left behind", leftLocks, [null, null, null]);
 
   part("Going back, and paying");
   sessions.set("cs_test_cartstockfirst01", { id: "cs_test_cartstockfirst01", status: "open" });

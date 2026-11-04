@@ -99,46 +99,26 @@ export type StockHold<T> = { ok: true; value: T } | { ok: false; reason: "soldou
 /**
  * Opens a checkout for a limited product only if a unit is free, and holds
  * that unit for it. Two buyers pressing buy for the last unit at the same
- * instant cannot both get a checkout: the count and the hold happen under one
- * short lock. `open` is told whether a unit is held, so the checkout it makes
- * closes before the hold runs out.
+ * instant cannot both get a checkout. `open` is told whether a unit is held,
+ * so the checkout it makes closes before the hold runs out.
+ *
+ * Since 2 November 2026 (513 [PF1], found by the review of unit 3) this is a
+ * cart of one (withCartStockHolds): its lock is a token only its holder lets
+ * go of, it is renewed before anything is written, and it is let go once a
+ * provisional hold is written, before Stripe is asked to open the checkout.
+ * Until then the lock, a plain value deleted without checking, was held
+ * while Stripe opened the checkout, which can take longer than the lock
+ * lasted, so a second checkout could count the same last unit. The cart
+ * takes the same lock key, so a product bought alone and the same product
+ * in a cart wait on each other and never both get the last unit.
  */
 export async function withStockHold<T extends { id: string }>(
   store: Store,
   product: Listing,
   open: (held: boolean) => Promise<T>,
 ): Promise<StockHold<T>> {
-  if (limitedStock(product) === null) {
-    return { ok: true, value: await open(false) };
-  }
-  if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "busy" };
-  const lock = lockKey(store.statsId, product.id);
-  let locked = false;
-  for (let attempt = 0; attempt < 6 && !locked; attempt += 1) {
-    const receipt = await redisPipeline([["SET", lock, "1", "NX", "EX", 15]]);
-    // Unknown acquisition evidence cannot open a checkout or release the lock.
-    if (!Array.isArray(receipt) || receipt.length !== 1) return { ok: false, reason: "busy" };
-    const got: unknown = receipt[0];
-    if (got !== null && got !== "OK") return { ok: false, reason: "busy" };
-    locked = got === "OK";
-    if (!locked) await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  if (!locked) return { ok: false, reason: "busy" };
-  try {
-    const left = await stockLeft(store, product, Date.now());
-    if (left !== null && left <= 0) return { ok: false, reason: "soldout" };
-    const value = await open(true);
-    // Counted from after the checkout exists, so the hold outlasts it.
-    const receipt = await redisPipeline([
-      ["HSET", stockKey(store.statsId, product.id), value.id, JSON.stringify({ until: Date.now() + HOLD_MS })],
-    ]);
-    if (!Array.isArray(receipt) || receipt.length !== 1) return { ok: false, reason: "busy" };
-    const recorded: unknown = receipt[0];
-    if (recorded !== 0 && recorded !== 1) return { ok: false, reason: "busy" };
-    return { ok: true, value };
-  } finally {
-    await redisPipeline([["DEL", lock]]).catch(() => {});
-  }
+  const held = await withCartStockHolds(store, [product], open);
+  return held.ok ? held : { ok: false, reason: held.reason };
 }
 
 /** Marks a limited product's checkout as sold, once the buyer is back. */
@@ -210,8 +190,8 @@ const PENDING_MS = HOLD_MS + 5 * 60 * 1000;
  * opens the checkout. Once it exists, its own hold replaces the provisional
  * one; if it cannot be opened, the provisional ones are taken back; if its
  * hold cannot be written, it is closed at Stripe and nothing is sold on it.
- * Any lock not taken, or any count that cannot be read, opens nothing
- * (unknown never becomes a unit). Each hold is then settled as a single
+ * Any lock not taken opens nothing ("busy"); a count that cannot be read
+ * throws, so nothing opens either (unknown never becomes a unit). Each hold is then settled as a single
  * product's is: paid becomes sold, expired is handed back (stockLeft).
  */
 export async function withCartStockHolds<T extends { id: string }>(
@@ -230,8 +210,8 @@ export async function withCartStockHolds<T extends { id: string }>(
     const now = Date.now();
     const out: string[] = [];
     for (const product of limited) {
-      const left = await stockLeft(store, product, now).catch(() => undefined);
-      if (left === undefined) return { ok: false, reason: "busy" };
+      // A count that cannot be read throws, as it always has for one product: nothing opens, every lock is let go below.
+      const left = await stockLeft(store, product, now);
       if (left !== null && left <= 0) out.push(product.id);
     }
     if (out.length > 0) return { ok: false, reason: "soldout", ids: out };

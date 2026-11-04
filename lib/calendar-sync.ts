@@ -636,10 +636,11 @@ export class FeedGone extends Error {}
  */
 async function withinPace(statsId: string, now: number): Promise<boolean> {
   const key = paceKey(statsId);
-  const member = `${now}:${randomBytes(4).toString("hex")}`;
+  // One answer's mark: its time and a few random bytes, nothing about who asked.
+  const mark = `${now}:${randomBytes(4).toString("hex")}`;
   try {
     const [, , n] = await redisPipeline([
-      ["ZADD", key, now, member],
+      ["ZADD", key, now, mark],
       ["ZREMRANGEBYSCORE", key, "-inf", now - 3_600_000],
       ["ZCARD", key],
       ["EXPIRE", key, 3_600],
@@ -647,7 +648,7 @@ async function withinPace(statsId: string, now: number): Promise<boolean> {
     const count = Number(n);
     if (!Number.isSafeInteger(count)) return false;
     if (count <= CALENDAR_POLLS_PER_HOUR) return true;
-    await redisPipeline([["ZREM", key, member]]).catch(() => {});
+    await redisPipeline([["ZREM", key, mark]]).catch(() => {});
     return false;
   } catch {
     return false;

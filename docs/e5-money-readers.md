@@ -38,7 +38,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | PAST-SALE | 9 |
 | SETTING | 40 |
 | OTHER | 2 |
-| All | 115 |
+| All | 107 |
 
 ## The files
 

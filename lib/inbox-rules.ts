@@ -17,7 +17,9 @@
  * before it is sent (one of the month's AI jobs).
  *
  * What it never does: write to anybody but the person who wrote first, and
- * only in answer to them; send a visitor's address or name to the writing
+ * only in answer to them, except one of the store's own approved affiliates,
+ * to whom the creator may write first (630 [HN6](5), lib/inbox.ts
+ * writeToAffiliate); send a visitor's address or name to the writing
  * help (addresses, phone numbers and links are taken out first); keep a
  * conversation past KEEP_DAYS after its last message.
  *
@@ -48,7 +50,8 @@ export const POLL_FOR_MINUTES = 15;
 export const CONVERSATION_ID = /^[a-z0-9]{12}$/;
 export const CHAT_TOKEN = /^[A-Za-z0-9_-]{32}$/;
 
-export type Source = "chat" | "contact";
+/** Where a conversation began: the store's chat, its contact form, or the creator writing first to an affiliate (630 [HN6](5)). */
+export type Source = "chat" | "contact" | "affiliate";
 export type Status = "open" | "closed";
 
 export type Message = { at: number; from: "visitor" | "store"; text: string; /** Who of the store's team wrote it. */ by?: string };
@@ -127,7 +130,7 @@ export function parseConversation(raw: unknown): Conversation | null {
       id: v.id,
       email: v.email,
       name: typeof v.name === "string" ? v.name : "",
-      source: v.source === "contact" ? "contact" : "chat",
+      source: v.source === "contact" ? "contact" : v.source === "affiliate" ? "affiliate" : "chat",
       status: v.status === "closed" ? "closed" : "open",
       assigned: typeof v.assigned === "string" ? v.assigned : "",
       startedAt: Number(v.startedAt) || 0,

@@ -1,3 +1,4 @@
+import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
@@ -112,7 +113,13 @@ export type Flow = {
    * "stage": the store's team made or moved a deal with their address into
    * the stage `stageId` of one of its pipelines (added 17 October 2026,
    * lib/deal-stage-trigger.ts), while they are on the list and agreed to
-   * hear from the creator.
+   * hear from the creator; "signed": signed a proposal or an agreement of
+   * the store's, with the address it was sent to (635 [GL3], added 2 November
+   * 2026, lib/agreement-flow-trigger.ts), while they are on the list and
+   * agreed to hear from the creator; "paid_request": paid one of the store's
+   * payment requests, sent to their address (635 [GL3], lib/payment-flow-
+   * trigger.ts), while they are on the list and agreed to hear from the
+   * creator.
    */
   trigger: FlowTrigger;
   productId: string | null;
@@ -229,7 +236,7 @@ const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw =
 
 export type FlowResult =
   | { ok: true; flows: Flow[] }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" };
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" };
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -268,6 +275,8 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   // A stage of one of the store's pipelines; one workflow a stage, so a deal entering it starts one run at the most.
   const stageId = trigger === "stage" && typeof raw.stageId === "string" ? raw.stageId : "";
   if (trigger === "stage" && !stages.some((st) => st.id === stageId)) return { ok: false, reason: "stage" };
+  // Every plan with workflows has proposals and agreements today; kept so a workflow that could never start is never saved if that changes.
+  if (trigger === "signed" && !agreementsAllowed(store)) return { ok: false, reason: "plan" };
   const rawSteps = Array.isArray(raw.steps) ? raw.steps : [];
   // Who may be made responsible for a deal: the owner, or a teammate who can see orders, as on the deals board.
   const assigns = rawSteps.some((s) => s && typeof s === "object" && (s as { action?: { do?: unknown } }).action?.do === "assign");
@@ -301,6 +310,10 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   const at = id ? flows.findIndex((f) => f.id === id) : -1;
   if (id && at < 0) return { ok: false, reason: "unknown" };
   if (trigger === "stage" && flows.some((f) => f.id !== id && f.trigger === "stage" && f.stageId === stageId)) return { ok: false, reason: "stage_taken" };
+  // One workflow starts on signing, so the check a signature makes stays inside the requests it takes (lib/agreement-flow-trigger.ts); it can start others with a step.
+  if (trigger === "signed" && flows.some((f) => f.id !== id && f.trigger === "signed")) return { ok: false, reason: "signed_taken" };
+  // The same for a paid payment request (lib/payment-flow-trigger.ts).
+  if (trigger === "paid_request" && flows.some((f) => f.id !== id && f.trigger === "paid_request")) return { ok: false, reason: "paid_request_taken" };
   if (!id && flows.length >= MAX_FLOWS) return { ok: false, reason: "too_many" };
   const active = at >= 0 ? raw.active === true : opts.activate === true;
   if (active && !(at >= 0 && flows[at].active) && flows.filter((f) => f.active && f.id !== id).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
@@ -467,7 +480,7 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  * Starts whichever sequences this event begins, for this person. Never
  * throws: the list must never cost anyone what they asked for.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
+export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
   try {
     if (!store.listId || monthlyAllowance(store) === 0) return;
     // Whether what they just got is sold for money: the store's own index
@@ -486,6 +499,8 @@ export async function enroll(store: Store, email: string, event: { joined: boole
           (f.trigger === "started" && event.started && f.productId === event.started) ||
           (f.trigger === "abandoned" && event.abandoned && f.productId === event.abandoned) ||
           (f.trigger === "stage" && event.stage && f.stageId === event.stage) ||
+          (f.trigger === "signed" && event.signed) ||
+          (f.trigger === "paid_request" && event.paidRequest) ||
           (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
     );
     if (!flows.length) return;
@@ -608,7 +623,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
       return each(emails, "uncertain", `Whether they were started on “${target.name}” could not be confirmed.`);
     }
   }
-  if (action.do === "field" || action.do === "deal" || action.do === "note" || action.do === "notify" || action.do === "assign") return actOnPeople(store, action, emails, at);
+  if (action.do === "field" || action.do === "deal" || action.do === "note" || action.do === "notify" || action.do === "assign" || action.do === "next") return actOnPeople(store, action, emails, at);
   if (action.do === "untag") {
     try {
       const { changed, same } = await changeLabels(listId, emails, (tags) =>
@@ -654,7 +669,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
  */
 async function actOnPeople(
   store: Store,
-  action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" }>,
+  action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" }>,
   emails: string[],
   at: { flow: Flow; step: FlowStep; index: number },
 ): Promise<Acted[]> {
@@ -691,7 +706,7 @@ async function actOnPeople(
     }
     return out;
   }
-  if (action.do === "deal" || action.do === "assign") {
+  if (action.do === "deal" || action.do === "assign" || action.do === "next") {
     const pipelines = await readPipelines(statsId);
     const stages = allStages(pipelines);
     let deals: Awaited<ReturnType<typeof readDeals>>;
@@ -717,7 +732,19 @@ async function actOnPeople(
       // Their open deal moves; with none open, a new one is made for them.
       const open = deals.find((d) => d.email === email && (!inPipeline || inPipeline.has(d.stage)) && stages.find((s) => s.id === d.stage)?.kind === "open");
       let deal;
-      if (action.do === "assign") {
+      if (action.do === "next") {
+        if (!open) {
+          out.push({ email, state: "failed", note: "They have no open deal to set a next action on." });
+          continue;
+        }
+        // The due date as the deals board keeps it: a day, counted in UTC from when the step runs.
+        const dueDate = new Date((now + action.days * 86_400) * 1000).toISOString().slice(0, 10);
+        if (open.nextAction === action.text && open.dueDate === dueDate) {
+          out.push({ email, state: "confirmed", note: "Their deal already had this next action and due date." });
+          continue;
+        }
+        deal = { ...open, nextAction: action.text, dueDate, updatedAt: now };
+      } else if (action.do === "assign") {
         if (!open) {
           out.push({ email, state: "failed", note: "They have no open deal to make someone responsible for." });
           continue;
@@ -737,7 +764,7 @@ async function actOnPeople(
           : { id: newCrmId(10), title: (action.title || at.flow.name).slice(0, 90), email, cents: 0, stage: stage!.id, note: `Made by the sequence “${at.flow.name}”.`.slice(0, 500), createdAt: now, updatedAt: now };
       }
       try {
-        out.push((await writeDeal(statsId, deal, store)) ? { email, state: "confirmed", changed: true, note: action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
+        out.push((await writeDeal(statsId, deal, store)) ? { email, state: "confirmed", changed: true, note: action.do === "next" ? `Next action on their deal: “${action.text}”, due ${deal.dueDate}.` : action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
       } catch (error) {
         if (error instanceof DataRoomError) {
           out.push({ email, state: "failed", note: "The deal was not written: the store's data room is full." });

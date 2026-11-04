@@ -889,7 +889,39 @@ function parseRowColumns(raw: unknown): RowElement[][] | null {
   });
 }
 
-/** Whether a row as sent keeps every element it was sent with, within the limits: what blocksProblem tells back. */
+/**
+ * Whether one element is kept with every word it was sent with: what was
+ * sent, made one line or several the same way the reading makes it but
+ * never cut short, is what was kept. A list's empty lines are left out
+ * before its points are counted, here as in parseRowElement.
+ */
+function rowElementWhole(raw: unknown, kept: RowElement): boolean {
+  const value = raw as Record<string, unknown>;
+  const whole = (text: unknown) => line(text, Infinity);
+  switch (kept.kind) {
+    case "heading":
+    case "subheading":
+      return whole(value.text) === kept.text;
+    case "paragraph":
+      return lines(value.text, Infinity) === kept.text;
+    case "list": {
+      const sent = Array.isArray(value.items) ? value.items.map(whole).filter(Boolean) : [];
+      return sent.length === kept.items.length && sent.every((item, i) => item === kept.items[i]);
+    }
+    case "icon":
+    case "button":
+      return whole(value.label) === kept.label;
+    case "image": {
+      const picture = (value.picture ?? {}) as Record<string, unknown>;
+      // A picture marked as decoration has its description taken out on purpose.
+      return whole(picture.caption) === kept.picture.caption && (kept.decorative || whole(picture.alt) === kept.picture.alt);
+    }
+    case "video":
+      return whole(value.title) === kept.title;
+  }
+}
+
+/** Whether a row as sent keeps every element it was sent with, whole, within the limits: what blocksProblem tells back. */
 function rowSentWhole(raw: Record<string, unknown>): boolean {
   const columns = raw.columns;
   if (!Array.isArray(columns) || columns.length < MIN_ROW_COLUMNS || columns.length > MAX_ROW_COLUMNS) return false;
@@ -897,9 +929,8 @@ function rowSentWhole(raw: Record<string, unknown>): boolean {
   const all = (columns as unknown[][]).flat();
   if (all.length > MAX_ROW_ELEMENTS) return false;
   return all.every((element) => {
-    if (parseRowElement(element) === null) return false;
-    const items = (element as { kind?: unknown; items?: unknown }).kind === "list" ? (element as { items: unknown }).items : null;
-    return !Array.isArray(items) || items.length <= MAX_ROW_LIST_ITEMS;
+    const kept = parseRowElement(element);
+    return kept !== null && rowElementWhole(element, kept);
   });
 }
 

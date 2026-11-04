@@ -1234,6 +1234,7 @@
     "components/ai-posts.tsx",
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
+    "components/app-code-invite.tsx",
     "components/ask-box.tsx",
     "components/assistant-reminder-box.tsx",
     "components/attribution-table.tsx",

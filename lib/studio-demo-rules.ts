@@ -59,7 +59,8 @@ export const DEMO_START_COMMANDS = 19;
  * that names no live session) the whole site counts in a day (UTC). Such a
  * request reads this count first, with its address's own; past it, the door
  * answers "closed" and the cookie reads nothing for the rest of the day,
- * after that first read, and nothing is written. A refusal reaches it only
+ * after those first reads (one for a door, two for a cookie), and nothing
+ * is written. A refusal reaches it only
  * through its address's DEMO_REFUSALS_PER_ADDRESS_PER_DAY, so one address
  * alone can never fill it. A live session is never answered by it: what a
  * session refuses is counted in its own record (DEMO_REFUSALS_PER_SESSION).
@@ -89,7 +90,12 @@ export const DEMO_TAKE_DB_BYTES = 2_048;
 export const DEMO_RESPONSE_MAX_BYTES = 120_000;
 /** Demo sessions the whole site opens in a day (UTC). */
 export const DEMO_SESSIONS_PER_DAY = 500;
-/** Database commands all demo sessions together may send in a day (UTC). */
+/**
+ * Database commands the accepted openings and actions of all demo sessions
+ * together may send in a day (UTC). Refusals are not inside it: a session's
+ * own (DEMO_REFUSALS_PER_SESSION) and the site's (DEMO_REFUSALS_PER_DAY) are
+ * capped and priced on their own.
+ */
 export const DEMO_COMMANDS_PER_DAY = 250_000;
 /**
  * Demo sessions one address may open in a day (UTC): an old-kind address as it

@@ -31,7 +31,8 @@ is("an unknown cost is listed, so it could not be on", DEMO_UNKNOWN_COSTS.length
 const privacy = readFileSync("app/privacy/page.tsx", "utf8");
 const funded = readFileSync("docs/funded-exposure-review.md", "utf8");
 const privacyNamesDemo = privacy.includes("nl_studio_demo") && /fingerprint/i.test(privacy.slice(Math.max(0, privacy.indexOf("nl_studio_demo") - 600), privacy.indexOf("nl_studio_demo") + 600));
-const fundedHasDemo = funded.includes("256 [KJ1]") && /studio demo/i.test(funded);
+// The demo's own line: one row of the review's tables naming both the item and the demo, not two words anywhere.
+const fundedHasDemo = funded.split("\n").some((line) => line.startsWith("|") && line.includes("256 [KJ1]") && /studio demo/i.test(line));
 is("on only when no cost is unknown, the privacy policy names the demo's cookie and the address's daily fingerprint, and docs/funded-exposure-review.md has the demo's line", !STUDIO_DEMO_ON || (DEMO_UNKNOWN_COSTS.length === 0 && privacyNamesDemo && fundedHasDemo), true);
 is("off: no session opens, whatever the counts", verdict(demoSessionAllowed({ today: "2026-11-04", sessionsToday: 0, commandsToday: 0 })), "off");
 is("off: no action runs", verdict(demoActionAllowed({ actions: 0, bytes: 0, startedAt: 0, now: 1, commandsToday: 0 }, { commands: 1, bytes: 1 })), "off");
@@ -115,12 +116,18 @@ const keptDay = num("DEMO_DAY_HASHES_KEPT_MICRO_USD");
 is("the day's own hashes kept are priced, never zero", keptDay > 0, true);
 const dayMicroUsd = cohortMicroUsd + refusalsMicroUsd + keptDay;
 is("the day's function worst is one day's openings, its refusals and its own hashes kept", demoDayFunctionWorstMicroUsd(), call("demoCohortFunctionWorstMicroUsd") + call("demoRefusalsFunctionWorstMicroUsd") + keptDay);
-// Every pair a day can hold, by brute force: s sessions open only while s whole worsts fit, each takes up to its actions and counts up to its own refusals.
+// Every count a day can hold, by brute force: s sessions open only while s whole worsts fit; each takes up to its
+// actions and counts up to its own refusals; the site counts up to its refusals. The sessions' own refusals q go
+// from 0 to s times their cap in steps of a session's cap, and the site's r in steps of a tenth, so a formula that
+// took the wrong cap or counted a term twice gives another most than this search.
+const perSessionRefusals = num("DEMO_REFUSALS_PER_SESSION");
 let best = 0;
 for (let s = 0; s <= DEMO_SESSIONS_PER_DAY; s += 1) {
   if (s * DEMO_SESSION_WORST_COMMANDS > DEMO_COMMANDS_PER_DAY) break;
-  for (let a = 0; a <= s * DEMO_ACTIONS_PER_SESSION; a += 1) {
-    for (const r of [0, refusals]) best = Math.max(best, s * (perOpening + num("DEMO_REFUSALS_PER_SESSION") * perRefusal) + a * perAction + r * perRefusal + keptDay);
+  for (let a = 0; a <= s * DEMO_ACTIONS_PER_SESSION; a += Math.max(1, DEMO_ACTIONS_PER_SESSION)) {
+    for (let q = 0; q <= s * perSessionRefusals; q += Math.max(1, perSessionRefusals)) {
+      for (let r = 0; r <= refusals; r += Math.max(1, refusals / 10)) best = Math.max(best, s * perOpening + a * perAction + q * perRefusal + r * perRefusal + keptDay);
+    }
   }
 }
 is("the day's ceiling is the most of every pair the caps allow", Math.abs(dayMicroUsd - best) < 1e-6, true);

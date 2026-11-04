@@ -64,11 +64,13 @@ export async function POST(request: NextRequest) {
   }
 
   // A session let in without its second step cannot add a way in of its own, nor take one away from the owner
-  // at once (lib/two-step.ts): removing a passkey could lock the owner out, and it cannot be undone. Asked before
-  // the hourly count, so a locked session never spends the owner's own changes on them. It may only ask for a
-  // removal that waits (below), so somebody who lost the app and the passkey waits once, not twice.
+  // (lib/two-step.ts): removing a passkey could lock the owner out, and it cannot be undone. Every request of
+  // one is refused, whatever it names, and before the hourly count, so a locked session never spends the
+  // owner's own changes (31 requests of any kind would otherwise keep the owner out for the hour). The one
+  // exception: it may ask for a removal that waits, on a count of its own (below), so somebody who lost the
+  // app and the passkey waits once, not twice.
   const locked = (await lockedUntil(session)) > 0;
-  if ((body.action === "options" || body.action === "add") && locked) {
+  if (locked && body.action !== "remove") {
     return Response.json({ ok: false, error: "locked" }, { status: 403 });
   }
   if (body.action === "remove" && locked) {

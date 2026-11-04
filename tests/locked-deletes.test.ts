@@ -16,17 +16,23 @@
  *   - a waitlist launched (one email, in the creator's words, to everyone on
  *     it), a link put over a product's file, and the store's own fields saved
  *     without one (its answers go off every person);
- *   - the product's file taken off or replaced, its picture removed or
+ *   - the product's file taken off or replaced, and a price option's own
+ *     file the same way (by the option's id), its picture removed or
  *     replaced, a page saved without a picture it showed, license keys and a
  *     bundle cleared, a price option, an episode, a page funnel, captions;
  *   - the store's pages: a form with its answers, a site page and its
  *     pictures, a saved block, a link and its picture, a short link, a blog
- *     post, the store photo, the missed questions;
+ *     post, the store photo, the missed questions, a link turned into a
+ *     heading (its picture goes);
  *   - events canceled, deleted or moved (each emails everyone coming);
  *   - notes, tasks, deals, pitches, segments and drafts deleted, a buyer's
  *     review photo taken off;
- *   - a passkey change does not spend the owner's hourly changes; a removal
- *     only waits (lib/passkeys.ts scheduleRemoval), on a count of its own.
+ *   - no passkey request from a locked session, not even a list, spends the
+ *     owner's hourly changes; a removal only waits (lib/passkeys.ts
+ *     scheduleRemoval), on a count of its own.
+ *
+ * Where a route deletes a file, the check also reads the file back after the
+ * refusal, and the inventory holds every such route to one of those reads.
  *
  * And what has a way back stays open: adding and editing, a post that emails
  * nobody, an event edited without moving it.
@@ -41,13 +47,15 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, addStoreLink, claimHandle, ensureStatsId, setLinkImage, setPhotoId, setProductFile, setProductImage, setProductPage, setSitePages, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, addStoreLink, claimHandle, ensureStatsId, setLinkImage, setPhotoId, setProductFile, setProductImage, setProductPage, setSitePages, storeForEmail } from "@/lib/store";
 import { LOCKED_ACTIONS, LOCKED_NEEDS, lockedOut, openLockedSession } from "@/lib/two-step";
 import { readFields } from "@/lib/crm";
 import { waitlistViews } from "@/lib/waitlist";
 import { LOCKED_LIST, LOCKED_LIST_START } from "@/lib/locked-words";
 import { CREATOR, createPost, readConfig, readPost } from "@/lib/community";
-import { readListing } from "@/lib/catalog";
+import { readDelivery, readListing } from "@/lib/catalog";
+import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
+import { readPage } from "@/lib/sales-page-store";
 import { readCourse, saveCourse } from "@/lib/course";
 import { addComment, readComment, setCommentsOn } from "@/lib/lesson-comments";
 import { writePage } from "@/lib/sales-page-store";
@@ -149,6 +157,15 @@ const ROUTES: Record<string, Handler> = {
   "resend": rresend as Handler,
   "waitlist": rwaitlist as Handler,
 };
+/**
+ * The routes a locked request was shown to leave a file or picture in place, read back after the
+ * refusal (not only answered "locked"): every route that deletes a file has to be here.
+ */
+const keptBy = new Set<string>();
+const keeps = (r: string, label: string, got: unknown, want: unknown) => {
+  keptBy.add(r);
+  is(label, got, want);
+};
 const route = async (path: string): Promise<Handler> => {
   if (!Object.hasOwn(ROUTES, path)) throw new Error(`no route ${path}`);
   return ROUTES[path];
@@ -219,7 +236,7 @@ async function main(): Promise<void> {
   kept.modules[0].lessons[0] = { ...kept.modules[0].lessons[0], video: { pathname: "stores/x/old.mp4", name: "old.mp4", bytes: 10, contentType: "video/mp4", addedAt: "" } };
   await saveCourse(kept, ROOM);
   is("a new video over the lesson's old one is refused", await answer(await course(json("/api/store/course", locked, { action: "media", id: pid, lessonId, kind: "video", pathname: "stores/x/new.mp4" }))), LOCKED);
-  is("and the lesson keeps it", (await readCourse(listing.course!.id))!.modules[0].lessons[0].video?.pathname, "stores/x/old.mp4");
+  keeps("course", "and the lesson keeps it", (await readCourse(listing.course!.id))!.modules[0].lessons[0].video?.pathname, "stores/x/old.mp4");
   await setCommentsOn(listing.course!.id, true);
   const said = await addComment({ courseId: listing.course!.id, lessonId, by: "s".repeat(16), name: "Sam", text: "A question", room: ROOM });
   if (!said.ok) throw new Error("no comment");
@@ -235,7 +252,7 @@ async function main(): Promise<void> {
   await setProductFile(OWNER, xid, { pathname: `stores/x/${xid}/book.pdf`, name: "book.pdf", bytes: 10, contentType: "application/pdf", addedAt: "" });
   const product = await route("product");
   is("a link put over the file, which deletes it, is refused", await answer(await product(json("/api/store/product", locked, { action: "link", id: xid, link: "https://example.com/elsewhere" }))), LOCKED);
-  is("and the product keeps its file", (await readListing((await storeForEmail(OWNER))!, xid))?.file?.name, "book.pdf");
+  keeps("product", "and the product keeps its file", (await readListing((await storeForEmail(OWNER))!, xid))?.file?.name, "book.pdf");
   is("a link on a product with no file is not", (await answer(await product(json("/api/store/product", locked, { action: "link", id: pid, link: "https://example.com/elsewhere" }))))[1] !== "locked", true);
   const waitlist = await route("waitlist");
   is("marked coming soon by the full session", ((await (await waitlist(json("/api/store/waitlist", full, { action: "soon", id: xid, on: true }))).json()) as { ok: boolean }).ok, true);
@@ -248,15 +265,49 @@ async function main(): Promise<void> {
   const attach = await route("file/attach");
   is("taking the file off is refused", await answer(await attach(json("/api/store/file/attach", locked, { id: xid, detach: true }))), LOCKED);
   is("a new file over it is refused", await answer(await attach(json("/api/store/file/attach", locked, { id: xid, pathname: `stores/x/${xid}/other.pdf` }))), LOCKED);
+  keeps("file/attach", "and the product still keeps its file", (await readListing((await storeForEmail(OWNER))!, xid))?.file?.name, "book.pdf");
+  // A price option keeps a file of its own (setProductFile on the option's id): the routes find it
+  // there, not only on the product, or an option's id walks past the lock (Revisor 3, 4 November 2026).
+  const priced = await addProduct(OWNER, "Templates", "", "29", null);
+  if (!priced.ok) throw new Error("no product");
+  const tid = priced.product.id;
+  const optioned = await addOption(OWNER, tid, "Pro", "49");
+  if (!optioned.ok) throw new Error("no option");
+  const oid = (await readListing(optioned.store, tid))!.options[0].id;
+  await setProductFile(OWNER, oid, { pathname: `stores/x/${oid}/pro.zip`, name: "pro.zip", bytes: 10, contentType: "application/zip", addedAt: "" });
+  const optionFile = async () => (await readDelivery((await storeForEmail(OWNER))!, oid))?.option?.file?.name;
+  is("a link put over a price option's file is refused", await answer(await product(json("/api/store/product", locked, { action: "link", id: oid, link: "https://example.com/elsewhere" }))), LOCKED);
+  keeps("product", "and the option keeps its file", await optionFile(), "pro.zip");
+  is("a new file over a price option's file is refused", await answer(await attach(json("/api/store/file/attach", locked, { id: oid, pathname: `stores/x/${oid}/other.zip` }))), LOCKED);
+  is("taking a price option's file off is refused", await answer(await attach(json("/api/store/file/attach", locked, { id: oid, detach: true }))), LOCKED);
+  keeps("file/attach", "and the option still keeps it", await optionFile(), "pro.zip");
+  is("removing the price option, with its file, is refused", await answer(await (await route("option"))(json("/api/store/option", locked, { action: "remove", id: oid }))), LOCKED);
+  keeps("option", "and the option is still there with its file", await optionFile(), "pro.zip");
+  const empty = await addOption(OWNER, tid, "Lite", "39");
+  if (!empty.ok) throw new Error("no option");
+  const bareOption = (await readListing(empty.store, tid))!.options[1].id;
+  is("a link on a price option with no file is not refused", (await answer(await product(json("/api/store/product", locked, { action: "link", id: bareOption, link: "https://example.com/elsewhere" }))))[1] !== "locked", true);
   await setProductImage(OWNER, xid, { path: picture("1"), width: 10, height: 10, alt: "", bytes: 10, small: null });
   const image = await route("image");
   is("removing the picture is refused", await answer(await image(json("/api/store/image", locked, { action: "remove", id: xid }))), LOCKED);
   is("a new picture over it is refused", await answer(await image(json("/api/store/image", locked, { action: "attach", id: xid, path: picture("2"), width: 10, height: 10 }))), LOCKED);
+  keeps("image", "and the product keeps its picture", (await readListing((await storeForEmail(OWNER))!, xid))?.image?.path, picture("1"));
   is("its alt text is not", (await answer(await image(json("/api/store/image", locked, { action: "alt", id: xid, alt: "A cover" }))))[1] !== "locked", true);
   await setProductPage(OWNER, xid, true);
   const pictures = { ...parsePage({}), blocks: [{ id: "blk001", kind: "pictures", heading: "", items: [{ path: picture("3"), width: 10, height: 10, alt: "", caption: "" }] }] };
   await writePage(store.statsId!, xid, pictures as never, ROOM);
   is("a page saved without a picture it showed is refused", await answer(await (await route("page"))(json("/api/store/page", locked, { id: xid, page: { blocks: [] } }))), LOCKED);
+  keeps("page", "and the page still shows it", (await readPage(store.statsId!, xid)).blocks.length, 1);
+  const cast = await addProduct(OWNER, "Show", "", "9", null);
+  if (!cast.ok) throw new Error("no product");
+  const podcastRoute = await route("podcast");
+  const podcastId = ((await (await podcastRoute(json("/api/store/podcast", full, { action: "enable", id: cast.product.id }))).json()) as { podcastId: string }).podcastId;
+  const aired = editPodcast({ id: podcastId, episodes: [] }, { op: "add", pathname: `stores/x/${cast.product.id}/one.mp3`, bytes: 10, contentType: "audio/mpeg", title: "One", notes: "", at: 1 });
+  if (!aired.ok) throw new Error("no episode");
+  await savePodcast(aired.podcast);
+  const episodeId = aired.podcast.episodes[0].id;
+  is("removing an episode, with its audio, is refused", await answer(await podcastRoute(json("/api/store/podcast", locked, { action: "remove", id: cast.product.id, episode: episodeId }))), LOCKED);
+  keeps("podcast", "and the episode is still there", (await readPodcast(podcastId))?.episodes.map((e) => e.id), [episodeId]);
   const plainRoutes: [string, Record<string, unknown>][] = [
     ["product", { action: "remove", id: xid }],
     ["keys", { action: "clear", id: xid }],
@@ -279,6 +330,12 @@ async function main(): Promise<void> {
   const linkId = linked.store.links[0].id;
   await setLinkImage(OWNER, linkId, { path: picture("4"), width: 10, height: 10, bytes: 10 });
   is("a new link picture over the old one is refused", await answer(await (await route("link-image"))(json("/api/store/link-image", locked, { action: "attach", id: linkId, path: picture("2"), width: 10, height: 10 }))), LOCKED);
+  const linkPicture = async () => (await storeForEmail(OWNER))!.links.find((l) => l.id === linkId)?.image?.path;
+  keeps("link-image", "and the link keeps its picture", await linkPicture(), picture("4"));
+  const links = await route("links");
+  is("turning the link into a heading, which lets its picture go, is refused", await answer(await links(json("/api/store/links", locked, { action: "edit", id: linkId, title: "Heading", header: true }))), LOCKED);
+  keeps("links", "and the link keeps its picture and its address", [await linkPicture(), (await storeForEmail(OWNER))!.links.find((l) => l.id === linkId)?.url], [picture("4"), "https://example.com"]);
+  is("editing the link's title is not refused", (await answer(await links(json("/api/store/links", locked, { action: "edit", id: linkId, title: "My own site", url: "https://example.com" }))))[1] !== "locked", true);
   await setPhotoId(OWNER, "a".repeat(32));
   const photo = await route("photo");
   is("removing the store photo is refused", await answer(await photo(json("/api/store/photo", locked, { remove: true }))), LOCKED);
@@ -295,6 +352,8 @@ async function main(): Promise<void> {
     ["assistant-settings", { clear: true }],
   ];
   for (const [path, body] of pageRoutes) is(`${path}: ${JSON.stringify(body)} is refused`, await answer(await (await route(path))(json(`/api/store/${path}`, locked, body))), LOCKED);
+  keeps("links", "and after all of them the link is still there with its picture", await linkPicture(), picture("4"));
+  keeps("site-page", "and the site page still shows its picture", (await readPage(store.statsId!, siteKey("pagepage01"))).blocks.length, 1);
   is("saving a form is not", (await answer(await (await route("forms"))(json("/api/store/forms", locked, { form: { name: "Survey", fields: [{ id: "gggggg", type: "short", label: "Your name", required: true }] } }))))[1] !== "locked", true);
 
   part("Notes, tasks, deals, pitches, segments, drafts and review photos");
@@ -329,6 +388,15 @@ async function main(): Promise<void> {
   for (let i = 0; i < 31; i += 1) await passkey(passkeyRequest(locked));
   is("the locked session removes nothing at once: it may only ask for a wait, on a count of its own", await answer(await passkey(passkeyRequest(locked))), [429, "rate_limited"]);
   is("and the owner's own change is not refused for the hour", (await answer(await passkey(passkeyRequest(full))))[1] !== "rate_limited", true);
+  const listRequest = (session: string) =>
+    new NextRequest(`${ORIGIN}/api/auth/passkey`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "list" }) });
+  redis.clear();
+  await claimHandle(OWNER, HANDLE, "Locked Shop", "");
+  const fullAgain = await openSession(OWNER);
+  const lockedAgain = await openLockedSession(OWNER, Date.now() + 7 * 86_400_000);
+  for (let i = 0; i < 31; i += 1) await passkey(listRequest(lockedAgain));
+  is("31 lists from a locked session are told locked", await answer(await passkey(listRequest(lockedAgain))), LOCKED);
+  is("and the owner can still list their passkeys", (await answer(await passkey(listRequest(fullAgain))))[1] !== "rate_limited", true);
 
   part("Said the same way everywhere, and true");
   const files = ["app/signin/code/page.tsx", "app/signin/lost/page.tsx", "app/studio/page.tsx", "lib/two-step.ts", "lib/recovery-address.ts", "lib/help-content.ts", "lib/feature-pages.ts"];
@@ -376,7 +444,7 @@ async function main(): Promise<void> {
     "join/confirm": ["not:a person confirming their own sign-up to the list"],
     "keys": ["act:products:clear"],
     "link-image": ["act:page:remove", "lockedFor"],
-    "links": ["act:page:remove"],
+    "links": ["act:page:remove", "lockedFor"],
     "mail": ["act:draft:segment-remove", "act:draft:draft-remove", "need:send"],
     "notes": ["act:stats:remove"],
     "numbers-links": ["need:settings"],
@@ -432,6 +500,10 @@ async function main(): Promise<void> {
     }
   }
   is("each one held the way it says", wrong, []);
+  // Answered "locked" is not enough for a route that deletes a file: a request above reads the file
+  // back after the refusal, so a check that reads the wrong record (an option's id) shows here.
+  const filing = deleting.filter((r) => /\bdel\(|dropStamped\(|dropStream\(/.test(readFileSync(join(base, r, "route.ts"), "utf8")));
+  is("every route that deletes a file has a request above that reads the file still there", filing.filter((r) => !keptBy.has(r)), []);
   const named = new Set(Object.values(HELD).flat().filter((w) => w.startsWith("act:")).map((w) => w.split(":").slice(1).join(":")));
   const unused = Object.entries(LOCKED_ACTIONS).flatMap(([need, list]) => list.filter((a) => !named.has(`${need}:${a}`) && !["replace", "move", "email", "delete", "delete-comment", "unsay", "clear", "fields-remove"].includes(a)).map((a) => `${need}:${a}`));
   is("and no action is named for one route only by its path", Object.values(LOCKED_ACTIONS).flat().filter((a) => a.includes(":")), []);
@@ -496,7 +568,7 @@ async function main(): Promise<void> {
     "join/confirm": "not:a person confirming their own sign-up to the list",
     "keys": { clear: "act:products", off: "open:reversible", revoke: "open:reversible", setup: "open:edits", upload: "open:adds" },
     "link-image": { attach: "lockedFor", remove: "act:page" },
-    "links": { add: "open:adds", edit: "open:edits", remove: "act:page" },
+    "links": { add: "open:adds", edit: "lockedFor", remove: "act:page" },
     "mail": {
       broadcast: "need:send", cancel: "need:send", copy: "open:adds", count: "open:reads", "draft-remove": "act:draft", "draft-save": "open:edits",
       flow: "need:send", "flow-activate": "need:send", "flow-forget": "need:send", "flow-import": "need:send", "flow-remove": "need:send",

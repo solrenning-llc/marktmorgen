@@ -185,10 +185,10 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
     const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    // A dispute closed as lost for the whole charge ends the booking's meeting
+    // A dispute closed as lost ends the booking's meeting
     // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
     // with the first page, from Stripe's closing events (kept thirty days).
-    const lost = page === 0 ? await lostDisputesOrRetry(account, since) : { rows: [], complete: true };
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline) : { rows: [], complete: true };
     if (!lost.complete) unsure = true;
     const rows = [...lost.rows, ...refunds];
     for (const refund of rows) {

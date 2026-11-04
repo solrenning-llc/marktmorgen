@@ -34,6 +34,8 @@ const en = {
     "pkg-refunded": { title: "This package was refunded", body: "It books nothing more. Nothing was charged." },
     "pkg-gone": { title: "That package link does not work", body: "Use the link in your package's email. Nothing was charged." },
     "pkg-error": { title: "We could not book from your package just now", body: "Nothing was charged. Try again in a moment." },
+    "price-changed": { title: "This length's price just changed", body: "The creator changed it while you were choosing. The price below is the new one; pick your time again. Nothing was charged." },
+    "length-gone": { title: "This length is no longer offered", body: "The creator changed the lengths while you were choosing. Pick a length and a time again below. Nothing was charged." },
     taken: {
       title: "That time was just taken",
       body: "Somebody booked it a moment before you, or it is being paid for right now. Pick another; nothing was charged.",
@@ -158,6 +160,8 @@ const en = {
     `${store} has been told, and an email with the new time and a calendar file is on its way to you. The old time is free again for somebody else.`,
   moveAgain: (left: number) => ` You can move it ${left === 1 ? "once more" : `${left} more times`} from this page.`,
   noOtherSession: "There is no other session to move to",
+  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
+  lengthNotMovable: "This booking's length can't be moved here",
   staysAsIs: (store: string) => `Your booking stays as it is. To ask ${store} about it, reply to your confirmation email.`,
   /** `hasMoved`: moved before, so the times left are "more" times. */
   canMoveUntil: (left: number, hasMoved: boolean, until: string, zone: string) =>
@@ -235,6 +239,10 @@ const en = {
   hostPick: "Who would you like to book with?",
   hostAny: "Any available",
   hostShow: "Show their times",
+  /** Choosing one of a call's lengths, each with its price (lib/call-lengths.ts). */
+  lengthPick: "How long would you like?",
+  lengthChosen: (what: string) => `Showing times for ${what}.`,
+  lengthOption: (minutes: number, price: string) => `${minutes} minutes, ${price}`,
   withHost: (name: string) => `With ${name}`,
   /** The creator's cancellation deadline (lib/call-setup.ts, cancelHours), said before paying and in the confirmation. */
   cancelPolicy: (hours: number, store: string) =>
@@ -287,6 +295,8 @@ const es: BookingWords = {
     "pkg-refunded": { title: "Este paquete fue reembolsado", body: "Ya no sirve para reservar nada más. No se ha cobrado nada." },
     "pkg-gone": { title: "Ese enlace del paquete no funciona", body: "Usa el enlace del email de tu paquete. No se ha cobrado nada." },
     "pkg-error": { title: "No pudimos reservar con tu paquete en este momento", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },
+    "price-changed": { title: "El precio acaba de cambiar", body: "El creador lo cambió mientras elegías. El precio de abajo es el nuevo; vuelve a elegir tu horario. No se ha cobrado nada." },
+    "length-gone": { title: "Esta duración ya no se ofrece", body: "El creador cambió las duraciones mientras elegías. Vuelve a elegir una duración y un horario abajo. No se ha cobrado nada." },
     taken: {
       title: "Ese horario acaba de ocuparse",
       body: "Alguien lo reservó justo antes que tú, o se está pagando ahora mismo. Elige otro; no se ha cobrado nada.",
@@ -374,6 +384,8 @@ const es: BookingWords = {
     `${store} ya está al tanto, y te llega un email con el nuevo horario y un archivo de calendario. El horario anterior vuelve a quedar libre para otra persona.`,
   moveAgain: (left) => ` Puedes cambiarla ${left === 1 ? "una vez más" : `${left} veces más`} desde esta página.`,
   noOtherSession: "No hay otra sesión a la que cambiarla",
+  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
+  lengthNotMovable: "La duración de esta reserva no se puede cambiar aquí",
   staysAsIs: (store) => `Tu reserva se queda como está. Para preguntarle a ${store} sobre ella, responde a tu email de confirmación.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Puedes cambiarla ${left === 1 ? "una vez más" : `${left} ${hasMoved ? "veces más" : "veces"}`}, hasta el ${until} (${zone}). No se cobra ni se reembolsa nada.`,
@@ -437,6 +449,9 @@ const es: BookingWords = {
   hostPick: "¿Con quién quieres reservar?",
   hostAny: "Cualquiera disponible",
   hostShow: "Ver sus horarios",
+  lengthPick: "¿Cuánto tiempo quieres?",
+  lengthChosen: (what: string) => `Horarios para ${what}.`,
+  lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
     `Cancela con al menos ${hours} horas de antelación, respondiendo a tu correo de confirmación, y ${store} te devuelve lo que pagaste en línea. Si cancelas más tarde o no vienes, ${store} no tiene que devolverlo. Si ${store} cancela, se te devuelve todo. Esto no afecta a tus derechos según la ley.`,
@@ -484,6 +499,8 @@ const fr: BookingWords = {
     "pkg-refunded": { title: "Ce forfait a été remboursé", body: "Il ne permet plus aucune réservation. Rien n'a été débité." },
     "pkg-gone": { title: "Ce lien de forfait ne fonctionne pas", body: "Utilisez le lien de l'e-mail de votre forfait. Rien n'a été débité." },
     "pkg-error": { title: "Nous n'avons pas pu réserver avec votre forfait pour l'instant", body: "Rien n'a été débité. Réessayez dans un instant." },
+    "price-changed": { title: "Le prix vient de changer", body: `Le créateur l'a modifié pendant que vous choisissiez. Le prix ci-dessous est le nouveau${S}; choisissez à nouveau votre horaire. Rien n'a été débité.` },
+    "length-gone": { title: "Cette durée n'est plus proposée", body: "Le créateur a modifié les durées pendant que vous choisissiez. Choisissez à nouveau une durée et un horaire ci-dessous. Rien n'a été débité." },
     taken: {
       title: "Ce créneau vient d'être pris",
       body: `Quelqu'un l'a réservé juste avant vous, ou il est en train d'être payé. Choisissez-en un autre${S}; rien n'a été débité.`,
@@ -574,6 +591,8 @@ const fr: BookingWords = {
     `${store} a été prévenu, et un e-mail avec le nouvel horaire et un fichier de calendrier est en route vers vous. L'ancien créneau est de nouveau libre pour quelqu'un d'autre.`,
   moveAgain: (left) => ` Vous pouvez encore la déplacer ${frTimes(left)} depuis cette page.`,
   noOtherSession: "Il n'y a pas d'autre session vers laquelle la déplacer",
+  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
+  lengthNotMovable: "La durée de cette réservation ne peut pas être déplacée ici",
   staysAsIs: (store) => `Votre réservation reste telle quelle. Pour en parler à ${store}, répondez à votre e-mail de confirmation.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Vous pouvez la déplacer ${left === 1 || hasMoved ? "encore " : ""}${frTimes(left)}, jusqu'au ${until} (${zone}). Rien n'est débité ni remboursé.`,
@@ -636,6 +655,9 @@ const fr: BookingWords = {
   hostPick: `Avec qui voulez-vous réserver${S}?`,
   hostAny: "Toute personne disponible",
   hostShow: "Voir ses horaires",
+  lengthPick: `Quelle durée souhaitez-vous${S}?`,
+  lengthChosen: (what: string) => `Horaires pour ${what}.`,
+  lengthOption: (minutes: number, price: string) => `${minutes} minutes à ${price}`,
   withHost: (name) => `Avec ${name}`,
   cancelPolicy: (hours, store) =>
     `Annulez au moins ${hours} heures avant le début, en répondant à votre e-mail de confirmation, et ${store} rembourse ce que vous avez payé en ligne. Si vous annulez plus tard ou ne venez pas, ${store} n'est pas tenu de le rembourser. Si ${store} annule, tout vous est remboursé. Cela ne change rien à vos droits prévus par la loi.`,
@@ -681,6 +703,8 @@ const de: BookingWords = {
     "pkg-refunded": { title: "Dieses Paket wurde erstattet", body: "Damit kann nichts mehr gebucht werden. Es wurde nichts berechnet." },
     "pkg-gone": { title: "Dieser Paket-Link funktioniert nicht", body: "Verwenden Sie den Link aus der E-Mail zu Ihrem Paket. Es wurde nichts berechnet." },
     "pkg-error": { title: "Die Buchung aus Ihrem Paket hat gerade nicht geklappt", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
+    "price-changed": { title: "Der Preis hat sich gerade geändert", body: "Der Anbieter hat ihn geändert, während Sie gewählt haben. Der Preis unten ist der neue; wählen Sie Ihren Termin noch einmal. Es wurde nichts abgebucht." },
+    "length-gone": { title: "Diese Länge wird nicht mehr angeboten", body: "Der Anbieter hat die Längen geändert, während Sie gewählt haben. Wählen Sie unten noch einmal eine Länge und einen Termin. Es wurde nichts abgebucht." },
     taken: {
       title: "Dieser Termin wurde gerade vergeben",
       body: "Jemand hat ihn kurz vor Ihnen gebucht, oder er wird gerade bezahlt. Wählen Sie einen anderen; es wurde nichts berechnet.",
@@ -768,6 +792,8 @@ const de: BookingWords = {
     `${store} wurde informiert, und eine E-Mail mit dem neuen Termin und einer Kalenderdatei ist unterwegs zu Ihnen. Der alte Termin ist wieder frei für jemand anderen.`,
   moveAgain: (left) => ` Sie können sie auf dieser Seite noch ${deTimes(left)} verschieben.`,
   noOtherSession: "Es gibt keine andere Session, auf die Sie verschieben können",
+  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
+  lengthNotMovable: "Die Länge dieser Buchung lässt sich hier nicht verschieben",
   staysAsIs: (store) => `Ihre Buchung bleibt, wie sie ist. Wenn Sie ${store} dazu etwas fragen möchten, antworten Sie auf Ihre Bestätigungs-E-Mail.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Sie können sie ${left === 1 || hasMoved ? "noch " : ""}${deTimes(left)} verschieben, bis ${until} (${zone}). Es wird nichts berechnet oder erstattet.`,
@@ -831,6 +857,9 @@ const de: BookingWords = {
   hostPick: "Bei wem möchten Sie buchen?",
   hostAny: "Wer gerade frei ist",
   hostShow: "Zeiten anzeigen",
+  lengthPick: "Wie lange möchten Sie buchen?",
+  lengthChosen: (what: string) => `Zeiten für ${what}.`,
+  lengthOption: (minutes: number, price: string) => `${minutes} Minuten, ${price}`,
   withHost: (name) => `Bei ${name}`,
   cancelPolicy: (hours, store) =>
     `Stornieren Sie mindestens ${hours} Stunden vor Beginn, indem Sie auf Ihre Bestätigungs-E-Mail antworten, dann erstattet ${store}, was Sie online bezahlt haben. Stornieren Sie später oder kommen Sie nicht, muss ${store} es nicht erstatten. Sagt ${store} ab, bekommen Sie alles zurück. Ihre gesetzlichen Rechte bleiben unberührt.`,
@@ -878,6 +907,8 @@ const it: BookingWords = {
     "pkg-refunded": { title: "Questo pacchetto è stato rimborsato", body: "Non permette più di prenotare. Non è stato addebitato nulla." },
     "pkg-gone": { title: "Quel link del pacchetto non funziona", body: "Usa il link nell'email del tuo pacchetto. Non è stato addebitato nulla." },
     "pkg-error": { title: "Non siamo riusciti a prenotare con il tuo pacchetto in questo momento", body: "Non è stato addebitato nulla. Riprova tra un momento." },
+    "price-changed": { title: "Il prezzo è appena cambiato", body: "Il creatore l'ha modificato mentre sceglievi. Il prezzo qui sotto è quello nuovo; scegli di nuovo il tuo orario. Non è stato addebitato nulla." },
+    "length-gone": { title: "Questa durata non è più disponibile", body: "Il creatore ha cambiato le durate mentre sceglievi. Scegli di nuovo una durata e un orario qui sotto. Non è stato addebitato nulla." },
     taken: {
       title: "Quell'orario è appena stato preso",
       body: "Qualcuno l'ha prenotato un attimo prima di te, oppure lo sta pagando proprio ora. Scegline un altro; non è stato addebitato nulla.",
@@ -965,6 +996,8 @@ const it: BookingWords = {
     `${store} è stato avvisato, e un'email con il nuovo orario e un file del calendario sta arrivando. Il vecchio orario è di nuovo libero per qualcun altro.`,
   moveAgain: (left) => ` Puoi spostarla ancora ${itTimes(left)} da questa pagina.`,
   noOtherSession: "Non c'è un'altra sessione in cui spostarla",
+  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
+  lengthNotMovable: "La durata di questa prenotazione non si può spostare qui",
   staysAsIs: (store) => `La tua prenotazione resta com'è. Per chiedere a ${store}, rispondi alla tua email di conferma.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Puoi spostarla ${left === 1 || hasMoved ? "ancora " : ""}${itTimes(left)}, fino a ${until} (${zone}). Non viene addebitato né rimborsato nulla.`,
@@ -1028,6 +1061,9 @@ const it: BookingWords = {
   hostPick: "Con chi vuoi prenotare?",
   hostAny: "Chiunque sia disponibile",
   hostShow: "Mostra i suoi orari",
+  lengthPick: "Quale durata preferisci?",
+  lengthChosen: (what: string) => `Orari per ${what}.`,
+  lengthOption: (minutes: number, price: string) => `${minutes} minuti, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
     `Annulla almeno ${hours} ore prima dell'inizio, rispondendo alla tua email di conferma, e ${store} ti rimborsa quanto pagato online. Se annulli oltre questo termine o non vieni, ${store} non è tenuto a rimborsarlo. Se ${store} annulla, ti viene restituito tutto. Questo non tocca i tuoi diritti di legge.`,
@@ -1075,6 +1111,8 @@ const nl: BookingWords = {
     "pkg-refunded": { title: "Dit pakket is terugbetaald", body: "Er kan niets meer mee worden geboekt. Er is niets afgeschreven." },
     "pkg-gone": { title: "Die pakketlink werkt niet", body: "Gebruik de link in de e-mail van je pakket. Er is niets afgeschreven." },
     "pkg-error": { title: "We konden nu niet boeken met je pakket", body: "Er is niets afgeschreven. Probeer het zo meteen opnieuw." },
+    "price-changed": { title: "De prijs is net veranderd", body: "De maker heeft hem gewijzigd terwijl je koos. De prijs hieronder is de nieuwe; kies je tijd opnieuw. Er is niets afgeschreven." },
+    "length-gone": { title: "Deze lengte wordt niet meer aangeboden", body: "De maker heeft de lengtes gewijzigd terwijl je koos. Kies hieronder opnieuw een lengte en een tijd. Er is niets afgeschreven." },
     taken: {
       title: "Die tijd is net bezet",
       body: "Iemand heeft hem vlak voor jou geboekt, of er wordt op dit moment voor betaald. Kies een andere; er is niets afgeschreven.",
@@ -1162,6 +1200,8 @@ const nl: BookingWords = {
     `${store} is op de hoogte gebracht, en er is een e-mail met de nieuwe tijd en een agendabestand naar je onderweg. De oude tijd is weer vrij voor iemand anders.`,
   moveAgain: (left) => ` Je kunt hem vanaf deze pagina nog ${nlTimes(left)} verplaatsen.`,
   noOtherSession: "Er is geen andere sessie om naartoe te verplaatsen",
+  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
+  lengthNotMovable: "De lengte van deze boeking kan hier niet worden verplaatst",
   staysAsIs: (store) => `Je boeking blijft zoals hij is. Wil je ${store} er iets over vragen, beantwoord dan je bevestigingsmail.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Je kunt hem ${left === 1 || hasMoved ? "nog " : ""}${nlTimes(left)} verplaatsen, tot ${until} (${zone}). Er wordt niets afgeschreven of terugbetaald.`,
@@ -1224,6 +1264,9 @@ const nl: BookingWords = {
   hostPick: "Bij wie wil je boeken?",
   hostAny: "Wie er beschikbaar is",
   hostShow: "Toon de tijden",
+  lengthPick: "Hoe lang wil je boeken?",
+  lengthChosen: (what: string) => `Tijden voor ${what}.`,
+  lengthOption: (minutes: number, price: string) => `${minutes} minuten, ${price}`,
   withHost: (name) => `Bij ${name}`,
   cancelPolicy: (hours, store) =>
     `Annuleer minstens ${hours} uur voor de start, door te antwoorden op je bevestigingsmail, en ${store} betaalt terug wat je online betaalde. Annuleer je later of kom je niet, dan hoeft ${store} het niet terug te betalen. Annuleert ${store}, dan krijg je alles terug. Dit doet niets af aan je wettelijke rechten.`,
@@ -1271,6 +1314,8 @@ const pt: BookingWords = {
     "pkg-refunded": { title: "Este pacote foi reembolsado", body: "Já não permite marcar mais nada. Nada foi cobrado." },
     "pkg-gone": { title: "Essa ligação do pacote não funciona", body: "Utilize a ligação do email do seu pacote. Nada foi cobrado." },
     "pkg-error": { title: "Não foi possível marcar com o seu pacote neste momento", body: "Nada foi cobrado. Tente novamente daqui a pouco." },
+    "price-changed": { title: "O preço acabou de mudar", body: "O criador alterou-o enquanto escolhia. O preço abaixo é o novo; escolha de novo o seu horário. Nada foi cobrado." },
+    "length-gone": { title: "Esta duração já não está disponível", body: "O criador alterou as durações enquanto escolhia. Escolha de novo uma duração e um horário abaixo. Nada foi cobrado." },
     taken: {
       title: "Esse horário acabou de ser ocupado",
       body: "Alguém o marcou momentos antes de si, ou está a ser pago neste momento. Escolha outro; nada foi cobrado.",
@@ -1358,6 +1403,8 @@ const pt: BookingWords = {
     `${store} já foi avisado, e vai receber um email com o novo horário e um ficheiro de calendário. O horário anterior fica livre para outra pessoa.`,
   moveAgain: (left) => ` Pode mudá-la mais ${ptTimes(left)} a partir desta página.`,
   noOtherSession: "Não há outra sessão para onde a mudar",
+  /** A paid booking whose length is not one a call may have: never moved at a guess (lib/call-lengths.ts, ownLength). */
+  lengthNotMovable: "A duração desta reserva não pode ser mudada aqui",
   staysAsIs: (store) => `A sua marcação mantém-se como está. Para perguntar a ${store}, responda ao seu email de confirmação.`,
   canMoveUntil: (left, hasMoved, until, zone) =>
     `Pode mudá-la ${left === 1 || hasMoved ? "mais " : ""}${ptTimes(left)}, até ${until} (${zone}). Nada é cobrado nem reembolsado.`,
@@ -1421,6 +1468,9 @@ const pt: BookingWords = {
   hostPick: "Com quem quer marcar?",
   hostAny: "Qualquer pessoa disponível",
   hostShow: "Ver os horários",
+  lengthPick: "Que duração prefere?",
+  lengthChosen: (what: string) => `Horários para ${what}.`,
+  lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Com ${name}`,
   cancelPolicy: (hours, store) =>
     `Cancele com pelo menos ${hours} horas de antecedência, respondendo ao seu e-mail de confirmação, e ${store} reembolsa o que pagou online. Se cancelar mais tarde ou faltar, ${store} não tem de o reembolsar. Se ${store} cancelar, recebe tudo de volta. Isto não afeta os seus direitos previstos na lei.`,

@@ -63,6 +63,11 @@ is(
   [offer(sub, invoice, null), offer(sub, invoice, product, ["p1"]), offer(sub, invoice, { ...product, intro: { cents: 500 } } as typeof product), offer(sub, invoice, { ...product, yearly: null } as unknown as typeof product)],
   [null, null, null, null],
 );
+is(
+  "the invoice's subscription read where the current API names it, and where older versions did",
+  [offer(sub, { ...invoice, subscription: undefined, parent: { subscription_details: { subscription: "sub_1" } } }) !== null, offer(sub, { ...invoice, subscription: "sub_1", parent: { subscription_details: { subscription: "sub_other" } } })],
+  [true, null],
+);
 is("never offered as a saving: a monthly price whose twelve months cost less than the failed year is not offered", offer(sub, { ...invoice, amount_due: 30000 }), null);
 is("the monthly price is the product's own today, never the failed year's amount divided", offer(sub, invoice, { ...product, priceCents: 1800, yearly: { cents: 20000 } })?.monthly, 1800);
 

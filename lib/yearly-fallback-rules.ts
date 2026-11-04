@@ -34,6 +34,9 @@ import { type YearlySub, affiliateMonthsLeft, discounted } from "@/lib/yearly-sw
 
 /** The parts of a Stripe invoice these rules read. */
 export type FallbackInvoice = {
+  /** Where the API versions since 2025 name the invoice's subscription. */
+  parent?: { subscription_details?: { subscription?: unknown } | null } | null;
+  /** Where older API versions name it. */
   subscription?: unknown;
   billing_reason?: unknown;
   status?: unknown;
@@ -69,7 +72,8 @@ export function monthlyFallback(
 ): MonthlyFallback | null {
   if (!product || !subId) return null;
   // Its own renewal, still unpaid.
-  const invoiceSub = typeof invoice.subscription === "string" ? invoice.subscription : null;
+  const named = invoice.parent?.subscription_details?.subscription ?? invoice.subscription;
+  const invoiceSub = typeof named === "string" ? named : null;
   if (invoiceSub !== subId) return null;
   if (invoice.billing_reason !== "subscription_cycle" || invoice.status !== "open") return null;
   if (String(invoice.currency ?? "").toLowerCase() !== storeCurrency.toLowerCase()) return null;

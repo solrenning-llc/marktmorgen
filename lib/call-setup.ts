@@ -402,8 +402,9 @@ export function readSetup(raw: unknown): CallSetup | SetupProblem {
  * MAX_SETUP_LENGTHS lengths a call may have, shortest first, none twice,
  * the first being the setup's own, each fitting in one stretch of the hours,
  * each with a whole positive price above any deposit. One person a time
- * only. Anything else refuses the setup, so nothing read from storage can
- * charge a length the rules never let through.
+ * only. Anything else refuses the setup as sent; read from storage, only the
+ * lengths are dropped (parseSetup), so nothing can charge a length the rules
+ * never let through, and the call itself is never lost for them.
  */
 function readLengthsShape(
   raw: unknown,
@@ -447,9 +448,19 @@ function inPerson(sessions: LiveSession[]): Omit<CallSetup, "tz" | "noticeHours"
   return { kind: "live", weekly: [[], [], [], [], [], [], []], horizonDays: 30, bufferMinutes: 0, room: null, video: false, meet: null, seats: 1, sessions };
 }
 
-/** Whatever came back from storage, made safe to use, or null. */
+/**
+ * Whatever came back from storage, made safe to use, or null. Lengths kept in
+ * a shape the rules no longer allow (the hours shortened or a deposit raised
+ * since) are dropped, not the call: it goes on selling at its own length and
+ * the product's price, never at a length the rules refuse, and its paid
+ * bookings still move at their own lengths (lib/call-lengths.ts, ownLength).
+ */
 export function parseSetup(raw: unknown): CallSetup | null {
   const read = readSetup(raw);
+  if (read === "lengths" && raw && typeof raw === "object") {
+    const again = readSetup({ ...(raw as Record<string, unknown>), lengths: undefined });
+    return typeof again === "string" ? null : again;
+  }
   return typeof read === "string" ? null : read;
 }
 

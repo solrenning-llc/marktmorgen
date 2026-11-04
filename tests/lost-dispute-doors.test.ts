@@ -7,13 +7,17 @@
  *   - the license key job still revokes on a full refund when the closing
  *     events cannot be read (a restricted key, a rate limit), and keeps its
  *     place so the disputes are read again next run;
- *   - a dispute lost for part of the price keeps access, as a partial refund
- *     does; lost for the whole price (with what was refunded) it closes;
+ *   - a dispute lost for less than the charge closes as one lost for the
+ *     whole: Stripe says its amount can differ by an exchange rate, and
+ *     nothing tells that from a part of the order (inbox C4-9; a charge of
+ *     4900 lost at 4870 left everything open before);
+ *   - the closing events are read with no charge read, and not once the
+ *     job's time is up, which keeps its place;
  *   - a dispute that cannot be read keeps the community and the list of
  *     purchases open, as a refund read does, and no dispute is read for an
  *     offer that is not of the product asked about;
- *   - the job that ends a paid call's meeting acts on a lost dispute, not on
- *     a won or partial one;
+ *   - the job that ends a paid call's meeting ends it on a lost dispute, also
+ *     one lost for less, and not on a won one;
  *   - a review is no longer from a "verified buyer" once its payment is lost
  *     to a dispute, both when proved and in the job that marks reviews.
  */
@@ -23,6 +27,8 @@ import { paidForAny } from "@/lib/community-access";
 import { purchasesFor } from "@/lib/buyer-orders";
 import { checkKey, keyForSale, revokeRefunded } from "@/lib/licence-keys";
 import { syncMeetings } from "@/lib/call-meetings";
+import { lostDisputesSince } from "@/lib/refunds";
+import { callScope, readRecord, writeRecord, type MeetRecord } from "@/lib/meet-records";
 import { MEET_STORES } from "@/lib/meet-links";
 import { markRefundedReviews, provePurchase } from "@/lib/review-proof";
 import { readReview, saveReview, visibleReviews } from "@/lib/reviews";
@@ -50,6 +56,8 @@ let refunds: Record<string, unknown>[] = [];
 let eventsStatus = 200;
 let disputesDown = false;
 let disputeReads = 0;
+let chargeReads = 0;
+let eventReads = 0;
 const lookedUp: string[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -76,10 +84,12 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     return list(disputes[url.searchParams.get("charge") ?? ""] ?? []);
   }
   if (path === "/events") {
+    eventReads += 1;
     if (eventsStatus !== 200) return answer({ error: { type: "invalid_request_error", message: "This API key does not have the rak_event_read permission" } }, eventsStatus);
     return list(url.searchParams.get("type") === "charge.dispute.closed" ? closings : []);
   }
   const read = /^\/charges\/(ch_[A-Za-z0-9]+)$/.exec(path);
+  if (read) chargeReads += 1;
   if (read) return answer(charges[read[1]] ?? { object: "charge", id: read[1], amount: 4900, amount_refunded: 0, disputed: true });
   if (path === "/refunds") return list(refunds);
   return list([]);
@@ -141,17 +151,28 @@ async function main(): Promise<void> {
   eventsStatus = 200;
   refunds = [];
 
-  part("A dispute lost for part of the price");
-  is("keeps access, as a partial refund does", await purchaseRefunded(ACCOUNT, paid("cs_test_part00000001", guide.product.id, "lost", {}, 1000)), false);
+  part("A dispute lost for less than the charge (an exchange rate, or part of the order: Stripe's amount cannot tell)");
+  is("4900 charged, 4870 lost: closed, as the whole", await purchaseRefunded(ACCOUNT, paid("cs_test_fx0000000001", guide.product.id, "lost", {}, 4870)), true);
+  is("lost for a small part: closed too", await purchaseRefunded(ACCOUNT, paid("cs_test_part00000001", guide.product.id, "lost", {}, 1000)), true);
   is("lost for the whole price: closed", await purchaseRefunded(ACCOUNT, paid("cs_test_whole0000001", guide.product.id, "lost")), true);
+  is("won: open", await purchaseRefunded(ACCOUNT, paid("cs_test_won000000001", guide.product.id, "won")), false);
   const partKey = await keyForSale(store, app, "cs_test_keypart000001", "buyer@example.com");
   const wholeKey = await keyForSale(store, app, "cs_test_keywhole00001", "buyer@example.com");
   if (partKey?.state !== "issued" || wholeKey?.state !== "issued") throw new Error("no key");
   sessionsByPayment.pi_TestKeyPart01 = [{ id: "cs_test_keypart000001", metadata: { store: "kilnworks", product: tool.product.id } }];
   sessionsByPayment.pi_TestKeyWhole1 = [{ id: "cs_test_keywhole00001", metadata: { store: "kilnworks", product: tool.product.id } }];
-  closings = [closing("evt_TestKeyPart01", "pi_TestKeyPart01", "lost", 1000), closing("evt_TestKeyWhole1", "pi_TestKeyWhole1", "lost")];
+  closings = [closing("evt_TestKeyPart01", "pi_TestKeyPart01", "lost", 4870), closing("evt_TestKeyWhole1", "pi_TestKeyWhole1", "lost")];
+  chargeReads = 0;
   await revokeRefunded(store, Date.now() + 10_000);
-  is("the key job: part lost keeps its key, whole lost revokes", [await checkKey(store, app, partKey.key), await checkKey(store, app, wholeKey.key)], ["valid", "revoked"]);
+  is("the key job: lost for less and lost for the whole both revoke", [await checkKey(store, app, partKey.key), await checkKey(store, app, wholeKey.key)], ["revoked", "revoked"]);
+  is("and no charge is read for them", chargeReads, 0);
+
+  part("The closing events and the job's time");
+  eventReads = 0;
+  const late = await lostDisputesSince(ACCOUNT, NOW - 3600, Date.now() - 1);
+  is("past the job's deadline: nothing is read, and the read is not complete, so the job keeps its place", [eventReads, late.rows.length, late.complete], [0, 0, false]);
+  const read = await lostDisputesSince(ACCOUNT, NOW - 3600, Date.now() + 10_000);
+  is("in time: one page read, each lost dispute a row marked lost on its charge", [eventReads, read.complete, read.rows.map((r) => (r.charge as { dispute?: { status?: string } }).dispute?.status)], [1, true, ["lost", "lost"]]);
   closings = [];
 
   part("A dispute that cannot be read keeps the door open, as a refund read does");
@@ -169,15 +190,26 @@ async function main(): Promise<void> {
   part("The meeting of a paid call");
   const callsId = "c".repeat(16);
   const callStore: Store = { ...store, callsId };
-  await redis.pipeline([["ZADD", MEET_STORES, Date.now() + 86_400_000, `${callsId}|kilnworks`]]);
-  const call = (pi: string) => [{ id: `cs_test_${pi.slice(3)}`, metadata: { kind: "call", store: "kilnworks", product: guide.product.id, start: String(Date.now() + 86_400_000) }, customer_details: { email: "buyer@example.com" } }];
-  sessionsByPayment.pi_TestCallLost01 = call("pi_TestCallLost01");
-  sessionsByPayment.pi_TestCallWon001 = call("pi_TestCallWon001");
-  sessionsByPayment.pi_TestCallPart01 = call("pi_TestCallPart01");
-  closings = [closing("evt_TestCallLost01", "pi_TestCallLost01", "lost"), closing("evt_TestCallWon001", "pi_TestCallWon001", "won"), closing("evt_TestCallPart01", "pi_TestCallPart01", "lost", 500)];
+  const callStart = Date.now() + 86_400_000;
+  await redis.pipeline([["ZADD", MEET_STORES, callStart, `${callsId}|kilnworks`]]);
+  const call = (pi: string) => [{ id: `cs_test_${pi.slice(3)}`, metadata: { kind: "call", store: "kilnworks", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
+  // Each booking's meeting, as confirmBooking leaves it before the provider made it: ending it needs no provider call.
+  const scopeOf = (pi: string) => callScope(callsId, { group: false, session: `cs_test_${pi.slice(3)}`, product: guide.product.id, start: callStart });
+  const meeting = (pi: string): MeetRecord => ({
+    provider: "google", scope: scopeOf(pi), statsId: store.statsId!, handle: "kilnworks", callsId, product: guide.product.id, session: `cs_test_${pi.slice(3)}`, group: false,
+    id: "", account: "", link: "https://marktmorgen.com/call", made: false, start: callStart, end: callStart + 3_600_000, tz: "UTC", title: "Glaze call",
+    guests: [], added: [], todo: "", tries: 0, next: 0, error: "", updates: 0, gone: false, host: "", calendar: "",
+  });
+  for (const pi of ["pi_TestCallLost01", "pi_TestCallWon001", "pi_TestCallPart01"]) {
+    sessionsByPayment[pi] = call(pi);
+    await writeRecord(meeting(pi));
+  }
+  closings = [closing("evt_TestCallLost01", "pi_TestCallLost01", "lost"), closing("evt_TestCallWon001", "pi_TestCallWon001", "won"), closing("evt_TestCallPart01", "pi_TestCallPart01", "lost", 4870)];
   lookedUp.length = 0;
   await syncMeetings(async (handle) => (handle === "kilnworks" ? callStore : null), Date.now() + 10_000, "https://marktmorgen.com");
-  is("the job ends the meeting of the call lost, not the won or partial one", lookedUp, ["pi_TestCallLost01"]);
+  is("the job looks up the calls lost, not the won one", [...lookedUp].sort(), ["pi_TestCallLost01", "pi_TestCallPart01"]);
+  const gone = async (pi: string) => (await readRecord(scopeOf(pi)))?.gone;
+  is("and their meetings end; the won call's stays", [await gone("pi_TestCallLost01"), await gone("pi_TestCallPart01"), await gone("pi_TestCallWon001")], [true, true, false]);
   closings = [];
 
   part("A review's verified buyer");

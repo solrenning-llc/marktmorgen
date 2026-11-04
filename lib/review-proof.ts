@@ -302,10 +302,10 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       if (after) query.set("starting_after", after);
       const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
       const refunds = Array.isArray(listed.data) ? (listed.data as Row[]) : [];
-      // A dispute closed as lost for the whole charge marks its reviews as a
+      // A dispute closed as lost marks its reviews as a
       // full refund does (lib/refunds.ts, queue 388 [TB14]): read once, with
       // the first page, from Stripe's closing events (kept thirty days).
-      const lost = page === 0 ? await lostDisputesOrRetry(store.stripeAccountId, since) : { rows: [], complete: true };
+      const lost = page === 0 ? await lostDisputesOrRetry(store.stripeAccountId, since, deadline) : { rows: [], complete: true };
       if (!lost.complete) unsure = true;
       const rows: Row[] = [...lost.rows, ...refunds];
       for (const refund of rows) {

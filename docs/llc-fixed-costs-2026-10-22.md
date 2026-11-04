@@ -8,6 +8,28 @@ As [instruções oficiais5472](https://www.irs.gov/instructions/i5472) condicion
 
 A observação histórica deINSS não comprova remuneração atual ou obrigação fixa universal. A remoção/zero depende dos fatos e leitura aplicável;permanece desconhecida neste passo,sem inventar remuneração. TX4global ainda não concluído. Alocação100%Marktmorgen,0%Hazelsong,preços/limites/comissão e demais travas preservados. Nenhum IOprodutivo novo;CI no orçamentoFX275,desconhecido nãozero. O relatório gerado é atualizado junto do catálogo;sem entrega funcional/contador.
 
+## TX4 — official U.S. federal filing evidence (4 November 2026)
+
+This is a dated evidence record, not a filed return, legal or tax advice, an applicability conclusion, or a complete cost ceiling. The official sources below were read on 4 November 2026. No form, extension, account, payment, engagement or external contact was made.
+
+### Conditional scope and return package
+
+The [Instructions for Form 5472 (Rev. December 2024)](https://www.irs.gov/instructions/i5472) define a foreign-owned U.S. disregarded entity as a domestic disregarded entity wholly owned by a foreign person. They generally require a reporting corporation to file Form 5472 when it had a reportable transaction with a foreign or domestic related party. For a foreign-owned U.S. disregarded entity, Part V transactions include amounts paid or received in connection with formation, dissolution, acquisition and disposition, including contributions and distributions. This record does not determine whether Marktmorgen LLC meets those conditions; classification, ownership, related parties and the actual transactions for each tax year still require review.
+
+When those conditions apply, the same instructions require a pro forma Form 1120 with Form 5472 attached. The pro forma return completes only the entity's name and address and items B and E on the first page, writes “Foreign-owned U.S. DE” across the top, and uses the same tax year as its owner for U.S. filing purposes or, if none, the calendar year. This filing package is an information-return rule in the cited instructions; it is not evidence that federal income tax, another return, or another jurisdiction's obligation is absent.
+
+### Due date, extension and delivery
+
+The [2025 Instructions for Form 1120](https://www.irs.gov/instructions/i1120), read on the same date, state the general due date as the 15th day of the 4th month after the end of the tax year. They state a special rule for a tax year ending in June and move a due date that falls on a Saturday, Sunday or legal holiday to the next business day. This record does not choose an actual tax year or calendar deadline for the LLC.
+
+The Form 5472 instructions say a qualifying foreign-owned U.S. DE requests an extension with Form 7004 by the regular due date, using the Form 1120 code and the dedicated delivery route. They also say that this filer cannot file Form 5472 electronically. The listed alternatives are Fax at 300 DPI or higher to 855-887-7737, or mail to 1973 Rulon White Blvd, M/S 6112 Attn: PIN Unit, Ogden, UT 84201. A delivery method still needs timely proof and operational review; this document does not prepare or send it.
+
+### Penalties, records and unpriced work
+
+The Form 5472 instructions state an initial $25,000 penalty for a late filing, a filing not made in the prescribed manner, a substantially incomplete filing, or failure to maintain required records. After IRS notice, a failure continuing beyond 90 days can add $25,000 for each 30-day period or part. The IRS [International information reporting penalties](https://www.irs.gov/payments/international-information-reporting-penalties) page states that this continuation exposure has no maximum penalty amount. These are penalty exposures, not compliance-cost estimates or reserved amounts.
+
+The cited pages do not provide a complete ceiling for applicability analysis, preparation and review, recordkeeping, timely delivery evidence, fax or postage, software or professional help, corrections, amended filings, taxes, currency conversion and reserve timing. This evidence does not establish that any filing, government, preparation or delivery cost is zero. Therefore the complete monetary ceiling remains unknown and unreserved; the existing Form 5472/pro forma 1120 cost category stays unreviewed, and no finite monthly or annual amount enters the margin or customer-base calculation from this evidence slice.
+
 
 > **TX vigente — dono, 27/10/2026, 12h34 Fortaleza.** As referências anteriores deste documento à regra 19, à leitura que dá mais imposto, ao ISS de 5% como certo ou a consultas tributárias ficam preservadas como histórico e são substituídas, nos pontos conflitantes, pela política TX de [AGENTS.md](../AGENTS.md). Nenhuma consulta será feita ou preparada para envio. As taxas de recebimento mais caras, SR, desconhecido reprova, reservas, exposição e custeio continuam obrigatórios. A [matriz TX1](tx-legal-source-review-2026-10-27.md) distingue fontes conferidas e lacunas; não certifica incidência zero. O código e os números antigos ainda não adaptados não provam a nova leitura; revisão e regeneração pertencem a TX2/TX5. Flags continuam false.
 >

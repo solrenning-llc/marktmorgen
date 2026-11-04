@@ -43,7 +43,7 @@ export type ShipmentMailPolicy = {
   continuedReviewIds?: string[];
   /** Explicit extra source coverage in this same funded envelope; absence
    * preserves legacy physical/shipment coverage, never admits extra origins. */
-  coveredOrigins?: ("course-confirmation" | "single-digital-confirmation" | "single-digital-access-renewal")[];
+  coveredOrigins?: ("course-confirmation" | "single-digital-confirmation" | "single-digital-access-renewal" | "physical-option-confirmation")[];
   /** Separate quantified discovery/trigger coverage in this SAME review.
    * Storage funding is not recovery funding. Actual review remains NULL. */
   recovery?: PendingMailRecoveryGrant;
@@ -150,11 +150,11 @@ export function shipmentMailPolicy(value: unknown, now = Date.now(), admission =
     const input = p.coveredOrigins;
     if (!Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype) return null;
     const length = Object.getOwnPropertyDescriptor(input, "length")?.value;
-    if (!Number.isSafeInteger(length) || length < 1 || length > 3 || Reflect.ownKeys(input).length !== length + 1) return null;
-    const origins: ("course-confirmation" | "single-digital-confirmation" | "single-digital-access-renewal")[] = [];
+    if (!Number.isSafeInteger(length) || length < 1 || length > 4 || Reflect.ownKeys(input).length !== length + 1) return null;
+    const origins: ("course-confirmation" | "single-digital-confirmation" | "single-digital-access-renewal" | "physical-option-confirmation")[] = [];
     for (let i = 0; i < length; i++) {
       const field = Object.getOwnPropertyDescriptor(input, String(i));
-      if (!field || !Object.hasOwn(field, "value") || !["course-confirmation", "single-digital-confirmation", "single-digital-access-renewal"].includes(field.value) || origins.includes(field.value)) return null;
+      if (!field || !Object.hasOwn(field, "value") || !["course-confirmation", "single-digital-confirmation", "single-digital-access-renewal", "physical-option-confirmation"].includes(field.value) || origins.includes(field.value)) return null;
       origins.push(field.value);
     }
     p.coveredOrigins = origins;
@@ -250,10 +250,10 @@ if op == 'enqueue' then
  -- Courses are a reserve/readback construction only. Funding must explicitly
  -- cover this origin in the SAME policy; no physical funding inheritance.
  if n.originKind~=nil then
-  if type(p.coveredOrigins)~='table' or #p.coveredOrigins<1 or #p.coveredOrigins>3 then return {'unknown'} end
+  if type(p.coveredOrigins)~='table' or #p.coveredOrigins<1 or #p.coveredOrigins>4 then return {'unknown'} end
   local covered={}
   for _,purpose in ipairs(p.coveredOrigins) do
-   if (purpose~='course-confirmation' and purpose~='single-digital-confirmation' and purpose~='single-digital-access-renewal') or covered[purpose] then return {'unknown'} end
+   if (purpose~='course-confirmation' and purpose~='single-digital-confirmation' and purpose~='single-digital-access-renewal' and purpose~='physical-option-confirmation') or covered[purpose] then return {'unknown'} end
    covered[purpose]=true
   end
   if n.originKind=='course' then

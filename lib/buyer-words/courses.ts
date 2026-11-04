@@ -1964,7 +1964,7 @@ const pt: CoursesWords = {
     posted: "Publicado.",
     noroom: "Esta loja não tem espaço para isso neste momento, por isso não foi guardado. Tente mais tarde.",
     deleted: "Eliminado.",
-    locked: "Você entrou sem a sua segunda etapa, então apagar espera até o login em duas etapas se desligar. Entre com o código do seu app ou uma chave de acesso para fazer isso agora.",
+    locked: "Entrou sem a sua segunda etapa, por isso apagar aguarda até que o início de sessão em duas etapas se desligue. Inicie sessão com o código da sua aplicação ou uma chave de acesso para o fazer já.",
     hidden: "Ocultado. Agora só é visível para si e para quem o escreveu.",
     shown: "Novamente visível para todos os alunos.",
     empty: "Escreva primeiro alguma coisa.",

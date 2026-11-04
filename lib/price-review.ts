@@ -28,6 +28,8 @@
 import type { Interval } from "@/lib/product-recurring";
 import { introProblem } from "@/lib/intro-price";
 import { yearlyProblem } from "@/lib/yearly-price";
+import { fastMoneyRefusal } from "@/lib/terms-check-rules";
+import { productPromptsLeft } from "@/lib/product-outline";
 
 export type PricedProduct = {
   /** A draft is seen by no buyer: nothing to review. */
@@ -38,9 +40,9 @@ export type PricedProduct = {
   interval: Interval | null;
   /** The pay-what-you-want box's starting price, or null when the price is set. */
   suggestedCents: number | null;
-  /** A membership's introductory price, or null. */
+  /** A membership's introductory price as the checkout offers it now (lib/intro-price.ts, activeIntro), or null. */
   intro: { cents: number; count: number } | null;
-  /** A monthly membership's yearly price, or null. */
+  /** A monthly membership's yearly price as the checkout offers it now (lib/yearly-price.ts, activeYearly), or null. */
   yearlyCents: number | null;
   /** Its id, to tell whether it is one of the plans members switch between. */
   id: string;
@@ -56,9 +58,15 @@ export type PricedProduct = {
   refuses: { free: boolean; membership: boolean; choose: boolean };
   /** Whether sales tax or VAT is added on top of the price at checkout (tax on, not included in the price). */
   taxOnTop: boolean;
+  /** Its payment plan's payment (one price; null with price options or none), offered or not. */
+  plan: { payments: number; cents: number } | null;
+  /** Whether buyers are offered its payment plan now (lib/product-extras.ts, activePlan). */
+  planBefore: boolean;
+  /** Whether they would be once saved, at this price and schedule. */
+  planAfter: (next: { priceCents: number; interval: Interval | null }) => boolean;
 };
 
-export type PriceDraft = { price: string; every: string; pwyw: boolean; suggested: string; introPrice: string; introCount: string; yearlyPrice: string };
+export type PriceDraft = { title: string; summary: string; about: string; price: string; every: string; pwyw: boolean; suggested: string; introPrice: string; introCount: string; yearlyPrice: string };
 
 /** Which field a row's "Change" goes back to. */
 export type PriceField = "every" | "pwyw" | "price" | "suggested" | "intro" | "yearly";
@@ -77,6 +85,27 @@ function how(interval: string | null, chooses: boolean): string {
   return chooses ? "They choose what to pay" : "Once";
 }
 
+/**
+ * What a new price does to a payment plan, from whether buyers are offered it
+ * now and once saved (lib/product-extras.ts, activePlan), for the product's
+ * own price or one of its options. `plan` is that price's payment in the
+ * plan, when it has one: a price above what the payments add up to stops the
+ * plan (planState "short"), a lower one can bring a paused plan back, and
+ * below what they add up to, buyers who pay in parts still pay that.
+ */
+export function planWords(plan: { payments: number; cents: number } | null, before: boolean, after: boolean, price: number, money: (cents: number) => string): string[] {
+  const total = plan ? plan.payments * plan.cents : 0;
+  const parts = plan ? `Buyers who pay in ${plan.payments} payments` : "";
+  if (before && !after) {
+    const said = ["Your payment plan stops being offered on this product."];
+    if (plan && total < price) said.push(`Its ${plan.payments} payments of ${money(plan.cents)} add up to ${money(total)}, less than ${money(price)}. Raise that payment in the plan to offer it again.`);
+    return said;
+  }
+  if (!before && after) return ["Your payment plan is offered again on this product.", ...(plan && total > price ? [`${parts} pay ${money(plan.cents)} each, ${money(total)} in all.`] : [])];
+  if (after && plan && total > price) return [`${parts} still pay ${money(plan.cents)} each, ${money(total)} in all, until you change it in the plan.`];
+  return [];
+}
+
 /** Said under the rows of a price: what the store charges, before what can lower it, and the tax on top. */
 export function storePriceWords(taxOnTop: boolean): string {
   return `Your store's price is this, before any sale, offer or discount code${taxOnTop ? ", plus sales tax or VAT where it applies" : ""}.`;
@@ -92,6 +121,10 @@ export function storePriceWords(taxOnTop: boolean): string {
  */
 export function priceReview(product: PricedProduct, draft: PriceDraft, read: (typed: string) => number | null, money: (cents: number) => string): PriceReview | null {
   if (product.hidden) return null;
+  // Nor a save the route refuses for its words (app/api/store/product/route.ts): no title, or, on a
+  // product buyers can see, a promise of fast money or a prompt of the ready outline left in.
+  const words = { title: draft.title.trim(), summary: draft.summary, about: draft.about };
+  if (!words.title || fastMoneyRefusal(words) || productPromptsLeft(words)[0]) return null;
   // With price options, buyers pay an option's price, set in its own editor: no price row here.
   const optioned = product.options > 0;
   // A free product is given for an email address, never sold for nothing.
@@ -129,16 +162,20 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
   if (!optioned && (price !== product.priceCents || howChanged)) rows.push({ key: "price", label: chooses ? "Lowest price" : "Price", now: priced(product.priceCents), then: priced(price), field: "price" });
   if (chooses && suggested !== product.suggestedCents) rows.push({ key: "suggested", label: "Price their box starts at", now: chose && product.suggestedCents !== null ? money(product.suggestedCents) : "None", then: money(suggested!), field: "suggested" });
   const introWords = (i: { cents: number; count: number } | null) => (i ? `${money(i.cents)} for the first ${i.count === 1 ? "payment" : `${i.count} payments`}` : "None");
-  if (introWords(intro) !== introWords(product.intro)) rows.push({ key: "intro", label: "Introductory price", now: introWords(product.intro), then: introWords(intro), field: "intro" });
-  if (yearly !== product.yearlyCents) rows.push({ key: "yearly", label: "Yearly price", now: product.yearlyCents === null ? "None" : money(product.yearlyCents), then: yearly === null ? "None" : money(yearly), field: "yearly" });
+  // A row's Change goes to its own field while the new schedule still has it; otherwise to the schedule that took it away.
+  if (introWords(intro) !== introWords(product.intro)) rows.push({ key: "intro", label: "Introductory price", now: introWords(product.intro), then: introWords(intro), field: every ? "intro" : "every" });
+  if (yearly !== product.yearlyCents) rows.push({ key: "yearly", label: "Yearly price", now: product.yearlyCents === null ? "None" : money(product.yearlyCents), then: yearly === null ? "None" : money(yearly), field: every === "month" ? "yearly" : "every" });
   if (!rows.length) return null;
 
   // Said only under a price that is charged: a sale, an offer or a code can lower it, and tax can be added on top.
   const store = price > 0 && rows.some((row) => MONEY_ROWS.has(row.key)) ? ` ${storePriceWords(product.taxOnTop)}` : "";
+  // A price buyers choose is refused beside a plan (above), so the plan is read with none.
+  const plan = planWords(optioned ? null : product.plan, product.planBefore, product.planAfter({ priceCents: price, interval: every as Interval | null }), price, money);
+  const planned = plan.length ? ` ${plan.join(" ")}` : "";
   const note = !product.interval
     ? `Your store shows this as soon as you save.${store}`
     : every
       ? `New members join at this once you save.${store} A checkout already open keeps what it opened with. Members who already joined keep the price and schedule they joined at.`
       : `Members who already joined are still charged what they joined at. Saving does not cancel them. Each membership ends when they or you cancel it, or after its last payment. To stop them, cancel their memberships in your Stripe dashboard. New buyers see this once you save.${store}`;
-  return { rows, note };
+  return { rows, note: note + planned };
 }

@@ -14,10 +14,10 @@ import { done, is, part } from "./check";
 const read = (typed: string) => readMoney(typed, "usd");
 const money = (cents: number) => formatMoney(cents, "usd");
 const NONE = { free: false, membership: false, choose: false };
-const once: PricedProduct = { hidden: false, options: 0, priceCents: 2900, interval: null, suggestedCents: null, intro: null, yearlyCents: null, id: "p1", tiers: [], bounds: { min: 100, max: 500_000 }, refuses: NONE, taxOnTop: false };
+const once: PricedProduct = { hidden: false, options: 0, priceCents: 2900, interval: null, suggestedCents: null, intro: null, yearlyCents: null, id: "p1", tiers: [], bounds: { min: 100, max: 500_000 }, refuses: NONE, taxOnTop: false, plan: null, planBefore: false, planAfter: () => false };
 const member: PricedProduct = { ...once, priceCents: 900, interval: "month" };
 const chosen: PricedProduct = { ...once, priceCents: 500, suggestedCents: 1500 };
-const draft = (more: Partial<PriceDraft>): PriceDraft => ({ price: "29", every: "", pwyw: false, suggested: "", introPrice: "", introCount: "1", yearlyPrice: "", ...more });
+const draft = (more: Partial<PriceDraft>): PriceDraft => ({ title: "Watercolor basics", summary: "", about: "", price: "29", every: "", pwyw: false, suggested: "", introPrice: "", introCount: "1", yearlyPrice: "", ...more });
 const review = (p: PricedProduct, d: Partial<PriceDraft>) => priceReview(p, draft(d), read, money);
 const rows = (r: ReturnType<typeof priceReview>) => r?.rows.map((x) => [x.label, x.now, x.then, x.field]) ?? null;
 const PRICE = "Your store's price is this, before any sale, offer or discount code.";
@@ -40,7 +40,7 @@ is("a new schedule: how buyers pay, back to the schedule, with the price shown",
 const withYearly = { ...member, yearlyCents: 9000, intro: { cents: 100, count: 3 } };
 const withIntro = { ...member, intro: { cents: 100, count: 3 } };
 const yearlyOnly = { ...member, yearlyCents: 9000 };
-is("a new schedule takes the yearly price away, and the introductory price down to one payment: both said", rows(review(withYearly, { price: "9", every: "week", yearlyPrice: "90", introPrice: "1", introCount: "3" })), [["How buyers pay", "Every month", "Every week", "every"], ["Price", "$9", "$9", "price"], ["Introductory price", "$1 for the first 3 payments", "$1 for the first payment", "intro"], ["Yearly price", "$90", "None", "yearly"]]);
+is("a new schedule takes the yearly price away, and the introductory price down to one payment: both said", rows(review(withYearly, { price: "9", every: "week", yearlyPrice: "90", introPrice: "1", introCount: "3" })), [["How buyers pay", "Every month", "Every week", "every"], ["Price", "$9", "$9", "price"], ["Introductory price", "$1 for the first 3 payments", "$1 for the first payment", "intro"], ["Yearly price", "$90", "None", "every"]]);
 is("a new yearly or introductory price on its own", [rows(review(yearlyOnly, { price: "9", every: "month", yearlyPrice: "80" })), rows(review(withIntro, { price: "9", every: "month", introPrice: "2", introCount: "3" }))], [[["Yearly price", "$90", "$80", "yearly"]], [["Introductory price", "$1 for the first 3 payments", "$2 for the first 3 payments", "intro"]]]);
 is("an introductory or yearly price that cannot be read: nothing reviewed", [review(yearlyOnly, { price: "9", every: "month", yearlyPrice: "x" }), review(withIntro, { price: "9", every: "month", introPrice: "x" })], [null, null]);
 
@@ -81,6 +81,28 @@ is("the editor gives the review the currency's range, the plans members switch b
 part("A product with price options");
 const optioned = { ...once, options: 2 };
 is("how buyers pay is still reviewed, without a price row: each option has its own", [rows(review(optioned, { price: "29", every: "month" })), rows(review(optioned, { price: "39" }))], [[["How buyers pay", "Once", "Every month", "every"]], null]);
+
+part("A payment plan on the product: what the new price or schedule does to it, said before saving");
+// lib/product-extras.ts, planState: offered on a one-off sale while its payments add up to at least the price.
+const planned: PricedProduct = { ...once, priceCents: 10000, plan: { payments: 3, cents: 4000 }, planBefore: true, planAfter: (next) => next.interval === null && 3 * 4000 >= next.priceCents };
+is("lowered to $80: buyers who pay in parts still pay what the payments add up to", review(planned, { price: "80" })?.note, `${STORE} Buyers who pay in 3 payments still pay $40 each, $120 in all, until you change it in the plan.`);
+is("raised to $130: the plan stops, said with why and how to bring it back", review(planned, { price: "130" })?.note, `${STORE} Your payment plan stops being offered on this product. Its 3 payments of $40 add up to $120, less than $130. Raise that payment in the plan to offer it again.`);
+is("made a membership: the plan stops (it only goes on a product sold once)", review(planned, { price: "100", every: "month" })?.note, `${STORE} Your payment plan stops being offered on this product.`);
+is("a paused plan the new price brings back, and one equal to the payments: nothing more", [review({ ...planned, planBefore: false }, { price: "90" })?.note, review(planned, { price: "120" })?.note], [`${STORE} Your payment plan is offered again on this product. Buyers who pay in 3 payments pay $40 each, $120 in all.`, STORE]);
+const editorPlan = readFileSync("components/product-editor.tsx", "utf8");
+is("the editor reads the plan offered now and once saved, at the new price and schedule, with no price buyers choose", [editorPlan.includes("planBefore: activePlan(product as Listing) !== null,"), editorPlan.includes("planAfter: (next) => activePlan({ ...product, priceCents: next.priceCents, recurring: next.interval ? { ...(product.recurring ?? { trialDays: 0, payments: 0 }), interval: next.interval } : null, pwyw: null } as Listing) !== null,")], [true, true]);
+
+part("Now: what the checkout offers, not only what is stored");
+is("the editor gives the introductory and yearly prices the checkout offers now (activeIntro, activeYearly)", [editorPlan.includes("intro: activeIntro(product, tiers),"), editorPlan.includes("yearlyCents: activeYearly(product, tiers)?.cents ?? null,")], [true, true]);
+is("a stored introductory price the checkout no longer offers is said as none now", rows(review({ ...member, intro: null }, { price: "9", every: "month", introPrice: "5" })), [["Introductory price", "None", "$5 for the first payment", "intro"]]);
+
+part("A save the route refuses for its words is not reviewed either");
+is("no title, a promise of fast money, or a prompt of the ready outline left in", [review(once, { price: "39", title: "  " }), review(once, { price: "39", summary: "Make easy money baking at home." }), review(once, { price: "39", about: "[Who it is for, and who it is not for.]" })], [null, null, null]);
+is("the words the save checks are the route's own", [readFileSync("app/api/store/product/route.ts", "utf8").includes("fastMoneyRefusal({ title, summary, about: about ?? \"\" })"), editorPlan.includes('{ ...draft, about: aboutUnread && !draft.about ? "" : draft.about },')], [true, true]);
+
+part("Change goes to a field the new schedule still has");
+is("a yearly or introductory price a new schedule takes away: Change goes to the schedule", rows(review(withYearly, { price: "9", every: "", yearlyPrice: "90" }))?.filter((r) => r[0] !== "How buyers pay" && r[0] !== "Price").map((r) => r[3]), ["every", "every"]);
+is("a yearly price taken away by a weekly schedule goes to the schedule; the introductory price kept goes to its own", rows(review(withYearly, { price: "9", every: "week", yearlyPrice: "90", introPrice: "1", introCount: "3" }))?.map((r) => r[3]), ["every", "price", "intro", "every"]);
 
 part("What the member notes rest on");
 const checkout = readFileSync("lib/store-checkout.ts", "utf8");

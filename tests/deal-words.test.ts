@@ -190,20 +190,20 @@ part("Review of #2084: honest words that only share letters with a deal word pas
 const course = "Pottery course. Lessons online.";
 is("the Portuguese and Spanish verb promover", ["Nós promovemos o acesso aos cursos.", "O curso promove a criatividade.", "Ela promoveu o evento.", "Vamos promover o curso.", "El curso promueve la creatividad."].filter((reply) => !heldToFacts(reply, course)), []);
 is("a verb to guarantee that only says how access works", [
-  "Para garantizar el acceso, inicia sesión.", "Garantizamos el acceso al curso.", "El curso garantiza el acceso de por vida.",
-  "Para garantir o acesso, entre na sua conta.", "Garantimos o acesso ao curso.", "O curso garante o acesso.",
-  "Pour garantir l'accès, connectez-vous.", "Le cours garantit l'accès.", "Per garantire l'accesso, accedi.", "Il corso garantisce l'accesso.",
-  "Wir garantieren den Zugang.", "Um den Zugang zu garantieren, melden Sie sich an.", "Wij garanderen de toegang tot de cursus.",
+  "Inicia sesión para garantizar el acceso.", "Garantizamos el acceso al curso.", "El curso garantiza el acceso de por vida.",
+  "Entre na sua conta para garantir o acesso.", "Garantimos o acesso ao curso.", "O curso garante o acesso.",
+  "Connectez-vous pour garantir l'accès.", "Le cours garantit l'accès.", "Accedi per garantire l'accesso.", "Il corso garantisce l'accesso.",
+  "Wir garantieren den Zugang.", "Melden Sie sich an, um den Zugang zu garantieren.", "Wij garanderen de toegang tot de cursus.",
 ].filter((reply) => !heldToFacts(reply, course)), []);
 is("but a verb that promises is refused, in every language (C3-107)", [
   "Garantizamos que vas a duplicar tus ventas.", "Garantimos resultados.", "Nous garantissons des résultats.", "Wir garantieren Ergebnisse.", "Garantiamo risultati.", "Wij garanderen resultaten.",
 ].filter((reply) => heldToFacts(reply, course)), []);
-is("access joined by a conjunction to another object is a promise and is refused (C3-109)", [
+is("access followed by anything but the end of the clause is refused: a conjunction (C3-109) or a comma (C3-111)", [
   "Garantizamos el acceso y que vas a duplicar tus ventas.", "Nous garantissons l'accès et des résultats.", "Wir garantieren den Zugang und Ergebnisse.", "Garantimos o acesso e o seu sucesso.",
-  "Garantizamos el acceso al curso y resultados.", "Garantimos o acesso, e o seu sucesso.", "Wij garanderen de toegang en resultaten.", "Garantiamo l'accesso e risultati.", "Um den Zugang und Ergebnisse zu garantieren.", "Um den Zugang zu garantieren und Ergebnisse.",
+  "Garantizamos el acceso al curso y resultados.", "Garantimos o acesso, e o seu sucesso.", "Wij garanderen de toegang en resultaten.", "Garantiamo l'accesso e risultati.", "Um den Zugang und Ergebnisse zu garantieren.", "Um den Zugang zu garantieren und Ergebnisse.", "Garantizamos el acceso, resultados y éxito.", "Nous garantissons l'accès, des résultats rapides.", "Para garantizar el acceso, inicia sesión.",
 ].filter((reply) => heldToFacts(reply, course)), []);
 is("while access at the end of the clause or with an access complement passes", [
-  "Garantizamos el acceso de por vida.", "Garantimos o acesso vitalício.", "Nous garantissons l'accès à vie.", "Wir garantieren den Zugang zum Kurs.", "Garantiamo l'accesso al corso, poi scegli tu.",
+  "Garantizamos el acceso de por vida.", "Garantimos o acesso vitalício.", "Nous garantissons l'accès à vie.", "Wir garantieren den Zugang zum Kurs.", "Garantiamo l'accesso al corso!",
   "Garantizamos el acceso", "Wij garanderen de toegang tot de cursussen; meer niet.",
 ].filter((reply) => !heldToFacts(reply, course)), []);
 is("unless the store wrote the same word", heldToFacts("Garantizamos resultados.", "Curso de cerámica. Garantizamos resultados o te devolvemos el dinero."), true);

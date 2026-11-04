@@ -452,9 +452,12 @@ export const FAMILIES: Record<string, Family> = {
   "nl:crm:fields:@lib/crm.ts": { what: "The store's own fields", parts: [capped(MAX_CRM_FIELDS * (MAX_FIELD_OPTIONS + 2) * 160, "MAX_CRM_FIELDS fields and their choices.", src("lib/crm-rules.ts", "MAX_CRM_FIELDS", "MAX_FIELD_OPTIONS"))] },
   "nl:crm:stages:@lib/crm.ts": { what: "The first pipeline's stages, as the board kept them before pipelines", parts: [capped(MAX_STAGES * 256, "MAX_STAGES stages.", src("lib/crm-rules.ts", "MAX_STAGES"))] },
   "nl:crm:pipes:@lib/crm.ts": { what: "The deals' pipelines and their stages (17 October 2026): one slot, at what the record weighs", room: ["lib/crm.ts"] },
+  "nl:crm:pacc:@lib/pipeline-access.ts": { what: "What each teammate may do with each pipeline, only where restricted", room: ["lib/pipeline-access.ts"] },
   "nl:crm:v:@lib/crm.ts": { what: "People's values of the store's fields", room: ["lib/crm.ts"] },
   "nl:voice:@lib/customer-voice.ts": { what: "What buyers said, summed up a month", parts: [capped(14 * 16 * KB, "One summary a month, 400 days.")] },
   "nl:voice:lock:@lib/customer-voice.ts": short("One summary at a time", "studio", 1, 128),
+  "nl:rsum:@lib/review-ai-summary.ts": short("A product's AI summary of its reviews, kept eight days", "studio", 8, 4 * KB),
+  "nl:rsum:lock:@lib/review-ai-summary.ts": short("One review summary at a time", "studio", 1, 128),
 
   // ---------------------------------------------------------------- lib/ d–f
   "nl:store:delivery:@lib/delivery.ts": { what: "Bytes delivered, by the month", parts: [capped(14 * KEY, "One count a month, 400 days.")] },
@@ -497,6 +500,9 @@ export const FAMILIES: Record<string, Family> = {
       per("monthly", 401, MARK, "A link in a monthly email noted."),
     ],
   },
+  "nl:transparency:@lib/transparency.ts": company("The public transparency page's counts: notices received and acted on, year by year (624 [SZ8](47))", "The company's: one hash and one set of notice ids a year, nothing about any store or person."),
+  "nl:transparency:acted:@lib/transparency.ts": company("The notices acted on each year, so each counts once", "The company's: notice ids only, one set a year."),
+  "nl:transparency:since@lib/transparency.ts": company("The day counting began", "The company's: one key for the whole platform, a date and nothing else."),
   "nl:erase:link:@lib/erasure-request.ts": company("A person's link to delete themselves from the stores they ask, an hour", "A person's, across stores, behind a per-address limit."),
   "nl:exposure:v1:YYYY-MM@lib/exposure-budget-policy.ts": company("The exposure ledger's name", "The company's ledger."),
   "nl:exposure:v1:@lib/exposure-budget.ts": company("The company's exposure ledger, a month", "The company's ledger, carried by its fixed costs."),

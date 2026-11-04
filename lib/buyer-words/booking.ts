@@ -236,6 +236,12 @@ const en = {
   hostAny: "Any available",
   hostShow: "Show their times",
   withHost: (name: string) => `With ${name}`,
+  /** The creator's cancellation deadline (lib/call-setup.ts, cancelHours), said before paying and in the confirmation. */
+  cancelPolicy: (hours: number, store: string) =>
+    `Cancel at least ${hours} hours before the start, by replying to your confirmation email, and ${store} refunds what you paid online. If you cancel later or miss it, ${store} does not have to refund it. If ${store} cancels, you get it all back. This does not affect your rights under the law.`,
+  /** The same deadline, for a time already inside it when booked. */
+  cancelTooLate: (hours: number, store: string) =>
+    `This time starts in less than ${hours} hours, so if you cancel or miss it, ${store} does not have to refund what you paid online. If ${store} cancels, you get it all back. This does not affect your rights under the law.`,
 
   // ---- A package of sessions ---------------------------------------------------------
   /** On Stripe's page. */
@@ -432,6 +438,10 @@ const es: BookingWords = {
   hostAny: "Cualquiera disponible",
   hostShow: "Ver sus horarios",
   withHost: (name) => `Con ${name}`,
+  cancelPolicy: (hours, store) =>
+    `Cancela con al menos ${hours} horas de antelación, respondiendo a tu correo de confirmación, y ${store} te devuelve lo que pagaste en línea. Si cancelas más tarde o no vienes, ${store} no tiene que devolverlo. Si ${store} cancela, se te devuelve todo. Esto no afecta a tus derechos según la ley.`,
+  cancelTooLate: (hours, store) =>
+    `Este horario empieza en menos de ${hours} horas, así que si cancelas o no vienes, ${store} no tiene que devolverte lo que pagaste en línea. Si ${store} cancela, se te devuelve todo. Esto no afecta a tus derechos según la ley.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sesión", "sesiones")}`,
   packageDescription: (sessions, limit) =>
@@ -627,6 +637,10 @@ const fr: BookingWords = {
   hostAny: "Toute personne disponible",
   hostShow: "Voir ses horaires",
   withHost: (name) => `Avec ${name}`,
+  cancelPolicy: (hours, store) =>
+    `Annulez au moins ${hours} heures avant le début, en répondant à votre e-mail de confirmation, et ${store} rembourse ce que vous avez payé en ligne. Si vous annulez plus tard ou ne venez pas, ${store} n'est pas tenu de le rembourser. Si ${store} annule, tout vous est remboursé. Cela ne change rien à vos droits prévus par la loi.`,
+  cancelTooLate: (hours, store) =>
+    `Ce créneau commence dans moins de ${hours} heures${S}: si vous annulez ou ne venez pas, ${store} n'est pas tenu de rembourser ce que vous avez payé en ligne. Si ${store} annule, tout vous est remboursé. Cela ne change rien à vos droits prévus par la loi.`,
 
   packageName: (title, sessions) => `${title} — ${sessions}${S}${pluralFr(sessions, "séance", "séances")}`,
   packageDescription: (sessions, limit) =>
@@ -818,6 +832,10 @@ const de: BookingWords = {
   hostAny: "Wer gerade frei ist",
   hostShow: "Zeiten anzeigen",
   withHost: (name) => `Bei ${name}`,
+  cancelPolicy: (hours, store) =>
+    `Stornieren Sie mindestens ${hours} Stunden vor Beginn, indem Sie auf Ihre Bestätigungs-E-Mail antworten, dann erstattet ${store}, was Sie online bezahlt haben. Stornieren Sie später oder kommen Sie nicht, muss ${store} es nicht erstatten. Sagt ${store} ab, bekommen Sie alles zurück. Ihre gesetzlichen Rechte bleiben unberührt.`,
+  cancelTooLate: (hours, store) =>
+    `Dieser Termin beginnt in weniger als ${hours} Stunden: Stornieren Sie oder kommen Sie nicht, muss ${store} nicht erstatten, was Sie online bezahlt haben. Sagt ${store} ab, bekommen Sie alles zurück. Ihre gesetzlichen Rechte bleiben unberührt.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "Termin", "Termine")}`,
   packageDescription: (sessions, limit) =>
@@ -1011,6 +1029,10 @@ const it: BookingWords = {
   hostAny: "Chiunque sia disponibile",
   hostShow: "Mostra i suoi orari",
   withHost: (name) => `Con ${name}`,
+  cancelPolicy: (hours, store) =>
+    `Annulla almeno ${hours} ore prima dell'inizio, rispondendo alla tua email di conferma, e ${store} ti rimborsa quanto pagato online. Se annulli oltre questo termine o non vieni, ${store} non è tenuto a rimborsarlo. Se ${store} annulla, ti viene restituito tutto. Questo non tocca i tuoi diritti di legge.`,
+  cancelTooLate: (hours, store) =>
+    `Questo orario inizia tra meno di ${hours} ore: se annulli o non vieni, ${store} non è tenuto a rimborsare quanto pagato online. Se ${store} annulla, ti viene restituito tutto. Questo non tocca i tuoi diritti di legge.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessione", "sessioni")}`,
   packageDescription: (sessions, limit) =>
@@ -1203,6 +1225,10 @@ const nl: BookingWords = {
   hostAny: "Wie er beschikbaar is",
   hostShow: "Toon de tijden",
   withHost: (name) => `Bij ${name}`,
+  cancelPolicy: (hours, store) =>
+    `Annuleer minstens ${hours} uur voor de start, door te antwoorden op je bevestigingsmail, en ${store} betaalt terug wat je online betaalde. Annuleer je later of kom je niet, dan hoeft ${store} het niet terug te betalen. Annuleert ${store}, dan krijg je alles terug. Dit doet niets af aan je wettelijke rechten.`,
+  cancelTooLate: (hours, store) =>
+    `Deze tijd begint over minder dan ${hours} uur: annuleer je of kom je niet, dan hoeft ${store} niet terug te betalen wat je online betaalde. Annuleert ${store}, dan krijg je alles terug. Dit doet niets af aan je wettelijke rechten.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessie", "sessies")}`,
   packageDescription: (sessions, limit) =>
@@ -1396,6 +1422,10 @@ const pt: BookingWords = {
   hostAny: "Qualquer pessoa disponível",
   hostShow: "Ver os horários",
   withHost: (name) => `Com ${name}`,
+  cancelPolicy: (hours, store) =>
+    `Cancele com pelo menos ${hours} horas de antecedência, respondendo ao seu e-mail de confirmação, e ${store} reembolsa o que pagou online. Se cancelar mais tarde ou faltar, ${store} não tem de o reembolsar. Se ${store} cancelar, recebe tudo de volta. Isto não afeta os seus direitos previstos na lei.`,
+  cancelTooLate: (hours, store) =>
+    `Esta hora começa daqui a menos de ${hours} horas: se cancelar ou faltar, ${store} não tem de reembolsar o que pagou online. Se ${store} cancelar, recebe tudo de volta. Isto não afeta os seus direitos previstos na lei.`,
 
   packageName: (title, sessions) => `${title} — ${sessions} ${plural(sessions, "sessão", "sessões")}`,
   packageDescription: (sessions, limit) =>

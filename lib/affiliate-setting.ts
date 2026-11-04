@@ -23,6 +23,7 @@
 
 import { type LeadSetting, NO_LEADS, parseLeadSetting } from "@/lib/affiliate-lead-rules";
 import { type PendingTerms, readNoticeDays, readPending } from "@/lib/affiliate-notice";
+import { readIdleDays } from "@/lib/affiliate-idle-rules";
 
 /**
  * Which affiliate a sale belongs to when the buyer followed more than one
@@ -128,6 +129,16 @@ export type AffiliateSetting = {
    */
   lifetime: boolean;
   /**
+   * Whether a purchase that no link, code or bond credits earns the affiliate
+   * who brought the buyer as a confirmed lead (630 [HN6](1)): an address that
+   * confirmed a sign-up, claimed a free product from its emailed link or had a
+   * booked call take place through that affiliate (lib/affiliate-leads.ts).
+   * Off until the creator switches it on, as `lifetime` is: it changes who
+   * gets paid, and a programme already running is not quietly re-pointed.
+   * Missing is off.
+   */
+  contacts?: boolean;
+  /**
    * Memberships and payment plans (added 12 October 2026): 0, not credited,
    * as every program before this was; otherwise each paid invoice of a
    * membership sold through a link earns while it falls within this many
@@ -173,6 +184,15 @@ export type AffiliateSetting = {
    * Missing on every program saved before it existed: none, as they were.
    */
   notice?: number;
+  /**
+   * Days without a sale or a lead after which an approved affiliate is
+   * removed, always after a warning (630 [HN6](3), lib/affiliate-idle-rules.ts):
+   * 0 for never, else 90 to 730. Missing on every program saved before it
+   * existed: never.
+   */
+  idle?: number;
+  /** When `idle` was last switched on or changed, in seconds: a warning older than that is set aside. */
+  idleOn?: number;
   /**
    * A cut announced and not yet in force: the whole set of terms that takes
    * over on its day. Until then `percent`, `rates` and `days` are the old
@@ -249,6 +269,7 @@ export const NO_AFFILIATES: AffiliateSetting = {
   numbers: false,
   kit: true,
   lifetime: false,
+  contacts: false,
   recurring: 0,
   bonuses: [],
   paidSearch: false,
@@ -314,6 +335,10 @@ export function parseAffiliateSetting(raw: unknown, now: number = Date.now()): A
     kit: value.kit !== false,
     // Likewise: a programme already running is not quietly re-pointed.
     lifetime: value.lifetime === true,
+    // Off on every program saved before it existed, and off whenever leads are
+    // not paid: kept on under "no leads", it would turn itself back on unseen
+    // the day leads are paid again (creditsContacts).
+    contacts: value.contacts === true && parseLeadSetting(value.lead).kind !== "none",
     // Every programme before these existed credited no membership, paid no
     // bonus and held nothing for paid search: missing means the same.
     recurring: (RECURRING_OPTIONS as readonly number[]).includes(Number(value.recurring)) ? Number(value.recurring) : 0,
@@ -324,6 +349,8 @@ export function parseAffiliateSetting(raw: unknown, now: number = Date.now()): A
     // Missing on every programme saved before it existed: no lead commission.
     lead: parseLeadSetting(value.lead),
     notice: readNoticeDays(value.notice),
+    idle: readIdleDays(value.idle),
+    idleOn: Number.isInteger(value.idleOn) && Number(value.idleOn) > 0 ? Number(value.idleOn) : 0,
     pending: null,
   };
   // A cut whose day has come is the terms from then on; before it, the old ones hold.
@@ -456,6 +483,21 @@ export function viaCookieValue(existing: string | undefined, code: string, nowSe
 }
 
 /**
+ * Whether a purchase that nothing else credits goes to the affiliate who
+ * brought the buyer as a confirmed lead (630 [HN6](1)). Only while the program
+ * pays per lead: that is the only time a contact is confirmed and written down
+ * as an affiliate's (lib/affiliate-leads.ts recordLead), so a switch that could
+ * find nobody is not offered or promised.
+ */
+export function creditsContacts(setting: Pick<AffiliateSetting, "enabled" | "contacts" | "lead">): boolean {
+  return setting.enabled && setting.contacts === true && setting.lead.kind !== "none";
+}
+
+/** The sentence added to the rule when a program credits its affiliates' contacts (creditsContacts). */
+export const CONTACTS_RULE =
+  "A one-off purchase not credited to an affiliate's link, an affiliate's code or an earlier purchase goes to the affiliate who brought the buyer as a confirmed lead before they bought, on any device and with no cookie involved.";
+
+/**
  * The sentence the affiliate and the creator both read about the rule.
  *
  * The window is stated conditionally — up to so many days, for as long as the
@@ -472,7 +514,8 @@ export function attributionWords(setting: AffiliateSetting): string {
     setting.rule === "first"
       ? `The first affiliate link a buyer follows earns the sale, ${window} after that first click and ${kept}, even if they follow somebody else's link later.`
       : `The last affiliate link a buyer follows earns the sale, ${window} after that click and ${kept}.`;
-  return setting.lifetime
+  const withBond = setting.lifetime
     ? `${rule} None of that applies once a sale has been credited: from then on the buyer stays with that affiliate, and everything the person buys afterward earns them, with no time limit, on any device, with no cookie involved at all.`
     : rule;
+  return creditsContacts(setting) ? `${withBond} ${CONTACTS_RULE}` : withBond;
 }

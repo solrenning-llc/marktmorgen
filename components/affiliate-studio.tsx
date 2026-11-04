@@ -42,12 +42,14 @@ import { MAX_LEAD_BUDGET_CENTS, MAX_LEAD_CAP, MAX_LEAD_CENTS, MAX_LEAD_HOLD_DAYS
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 import { MAX_NOTICE_DAYS, MIN_NOTICE_DAYS, noticeLines } from "@/lib/affiliate-notice";
+import { IDLE_WARN_DAYS, MAX_IDLE_DAYS, MIN_IDLE_DAYS } from "@/lib/affiliate-idle-rules";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   percent: `Type a whole share from ${MIN_COMMISSION} to ${MAX_COMMISSION} percent.`,
   days: `Type a whole number of days from ${MIN_COOKIE_DAYS} to ${MAX_COOKIE_DAYS}.`,
   notice: `Type a whole number of days of notice from ${MIN_NOTICE_DAYS} to ${MAX_NOTICE_DAYS}, or leave it empty for none.`,
+  idle_days: `Pick never, or a number of days from ${MIN_IDLE_DAYS} to ${MAX_IDLE_DAYS}.`,
   rate: `A product's own share is a whole number from 0 to ${MAX_COMMISSION}; 0 leaves it out.`,
   rule: "Pick whether the first or the last link a buyer followed earns the sale.",
   share_percent: SHARE_PROBLEMS.percent,
@@ -638,6 +640,10 @@ function Terms({
   const [numbers, setNumbers] = useState(setting.numbers);
   const [kit, setKit] = useState(setting.kit);
   const [lifetime, setLifetime] = useState(setting.lifetime);
+  const [contacts, setContacts] = useState(setting.contacts === true);
+  const [idle, setIdle] = useState(String(setting.idle ?? 0));
+  // The usual choices, and the one saved if it is another (set through the API).
+  const idleChoices = [...new Set([0, 90, 180, 365, setting.idle ?? 0])].sort((x, y) => x - y);
   const [recurringMonths, setRecurringMonths] = useState(String(setting.recurring));
   const [paidSearch, setPaidSearch] = useState(setting.paidSearch);
   const [secondTier, setSecondTier] = useState(String(setting.secondTier));
@@ -685,6 +691,10 @@ function Terms({
               buyers,
               autoApprove,
               lifetime,
+              // Only a program that pays per lead has confirmed contacts to credit (lib/affiliate-setting.ts creditsContacts).
+              contacts: lead.kind !== "none" && contacts,
+              // Not while memberships are credited: their sales are read from Stripe, never written down (idleRemovalAllowed).
+              idle: recurringOn ? 0 : Number(idle),
               recurring: Number(recurringMonths),
               paidSearch,
               secondTier: Number(secondTier),
@@ -1149,6 +1159,54 @@ function Terms({
 
         {/* Pay per lead (components/affiliate-leads-studio.tsx, lib/affiliate-leads.ts). */}
         <LeadTerms value={lead} onChange={setLead} currency={storeCurrency} />
+        {/*
+          A purchase by a contact an affiliate brought (630 [HN6](1),
+          lib/affiliate-leads.ts contactFor). Shown only while leads are paid,
+          because only then is a contact confirmed and written down as theirs.
+          Off until the creator says so, like the bond above.
+        */}
+        {lead.kind !== "none" ? (
+          <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
+            <input
+              type="checkbox"
+              checked={contacts}
+              onChange={(e) => setContacts(e.target.checked)}
+              className="h-5 w-5 shrink-0 accent-[var(--violet)]"
+            />
+            <span className="text-sm">
+              <span className="block font-semibold text-ink">A lead who buys later earns the affiliate who brought them</span>
+              <span className="block text-ink-soft">
+                A one-off purchase not credited to an affiliate&rsquo;s link, code or an earlier purchase goes to the affiliate
+                who brought the buyer as a confirmed lead before they bought, at that affiliate&rsquo;s share, on any device. A
+                lead counts from when it is confirmed, even while it waits for your approval. Once you mark a lead as not
+                genuine, or delete the person from your store, their later purchases earn nobody. Your affiliate page says so
+                before anyone applies.
+              </span>
+            </span>
+          </label>
+        ) : null}
+
+        {/* Removing affiliates who bring nothing (630 [HN6](3), lib/affiliates.ts idleSweep). */}
+        {recurringOn ? (
+          <p className="mt-5 text-xs text-ink-soft">
+            Removing affiliates who bring nothing is not available while memberships and payment plans earn commission: their payments
+            are read from Stripe each time, so a link that brings only members would look idle.
+          </p>
+        ) : (
+        <label className="mt-5 block" htmlFor="aff-idle">
+          <span className="field-label">Remove affiliates who bring nothing</span>
+          <select id="aff-idle" value={idle} onChange={(e) => setIdle(e.target.value)} aria-describedby="aff-idle-help" className="field max-w-[16rem]">
+            {idleChoices.map((n) => (
+              <option key={n} value={String(n)}>
+                {n === 0 ? "Never" : `After ${n} days with no sale and no lead`}
+              </option>
+            ))}
+          </select>
+          <span id="aff-idle-help" className="mt-1 block text-xs text-ink-soft">
+            {`Counted from today when you switch it on. An approved affiliate whose link brings no sale${lead.kind !== "none" ? " and no lead" : ""} in that time is emailed ${IDLE_WARN_DAYS} days before, with the date, and removed on it if still nothing comes. Never a partner, and never anybody you may still owe: they stay until you have paid them. Their record stays, and you can add them back.`}
+          </span>
+        </label>
+        )}
 
         <label className="mt-5 flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
           <input

@@ -37,7 +37,7 @@ for (let i = MAX_SIGN_INS + 5; i >= 1; i -= 1) signIn(NOW - i * 3_600_000);
 signIn(NOW);
 is("at most twenty stored and shown, the new one first", [redis.run(["ZCARD", KEY]), shown(NOW).length, shown(NOW)[0].at], [MAX_SIGN_INS, MAX_SIGN_INS, NOW]);
 redis.clear();
-// Somebody who signs in every sixty days: a list would live on for ever, as EXPIRE restarts at each sign-in.
+// Somebody who signs in every sixty days: a list would live on forever, as EXPIRE restarts at each sign-in.
 for (let day = 0; day <= 600; day += 60) signIn(NOW + day * DAY);
 const last = NOW + 600 * DAY;
 is("someone signing in every sixty days keeps only what is under ninety days old", (redis.run(["ZRANGEBYSCORE", KEY, "-inf", "+inf"]) as string[]).map((m) => JSON.parse(m).at), [last - 60 * DAY, last]);
@@ -65,7 +65,7 @@ is("every way has its words, so none is ever dropped", (["link", "passkey", "inv
 is("under every list: the place is approximate, the browser is what the device reported", [historyNotes([entry(NOW)]), SIGN_IN_NOTES.some((n) => /approximate/.test(n)) && SIGN_IN_NOTES.some((n) => /device reported/.test(n))], [[...SIGN_IN_NOTES], true]);
 is("what a locked session is, said only when one is listed", historyNotes([entry(NOW), entry(NOW - DAY, { way: "locked" })]), [...SIGN_IN_NOTES, ...LOCKED_NOTE]);
 // Each thing a locked session cannot do (lib/two-step.ts), named in the note; a new one fails here until the note says it.
-const NEED_WORDS: Record<string, RegExp> = { billing: /\bbilling\b/, payments: /\bpayments\b/, team: /\byour team\b/, delete: /\bdelete\b/, export: /\bexport\b/, settings: /\bsettings\b/, send: /\bsend to your list\b/, import: /\bimport\b/ };
+const NEED_WORDS: Record<string, RegExp> = { billing: /\bbilling\b/, payments: /\bpayments\b/, team: /\byour team\b/, delete: /\bdelete your store\b/, export: /\bexport\b/, settings: /\bsettings\b/, send: /\bsend to your list\b/, import: /\bimport\b/ };
 is("the locked note names everything a locked session is held back from", LOCKED_NEEDS.map((need) => [need, NEED_WORDS[need]?.test(LOCKED_NOTE.join(" ")) ?? false]), LOCKED_NEEDS.map((need) => [need, true]));
 is("every sentence shown is under twenty-one words", [...SIGN_IN_NOTES, ...LOCKED_NOTE].every((n) => n.split(/\s+/).length < 21), true);
 

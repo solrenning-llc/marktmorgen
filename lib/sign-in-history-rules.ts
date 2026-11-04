@@ -8,7 +8,7 @@
  * (lib/data-families.ts).
  *
  *   - Each entry says when, how the creator signed in (the way lib/auth.ts
- *     names, and apart from it the two ways that matter most to recognise:
+ *     names, and apart from it the two ways that matter most to recognize:
  *     "rescue", the link to the recovery address that turned two-step login
  *     off, app/api/auth/rescue; and "locked", a session opened without the
  *     second step that is held back from everything LOCKED_NEEDS names,
@@ -188,9 +188,9 @@ export const SIGN_IN_NOTES = [
  * could and could not do (lib/two-step.ts LOCKED_NEEDS, held in the test).
  */
 export const LOCKED_NOTE = [
-  "A locked session can sell, edit products and pages, answer buyers and see your numbers.",
+  "A locked session can sell, edit or delete products and pages, answer buyers and see orders and your numbers.",
   "It cannot change billing, payments, your team or settings.",
-  "It cannot delete, export, import or send to your list.",
+  "It cannot delete your store, export or import lists, or send to your list.",
 ] as const;
 
 /** The notes to show under a list: always where the facts come from, and what a locked session is when one is listed. */

@@ -7,7 +7,8 @@ import { DataRoomError } from "@/lib/store-data";
 import { MAX_AI_LESSONS, MAX_AI_MODULES } from "@/lib/ai-rules";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setCourseLessons, setProductCourse, setProductHidden, storeForEmail, storeFolder } from "@/lib/store";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
@@ -104,7 +105,16 @@ export async function GET(request: NextRequest) {
  * creator's own store, so nothing here can reach anyone else's course.
  */
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "products", MAX_BODY_LENGTH * 4 + 4_000);
+  // What takes a lesson, a module, a file, a quiz or handed-in work away for good is
+  // named apart, for a session let in without its second step (lib/two-step.ts).
+  const guarded = await guardStoreWrite(request, "products", MAX_BODY_LENGTH * 4 + 4_000, (sent) => {
+    const asked = text(sent.action, 20);
+    const op = text(sent.op, 20);
+    if (asked === "edit" && (op === "lesson-remove" || op === "module-remove" || op === "media-remove")) return op;
+    if (asked === "task" && sent.task === null) return "task-remove";
+    if (asked === "quiz" && sent.quiz === null) return "quiz-remove";
+    return asked;
+  });
   if (!guarded.ok) return guarded.response;
   const { ref, body } = guarded;
   // Long enough for the longest action below ("cert-months" has 11 letters);
@@ -386,7 +396,10 @@ export async function POST(request: NextRequest) {
         const lessonId = text(body.lessonId, 20);
         const pathname = text(body.pathname, 400);
         const kind = body.kind === "video" ? "video" : "file";
-        if (!findLesson(course, lessonId)) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+        const lesson = findLesson(course, lessonId);
+        if (!lesson) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+        // A new video deletes the one the lesson had: not from a session let in without its second step.
+        if (kind === "video" && lesson.lesson.video && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
         // The file has to sit in this account's folder for this very lesson,
         // and what it is is read from storage, not from the browser.
         const folder = await storeFolder(ref);

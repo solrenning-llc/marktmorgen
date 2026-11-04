@@ -74,7 +74,7 @@
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { type Paid, paypalPaymentId, paypalRefundedKey, readPayPalRefunds } from "@/lib/paypal-sales";
+import { type Paid, paypalPaymentId, readPayPalRefunds, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { saleHandles, storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -100,7 +100,8 @@ import {
   RECURRING_ALWAYS,
   readViaCookie,
 } from "@/lib/affiliate-setting";
-import { readListings } from "@/lib/catalog";
+import { productIds, readListings } from "@/lib/catalog";
+import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
 import { type PartnerShare, parsePartnerShare, shareOn } from "@/lib/partner-share";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
@@ -1855,6 +1856,44 @@ export function settleLine(referral: Referral, refunded: number): Line {
 }
 
 /**
+ * How big the program is, counted before it is read, so a reading that pays
+ * for itself by its size (the API's affiliates, lib/api-read.ts) can take
+ * what readBook will cost first: the seven records it reads whole, by their
+ * entries, the PayPal refunds it reads one by one, the products it may read
+ * and whether Stripe is connected. One pipeline of counts, nothing else. Null
+ * when a count did not come back as one: unknown is never read as small.
+ */
+// Accepted race: between this count and readBook's HGETALL the records can grow for a few milliseconds and be
+// read past what was paid for, bounded by how fast the store writes them.
+export async function bookSizes(store: Store): Promise<BookSizes | null> {
+  const stripe = Boolean(store.stripeAccountId);
+  const products = productIds(store).length;
+  if (!store.statsId || !isRedisConfigured()) return { kept: false, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe, products };
+  const id = store.statsId;
+  const replies = await redisPipeline([
+    ["HLEN", peopleKey(id)],
+    ["HLEN", clicksKey(id)],
+    ["HLEN", salesKey(id)],
+    ["HLEN", payoutsKey(id)],
+    ["HLEN", sharesKey(id)],
+    ["HLEN", paidClicksKey(id)],
+    ["HLEN", leadsKey(id)],
+    ["ZCARD", paypalRefundedKey(id)],
+  ]);
+  const counts = replies.map((r) => (typeof r === "number" || (typeof r === "string" && /^\d{1,12}$/.test(r)) ? Number(r) : NaN));
+  if (counts.length !== 8 || counts.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+  return {
+    kept: true,
+    entries: counts.slice(0, 7).reduce((a, b) => a + b, 0),
+    people: counts[0],
+    leads: counts[6],
+    paypalRefunds: counts[7],
+    stripe,
+    products,
+  };
+}
+
+/**
  * Everything the studio shows about the programme — and, filtered to one
  * person, what an affiliate sees: their clicks, the sales through their link
  * with what each earns after refunds, and what the creator says they paid.
@@ -2071,6 +2110,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
 
 /** How many invoice pages of a hundred are read when the book is opened. */
 export const INVOICE_PAGES = 10;
+/** The most pages of the creator's Stripe account one reading of the book waits on: invoices, refunds and disputes (lib/api-read-rules.ts, bookWork). */
+export const BOOK_STRIPE_PAGES = INVOICE_PAGES + REFUND_PAGES + DISPUTE_PAGES;
 const AFF_SUB_STRIPE_VERSION = "2026-08-26.dahlia";
 
 type InvoiceLike = {

@@ -41,8 +41,17 @@ export const DEMO_BYTES_PER_SESSION = 256 * 1024;
 export const DEMO_ACTION_MAX_BYTES = 32 * 1024;
 /** Database commands one action may send at the most, its counting included. */
 export const DEMO_COMMANDS_PER_ACTION = 12;
-/** Database commands opening a session sends: the day's counts, the address limit, the session record and its expiry. */
-export const DEMO_START_COMMANDS = 8;
+/**
+ * Database commands opening a session sends, as billed (scripts' inner commands
+ * one by one): the address limit (2), the day's counting script (6) and the
+ * script that writes the session's record and first drafts (9). Held against
+ * what the door really sends in tests/studio-demo.test.ts.
+ */
+export const DEMO_START_COMMANDS = 17;
+/** Bytes opening a session moves through the database at the most, both ways (held in tests/studio-demo.test.ts). */
+export const DEMO_START_DB_BYTES = 4_096;
+/** Bytes an action's own check and count move through the database at the most, both ways (held in tests/studio-demo.test.ts). */
+export const DEMO_TAKE_DB_BYTES = 2_048;
 /** What one answer of the demo may send to the browser, as it travels; the screens' unit holds its pages under it. */
 export const DEMO_RESPONSE_MAX_BYTES = 120_000;
 /** Demo sessions the whole site opens in a day (UTC). */
@@ -237,10 +246,10 @@ function functionMicroUsd(seconds: number, commands: number, dbBytes: number): n
     + (UPSTASH_MICRO_USD_PER_GB_TRANSFER * dbBytes) / 1e9;
 }
 
-/** One action at its worst: 1.5 s at 2 GB, 0.2 CPU-second, its commands, a draft read and written. */
-export const DEMO_ACTION_FUNCTION_MICRO_USD = functionMicroUsd(ACTION_SECONDS, DEMO_COMMANDS_PER_ACTION, 2 * DEMO_ACTION_MAX_BYTES);
+/** One action at its worst: 1.5 s at 2 GB, 0.2 CPU-second, its commands, a draft read and written, and its own check and count. */
+export const DEMO_ACTION_FUNCTION_MICRO_USD = functionMicroUsd(ACTION_SECONDS, DEMO_COMMANDS_PER_ACTION, 2 * DEMO_ACTION_MAX_BYTES + DEMO_TAKE_DB_BYTES);
 /** Opening a session at its worst: the bot check waited on up to 2.5 s, then the session written. */
-export const DEMO_START_FUNCTION_MICRO_USD = functionMicroUsd(START_SECONDS, DEMO_START_COMMANDS, 2_048);
+export const DEMO_START_FUNCTION_MICRO_USD = functionMicroUsd(START_SECONDS, DEMO_START_COMMANDS, DEMO_START_DB_BYTES);
 /** A session's bytes kept for its whole life. */
 export const DEMO_SESSION_KEPT_MICRO_USD = (UPSTASH_MICRO_USD_PER_GB_MONTH * DEMO_BYTES_PER_SESSION * DEMO_SESSION_SECONDS) / (1e9 * MONTH_SECONDS);
 

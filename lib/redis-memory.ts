@@ -527,6 +527,9 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
+        if (key.startsWith("-- marktmorgen:studio-demo-day:v1\n")) return this.studioDemo("day", args);
+        if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
+        if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];
         this.live(target);
@@ -1217,6 +1220,66 @@ export class MemoryRedis {
     total = Math.max(0, total + delta);
     keep();
     return [1, total];
+  }
+
+  /**
+   * lib/studio-demo.ts: the demo's day counted, a session's record and drafts
+   * made, and one action counted, step by step as each script runs them, with
+   * the commands run inside counted in scriptCalls.
+   */
+  private studioDemo(kind: "day" | "seed" | "take", args: string[]): unknown {
+    const n = Number(args[0]);
+    const keys = args.slice(1, 1 + n);
+    const argv = args.slice(1 + n);
+    if (!Number.isInteger(n) || n < 1 || keys.length !== n) throw new Error("ERR studio-demo: arguments");
+    for (const k of keys) this.live(k);
+    const field = (hash: Map<string, string> | undefined, name: string) => hash?.get(name);
+    const digits = (value: string | undefined) => (value === undefined ? null : /^\d{1,15}$/.test(value) ? Number(value) : -1);
+    const held = this.data.get(keys[0]);
+    if (held !== undefined && !(held instanceof Map) && kind !== "seed") throw new Error("WRONGTYPE");
+    const hash = held instanceof Map ? held : undefined;
+    if (kind === "day") {
+      this.scriptCalls += 1;
+      const [s, c, u] = ["sessions", "commands", "sent"].map((name) => digits(field(hash, name)) ?? 0);
+      if (s < 0 || c < 0 || u < 0) return [-1, 0, 0];
+      const [sessionsCap, commandsCap, worst, start, keep] = argv.map(Number);
+      if (s >= sessionsCap || c + worst > commandsCap) return [0, s, c];
+      const day = this.hash(keys[0]);
+      day.set("sessions", String(s + 1));
+      day.set("commands", String(c + worst));
+      day.set("sent", String(u + start));
+      this.until.set(keys[0], this.now() + keep * 1000);
+      this.scriptCalls += 4;
+      return [1, s + 1, c + worst];
+    }
+    if (kind === "seed") {
+      this.scriptCalls += 1;
+      if (held !== undefined) return 0;
+      const [end, day, startedAt, expiresAt, bytes, ...values] = argv;
+      if (values.length !== n - 1) throw new Error("ERR studio-demo: arguments");
+      this.data.set(keys[0], new Map([["day", day], ["startedAt", startedAt], ["expiresAt", expiresAt], ["actions", "0"], ["bytes", bytes]]));
+      this.until.set(keys[0], Number(end) * 1000);
+      this.scriptCalls += 2;
+      keys.slice(1).forEach((k, i) => {
+        this.data.set(k, values[i]);
+        this.until.set(k, Number(end) * 1000);
+        this.scriptCalls += 1;
+      });
+      return 1;
+    }
+    this.scriptCalls += 1;
+    const read = ["actions", "bytes", "expiresAt"].map((name) => field(hash, name));
+    if (read.every((v) => v === undefined)) return [0];
+    const [a, b, e] = read.map(digits);
+    if (a === null || b === null || e === null || a < 0 || b < 0 || e < 0) return [-1];
+    const [now, by, actionsCap, bytesCap] = argv.map(Number);
+    if (now >= e) return [-2];
+    if (a >= actionsCap) return [-3];
+    if (b + by > bytesCap) return [-4];
+    hash!.set("actions", String(a + 1));
+    hash!.set("bytes", String(b + by));
+    this.scriptCalls += 2;
+    return [1, a + 1, b + by];
   }
 
   /** lib/store-assistant.ts, ASSISTANT_POOL: the Store assistant's month, reserved, settled and given back. */

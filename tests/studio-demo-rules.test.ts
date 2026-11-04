@@ -93,7 +93,7 @@ const cdnPerAnswer = CDN_PER_REQUEST * 1e6 + DEMO_RESPONSE_MAX_BYTES * ORIGIN_MI
 const dayMicroUsd = demoDayFunctionWorstMicroUsd() + (DEMO_SESSIONS_PER_DAY + actions) * cdnPerAnswer;
 const dollars = (micro: number) => `$${(micro / 1e6).toFixed(2)}`;
 const doc = readFileSync("docs/studio-demo.md", "utf8");
-is("an action at its worst, in micro-USD", Math.round((DEMO_ACTION_FUNCTION_MICRO_USD + cdnPerAnswer) * 100) / 100, 51.71);
+is("an action at its worst, in micro-USD", Math.round((DEMO_ACTION_FUNCTION_MICRO_USD + cdnPerAnswer) * 100) / 100, 51.77);
 is(`the doc states the day's known worst (${dollars(dayMicroUsd)})`, doc.includes(`${dollars(dayMicroUsd)} a day`), true);
 is(`the doc states thirty such days (${dollars(30 * dayMicroUsd)})`, doc.includes(`${dollars(30 * dayMicroUsd)} in thirty days`), true);
 is("the doc says the demo stays off while a cost is unknown", /unknown/i.test(doc) && /STUDIO_DEMO_ON/.test(doc), true);

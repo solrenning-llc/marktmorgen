@@ -770,6 +770,7 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       if (!payload || typeof payload.body !== "string" || confirmationBodyDigest(payload.body) !== row.bodyDigest ||
           typeof payload.preintentToken !== "string" || hash(payload.preintentToken) !== row.intentFingerprint ||
           payload.intentFingerprint !== row.intentFingerprint || !data(payload.snapshot)) return { raw: reply[1] };
+      if (!physicalOriginCovered({ row, payload: payload as unknown as ConfirmationOriginPayload }, p, now())) return { raw: reply[1] };
       return { raw: reply[1], keys: keys(row) };
     } catch { return null; }
   });

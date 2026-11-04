@@ -464,7 +464,7 @@ if op=='next' then
   end
   replaced=true
  end
- if (c.phase=='active' or c.phase=='continuing') and c.family~=family then
+ if (c.phase=='capturing' or c.phase=='active' or c.phase=='continuing') and c.family~=family then
   if replaced and not save() then return {'unknown'} end
   return {'held'}
  end

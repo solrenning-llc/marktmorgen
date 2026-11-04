@@ -14,7 +14,7 @@ Code read: `origin/main` at `fcd1617ac` (4 November 2026): `lib/backup-run.ts`, 
 | Size per run | at most 4 MiB of sealed JSON (`BACKUP_MAX_BYTES` = 4,194,304 bytes); stored object at most that + 65,536 bytes of seal room = **4,259,840 bytes** (`objectBound`) | `lib/backup-run.ts` |
 | R2 operations per run | 1 `PutObject` with `If-None-Match: *` (Class A; a 412 is also billed as Class A) + 1 `GetObject` read-back (Class B). No delete, no list | `r2BackupStore`, `verifyBackupRoundtrip` |
 | Runs | at most 1 per UTC day (`SET nl:backup:ran:<day> NX`), so at most **31 a month**; a second call the same day costs 1 command and stops | `runBackup` |
-| Retention | Not in code: a lifecycle rule the owner sets on the bucket. `validReview` demands `(retentionDays + 3)` since the review of #2175 (`(retentionDays + 2)` since #2219 (was `(retentionDays + 1)` × objectBound ≤ maxStoredBytes` | `validReview` |
+| Retention | Not in code: a lifecycle rule the owner sets on the bucket. `validReview` demands `(retentionDays + 3) × objectBound ≤ maxStoredBytes` since the review of #2175; before it, `retentionDays + 2` since #2219, and `retentionDays + 1` before that | `validReview` |
 | Daily report reads | `backupStale()` 1 `GET` + `backupLastFailure()` 1 `GET` | `lib/backup-run.ts` |
 | Schedule and route | None yet; no `maxDuration` exists for the run | `vercel.json` unchanged |
 
@@ -48,7 +48,7 @@ Because one run copies the whole database, the cost does not grow with the numbe
 
 Proposed ceiling for `BACKUP_COST_REVIEW` (a proposal, not set): `maxRows` 10,000; `maxBytes` 4,194,304; `maxCommands` 20,202 (20,000 for the copy, 200 `SCAN` pages, 2 marks); `retentionDays` 30 or 90; `maxStoredBytes` = (retentionDays + 1) × 4,259,840. With 200 `SCAN` pages the walk covers about 100,000 keys in the whole shared database (the hint is not a guarantee); a larger database makes the run refuse with `export_budget`, which is a visible failure, not a higher bill.
 
-Formulas, per month of 31 runs:
+Formulas, per month of 31 runs (superseded by section 5c: 32 runs, retention + 3 sets, every command a full `SCAN` page):
 
 - Upstash commands = 31 × (20,202 + 2 report reads) × $2.00 / 1,000,000 = 626,324 commands = **$1.2526**
 - Upstash bandwidth = 31 × (4,194,304 bytes of `DUMP` answers + 200 pages × 500 names × 1,024 bytes of `SCAN` answers) = 3.304 GB × $0.03 = **$0.0991** (1,024 bytes is the longest key name the codec accepts for our keys; other products' names are not capped, see section 5)
@@ -82,7 +82,7 @@ Bytes a store can keep in Redis at full use = data room (`DATA_ROOM_BYTES`, `lib
 | Studio ($449) | 135,000,000 | 593,771,021 | 728,771,021 | 0.9717 GB | 229 |
 | Scale ($999) | 250,000,000 | 1,877,390,853 | 2,127,390,853 | 2.8365 GB | 666 |
 
-Formulas per store, per month of 31 runs: storage = copies kept × copy GB × $0.015 (31 copies for 30 days, 91 for 90 days); Upstash bandwidth = 31 × copy GB × $0.03; R2 operations = 31 × parts × ($4.50 + $0.36) / 1,000,000. Gzip savings are not credited (worst case: data that does not compress).
+Formulas per store, per month of 31 runs (superseded for the number of runs by section 5c: 32): storage = copies kept × copy GB × $0.015 (31 copies for 30 days, 91 for 90 days); Upstash bandwidth = 31 × copy GB × $0.03; R2 operations = 31 × parts × ($4.50 + $0.36) / 1,000,000. Gzip savings are not credited (worst case: data that does not compress).
 
 | Plan | Storage, 30 days | Storage, 90 days | Upstash bandwidth | R2 operations | Known lines + 10%, 30 days | Known lines + 10%, 90 days |
 |---|---|---|---|---|---|---|
@@ -176,7 +176,7 @@ What changed from sections 3 and 5b, each toward more cost:
 - **32 runs a month**, not 31: a run is marked by the UTC day it starts, so one that starts just before a midnight writes after it, and a 31-day billing period that does not start at 00:00 UTC touches 32 days.
 - **R2 storage:** retention + 3 sets at the daily peak (30 days + the lifecycle rule's day + the day being written + a run that wrote past its midnight = 33), each at the stored bound of a set in parts (`runStoredBound`), plus one GB-month of rounding. `validReview` (`lib/backup-run.ts`) now demands the same (retention + 3) × a set's bound of `maxStoredBytes`.
 - **R2 operations:** one Class A for each object written and one more for its lifecycle deletion, one Class B for its read-back, plus one million of each class of rounding.
-- **Upstash bytes:** every command the caps allow taken as a full `SCAN` page (500 names of 1,024 bytes), since `COUNT` is a hint and the shared database holds other products' keys; every copied byte as read (`maxRunBytes` counts the base64 `DUMP`s the run keeps, so the 1.7 × logical bytes measured in item 6 decides how much data fits under the cap, not what the cap lets be billed); each key's name sent twice; the marks and the report's reads. **Upstash storage:** the backup's four marks.
+- **Upstash bytes:** every command the caps allow taken as a full `SCAN` page (500 names of 1,024 bytes), since `COUNT` is a hint and the shared database holds other products' keys; every copied byte as read (`maxRunBytes` counts the base64 `DUMP`s the run keeps, so the 1.7 × logical bytes measured in item 6 decides how much data fits under the cap, not what the cap lets be billed); each key's name sent twice; the marks and the report's reads. **Upstash storage:** the backup's five marks (three days' day marks, the last good copy, the last failure).
 - **No free quota** is credited anywhere.
 
 Worst month of the design as built (one part of 4 MiB, 10,000 keys, 20,202 commands, 30 days, `maxStoredBytes` 142,742,688, a 300 s route):
@@ -188,7 +188,7 @@ Worst month of the design as built (one part of 4 MiB, 10,000 keys, 20,202 comma
 | R2 Class B (64 operations + 1 million of rounding) | $0.3600 |
 | Upstash commands (32 × 20,204) | $1.2931 |
 | Upstash bytes (32 × 10.37 GB, almost all of it the `SCAN` pages taken as full) | $9.9540 |
-| Upstash storage (4 marks) | $0.0000 |
+| Upstash storage (5 marks) | $0.0000 |
 | Vercel (32 calls of 300 s at 2 GB) | $0.3979 |
 | Provider allowance, 10% | $1.6523 |
 | **Total** | **$18.1749** |

@@ -47,16 +47,16 @@ is("R2 Class A: each object written and deleted, plus a million of rounding", li
 is("R2 Class B: each object read back, plus a million of rounding", line("r2-class-b"), 360_024);
 // 32 × (20,202 + 2) = 646,528 commands × 2 = 1,293,056.
 is("Upstash commands: every one the caps allow and the report's two reads", line("upstash-commands"), 1_293_056);
-// A run: 20,202 × 500 × 1,024 = 10,343,424,000 + 4,194,304 + 10,000 × 2,112 + 4 × 1,024 = 10,368,742,400 bytes;
-// × 32 = 331.7997568 GB × 30,000 = 9,953,992.70 → 9,953,993.
-is("Upstash bytes: every command a full SCAN page, every copied byte, each name sent twice, the marks", line("upstash-transfer"), 9_953_993);
-// 4 marks × 1,024 bytes = 0.000004096 GB × 250,000 = 1.02 → 2.
-is("Upstash storage: the backup's four marks", line("upstash-storage"), 2);
+// A run: 20,202 × 500 × 1,024 = 10,343,424,000 + 4,194,304 + 10,000 × 2,112 + 5 × 1,024 = 10,368,743,424 bytes;
+// × 32 = 331.799789568 GB × 30,000 = 9,953,993.69 → 9,953,994.
+is("Upstash bytes: every command a full SCAN page, every copied byte, each name sent twice, the marks", line("upstash-transfer"), 9_953_994);
+// 5 marks (three days' marks, the last good copy, the last failure) × 1,024 bytes = 0.00000512 GB × 250,000 = 1.28 → 2.
+is("Upstash storage: the backup's five marks", line("upstash-storage"), 2);
 // 32 × (2 × 300/3,600 × 10,600 + 300/3,600 × 128,000 + 0.6) = 32 × 12,433.93 = 397,885.87 → 397,886.
 is("Vercel: the whole 300 s at 2 GB, CPU all along", line("vercel"), 397_886);
-// 16,522,679 × 10% = 1,652,267.9 → 1,652,268.
+// 16,522,680 × 10% = 1,652,268.
 is("the provider allowance on all of it", line("provider-allowance"), 1_652_268);
-is("the month: $18.17", month?.knownMicroUsd, 18_174_947);
+is("the month: $18.17", month?.knownMicroUsd, 18_174_948);
 is("no free quota anywhere: storage, operations and bytes all above zero", [line("r2-storage"), line("r2-class-a"), line("r2-class-b"), line("upstash-transfer")].every((n) => n > 0), true);
 
 part("Larger caps cost more, never less");

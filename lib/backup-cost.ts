@@ -59,8 +59,11 @@ export const BACKUP_PEAK_EXTRA_SETS = 3;
 /** Names a SCAN page is taken to answer (its COUNT, a hint) and the longest name, in bytes. */
 export const BACKUP_SCAN_NAMES_PER_PAGE = 500;
 export const BACKUP_SCAN_NAME_BYTES = 1_024;
-/** The backup's own small keys (the day marks of two days, the last good copy, the last failure) and their commands' bytes, at the most. */
-const MARK_KEYS = 4;
+/**
+ * The backup's own small keys and their commands' bytes, at the most: the day marks of three days (each kept two days
+ * from its run, so the day before yesterday's lives into today), the last good copy and the last failure.
+ */
+const MARK_KEYS = 5;
 const MARK_BYTES = 1_024;
 /** A PEXPIRETIME answer and a request's framing, at the most, in bytes. */
 const ANSWER_FRAME_BYTES = 64;

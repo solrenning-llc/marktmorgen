@@ -6,7 +6,7 @@ import { type Listing, type Store, normaliseHandle, storeForHandle } from "@/lib
 import { readOrder } from "@/lib/store-checkout";
 import { plain, serveFile } from "@/lib/serve-file";
 import { offerRefunded, upsellDelivery } from "@/lib/upsell";
-import { OrdersBusy, findPurchase } from "@/lib/buyer-orders";
+import { ORDERS_LISTING_COMMANDS, OrdersBusy, findPurchase } from "@/lib/buyer-orders";
 import { stampedCopy, wantsStamp } from "@/lib/pdf-stamp";
 import { renewPath } from "@/lib/membership-access";
 import { originFrom } from "@/lib/request-origin";
@@ -107,8 +107,8 @@ export async function GET(request: NextRequest) {
     });
   if (!(await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer"))) return tooOften();
   if (token) {
-    // The purchases are read as an opening of the list reads them, paid for before each read (lib/buyer-orders.ts,
-    // findPurchase): a store with no room left for them is answered as too often, and nothing more is asked of Stripe.
+    // Only the purchase asked for is read, by its reference, paid for before each read (lib/buyer-orders.ts, findPurchase):
+    // a store with no room left for it is answered as too often, and nothing more is asked of Stripe.
     let found;
     try {
       found = await findPurchase(store, token, request.nextUrl.searchParams.get("ref") ?? "");
@@ -120,7 +120,13 @@ export async function GET(request: NextRequest) {
     if (!found) {
       return plain(410, say.linkExpired);
     }
-    const { purchase, email } = found;
+    const { purchase, email, meter } = found;
+    // The listing read again below for how its file is handed over (stamped or not) is taken through the lookup's meter
+    // first: false when the store has no room left for it.
+    const listingRead = () => meter.take(ORDERS_LISTING_COMMANDS).then(() => true, (error) => {
+      if (error instanceof OrdersBusy) return false;
+      throw error;
+    });
     if (purchase.ended) return toRenew(request, store, { id: purchase.productId });
     // A product ticked at checkout is asked for by the key its order names it under.
     const asked = request.nextUrl.searchParams.get("item") ?? "";
@@ -132,6 +138,7 @@ export async function GET(request: NextRequest) {
       const line = (bumped ? bumped.items : purchase.items)?.lines.find((l) => l.productId === pid) ?? null;
       if (!line || !line.delivery) return plain(404, say.nothingToDownload);
       if (!line.delivery.file) return plain(409, say.notADownloadPurchases);
+      if (!(await listingRead())) return tooOften();
       const item = await readListing(store, line.productId);
       if (!item) return plain(404, say.nothingToDownload);
       return deliver(store, item, line.delivery.file, { reference: purchase.reference, email, paidAt: purchase.paidAt });
@@ -141,6 +148,7 @@ export async function GET(request: NextRequest) {
     if (!delivery.file) {
       return plain(409, say.notADownloadPurchases);
     }
+    if (!(await listingRead())) return tooOften();
     const owner = await readListing(store, bumped ? bumped.id : purchase.productId);
     if (!owner) return serveFile(delivery.file);
     return deliver(store, owner, delivery.file, { reference: purchase.reference, email, paidAt: purchase.paidAt });

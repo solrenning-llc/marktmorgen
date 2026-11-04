@@ -48,3 +48,23 @@ export const ORDERS_KEY_COMMANDS = 24;
  * not be read, inside ORDERS_OPEN_SECONDS so the page answers before it is cut.
  */
 export const ORDERS_READ_MS = 25_000;
+/**
+ * What one download from the list of purchases takes to find its purchase
+ * (lib/buyer-orders.ts, findPurchase; C3-78, MR, 4 November 2026), besides the
+ * download's own request: DOWNLOAD_LOOKUP_UNITS of the store's buyer requests,
+ * taken before the link's grant is read. They pay for the grant, the purchase
+ * read by its own reference (one checkout, or a payment taken in one click
+ * with the checkout it followed, from the creator's Stripe account; or the
+ * one entry brought over), waited on DOWNLOAD_LOOKUP_MS at the most, and its
+ * DOWNLOAD_LOOKUP_COMMANDS. The listings it reads, and each id of a record
+ * brought over, are taken through an OrdersMeter before they are read, as on
+ * the page. Never the whole list: a bundle's twenty files cost twenty lookups,
+ * not twenty readings of every purchase. tests/plan-cost-registry.ts prices it
+ * (DOWNLOAD_LOOKUP_READ) and tests/plan-cost-registry.test.ts holds the units
+ * above it.
+ */
+export const DOWNLOAD_LOOKUP_UNITS = 2;
+/** The longest a download waits on finding its purchase; past it the buyer is told the purchase could not be checked. */
+export const DOWNLOAD_LOOKUP_MS = 10_000;
+/** Commands a download's lookup makes besides its metered reads: the grant; for one brought over, how many ids there are, the ids and the one entry. */
+export const DOWNLOAD_LOOKUP_COMMANDS = 4;

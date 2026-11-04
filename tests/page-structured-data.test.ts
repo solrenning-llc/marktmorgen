@@ -4,7 +4,7 @@
  * it sits in the store.
  */
 import { readFileSync } from "node:fs";
-import { breadcrumbData, faqData } from "@/lib/page-structured-data";
+import { MIN_COURSE_LIST, breadcrumbData, courseData, courseListData, faqData } from "@/lib/page-structured-data";
 import { parsePage } from "@/lib/sales-page";
 import { done, is, part } from "./check";
 
@@ -25,6 +25,17 @@ async function main(): Promise<void> {
   part("Where it sits");
   const crumbs = breadcrumbData({ name: "Harbor Kitchen", url: "https://marktmorgen.com/@harbor" }, { title: "Knife Skills", url: "https://marktmorgen.com/@harbor/p/knife-skills-5e3f350b52" }) as { itemListElement: { position: number; name: string }[] };
   is("the store, then the product", crumbs.itemListElement.map((i) => [i.position, i.name]), [[1, "Harbor Kitchen"], [2, "Knife Skills"]]);
+
+  part("Courses (639 [GL7](20), Google's course list read on 4 November 2026)");
+  const provider = { name: "Harbor Kitchen", url: "https://marktmorgen.com/@harbor" };
+  const knife = { name: "Knife Skills", description: "Six lessons on holding, sharpening and cutting.", url: "https://marktmorgen.com/@harbor/p/knife-skills-5e3f350b52" };
+  is("a course: its name, description, page and provider", courseData(knife, provider), { "@context": "https://schema.org", "@type": "Course", name: "Knife Skills", description: "Six lessons on holding, sharpening and cutting.", url: knife.url, provider: { "@type": "Organization", name: "Harbor Kitchen", sameAs: provider.url } });
+  is("no markup for a name with a price, a discount or a call to buy, or without a description", [courseData({ ...knife, name: "Knife Skills - only $30!" }, provider), courseData({ ...knife, name: "Knife Skills 50% off" }, provider), courseData({ ...knife, name: "Knife Skills: buy now" }, provider), courseData({ ...knife, description: " " }, provider)], [null, null, null, null]);
+  const more = (n: number) => Array.from({ length: n }, (_, i) => ({ ...knife, name: `Course ${i + 1}`, url: `${knife.url}-${i}` }));
+  is("but a plain name with ordinary words keeps it", [courseData({ ...knife, name: "Gluten-free Baking" }, provider) !== null, courseData({ ...knife, name: "Off-grid Living" }, provider) !== null, courseData({ ...knife, name: "The Only Sourdough Guide" }, provider) !== null], [true, true, true]);
+  is("a list only from three courses", [MIN_COURSE_LIST, courseListData(more(2), provider), (courseListData(more(3), provider) as { itemListElement: unknown[] }).itemListElement.length], [3, null, 3]);
+  is("each listed once, in order, by its own page", courseListData([...more(3), more(1)[0]], provider), { "@context": "https://schema.org", "@type": "ItemList", itemListElement: more(3).map((c, i) => ({ "@type": "ListItem", position: i + 1, url: c.url })) });
+  is("a course that cannot be marked up does not count toward the three", courseListData([...more(2), { ...knife, name: "Bread course on sale", url: "x" }], provider), null);
 
   part("On the page");
   const source = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");

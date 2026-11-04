@@ -427,11 +427,11 @@ export async function sesSentLast24h(now = Date.now()): Promise<number | null> {
     const rows: unknown = await redisPipeline(keys.map((key) => ["GET", key]));
     if (!Array.isArray(rows)) return null;
     const length = Object.getOwnPropertyDescriptor(rows, "length");
-    if (!length || !("value" in length) || length.value !== SES_USAGE_BUCKETS) return null;
+    if (!length || !Object.hasOwn(length, "value") || length.value !== SES_USAGE_BUCKETS) return null;
     let total = 0;
     for (let i = 0; i < SES_USAGE_BUCKETS; i += 1) {
       const item = Object.getOwnPropertyDescriptor(rows, String(i));
-      if (!item || !("value" in item)) return null;
+      if (!item || !Object.hasOwn(item, "value")) return null;
       if (item.value === null) continue; // Explicit absence is known zero.
       if (typeof item.value !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(item.value)) return null;
       const count = Number(item.value);

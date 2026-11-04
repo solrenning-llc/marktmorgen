@@ -654,7 +654,7 @@ test("a link request reads for ORDERS_LINK_READ_MS at the most, so its grant and
   assert.ok(readFileSync("lib/buyer-orders.ts", "utf8").includes("callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS);"));
 });
 
-test("the page after a link request sends nobody to reply to an email unless every email about a purchase answers to the creator", () => {
+test("the orders page sends nobody to reply to an email unless every email about a purchase answers to the creator", () => {
   // Every email a buyer gets about what they have here, and whether each answers to the creator (replyTo: store.email).
   const senders = ["lib/purchase-email.ts", "lib/gifts.ts", "lib/paypal-sales.ts", "lib/preorders.ts", "lib/group-buy.ts", "lib/api-write.ts", "lib/imports.ts", "lib/buyer-orders.ts"];
   const unanswered = senders.filter((file) => {
@@ -667,6 +667,8 @@ test("the page after a link request sends nobody to reply to an email unless eve
   assert.ok(unanswered.length > 0, "every one answers now: the page may say so again");
   for (const language of LANGUAGE_CODES) {
     const words = ordersWords(language);
-    assert.doesNotMatch(`${words.sentBody("Olive Studio")} ${words.nothingArrived}`, /confirm|bestätigung|bevestiging|conferma|reply|respon|antwo|rispond/i, language);
+    // After a link request, and when the store cannot look purchases up at all (notices.unavailable, cannotLookUp).
+    const said = [words.sentBody("Olive Studio"), words.nothingArrived, words.notices.unavailable.body, words.cannotLookUp("Olive Studio")].join(" ");
+    assert.doesNotMatch(said, /confirm|bestätigung|bevestiging|conferma|reply|respon|antwo|rispond/i, language);
   }
 });

@@ -41,7 +41,7 @@ const en = {
     },
     unavailable: {
       title: "This store cannot look up purchases right now",
-      body: "Its payments are not connected to Stripe right now. Reply to the order confirmation you were emailed when you paid, and it reaches the store.",
+      body: "Its payments are not connected to Stripe right now. Try again later.",
     },
     error: {
       title: "Something went wrong on our side",
@@ -62,7 +62,7 @@ const en = {
   getAgainIntro: (store: string) =>
     `Lost a download, or got a new phone? Type the email you paid ${store} with, and we will email you a link to everything you bought here. No account and no password.`,
   cannotLookUp: (store: string) =>
-    `${store} cannot take payments through Stripe right now, so there is nothing to look up from here. Reply to the order confirmation you were emailed when you paid, and it reaches them.`,
+    `${store} cannot take payments through Stripe right now, so there is nothing to look up from here. Try again later.`,
   emailYouPaidWith: "The email you paid with",
   emailMe: "Email me my purchases",
   formNote: (store: string) =>
@@ -288,7 +288,7 @@ const es: OrdersWords = {
     },
     unavailable: {
       title: "Esta tienda no puede buscar compras en este momento",
-      body: "Sus pagos no están conectados a Stripe en este momento. Responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a la tienda.",
+      body: "Sus pagos no están conectados a Stripe en este momento. Inténtalo de nuevo más tarde.",
     },
     error: {
       title: "Algo salió mal por nuestra parte",
@@ -308,7 +308,7 @@ const es: OrdersWords = {
   getAgainIntro: (store) =>
     `¿Perdiste una descarga o cambiaste de teléfono? Escribe el email con el que le pagaste a ${store} y te enviaremos por email un enlace a todo lo que compraste aquí. Sin cuenta y sin contraseña.`,
   cannotLookUp: (store) =>
-    `${store} no puede recibir pagos a través de Stripe en este momento, así que desde aquí no hay nada que buscar. Responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
+    `${store} no puede recibir pagos a través de Stripe en este momento, así que desde aquí no hay nada que buscar. Inténtalo de nuevo más tarde.`,
   emailYouPaidWith: "El email con el que pagaste",
   emailMe: "Envíame mis compras por email",
   formNote: (store) =>
@@ -507,7 +507,7 @@ const fr: OrdersWords = {
     },
     unavailable: {
       title: "Cette boutique ne peut pas rechercher d'achats pour le moment",
-      body: "Ses paiements ne sont pas reliés à Stripe pour le moment. Répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à la boutique.",
+      body: "Ses paiements ne sont pas reliés à Stripe pour le moment. Réessayez plus tard.",
     },
     error: {
       title: "Un problème est survenu de notre côté",
@@ -527,7 +527,7 @@ const fr: OrdersWords = {
   getAgainIntro: (store) =>
     `Vous avez perdu un téléchargement ou changé de téléphone${S}? Saisissez l'e-mail avec lequel vous avez payé ${store}, et nous vous enverrons par e-mail un lien vers tout ce que vous avez acheté ici. Sans compte ni mot de passe.`,
   cannotLookUp: (store) =>
-    `${store} ne peut pas accepter de paiements via Stripe pour le moment, il n'y a donc rien à rechercher ici. Répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
+    `${store} ne peut pas accepter de paiements via Stripe pour le moment, il n'y a donc rien à rechercher ici. Réessayez plus tard.`,
   emailYouPaidWith: "L'e-mail avec lequel vous avez payé",
   emailMe: "M'envoyer mes achats par e-mail",
   formNote: (store) =>
@@ -724,7 +724,7 @@ const de: OrdersWords = {
     },
     unavailable: {
       title: "Dieser Shop kann gerade keine Käufe nachschlagen",
-      body: "Seine Zahlungen sind gerade nicht mit Stripe verbunden. Antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht den Shop.",
+      body: "Seine Zahlungen sind gerade nicht mit Stripe verbunden. Versuchen Sie es später noch einmal.",
     },
     error: {
       title: "Bei uns ist etwas schiefgelaufen",
@@ -744,7 +744,7 @@ const de: OrdersWords = {
   getAgainIntro: (store) =>
     `Einen Download verloren oder ein neues Handy? Geben Sie die E-Mail-Adresse ein, mit der Sie bei ${store} bezahlt haben, und wir schicken Ihnen per E-Mail einen Link zu allem, was Sie hier gekauft haben. Ohne Konto und ohne Passwort.`,
   cannotLookUp: (store) =>
-    `${store} kann gerade keine Zahlungen über Stripe annehmen, daher gibt es hier nichts nachzuschlagen. Antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
+    `${store} kann gerade keine Zahlungen über Stripe annehmen, daher gibt es hier nichts nachzuschlagen. Versuchen Sie es später noch einmal.`,
   emailYouPaidWith: "Die E-Mail-Adresse, mit der Sie bezahlt haben",
   emailMe: "Meine Käufe per E-Mail senden",
   formNote: (store) =>
@@ -946,7 +946,7 @@ const it: OrdersWords = {
     },
     unavailable: {
       title: "Questo negozio non può cercare acquisti in questo momento",
-      body: "I suoi pagamenti non sono collegati a Stripe in questo momento. Rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà al negozio.",
+      body: "I suoi pagamenti non sono collegati a Stripe in questo momento. Riprova più tardi.",
     },
     error: {
       title: "Qualcosa è andato storto da parte nostra",
@@ -966,7 +966,7 @@ const it: OrdersWords = {
   getAgainIntro: (store) =>
     `Hai perso un download o hai cambiato telefono? Inserisci l'email con cui hai pagato ${store} e ti invieremo via email un link a tutto ciò che hai acquistato qui. Nessun account e nessuna password.`,
   cannotLookUp: (store) =>
-    `${store} non può accettare pagamenti tramite Stripe in questo momento, quindi da qui non c'è nulla da cercare. Rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
+    `${store} non può accettare pagamenti tramite Stripe in questo momento, quindi da qui non c'è nulla da cercare. Riprova più tardi.`,
   emailYouPaidWith: "L'email con cui hai pagato",
   emailMe: "Inviami i miei acquisti via email",
   formNote: (store) =>
@@ -1164,7 +1164,7 @@ const nl: OrdersWords = {
     },
     unavailable: {
       title: "Deze winkel kan nu geen aankopen opzoeken",
-      body: "De betalingen van deze winkel zijn nu niet aan Stripe gekoppeld. Beantwoord de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij de winkel aan.",
+      body: "De betalingen van deze winkel zijn nu niet aan Stripe gekoppeld. Probeer het later opnieuw.",
     },
     error: {
       title: "Er ging aan onze kant iets mis",
@@ -1184,7 +1184,7 @@ const nl: OrdersWords = {
   getAgainIntro: (store) =>
     `Een download kwijt, of een nieuwe telefoon? Vul het e-mailadres in waarmee je ${store} hebt betaald, en we mailen je een link naar alles wat je hier hebt gekocht. Geen account en geen wachtwoord.`,
   cannotLookUp: (store) =>
-    `${store} kan nu geen betalingen via Stripe ontvangen, dus hier valt niets op te zoeken. Beantwoord de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
+    `${store} kan nu geen betalingen via Stripe ontvangen, dus hier valt niets op te zoeken. Probeer het later opnieuw.`,
   emailYouPaidWith: "Het e-mailadres waarmee je hebt betaald",
   emailMe: "Mail me mijn aankopen",
   formNote: (store) =>
@@ -1381,7 +1381,7 @@ const pt: OrdersWords = {
     },
     unavailable: {
       title: "Esta loja não pode procurar compras neste momento",
-      body: "Os pagamentos da loja não estão ligados à Stripe neste momento. Responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega à loja.",
+      body: "Os pagamentos da loja não estão ligados à Stripe neste momento. Tente novamente mais tarde.",
     },
     error: {
       title: "Algo correu mal do nosso lado",
@@ -1401,7 +1401,7 @@ const pt: OrdersWords = {
   getAgainIntro: (store) =>
     `Perdeu um ficheiro descarregado ou mudou de telemóvel? Introduza o email com que pagou a ${store} e enviamos-lhe por email uma ligação para tudo o que comprou aqui. Sem conta e sem palavra-passe.`,
   cannotLookUp: (store) =>
-    `${store} não pode receber pagamentos através da Stripe neste momento, por isso não há nada a procurar aqui. Responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
+    `${store} não pode receber pagamentos através da Stripe neste momento, por isso não há nada a procurar aqui. Tente novamente mais tarde.`,
   emailYouPaidWith: "O email com que pagou",
   emailMe: "Enviar-me as minhas compras por email",
   formNote: (store) =>

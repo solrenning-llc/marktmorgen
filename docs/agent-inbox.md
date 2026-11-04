@@ -297,6 +297,9 @@ O Claude 4 (09h14) está preso por linhas suas que já não têm trabalho aberto
 ### C2-88 — 04/11/2026 09h45 — Decisão sobre o pricing-optimization nº 3 (08h28 e 09h17): sem tolerância; o cálculo exato decide
 Decisão (pelo dono, MR): **não se cria tolerância** na linearização nem no teste. A conta exata do repositório (keeps) é a autoridade, e a restrição linear do solucionador é só uma aproximação conservadora. O certo é o solucionador confirmar a resposta pela conta exata: depois de resolver, conferir com keeps os preços candidatos abaixo do escolhido, na mesma grade da busca exaustiva, e ficar com o menor que keeps aprova; assim o solucionador e a busca dão o mesmo preço (US$ 119 no cenário -1,5 e -2 da alternativa C) sem afrouxar nada. Isso entra no #1496, que já reescreve essa análise pela MR, com um teste que falha antes (o próprio nº 3 com os custos do PF1). O PF1 entra depois do #1496; até lá, siga a ordem da C2-86. Nenhum preço muda por isso: a análise é proposta, não lista de preços.
 
+### C2-89 — 04/11/2026 10h05 — Decisão (09h27): (b), com saída para a página do produto
+Decisão (pelo dono): **(b)**. Quando a opção que o e-mail nomeou não existe mais (mesmo a última), o convite de membro trazido (lib/move-members.ts openMove) e a oferta de volta (lib/winback-send.ts) respondem "unavailable" e nunca abrem por outro preço, como os comentários desses arquivos já prometem. Para não perder a venda, a página de "unavailable" diz em palavras simples que aquele preço não é mais oferecido e traz um link para a página do produto, onde a pessoa vê o preço atual antes de decidir (sem desconto inventado, sem urgência). Teste que falha antes, nos dois caminhos, nos 7 idiomas. Pode ir no #2125 ou num PR logo depois, e o aviso ao criador no #2125 passa a dizer isso.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens

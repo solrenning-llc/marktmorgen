@@ -19,9 +19,14 @@ const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
   rate_limited: "That is a lot of passkey changes in an hour. Try again later.",
   reauth: "Adding a passkey needs a login from the last 15 minutes. Log in again below, then add it.",
+  second_step: "Your account already has a passkey or an authenticator app, so adding another needs a login with one of them. Log in again with your passkey or your app's code, then add it here.",
 };
 
-type Answer = { ok?: boolean; error?: string; options?: unknown; passkeys?: PasskeyRow[] };
+type Answer = { ok?: boolean; error?: string; options?: unknown; passkeys?: PasskeyRow[]; removeOn?: number };
+
+function onDay(ms: number): string {
+  return new Date(ms).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
+}
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -85,8 +90,26 @@ function takeReturn(): boolean {
  * The person's passkeys, in the studio's Account part: add one, see when
  * each was last used, remove one. A passkey is the person's, not a store's,
  * so the list is the same whichever store is open.
+ *
+ * `needsStep`: the account already has a passkey or an app and this session
+ * was not opened with one (lib/second-step-gate.ts), so adding waits for a
+ * login with one, and a removal waits `removalDays` with an email to the
+ * account (lib/passkeys.ts scheduleRemoval): the way back for a lost passkey.
+ * `removals` are the passkeys already waiting, by id, with their day in ms.
  */
-export function PasskeyManager({ initial, fresh }: { initial: PasskeyRow[]; fresh: boolean }) {
+export function PasskeyManager({
+  initial,
+  fresh,
+  needsStep = false,
+  removals = {},
+  removalDays = 7,
+}: {
+  initial: PasskeyRow[];
+  fresh: boolean;
+  needsStep?: boolean;
+  removals?: Record<string, number>;
+  removalDays?: number;
+}) {
   const supported = useSyncExternalStore(noSubscription, () => browserSupportsWebAuthn(), () => true);
   const [list, setList] = useState(initial);
   const [name, setName] = useState("");
@@ -94,6 +117,9 @@ export function PasskeyManager({ initial, fresh }: { initial: PasskeyRow[]; fres
   const [error, setError] = useState<string | null>(null);
   /** The login is too old to add a passkey (told by the page, or by the server when it ran out meanwhile). */
   const [stale, setStale] = useState(!fresh);
+  /** Adding needs a login with the passkey or app the account already has (told by the page, or by the server). */
+  const [blocked, setBlocked] = useState(needsStep);
+  const [waiting, setWaiting] = useState(removals);
   const [back, setBack] = useState(false);
   const section = useRef<HTMLElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
@@ -121,6 +147,10 @@ export function PasskeyManager({ initial, fresh }: { initial: PasskeyRow[]; fres
         setStale(true);
         return;
       }
+      if (first.error === "second_step") {
+        setBlocked(true);
+        return;
+      }
       if (!first.ok || !first.options) {
         setError(MESSAGES[first.error ?? ""] ?? MESSAGES.server_error);
         return;
@@ -137,6 +167,10 @@ export function PasskeyManager({ initial, fresh }: { initial: PasskeyRow[]; fres
         setStale(true);
         return;
       }
+      if (done.error === "second_step") {
+        setBlocked(true);
+        return;
+      }
       if (!done.ok) {
         setError(MESSAGES[done.error ?? ""] ?? MESSAGES.server_error);
         return;
@@ -151,13 +185,23 @@ export function PasskeyManager({ initial, fresh }: { initial: PasskeyRow[]; fres
   }
 
   async function remove(row: PasskeyRow) {
-    if (!window.confirm(`Remove “${row.name}”? You will no longer be able to log in with it.`)) return;
+    const question = blocked
+      ? `Remove “${row.name}”? You did not log in with a passkey or an app code, so it is removed in ${removalDays} days, and we email you now. Logging in with it before then keeps it.`
+      : `Remove “${row.name}”? You will no longer be able to log in with it.`;
+    if (!window.confirm(question)) return;
     setBusy(row.id);
     setError(null);
     const done = await call({ action: "remove", id: row.id });
     setBusy(null);
     if (!done.ok) {
       setError(MESSAGES[done.error ?? ""] ?? MESSAGES.server_error);
+      return;
+    }
+    if (typeof done.removeOn === "number") {
+      const at = done.removeOn;
+      setBlocked(true);
+      setWaiting((rows) => ({ ...rows, [row.id]: at }));
+      toast(`“${row.name}” will be removed on ${onDay(at)}.`);
       return;
     }
     setList((rows) => rows.filter((r) => r.id !== row.id));
@@ -184,6 +228,9 @@ export function PasskeyManager({ initial, fresh }: { initial: PasskeyRow[]; fres
                 <span className="block text-xs text-ink-soft">
                   {`Added ${day(row.createdAt)} · last used ${day(row.lastUsedAt)}${row.synced ? " · synced across your devices" : ""}`}
                 </span>
+                {waiting[row.id] ? (
+                  <span className="block text-xs font-bold text-ink">{`Will be removed on ${onDay(waiting[row.id])}. Logging in with it before then keeps it.`}</span>
+                ) : null}
               </span>
               <button
                 type="button"
@@ -207,7 +254,18 @@ export function PasskeyManager({ initial, fresh }: { initial: PasskeyRow[]; fres
         </p>
       ) : null}
 
-      {supported && stale ? (
+      {blocked ? (
+        <div className="mt-4 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line">
+          <p className="text-sm text-ink-soft">{MESSAGES.second_step}</p>
+          <p className="mt-2 text-sm text-ink-soft">
+            {`Lost your passkey? Press Remove next to it. Because you did not log in with a passkey or an app code, it is removed after ${removalDays} days, and we email you now. Logging in with it before then keeps it. Once no passkey is left, you can add a new one here. Lost your authenticator app too? After the emailed link, the code page offers a way in that waits the same days.`}
+          </p>
+          <Link href="/signin?status=reauth" onClick={rememberReturn} className="btn btn-secondary mt-3">
+            <Icon name="key" size={16} />
+            Log in again with a passkey or a code
+          </Link>
+        </div>
+      ) : supported && stale ? (
         <div className="mt-4 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line">
           <p className="text-sm text-ink-soft">
             Adding a passkey needs a login from the last 15 minutes, because a passkey keeps working after this

@@ -4,6 +4,7 @@ import { isRedisConfigured } from "@/lib/redis";
 import { canSeal } from "@/lib/secret-box";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { cancelReset, finishSetup, lockedUntil, replaceCodes, startSetup, turnOff } from "@/lib/two-step";
+import { mayAddSecondStep } from "@/lib/second-step-gate";
 
 /** Changes one account may ask for in an hour: most of them email the account. */
 const CHANGES_PER_HOUR = 30;
@@ -13,7 +14,9 @@ const CHANGES_PER_HOUR = 30;
  *
  *   { action: "start", backup }    a secret for the app, with its QR address,
  *                                  and a code emailed to the recovery address;
- *                                  needs a login from the last 15 minutes
+ *                                  needs a login from the last 15 minutes, and,
+ *                                  on an account with a passkey, a session
+ *                                  opened with it ("second_step")
  *   { action: "finish", code, backupCode }
  *                                  turns it on with a right code from the app and
  *                                  the one the recovery address got; answers the
@@ -52,6 +55,8 @@ export async function POST(request: NextRequest) {
   try {
     if (body.action === "start" || body.action === "finish") {
       if (!(await isFreshSession(session))) return refuse("reauth", 403);
+      // An account that already has a passkey turns the app on only from a session opened with one (lib/second-step-gate.ts).
+      if (!(await mayAddSecondStep(email, session))) return refuse("second_step", 403);
       if (body.action === "start") {
         const started = await startSetup(email, session, typeof body.backup === "string" ? body.backup.slice(0, 300) : "");
         return typeof started === "string"

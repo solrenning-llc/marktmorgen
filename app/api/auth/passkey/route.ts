@@ -1,16 +1,17 @@
 import type { NextRequest } from "next/server";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
-import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
+import { SESSION_COOKIE, emailForSession, isFreshSession, sessionSecondStep } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { addPasskey, listPasskeys, registrationOptions, removePasskey } from "@/lib/passkeys";
+import { addPasskey, listPasskeys, registrationOptions, removePasskey, scheduleRemoval } from "@/lib/passkeys";
+import { mayAddSecondStep } from "@/lib/second-step-gate";
 import { lockedUntil } from "@/lib/two-step";
 
 const MAX_BODY_BYTES = 16_000;
 /** Changes one account may make to its passkeys in an hour: each one emails the account. */
 const CHANGES_PER_HOUR = 30;
 
-const ANSWERS: Record<string, number> = { expired: 400, invalid: 400, full: 409, taken: 409, unknown: 404, reauth: 403 };
+const ANSWERS: Record<string, number> = { expired: 400, invalid: 400, full: 409, taken: 409, unknown: 404, reauth: 403, second_step: 403 };
 
 /**
  * The signed-in person's own passkeys (lib/passkeys.ts):
@@ -25,8 +26,14 @@ const ANSWERS: Record<string, number> = { expired: 400, invalid: 400, full: 409,
  * Adding one needs a login from the last fifteen minutes (lib/auth.ts,
  * isFreshSession): a passkey outlives the session that adds it, so an old
  * session — or one that walked off on a borrowed laptop — is asked to log in
- * again first ("reauth"). Removing one does not: it can only take a way in
- * away, and the emailed link always works.
+ * again first ("reauth"). On an account that already has a passkey or an
+ * authenticator app, adding one also needs a session opened with one of them
+ * ("second_step", lib/second-step-gate.ts): an emailed link alone, however
+ * fresh, adds nothing. Removing one from such a session is at once; from a
+ * session without the step it waits REMOVAL_DAYS, with an email to the
+ * account (lib/passkeys.ts scheduleRemoval), so somebody who only reads the
+ * inbox cannot clear the passkeys and add their own, and somebody who lost
+ * theirs still gets back.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -57,6 +64,9 @@ export async function POST(request: NextRequest) {
   if ((body.action === "options" || body.action === "add") && !(await isFreshSession(session))) {
     return Response.json({ ok: false, error: "reauth" }, { status: 403 });
   }
+  if ((body.action === "options" || body.action === "add") && !(await mayAddSecondStep(email, session))) {
+    return Response.json({ ok: false, error: "second_step" }, { status: 403 });
+  }
 
   try {
     if (body.action === "options") {
@@ -73,6 +83,11 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "remove") {
       const id = typeof body.id === "string" ? body.id.slice(0, 1_400) : "";
+      if ((await sessionSecondStep(session, email)) === null) {
+        const at = await scheduleRemoval(email, id);
+        if (at === null) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+        return Response.json({ ok: true, removeOn: at });
+      }
       if (!(await removePasskey(email, id))) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
       return Response.json({ ok: true });
     }

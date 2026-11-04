@@ -3,6 +3,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { TWO_STEP_COOKIE, enterLocked, finishSignIn, sendRescue } from "@/lib/two-step";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { cancelRemoval } from "@/lib/passkeys";
 
 /**
  * The second step of logging in (lib/two-step.ts): the code from the app, or
@@ -74,6 +75,8 @@ export async function POST(request: NextRequest) {
   if (previous) await endSession(previous);
   // Opened with its second step: the app's code or a recovery code (lib/auth.ts SecondStep).
   const sessionId = await openSession(answer.email, answer.how);
+  // The passkeys set to be removed from a session without the step stay (lib/passkeys.ts scheduleRemoval).
+  await cancelRemoval(answer.email).catch((error) => console.error("calling off a passkey removal failed", error));
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   const response = away("/studio");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));

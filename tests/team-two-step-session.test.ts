@@ -9,13 +9,13 @@
  * store that does not ask, never are. Synthetic records, a key pair made
  * here, and no email leaves.
  */
-import { createHash, createSign, generateKeyPairSync } from "node:crypto";
+import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { emailForSession, endSession, openSession, sessionSecondStep } from "@/lib/auth";
 import { finishSetup, startSetup } from "@/lib/two-step";
-import { PASSKEY_COOKIE, RP_ID } from "@/lib/passkeys";
-import { SITE_URL } from "@/lib/site-url";
+import { PASSKEY_COOKIE } from "@/lib/passkeys";
+import { makePasskey } from "./passkey-world";
 import { SECOND_STEP_WORDS, putMember, secondStepWay, setRequireTwoStep, teamTwoStepBlocks } from "@/lib/team";
 import { resolveAccess, studioAccess } from "@/lib/studio-route";
 import { claimHandle, ensureStoreId, storeForEmail } from "@/lib/store";
@@ -37,7 +37,6 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 
-const sha = (value: string | Buffer) => createHash("sha256").update(value).digest();
 const hex = (value: string) => createHash("sha256").update(value).digest("hex");
 const OWNER = "owner-session@example.com";
 const PIA = "pia-passkey@example.com";
@@ -55,44 +54,6 @@ const form = (url: string, fields: Record<string, string>, cookie = "") =>
 const json = (url: string, body: unknown, cookie = "") =>
   new NextRequest(url, { method: "POST", headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) });
 const cookieOf = (response: Response, name: string) => (response.headers.get("set-cookie") ?? "").match(new RegExp(`${name}=([^;]*)`))?.[1] ?? "";
-
-/** A passkey made here: a P-256 key pair, its public half kept as the account's, in COSE form. */
-function makePasskey(email: string, id: string) {
-  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-  const jwk = publicKey.export({ format: "jwk" }) as { x: string; y: string };
-  const x = Buffer.from(jwk.x, "base64url");
-  const y = Buffer.from(jwk.y, "base64url");
-  // {1: 2 (EC2), 3: -7 (ES256), -1: 1 (P-256), -2: x, -3: y}
-  const cose = Buffer.concat([Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]), x, Buffer.from([0x22, 0x58, 0x20]), y]);
-  const record = { id, publicKey: cose.toString("base64url"), counter: 0, transports: ["internal"], name: "Phone", createdAt: "", lastUsedAt: "", synced: true };
-  let counter = 0;
-  return {
-    async keep() {
-      await redis.pipeline([
-        ["SET", `nl:pk:${hex(`nimbus-passkeys:${email}`).slice(0, 40)}`, JSON.stringify([record])],
-        ["SET", `nl:pk:cred:${hex(`nimbus-passkey-id:${id}`).slice(0, 40)}`, email],
-      ]);
-    },
-    /** What a browser answers to the sign-in options, signed by this key. */
-    answer(challenge: string) {
-      counter += 1;
-      const count = Buffer.alloc(4);
-      count.writeUInt32BE(counter);
-      const authData = Buffer.concat([sha(RP_ID), Buffer.from([0x05]), count]);
-      const clientData = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge, origin: SITE_URL, crossOrigin: false }));
-      const signer = createSign("SHA256");
-      signer.update(Buffer.concat([authData, sha(clientData)]));
-      const signature = signer.sign(privateKey);
-      return {
-        id,
-        rawId: id,
-        type: "public-key",
-        clientExtensionResults: {},
-        response: { authenticatorData: authData.toString("base64url"), clientDataJSON: clientData.toString("base64url"), signature: signature.toString("base64url") },
-      };
-    },
-  };
-}
 
 async function signInWithPasskey(key: ReturnType<typeof makePasskey>, previous = ""): Promise<string> {
   const options = await passkeyRoute(json(`${ORIGIN}/api/auth/passkey/signin`, { action: "options" }));

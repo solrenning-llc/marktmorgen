@@ -212,7 +212,8 @@ import { CLOSING_CHECKOUT_SECONDS, lastPlanMoment } from "@/lib/closing-plan-gua
 import { type Permission, type Role, ROLE_NAMES, ROLE_SUMMARIES, can } from "@/lib/team-roles";
 import { MAX_TEAM, SECOND_STEP_WORDS, readTeam, secondStepWay } from "@/lib/team";
 import { MAX_FUNNEL_STEPS } from "@/lib/funnel";
-import { listPasskeys } from "@/lib/passkeys";
+import { REMOVAL_DAYS, listPasskeys, pendingRemoval } from "@/lib/passkeys";
+import { mayAddSecondStep } from "@/lib/second-step-gate";
 import { SESSION_COOKIE, isFreshSession } from "@/lib/auth";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
@@ -1105,6 +1106,11 @@ export default async function StudioPage({
     : [null, { state: "none" as const }, null];
   // The person's own passkeys, and — for the owner — how many are on the team.
   // Adding a passkey needs a login from the last fifteen minutes (lib/auth.ts).
+  // Passkeys whose wait to be removed has run out go first, so the list below is what is left; and
+  // whether this session may add a passkey or an app (lib/second-step-gate.ts), so the managers say so.
+  const removing = email ? await pendingRemoval(email).catch(() => null) : null;
+  const passkeyRemovals: Record<string, number> = removing ? Object.fromEntries(removing.ids.map((id) => [id, removing.at])) : {};
+  const needsStep = email ? !(await mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : false;
   const [passkeys, team, freshLogin, lockedTill, twoStep, recoveryShown] = await Promise.all([
     email ? listPasskeys(email).catch(() => []) : Promise.resolve([]),
     store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
@@ -3240,6 +3246,9 @@ export default async function StudioPage({
               <PasskeyManager
                 initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                 fresh={freshLogin}
+                needsStep={needsStep}
+                removals={passkeyRemovals}
+                removalDays={REMOVAL_DAYS}
               />
               <RecoveryAddressManager shown={recoveryShown} />
               <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
@@ -3326,6 +3335,9 @@ export default async function StudioPage({
                 <PasskeyManager
                   initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                   fresh={freshLogin}
+                  needsStep={needsStep}
+                  removals={passkeyRemovals}
+                  removalDays={REMOVAL_DAYS}
                 />
                 <RecoveryAddressManager shown={recoveryShown} />
                 <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />

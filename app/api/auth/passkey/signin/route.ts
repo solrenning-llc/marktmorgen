@@ -3,7 +3,7 @@ import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { PASSKEY_COOKIE, signInOptions, signInWith } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, cancelRemoval, signInOptions, signInWith } from "@/lib/passkeys";
 import { cancelReset, endRecoveryAccess } from "@/lib/two-step";
 
 const MAX_BODY_BYTES = 16_000;
@@ -60,6 +60,8 @@ export async function POST(request: NextRequest) {
       // A passkey is the second step: a pending request to turn two-step login off is called off (lib/two-step.ts).
       await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
       await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
+      // And the passkeys set to be removed from a session without it stay (lib/passkeys.ts scheduleRemoval).
+      await cancelRemoval(email).catch((error) => console.error("calling off a passkey removal failed", error));
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));
       response.headers.append("Set-Cookie", `${PASSKEY_COOKIE}=; Path=/api/auth/passkey; Max-Age=0; HttpOnly; SameSite=Strict${secure}`);

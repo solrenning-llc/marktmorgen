@@ -384,7 +384,7 @@ export class MemoryRedis {
           this.data.set(args[1], String(n - 1));
           return n - 1;
         }
-        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v1\n")) {
+        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const argv = args.slice(1 + count);
@@ -398,7 +398,8 @@ export class MemoryRedis {
             try { rows.set(id, JSON.parse(raw)); } catch { /* not a comment */ }
           }
           const tops = new Set([...rows].filter(([, c]) => c.b === who && !c.r).map(([id]) => id));
-          let gone = 0;
+          const raws = new Map(held instanceof Map ? [...held] : []);
+          const gone: string[] = [];
           for (const [id, c] of rows) {
             const parent = c.r ?? null;
             if (c.b !== who && !(parent && tops.has(parent))) continue;
@@ -411,10 +412,11 @@ export class MemoryRedis {
               const counts = this.hash(replies);
               counts.set(parent, String((Number(counts.get(parent)) || 0) - 1));
             }
-            gone += 1;
+            gone.push(raws.get(id) ?? "");
           }
+          const name = this.hash(names).get(who) ?? "";
           this.hash(names).delete(who);
-          return gone;
+          return [name, gone];
         }
         if (key.startsWith("-- marktmorgen:list-blank:v1\n")) {
           const count = Number(args[0]);

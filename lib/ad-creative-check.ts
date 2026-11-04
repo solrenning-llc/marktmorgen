@@ -99,8 +99,12 @@ function mixedScriptWord(text: string): string | null {
  * of (U+200C, U+200D), nor the direction marks Arabic and Hebrew text use.
  */
 const HIDDEN = /[\u200B\u2060-\u2064\uFEFF\u00AD\u034F\u115F\u1160\u3164\u180B-\u180F\u202A-\u202E]|[\u{E0000}-\u{E007F}]/u;
-/** A flag emoji made of tags (England, Scotland, Wales): the black flag, its tag letters and the cancel tag. */
-const TAG_FLAG = /\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F}/gu;
+/**
+ * A flag emoji made of tags (England, Scotland, Wales, other subdivisions):
+ * the black flag, two to seven tag letters or digits as a subdivision code
+ * has, and the cancel tag. Never a longer run, which could carry hidden text.
+ */
+const TAG_FLAG = /\u{1F3F4}[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{2,7}\u{E007F}/gu;
 /** Mongolian free variation selectors right after a Mongolian letter: how the script chooses a letter's shape. */
 const MONGOLIAN_SHAPE = /(?<=\p{Script=Mongolian})[\u180B-\u180D\u180F]/gu;
 /** A line with what is written on purpose (flag emoji, Mongolian letter shapes) set aside, so only hiding characters are left to find. */

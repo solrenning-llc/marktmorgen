@@ -113,6 +113,27 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
+        if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, target, token, value] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", target, value]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:fenced-set-new:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, target, token, value] = args;
+          if (this.run(["GET", lock]) !== token || Number(this.run(["EXISTS", target])) !== 0) return 0;
+          this.run(["SET", target, value]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:fenced-del:v1\n") && Number(args[0]) >= 2 && args.length === Number(args[0]) + 2) {
+          const count = Number(args[0]);
+          const lock = args[1];
+          const targets = args.slice(2, count + 1);
+          if (this.run(["GET", lock]) !== args[count + 1]) return 0;
+          for (const target of targets) this.run(["DEL", target]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:pause-due-observation:v1\n") && args[0] === "1" && args.length === 3) {
           const [,target,deadline]=args;
           if(!/^(0|[1-9][0-9]*)$/.test(deadline)||Number(deadline)>1_000_000_000_000)return [-1];
@@ -840,6 +861,10 @@ export class MemoryRedis {
       }
       case "SISMEMBER":
         return this.set(key).has(args[0]) ? 1 : 0;
+      case "SMISMEMBER": {
+        const members = this.set(key);
+        return args.map((member) => (members.has(member) ? 1 : 0));
+      }
       case "SMEMBERS":
         return [...this.set(key)];
       case "SUNION": {

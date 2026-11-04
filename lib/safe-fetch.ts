@@ -239,8 +239,9 @@ async function publicAddressFor(host: string, resolve: Resolver): Promise<{ addr
  */
 export function sensitiveHeader(name: string): boolean {
   const lower = name.toLowerCase();
-  // By what the name holds, not its exact spelling: X-Authorization, X-Auth, X-Cookie, X-Session-Id and the like carry credentials too.
-  return /auth|cookie|token|secret|key|signature|session|credential|password|passwd/.test(lower);
+  // By what the name holds, not its exact spelling: X-Authorization, X-Auth, X-Cookie, X-Session-Id, X-Hmac, X-Jwt, a bearer, a pass,
+  // a CSRF or XSRF token and a DPoP proof carry credentials too.
+  return /auth|cookie|token|secret|key|signature|session|credential|pass|hmac|jwt|bearer|csrf|xsrf|dpop/.test(lower);
 }
 
 /** The headers without any credential, for a request to another origin. */

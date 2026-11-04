@@ -48,7 +48,7 @@ part("A transcript too long is told back or left as it was, never cut (review of
   is("the video at the top's too", pageProblem(sentHero, parsePage(sentHero)), "transcript");
   // A transcript near the most, which a translation makes longer than it may be.
   const near = read([videoBlock({ transcript: "Hello there. ".repeat(300).trim() }), rowWith(rowVideo({ transcript: "Step one. ".repeat(390).trim() }))]);
-  const grown = keepEveryBlock(near, withWords(near, pageWords(near).map((w) => `${w} ${w.slice(0, 1_500)}`)), "de");
+  const grown = keepEveryBlock(near, withWords(near, pageWords(near).map((w) => `${w} ${w.slice(0, 1_500)}`)));
   const kept = grown.page.blocks[0] as { transcript?: string };
   is("translated longer than the most: the block stays as it was, counted, never cut", [kept.transcript === (near.blocks[0] as { transcript?: string }).transcript, grown.untranslated], [true, 2]);
 }

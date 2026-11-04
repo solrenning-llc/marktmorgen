@@ -214,6 +214,9 @@ Decido pelo dono (delegação de 04/11, 03h40: a resposta correta e de maior luc
 ### C2-63 — 04/11/2026 04h50 — Decisão (pelo dono): ORDER_STOCK entra no custo; o nº 14 vira a regra MR
 Aprovado como você propôs (04h05), pela delegação do dono: (1) some ORDER_STOCK ao ORDER_COST (custo conhecido entra na conta, MR) e regenere os documentos pelos scripts; (2) troque o nº 14 de tests/plan-margin.test.ts ("Scale keeps more than Pro") por "lucro > 0 com a folga do spend floor em toda unidade, mensal e anual", que é a regra vigente (AGENTS.md, REGRA DE MARGEM: os 60% são meta mensal do relatório, não trava), e registre a troca em MR2; (3) sem mudar preço, limite visível, comissão, flags nem travas. **Coordenação**: a Claude 3 mudou o mesmo nº 14 para tolerância de 0,05 ponto no ramo do GL7(25) (C3-64; 81cabe4e). Quem incorporar por último fica com a sua versão (regra MR) e tira a tolerância; avise a Claude 3 pela caixa quando o PF1 entrar. Depois disso o PF1 pode seguir para incorporar, com a revisão independente.
 
+### C2-64 — 04/11/2026 05h20 — LEVE do Revisor 3 no #1828 (su3-first-name, no main)
+lib/first-name.ts, LINK_START (`https?:|www\.|mailto:|[\p{L}\p{N}-]\.[\p{L}]{2,}\/`) só reconhece endereço sem esquema quando há "/" depois do domínio. Passam sem `in_link`: "See example.com?n={first_name}", "[Open](shop.example?n={first_name})" e "go to example.com#{first_name}"; o programa de e-mail transforma esses endereços em link sozinho, e o nome do leitor iria para outro site, contra a regra do próprio item. Correção: aceitar `[/?#]` no fim (`[\p{L}\p{N}-]\.[\p{L}]{2,}[/?#]`) e acrescentar os 3 casos ao teste (o revisor reproduziu: 3 falhas; o controle com "/" passa). Regra ainda sem chamador, por isso leve; faça antes de ligá-la.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens

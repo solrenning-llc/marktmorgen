@@ -32,7 +32,7 @@ import { BLOCK_GROUPS } from "@/components/block-picker";
 import { KIND_ICONS } from "@/lib/sales-page-icons";
 import { SITE_KINDS } from "@/lib/site-page-rules";
 import { fastMoneyOnPage } from "@/lib/terms-check-rules";
-import { pageWords, withWords } from "@/lib/page-translate";
+import { keepEveryBlock, pageWords, withWords } from "@/lib/page-translate";
 import { copiedBlocks, emptyBlocksLeft } from "@/lib/store-copy-rules";
 import { bookingCardOf, bookingCards } from "@/lib/booking-cards";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -91,6 +91,17 @@ part("Its words are its heading, and only its heading");
   const translated = withWords(page, pageWords(page).map((w) => `ES ${w}`));
   is("a translation puts the heading back, the call untouched", translated.blocks[0], { id: "book0001", kind: "booking", product: "call000001", heading: "ES Talk it through first" });
   is("no heading, no words", pageWords(keep([booking({ heading: "" })]).page), []);
+}
+
+part("A translation that makes its heading too long keeps the block, untranslated (review of #2145)");
+{
+  const page = keep([booking({ heading: "x".repeat(95) }), { id: "text0001", kind: "text", heading: "Why talk", body: "Twenty minutes." }]).page;
+  const longer = pageWords(page).map((w) => `${w} (translated)`);
+  const reread = parsePage(withWords(page, longer));
+  is("read again on its own, the longer heading would drop the block", reread.blocks.some((b) => b.kind === "booking"), false);
+  const kept = keepEveryBlock(page, reread);
+  is("kept: the booking block as it was, in its place, the other block translated", [kept.blocks.map((b) => b.kind), kept.blocks[0], kept.blocks[1].kind === "text" ? kept.blocks[1].heading : ""], [["booking", "text"], page.blocks[0], "Why talk (translated)"]);
+  is("the translation of a page reads its answer through keepEveryBlock", /keepEveryBlock\(input\.page, parsePage\(withWords\(/.test(readFileSync("lib/ai.ts", "utf8")), true);
 }
 
 part("A copy into another store maps the call, or leaves the block out");

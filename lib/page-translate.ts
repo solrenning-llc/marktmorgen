@@ -107,6 +107,25 @@ export function withWords(page: SalesPage, words: string[]): SalesPage {
   });
 }
 
+/**
+ * The translated page, read again, with every block the original had. A
+ * block kept whole or not at all (a booking, a row of columns) is refused
+ * when a translation makes one of its words longer than it may be, where
+ * other blocks only shorten the word: such a block comes back as it was,
+ * untranslated, rather than vanishing from the page without a word.
+ */
+export function keepEveryBlock(original: SalesPage, translated: SalesPage): SalesPage {
+  const back = (from: PageBlock[], to: PageBlock[]): PageBlock[] => {
+    const byId = new Map(to.map((block) => [block.id, block]));
+    return from.map((block) => byId.get(block.id) ?? block);
+  };
+  const variant =
+    original.variant && translated.variant
+      ? { ...translated.variant, blocks: back(original.variant.blocks, translated.variant.blocks) }
+      : original.variant;
+  return { ...translated, blocks: back(original.blocks, translated.blocks), variant };
+}
+
 /** The words split into parts of at most TRANSLATE_PART_CHARS characters (a longer single one is a part of its own). */
 export function translateParts(words: string[]): string[][] {
   const parts: string[][] = [];

@@ -1203,6 +1203,18 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
 export const storeForPage = cache(storeForHandle);
 
 /**
+ * Whether a store with this id still exists: one command, the id's own key,
+ * which deleting the store removes first (deleteStore, closeStoreRecord) and
+ * moving its owner rewrites in place. For a write that must not outlive its
+ * store (the tasks, lib/crm.ts), without reading the whole store record.
+ */
+export async function storeIdExists(sid: string): Promise<boolean> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return false;
+  const [n] = await redisPipeline([["EXISTS", storeIdKey(sid)]]);
+  return Number(n) === 1;
+}
+
+/**
  * The store with this id, or null. The id comes from a cookie, a link or a
  * team record, so the store found is checked to carry that very id.
  */

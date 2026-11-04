@@ -792,6 +792,14 @@ Em claude3/orders-page-bounds (a8d0a70c), a escrita misturada está corrigida, m
 ### C3-106 — 04/11/2026 14h30 — #2192 (14h12): o modelo novo do fim do teste grátis está certo, com uma condição
 Aprovado (pelo dono, MR): o custo deve contar o que o código de fato permite, e AFTER_TRIAL_UNITS pelo maior entre "ended" e "none" de lib/plan-standing.ts é isso, igual a ENDED_UNITS da loja paga encerrada; a asserção não afrouxou. Condição: um teste que prove, pelo código real e não pela constante, que depois do fim do teste nenhum caminho (webhook, estúdio, API, e-mails) usa as unidades do próprio teste, e que uma assinatura reativada antes de CLOSING_DAYS passa ao modelo pago. Com isso, siga; mantenha o webhook a 64 KB como você mediu.
 
+### C3-107 — 04/11/2026 14h50 — claude3/assistant-deal-nouns (033250b1): 1 médio do Revisor 2 (garantia com verbo passa em 5 idiomas), 1 leve
+Médio, reproduzido: lib/store-assistant-rules.ts:247, GUARANTEE_NOUNS deixou de pegar a promessa de garantia feita com verbo. No main pegam e neste ramo passam: "Garantizamos que vas a duplicar tus ventas.", "Garantimos resultados.", "Nous garantissons des résultats.", "Wir garantieren Ergebnisse.", "Garantiamo risultati." ("We guarantee results." continua pegando). Decisão: o verbo volta a ser pego em todos os idiomas, como no inglês; libere só as locuções descritivas conhecidas ("garantizar el acceso", "garantir l'accès" e equivalentes que você listar) ou o verbo quando a loja publicou a palavra nos fatos (a mesma regra de termo da loja de "Discounts"). Na dúvida, recusa. Teste com as cinco frases acima recusadas e as descritivas liberadas, falhando antes.
+Leve: :257, REMISE_AS_DISCOUNT deixa passar "Profitez de la remise exclusive pour les abonnés." e "La remise réservée aux membres.". Decisão: inverta, pegue "remise" e libere só as locuções de entrega ("remise en main propre", "remise du", "date de remise"). Teste com as duas frases.
+Sem achado no claude3/api-events-measured (4020385d). Depois da correção, o Revisor 2 confere de novo antes do merge.
+
+### C3-108 — 04/11/2026 14h35 — Resposta do dono: e-mail agendado SEM filtro também é cancelado com aviso
+mail-ledger-counted (1b15a9ffa), C3-102 (2): decidido. Um e-mail agendado sem filtro (lista inteira) segue a mesma regra do filtrado: se o plano não estiver pago no mês do envio, é cancelado com aviso ao criador, e nada sai depois do fim do plano. O criador reagenda se o plano voltar. Não deixe em 'waiting' para sair sozinho quando o Pro voltar. Teste que falha antes: plano encerrado + agendado sem filtro -> cancelado, aviso enviado, zero envios; plano reativado não o ressuscita. Siga com a conferência curta do alto corrigido e abra o PR.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

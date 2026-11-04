@@ -77,6 +77,10 @@ export function TeamTwoStepSwitch({
         setError("The API keys changed since this page opened. Nothing was saved. Check the list again, then turn it on.");
         return;
       }
+      if (answer?.error === "unsure") {
+        setError("We could not confirm that this was saved. Any API keys already paused stay paused. Reload the page to see where things stand.");
+        return;
+      }
       if (answer?.error === "unsaved") {
         setError(
           answer.undone === false

@@ -34,13 +34,14 @@ import { POST as keysRoute } from "@/app/api/store/api-keys/route";
 import { POST as teamRoute } from "@/app/api/store/team/route";
 import { POST as postHook } from "@/app/api/v1/hooks/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { keyRecords, makeKey, makerPrint, resolveKey, revokeKey } from "@/lib/api-keys";
-import { makerFor, pauseIfRuleOn, pausePreview, pausesUnderRule, shownKeys } from "@/lib/api-key-pause";
+import { HOLD_SWAP, keyRecords, makeKey, makerPrint, resolveKey, revokeKey, rewriteMakers, swapHolds } from "@/lib/api-keys";
+import { afterMake, applyPause, leftTeam, makerFor, planPause, pausePreview, pausesUnderRule, shownKeys, tellPaused, undoPause } from "@/lib/api-key-pause";
 import { MAKER_FORMER, MAKER_UNRECORDED } from "@/lib/api-key-rules";
 import { apiStore } from "@/lib/api-guard";
-import { moveMemberships, putMember, readTeam, removeMember } from "@/lib/team";
+import { moveMemberships, putMember, readTeam, removeMember, setMemberRole } from "@/lib/team";
 import { type Store, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
-import { addEndpoint, emitEvent, setSendHooksForTests, webhooksView } from "@/lib/webhooks";
+import { addEndpoint, emitEvent, sendTest, setSendHooksForTests, webhooksView } from "@/lib/webhooks";
+import { allowanceUsed } from "@/lib/store-allowance";
 import { TeamTwoStepReview } from "@/components/team-two-step-switch";
 import { makePasskey } from "./passkey-world";
 import { paidPeriod } from "./billing-period-fixture";
@@ -84,6 +85,13 @@ const FAY = "fay-former@example.com"; // an Admin who is taken off the team
 const GUS = "gus-admin@example.com"; // an Admin who stays
 const MO = "mo-mover@example.com"; // an Admin who moves their address
 const MO2 = "mo-moved@example.com";
+const OWNER3 = "owner-three@example.com";
+const ADA = "ada-admin@example.com";
+const BEN = "ben-admin@example.com";
+const CAL = "cal-admin@example.com";
+const DOT = "dot-admin@example.com";
+const EVE = "eve-admin@example.com";
+const ADA2 = "ada-moved@example.com";
 
 async function newStore(owner: string, handle: string): Promise<Store> {
   await claimHandle(owner, handle, handle, "");
@@ -100,6 +108,7 @@ async function main(): Promise<void> {
   redis.clear();
   const store = await newStore(OWNER, "keys-two-step");
   const other = await newStore(OWNER2, "keys-former");
+  const third = await newStore(OWNER3, "keys-races");
   for (const email of [PIA, NED, LOU]) await putMember(store, email, "admin");
   for (const email of [FAY, GUS, MO]) await putMember(other, email, "admin");
 
@@ -116,7 +125,7 @@ async function main(): Promise<void> {
   type KeyAnswer = { ok: boolean; error?: string; key?: string; made?: { id: string }; paused?: boolean };
   const keys = async (session: string, body: unknown, on = store) => (await call(keysRoute, "/api/store/api-keys", on, session, body)) as { status: number; body: KeyAnswer };
   type TeamAnswer = { ok: boolean; error?: string; on?: boolean; paused?: number; emailed?: number; waiting?: number; undone?: boolean; preview?: { total: number; stamp: string } };
-  const team = async (session: string, body: unknown) => (await call(teamRoute, "/api/store/team", store, session, body)) as { status: number; body: TeamAnswer };
+  const team = async (session: string, body: unknown, on = store) => (await call(teamRoute, "/api/store/team", on, session, body)) as { status: number; body: TeamAnswer };
   const make = (session: string, name: string, on = store, write = false) => keys(session, { action: "make", name, write }, on);
   const asApi = async (key: string) => {
     const found = await apiStore(new Request(`${ORIGIN}/api/v1/store`, { headers: { authorization: `Bearer ${key}` } }));
@@ -133,7 +142,7 @@ async function main(): Promise<void> {
   // Keys are handed out under "export", which has a small daily figure of its own (lib/studio-route.ts countStudio):
   // this test makes more than a day's worth, so each part starts a new day.
   const newDay = () =>
-    redis.pipeline([store, other].map((s) => ["DEL", `nl:rl:studio-essential:${createHash("sha256").update(`nimbus-studio-essential:${s.sid}`).digest("hex").slice(0, 32)}`]));
+    redis.pipeline([store, other, third].map((s) => ["DEL", `nl:rl:studio-essential:${createHash("sha256").update(`nimbus-studio-essential:${s.sid}`).digest("hex").slice(0, 32)}`]));
   const teamRaw = async () => String((await realPipeline([["GET", `nl:team:${store.sid}`]]))[0]);
   const nobody = new Map<string, string>();
 
@@ -317,7 +326,7 @@ async function main(): Promise<void> {
   const raced = await make(louLink, "Lou's sync");
   is("let in while the rule was off, made as it turned on: paused, and the answer says so", [raced.body.ok, raced.body.paused], [true, true]);
   is("refused by the API", (await asApi(raced.body.key ?? "")).error, "key_paused");
-  is("an owner's key never is", await pauseIfRuleOn(store, ownerMade.body.made?.id ?? "", makerFor(store.sid, "owner", OWNER, false)), false);
+  is("an owner's key never is", await afterMake(store, ownerMade.body.made?.id ?? "", makerFor(store.sid, "owner", OWNER, false), OWNER, false), false);
 
   // ------------------------------------------------------------------ a teammate leaving
   await newDay();
@@ -355,6 +364,192 @@ async function main(): Promise<void> {
   const moView = (await shownKeys(other, MO2, "admin")).find((k) => k.name === "Mo's sheet")!;
   is("the key follows the new address", [moView.maker, (await readTeam(other.sid)).members.some((m) => m.email === MO2)], ["you", true]);
   is("and still works", await asApi(moKey.body.key), { status: 200, error: "" });
+
+
+  // ------------------------------------------------------------------ the second review: races and failures
+  for (const email of [ADA, BEN, CAL, DOT, EVE]) await putMember(third, email, "admin");
+  await makePasskey(OWNER3, "pk-owner3").keep();
+  const owner3Passkey = await openSession(OWNER3, "passkey", "pk-owner3");
+  const hold3 = async (id: string) => (await realPipeline([["HGET", `nl:api:hold:${third.sid}`, id]]))[0];
+  const rec3 = async (name: string) => (await keyRecords(third.sid)).find((k) => k.name === name)!;
+  const teamSet = async (on: Store, change: (t: Record<string, unknown> & { members: { email: string }[] }) => unknown) => {
+    const raw = String((await realPipeline([["GET", `nl:team:${on.sid}`]]))[0]);
+    await realPipeline([["SET", `nl:team:${on.sid}`, JSON.stringify(change(JSON.parse(raw)))]]);
+  };
+
+  await newDay();
+  part("G1: a key written after its maker was taken off, as the door let them in before, is theirs who left");
+  hook = async (commands) => {
+    if (!commands.some((c) => c[0] === "HSET" && c[1] === `nl:api:keys:${third.sid}`)) return;
+    hook = null;
+    await teamSet(third, (t) => ({ ...t, members: t.members.filter((m) => m.email !== ADA) }));
+  };
+  const adaRaced = await make(await openSession(ADA), "Ada's raced", third);
+  is("made, and paused in the same answer", [adaRaced.body.ok, adaRaced.body.paused], [true, true]);
+  is("refused by the API, held for good", [(await asApi(adaRaced.body.key ?? "")).error, await hold3(adaRaced.body.made?.id ?? "")], ["key_paused", "left"]);
+  await revokeKey(third.sid, adaRaced.body.made?.id ?? "");
+  await putMember(third, ADA, "admin");
+
+  part("G1: an endpoint written as its key was revoked is sent nothing");
+  const benLink = await openSession(BEN);
+  const benWriter = await make(benLink, "Ben's writer", third, true);
+  const benId = benWriter.body.made?.id ?? "";
+  await revokeKey(third.sid, benId);
+  const late1 = await addEndpoint(third, "https://hooks.zapier.com/hooks/catch/9/late", ["sale.completed"], Date.now(), benId);
+  const lateHook = late1.ok ? (late1.view.endpoints.at(-1)?.id ?? "") : "";
+  is("it is written, and shown as its key's: revoked", await held(third, lateHook), "revoked");
+  is("a sale goes nowhere", await sale(third), 0);
+
+  part("G1: a key whose maker left is refused even with no hold written");
+  const calKey = await make(await openSession(CAL), "Cal's sheet", third);
+  const calId = calKey.body.made?.id ?? "";
+  await rewriteMakers(third.sid, (m) => (!m.owner && m.by === makerPrint(third.sid, CAL) ? { owner: false, by: "", step: m.step, left: true } : null));
+  await realPipeline([["HDEL", `nl:api:hold:${third.sid}`, calId]]);
+  is("refused", (await asApi(calKey.body.key ?? "")).error, "key_paused");
+  await revokeKey(third.sid, calId);
+
+  await newDay();
+  part("G2: turning a key on while its maker leaves never wins over the leaving");
+  await makePasskey(BEN, "pk-ben").keep();
+  const benPasskey = await openSession(BEN, "passkey", "pk-ben");
+  const benKey = await make(benPasskey, "Ben's sheet", third);
+  const benKeyId = benKey.body.made?.id ?? "";
+  await swapHolds(third.sid, [benKeyId], "paused", [null]);
+  hook = async (commands) => {
+    if (!commands.some((c) => c[0] === "EVAL" && c[1] === HOLD_SWAP && c[5] === "vouched")) return;
+    hook = null;
+    await leftTeam(third, BEN);
+  };
+  const turned = await keys(benPasskey, { action: "turn_on", id: benKeyId }, third);
+  is("the turning on is refused, as the hold changed", turned.body.ok, false);
+  is("the key stays held for good, and refused", [await hold3(benKeyId), (await asApi(benKey.body.key ?? "")).error], ["left", "key_paused"]);
+  const undoPlan = [{ id: benKeyId, to: "paused" as const, before: null }];
+  await undoPause(third, undoPlan);
+  is("an undo never puts back a key whose maker left", await hold3(benKeyId), "left");
+  await revokeKey(third.sid, benKeyId);
+
+  part("M1: a key made under the earlier secret is still its maker's once NIMBUS_DATA_KEY is set");
+  const dataKey = process.env.NIMBUS_DATA_KEY;
+  delete process.env.NIMBUS_DATA_KEY;
+  process.env.STRIPE_SECRET_KEY = "sk_test_api_key_second_step_legacy_root_only";
+  const legacyMaker = makerFor(third.sid, "admin", ADA, false);
+  process.env.NIMBUS_DATA_KEY = dataKey;
+  const adaLegacy = await makeKey(third.sid, "Ada's legacy", Date.now(), false, "none", legacyMaker);
+  if (!adaLegacy.ok) throw new Error("legacy key not made");
+  is("its print is not today's", legacyMaker.by !== makerPrint(third.sid, ADA), true);
+  is("Ada still sees it as hers", (await shownKeys(third, ADA, "admin")).find((k) => k.name === "Ada's legacy")?.maker, "you");
+
+  part("M2: a teammate leaving also pauses keys nobody is recorded as having made, without a secret too");
+  delete process.env.NIMBUS_DATA_KEY;
+  delete process.env.STRIPE_SECRET_KEY;
+  const noSecret = await makeKey(third.sid, "No secret", Date.now(), false, "none", makerFor(third.sid, "admin", DOT, false));
+  process.env.NIMBUS_DATA_KEY = dataKey;
+  process.env.STRIPE_SECRET_KEY = "sk_test_api_key_second_step_legacy_root_only";
+  if (!noSecret.ok) throw new Error("key not made");
+  is("with no secret, nobody is recorded", (await rec3("No secret")).maker, null);
+  await removeMember(third, ADA);
+  is("Ada's legacy key is found and held for good", await hold3(adaLegacy.made.id), "left");
+  is("the unrecorded key is paused", [await hold3(noSecret.made.id), (await asApi(noSecret.key)).error], ["told", "key_paused"]);
+  is("and the owner may turn it back on", (await shownKeys(third, OWNER3, "owner")).find((k) => k.name === "No secret")?.mayTurnOn, true);
+  delete process.env.STRIPE_SECRET_KEY;
+  await revokeKey(third.sid, adaLegacy.made.id);
+  await revokeKey(third.sid, noSecret.made.id);
+
+  await newDay();
+  part("M3: a pause cut short before the rule is saved is undone, key by key");
+  const dotLink = await openSession(DOT);
+  const dotKey = await make(dotLink, "Dot's sheet", third);
+  const oldThird = await makeKey(third.sid, "Old third");
+  if (!oldThird.ok) throw new Error("old key not made");
+  const cut = await pausePreview(third);
+  hook = async (commands) => {
+    if (!commands.some((c) => c[0] === "EVAL" && c[1] === HOLD_SWAP && c[5] === "told")) return;
+    hook = null;
+    throw new Error("a stand-in for a pipeline cut short");
+  };
+  const cutShort = await team(owner3Passkey, { action: "two-step", on: true, expect: cut.stamp }, third);
+  is("refused as unsaved, and undone", [cutShort.body.error, cutShort.body.undone], ["unsaved", true]);
+  is("the key paused before the cut is back on", [await hold3(dotKey.body.made?.id ?? ""), (await asApi(dotKey.body.key ?? "")).status], [null, 200]);
+  const plan = await planPause(third);
+  is("a plan applied and undone leaves nothing", [(await applyPause(third, plan)).length, await undoPause(third, plan).then(() => hold3(oldThird.made.id))], [2, null]);
+  await revokeKey(third.sid, oldThird.made.id);
+
+  await newDay();
+  part("L3: the team unreadable after a failed save: the pause stands, and the answer does not claim it saved");
+  const unsureStamp = (await pausePreview(third)).stamp;
+  let setFailed = false;
+  hook = async (commands) => {
+    if (writes(commands, "SET", `nl:team:${third.sid}`)) {
+      setFailed = true;
+      throw new Error("a stand-in for a failed write");
+    }
+    if (setFailed && commands.some((c) => c[0] === "GET" && c[1] === `nl:team:${third.sid}`)) {
+      hook = null;
+      throw new Error("a stand-in for an unreadable team");
+    }
+  };
+  const unsure = await team(owner3Passkey, { action: "two-step", on: true, expect: unsureStamp }, third);
+  hook = null;
+  is("answered unsure", [unsure.status, unsure.body.error], [503, "unsure"]);
+  is("Dot's key stays paused", (await asApi(dotKey.body.key ?? "")).error, "key_paused");
+
+  part("L3: two presses at once email a teammate once");
+  const before = mails.length;
+  await Promise.all([tellPaused(third, ORIGIN), tellPaused(third, ORIGIN)]);
+  is("one email to Dot", [mails.length - before, mails.list().at(-1)?.to], [1, DOT]);
+  is("and his key is told", await hold3(dotKey.body.made?.id ?? ""), "told");
+
+  await newDay();
+  part("L1: a test to an endpoint whose key is paused takes nothing");
+  await swapHolds(third.sid, [dotKey.body.made?.id ?? ""], null, ["told"]);
+  const dotWriter = await make(dotLink, "Dot's writer", third, true);
+  const dotHook = await addHook(dotWriter.body.key ?? "", "https://hooks.zapier.com/hooks/catch/9/dot");
+  await swapHolds(third.sid, [dotWriter.body.made?.id ?? ""], "told", [null]);
+  const usedBefore = await allowanceUsed(third, "webhook");
+  const test = await sendTest(third, dotHook);
+  is("refused as held", test.ok ? "sent" : test.reason, "held");
+  is("and no delivery was taken", await allowanceUsed(third, "webhook"), usedBefore);
+  await revokeKey(third.sid, dotWriter.body.made?.id ?? "");
+
+  part("L4: using a key at the instant its maker is rewritten never writes the old maker back");
+  // A key never used yet, so this use writes when it was last used.
+  const dotFresh = await make(dotLink, "Dot's fresh", third);
+  hook = async (commands) => {
+    if (!(commands.length === 1 && commands[0][0] === "HSET" && (commands[0][1] === `nl:api:used:${third.sid}` || (commands[0][1] === `nl:api:keys:${third.sid}` && String(commands[0][3]).includes('"usedAt":1'))))) return;
+    hook = null;
+    await rewriteMakers(third.sid, (m) => (!m.owner && m.by === makerPrint(third.sid, DOT) ? { owner: false, by: "", step: m.step, left: true } : null));
+  };
+  await asApi(dotFresh.body.key ?? "");
+  const touched = hook === null;
+  hook = null;
+  is("the use wrote when it was last used, after the rewrite", touched, true);
+  is("the rewrite stands", (await rec3("Dot's fresh")).maker?.left, true);
+  await revokeKey(third.sid, dotFresh.body.made?.id ?? "");
+  await revokeKey(third.sid, dotKey.body.made?.id ?? "");
+
+  await newDay();
+  part("L5: a teammate moved to a role that cannot hand out keys has theirs wait for the owner");
+  const eveKey = await make(await openSession(EVE), "Eve's sync", third, true);
+  await setMemberRole(third, EVE, "editor");
+  is("paused for the role", [await hold3(eveKey.body.made?.id ?? ""), (await asApi(eveKey.body.key ?? "")).error], ["role", "key_paused"]);
+  is("the owner turns it back on", (await keys(owner3Passkey, { action: "turn_on", id: eveKey.body.made?.id ?? "" }, third)).body.ok, true);
+  is("and it works", await asApi(eveKey.body.key ?? ""), { status: 200, error: "" });
+  await revokeKey(third.sid, eveKey.body.made?.id ?? "");
+
+  await newDay();
+  part("M4: when the keys cannot follow a move, the membership stays where it was");
+  await putMember(third, ADA, "admin");
+  const adaKey = await make(await openSession(ADA), "Ada's sheet", third);
+  hook = async (commands) => {
+    if (!commands.some((c) => c[0] === "HSET" && c[1] === `nl:api:keys:${third.sid}`)) return;
+    hook = null;
+    throw new Error("a stand-in for a failed rewrite");
+  };
+  await moveMemberships(ADA, ADA2);
+  hook = null;
+  is("the membership stayed on the old address", [(await readTeam(third.sid)).members.some((m) => m.email === ADA), (await readTeam(third.sid)).members.some((m) => m.email === ADA2)], [true, false]);
+  is("and the key is still hers there", (await shownKeys(third, ADA, "admin")).find((k) => k.name === "Ada's sheet")?.maker, "you");
+  is("and still works", (await asApi(adaKey.body.key ?? "")).status, 200);
 
   part("The developers page names the answer");
   const docs = readFileSync("app/developers/page.tsx", "utf8");

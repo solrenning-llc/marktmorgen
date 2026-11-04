@@ -414,6 +414,13 @@ export async function setMemberRole(store: Store, email: string, rawRole: unknow
       invites: team.invites,
     });
     return { ok: true as const, before: member.role, role };
+  }).then(async (result) => {
+    // API keys the new role may not hand out wait for the owner (owner C3-100, lib/api-key-pause.ts roleChanged).
+    if (result.ok) {
+      const { roleChanged } = await import("@/lib/api-key-pause");
+      await roleChanged(store, address, result.role);
+    }
+    return result;
   });
 }
 
@@ -451,25 +458,26 @@ export async function putMember(store: Store, email: string, role: TeamRole): Pr
 
 /**
  * Takes someone off the team, whether the owner does it or they leave. Every
- * API key they made is paused first, with the webhook endpoints it added,
- * whatever the team's two-step rule (owner C3-100, lib/api-key-pause.ts
- * leftTeam): a key outlives the person who made it, and only the owner may
- * revoke it now. If that cannot be done, nobody is taken off, so trying again
- * does both.
+ * API key they made is paused, whatever the team's two-step rule (owner
+ * C3-100, lib/api-key-pause.ts leftTeam): a key outlives the person who made
+ * it, and only the owner may revoke it now. Done before the team is written,
+ * and again after, so a key they made in between is caught too (one written
+ * after that is checked by the route that made it, lib/api-key-pause.ts
+ * afterMake). If the first cannot be done, nobody is taken off; it runs even
+ * for an address no longer on the team, so trying again finishes it.
  */
 export async function removeMember(store: Store, email: string): Promise<boolean> {
   const address = normaliseEmail(email);
-  if ((await readTeam(store.sid)).members.some((m) => m.email === address)) {
-    // Loaded here, as lib/api-key-pause.ts reads the team through this file.
-    const { leftTeam } = await import("@/lib/api-key-pause");
-    await leftTeam(store, address);
-  }
+  // Loaded here, as lib/api-key-pause.ts reads the team through this file.
+  const { leftTeam } = await import("@/lib/api-key-pause");
+  await leftTeam(store, address);
   const removed = await withTeam(store.sid, async () => {
     const team = await readTeam(store.sid);
     if (!team.members.some((m) => m.email === address)) return false;
     await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
     return true;
   });
+  await leftTeam(store, address);
   if (removed) await redisPipeline([["SREM", indexKey(address), store.sid]]).catch(() => {});
   // What they could do with each pipeline (639 [GL7](7)) goes with them.
   if (removed) await forgetPipelineAccess(store, address).catch(() => {});
@@ -591,8 +599,15 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
       // its restrictions.
       try {
         await copyPipelineAccess(store, before, after);
+        // The API keys they made follow them (owner C3-100); left behind, they would read as a former teammate's.
+        // Cut short, the keys already moved are moved back, so they and the membership stay on the old address together.
+        const { movedMaker } = await import("@/lib/api-key-pause");
+        await movedMaker(sid, before, after).catch(async (error: unknown) => {
+          await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
+          throw error;
+        });
       } catch (error) {
-        console.error("copying pipeline access failed; the membership stays on the old address", error);
+        console.error("copying pipeline access or the maker of their API keys failed; the membership stays on the old address", error);
         stayed.push(sid);
         return null;
       }
@@ -602,9 +617,6 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
     if (!role) continue;
     // The old address's restrictions go only once the team names the new one.
     await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
-    // The API keys they made follow them (owner C3-100); left behind, they would read as a former teammate's.
-    const { movedMaker } = await import("@/lib/api-key-pause");
-    await movedMaker(sid, before, after).catch((error) => console.error("moving the maker of a teammate's API keys failed; those keys now read as a former teammate's", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
     await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
   }

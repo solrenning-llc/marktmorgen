@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_KEY_NAME, makeKey } from "@/lib/api-keys";
-import { makerFor, pauseIfRuleOn, revokeWithEndpoints, shownKeys, turnKeyOn } from "@/lib/api-key-pause";
+import { afterMake, makerFor, revokeChecked, shownKeys, turnKeyOn } from "@/lib/api-key-pause";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 import { can } from "@/lib/team-roles";
@@ -47,7 +47,8 @@ export async function POST(request: NextRequest) {
       const maker = makerFor(store.sid, role, email, step);
       const made = await makeKey(store.sid, text(body.name, MAX_KEY_NAME * 2), Date.now(), write, "none", maker);
       if (!made.ok) return Response.json({ ok: false, error: made.reason }, { status: made.reason === "unavailable" ? 503 : 400 });
-      const paused = await pauseIfRuleOn(store, made.made.id, maker);
+      // Checked again once written: the door let them in a moment before (owner C3-100).
+      const paused = await afterMake(store, made.made.id, maker, email, write);
       return Response.json(
         { ok: true, key: made.key, made: made.made, paused, keys: await keys() },
         // A key in a cached response is a key in somebody's cache.
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
     }
     if (action === "revoke") {
       // The webhook endpoints the key added stop with it (owner C3-100); a key whose maker left the team is the owner's to revoke.
-      const gone = await revokeWithEndpoints(store, role, text(body.id, 20));
+      const gone = await revokeChecked(store, role, text(body.id, 20));
       if (gone !== "ok") return Response.json({ ok: false, error: gone }, { status: gone === "unknown" ? 404 : 403 });
       return Response.json({ ok: true, keys: await keys() }, { headers: { "Cache-Control": "no-store" } });
     }

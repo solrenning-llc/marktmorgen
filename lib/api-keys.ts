@@ -51,7 +51,7 @@
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { deriveKey } from "@/lib/secret-box";
+import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
 
 import { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME, agentScopeOf } from "@/lib/api-key-rules";
 export { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME };
@@ -62,6 +62,8 @@ const SID_PATTERN = /^[0-9a-f]{32}$/;
 const lookupKey = (hash: string) => `nl:api:k:${hash}`;
 const listKey = (sid: string) => `nl:api:keys:${sid}`;
 const holdKey = (sid: string) => `nl:api:hold:${sid}`;
+/** When each key was last used, apart from its record, so that writing it can never put back what a rewrite of the record took out. */
+const usedKey = (sid: string) => `nl:api:used:${sid}`;
 const hashOf = (key: string) => createHash("sha256").update(key).digest("hex");
 
 /**
@@ -76,13 +78,15 @@ export type KeyMaker = { owner: boolean; by: string; step: boolean; left?: true 
 
 /**
  * A key's hold (lib/api-key-pause.ts): "paused", refused, its maker not yet
- * told; "told", refused, its maker emailed (or nobody to tell); "vouched",
- * turned back on by its maker with a second step; none, as made.
+ * told; "told", refused, its maker emailed (or nobody to tell); "left",
+ * refused for good, its maker left the team; "role", refused, its maker's
+ * role no longer allows it, until the owner turns it back on; "vouched",
+ * turned back on with a second step; none, as made.
  */
-export type Hold = "paused" | "told" | "vouched";
-const HOLDS: readonly string[] = ["paused", "told", "vouched"];
+export type Hold = "paused" | "told" | "left" | "role" | "vouched";
+const HOLDS: readonly string[] = ["paused", "told", "left", "role", "vouched"];
 /** Whether a hold refuses the key. */
-export const isPaused = (hold: Hold | null): boolean => hold === "paused" || hold === "told";
+export const isPaused = (hold: Hold | null): boolean => hold !== null && hold !== "vouched";
 
 /** A key's record with who made it and its hold, never the key or its fingerprint. */
 export type KeyRecord = ApiKey & { maker: KeyMaker | null; hold: Hold | null };
@@ -95,9 +99,22 @@ export type KeyRecord = ApiKey & { maker: KeyMaker | null; hold: Hold | null };
  * two-step rule, turned back on only by the owner).
  */
 export function makerPrint(sid: string, email: string): string {
-  const key = deriveKey("api-key-maker/v1");
-  if (!key) return "";
-  return createHmac("sha256", key).update(`${sid}|${email.trim().toLowerCase()}`).digest("hex").slice(0, 40);
+  return printUnder(deriveKey(PRINT_LABEL), sid, email);
+}
+
+const PRINT_LABEL = "api-key-maker/v1";
+const printUnder = (key: Buffer | null, sid: string, email: string): string =>
+  key ? createHmac("sha256", key).update(`${sid}|${email.trim().toLowerCase()}`).digest("hex").slice(0, 40) : "";
+
+/**
+ * Every fingerprint a teammate's keys may carry: under the deployment's
+ * secret now, and under the one it had before NIMBUS_DATA_KEY was set
+ * (lib/secret-box.ts deriveLegacyKey), so setting that secret does not make
+ * every teammate's keys read as a stranger's. Matching uses these; a key is
+ * made with the first.
+ */
+export function makerPrints(sid: string, email: string): string[] {
+  return [...new Set([makerPrint(sid, email), printUnder(deriveLegacyKey(PRINT_LABEL), sid, email)])].filter((p) => p !== "");
 }
 
 type Stored = ApiKey & { hash: string; maker?: KeyMaker };
@@ -141,15 +158,7 @@ const clean = (name: unknown) =>
 
 /** A store's keys, newest first, as the studio lists them. Never the key itself. */
 export async function listKeys(sid: string): Promise<ApiKey[]> {
-  if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGETALL", listKey(sid)]]);
-  const flat = Array.isArray(raw) ? raw : [];
-  const out: ApiKey[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    const stored = parseStored(flat[i + 1]);
-    if (stored) out.push({ id: stored.id, name: stored.name, hint: stored.hint, madeAt: stored.madeAt, usedAt: stored.usedAt, write: stored.write, agent: stored.agent });
-  }
-  return out.sort((a, b) => b.madeAt - a.madeAt);
+  return (await keyRecords(sid)).map(({ id, name, hint, madeAt, usedAt, write, agent }) => ({ id, name, hint, madeAt, usedAt, write, agent })).sort((a, b) => b.madeAt - a.madeAt);
 }
 
 export type MakeResult = { ok: true; key: string; made: ApiKey } | { ok: false; reason: "full" | "name" | "unavailable" };
@@ -195,64 +204,89 @@ export async function revokeKey(sid: string, id: string): Promise<boolean> {
   if (!stored) return false;
   // The lookup first: from this moment the key opens nothing, whatever
   // happens to the second write.
-  await redisPipeline([["DEL", lookupKey(stored.hash)], ["HDEL", listKey(sid), id], ["HDEL", holdKey(sid), id]]);
+  await redisPipeline([["DEL", lookupKey(stored.hash)], ["HDEL", listKey(sid), id], ["HDEL", holdKey(sid), id], ["HDEL", usedKey(sid), id]]);
   return true;
 }
 
 /** Every key of a store with who made it and its hold, oldest first, for lib/api-key-pause.ts. */
 export async function keyRecords(sid: string): Promise<KeyRecord[]> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const [raw, holds] = await redisPipeline([["HGETALL", listKey(sid)], ["HGETALL", holdKey(sid)]]);
-  const held = new Map<string, string>();
-  const flatHolds = flatOf(holds);
-  for (let i = 0; i + 1 < flatHolds.length; i += 2) held.set(String(flatHolds[i]), String(flatHolds[i + 1]));
+  const [raw, holds, uses] = await redisPipeline([["HGETALL", listKey(sid)], ["HGETALL", holdKey(sid)], ["HGETALL", usedKey(sid)]]);
+  const held = mapOf(holds);
+  const used = mapOf(uses);
   const flat = flatOf(raw);
   const out: KeyRecord[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const s = parseStored(flat[i + 1]);
     if (!s) continue;
     const hold = held.get(s.id) ?? "";
-    out.push({ id: s.id, name: s.name, hint: s.hint, madeAt: s.madeAt, usedAt: s.usedAt, write: s.write, agent: s.agent, maker: s.maker ?? null, hold: HOLDS.includes(hold) ? (hold as Hold) : null });
+    const usedAt = Math.max(s.usedAt, Number(used.get(s.id)) || 0);
+    out.push({ id: s.id, name: s.name, hint: s.hint, madeAt: s.madeAt, usedAt, write: s.write, agent: s.agent, maker: s.maker ?? null, hold: HOLDS.includes(hold) ? (hold as Hold) : null });
   }
   return out.sort((a, b) => a.madeAt - b.madeAt);
 }
 
 /**
- * Sets keys' hold: paused, told, or vouched for (turned back on by their
- * maker in a session with a second step, so no later switch pauses them
- * again). Only
- * ids that are still the store's keys are written, so a key revoked before
- * leaves nothing behind (one revoked in the very same instant may leave a
- * mark of a few bytes, which opens nothing and goes with the store).
+ * Changes keys' holds only from what the caller read (a compare-and-set, in
+ * one step on the database): each id whose hold is now one of `from` (null:
+ * none) and that is still one of the store's keys takes `to` (null: none).
+ * Returns the ids changed. So a hold written meanwhile by somebody else (a
+ * teammate leaving, the owner pausing) is never overwritten by a change
+ * decided on what was there before.
  */
-export async function holdKeys(sid: string, ids: string[], state: Hold): Promise<string[]> {
+export async function swapHolds(sid: string, ids: string[], to: Hold | null, from: (Hold | null)[]): Promise<string[]> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const wanted = ids.filter((id) => ID_PATTERN.test(id));
-  if (!wanted.length) return [];
-  const present = await redisPipeline(wanted.map((id) => ["HEXISTS", listKey(sid), id]));
-  const kept = wanted.filter((_, i) => Number(present[i]) === 1);
-  if (kept.length) await redisPipeline([["HSET", holdKey(sid), ...kept.flatMap((id) => [id, state])]]);
-  return kept;
+  const wanted = [...new Set(ids.filter((id) => ID_PATTERN.test(id)))];
+  if (!wanted.length || !from.length) return [];
+  const [changed] = await redisPipeline([["EVAL", HOLD_SWAP, 2, holdKey(sid), listKey(sid), to ?? "", wanted.length, ...wanted, ...from.map((f) => f ?? "")]]);
+  return Array.isArray(changed) ? changed.map(String).filter((id) => wanted.includes(id)) : [];
 }
 
-/** Puts keys' holds back as they were (null: none), when a change that paused them could not be saved. */
-export async function restoreHolds(sid: string, before: { id: string; hold: Hold | null }[]): Promise<void> {
-  if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return;
-  const valid = before.filter((b) => ID_PATTERN.test(b.id));
-  const back = valid.filter((b) => b.hold !== null);
-  const none = valid.filter((b) => b.hold === null);
-  await redisPipeline([
-    ...(back.length ? [["HSET", holdKey(sid), ...back.flatMap((b) => [b.id, b.hold as string])]] : []),
-    ...(none.length ? [["HDEL", holdKey(sid), ...none.map((b) => b.id)]] : []),
-  ]);
+/** Every hold but the one for good: what any change may start from. */
+export const NOT_LEFT: (Hold | null)[] = [null, "paused", "told", "role", "vouched"];
+
+/** The compare-and-set swapHolds runs, modelled by lib/redis-memory.ts. */
+export const HOLD_SWAP = `-- marktmorgen:api-hold-swap:v1
+local n = tonumber(ARGV[2])
+local changed = {}
+for i = 1, n do
+  local f = ARGV[2 + i]
+  if redis.call('HEXISTS', KEYS[2], f) == 1 then
+    local v = redis.call('HGET', KEYS[1], f) or ''
+    for j = 3 + n, #ARGV do
+      if v == ARGV[j] then
+        if ARGV[1] == '' then redis.call('HDEL', KEYS[1], f) else redis.call('HSET', KEYS[1], f, ARGV[1]) end
+        changed[#changed + 1] = f
+        break
+      end
+    end
+  end
+end
+return changed`;
+
+/** Whether each of these keys of a store is in use, paused (held, or its maker gone from the team) or gone (revoked). */
+export async function keyStates(sid: string, ids: string[]): Promise<Map<string, "live" | "paused" | "gone">> {
+  const out = new Map<string, "live" | "paused" | "gone">();
+  const wanted = [...new Set(ids.filter((id) => ID_PATTERN.test(id)))];
+  if (!wanted.length) return out;
+  if (!SID_PATTERN.test(sid) || !isRedisConfigured()) {
+    for (const id of wanted) out.set(id, "gone");
+    return out;
+  }
+  const [records, holds] = await redisPipeline([["HMGET", listKey(sid), ...wanted], ["HMGET", holdKey(sid), ...wanted]]);
+  wanted.forEach((id, at) => {
+    const stored = parseStored(Array.isArray(records) ? records[at] : null);
+    const hold = Array.isArray(holds) ? String(holds[at] ?? "") : "";
+    out.set(id, !stored ? "gone" : stored.maker?.left || (HOLDS.includes(hold) && isPaused(hold as Hold)) ? "paused" : "live");
+  });
+  return out;
 }
 
 /**
  * Rewrites who made some keys: `left`, their maker left the team and the
  * fingerprint goes; or a fingerprint replaced by another (a teammate moving
- * their sign-in address). A key used in the very same instant may write its
- * record back as it read it ("last used"); the key stays paused all the same,
- * as its hold is kept apart.
+ * their sign-in address). "Last used" is kept apart from the record, so a
+ * request using the key at that instant cannot write the old maker back.
  */
 export async function rewriteMakers(sid: string, change: (maker: KeyMaker) => KeyMaker | null): Promise<string[]> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
@@ -272,6 +306,13 @@ export async function rewriteMakers(sid: string, change: (maker: KeyMaker) => Ke
   return ids;
 }
 
+function mapOf(raw: unknown): Map<string, string> {
+  const flat = flatOf(raw);
+  const out = new Map<string, string>();
+  for (let i = 0; i + 1 < flat.length; i += 2) out.set(String(flat[i]), String(flat[i + 1]));
+  return out;
+}
+
 const flatOf = (raw: unknown): unknown[] =>
   Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Object.entries(raw as Record<string, unknown>).flat() : [];
 
@@ -289,7 +330,7 @@ export async function revokeAllKeys(sid: string): Promise<number> {
     if (stored) hashes.push(stored.hash);
   }
   if (hashes.length) await redisPipeline(hashes.map((hash) => ["DEL", lookupKey(hash)]));
-  await redisPipeline([["DEL", listKey(sid)], ["DEL", holdKey(sid)]]);
+  await redisPipeline([["DEL", listKey(sid)], ["DEL", holdKey(sid)], ["DEL", usedKey(sid)]]);
   return hashes.length;
 }
 
@@ -316,15 +357,18 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   const sid = typeof found.sid === "string" && SID_PATTERN.test(found.sid) ? found.sid : "";
   const id = typeof found.id === "string" && ID_PATTERN.test(found.id) ? found.id : "";
   if (!sid || !id) return null;
-  const [listed, hold] = await redisPipeline([["HGET", listKey(sid), id], ["HGET", holdKey(sid), id]]);
+  const [listed, hold, used] = await redisPipeline([["HGET", listKey(sid), id], ["HGET", holdKey(sid), id], ["HGET", usedKey(sid), id]]);
   const stored = parseStored(listed);
   if (!stored || stored.hash !== hash) return null;
-  // Paused by the team's two-step rule or its maker leaving (lib/api-key-pause.ts): known, and refused, and not counted as used.
-  if (hold === "paused" || hold === "told") return { sid, id, write: stored.write, agent: stored.agent, paused: true };
+  // Paused by the team's two-step rule, its maker's role, or its maker leaving (lib/api-key-pause.ts):
+  // known, refused, and not counted as used. A maker who left refuses it even with no hold written.
+  const holdNow = typeof hold === "string" && HOLDS.includes(hold) ? (hold as Hold) : null;
+  if (isPaused(holdNow) || stored.maker?.left) return { sid, id, write: stored.write, agent: stored.agent, paused: true };
 
   const seconds = Math.floor(now / 1000);
-  if (seconds - stored.usedAt >= TOUCH_SECONDS) {
-    await redisPipeline([["HSET", listKey(sid), id, JSON.stringify({ ...stored, usedAt: seconds })]]).catch(() => {});
+  // Its own field: the record is never written back here, so a rewrite of who made it is never undone.
+  if (seconds - Math.max(stored.usedAt, Number(used) || 0) >= TOUCH_SECONDS) {
+    await redisPipeline([["HSET", usedKey(sid), id, String(seconds)]]).catch(() => {});
   }
   return { sid, id, write: stored.write, agent: stored.agent, paused: false };
 }

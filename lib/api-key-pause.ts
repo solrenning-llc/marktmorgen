@@ -24,10 +24,20 @@
  *     and only by the owner. Under the rule a key whose maker is not on the
  *     team pauses too, vouched for or not.
  *   - Turning the rule off again does not turn any key back on.
- *   - What a key added stops with it: the webhook endpoints it added
- *     (lib/webhooks.ts holdEndpointsOfKeys) are sent nothing while it is
- *     paused, start again when it is turned back on, and stop for good when
- *     it is revoked.
+ *   - A teammate whose role is changed to one that may no longer hand out
+ *     keys (or keys that write) has those keys paused ("role") until the
+ *     owner turns them back on.
+ *   - What a key added stops with it: the webhook endpoints it added are
+ *     sent nothing while it is paused, start again when it is turned back
+ *     on, and stop for good when it is revoked. That is read from the key at
+ *     every send (lib/webhooks.ts liveEndpoints), never from a mark on the
+ *     endpoint, so an endpoint written in the instant its key stopped is
+ *     sent nothing either.
+ *
+ * Every change of a hold is a compare-and-set from what was read
+ * (lib/api-keys.ts swapHolds), so two changes at once never undo each other:
+ * a key whose maker left ("left") is never turned back on, nor put back to
+ * how it was by an undo, nor marked as told.
  *
  * Before the switch is saved, the owner's page shows how many keys and
  * endpoints will pause and whose (pausePreview), and the save is refused when
@@ -43,20 +53,21 @@ import {
   type Hold,
   type KeyMaker,
   type KeyRecord,
-  holdKeys,
+  NOT_LEFT,
   isPaused,
   keyRecords,
   makerPrint,
-  restoreHolds,
+  makerPrints,
   revokeKey,
   rewriteMakers,
+  swapHolds,
 } from "@/lib/api-keys";
 import { MAKER_FORMER, MAKER_UNRECORDED, type PauseLine, type PausePreview, type ShownKey } from "@/lib/api-key-rules";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import type { Store } from "@/lib/store";
-import { readTeam } from "@/lib/team";
-import type { Role } from "@/lib/team-roles";
-import { endpointsOfKeys, holdEndpointsOfKeys } from "@/lib/webhooks";
+import { readTeam, roleIn } from "@/lib/team";
+import { type Role, can } from "@/lib/team-roles";
+import { endpointsOfKeys } from "@/lib/webhooks";
 export type { PauseLine, PausePreview };
 
 /** Who is making a key now, as its record keeps it: the owner, or a teammate's fingerprint on this store; and whether the session has a second step. */
@@ -77,8 +88,8 @@ function whoseOf(maker: KeyMaker | null, members: Map<string, string>): Whose {
 /**
  * Whether a key is paused when the team's rule is on: one whose maker is not
  * on the team, vouched for or not; else one made without a second step by
- * anyone but the owner, or by somebody never recorded, unless its maker
- * turned it back on with a second step.
+ * anyone but the owner, or by somebody never recorded, unless it was turned
+ * back on with a second step.
  */
 export function pausesUnderRule(key: Pick<KeyRecord, "maker" | "hold">, members: Map<string, string>): boolean {
   const whose = whoseOf(key.maker, members);
@@ -89,10 +100,15 @@ export function pausesUnderRule(key: Pick<KeyRecord, "maker" | "hold">, members:
   return !key.maker?.step;
 }
 
+/** The team by every fingerprint each teammate's keys may carry (lib/api-keys.ts makerPrints). */
 async function membersByPrint(store: Store): Promise<Map<string, string>> {
   const team = await readTeam(store.sid);
-  return new Map(team.members.map((m) => [makerPrint(store.sid, m.email), m.email] as [string, string]).filter(([print]) => print !== ""));
+  const out = new Map<string, string>();
+  for (const m of team.members) for (const print of makerPrints(store.sid, m.email)) out.set(print, m.email);
+  return out;
 }
+
+const madeBy = (key: Pick<KeyRecord, "maker">, prints: string[]): boolean => Boolean(key.maker && !key.maker.owner && !key.maker.left && prints.includes(key.maker.by));
 
 const whoWords = (whose: Whose): string => (whose.kind === "member" ? whose.email : whose.kind === "unrecorded" ? MAKER_UNRECORDED : MAKER_FORMER);
 
@@ -106,7 +122,7 @@ export async function pausePreview(store: Store): Promise<PausePreview> {
   if (!store.sid) return { total: 0, endpoints: 0, untold: 0, stamp: stampOf([], []), people: [] };
   const [keys, members] = await Promise.all([keyRecords(store.sid), membersByPrint(store)]);
   const pausing = keys.filter((k) => !isPaused(k.hold) && pausesUnderRule(k, members));
-  const endpoints = (await endpointsOfKeys(store, pausing.map((k) => k.id))).filter((e) => !e.held);
+  const endpoints = await endpointsOfKeys(store, pausing.map((k) => k.id));
   const lines = new Map<string, PauseLine>();
   for (const key of pausing) {
     const whose = whoseOf(key.maker, members);
@@ -127,93 +143,137 @@ export async function pausePreview(store: Store): Promise<PausePreview> {
   };
 }
 
-/** What one pause did, to be told about or undone. */
-export type Paused = { key: KeyRecord; email: string | null; before: Hold | null }[];
+/** What a pause is to do, key by key: the hold it takes and the one it had, so it can be undone exactly. */
+export type PausePlan = { id: string; to: Hold; before: Hold | null }[];
 
 /**
- * Pauses every key the rule pauses, and the endpoints they added, and
- * returns the keys this call paused. A key whose maker is on the team is
- * held "paused" until they are emailed (tellPaused); one with nobody to tell
- * is "told" at once. Run before the rule is saved and once more after, so a
- * key made in between is caught too.
+ * What the rule pauses now: a key whose maker is on the team is held
+ * "paused" until they are emailed (tellPaused); one with nobody to tell is
+ * "told" at once.
  */
-export async function pauseForRule(store: Store): Promise<Paused> {
+export async function planPause(store: Store): Promise<PausePlan> {
   if (!store.sid) return [];
   const [keys, members] = await Promise.all([keyRecords(store.sid), membersByPrint(store)]);
-  const pausing = keys
+  return keys
     .filter((k) => !isPaused(k.hold) && pausesUnderRule(k, members))
-    .map((key) => {
-      const whose = whoseOf(key.maker, members);
-      return { key, email: whose.kind === "member" ? whose.email : null, before: key.hold };
-    });
-  if (!pausing.length) return [];
-  const toTell = pausing.filter((p) => p.email).map((p) => p.key.id);
-  const nobody = pausing.filter((p) => !p.email).map((p) => p.key.id);
-  const held = new Set([...(await holdKeys(store.sid, toTell, "paused")), ...(await holdKeys(store.sid, nobody, "told"))]);
-  const done = pausing.filter((p) => held.has(p.key.id));
-  await holdEndpointsOfKeys(store, done.map((p) => p.key.id), "paused");
+    .map((k) => ({ id: k.id, to: whoseOf(k.maker, members).kind === "member" ? ("paused" as const) : ("told" as const), before: k.hold }));
+}
+
+const groups = (plan: PausePlan) => {
+  const out = new Map<string, { to: Hold; before: Hold | null; ids: string[] }>();
+  for (const p of plan) {
+    const at = `${p.to}|${p.before ?? ""}`;
+    const group = out.get(at) ?? { to: p.to, before: p.before, ids: [] };
+    group.ids.push(p.id);
+    out.set(at, group);
+  }
+  return [...out.values()];
+};
+
+/** Carries a plan out, each key only from the hold it was read with; returns the ids paused. */
+export async function applyPause(store: Store, plan: PausePlan): Promise<string[]> {
+  const done: string[] = [];
+  for (const g of groups(plan)) done.push(...(await swapHolds(store.sid, g.ids, g.to, [g.before])));
   return done;
 }
 
-/** Undoes a pause whose rule could not be saved: each key's hold as it was, and its endpoints let go. */
-export async function undoPause(store: Store, paused: Paused): Promise<void> {
-  if (!store.sid || !paused.length) return;
-  await restoreHolds(store.sid, paused.map((p) => ({ id: p.key.id, hold: p.before })));
-  await holdEndpointsOfKeys(store, paused.map((p) => p.key.id), null);
+/** Pauses what the rule pauses now; returns how many. Run before the rule is saved and once more after, so a key made in between is caught. */
+export async function pauseForRule(store: Store): Promise<number> {
+  return (await applyPause(store, await planPause(store))).length;
 }
 
 /**
- * A key just made by a teammate without a second step, while the rule is on
- * (switched on in the moment between the studio letting them in and the key
- * being written): paused at once, as the switch would have. They are told in
- * the answer that made it, so it counts as told.
+ * Undoes a plan whose rule could not be saved: each key goes back to the hold
+ * it had only if it still holds what the plan gave it, so a hold written
+ * meanwhile (a teammate leaving, a key told) is never undone. Safe for keys
+ * the plan never reached.
  */
-export async function pauseIfRuleOn(store: Store, id: string, maker: KeyMaker): Promise<boolean> {
-  if (!store.sid) return false;
+export async function undoPause(store: Store, plan: PausePlan): Promise<void> {
+  for (const g of groups(plan)) await swapHolds(store.sid, g.ids, g.before, [g.to]);
+}
+
+/**
+ * A key just made by a teammate, checked again once written, as the studio's
+ * door let them in a moment before: if they are no longer on the team, it is
+ * theirs who left; if their role no longer allows it, it waits for the owner;
+ * if the team's rule turned on and it was made without a second step, it is
+ * paused as the switch would have. They are told in the answer that made it.
+ */
+export async function afterMake(store: Store, id: string, maker: KeyMaker, email: string, write: boolean): Promise<boolean> {
+  if (!store.sid || maker.owner) return false;
+  const role = await roleIn(store, email);
+  if (!role) {
+    await leftTeam(store, email);
+    return true;
+  }
+  if (!can(role, "export") || (write && !can(role, "import"))) return (await swapHolds(store.sid, [id], "role", [null])).length > 0;
   if (!(await readTeam(store.sid)).requireTwoStep) return false;
   if (!pausesUnderRule({ maker, hold: null }, await membersByPrint(store))) return false;
-  return (await holdKeys(store.sid, [id], "told")).length > 0;
+  return (await swapHolds(store.sid, [id], "told", [null])).length > 0;
 }
 
 /**
- * A teammate left the team or was taken off it (lib/team.ts removeMember):
- * every key they made is paused, whatever the rule and however they logged
- * in, with the endpoints it added, and their fingerprint goes from those
- * keys. Returns how many keys.
+ * A teammate left the team or was taken off it (lib/team.ts removeMember,
+ * which runs this before and after the team is written): every key they made
+ * is held "left", whatever the rule and however they logged in, and their
+ * fingerprint goes from those keys; every key whose maker was never recorded
+ * is paused too, as it may be theirs (the owner may turn it back on). Returns
+ * how many keys.
  */
 export async function leftTeam(store: Store, email: string): Promise<number> {
   if (!store.sid) return 0;
-  const print = makerPrint(store.sid, email);
-  if (!print) return 0;
-  const theirs = (await keyRecords(store.sid)).filter((k) => k.maker && !k.maker.owner && k.maker.by === print).map((k) => k.id);
-  if (!theirs.length) return 0;
-  // Paused first, so the key opens nothing from this moment, whatever happens to the rest.
-  await holdKeys(store.sid, theirs, "told");
-  await holdEndpointsOfKeys(store, theirs, "paused");
-  await rewriteMakers(store.sid, (maker) => (!maker.owner && maker.by === print ? { owner: false, by: "", step: maker.step, left: true } : null));
-  return theirs.length;
+  const prints = makerPrints(store.sid, email);
+  const keys = await keyRecords(store.sid);
+  const theirs = keys.filter((k) => madeBy(k, prints)).map((k) => k.id);
+  const unrecorded = keys.filter((k) => !k.maker && k.hold === null).map((k) => k.id);
+  // Held first, so the key opens nothing from this moment, whatever happens to the rest.
+  const held = await swapHolds(store.sid, theirs, "left", NOT_LEFT);
+  const paused = await swapHolds(store.sid, unrecorded, "told", [null]);
+  if (theirs.length) await rewriteMakers(store.sid, (maker) => (!maker.owner && !maker.left && prints.includes(maker.by) ? { owner: false, by: "", step: maker.step, left: true } : null));
+  return held.length + paused.length;
 }
 
-/** A teammate moved their sign-in address (lib/team.ts moveMemberships): their keys follow them. */
+/**
+ * A teammate's role changed (lib/team.ts setMemberRole): keys their new role
+ * may not hand out (any key without "export", one that writes without
+ * "import", lib/team-roles.ts) are held "role" until the owner turns them
+ * back on. Returns how many.
+ */
+export async function roleChanged(store: Store, email: string, role: Role): Promise<number> {
+  if (!store.sid || role === "owner") return 0;
+  const prints = makerPrints(store.sid, email);
+  const over = (await keyRecords(store.sid)).filter((k) => madeBy(k, prints) && (!can(role, "export") || (k.write && !can(role, "import")))).map((k) => k.id);
+  return (await swapHolds(store.sid, over, "role", [null, "paused", "told", "vouched"])).length;
+}
+
+/** A teammate moved their sign-in address (lib/team.ts moveMemberships): their keys follow them. Throws when that could not be written. */
 export async function movedMaker(sid: string, from: string, to: string): Promise<void> {
-  const before = makerPrint(sid, from);
+  const before = makerPrints(sid, from);
   const after = makerPrint(sid, to);
-  if (!before || !after || before === after) return;
-  await rewriteMakers(sid, (maker) => (!maker.owner && maker.by === before ? { ...maker, by: after } : null));
+  if (!before.length || !after) return;
+  await rewriteMakers(sid, (maker) => (!maker.owner && !maker.left && before.includes(maker.by) && maker.by !== after ? { ...maker, by: after } : null));
+}
+
+/** Who may turn a paused key back on: its maker, on the team; the owner, for one whose maker is not recorded or that the role paused; nobody, for one whose maker left. */
+function mayTurnOnAs(key: KeyRecord, whose: Whose, mine: string[], role: Role): boolean {
+  if (!isPaused(key.hold) || key.hold === "left" || whose.kind === "former") return false;
+  if (key.hold === "role") return role === "owner";
+  if (whose.kind === "unrecorded") return role === "owner";
+  return whose.kind === "member" && role !== "owner" && madeBy(key, mine);
 }
 
 /** The key list as the studio's panel shows it to this person, newest first. */
 export async function shownKeys(store: Store, email: string, role: Role): Promise<ShownKey[]> {
   if (!store.sid) return [];
   const [keys, members] = await Promise.all([keyRecords(store.sid), membersByPrint(store)]);
-  const mine = makerPrint(store.sid, email);
+  const mine = makerPrints(store.sid, email);
   return keys
     .map((k): ShownKey => {
       const whose = whoseOf(k.maker, members);
-      const byMe = role === "owner" ? whose.kind === "owner" : whose.kind === "member" && mine !== "" && k.maker?.by === mine;
+      const byMe = role === "owner" ? whose.kind === "owner" : whose.kind === "member" && madeBy(k, mine);
       const maker = byMe ? "you" : whose.kind === "owner" ? "the owner" : whoWords(whose);
-      const paused = isPaused(k.hold);
-      const mayTurnOn = paused && whose.kind !== "former" && (byMe || (whose.kind === "unrecorded" && role === "owner"));
+      const paused = isPaused(k.hold) || Boolean(k.maker?.left);
+      const mayTurnOn = mayTurnOnAs(k, whose, mine, role);
       const mayRevoke = whose.kind !== "former" || role === "owner";
       return { id: k.id, name: k.name, hint: k.hint, madeAt: k.madeAt, usedAt: k.usedAt, write: k.write, agent: k.agent, paused, maker, mayTurnOn, mayRevoke };
     })
@@ -223,49 +283,41 @@ export async function shownKeys(store: Store, email: string, role: Role): Promis
 export type TurnOn = "ok" | "unknown" | "not_paused" | "not_yours";
 
 /**
- * Turns a paused key back on, for its maker while they are on the team, or
- * for the owner when nobody was recorded as its maker; never one whose maker
- * left. The route has already checked the session's second step. Marked
- * vouched for, so no later switch pauses it again, and the endpoints it
- * added are sent to again.
+ * Turns a paused key back on, by who may (mayTurnOnAs). The route has already
+ * checked the session's second step. Marked vouched for, only from the hold
+ * it was read with, so a teammate leaving at that instant wins. The endpoints
+ * it added are sent to again from then on (read at every send).
  */
 export async function turnKeyOn(store: Store, email: string, role: Role, id: string): Promise<TurnOn> {
   if (!store.sid) return "unknown";
   const [keys, members] = await Promise.all([keyRecords(store.sid), membersByPrint(store)]);
   const key = keys.find((k) => k.id === id);
   if (!key) return "unknown";
-  if (!isPaused(key.hold)) return "not_paused";
-  const whose = whoseOf(key.maker, members);
-  const mine = makerPrint(store.sid, email);
-  const yours = whose.kind === "member" ? role !== "owner" && mine !== "" && key.maker?.by === mine : whose.kind === "unrecorded" && role === "owner";
-  if (!yours) return "not_yours";
-  if (!(await holdKeys(store.sid, [id], "vouched")).length) return "unknown";
-  await holdEndpointsOfKeys(store, [id], null);
-  return "ok";
+  if (!isPaused(key.hold) && !key.maker?.left) return "not_paused";
+  if (!mayTurnOnAs(key, whoseOf(key.maker, members), makerPrints(store.sid, email), role)) return "not_yours";
+  return (await swapHolds(store.sid, [id], "vouched", [key.hold])).length ? "ok" : "not_paused";
 }
 
 export type Revoke = "ok" | "unknown" | "owner_only";
 
-/**
- * Revokes a key, and stops for good the endpoints it added (held first, so
- * nothing more is sent to them whatever happens to the revocation). A key
- * whose maker left the team is the owner's alone to revoke.
- */
-export async function revokeWithEndpoints(store: Store, role: Role, id: string): Promise<Revoke> {
+/** Revokes a key; the endpoints it added stop with it (read at every send). A key whose maker left the team is the owner's alone to revoke. */
+export async function revokeChecked(store: Store, role: Role, id: string): Promise<Revoke> {
   if (!store.sid) return "unknown";
   const [keys, members] = await Promise.all([keyRecords(store.sid), membersByPrint(store)]);
   const key = keys.find((k) => k.id === id);
   if (!key) return "unknown";
   if (whoseOf(key.maker, members).kind === "former" && role !== "owner") return "owner_only";
-  await holdEndpointsOfKeys(store, [id], "revoked");
   return (await revokeKey(store.sid, id)) ? "ok" : "unknown";
 }
 
 /**
  * One short email to each teammate whose keys are paused and who was not told
- * yet, however many keys, saying how to turn them back on; each key is marked
- * told once its email went. Returns who was written to and how many keys
- * still wait for theirs (an email that could not go is tried at the next press).
+ * yet, however many keys, saying how to turn them back on. A person's keys
+ * are claimed together, in one step, before the email (paused to told), so
+ * two presses at once never email anybody twice, and never mark a key told
+ * that was turned back on or left meanwhile; when the email cannot go, they
+ * are put back for the next press. Returns who was written to and how many
+ * keys still wait for theirs.
  */
 export async function tellPaused(store: Store, origin: string): Promise<{ emailed: string[]; waiting: number }> {
   if (!store.sid) return { emailed: [], waiting: 0 };
@@ -279,11 +331,13 @@ export async function tellPaused(store: Store, origin: string): Promise<{ emaile
     if (whose.kind !== "member") nobody.push(key.id);
     else byPerson.set(whose.email, [...(byPerson.get(whose.email) ?? []), key]);
   }
-  if (nobody.length) await holdKeys(store.sid, nobody, "told");
+  if (nobody.length) await swapHolds(store.sid, nobody, "told", ["paused"]);
   const emailed: string[] = [];
   let waiting = 0;
   for (const [email, theirs] of byPerson) {
-    const names = theirs.map((k) => k.name);
+    const claimed = new Set(await swapHolds(store.sid, theirs.map((k) => k.id), "told", ["paused"]));
+    const names = theirs.filter((k) => claimed.has(k.id)).map((k) => k.name);
+    if (!names.length) continue;
     const one = names.length === 1;
     const ok = await sendEmail({
       meter: { by: "store", store, kind: "email" },
@@ -306,10 +360,11 @@ export async function tellPaused(store: Store, origin: string): Promise<{ emaile
         "If you no longer need a key, you can revoke it there instead.",
       ].join("\n"),
     }).catch(() => false);
-    if (ok) {
-      emailed.push(email);
-      await holdKeys(store.sid, theirs.map((k) => k.id), "told");
-    } else waiting += theirs.length;
+    if (ok) emailed.push(email);
+    else {
+      // Put back for the next press, only where still told by this one.
+      waiting += (await swapHolds(store.sid, [...claimed], "paused", ["told"])).length;
+    }
   }
   return { emailed, waiting };
 }

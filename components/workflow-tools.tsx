@@ -37,6 +37,8 @@ export function stepWhat(step: MapStep): string {
       return `Give the label “${action.tag}”`;
     case "untag":
       return `Take off the label “${action.tag}”`;
+    case "stop":
+      return "Take them out of another workflow";
     case "start":
       return "Start another workflow";
     case "webhook":

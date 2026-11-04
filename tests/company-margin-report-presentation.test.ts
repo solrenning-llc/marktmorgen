@@ -32,7 +32,8 @@ function fixture(): CommercialProfitMixInput {
 test("a complete reconciled month has one deterministic private owner presentation", () => {
   const input = fixture() as CommercialProfitMixInput & { privateEmail?: string };
   input.privateEmail = "synthetic-person@example.com";
-  const presentation = companyMonthlyMarginPresentation(input, NOW);
+  const held = { month: "2026-10", count: 2, peak: 5, privateEmail: "held-person@example.com" };
+  const presentation = companyMonthlyMarginPresentation(input, NOW, held);
   assert.deepEqual(presentation, {
     schema: 1,
     reportId: "company-margin:2026-10:v1",
@@ -53,12 +54,14 @@ test("a complete reconciled month has one deterministic private owner presentati
       "Net profit: $45.00",
       "Net margin: 50.00%",
       "Target: 60.00% — not met.",
+      "Stores held for recovery: 2 at month end; monthly peak 5.",
       "Informational only: this report does not open sales or change any price, limit, commission, flag or gate.",
     ].join("\n"),
   });
   assert.equal(Object.isFrozen(presentation), true);
-  assert.deepEqual(companyMonthlyMarginPresentation(input, NOW), presentation);
+  assert.deepEqual(companyMonthlyMarginPresentation(input, NOW, held), presentation);
   assert.doesNotMatch(JSON.stringify(presentation), /example\.com|synthetic-account|evidence|privateEmail|SYNTHETIC/);
+  assert.match(companyMonthlyMarginPresentation(input, NOW)!.text, /Stores held for recovery: unknown \(not zero\)\./);
 });
 
 test("losses, zero revenue and the exact target remain truthful presentation states", () => {
@@ -98,6 +101,11 @@ test("unknown, malformed or uninspectable accounting never gets a presentation",
 
   const revoked = Proxy.revocable(fixture(), {}); revoked.revoke();
   assert.equal(companyMonthlyMarginPresentation(revoked.proxy, NOW), null);
+
+  let heldReads = 0;
+  const unreadableHeld = { month: "2026-10", peak: 5, get count() { heldReads++; return 2; } };
+  assert.match(companyMonthlyMarginPresentation(fixture(), NOW, unreadableHeld)!.text, /held for recovery: unknown \(not zero\)/);
+  assert.equal(heldReads, 0);
 });
 
 test("the month and idempotency key come only from the complete UTC period", () => {

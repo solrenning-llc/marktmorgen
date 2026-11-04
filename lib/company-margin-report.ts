@@ -23,6 +23,34 @@ export type CompanyMonthlyMarginReport = {
   heldStores: number | null;
   heldStoresPeak: number | null;
 };
+export type CompanyMonthlyMarginPresentation = Readonly<{
+  schema: 1;
+  reportId: string;
+  month: string;
+  currency: "USD";
+  basis: "reconciled_actual";
+  subject: string;
+  text: string;
+}>;
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+] as const;
+
+function usd(cents: number): string {
+  const amount = BigInt(cents);
+  const negative = amount < BigInt(0);
+  const absolute = negative ? -amount : amount;
+  return `${negative ? "-" : ""}$${absolute / BigInt(100)}.${String(absolute % BigInt(100)).padStart(2, "0")}`;
+}
+
+function percent(bps: number): string {
+  const amount = BigInt(bps);
+  const negative = amount < BigInt(0);
+  const absolute = negative ? -amount : amount;
+  return `${negative ? "-" : ""}${absolute / BigInt(100)}.${String(absolute % BigInt(100)).padStart(2, "0")}%`;
+}
 
 /** Last complete UTC calendar month, not a rolling 30-day estimate. */
 export function lastCompleteCompanyMonth(now: number): string | null {
@@ -93,6 +121,70 @@ export function companyMonthlyMarginReport(input: CommercialProfitMixInput | nul
     // Exact comparison; a displayed rounded percentage never meets the target.
     targetMet: revenue > 0 ? BigInt(mix.totalNetProfitCents) * BigInt(10_000) >= BigInt(revenue) * BigInt(COMPANY_NET_MARGIN_TARGET_BPS) : null,
   };
+}
+
+/**
+ * Produce an idempotent, aggregate-only envelope for private owner presentation.
+ * Accept the accounting input, not a caller-supplied report, so a forged complete
+ * status cannot bypass reconciliation. This pure function does not send, schedule,
+ * persist, call a provider or grant release permission.
+ */
+export function companyMonthlyMarginPresentation(
+  input: CommercialProfitMixInput | null,
+  now = Date.now(),
+  held: unknown = null,
+): CompanyMonthlyMarginPresentation | null {
+  const report = companyMonthlyMarginReport(input, now, held);
+  if (
+    report.status !== "complete" || report.month === null ||
+    report.revenueCents === null || report.variableCostsCents === null ||
+    report.fixedCostsCents === null || report.taxesCents === null ||
+    report.refundsCents === null || report.reservesCents === null ||
+    report.netProfitCents === null
+  ) return null;
+
+  const year = report.month.slice(0, 4);
+  const monthName = MONTH_NAMES[Number(report.month.slice(5, 7)) - 1];
+  if (monthName === undefined) return null;
+
+  const zeroRevenue = report.revenueCents === 0;
+  if (zeroRevenue !== (report.netMarginBps === null && report.targetMet === null)) return null;
+  const reportId = `company-margin:${report.month}:v1`;
+  const subject = `Marktmorgen company margin — ${monthName} ${year}`;
+  const marginLine = report.netMarginBps === null
+    ? `Net margin: not measurable because revenue was ${usd(report.revenueCents)}.`
+    : `Net margin: ${percent(report.netMarginBps)}`;
+  const targetLine = report.targetMet === null
+    ? `Target: ${percent(report.targetBps)} — not measurable because revenue was ${usd(report.revenueCents)}.`
+    : `Target: ${percent(report.targetBps)} — ${report.targetMet ? "met" : "not met"}.`;
+  const heldLine = report.heldStores === null || report.heldStoresPeak === null
+    ? "Stores held for recovery: unknown (not zero)."
+    : `Stores held for recovery: ${report.heldStores} at month end; monthly peak ${report.heldStoresPeak}.`;
+
+  return Object.freeze({
+    schema: 1,
+    reportId,
+    month: report.month,
+    currency: report.currency,
+    basis: report.basis,
+    subject,
+    text: [
+      subject,
+      `Report ID: ${reportId}`,
+      "Basis: reconciled actuals for the complete UTC calendar month.",
+      `Revenue: ${usd(report.revenueCents)}`,
+      `Variable costs: ${usd(report.variableCostsCents)}`,
+      `Fixed costs: ${usd(report.fixedCostsCents)}`,
+      `Taxes: ${usd(report.taxesCents)}`,
+      `Refunds: ${usd(report.refundsCents)}`,
+      `Reserves: ${usd(report.reservesCents)}`,
+      `Net profit: ${usd(report.netProfitCents)}`,
+      marginLine,
+      targetLine,
+      heldLine,
+      "Informational only: this report does not open sales or change any price, limit, commission, flag or gate.",
+    ].join("\n"),
+  });
 }
 
 /** Read the completed monthly operational observation, without inventing actual

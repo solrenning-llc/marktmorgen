@@ -32,7 +32,10 @@ import {
   CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, TOTALS_STORE_SHAPE, TOTALS_STORE_UNITS,
   UPDATE_READ_SHAPE, UPDATE_READ_UNITS,
 } from "@/lib/read-ceilings";
-import { claimHandle, ensureStatsId, renameHandle, setStripeAccount, setSubscription, storeForEmail, storeForHandle, type Store } from "@/lib/store";
+import { claimHandle, createStore, ensureStatsId, renameHandle, setStripeAccount, setSubscription, storeForEmail, storeForHandle, storeForId, type Store } from "@/lib/store";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { takeAllowance } from "@/lib/store-allowance";
 import { readNumbers } from "@/lib/stats-report";
 import { COST_LINES, PER_PAYMENT_LINES, UNIT_COST, readShapeCost } from "./plan-cost-registry";
@@ -214,7 +217,10 @@ async function main(): Promise<void> {
     is("the first store's copy is made", (await bookedCalendarFeed(feedOwner, asRoute, t0)).state, "made");
     // Deleted without its feed forgotten (as before this fix), the handle held back, then taken by another account's store.
     redis.run(["SET", `nl:store:handle:${feedOwner.handle}`, `released:${new Date(t0).toISOString()}`]);
-    is("deleted: gone", (await bookedCalendarFeed(feedOwner, asRoute, t0 + 3_600_000)).state, "gone");
+    const goneAnswer = await counted(() => bookedCalendarFeed(feedOwner, asRoute, t0 + 3_600_000));
+    is("deleted: gone, and the copy, which names buyers, deleted at once (light 1)", [goneAnswer.value.state, redis.run(["GET", `nl:cal:out:${feedOwner.statsId}`])], ["gone", null]);
+    // The token and its settings are read by the route before the feed (2 GET): with the feed's own, within the answer's count (light 5).
+    is(`that answer's commands, with the token's two, within CALENDAR_POLL_SHAPE (${goneAnswer.commands + 2} <= ${CALENDAR_POLL_SHAPE.commands})`, goneAnswer.commands + 2 <= CALENDAR_POLL_SHAPE.commands, true);
     redis.run(["DEL", `nl:store:handle:${feedOwner.handle}`]);
     await claimHandle(TWO, "takenback", "Second Store", "");
     await ensureStatsId(TWO);
@@ -244,10 +250,46 @@ async function main(): Promise<void> {
     is("renamed", renamed.ok, true);
     is("its feed, still under the old handle in its settings, answers: no 404 by mistake", (await bookedCalendarFeed(thirdOwner, thirdMake, t0)).state, "made");
 
-    part("A store deleted from the studio forgets its feed at once (M2-bis, 1)");
-    await forgetStoreCalendar(thirdOwner.statsId);
-    is("its address leads nowhere, and its copy is gone", [await storeIdForToken(thirdUrl.slice(thirdUrl.lastIndexOf("/") + 1).replace(/\.ics$/, "")), redis.run(["GET", `nl:cal:out:${thirdOwner.statsId}`])], [null, null]);
-    is("the studio's deletion forgets it", read("app/api/store/stores/route.ts").includes("forgetStoreCalendar(result.store.statsId)"), true);
+    part("A copy is kept only by the store that made it (light 3)");
+    const third0 = Date.UTC(2032, 3, 1, 0, 30);
+    const copyKey = `nl:cal:out:${thirdOwner.statsId}`;
+    const madeCopy = JSON.parse(String(redis.run(["GET", copyKey]))) as { ref?: string; sid?: string };
+    is("it names what the handle led to and the store's own id", [typeof madeCopy.ref, madeCopy.sid], ["string", thirdOwner.statsId]);
+    redis.run(["SET", copyKey, JSON.stringify({ ...madeCopy, at: third0, ics: "BEGIN:VCALENDAR\r\nX-WHO:other\r\nEND:VCALENDAR", sid: "someone-else" })]);
+    redis.run(["SET", `nl:cal:builds:${thirdOwner.statsId}:${new Date(third0).toISOString().slice(0, 10)}`, String(CALENDAR_BUILDS_PER_DAY), "EX", 86_400]);
+    const wrongSid = await bookedCalendarFeed(thirdOwner, thirdMake, third0 + 60_000);
+    is("a copy that names another store's id is not answered", [wrongSid.state, "ics" in wrongSid], ["none", false]);
+
+    part("A deletion while the file is being made is not undone (light 2)");
+    const racing = await bookedCalendarFeed(thirdOwner, async () => {
+      // The store is deleted from the studio while its file is being made.
+      await forgetStoreCalendar(thirdOwner.statsId);
+      return "BEGIN:VCALENDAR\r\nX-WHO:raced\r\nEND:VCALENDAR";
+    }, third0 + 2 * 86_400_000);
+    is("the file made answers once, but no copy is written after the deletion", [racing.state, redis.run(["GET", copyKey])], ["made", null]);
+  }
+
+  part("A store deleted from the studio forgets its feed at once (M2-bis, 1; light 6)");
+  {
+    const OWNS = "owns@example.com";
+    await claimHandle(OWNS, "ownsfirst", "Owns First", "");
+    await ensureStatsId(OWNS);
+    const extra = await createStore(OWNS, "ownsextra", "Owns Extra", "");
+    if (!extra.ok) throw new Error(`no extra store: ${JSON.stringify(extra)}`);
+    const extraStore = (await storeForId(extra.store.sid))!;
+    const extraUrl = (await newFeedToken(extraStore)).subscribeUrl ?? "";
+    const extraToken = extraUrl.slice(extraUrl.lastIndexOf("/") + 1).replace(/\.ics$/, "");
+    const extraOwner = (await storeIdForToken(extraToken))!;
+    await bookedCalendarFeed(extraOwner, async () => "BEGIN:VCALENDAR\r\nEND:VCALENDAR", Date.UTC(2032, 5, 1, 0, 30));
+    const before = ["cfg", "out"].map((k) => redis.run(["GET", `nl:cal:${k}:${extraOwner.statsId}`]) !== null);
+    const cookie = `${SESSION_COOKIE}=${await openSession(OWNS)}`;
+    const form = new FormData();
+    form.set("action", "delete");
+    form.set("confirm", "ownsextra");
+    const response = await storesRoute(new NextRequest("https://marktmorgen.com/api/store/stores", { method: "POST", headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com", cookie, "x-nimbus-store": extra.store.sid }, body: form }));
+    is("the studio's delete answers by going back to the studio", [response.status, response.headers.get("Location")?.includes("stores=deleted")], [303, true]);
+    is("before: its settings and its copy were kept", before, [true, true]);
+    is("after: its settings, its copy and its address are gone", [redis.run(["GET", `nl:cal:cfg:${extraOwner.statsId}`]), redis.run(["GET", `nl:cal:out:${extraOwner.statsId}`]), await storeIdForToken(extraToken)], [null, null, null]);
   }
 
   done();

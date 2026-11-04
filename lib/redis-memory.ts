@@ -327,6 +327,16 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/calendar-sync.ts, KEEP_COPY: the feed's copy written only while the store's calendar settings exist.
+        if (key.startsWith("-- marktmorgen:calendar-copy:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, settings, copy, value, seconds] = args;
+          this.live(settings);
+          this.scriptCalls += 1;
+          if (!this.data.has(settings)) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", copy, value, "EX", seconds]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:form-save:v1\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
           this.live(target);

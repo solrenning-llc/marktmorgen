@@ -70,13 +70,14 @@ export const CALENDAR_FILE_BYTES = CALENDAR_FILE_MAX_BYTES;
 /**
  * Every answer: the token and its settings (2 GET), the hour's pace (SET NX,
  * INCRBY, EXPIRE NX and, when refused, DECRBY: 4), the copy, the changed mark
- * and the store's handle (one MGET); the copy sent. An answer refused for the
+ * and the store's handle (one MGET), and, for a store whose handle was let
+ * go, its copy deleted (DEL): 8; the copy sent. An answer refused for the
  * pace stops after the pace: 6 commands and no copy (CALENDAR_REFUSED_SHAPE).
  */
 export const CALENDAR_POLL_SHAPE: ReadShape = {
   seconds: 1,
   cpu: 0.1,
-  commands: 2 + 4 + 1,
+  commands: 2 + 4 + 1 + 1,
   dbBytes: 2 * 4_096 + CALENDAR_FILE_BYTES + 2 * 256,
   outBytes: CALENDAR_FILE_BYTES,
   stripePages: 0,
@@ -88,12 +89,13 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  * MAX_PRODUCTS, the catalog's head aside); each booking's moves
  * (lib/call-records.ts, readMoves: one GET a booking); four reads of each
  * booking's room and, for a video room not made yet, its making (SET NX and
- * GET: lib/call-rooms.ts, roomsFor); the copy kept (SET).
+ * GET: lib/call-rooms.ts, roomsFor); the copy kept (lib/calendar-sync.ts,
+ * KEEP_COPY: the EVAL and the EXISTS and SET it runs, billed one by one: 3).
  */
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,
   cpu: 1,
-  commands: 4 + 2 + MAX_PRODUCTS + CALENDAR_CALLS + 4 * CALENDAR_CALLS + 2 * CALENDAR_CALLS + 1,
+  commands: 4 + 2 + MAX_PRODUCTS + CALENDAR_CALLS + 4 * CALENDAR_CALLS + 2 * CALENDAR_CALLS + 3,
   dbBytes: MAX_STORE_BYTES + MAX_PRODUCTS * LISTING_READ_BYTES + CALENDAR_CALLS * 1_024 + 4 * CALENDAR_CALLS * 1_024 + 2 * CALENDAR_CALLS * 512 + CALENDAR_FILE_BYTES,
   outBytes: 0,
   stripePages: CALENDAR_STRIPE_PAGES,

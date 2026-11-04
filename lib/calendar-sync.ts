@@ -565,14 +565,16 @@ export function keptSlots<T extends { start: number; end: number }>(slots: T[], 
  * tombstone (`gone`: what it leads to now), so the feed answers 404 at once
  * without making anything again.
  */
-type Copy = { at: number; ics: string; ref: string };
+type Copy = { at: number; ics: string; ref: string; sid: string };
 type Kept = { copy: Copy | null; gone: string | null };
 function parseKept(raw: unknown): Kept {
   if (typeof raw !== "string" || !raw) return { copy: null, gone: null };
   try {
     const value = JSON.parse(raw) as Partial<Copy> & { gone?: unknown };
     if (typeof value.gone === "string") return { copy: null, gone: value.gone };
-    const copy = typeof value.at === "number" && typeof value.ics === "string" && value.ics ? { at: value.at, ics: value.ics, ref: typeof value.ref === "string" ? value.ref : "" } : null;
+    const copy = typeof value.at === "number" && typeof value.ics === "string" && value.ics
+      ? { at: value.at, ics: value.ics, ref: typeof value.ref === "string" ? value.ref : "", sid: typeof value.sid === "string" ? value.sid : "" }
+      : null;
     return { copy, gone: null };
   } catch {
     return { copy: null, gone: null };
@@ -596,6 +598,15 @@ async function takeCounted(key: string, ceiling: number, seconds: number): Promi
     return false;
   }
 }
+
+/**
+ * The copy written only while the store's calendar settings exist, in one step:
+ * EXISTS, then SET with its expiry (lib/redis-memory.ts runs it the same way).
+ */
+export const KEEP_COPY = `-- marktmorgen:calendar-copy:v1
+if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end
+redis.call("SET", KEYS[2], ARGV[1], "EX", ARGV[2])
+return 1`;
 
 /** Thrown by a feed's `make` when the store behind its token is not the one that kept it. */
 export class FeedGone extends Error {}
@@ -660,7 +671,10 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   if (kept.gone === ref) return { state: "gone" };
   // A copy is answered only while the handle leads to the store that made it; otherwise the file is made again,
   // and `make` reads the store behind the handle and compares its id with the feed's (FeedGone when it is another store).
-  const copy = kept.copy && kept.copy.ref === ref ? kept.copy : null;
+  // Both what the handle led to and the feed's own store id must match. A copy without them (none was ever kept
+  // so: the copy carried both from its first release) or one made before the owner's account moved (lib/store.ts,
+  // moveAccount: the handle then leads to the new address) is set aside once and made again.
+  const copy = kept.copy && kept.copy.ref === ref && kept.copy.sid === owner.statsId ? kept.copy : null;
   const changed = Number(changedRaw) || 0;
   const fresh = copy !== null && changed <= copy.at && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
   if (fresh) return { state: "copy", ics: copy.ics };
@@ -681,11 +695,13 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     if (copy) return { state: "copy", ics: copy.ics };
     throw error;
   }
-  const file = JSON.stringify({ at: now, ics, ref });
+  const file = JSON.stringify({ at: now, ics, ref, sid: owner.statsId });
   if (Buffer.byteLength(file, "utf8") > CALENDAR_FILE_MAX_BYTES) {
     console.error("a booking calendar file is larger than its ceiling, so it is neither kept nor sent", owner.statsId);
     return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
   }
-  await redisPipeline([["SET", outKey(owner.statsId), file, "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
+  // Kept only while the store's settings are still there: a deletion that ran while this was being made
+  // (forgetStoreCalendar) is not undone by a copy written after it, with its buyers' names.
+  await redisPipeline([["EVAL", KEEP_COPY, 2, cfgKey(owner.statsId), outKey(owner.statsId), file, CALENDAR_COPY_SECONDS]]).catch(() => {});
   return { state: "made", ics };
 }

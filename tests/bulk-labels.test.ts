@@ -68,7 +68,7 @@ async function main(): Promise<void> {
   is("and writes nothing", JSON.stringify(await redisPipeline([["HGETALL", leadsKey(list)]])), before);
 
   // Every workflow record (lib/flows.ts keeps runs, steps and held sends under nl:wf:): a run started would write one.
-  const workflows = async () => (await redis.keys("*")).filter((key: string) => key.startsWith("nl:wf:")).sort();
+  const workflows = async () => (await redis.keys()).filter((key: string) => key.startsWith("nl:wf:")).sort();
   const workflowsBefore = await workflows();
   const applied = await post({ action: "apply", label: "Workshop May", change: "add", text: pasted });
   is("applied: the contacts it changed, by address", [applied.status, applied.body.changed?.sort(), applied.body.already], [200, ["ana@example.com", "ben@example.com"], 1]);

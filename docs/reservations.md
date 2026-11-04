@@ -10,6 +10,7 @@ Lanes (who owns which subjects):
 | Claude 1 | claude/ | Coordination, the queue, research, design of the site and the studio with the owner (571 [VS1]), review of the others' work, accounts (232 [CA1]) and refunds (305 [SY1], 306 [SY2]) |
 | Claude 2 | claude2/ | Group A product items it has in progress (520 [LB1], 513 [PF1], 22 [E5], 270 [GR1], 397 [SL1], FQ1 and the next Group A items in order) |
 | Claude 3 | claude3/ | 631 [AA1] (the whole store run by an AI agent) and then 632 [AA2] (ads launched from inside Marktmorgen) |
+| Claude 4 | claude4/ | Group A items not started, taken from the END of the Group A order upward (Claude 2 takes them from the top), skipping money, billing, Amazon SES email, taxes and costs (Codex) and 631 [AA1], 632 [AA2], 639 [GL7] (Claude 3); owner decision 04/11/2026 (inbox C4-1) |
 
 ## Open pull requests and their files (snapshot 02/11/2026, 12h55 Fortaleza)
 

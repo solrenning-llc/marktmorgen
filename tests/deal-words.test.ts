@@ -63,7 +63,7 @@ const hidden = [
   "Ask for a dis.count.", "Ask for a dis-count.", "Ask for a dis_count.", "Ask for a dis\u00B7count.",
 ];
 is("each hidden form is refused", hidden.filter((reply) => heldToFacts(reply, probe)), []);
-is("a word mixing scripts is refused even with no deal in it", heldToFacts("The \u0441ourse has 20 lessons.", probe), false);
+is("a look-alike letter with no deal word in it is not refused", heldToFacts("The \u0441ourse has 20 lessons.", probe), true);
 is("hidden with no deal in the facts too", [heldToFacts("A dis\u0441ount.", "nothing"), heldToFacts("dis.count", "nothing"), heldToFacts("\uFF52\uFF41\uFF42\uFF41\uFF54\uFF54", "nichts")], [false, false, false]);
 is("a number in another script is compared as its ASCII digits", [
   heldToFacts("It costs $\uFF12\uFF10.", probe), heldToFacts("It costs $\u0662\u0660.", probe),
@@ -92,4 +92,37 @@ is("a curly or straight apostrophe, '%off' or '% off'", [
 is("a stem with an open ending allows the same word, plural or not", [heldToFacts("Mit Gutschein.", "Mit Gutscheinen."), heldToFacts("Garantias.", "Garantia de 7 dias."), heldToFacts("Es ist rabattiert.", "Alles rabattiert.")], [true, true, true]);
 is("but not another word of that stem", [heldToFacts("Rabatt heute.", "Rabattcode im Mai."), heldToFacts("Rabatt heute.", "Frühlingsrabatt im Mai."), heldToFacts("A discount today.", "A discounted item.")], [false, false, false]);
 is("ordinary replies pass", [heldToFacts("The Course costs $20 and has 20 lessons.", probe), heldToFacts("Café crème lessons, naïve style.", "Pottery."), heldToFacts("Don’t worry, it has 20 lessons.", probe)], [true, true, true]);
+
+part("Fifth review: honest text in any script, and compounds the store wrote with a hyphen");
+const sameFacts = (reply: string) => heldToFacts(reply, reply);
+is("text in another script, with a Latin word inside, passes", [
+  heldToFacts("Pythonコ\u30FCスは初心者向けです。", "Pythonコ\u30FCス 初心者向け"), heldToFacts("Excelの使い方を学べます。", "Excelの使い方"), heldToFacts("这是Python课程。", "Python课程"),
+  sameFacts("Python으로 배우는 데이터 분석"), sameFacts("\u05D4\u05E7\u05D5\u05E8\u05E1 \u05D1-Python \u05DE\u05D9\u05D5\u05E2\u05D3 \u05DC\u05DE\u05EA\u05D7\u05D9\u05DC\u05D9\u05DD"), sameFacts("\u062F\u0648\u0631\u0629 \u0627\u0644\u0640Python \u0644\u0644\u0645\u0628\u062A\u062F\u0626\u064A\u0646"),
+  heldToFacts("Each capsule has 500 µg.", "500 µg per capsule"), heldToFacts("Each capsule has 500 μg.", "500 μg per capsule"), heldToFacts("Rich in β-carotene.", "Rich in β-carotene"),
+  heldToFacts("Uses a 10 kΩ resistor.", "10 kΩ resistor"), heldToFacts("\u0627\u0644\u0633\u0639\u0631 \u0662\u0667 \u062F\u0648\u0644\u0627\u0631", "\u0627\u0644\u0633\u0639\u0631 27 \u062F\u0648\u0644\u0627\u0631"),
+], [true, true, true, true, true, true, true, true, true, true, true]);
+is("a compound the store wrote with a hyphen may be repeated", [
+  heldToFacts("Der Sommer-Rabatt gilt bis Juli.", "Sommer-Rabatt bis Juli."), heldToFacts("Ein Geschenk-Gutschein ist erhältlich.", "Geschenk-Gutschein erhältlich."),
+  sameFacts("Gratis-Versand für alle Bestellungen."), heldToFacts("De Black-Friday-korting geldt.", "Black-Friday-korting"), sameFacts("Versandkosten-frei."),
+  heldToFacts("Der E-Book-Gutschein ist da.", "E-Book-Gutschein"), heldToFacts("Ein Geschenk-Gutschein.", "Ein Geschenkgutschein."),
+], [true, true, true, true, true, true, true]);
+is("but not the stem alone, with a hyphen in the facts or without", [heldToFacts("Ein Gutschein.", "Geschenk-Gutschein erhältlich."), heldToFacts("Ein Gutschein.", "Ein Geschenkgutschein."), heldToFacts("Der Rabatt.", "Sommer-Rabatt.")], [false, false, false]);
+is("and a compound the store never wrote is refused", [heldToFacts("Der Sommer-Rabatt.", "Kurs."), heldToFacts("Mega-Uitverkoop!", "Cursus."), heldToFacts("Versandkosten-frei.", "Kurs.")], [false, false, false]);
+is("an apostrophe written as a modifier letter", heldToFacts("Offre valable aujourd\u02BChui seulement.", "Aujourd'hui seulement"), true);
+
+part("Fifth review: a deal word spelled with look-alike letters, with no Latin letter in it");
+const lookalikes = [
+  "Use the \u0441\u043E\u0501\u0435 at checkout.", "Everything is on \u0455\u0430\u04CF\u0435 this week.", "Courses are \u0585\u0578 \u0455\u0430\u04CF\u0435.", "Ask for a \u0441\u03BF\u057D\u0440\u03BF\u0578.", "Ask for a \u1D05\u026A\uA731\u1D04\u1D0F\u1D1C\u0274\u1D1B.",
+  "Ask for a \u{1F173}\u{1F178}\u{1F182}\u{1F172}\u{1F17E}\u{1F184}\u{1F17D}\u{1F183}.", "Ask for a \u{1F153}\u{1F158}\u{1F162}\u{1F152}\u{1F15E}\u{1F164}\u{1F15D}\u{1F163}.", "Ask for a \u249F\u24A4\u24AE\u249E\u24AA\u24B0\u24A9\u24AF.", "Ask for a \u{1F1E9}\u{1F1EE}\u{1F1F8}\u{1F1E8}\u{1F1F4}\u{1F1FA}\u{1F1F3}\u{1F1F9}.", "Everything is on \u13DA\u13AA\u13DE\u13AC.",
+];
+is("each is refused, though the facts have the word in Latin letters", lookalikes.filter((reply) => heldToFacts(reply, `${probe} Use the code. On sale.`)), []);
+is("unless the store spelled it with the same letters", heldToFacts("Use the \u0441\u043E\u0501\u0435.", "Use the \u0441\u043E\u0501\u0435."), true);
+
+part("Fifth review: every split of a word is joined for the deal-word check");
+is("each split is refused", ["Get a dis..count today.", "Get a d i s c o u n t.", "Get a dis\ncount.", "Get a dis/count.", "Get a dis\u2009count.", "Get a dis\u00A0count.", "Get a dis-_-count."].filter((reply) => heldToFacts(reply, probe)), []);
+is("while ordinary punctuation and letters pass", [heldToFacts("Lessons 1/2 and Q&A.", "Lessons 1 and 2."), heldToFacts("I am a b c learner.", "ABC."), heldToFacts("Don't miss the A/B test lesson.", "A/B")], [true, true, true]);
+
+part("Fifth review: links and bare domains");
+is("a bare domain the facts do not have is refused", [heldToFacts("See evil.example/deal for more.", probe), heldToFacts("Visit cheap-courses.shop today.", probe), heldToFacts("Visit \uFF43\uFF48\uFF45\uFF41\uFF50\uFF0E\uFF53\uFF48\uFF4F\uFF50 today.", probe), heldToFacts("See www.example.com", probe)], [false, false, false, false]);
+is("one the store wrote is allowed, and names with a dot are not domains", [heldToFacts("Write to us at mystore.com.", "Our site is mystore.com."), heldToFacts("Learn Node.js, e.g. Vue.js.", "Node.js course"), heldToFacts("Email ana@example.com.", "Pottery.")], [true, true, true]);
 done();

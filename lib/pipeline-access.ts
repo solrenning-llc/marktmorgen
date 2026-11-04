@@ -13,7 +13,7 @@
 import { normaliseEmail } from "@/lib/auth";
 import { type AccessMap, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const accessKey = (statsId: string) => `nl:crm:pacc:${statsId}`;
@@ -83,14 +83,12 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
   if (before === after) return;
   const [raw] = await redisPipeline([["HGET", accessKey(statsId), before]]);
   if (raw === null || raw === undefined || raw === "") return;
-  // The new address's field takes its own room first; the old one gives its room back when it is forgotten.
-  const bytes = dataBytes([after, String(raw)], 1);
-  await needData(store, [{ slot: ACCESS_SLOT, bytes }]);
-  const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]).catch(() => [null]);
-  if (written !== 0 && written !== 1) {
-    await giveData(store, [{ slot: ACCESS_SLOT, bytes }]).catch(() => {});
-    throw new Error("copying a teammate's pipeline access could not be confirmed");
-  }
+  // A record moved, not a new one: it is counted as written (noteData never refuses), so a full data room
+  // never leaves a teammate off the store when they change their sign-in. The old field gives its room back
+  // when it is forgotten. Only a write that cannot be confirmed throws.
+  const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]);
+  if (written !== 0 && written !== 1) throw new Error("copying a teammate's pipeline access could not be confirmed");
+  await noteData(store, [{ slot: ACCESS_SLOT, bytes: dataBytes([after, String(raw)], 1) }]);
 }
 
 /** A teammate who left: their restrictions go with them, and the room they took is given back. */

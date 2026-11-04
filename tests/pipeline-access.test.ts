@@ -100,6 +100,15 @@ async function main(): Promise<void> {
   is("and the new address is refused where the old one was", (await deal("sam", "lead00")).status, 403);
   await moveMemberships("sam2@example.com", "sam@example.com");
   cookies.sam = `${SESSION_COOKIE}=${await openSession("sam@example.com")}`;
+  // A store whose data room is full: changing one's sign-in moves a record, it never refuses.
+  const [usedBefore] = await redisPipeline([["HGET", dataKey(store)!, "#"]]);
+  await redisPipeline([["HSET", dataKey(store)!, "#", 10 ** 12]]);
+  await moveMemberships("sam@example.com", "sam4@example.com");
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam4@example.com")}`;
+  is("with the store's data room full, the new address still gets the store and exactly its restrictions", [await readPipelineAccess(statsId, "sam4@example.com"), await readPipelineAccess(statsId, "sam@example.com"), (await deal("sam", "wnew01")).status !== 403, (await deal("sam", "lead00")).status], [{ sales0: "none" }, {}, true, 403]);
+  await moveMemberships("sam4@example.com", "sam@example.com");
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam@example.com")}`;
+  await redisPipeline([["HSET", dataKey(store)!, "#", Number(usedBefore ?? 0)]]);
 
   part("Moving one's sign-in when the database fails");
   await writePipelineAccess(statsId, "sam@example.com", { sales0: "none" }, store);

@@ -6,6 +6,7 @@ import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { cancelReset, finishSetup, lockedUntil, replaceCodes, startSetup, turnOff } from "@/lib/two-step";
 import { mayAddSecondStep } from "@/lib/second-step-gate";
 import { cancelRemoval } from "@/lib/passkeys";
+import { LockBusyError } from "@/lib/redis-lock";
 
 /** Changes one account may ask for in an hour: most of them email the account. */
 const CHANGES_PER_HOUR = 30;
@@ -25,8 +26,11 @@ const CHANGES_PER_HOUR = 30;
  *   { action: "off", code }        turns it off, with a right code
  *   { action: "codes", code }      ten new recovery codes, with a right code
  *   { action: "cancel" }           calls off a request to turn it off without a
- *                                  code; any logged-in browser may, because a
- *                                  session here only ever opened past the second step
+ *                                  code, and any passkey removal that waits;
+ *                                  any logged-in browser not locked may, because
+ *                                  keeping things as they are takes nothing away
+ *                                  (a session let in without the step is refused
+ *                                  above, as it is the one the request is about)
  *
  * It belongs to the person, not to a store, like their passkeys.
  */
@@ -86,6 +90,8 @@ export async function POST(request: NextRequest) {
     }
     return refuse("invalid");
   } catch (error) {
+    // Another change to the same passkeys held them past the wait (lib/passkeys.ts): said so, to try again.
+    if (error instanceof LockBusyError) return refuse("busy", 503);
     console.error("changing two-step login failed", error);
     return refuse("server_error", 500);
   }

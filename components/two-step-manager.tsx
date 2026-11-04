@@ -15,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   limited: "That is a lot of codes in an hour. Try again later.",
   unreadable: "Your app's codes cannot be checked right now, after a security change on our side. Use a recovery code.",
   reauth: "Turning this on needs a login from the last 15 minutes. Log in again, then come back here.",
+  busy: "Your account is being changed by another request right now. Try again in a moment.",
   second_step: "Your account already has a passkey, so turning on an authenticator app needs a login with it. Log in again with your passkey, then come back here.",
   rate_limited: "That is a lot of changes in an hour. Try again later.",
   unavailable: "Two-step login is not available on this deployment yet.",

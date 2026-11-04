@@ -72,6 +72,7 @@ import { LOCKED_LIST } from "@/lib/locked-words";
 import { seal, unseal } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
 import { newSecret, otpauthUri, stepOf } from "@/lib/totp";
+import { cancelRemovalsBy } from "@/lib/passkeys";
 import { alignRecoveryLock, endRecoveryLock, hideAddress, keepRecoveryAddress, recoveryAddress } from "@/lib/recovery-address";
 
 export { hideAddress };
@@ -349,6 +350,8 @@ async function endLocked(email: string): Promise<void> {
   const sessions = (Array.isArray(members) ? members : []).filter((m): m is string => typeof m === "string");
   for (const session of sessions) await endSession(session);
   await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
+  // A passkey removal one of them asked for goes with it (lib/passkeys.ts scheduleRemoval).
+  await cancelRemovalsBy(email, sessions).catch((error) => console.error("calling off a passkey removal failed", error));
 }
 
 /** Calls off a pending request: the owner logged in with a code or a passkey, or pressed Cancel. The locked sessions are logged out. */

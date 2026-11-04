@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { LockBusyError } from "@/lib/redis-lock";
 import { isRedisConfigured } from "@/lib/redis";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { PASSKEY_COOKIE, cancelRemoval, signInOptions, signInWith } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, cancelRemoval, listPasskeys, signInOptions, signInWith } from "@/lib/passkeys";
 import { cancelReset, endRecoveryAccess } from "@/lib/two-step";
 
 const MAX_BODY_BYTES = 16_000;
@@ -52,12 +53,18 @@ export async function POST(request: NextRequest) {
       const email = signed?.email ?? null;
       if (!signed || !email) return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
 
+      // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
+      const id = await openSession(email, "passkey", signed.id);
+      // Removed between its check and this session (its wait ran out, or it was removed in the studio):
+      // the session it would have opened is closed again, as the removal closes what it opened.
+      if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) {
+        await endSession(id);
+        return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
+      }
       // As with the emailed link: whatever session this browser held before
       // is closed, and only the new one is kept.
       const previous = request.cookies.get(SESSION_COOKIE)?.value;
-      if (previous) await endSession(previous);
-      // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
-      const id = await openSession(email, "passkey", signed.id);
+      if (previous && previous !== id) await endSession(previous);
       // A passkey is the second step: a pending request to turn two-step login off is called off (lib/two-step.ts).
       await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
       await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
@@ -74,6 +81,8 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
+    // Another change to the same passkeys held them past the wait (lib/passkeys.ts): said so, to try again.
+    if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
     console.error("logging in with a passkey failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

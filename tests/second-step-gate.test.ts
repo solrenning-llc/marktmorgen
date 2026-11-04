@@ -11,7 +11,9 @@
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
-import { PASSKEY_COOKIE, REMOVAL_DAYS, listPasskeys, pendingRemoval } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, REMOVAL_DAYS, listPasskeys, pendingRemoval, scheduleRemoval } from "@/lib/passkeys";
+import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
+import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
 import { RESET_DAYS, finishSetup, lockedUntil, resetIfDue, startSetup, twoStepStatus } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
@@ -192,6 +194,83 @@ async function main(): Promise<void> {
   await releaseLock(heldAgain);
   is("a passkey removed while its sign-in was checked opens nothing", await cancelling, "");
   is("and is not written back", (await listPasskeys(NIA)).length, 0);
+
+  part("A removal asked through the recovery address goes when the owner's full login closes it");
+  const SAM = "sam-recovery@example.com";
+  const sam = makePasskey(SAM, "cred-sam-1");
+  await sam.keep();
+  await keepRecoveryAddress(SAM, "sam-rec@example.org");
+  await sendLostEmailLink(SAM, "203.0.113.9", ORIGIN);
+  const lostToken = /token=([0-9a-f]{64})/.exec([...mails].reverse().find((m) => m.to === "sam-rec@example.org")?.text ?? "")?.[1] ?? "";
+  const viaRecovery = cookieOf(await lostConfirm(form(`${ORIGIN}/api/auth/lost/confirm`, { token: lostToken })), "nl_session");
+  is("the recovery address opened a locked session", [viaRecovery.length, (await lockedUntil(viaRecovery)) > Date.now()], [64, true]);
+  is("which asks for the passkey's removal", typeof (await passkeys(viaRecovery, { action: "remove", id: "cred-sam-1" })).removeOn, "number");
+  mails.length = 0;
+  await linkSession(SAM);
+  is("the owner's login with the sign-in inbox logs it out", await emailForSession(viaRecovery), null);
+  is("and calls its removal off", [await pendingRemoval(SAM), (await listPasskeys(SAM)).length], [null, 1]);
+  is("saying so, beside the notice that what the recovery address opened was closed", [mails.some((m) => m.to === SAM && m.subject === "Your passkeys stay on your Marktmorgen account"), mails.some((m) => m.to === SAM && m.subject === "What your recovery address opened was closed")], [true, true]);
+  const samLink = await linkSession(SAM);
+  await passkeys(samLink, { action: "remove", id: "cred-sam-1" });
+  await linkSession(SAM);
+  is("a removal asked by a session that stays open is not called off by another login", (await pendingRemoval(SAM)) !== null, true);
+  is("“Keep it” calls it off", [(await passkeys(samLink, { action: "keep", id: "cred-sam-1" })).ok, await pendingRemoval(SAM)], [true, null]);
+
+  part("Asking again within the hour is not emailed again");
+  const TIA = "tia-again@example.com";
+  const tia = makePasskey(TIA, "cred-tia-1");
+  await tia.keep();
+  const t0 = Date.now();
+  const told = () => mails.filter((m) => m.to === TIA && m.subject === "A passkey is set to be removed from your Marktmorgen account").length;
+  await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), t0);
+  await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), t0 + 10 * 60_000);
+  is("once in the first hour", told(), 1);
+  await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), t0 + 61 * 60_000);
+  is("again an hour later", told(), 2);
+  is("the email says the moment with its time zone spelled out, and how to stop it", [...mails].reverse().find((m) => m.to === TIA)?.text.includes("Coordinated Universal Time (UTC)") && [...mails].reverse().find((m) => m.to === TIA)?.text.includes("“Keep it”"), true);
+
+  part("A passkey removed, or the app turned off, just as a login opens its session");
+  const UMA = "uma-race@example.com";
+  const uma = makePasskey(UMA, "cred-uma-1");
+  await uma.keep();
+  const original = redis.pipeline.bind(redis);
+  let strike: ((commands: (string | number)[][]) => Promise<void>) | null = null;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (strike && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:auth:session:"))) {
+      const now = strike;
+      strike = null;
+      await now(commands);
+    }
+    return original(commands);
+  }) as typeof redis.pipeline;
+  strike = async () => { await original([["DEL", `nl:pk:${hex(`nimbus-passkeys:${UMA}`).slice(0, 40)}`]]); };
+  is("a passkey removed as its session opens: no session", await signInWithPasskey(uma), "");
+  is("none left behind", (await original([["SMEMBERS", `nl:auth:sessions:${hex(`nimbus-auth-sessions:${UMA}`).slice(0, 40)}`]]))[0], []);
+  const VAL = "val-race@example.com";
+  const valApp = await turnOnApp(VAL, "val-backup@example.org");
+  const tokenVal = hex(String(Math.random()));
+  await original([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenVal}`).slice(0, 40)}`, VAL, "EX", 900]]);
+  const heldVal = await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenVal }));
+  strike = async () => { await original([["DEL", `nl:2fa:${hex(`nimbus-2fa:${VAL}`).slice(0, 40)}`]]); };
+  const valIn = await codeRoute(form(`${ORIGIN}/api/auth/code`, { code: valApp.codes[0] }, `nl_2fa=${cookieOf(heldVal, "nl_2fa")}`));
+  redis.pipeline = original;
+  is("the app turned off as its code's session opens: back to log in", valIn.headers.get("location"), `${ORIGIN}/signin?status=expired`);
+  is("and the session is closed", await emailForSession(cookieOf(valIn, "nl_session")), null);
+
+  part("A lock held too long is said as busy, never a bare error");
+  const WES = "wes-busy@example.com";
+  const wes = makePasskey(WES, "cred-wes-1");
+  await wes.keep();
+  const wesLink = await linkSession(WES);
+  await passkeys(wesLink, { action: "remove", id: "cred-wes-1" });
+  const blocking = await takeLock(lockOf(WES), 30, 1_000);
+  is("keeping it while the lock is held elsewhere", await passkeys(wesLink, { action: "keep", id: "cred-wes-1" }), { status: 503, ok: false, error: "busy" });
+  const optionsBusy = await passkeySignIn(asJson(`${ORIGIN}/api/auth/passkey/signin`, { action: "options" }, ""));
+  const nonceBusy = cookieOf(optionsBusy, PASSKEY_COOKIE);
+  const { options: askedBusy } = (await optionsBusy.json()) as { options: { challenge: string } };
+  const busyIn = await passkeySignIn(asJson(`${ORIGIN}/api/auth/passkey/signin`, { action: "verify", response: wes.answer(askedBusy.challenge) }, `${PASSKEY_COOKIE}=${nonceBusy}`));
+  is("logging in with the passkey meanwhile", [busyIn.status, ((await busyIn.json()) as { error?: string }).error], [503, "busy"]);
+  await releaseLock(blocking);
 
   done();
 }

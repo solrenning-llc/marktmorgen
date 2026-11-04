@@ -43,7 +43,6 @@ import { dropSecondStep, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SITE_URL } from "@/lib/site-url";
-import { RESET_DAYS } from "@/lib/two-step";
 import { withLock } from "@/lib/redis-lock";
 import { removalWhen } from "@/lib/removal-time";
 
@@ -254,28 +253,50 @@ export async function addPasskey(
  * How long a passkey asked to be removed by a session opened without a second
  * step (an emailed link, Google, a recovery address) waits before it goes: the
  * same days a request to turn two-step login off without a code waits
- * (lib/two-step.ts RESET_DAYS), with an email to the account at once. It is
+ * (lib/two-step.ts RESET_DAYS, held equal by tests/second-step-gate.test.ts;
+ * not imported, as lib/two-step.ts reads this file), with an email to the account at once. It is
  * the way back for somebody who lost their passkey, and it keeps somebody who
  * only reads the inbox from taking the passkeys away and adding their own.
  */
-export const REMOVAL_DAYS = RESET_DAYS;
+export const REMOVAL_DAYS = 7;
 
 const dropKey = (email: string) => `nl:pk:drop:${sha(`nimbus-passkey-drop:${normaliseEmail(email)}`).slice(0, 40)}`;
 
 /** Passkeys waiting to be removed, and when, in ms. */
 export type PendingRemoval = { ids: string[]; at: number };
 
-async function readDrop(email: string): Promise<PendingRemoval | null> {
+/**
+ * The record behind it: for each passkey, a one-way mark of the session that
+ * asked (so closing that session, as a full login closes what the recovery
+ * address opened, calls its request off: cancelRemovalsBy), and when the
+ * account was last emailed about it (a request asked again within the hour
+ * is not emailed again).
+ */
+type DropRecord = PendingRemoval & { by: Record<string, string>; told: number };
+
+/** How long a request asked again waits before it is emailed again. */
+const RETELL_MS = 60 * 60 * 1000;
+
+const askerOf = (session: string) => sha(`nimbus-passkey-asker:${session}`).slice(0, 40);
+
+async function readDrop(email: string): Promise<DropRecord | null> {
   if (!isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", dropKey(email)]]);
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as { ids?: unknown; at?: unknown }) : null;
+    const value = typeof raw === "string" ? (JSON.parse(raw) as { ids?: unknown; at?: unknown; by?: unknown; told?: unknown }) : null;
     if (!value || !Array.isArray(value.ids) || typeof value.at !== "number") return null;
     const ids = value.ids.filter((id): id is string => typeof id === "string").slice(0, MAX_PASSKEYS);
-    return ids.length ? { ids, at: value.at } : null;
+    const rawBy = value.by && typeof value.by === "object" ? (value.by as Record<string, unknown>) : {};
+    const by = Object.fromEntries(ids.filter((id) => typeof rawBy[id] === "string").map((id) => [id, rawBy[id] as string]));
+    return ids.length ? { ids, at: value.at, by, told: typeof value.told === "number" ? value.told : 0 } : null;
   } catch {
     return null;
   }
+}
+
+async function writeDrop(email: string, record: DropRecord, now: number): Promise<void> {
+  const seconds = Math.max(60, Math.ceil((record.at - now) / 1000) + 30 * 86_400);
+  await redisPipeline([["SET", dropKey(email), JSON.stringify(record), "EX", seconds]]);
 }
 
 /**
@@ -283,27 +304,35 @@ async function readDrop(email: string): Promise<PendingRemoval | null> {
  * a recovery address, an invite, a session from before the mark, or one let
  * in without the second step: lib/two-step.ts enterLocked, so its wait and
  * this one run side by side): the passkey is removed REMOVAL_DAYS after the
- * first such request (asking again does not move the day), and the account
- * is told now. Answers the moment, or null when the account has no such passkey.
+ * first such request (asking again does not move the moment), and the
+ * account is told now, and again only an hour or more later. Answers the
+ * moment, or null when the account has no such passkey.
  */
-export async function scheduleRemoval(email: string, id: string, now = Date.now()): Promise<number | null> {
+export async function scheduleRemoval(email: string, id: string, session: string, now = Date.now()): Promise<number | null> {
   const address = normaliseEmail(email);
   const asked = await withPasskeys(address, async () => {
     const row = (await listPasskeys(address)).find((p) => p.id === id);
     if (!row) return null;
     const before = await readDrop(address);
     const at = before?.at ?? now + REMOVAL_DAYS * 86_400_000;
-    const ids = [...new Set([...(before?.ids ?? []), id])];
-    const seconds = Math.max(60, Math.ceil((at - now) / 1000) + 30 * 86_400);
-    await redisPipeline([["SET", dropKey(address), JSON.stringify({ ids, at }), "EX", seconds]]);
-    return { at, name: row.name };
+    const tellNow = !before || now - before.told >= RETELL_MS;
+    const record: DropRecord = {
+      ids: [...new Set([...(before?.ids ?? []), id])],
+      at,
+      by: { ...(before?.by ?? {}), [id]: askerOf(session) },
+      told: tellNow ? now : (before?.told ?? now),
+    };
+    await writeDrop(address, record, now);
+    return { at, name: row.name, tellNow };
   });
   if (!asked) return null;
-  await tell(
-    address,
-    "A passkey is set to be removed from your Marktmorgen account",
-    `Somebody logged in to your Marktmorgen account (${address}) without a passkey or an app code and asked to remove the passkey called “${headerText(asked.name, 60)}”. It will be removed on ${removalWhen(asked.at)}. Logging in with any of your passkeys or your app's code before then calls this off.`,
-  );
+  if (asked.tellNow) {
+    await tell(
+      address,
+      "A passkey is set to be removed from your Marktmorgen account",
+      `Somebody logged in to your Marktmorgen account (${address}) without a passkey or an app code and asked to remove the passkey called “${headerText(asked.name, 60)}”. It will be removed on ${removalWhen(asked.at)}. Logging in with any of your passkeys or your app's code, or pressing “Keep it” next to the passkey in your studio, before then stops it.`,
+    );
+  }
   return asked.at;
 }
 
@@ -317,7 +346,7 @@ export async function pendingRemoval(email: string, now = Date.now()): Promise<P
   const address = normaliseEmail(email);
   const pending = await readDrop(address);
   if (!pending) return null;
-  if (now < pending.at) return pending;
+  if (now < pending.at) return { ids: pending.ids, at: pending.at };
   const gone = await withPasskeys(address, async () => {
     const again = await readDrop(address);
     if (!again || now < again.at) return null;
@@ -327,7 +356,10 @@ export async function pendingRemoval(email: string, now = Date.now()): Promise<P
     await redisPipeline([["DEL", dropKey(address), ...removed.map((p) => credKey(p.id))]]);
     return removed;
   });
-  if (gone === null) return readDrop(address);
+  if (gone === null) {
+    const left = await readDrop(address);
+    return left ? { ids: left.ids, at: left.at } : null;
+  }
   if (gone.length) {
     const ids = gone.map((p) => `passkey:${p.id}`);
     await dropSecondStep(address, (mark) => ids.includes(mark));
@@ -336,15 +368,53 @@ export async function pendingRemoval(email: string, now = Date.now()): Promise<P
   return null;
 }
 
-/** A login with a passkey or the app's code, or Cancel in the studio: whatever waited to be removed stays. True when something did. */
-export async function cancelRemoval(email: string): Promise<boolean> {
+/**
+ * Calls off what waits to be removed: all of it, for a login with a passkey
+ * or the app's code or Cancel under Two-step login; one passkey, for "Keep it"
+ * next to it in the studio. Any session may: keeping a passkey takes nothing
+ * away. True when something was waiting.
+ */
+export async function cancelRemoval(email: string, id?: string, now = Date.now()): Promise<boolean> {
   const address = normaliseEmail(email);
   const called = await withPasskeys(address, async () => {
-    if (!(await readDrop(address))) return false;
-    await redisPipeline([["DEL", dropKey(address)]]);
+    const record = await readDrop(address);
+    if (!record || (id !== undefined && !record.ids.includes(id))) return false;
+    const ids = id === undefined ? [] : record.ids.filter((x) => x !== id);
+    if (ids.length) await writeDrop(address, { ...record, ids, by: Object.fromEntries(ids.map((x) => [x, record.by[x] ?? ""])) }, now);
+    else await redisPipeline([["DEL", dropKey(address)]]);
     return true;
   });
-  if (called) await tell(address, "Your passkeys stay on your Marktmorgen account", `Your account (${address}) was just logged in with a passkey or an app code, or the removal was canceled in the studio, so the passkeys that were set to be removed stay.`);
+  if (called) {
+    await tell(
+      address,
+      "Your passkeys stay on your Marktmorgen account",
+      id === undefined
+        ? `Your account (${address}) was just logged in with a passkey or an app code, or the removal was canceled in the studio, so the passkeys that were set to be removed stay.`
+        : `“Keep it” was pressed in the studio of your account (${address}), so a passkey that was set to be removed stays.`,
+    );
+  }
+  return called;
+}
+
+/**
+ * The sessions that asked are gone (lib/two-step.ts: a full login closes what
+ * the recovery address or the way in without the second step opened): what
+ * they asked to remove stays. True when something did.
+ */
+export async function cancelRemovalsBy(email: string, sessions: readonly string[], now = Date.now()): Promise<boolean> {
+  if (!sessions.length) return false;
+  const address = normaliseEmail(email);
+  const askers = new Set(sessions.map(askerOf));
+  const called = await withPasskeys(address, async () => {
+    const record = await readDrop(address);
+    if (!record) return false;
+    const ids = record.ids.filter((x) => !askers.has(record.by[x] ?? ""));
+    if (ids.length === record.ids.length) return false;
+    if (ids.length) await writeDrop(address, { ...record, ids, by: Object.fromEntries(ids.map((x) => [x, record.by[x] ?? ""])) }, now);
+    else await redisPipeline([["DEL", dropKey(address)]]);
+    return true;
+  });
+  if (called) await tell(address, "Your passkeys stay on your Marktmorgen account", `The browser that asked to remove a passkey from your account (${address}) was logged out, so what it asked is called off and your passkeys stay.`);
   return called;
 }
 

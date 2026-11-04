@@ -3,7 +3,8 @@ import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { SESSION_COOKIE, emailForSession, isFreshSession, sessionSecondStep } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { addPasskey, listPasskeys, registrationOptions, removePasskey, scheduleRemoval } from "@/lib/passkeys";
+import { addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemoval } from "@/lib/passkeys";
+import { LockBusyError } from "@/lib/redis-lock";
 import { mayAddSecondStep } from "@/lib/second-step-gate";
 import { lockedUntil } from "@/lib/two-step";
 
@@ -15,12 +16,21 @@ const LOCKED_REMOVALS_PER_HOUR = 5;
 
 const ANSWERS: Record<string, number> = { expired: 400, invalid: 400, full: 409, taken: 409, unknown: 404, reauth: 403, second_step: 403 };
 
+/** What went wrong, in JSON: another change to the same passkeys holding them (lib/passkeys.ts) is "busy", to try again. */
+function failed(error: unknown, doing: string): Response {
+  if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy" }, { status: 503 });
+  console.error(doing, error);
+  return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+}
+
 /**
  * The signed-in person's own passkeys (lib/passkeys.ts):
  *
  *   { action: "options" }                  what the browser needs to make one
  *   { action: "add", response, name }      the browser's answer, to keep it
- *   { action: "remove", id }               forgets one
+ *   { action: "remove", id }               forgets one (or, from a session
+ *                                          without the step, asks it to wait)
+ *   { action: "keep", id }                 calls off a removal that waits
  *
  * A passkey belongs to the person, not to a store, so this works the same
  * for an owner and for someone on a team, whichever store is open.
@@ -66,11 +76,10 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     try {
-      const at = await scheduleRemoval(email, typeof body.id === "string" ? body.id.slice(0, 1_400) : "");
+      const at = await scheduleRemoval(email, typeof body.id === "string" ? body.id.slice(0, 1_400) : "", session);
       return at === null ? Response.json({ ok: false, error: "unknown" }, { status: 404 }) : Response.json({ ok: true, removeOn: at });
     } catch (error) {
-      console.error("asking for a passkey removal failed", error);
-      return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+      return failed(error, "asking for a passkey removal failed");
     }
   }
   if (!(await withinLimit("passkey-change", email, CHANGES_PER_HOUR, 60 * 60))) {
@@ -80,11 +89,14 @@ export async function POST(request: NextRequest) {
   if ((body.action === "options" || body.action === "add") && !(await isFreshSession(session))) {
     return Response.json({ ok: false, error: "reauth" }, { status: 403 });
   }
-  if ((body.action === "options" || body.action === "add") && !(await mayAddSecondStep(email, session))) {
-    return Response.json({ ok: false, error: "second_step" }, { status: 403 });
-  }
-
   try {
+    if ((body.action === "options" || body.action === "add") && !(await mayAddSecondStep(email, session))) {
+      return Response.json({ ok: false, error: "second_step" }, { status: 403 });
+    }
+    if (body.action === "keep") {
+      const id = typeof body.id === "string" ? body.id.slice(0, 1_400) : "";
+      return (await cancelRemoval(email, id)) ? Response.json({ ok: true }) : Response.json({ ok: false, error: "unknown" }, { status: 404 });
+    }
     if (body.action === "options") {
       return Response.json({ ok: true, options: await registrationOptions(email, session) }, { headers: { "Cache-Control": "no-store" } });
     }
@@ -100,7 +112,7 @@ export async function POST(request: NextRequest) {
     if (body.action === "remove") {
       const id = typeof body.id === "string" ? body.id.slice(0, 1_400) : "";
       if ((await sessionSecondStep(session, email)) === null) {
-        const at = await scheduleRemoval(email, id);
+        const at = await scheduleRemoval(email, id, session);
         if (at === null) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
         return Response.json({ ok: true, removeOn: at });
       }
@@ -109,7 +121,6 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
-    console.error("a passkey change failed", error);
-    return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+    return failed(error, "a passkey change failed");
   }
 }

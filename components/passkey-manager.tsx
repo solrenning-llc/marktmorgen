@@ -19,6 +19,7 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   server_error: "Something went wrong on our side. Try again in a moment.",
   rate_limited: "That is a lot of passkey changes in an hour. Try again later.",
+  busy: "Your passkeys are being changed by another request right now. Try again in a moment.",
   reauth: "Adding a passkey needs a login from the last 15 minutes. Log in again below, then add it.",
   second_step: "Your account already has a passkey or an authenticator app, so adding another needs a login with one of them. Log in again with your passkey or your app's code, then add it here.",
 };
@@ -207,6 +208,20 @@ export function PasskeyManager({
     toast("Passkey removed.");
   }
 
+  /** Calls off a removal that waits: any session may, as keeping a passkey takes nothing away. */
+  async function keep(row: PasskeyRow) {
+    setBusy(`keep:${row.id}`);
+    setError(null);
+    const done = await call({ action: "keep", id: row.id });
+    setBusy(null);
+    if (!done.ok) {
+      setError(MESSAGES[done.error ?? ""] ?? MESSAGES.server_error);
+      return;
+    }
+    setWaiting((rows) => Object.fromEntries(Object.entries(rows).filter(([id]) => id !== row.id)));
+    toast(`“${row.name}” stays.`);
+  }
+
   return (
     <section ref={section} id="passkeys" aria-labelledby="passkeys-title" className="mt-8 scroll-mt-32 border-t border-line pt-6">
       <h3 id="passkeys-title" className="flex items-center gap-2 font-semibold text-ink">
@@ -228,9 +243,21 @@ export function PasskeyManager({
                   {`Added ${day(row.createdAt)} · last used ${day(row.lastUsedAt)}${row.synced ? " · synced across your devices" : ""}`}
                 </span>
                 {waiting[row.id] ? (
-                  <span className="block text-xs font-bold text-ink">{`Will be removed on ${onDay(waiting[row.id])}. Logging in with it before then keeps it.`}</span>
+                  <span className="block text-xs font-bold text-ink">{`Will be removed on ${onDay(waiting[row.id])}. Logging in with it before then, or Keep it, keeps it.`}</span>
                 ) : null}
               </span>
+              {waiting[row.id] ? (
+                <button
+                  type="button"
+                  onClick={() => void keep(row)}
+                  disabled={busy !== null}
+                  aria-busy={busy === `keep:${row.id}`}
+                  className="inline-flex min-h-11 -my-2.5 items-center text-sm font-bold text-ink underline underline-offset-4"
+                >
+                  {`Keep it`}
+                  <span className="sr-only">{`: keep “${row.name}”`}</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void remove(row)}

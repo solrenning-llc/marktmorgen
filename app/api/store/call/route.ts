@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
         if (Array.isArray(extra) && extra.length > 0) {
           const product = await readProduct(store, id);
           if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
-          const read = readCallLengths([{ minutes: setup.minutes, price: toMajor(product.priceCents, store.currency) }, ...extra], {
+          const read = readCallLengths([{ minutes: setup.minutes, price: String(toMajor(product.priceCents, store.currency)) }, ...extra], {
             setup,
             currency: store.currency,
             packaged: Boolean(product.callPackage),

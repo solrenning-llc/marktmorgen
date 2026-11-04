@@ -12,7 +12,7 @@ import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
 import { readFields, readPersonTasks, readValues } from "@/lib/crm";
-import type { PersonTask } from "@/lib/person-tasks";
+import { type PersonTask, taskAssignees } from "@/lib/person-tasks";
 import { readTeam } from "@/lib/team";
 import type { CrmField } from "@/lib/crm-rules";
 import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken } from "@/lib/buyer-profile";
@@ -102,7 +102,8 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   const values = profile?.person ? await readValues(store.statsId, profile.person, fields) : {};
   // Tasks about this person (639 [GL7](6)), and who may be made responsible: the owner and teammates who can see orders.
   const [tasks, team] = profile?.person ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null)]) : [null, null];
-  const assignees = [store.email.toLowerCase(), ...(team?.members ?? []).filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())];
+  // Null when the team could not be read: the screen then says so, and leaves a teammate to the server to decide.
+  const assignees = team ? taskAssignees(store.email, team.members) : null;
   // Deleting the person needs the page's token, never the address in a link (lib/person-erasure.ts).
   const mayErase = can(view.role, "erase");
   const eraseToken = profile && email && mayErase ? (token || (await findToken(store, email).catch(() => null)) || "") : "";
@@ -212,7 +213,7 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken, tasks, assignees }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] }) {
+function Profile({ store, profile, fields, values, eraseToken, tasks, assignees }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
@@ -397,7 +398,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
         <h2 id="tasks-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks</h2>
         <p className="mt-1 text-sm text-ink-soft">What you still owe this person, beside any deal. For you and your team only.</p>
         {profile.person && tasks ? (
-          <PersonTasks key={profile.person} person={profile.person} initial={tasks} assignees={assignees} today={new Date().toISOString().slice(0, 10)} />
+          <PersonTasks key={profile.person} person={profile.person} initial={tasks} owner={store.email.toLowerCase()} assignees={assignees} today={new Date().toISOString().slice(0, 10)} />
         ) : profile.person ? (
           <p className="mt-2 text-sm text-ink-soft" role="status">This person&apos;s tasks could not be read just now. Open this page again in a moment.</p>
         ) : null}

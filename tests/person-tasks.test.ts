@@ -4,11 +4,11 @@
  * none, a teammate who can see deals or nobody; refused, never cut; twenty a
  * person, a thousand a store; grouped by date as deals' next actions are.
  */
-import { MAX_PERSON_TASKS, MAX_TASK_TEXT, TASKS_BUSY, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
-import { CrmValueWriteUnconfirmed, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks } from "@/lib/crm";
+import { MAX_PERSON_TASKS, MAX_STORE_TASKS, MAX_TASK_TEXT, TASKS_BUSY, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
+import { CrmValueWriteUnconfirmed, TASK_COUNT_FIELD, TASK_COUNT_WEIGHT, TASK_KEPT_BYTES, TasksRecountRefused, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks, tasksRecountUnits } from "@/lib/crm";
 import { LockBusyError } from "@/lib/redis-lock";
 import { dataUsed } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { dataBytes, utf8Length } from "@/lib/store-data-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -94,17 +94,18 @@ async function main(): Promise<void> {
   is("two adds at once: both answered ok", both.map((r) => r.ok), [true, true]);
   is("both kept", (await readPersonTasks(SAME, ANA)).map((t) => t.id).sort(), [id(11), id(12)]);
   is("the last answer says what is kept", both[1].ok ? both[1].tasks.map((t) => t.id).sort() : null, [id(11), id(12)]);
-  is("the room taken once, for what is kept", (await used()) - roomBefore, weighs(ANA, await stored(ANA)));
+  is("the room taken once, for what is kept and the store's count of its tasks", (await used()) - roomBefore, weighs(ANA, await stored(ANA)) + TASK_COUNT_WEIGHT);
   await Promise.all([at(ANA, (t) => editTask(t, id(11), input({ text: "First, changed" }))), at(ANA, (t) => editTask(t, id(12), input({ text: "Second, changed" })))]);
   is("two edits at once: both kept", (await readPersonTasks(SAME, ANA)).map((t) => t.text).sort(), ["First, changed", "Second, changed"]);
-  is("the room follows the edits", (await used()) - roomBefore, weighs(ANA, await stored(ANA)));
+  is("the room follows the edits", (await used()) - roomBefore, weighs(ANA, await stored(ANA)) + TASK_COUNT_WEIGHT);
   await Promise.all([at(ANA, (t) => markTask(t, id(11), true, NOW)), at(ANA, (t) => markTask(t, id(12), true, NOW))]);
   is("two marked done at once: both done", (await readPersonTasks(SAME, ANA)).map((t) => t.done), [true, true]);
   const four = await Promise.all([at(ANA, (t) => ({ ok: true, tasks: dropTask(t, id(11)) })), at(ANA, (t) => ({ ok: true, tasks: dropTask(t, id(12)) })), at(BEN, (t) => addTask(t, input({ text: "Third" }), id(13), NOW)), at(BEN, (t) => addTask(t, input({ text: "Fourth" }), id(14), NOW))]);
   is("two removed and two added at once: all answered ok", four.map((r) => r.ok), [true, true, true, true]);
   is("both removed, the record with them", [await readPersonTasks(SAME, ANA), await stored(ANA)], [[], null]);
   is("both added to the other person", (await readPersonTasks(SAME, BEN)).map((t) => t.id).sort(), [id(13), id(14)]);
-  is("the room given back once and taken once", (await used()) - roomBefore, weighs(BEN, await stored(BEN)));
+  is("the room given back once and taken once", (await used()) - roomBefore, weighs(BEN, await stored(BEN)) + TASK_COUNT_WEIGHT);
+  is("the count says what is kept", (await redis.pipeline([["HGET", `nl:crm:tasks:${SAME}`, TASK_COUNT_FIELD]]))[0], "2");
   is("the lock let go after each change", (await redis.pipeline([["EXISTS", lockKey]]))[0], 0);
 
   part("Still taken after the wait: refused, nothing written or counted");
@@ -122,7 +123,7 @@ async function main(): Promise<void> {
   part("A write that fails lets go of the lock");
   const pipe = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "HSET" && c[1] === `nl:crm:tasks:${SAME}`)) throw new Error("the write failed");
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-tasks-write:") && c[3] === `nl:crm:tasks:${SAME}`)) throw new Error("the write failed");
     return pipe(commands);
   }) as typeof redis.pipeline;
   try {
@@ -170,7 +171,7 @@ async function main(): Promise<void> {
   const benBefore = weighs(BEN, await stored(BEN));
   const keep = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => (c[0] === "HSET" || c[0] === "HDEL") && c[1] === `nl:crm:tasks:${SAME}`)) throw new Error("the write failed");
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-tasks-write:") && c[3] === `nl:crm:tasks:${SAME}`)) throw new Error("the write failed");
     return keep(commands);
   }) as typeof redis.pipeline;
   try {
@@ -196,6 +197,8 @@ async function main(): Promise<void> {
   await forgetCrm(SAME);
   is("every task of the store deleted", (await redis.pipeline([["EXISTS", `nl:crm:tasks:${SAME}`]]))[0], 0);
   is("none left for the agenda", await readAllTasks(SAME), []);
+
+  await countChecks();
 
   part("Through the studio's route");
   const owner = "tasks@example.com";
@@ -249,6 +252,166 @@ async function main(): Promise<void> {
   is("broken entries and repeated ids dropped", parseTasks([{ id: id(1), text: "Fine", due: "", assignee: "", done: false, createdAt: NOW }, { id: id(1), text: "Repeated" }, { id: "BAD", text: "x" }, { id: id(2), text: "Bad date", due: "soon", assignee: "" }, null]).map((t) => t.text), ["Fine"]);
 
   done();
+}
+
+/**
+ * The review of #1959 (MEDIUM 1): an add checked the store's cap by reading
+ * every task of the store; it now reads the store's count of them, kept in
+ * the same step as each write and deletion, made again once (paid for first)
+ * for a store that kept tasks before the count.
+ */
+async function countChecks(): Promise<void> {
+  const person = (n: number) => n.toString(16).padStart(32, "0");
+  const heavy = "Send the signed workbook and the next steps ".repeat(5).slice(0, MAX_TASK_TEXT);
+  const fill = (count: number) => (tasks: PersonTask[]) => {
+    let list = tasks;
+    for (let n = 0; n < count; n += 1) {
+      const r = addTask(list, input({ text: heavy, due: "2026-11-10", assignee: "sam@example.com" }), id(list.length + 1), NOW);
+      if (!r.ok) return r;
+      list = r.tasks;
+    }
+    return { ok: true as const, tasks: list };
+  };
+  const counted = async (stats: string) => (await redis.pipeline([["HGET", `nl:crm:tasks:${stats}`, TASK_COUNT_FIELD]]))[0];
+  /** Every command a step sends, and the bytes of every reply, while it runs. */
+  const watched = async <T,>(step: () => Promise<T>) => {
+    const commands: (string | number)[][] = [];
+    let bytes = 0;
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (sent: (string | number)[][]) => {
+      commands.push(...sent);
+      const replies = await real(sent);
+      bytes += utf8Length(JSON.stringify(replies));
+      return replies;
+    }) as typeof redis.pipeline;
+    try {
+      return { result: await step(), commands, bytes };
+    } finally {
+      redis.pipeline = real;
+    }
+  };
+
+  part("The store's count of its tasks: an add reads one number, never every task (review of #1959, MEDIUM 1)");
+  const FULL = "c".repeat(16);
+  for (let n = 1; n <= 49; n += 1) await changePersonTasks(FULL, person(n), ROOM, fill(20));
+  is("980 tasks kept, and counted", [(await readAllTasks(FULL)).length, await counted(FULL)], [980, "980"]);
+  const one = await watched(() => changePersonTasks(FULL, person(50), ROOM, fill(1)));
+  is("an add with 980 tasks in the store is kept", one.result.ok, true);
+  is("and reads none of the others: no HGETALL", one.commands.some((c) => c[0] === "HGETALL"), false);
+  is("what it reads stays far inside a studio request's 50,000 bytes", [one.bytes < 5_000, one.bytes], [true, one.bytes]);
+  const undo = await watched(() => changePersonTasks(FULL, person(50), ROOM, (t) => ({ ok: true, tasks: dropTask(t, t[0].id) })));
+  const back = await watched(() => changePersonTasks(FULL, person(50), ROOM, fill(1)));
+  is("a removal and its undo read none of the others either", [undo.result.ok, back.result.ok, [...undo.commands, ...back.commands].some((c) => c[0] === "HGETALL"), back.bytes < 5_000], [true, true, false, true]);
+  is("the count follows each one", await counted(FULL), "981");
+
+  part("The count stays what is kept: add, edit, done, remove, a person deleted");
+  const agrees = async (stats: string) => String((await readAllTasks(stats)).length) === (await counted(stats));
+  await changePersonTasks(FULL, person(1), ROOM, (t) => editTask(t, t[0].id, input({ text: "Changed words" })));
+  await changePersonTasks(FULL, person(1), ROOM, (t) => markTask(t, t[1].id, true, NOW));
+  is("an edit and a task done change nothing", [await counted(FULL), await agrees(FULL)], ["981", true]);
+  await changePersonTasks(FULL, person(2), ROOM, () => ({ ok: true, tasks: [] }));
+  is("every task of a person removed at once", [await counted(FULL), await agrees(FULL)], ["961", true]);
+  const roomBefore = (await dataUsed(ROOM))?.used ?? 0;
+  const weighed = dataBytes([person(3), String((await redis.pipeline([["HGET", `nl:crm:tasks:${FULL}`, person(3)]]))[0])], 1);
+  await forgetCrmPerson(FULL, person(3), "three@example.com", ROOM);
+  is("a person deleted: their tasks leave the count, their room is given back", [await counted(FULL), await agrees(FULL), roomBefore - ((await dataUsed(ROOM))?.used ?? 0)], ["941", true, weighed]);
+  is("deleted again: nothing more", [await forgetCrmPerson(FULL, person(3), "three@example.com", ROOM), await counted(FULL)], [0, "941"]);
+
+  part("At the cap, two adds at once: one kept, one refused");
+  await changePersonTasks(FULL, person(51), ROOM, fill(20));
+  await changePersonTasks(FULL, person(52), ROOM, fill(20));
+  await changePersonTasks(FULL, person(53), ROOM, fill(18));
+  is("999 kept", await counted(FULL), String(MAX_STORE_TASKS - 1));
+  const race = await Promise.all([changePersonTasks(FULL, person(54), ROOM, fill(1)), changePersonTasks(FULL, person(55), ROOM, fill(1))]);
+  is("one kept, the other refused as the store full", race.map((r) => (r.ok ? "ok" : r.error)).sort(), ["ok", "store_full"]);
+  is("the count at the cap, and what is kept", [await counted(FULL), await agrees(FULL)], [String(MAX_STORE_TASKS), true]);
+  const freed = await Promise.all([person(54), person(55)].map((p) => changePersonTasks(FULL, p, ROOM, () => ({ ok: true, tasks: [] }))));
+  is("a removal at the cap is never refused", freed.map((r) => r.ok), [true, true]);
+  is("and frees its place", [await counted(FULL), await agrees(FULL)], [String(MAX_STORE_TASKS - 1), true]);
+
+  part("A write whose tasks changed since they were read writes nothing (a lock that ran out)");
+  const real = redis.pipeline.bind(redis);
+  const usedBefore = (await dataUsed(ROOM))?.used ?? 0;
+  redis.pipeline = (async (sent: (string | number)[][]) => {
+    if (sent.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-tasks-write:"))) {
+      redis.pipeline = real;
+      await real([["HSET", `nl:crm:tasks:${FULL}`, person(1), "[]"]]);
+    }
+    return real(sent);
+  }) as typeof redis.pipeline;
+  const stale = await changePersonTasks(FULL, person(1), ROOM, fill(0)).catch((error: unknown) => error);
+  const staleAdd = await (async () => {
+    redis.pipeline = (async (sent: (string | number)[][]) => {
+      if (sent.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-tasks-write:"))) {
+        redis.pipeline = real;
+        await real([["HSET", `nl:crm:tasks:${FULL}`, person(60), "[]"]]);
+      }
+      return real(sent);
+    }) as typeof redis.pipeline;
+    return changePersonTasks(FULL, person(60), ROOM, fill(1)).catch((error: unknown) => error);
+  })();
+  redis.pipeline = real;
+  is("refused as busy, the other change kept", [stale instanceof LockBusyError, staleAdd instanceof LockBusyError, (await redis.pipeline([["HGET", `nl:crm:tasks:${FULL}`, person(60)]]))[0]], [true, true, "[]"]);
+  is("nothing counted, the room taken for it given back", [await counted(FULL), (await dataUsed(ROOM))?.used ?? 0], [String(MAX_STORE_TASKS - 1), usedBefore]);
+  await redis.pipeline([["HDEL", `nl:crm:tasks:${FULL}`, person(60)], ["HSET", `nl:crm:tasks:${FULL}`, TASK_COUNT_FIELD, String((await readAllTasks(FULL)).length)]]);
+
+  part("A store that kept tasks before the count: counted once, paid for first");
+  const OLD = "o".repeat(16);
+  const legacy = (n: number, count: number) => JSON.stringify(Array.from({ length: count }, (_, i) => ({ id: id(i + 1), text: `Old ${n}.${i}`, due: "", assignee: "", done: false, createdAt: NOW, doneAt: 0 })));
+  await redis.pipeline([["HSET", `nl:crm:tasks:${OLD}`, person(1), legacy(1, 3), person(2), legacy(2, 2), person(3), legacy(3, 1)]]);
+  const asked: number[] = [];
+  const refusing = async (units: number) => { asked.push(units); return false; };
+  const notPaid = await changePersonTasks(OLD, person(4), ROOM, fill(1), refusing).catch((error: unknown) => error);
+  is("not paid for: refused, nothing written, no count made", [notPaid instanceof TasksRecountRefused, asked, await readPersonTasks(OLD, person(4)), await counted(OLD)], [true, [tasksRecountUnits(3)], [], null]);
+  is("what it asks for covers what three people can keep", tasksRecountUnits(3), Math.ceil((3 * MAX_PERSON_TASKS * (TASK_KEPT_BYTES + 64)) / 50_000));
+  const shrink = await watched(() => changePersonTasks(OLD, person(1), ROOM, (t) => ({ ok: true, tasks: dropTask(t, t[0].id) }), refusing));
+  is("a removal needs no count: kept without reading every task or paying", [shrink.result.ok, shrink.commands.some((c) => c[0] === "HGETALL"), asked.length, await counted(OLD)], [true, false, 1, null]);
+  const paidFor: number[] = [];
+  const paying = async (units: number) => { paidFor.push(units); return true; };
+  const firstAdd = await watched(() => changePersonTasks(OLD, person(4), ROOM, fill(1), paying));
+  is("paid for, then every task read once and counted", [firstAdd.result.ok, paidFor, firstAdd.commands.filter((c) => c[0] === "HGETALL").length, await counted(OLD)], [true, [tasksRecountUnits(3)], 1, "6"]);
+  const secondAdd = await watched(() => changePersonTasks(OLD, person(4), ROOM, fill(1), paying));
+  is("never again: the next add reads the count only", [secondAdd.result.ok, paidFor.length, secondAdd.commands.some((c) => c[0] === "HGETALL"), await counted(OLD), await agrees(OLD)], [true, 1, false, "7", true]);
+
+  part("A deletion that finds the tasks changed since they were read drops the count, to be made again");
+  redis.pipeline = (async (sent: (string | number)[][]) => {
+    if (sent.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-tasks-forget:"))) {
+      redis.pipeline = real;
+      await real([["HSET", `nl:crm:tasks:${OLD}`, person(2), legacy(2, 5)]]);
+    }
+    return real(sent);
+  }) as typeof redis.pipeline;
+  const roomAt = (await dataUsed(ROOM))?.used ?? 0;
+  try {
+    await forgetCrmPerson(OLD, person(2), "two@example.com", ROOM);
+  } finally {
+    redis.pipeline = real;
+  }
+  is("deleted all the same, and the count dropped", [await readPersonTasks(OLD, person(2)), await counted(OLD)], [[], null]);
+  is("the room of what was deleted and of the count given back", roomAt - ((await dataUsed(ROOM))?.used ?? 0), dataBytes([person(2), legacy(2, 5)], 1) + TASK_COUNT_WEIGHT);
+  await changePersonTasks(OLD, person(5), ROOM, fill(1), paying);
+  is("made again by the next add, paid for first", [paidFor.length, await agrees(OLD)], [2, true]);
+
+  part("A count that is not a whole number is never trusted: made again, once");
+  await redis.pipeline([["HSET", `nl:crm:tasks:${OLD}`, TASK_COUNT_FIELD, "5.5"]]);
+  await changePersonTasks(OLD, person(6), ROOM, fill(1), paying);
+  const afterFix = paidFor.length;
+  await changePersonTasks(OLD, person(6), ROOM, fill(1), paying);
+  is("paid for once, then counted as it should be", [afterFix, paidFor.length, await agrees(OLD)], [3, 3, true]);
+  await redis.pipeline([["HSET", `nl:crm:tasks:${OLD}`, TASK_COUNT_FIELD, "-1"]]);
+  await changePersonTasks(OLD, person(6), ROOM, (t) => ({ ok: true, tasks: dropTask(t, t[0].id) }), refusing);
+  is("a removal drops it, and asks nothing", [await counted(OLD), asked.length], [null, 1]);
+
+  part("A deleted store's count goes with it");
+  await forgetCrm(OLD);
+  is("gone", [(await redis.pipeline([["EXISTS", `nl:crm:tasks:${OLD}`]]))[0], await counted(OLD)], [0, null]);
+  await changePersonTasks(OLD, person(1), ROOM, fill(1), refusing);
+  is("a new start needs no recount", [await counted(OLD), asked.length], ["1", 1]);
+
+  part("A task at its heaviest fits TASK_KEPT_BYTES");
+  const worst = { id: id(1), text: "\u20ac".repeat(MAX_TASK_TEXT), due: "2026-11-10", assignee: "a".repeat(2_000), done: true, createdAt: Number.MAX_VALUE, doneAt: Number.MAX_VALUE };
+  is("words at three bytes a character, an address as long as a request, the longest times", utf8Length(`${JSON.stringify(worst)},`) <= TASK_KEPT_BYTES, true);
+  is("quotes, written as two bytes each, weigh less", utf8Length(JSON.stringify({ ...worst, text: '"'.repeat(MAX_TASK_TEXT) })) <= TASK_KEPT_BYTES, true);
 }
 
 main().catch((error) => {

@@ -1,14 +1,14 @@
 /**
- * Inbox C4-35: in Studio AAA (WebKit, forced colours, 390 px), "Add a pixel"
+ * Inbox C4-35: in Studio AAA (WebKit, forced colors, 390 px), "Add a pixel"
  * was measured at 2.78:1, GrayText on sand, with aria-disabled already
  * "false". The summary was drawn off until the page was ready, and WebKit
- * animates a button's colours in forced colours, so a moment after it turned
- * usable it still wore the off colours.
+ * animates a button's colors in forced colors, so a moment after it turned
+ * usable it still wore the off colors.
  *
  * What fails here:
  *   - the pixel summary marked off before the page is ready (a <details> opens
  *     without script, so "off" was untrue), or its fields not held until then;
- *   - any colour of a button animated in forced colours;
+ *   - any color of a button animated in forced colors;
  *   - the off button's forced look (GrayText, dashed) lost.
  */
 import { readFileSync } from "node:fs";
@@ -26,7 +26,7 @@ part("The pixel summary is never drawn off and then on");
   is("and a save before then does nothing", editor.includes("if (!ready || busy) return;"), true);
 }
 
-part("Forced colours: no button colour is animated");
+part("Forced colors: no button color is animated");
 {
   const blocks = [...css.matchAll(/@media \(forced-colors: active\) \{([\s\S]*?)\n\}/g)].map((m) => m[1]);
   const offBlock = blocks.find((b) => b.includes('.btn[aria-disabled="true"]'));

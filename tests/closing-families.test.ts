@@ -29,9 +29,13 @@ const KEPT_AS_COMPANY: Record<string, string> = {
 /** Families gone by themselves whose time is set in code and not by a part of the registry. */
 const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:taxobs:v1:": ["lib/checkout-sweep.ts", "TAX_OBSERVATION_KEEP_SECONDS"],
+  // The mark of a passed-over Stripe event (a capped part): set with the same expiry as every event mark.
+  "nl:hooks:evt:": ["lib/webhooks.ts", "EVENT_SECONDS"],
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],
   "nl:adsrv:ctx:": ["lib/ad-events.ts", "CTX_SECONDS"],
   "nl:adsrv:sent:": ["lib/ad-events.ts", "SENT_SECONDS"],
+  // A store's picture uploads not yet put on anything (a capped part): the list expires a window after its last note.
+  "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_DOOR_SECONDS"],
 };
 /** A person's records across stores that hold a store's id among others and run out by the quarter (lib/joined-stores.ts), and the file that writes them. */
 const PERSON_RECORDS: Record<string, string> = {

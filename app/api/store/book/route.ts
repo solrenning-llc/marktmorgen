@@ -109,10 +109,13 @@ export async function POST(request: NextRequest) {
   if (!canSellProduct(store, product)) return back("unavailable");
   if (await isSoon(store, product.id).catch(() => false)) return back("unavailable");
   if (!Number.isFinite(start)) return back("invalid");
-  // A length's price the creator changed while the buyer chose: said, never charged at a price the page did not show.
-  if (minutes && /^\d{1,9}$/.test(shown)) {
+  // A length chosen comes with the price the page showed for it. One the creator took off meanwhile, or one sent with
+  // no shown price (only ever a request the page did not make): said, never booked. A price changed meanwhile: said,
+  // never charged at a price the page did not show.
+  if (minutes) {
     const now = bookingLength(product.call, product.priceCents, minutes);
-    if (!now || now.cents !== Number(shown)) return back("price-changed");
+    if (!now) return back("length-gone");
+    if (!/^\d{1,9}$/.test(shown) || now.cents !== Number(shown)) return back("price-changed");
   }
   // Each try holds a time for half an hour while Stripe's page is open, so
   // one connection gets fifteen in ten minutes per store: enough to change

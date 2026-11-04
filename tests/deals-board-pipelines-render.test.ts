@@ -3,6 +3,7 @@
  * pipeline tabs and honest totals, every pipeline's stages to move a deal
  * to, and the payment request a deal links to (#533), kept.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DealsBoard } from "@/components/deals-board";
@@ -25,6 +26,20 @@ is("a deal moves to a stage of any pipeline", html.includes('<optgroup label="Co
 is("only the chosen pipeline's deals are on its board", html.includes("Deal d000000001") && !html.includes("Deal d000000003"), true);
 is("a deal with a person still links to a payment request, filled in", html.includes("/studio/requests?store=s1&amp;email=dana%40example.com&amp;for=Deal+d000000001&amp;amount=1500"), true);
 is("a new pipeline can be added below the plan's number", html.includes("New pipeline"), true);
+is("the alert region is always there, empty and visually hidden without an error, so a message put in it is announced", html.includes('class="sr-only" role="alert"></p>'), true);
+// Drawn only after a refused save (state the server render cannot reach), so read from the source (635 [GL3], review round 2).
+const boardSource = readFileSync("components/deals-board.tsx", "utf8");
+is("\"Use this\" keeps its visible words in its name, with the part it is for read after them (2.5.3)", [boardSource.includes('Use this<span className="sr-only">{` for ${label}`}</span>'), boardSource.includes("Use what is saved now for")], [true, false]);
+is("taking what is saved moves focus to that part and says so in the board's one status region (2.4.3, 4.1.3; AAA review)", [boardSource.includes("focusLater(taken.focus)"), boardSource.includes("say(taken.said)"), boardSource.includes('<p className="sr-only" role="status">{said}</p>')], [true, true, false]);
+is("each field in conflict points to the words of what is saved now (aria-describedby)", ["title", "email", "value", "stage", "nextAction", "dueDate", "assignee", "note"].every((f) => boardSource.includes(`id={dealFieldId("${f}")} aria-describedby={describedBy("${f}")}`)), true);
+is("a card's stage select only marks a stage, and Move sends it (3.2.5; round 3)", [boardSource.includes('onChange={(e) => stageEvent(deal, { kind: "change", value: e.target.value })}'), boardSource.includes('onClick={() => stageEvent(deal, { kind: "move" })}'), boardSource.includes("onBlur={() => stageEvent"), boardSource.includes('kind: "enter"'), boardSource.includes('onChange={(e) => void run({ action: "deal"')], [true, true, false, false, false]);
+is("the Move button is drawn beside each stage select, off until a different stage is chosen: still focusable, pointing to why (2.4.3; AAA review)", html.includes('id="deal-move-d000000001" class="btn btn-primary btn-sm" aria-disabled="true" aria-describedby="deal-stage-hint-d000000001" aria-label="Move Deal d000000001">Move</button>'), true);
+is("its hint sits outside the select's label, so it is not part of its name, and shows how to move (on screen, not only to a screen reader); it is not a live region of its own", html.includes('</label><button type="button" id="deal-move-d000000001"') && html.includes('<p id="deal-stage-hint-d000000001" class="w-full text-xs text-ink-soft">Choose a new stage, then press Move.</p>'), true);
+is("the board has one status region, always there (4.1.3; AAA review)", [(html.match(/role="status"/g) ?? []).length, html.includes('<p id="deal-board-status" role="status" class="sr-only"></p>')], [1, true]);
+is("no control on the board is disabled outright: each one off stays focusable (2.4.3; AAA review)", html.includes('disabled=""'), false);
+is("focus is given back only when it was lost (round 3)", boardSource.includes("focusWasLost(document.activeElement, document.body)"), true);
+is("repeated words in the status region are said again", boardSource.includes("setStatus(previous => announce(previous, words))"), true);
+is("what was typed, to copy, is a named group, says the message once, and Done gives focus to New deal or the alert", [boardSource.includes('role="group" tabIndex={-1}'), boardSource.includes("{`${DEAL_HIDDEN} Here is what you typed"), boardSource.includes('focusLater("deal-new", "deal-board-alert")')], [true, false, true]);
 const full = renderToStaticMarkup(createElement(DealsBoard, { ...props, pipelineMax: 2 }));
 is("and not at it", full.includes("New pipeline"), false);
 const one = renderToStaticMarkup(createElement(DealsBoard, { ...props, pipelines: undefined, stages: DEFAULT_STAGES, deals: deals.slice(0, 2), pipelineMax: 1 }));

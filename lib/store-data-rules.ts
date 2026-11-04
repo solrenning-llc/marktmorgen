@@ -177,6 +177,15 @@ export function dataBytes(values: (string | number | null | undefined)[] | strin
   return Math.ceil(bytes / DATA_STEP_BYTES) * DATA_STEP_BYTES;
 }
 
+/**
+ * dataBytes for values known only by their total UTF-8 length, as a Redis script reports one (string.len counts
+ * bytes): dataBytesOfLength(utf8Length(a) + utf8Length(b), n) === dataBytes([a, b], n).
+ */
+export function dataBytesOfLength(utf8Bytes: number, entries = 1): number {
+  const bytes = Math.max(0, Math.floor(entries)) * ENTRY_BYTES + Math.max(0, Math.floor(utf8Bytes));
+  return Math.ceil(bytes / DATA_STEP_BYTES) * DATA_STEP_BYTES;
+}
+
 /** UTF-8 bytes of a string, without a TextEncoder (so it runs anywhere). */
 export function utf8Length(text: string): number {
   let n = 0;

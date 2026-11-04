@@ -5,7 +5,7 @@ import { checkCallChange } from "@/lib/calls";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { usableProviders } from "@/lib/meet-connect";
 import { readTeams, writeTeam } from "@/lib/team-booking";
-import { readCallLengths } from "@/lib/call-lengths";
+import { readCallLengths, shorterRow } from "@/lib/call-lengths";
 import { readProduct } from "@/lib/catalog";
 import { toMajor } from "@/lib/money";
 
@@ -57,17 +57,20 @@ export async function POST(request: NextRequest) {
         if (Array.isArray(extra) && extra.length > 0) {
           const product = await readProduct(store, id);
           if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
-          const read = readCallLengths([{ minutes: setup.minutes, price: toMajor(product.priceCents, store.currency) }, ...extra], {
+          const read = readCallLengths([{ minutes: setup.minutes, price: String(toMajor(product.priceCents, store.currency)) }, ...extra], {
             setup,
             currency: store.currency,
             packaged: Boolean(product.callPackage),
             deposit: setup.deposit ?? null,
             team: (await readTeams(store)).has(id),
           });
+          // The call's own length is the shortest: another length is always longer, so the price on the store stays the call's own.
+          // Said before "cheaper", which a shorter row priced above the call's own would otherwise raise on the call's own line,
+          // asking for a price that is not changed there; the row is named so the editor marks it.
+          const shorter = shorterRow(extra, setup.minutes);
+          if (shorter !== null && (read.ok || (read.problem === "cheaper" && read.index === 0))) return Response.json({ ok: false, error: "lengths", problem: "shorter", index: shorter }, { status: 400 });
           // Which line is wrong, so the editor marks it: 0 is the call's own length at the product's price, 1 the first other one.
           if (!read.ok) return Response.json({ ok: false, error: "lengths", problem: read.problem, ...(read.index !== undefined ? { index: read.index } : {}), ...(read.minutes ? { minutes: read.minutes } : {}) }, { status: 400 });
-          // The call's own length is the shortest: another length is always longer, so the price on the store stays the call's own.
-          if (read.lengths[0].minutes !== setup.minutes) return Response.json({ ok: false, error: "lengths", problem: "shorter" }, { status: 400 });
           setup = { ...setup, lengths: read.lengths };
         }
         const checked = await checkCallChange(store, id, setup);

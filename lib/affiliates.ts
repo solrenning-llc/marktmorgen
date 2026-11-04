@@ -74,8 +74,8 @@
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { type Paid, paypalPaymentId, readPayPalRefunds } from "@/lib/paypal-sales";
-import { saleHandles } from "@/lib/store";
+import { type Paid, paypalPaymentId, readPayPalRefunds, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
+import { saleHandles, storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -95,10 +95,12 @@ import {
   MIN_COMMISSION,
   commissionOn,
   commissionRate,
+  creditsContacts,
   RECURRING_ALWAYS,
   readViaCookie,
 } from "@/lib/affiliate-setting";
-import { readListings } from "@/lib/catalog";
+import { productIds, readListings } from "@/lib/catalog";
+import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
 import { type PartnerShare, parsePartnerShare, shareOn } from "@/lib/partner-share";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
@@ -113,6 +115,7 @@ import { readMoves } from "@/lib/call-records";
 import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { formatMoney } from "@/lib/money";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
+import { idleStep, readIdleDays } from "@/lib/affiliate-idle-rules";
 
 /** How long the emailed link to apply or sign in keeps working. */
 export const AFFILIATE_LINK_SECONDS = 24 * 60 * 60;
@@ -197,6 +200,11 @@ export type Affiliate = {
    * of this one's own share. Null for everybody else.
    */
   by: { id: string; percent: number } | null;
+  /**
+   * When they were last warned that they would be removed for bringing no
+   * sale and no lead (630 [HN6](3), idleSweep), in seconds; 0 if never.
+   */
+  warned?: number;
 };
 
 /**
@@ -207,6 +215,9 @@ export type Affiliate = {
  *            click anywhere (lib/affiliate-codes.ts);
  *   "buyer"  they had been credited to that affiliate before, and the creator
  *            asked for their buyers to stay theirs (lib/affiliate-bond.ts);
+ *   "contact" nothing else credited it, and the buyer is a confirmed lead
+ *            that affiliate brought, where the creator asked for contacts to
+ *            earn their affiliate (lib/affiliate-leads.ts contactFor; 630 [HN6](1));
  *   "partner" nobody brought this buyer to them: they hold a standing share
  *            of the product itself (lib/partner-share.ts);
  *   "recurring" a payment of a membership or payment plan sold through their
@@ -217,7 +228,7 @@ export type Affiliate = {
  *   "lead"   not a sale: a confirmed lead, earning the program's fixed amount
  *            per lead (lib/affiliate-leads.ts, added 18 October 2026).
  */
-export type Credit = "click" | "code" | "buyer" | "partner" | "recurring" | "bonus" | "tier2" | "lead";
+export type Credit = "click" | "code" | "buyer" | "partner" | "contact" | "recurring" | "bonus" | "tier2" | "lead";
 
 /** A sale that came through an affiliate's link. */
 export type Referral = {
@@ -342,6 +353,7 @@ function parseAffiliate(raw: unknown): Affiliate | null {
         const percent = Number(by.percent);
         return Number.isInteger(percent) && percent >= 1 && percent <= MAX_COMMISSION ? { id: by.id, percent } : null;
       })(),
+      warned: Number.isInteger(value.warned) && Number(value.warned) > 0 ? Number(value.warned) : 0,
     };
   } catch {
     return null;
@@ -442,7 +454,7 @@ function parseReferral(raw: unknown): Referral | null {
       // neither field, and every one of those came from a click. `byCode` is
       // read for the ones written in between.
       how:
-        value.how === "code" || value.how === "buyer" || value.how === "partner"
+        value.how === "code" || value.how === "buyer" || value.how === "partner" || value.how === "contact"
           ? value.how
           : value.byCode === true
             ? "code"
@@ -638,7 +650,7 @@ export async function requestAffiliateLink(input: {
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   const email = normaliseEmail(raw);
   if (!canApply(store)) return "unavailable";
-  if (email === normaliseEmail(store.email)) return "owner";
+  if (canonicalEmail(email) === canonicalEmail(store.email)) return "owner";
   if (!(await within(applyIpKey(ip, store.handle), APPLY_IP_LIMIT))) return "limited";
   if (!(await within(applyAddressKey(email), APPLY_ADDRESS_LIMIT))) return "limited";
 
@@ -911,18 +923,47 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
     ["DEL", linkKey(token)],
   ]);
 
+  // Approved at once when the creator chose it (624 [SZ8](35)): through the same decision as by hand, so the
+  // approval email with their link goes as usual. Only a new application; someone declined or removed stays out,
+  // and so does the same inbox written another way (a dot or a "+" tag): an application whose address matches any
+  // other record, declined and removed included, waits for the creator instead.
+  // The store's own address (the owner's, as it is now) waits too: the owner is never their own affiliate.
+  // The choice is read again from the store as it is now, and the application again, so a creator who turned
+  // approval off, or declined or removed this person, in the meantime is not overruled.
+  const autoChosen = created && grant.k !== 1 && store.affiliates.autoApprove === true && affiliate.status === "pending";
+  const knownInbox = autoChosen && (await sameInboxAsAnother(store, affiliate.email, affiliate.id));
+  const ownersInbox = autoChosen && canonicalEmail(affiliate.email) === canonicalEmail(store.email);
+  let autoApproved = false;
+  if (autoChosen && !knownInbox && !ownersInbox) {
+    const now = store.sid ? await storeForId(store.sid) : null;
+    const still = now?.affiliates.autoApprove === true ? await readAffiliate(store, affiliate.id) : null;
+    if (still?.status === "pending") {
+      affiliate = (await decide(store, affiliate.id, "approve")) ?? affiliate;
+      autoApproved = affiliate.status === "approved";
+    }
+  }
+
   if (created && isSenderConfigured() && grant.k !== 1) {
+    const studioLink = `${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`;
     await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
       from: `Marktmorgen <${senderAddress()}>`,
       to: store.email,
-      subject: `New affiliate application: ${affiliate.email}`,
+      subject: autoApproved ? `New affiliate: ${affiliate.email}` : `New affiliate application: ${affiliate.email}`,
       text: [
-        `${affiliate.email} applied to be an affiliate of ${store.name}.`,
+        autoApproved
+          ? `${affiliate.email} joined as an affiliate of ${store.name}, approved at once because you chose to approve every application.`
+          : `${affiliate.email} applied to be an affiliate of ${store.name}.`,
+        ...(knownInbox
+          ? ["It was not approved at once: the address matches one already on your list (including people you declined or removed), written the same way or another way, so it waits for your decision."]
+          : []),
+        ...(ownersInbox ? ["It was not approved at once: it is this store's own address, so it waits for your decision."] : []),
         ...(affiliate.note ? [`Where they will share it: ${affiliate.note}`] : []),
         "",
-        `Approve or decline them in your studio: ${SITE_URL}/studio/affiliates${store.sid ? `?store=${store.sid}` : ""}`,
+        autoApproved ? `Remove them in your studio if you would rather not: ${studioLink}` : `Approve or decline them in your studio: ${studioLink}`,
         "",
-        "Nothing changes until you decide. Commissions are paid by you, directly, never by Marktmorgen.",
+        autoApproved
+          ? "Commissions are paid by you, directly, never by Marktmorgen."
+          : "Nothing changes until you decide. Commissions are paid by you, directly, never by Marktmorgen.",
       ].join("\n"),
     }).catch((error) => console.error("telling a creator about an application failed", error));
   }
@@ -934,11 +975,25 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
       "affiliate",
       grant.k === 1
         ? { title: "Your partner accepted", body: `Somebody you invited as a partner on ${store.name} opened their link.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" }
-        : { title: "New affiliate application", body: `Someone applied to promote ${store.name}. Approve or decline them in your studio.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
+        : autoApproved
+          ? { title: "New affiliate", body: `Someone joined as an affiliate of ${store.name}, approved at once as you chose.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" }
+          : { title: "New affiliate application", body: `Someone applied to promote ${store.name}. Approve or decline them in your studio.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
       { seed: affiliate.id },
     ).catch((error) => console.error("an application notification failed", error));
   }
   return { ok: true, session, affiliate, created };
+}
+
+/**
+ * Whether another record of this store than `self`, in any state (declined
+ * and removed included), reaches the same inbox as `address`, by its address
+ * or its payout address, written the same or another way (canonicalEmail).
+ */
+async function sameInboxAsAnother(store: Store, address: string, self: string | null): Promise<boolean> {
+  const mine = canonicalEmail(address);
+  return (await listAffiliates(store)).some(
+    (other) => other.id !== self && (canonicalEmail(other.email) === mine || canonicalEmail(payAddress(other)) === mine),
+  );
 }
 
 /** Whether buyers may join this store's programme on their own (lib/affiliate-setting.ts). */
@@ -984,16 +1039,19 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
   if (!buyersJoin(store)) return { ok: false, reason: "unavailable" };
   const email = await buyerOfOrder(store, sessionId);
   if (!email) return { ok: false, reason: "order" };
-  if (email === normaliseEmail(store.email)) return { ok: false, reason: "owner" };
+  if (canonicalEmail(email) === canonicalEmail(store.email)) return { ok: false, reason: "owner" };
   const statsId = store.statsId as string;
 
   let affiliate: Affiliate | null = null;
   let created = false;
   const [knownId] = await redisPipeline([["HGET", emailsKey(statsId), email]]);
   if (typeof knownId === "string") affiliate = await readAffiliate(store, knownId);
+  // The same inbox as another record, declined and removed included, written another way (a "+" tag, dots at
+  // Gmail): not let in by an order; an application waits for the creator instead (624 [SZ8](35)).
+  const knownInbox = await sameInboxAsAnother(store, email, affiliate?.id ?? null);
   if (affiliate) {
     if (affiliate.status === "declined" || affiliate.status === "removed") return { ok: false, reason: "declined" };
-    if (affiliate.status === "pending") {
+    if (affiliate.status === "pending" && !knownInbox) {
       affiliate = { ...affiliate, status: "approved", decidedAt: Date.now() };
       await writeAffiliate(store, affiliate);
     }
@@ -1010,7 +1068,9 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
     } else {
       const code = await claimCode(store, email, id);
       const now = Date.now();
-      affiliate = { id, email, code, status: "approved", appliedAt: now, decidedAt: now, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null };
+      affiliate = knownInbox
+        ? { id, email, code, status: "pending", appliedAt: now, decidedAt: 0, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null }
+        : { id, email, code, status: "approved", appliedAt: now, decidedAt: now, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null };
       await writeAffiliate(store, affiliate);
       created = true;
     }
@@ -1022,7 +1082,9 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
     await alertCreator(
       store,
       "affiliate",
-      { title: "A buyer became an affiliate", body: `Someone who bought from ${store.name} took their own link to share it.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
+      affiliate.status === "pending"
+        ? { title: "New affiliate application", body: `Someone who bought from ${store.name} asked for a link. Their address matches one already on your list, so it waits for you.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" }
+        : { title: "A buyer became an affiliate", body: `Someone who bought from ${store.name} took their own link to share it.`, url: store.sid ? `/studio/affiliates?store=${store.sid}` : "/studio/affiliates" },
       { seed: affiliate.id },
     ).catch((error) => console.error("a new-affiliate notification failed", error));
   }
@@ -1094,6 +1156,82 @@ export async function decide(store: Store, id: string, decision: Decision): Prom
     }).catch((error) => console.error("telling an affiliate they were approved failed", error));
   }
   return next;
+}
+
+// ---- Several decisions at once, with undo (630 [HN6](4), unit 1) ----------
+
+/** The most applications one press decides, and how long its undo lasts. */
+export const MAX_BULK_DECISIONS = 100;
+export const BULK_UNDO_MS = 10 * 60_000;
+
+/** How one affiliate stood before a decision in bulk: what an undo puts back. */
+export type Before = { id: string; status: AffiliateStatus; decidedAt: number };
+
+/**
+ * Approves or declines several pending applications, one by one through
+ * decide (each approval emails its link, as one at a time). Only pending
+ * ones are touched; anybody already decided is left as they are. Returns how
+ * each stood before, for an undo.
+ */
+export async function decideMany(store: Store, ids: string[], decision: "approve" | "decline"): Promise<Before[]> {
+  const before: Before[] = [];
+  for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
+    const affiliate = await readAffiliate(store, id);
+    if (!affiliate || affiliate.status !== "pending") continue;
+    const done = await decide(store, id, decision);
+    if (done) before.push({ id, status: affiliate.status, decidedAt: affiliate.decidedAt });
+  }
+  return before;
+}
+
+/**
+ * Puts back how each affiliate stood before a decision in bulk, for those
+ * still exactly as that decision left them and within BULK_UNDO_MS of it: a
+ * later decision by hand is never overwritten. An approval email already
+ * sent is not taken back; the studio says so. Returns how many were put back.
+ */
+export async function undoMany(store: Store, before: Before[], decision: "approve" | "decline", now = Date.now()): Promise<number> {
+  const left: AffiliateStatus = decision === "approve" ? "approved" : "declined";
+  let undone = 0;
+  for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
+    if (entry.status !== "pending") continue;
+    const affiliate = await readAffiliate(store, entry.id);
+    if (!affiliate || affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt) continue;
+    await writeAffiliate(store, { ...affiliate, status: entry.status, decidedAt: entry.decidedAt });
+    undone += 1;
+  }
+  return undone;
+}
+
+/** How one affiliate's own share stood before a change in bulk: what an undo puts back. */
+export type RateBefore = { id: string; rate: number | null };
+
+/**
+ * Sets, or clears with null, the share of several approved affiliates at
+ * once (630 [HN6](4), unit 2), each through setAffiliateRate: it applies to
+ * sales from now on, and a sale keeps the share it was made at. Returns how
+ * each stood before, leaving out those already at it.
+ */
+export async function setRatesMany(store: Store, ids: string[], rate: number | null): Promise<RateBefore[] | null> {
+  if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
+  const before: RateBefore[] = [];
+  for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
+    const affiliate = await readAffiliate(store, id);
+    if (!affiliate || affiliate.status !== "approved" || affiliate.rate === rate) continue;
+    if (await setAffiliateRate(store, id, rate)) before.push({ id, rate: affiliate.rate });
+  }
+  return before;
+}
+
+/** Puts back each share still exactly as the change left it; one changed by hand since is never overwritten. */
+export async function undoRates(store: Store, before: RateBefore[], rate: number | null): Promise<number> {
+  let undone = 0;
+  for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
+    const affiliate = await readAffiliate(store, entry.id);
+    if (!affiliate || affiliate.rate !== rate) continue;
+    if (await setAffiliateRate(store, entry.id, entry.rate)) undone += 1;
+  }
+  return undone;
 }
 
 export async function addPayout(
@@ -1330,7 +1468,8 @@ export function canonicalEmail(raw: string): string {
   const at = email.lastIndexOf("@");
   if (at < 1) return email;
   let name = email.slice(0, at).split("+")[0];
-  let domain = email.slice(at + 1);
+  // "example.com." is the same domain as "example.com".
+  let domain = email.slice(at + 1).replace(/\.+$/, "");
   if (domain === "googlemail.com") domain = "gmail.com";
   if (domain === "gmail.com") name = name.replace(/\./g, "");
   return `${name}@${domain}`;
@@ -1420,8 +1559,19 @@ export async function noteSession(
       found = await bondFor(store, buyer);
       how = "buyer";
     }
+    // Then the affiliate who brought this buyer as a confirmed lead, where the
+    // creator asked for that (lib/affiliate-leads.ts contactFor). Read lazily:
+    // that file reads this one.
+    if (!found && buyer && creditsContacts(store.affiliates)) {
+      const { contactFor } = await import("@/lib/affiliate-leads");
+      // Only a lead confirmed before this checkout was opened, and never the
+      // lead this very checkout made (a paid booking is one): a sale written
+      // down again later must not reach back to a lead that came after it.
+      found = await contactFor(store, buyer, at, session.id);
+      how = "contact";
+    }
     if (!found) return;
-    // A code or a bond only ever credits somebody the creator approves today.
+    // A code, a bond or a contact only ever credits somebody the creator approves today.
     // An affiliate they declined or removed keeps their record — it is
     // history — and earns nothing more through either.
     const who = await readAffiliate(store, found);
@@ -1693,6 +1843,44 @@ export function settleLine(referral: Referral, refunded: number): Line {
 }
 
 /**
+ * How big the program is, counted before it is read, so a reading that pays
+ * for itself by its size (the API's affiliates, lib/api-read.ts) can take
+ * what readBook will cost first: the seven records it reads whole, by their
+ * entries, the PayPal refunds it reads one by one, the products it may read
+ * and whether Stripe is connected. One pipeline of counts, nothing else. Null
+ * when a count did not come back as one: unknown is never read as small.
+ */
+// Accepted race: between this count and readBook's HGETALL the records can grow for a few milliseconds and be
+// read past what was paid for, bounded by how fast the store writes them.
+export async function bookSizes(store: Store): Promise<BookSizes | null> {
+  const stripe = Boolean(store.stripeAccountId);
+  const products = productIds(store).length;
+  if (!store.statsId || !isRedisConfigured()) return { kept: false, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe, products };
+  const id = store.statsId;
+  const replies = await redisPipeline([
+    ["HLEN", peopleKey(id)],
+    ["HLEN", clicksKey(id)],
+    ["HLEN", salesKey(id)],
+    ["HLEN", payoutsKey(id)],
+    ["HLEN", sharesKey(id)],
+    ["HLEN", paidClicksKey(id)],
+    ["HLEN", leadsKey(id)],
+    ["ZCARD", paypalRefundedKey(id)],
+  ]);
+  const counts = replies.map((r) => (typeof r === "number" || (typeof r === "string" && /^\d{1,12}$/.test(r)) ? Number(r) : NaN));
+  if (counts.length !== 8 || counts.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+  return {
+    kept: true,
+    entries: counts.slice(0, 7).reduce((a, b) => a + b, 0),
+    people: counts[0],
+    leads: counts[6],
+    paypalRefunds: counts[7],
+    stripe,
+    products,
+  };
+}
+
+/**
  * Everything the studio shows about the programme — and, filtered to one
  * person, what an affiliate sees: their clicks, the sales through their link
  * with what each earns after refunds, and what the creator says they paid.
@@ -1862,6 +2050,8 @@ export async function readBook(store: Store, only?: string): Promise<Book> {
 
 /** How many invoice pages of a hundred are read when the book is opened. */
 const INVOICE_PAGES = 10;
+/** The most pages of the creator's Stripe account one reading of the book waits on: invoices, refunds and disputes (lib/api-read-rules.ts, bookWork). */
+export const BOOK_STRIPE_PAGES = INVOICE_PAGES + REFUND_PAGES + DISPUTE_PAGES;
 const AFF_SUB_STRIPE_VERSION = "2026-08-26.dahlia";
 
 type InvoiceLike = {
@@ -1995,7 +2185,7 @@ export function bonusLines(store: Pick<Store, "affiliates" | "currency">, lines:
 }
 
 /** What a line credited this way is: a sale somebody brought, as opposed to a share, a bonus or a second tier. */
-const BROUGHT: readonly Credit[] = ["click", "code", "buyer", "recurring"];
+const BROUGHT: readonly Credit[] = ["click", "code", "buyer", "contact", "recurring"];
 
 /**
  * The second tier: for each sale an affiliate brought that earns them
@@ -2052,11 +2242,15 @@ export function holdFlags(store: Pick<Store, "affiliates">, everyone: Affiliate[
   return out;
 }
 
-/** The other affiliates, approved or waiting, with this one's inbox or payout address, written any way. */
+/**
+ * The other records with this one's inbox or payout address, written any way:
+ * approved, waiting, and also declined or removed, so a payout address set to
+ * the inbox of someone the creator turned away is held too.
+ */
 function sharersOf(a: Affiliate, everyone: Affiliate[]): string[] {
   const mine = new Set([canonicalEmail(a.email), canonicalEmail(payAddress(a))]);
   return everyone
-    .filter((b) => b.id !== a.id && (b.status === "approved" || b.status === "pending"))
+    .filter((b) => b.id !== a.id)
     .filter((b) => mine.has(canonicalEmail(b.email)) || mine.has(canonicalEmail(payAddress(b))))
     .map((b) => b.id);
 }
@@ -2207,4 +2401,173 @@ export async function programNumbers(store: Store): Promise<ProgramNumbers | nul
       .reduce((sum, p) => sum + p.cents, 0),
     since: approved.reduce((first, a) => (first === 0 || (a.decidedAt > 0 && a.decidedAt < first) ? a.decidedAt : first), 0),
   };
+}
+
+/** The most warnings and removals one store's sweep does in one run; the rest wait for the next day. */
+export const MAX_IDLE_STEPS = 25;
+
+/**
+ * Whether a program can have idle affiliates removed at all (630 [HN6](3)):
+ * not while it credits memberships and payment plans, whose payments are read
+ * from Stripe's invoices when the book is opened and never written down as
+ * sales, so an affiliate who brings only members would look idle.
+ */
+export function idleRemovalAllowed(setting: { recurring: number }): boolean {
+  return !(setting.recurring > 0);
+}
+
+/**
+ * Removing approved affiliates who bring nothing, where the creator asked for
+ * it (630 [HN6](3), lib/affiliate-idle-rules.ts idleStep): run once a day by
+ * the affiliates' schedule (app/api/cron/affiliates), until `deadline` (ms).
+ *
+ * What it reads, four commands for the whole store: the affiliates, the
+ * sales, the leads and the payments the creator wrote down, already kept and
+ * bounded by the store's data room. A sale counts from when it was credited,
+ * unless it was the affiliate's own purchase, and counts for the affiliate who
+ * invited its affiliate too (their second tier); a lead from when it was
+ * confirmed, whatever was decided on it later, so a refund or a reversal never
+ * brings an old warning back to life.
+ *
+ * Who is never warned or removed by it:
+ *   - a partner holding a standing share (lib/partner-share.ts): their shares
+ *     come from every sale of the product, not through a link;
+ *   - anybody who may still be owed something: what their sales, second tier,
+ *     leads and monthly goals could have earned, before refunds and so on the
+ *     high side, is more than the creator wrote down as paid to them (a sale
+ *     in another currency counts as owed). Removal takes them out of every
+ *     later payment batch, so it waits until they are paid;
+ *   - every affiliate of a program that credits memberships (idleRemovalAllowed).
+ *
+ * The count starts no earlier than when the creator switched this on, changed
+ * it or switched the program back on (idleOn), so nobody is removed for a
+ * stretch that came before the rule or during a pause.
+ *
+ * What it does, at most MAX_IDLE_STEPS a run: removals first, then warnings.
+ * A warning is sent only after the affiliate's record is read again and still
+ * matches, by email in the store's language from the store's own emails; the
+ * first one refused (the store's emails spent, or the provider declining)
+ * ends the store's run for the day. Only a warning that went out is written
+ * down, on the affiliate's record read again just before, as every writer of
+ * that record does. On the date it named, with still nothing, the same removal
+ * as the creator's "Remove" (decide): their record stays, and the creator can
+ * restore them, which starts the count again.
+ */
+export async function idleSweep(store: Store, nowMs: number = Date.now(), deadline = Number.POSITIVE_INFINITY): Promise<{ warned: number; removed: number }> {
+  const done = { warned: 0, removed: 0 };
+  const days = readIdleDays(store.affiliates.idle);
+  if (days === 0 || !affiliatesOn(store) || !idleRemovalAllowed(store.affiliates)) return done;
+  const statsId = store.statsId as string;
+  const now = Math.floor(nowMs / 1000);
+  const [peopleReply, salesReply, leadsReply, payoutsReply] = await redisPipeline([
+    ["HGETALL", peopleKey(statsId)],
+    ["HGETALL", salesKey(statsId)],
+    ["HGETALL", leadsKey(statsId)],
+    ["HGETALL", payoutsKey(statsId)],
+  ]);
+  const everyone = pairs(peopleReply)
+    .map(([, raw]) => parseAffiliate(raw))
+    .filter((a): a is Affiliate => a !== null);
+  const inviter = new Map(everyone.filter((a) => a.by).map((a) => [a.id, a.by as { id: string; percent: number }]));
+  const lastActive = new Map<string, number>();
+  const owedHigh = new Map<string, number>();
+  const foreign = new Set<string>();
+  const active = (id: string, at: number) => lastActive.set(id, Math.max(lastActive.get(id) ?? 0, at));
+  const earn = (id: string, cents: number) => owedHigh.set(id, (owedHigh.get(id) ?? 0) + Math.max(0, Math.ceil(cents)));
+  const salesByMonth = new Map<string, number>();
+  for (const [, raw] of pairs(salesReply)) {
+    const sale = parseReferral(raw);
+    if (!sale || sale.self) continue;
+    active(sale.aff, sale.at);
+    if (sale.currency !== store.currency) foreign.add(sale.aff);
+    earn(sale.aff, (sale.base * sale.rate) / 100);
+    const up = inviter.get(sale.aff);
+    if (up) {
+      active(up.id, sale.at);
+      if (sale.currency !== store.currency) foreign.add(up.id);
+      earn(up.id, (sale.base * up.percent) / 100);
+    }
+    if (sale.rate > 0) {
+      const month = `${sale.aff}:${new Date(sale.at * 1000).toISOString().slice(0, 7)}`;
+      salesByMonth.set(month, (salesByMonth.get(month) ?? 0) + 1);
+    }
+  }
+  for (const [month, count] of salesByMonth) {
+    const aff = month.slice(0, month.indexOf(":"));
+    for (const goal of store.affiliates.bonuses) if (count >= goal.sales) earn(aff, goal.cents);
+  }
+  for (const [, raw] of pairs(leadsReply)) {
+    const lead = parseLead(raw);
+    if (!lead) continue;
+    active(lead.aff, lead.at);
+    if (lead.state !== "reversed") earn(lead.aff, lead.cents);
+    if (lead.currency !== store.currency) foreign.add(lead.aff);
+  }
+  const paid = new Map<string, number>();
+  for (const [, raw] of pairs(payoutsReply)) {
+    const payout = parsePayout(raw);
+    if (payout && payout.currency === store.currency) paid.set(payout.aff, (paid.get(payout.aff) ?? 0) + payout.cents);
+  }
+  const mayBeOwed = (id: string) => foreign.has(id) || (owedHigh.get(id) ?? 0) > (paid.get(id) ?? 0);
+
+  const steps = everyone
+    .filter((a) => a.status === "approved" && a.share === null && !mayBeOwed(a.id))
+    .map((affiliate) => ({
+      affiliate,
+      step: idleStep(
+        {
+          status: affiliate.status,
+          // Counted from their approval, or from when the creator switched this on, changed it or switched the
+          // program back on, whichever is later: nobody is removed for a stretch that came before the rule.
+          since: Math.max(Math.floor(affiliate.decidedAt / 1000), store.affiliates.idleOn ?? 0),
+          lastSale: lastActive.get(affiliate.id) ?? 0,
+          lastLead: 0,
+          warnedAt: affiliate.warned ?? 0,
+          onSince: store.affiliates.idleOn ?? 0,
+        },
+        days,
+        now,
+      ),
+    }))
+    .filter(({ step }) => step.do === "remove" || step.do === "warn")
+    // Removals first: they were warned longest ago.
+    .sort((x, y) => (x.step.do === y.step.do ? 0 : x.step.do === "remove" ? -1 : 1))
+    .slice(0, MAX_IDLE_STEPS);
+
+  const a = affiliatesWords(store.language);
+  const locale = LANGUAGES[parseLanguage(store.language)].locale;
+  const leads = store.affiliates.lead.kind !== "none";
+  // Read again and still the very affiliate the snapshot saw: approved, not decided on, warned as it was.
+  const same = (fresh: Affiliate | null, seen: Affiliate): fresh is Affiliate =>
+    fresh !== null && fresh.status === "approved" && fresh.share === null && fresh.decidedAt === seen.decidedAt && (fresh.warned ?? 0) === (seen.warned ?? 0);
+  for (const { affiliate, step } of steps) {
+    if (Date.now() >= deadline) break;
+    const fresh = await readAffiliate(store, affiliate.id);
+    if (!same(fresh, affiliate)) continue;
+    if (step.do === "remove") {
+      if (await decide(store, affiliate.id, "remove")) done.removed += 1;
+      continue;
+    }
+    if (step.do !== "warn" || !isSenderConfigured()) continue;
+    const date = new Date(step.removeOn * 1000).toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+    const sent = await sendEmail({
+      meter: { by: "store", store, kind: "email" },
+      from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
+      replyTo: store.email,
+      to: fresh.email,
+      subject: a.idleSubject(store.name, date),
+      text: [a.idleBody(store.name, days, date, leads), "", a.approvedPage(`${SITE_URL}/@${store.handle}/affiliates`)].join("\n"),
+    }).catch((error) => {
+      console.error("warning an idle affiliate failed", error);
+      return false;
+    });
+    // Refused past the store's emails, or not delivered: nobody is warned, so nobody is removed, and the store waits for tomorrow.
+    if (sent !== true) break;
+    const again = await readAffiliate(store, affiliate.id);
+    if (same(again, affiliate)) {
+      await writeAffiliate(store, { ...again, warned: now });
+      done.warned += 1;
+    }
+  }
+  return done;
 }

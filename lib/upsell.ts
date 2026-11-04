@@ -57,7 +57,7 @@ import {
 import { funnelRate, noteCharge } from "@/lib/affiliates";
 import { confirmOffer } from "@/lib/purchase-email";
 import { noteOfferSale } from "@/lib/sale-events";
-import { refundedInFull } from "@/lib/refunds";
+import { givenBack } from "@/lib/refunds";
 import { methodId, reusableMethod } from "@/lib/instant-pay";
 import type { Listing, Product, Store } from "@/lib/store";
 import { listingFinder, readListing, readListings, readProduct } from "@/lib/catalog";
@@ -591,7 +591,8 @@ export function upsellReference(session: string, slot: string, record: UpsellRec
 }
 
 /**
- * Whether an offer's own payment was refunded in full since (lib/refunds.ts),
+ * Whether an offer's own payment was refunded in full, or lost to a dispute,
+ * since (lib/refunds.ts),
  * read from Stripe on every download, as the order is. An offer is its own
  * payment, so the order it followed may stand while it is refunded, or the
  * other way round. Throws when Stripe cannot be asked; the download then
@@ -600,7 +601,7 @@ export function upsellReference(session: string, slot: string, record: UpsellRec
 export async function offerRefunded(store: Store, reference: string): Promise<boolean> {
   if (!/^pi_[A-Za-z0-9]{6,200}$/.test(reference) || !store.stripeAccountId) return false;
   const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(reference)}?expand[]=latest_charge`);
-  return refundedInFull(pi);
+  return givenBack(store.stripeAccountId, pi);
 }
 
 /** What one offer delivers, once it is paid. `slot` is "" for the first. */

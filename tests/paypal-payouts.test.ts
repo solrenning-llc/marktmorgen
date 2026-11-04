@@ -29,8 +29,10 @@ let tokenStatus = 200;
 let funds = true;
 let itemStatus: Record<string, string> = {};
 const created: { body: Record<string, unknown>; requestId: string | null }[] = [];
+let fetches = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  fetches += 1;
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });
@@ -120,6 +122,11 @@ async function main(): Promise<void> {
   is("the studio sees only a shortened Client ID", [view?.client, view?.broken, view?.auto], ["AbCdEf…6789", false, false]);
 
   part("One press");
+  await redis.pipeline([["SET", `nl:pp:${STATS}:lock`, "another-payout", "EX", 60]]);
+  const fetchedBefore = fetches;
+  const held = await payWithPayPal(store);
+  await redis.pipeline([["DEL", `nl:pp:${STATS}:lock`]]);
+  is("another payout holding the lock: busy, never an error, and nothing asked of PayPal or Stripe", [held.ok ? "sent" : held.reason, fetches - fetchedBefore, created.length], ["busy", 0, 0]);
   funds = false;
   const short = await payWithPayPal(store);
   is("a balance that does not cover it sends nothing", [short.ok ? "sent" : short.reason, (await onTheirWay(store)).size], ["funds", 0]);

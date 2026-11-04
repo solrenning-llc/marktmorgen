@@ -1,3 +1,4 @@
+import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
@@ -66,8 +67,9 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CrmDealReadUnavailable, readFields, readPipelines, readStages, readDeals, setValue, writeDeal } from "@/lib/crm";
-import { allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
+import { CrmDealReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
+import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
 import { readForm } from "@/lib/form-store";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -112,7 +114,13 @@ export type Flow = {
    * "stage": the store's team made or moved a deal with their address into
    * the stage `stageId` of one of its pipelines (added 17 October 2026,
    * lib/deal-stage-trigger.ts), while they are on the list and agreed to
-   * hear from the creator.
+   * hear from the creator; "signed": signed a proposal or an agreement of
+   * the store's, with the address it was sent to (635 [GL3], added 2 November
+   * 2026, lib/agreement-flow-trigger.ts), while they are on the list and
+   * agreed to hear from the creator; "paid_request": paid one of the store's
+   * payment requests, sent to their address (635 [GL3], lib/payment-flow-
+   * trigger.ts), while they are on the list and agreed to hear from the
+   * creator.
    */
   trigger: FlowTrigger;
   productId: string | null;
@@ -156,6 +164,17 @@ const QUEUE = "nl:mail:flowq";
  */
 const LEASE = "nl:mail:flowq:lease";
 const LEASE_SECONDS = 15 * 60;
+/**
+ * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
+ * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
+ * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
+ */
+const QUEUE_IF_LEASED = `-- marktmorgen:flow-queue-if-leased:v1
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
+  redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
+  return 1
+end
+return 0`;
 const flowsKey = (listId: string) => `nl:mail:flows:${listId}`;
 const enrolledKey = (flowId: string, email: string) =>
   `nl:mail:enr:${flowId}:${createHash("sha256").update(`nimbus-flow:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
@@ -229,7 +248,7 @@ const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw =
 
 export type FlowResult =
   | { ok: true; flows: Flow[] }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" };
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" };
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -268,6 +287,8 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   // A stage of one of the store's pipelines; one workflow a stage, so a deal entering it starts one run at the most.
   const stageId = trigger === "stage" && typeof raw.stageId === "string" ? raw.stageId : "";
   if (trigger === "stage" && !stages.some((st) => st.id === stageId)) return { ok: false, reason: "stage" };
+  // Every plan with workflows has proposals and agreements today; kept so a workflow that could never start is never saved if that changes.
+  if (trigger === "signed" && !agreementsAllowed(store)) return { ok: false, reason: "plan" };
   const rawSteps = Array.isArray(raw.steps) ? raw.steps : [];
   // Who may be made responsible for a deal: the owner, or a teammate who can see orders, as on the deals board.
   const assigns = rawSteps.some((s) => s && typeof s === "object" && (s as { action?: { do?: unknown } }).action?.do === "assign");
@@ -301,6 +322,10 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   const at = id ? flows.findIndex((f) => f.id === id) : -1;
   if (id && at < 0) return { ok: false, reason: "unknown" };
   if (trigger === "stage" && flows.some((f) => f.id !== id && f.trigger === "stage" && f.stageId === stageId)) return { ok: false, reason: "stage_taken" };
+  // One workflow starts on signing, so the check a signature makes stays inside the requests it takes (lib/agreement-flow-trigger.ts); it can start others with a step.
+  if (trigger === "signed" && flows.some((f) => f.id !== id && f.trigger === "signed")) return { ok: false, reason: "signed_taken" };
+  // The same for a paid payment request (lib/payment-flow-trigger.ts).
+  if (trigger === "paid_request" && flows.some((f) => f.id !== id && f.trigger === "paid_request")) return { ok: false, reason: "paid_request_taken" };
   if (!id && flows.length >= MAX_FLOWS) return { ok: false, reason: "too_many" };
   const active = at >= 0 ? raw.active === true : opts.activate === true;
   if (active && !(at >= 0 && flows[at].active) && flows.filter((f) => f.active && f.id !== id).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
@@ -467,7 +492,7 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  * Starts whichever sequences this event begins, for this person. Never
  * throws: the list must never cost anyone what they asked for.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
+export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
   try {
     if (!store.listId || monthlyAllowance(store) === 0) return;
     // Whether what they just got is sold for money: the store's own index
@@ -486,6 +511,8 @@ export async function enroll(store: Store, email: string, event: { joined: boole
           (f.trigger === "started" && event.started && f.productId === event.started) ||
           (f.trigger === "abandoned" && event.abandoned && f.productId === event.abandoned) ||
           (f.trigger === "stage" && event.stage && f.stageId === event.stage) ||
+          (f.trigger === "signed" && event.signed) ||
+          (f.trigger === "paid_request" && event.paidRequest) ||
           (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
     );
     if (!flows.length) return;
@@ -597,6 +624,47 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
     }
     return out;
   }
+  if (action.do === "stop") {
+    // 635 [GL3]: out of another sequence where they are now. A run lives as one entry for its next step in the queue,
+    // or in the lease while a step of it is being done, under any address the store has had (queuedOf); or it is held,
+    // waiting for the creator's choice. Each is ended here, and they are not started on it again: each person goes
+    // through a sequence once (startFlows).
+    const target = flows.find((f) => f.id === action.flowId);
+    if (!target) return each(emails, "failed", "The sequence to take them out of was removed.");
+    const note = `Taken out by step ${at.index + 1} of “${at.flow.name}”.`;
+    const out: Acted[] = [];
+    const ended: string[] = [];
+    for (const email of emails) {
+      try {
+        const reply = await redisPipeline(queuedOf(store, target, [email]));
+        const fromQueue = Number(reply[0]) || 0;
+        const fromLease = Number(reply[1]) || 0;
+        if (fromQueue > 0) {
+          ended.push(email);
+          out.push({ email, state: "confirmed", changed: true, note: `Taken out of “${target.name}”.` });
+          continue;
+        }
+        if (fromLease > 0) {
+          // A step of it is being done right now. Its lease entry, now gone, is what that run reads before its attempt,
+          // and what every later queueing of it needs (sendGroup, QUEUE_IF_LEASED): it ends there, so nothing after it is sent.
+          ended.push(email);
+          out.push({ email, state: "confirmed", changed: true, note: `Taken out of “${target.name}”. A step of it that was under way for them may still finish; nothing after it is sent.` });
+          continue;
+        }
+        // Held, waiting for the creator's choice: ended now, so choosing later cannot put them back in it.
+        const found = await readRun(target.id, personOf(email));
+        if (found?.run.status === "held" && found.run.open && (await releaseHold(listId, target.id, personOf(email), found.run.open, note, "ended", -1))) {
+          out.push({ email, state: "confirmed", changed: true, note: `Taken out of “${target.name}”, where it was waiting for your choice.` });
+          continue;
+        }
+        out.push({ email, state: "confirmed", note: `They were not waiting in “${target.name}”.` });
+      } catch {
+        out.push({ email, state: "deferred", note: `Whether they were taken out of “${target.name}” could not be confirmed; tried again in a few minutes.`, wait: "retry" });
+      }
+    }
+    await noteRuns(target.id, ended.map((email) => ({ email, index: -1, stepId: "", kind: "run", state: "ended" as const, note, to: -1, status: "ended" as const })), Math.floor(Date.now() / 1000)).catch((error) => console.error("writing workflow history failed", error));
+    return out;
+  }
   if (action.do === "start") {
     const target = startableFlows(flows, activeFlowLimit(store)).find((f) => f.id === action.flowId && f.active && f.steps.length > 0);
     if (!target) return each(emails, "failed", "The workflow to start is paused, removed, empty or over your plan's number of active workflows.");
@@ -608,7 +676,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
       return each(emails, "uncertain", `Whether they were started on “${target.name}” could not be confirmed.`);
     }
   }
-  if (action.do === "field" || action.do === "deal" || action.do === "note" || action.do === "notify" || action.do === "assign") return actOnPeople(store, action, emails, at);
+  if (action.do === "field" || action.do === "deal" || action.do === "note" || action.do === "notify" || action.do === "assign" || action.do === "next" || action.do === "rotate") return actOnPeople(store, action, emails, at);
   if (action.do === "untag") {
     try {
       const { changed, same } = await changeLabels(listId, emails, (tags) =>
@@ -654,7 +722,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
  */
 async function actOnPeople(
   store: Store,
-  action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" }>,
+  action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" | "rotate" }>,
   emails: string[],
   at: { flow: Flow; step: FlowStep; index: number },
 ): Promise<Acted[]> {
@@ -691,63 +759,23 @@ async function actOnPeople(
     }
     return out;
   }
-  if (action.do === "deal" || action.do === "assign") {
-    const pipelines = await readPipelines(statsId);
-    const stages = allStages(pipelines);
-    let deals: Awaited<ReturnType<typeof readDeals>>;
-    try {
-      deals = await readDeals(statsId, stages);
-    } catch {
-      // Nothing was written: tried again later, which is safe.
-      return each(emails, "deferred", "Your deals board could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
-    }
-    const now = Math.floor(Date.now() / 1000);
-    if (action.do === "assign") {
-      // Checked again now: a teammate who left, or lost the role, is never made responsible.
-      const team = await readTeam(store.sid);
-      const eligible = action.assignee === store.email.toLowerCase() || team.members.some((m) => m.email.toLowerCase() === action.assignee && can(m.role, "orders"));
-      if (!eligible) return each(emails, "failed", `${action.assignee} can no longer be responsible for deals in this store.`);
-    }
-    const stage = action.do === "deal" ? stages.find((s) => s.id === action.stage) : undefined;
-    if (action.do === "deal" && !stage) return each(emails, "failed", "The deal stage was removed from your board.");
-    // A deal step works in the pipeline of its stage: their open deal there moves, and another pipeline's deal is left as it is.
-    const inPipeline = stage ? new Set(pipelineOf(pipelines, stage.id)?.stages.map((s) => s.id) ?? []) : null;
-    const out: Acted[] = [];
-    for (const email of emails) {
-      // Their open deal moves; with none open, a new one is made for them.
-      const open = deals.find((d) => d.email === email && (!inPipeline || inPipeline.has(d.stage)) && stages.find((s) => s.id === d.stage)?.kind === "open");
-      let deal;
-      if (action.do === "assign") {
-        if (!open) {
-          out.push({ email, state: "failed", note: "They have no open deal to make someone responsible for." });
-          continue;
-        }
-        if ((open.assignee ?? "") === action.assignee) {
-          out.push({ email, state: "confirmed", note: `${action.assignee} was already responsible for their deal.` });
-          continue;
-        }
-        deal = { ...open, assignee: action.assignee, updatedAt: now };
-      } else {
-        if (open && open.stage === stage!.id) {
-          out.push({ email, state: "confirmed", note: `Their deal was already in “${stage!.name}”.` });
-          continue;
-        }
-        deal = open
-          ? { ...open, stage: stage!.id, updatedAt: now }
-          : { id: newCrmId(10), title: (action.title || at.flow.name).slice(0, 90), email, cents: 0, stage: stage!.id, note: `Made by the sequence “${at.flow.name}”.`.slice(0, 500), createdAt: now, updatedAt: now };
-      }
+  if (action.do === "deal" || action.do === "assign" || action.do === "next" || action.do === "rotate") {
+    // Sharing deals among the team is decided from one count of who holds what, so two runs at once (a cron that fires
+    // twice, two batches) would each give the same deal-light teammate a deal: one run shares at a time per store.
+    let held: Held | null = null;
+    if (action.do === "rotate") {
       try {
-        out.push((await writeDeal(statsId, deal, store)) ? { email, state: "confirmed", changed: true, note: action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
-      } catch (error) {
-        if (error instanceof DataRoomError) {
-          out.push({ email, state: "failed", note: "The deal was not written: the store's data room is full." });
-          continue;
-        }
-        out.push(error instanceof CrmDealReadUnavailable ? { email, state: "deferred", note: "Your deals board could not be read; tried again in a few minutes.", wait: "board" } : { email, state: "uncertain", note: "Whether the deal was saved could not be confirmed." });
+        // One SET only: a busy lock is a wait like any other, priced as one (lib/flow-limits.ts), never a loop of tries.
+        held = await takeLock(`nl:flow-rotate:${statsId}`, ROTATE_LOCK_SECONDS, 0);
+      } catch {
+        return each(emails, "deferred", "Deals are being shared on your team right now; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
       }
     }
-    // A deal a step moves starts no workflow of its stage (lib/deal-stage-trigger.ts): a step that starts another workflow does that, priced as its own step.
-    return out;
+    try {
+      return await actOnDeals(store, statsId, action, emails, at, held);
+    } finally {
+      if (held) await releaseLock(held);
+    }
   }
   // The owner, told once for everyone who reached the step together: who, and where.
   if (!isSenderConfigured()) return each(emails, "deferred", "Email is not available right now; tried again later.").map((o) => ({ ...o, wait: "email_off" as const }));
@@ -772,6 +800,156 @@ async function actOnPeople(
   }).then((ok) => (ok ? "sent" : "no"), () => "unknown");
   if (sent === "no") await giveBackToMonth(store, 1).catch(() => {});
   return sent === "sent" ? each(emails, "confirmed", "You were emailed that they reached this step.").map((o) => ({ ...o, changed: true })) : sent === "no" ? each(emails, "failed", "The email to you was not accepted.") : each(emails, "uncertain", "Whether the email to you was sent could not be confirmed.");
+}
+
+/** Said when a deal changed on the board between the batch's read and its write: left as the creator made it. */
+const CHANGED_ON_BOARD = "Their deal changed on your board while this step ran, so it was left as it is.";
+
+/** How long one run may hold the right to share deals in a store (actOnDeals): the slowest batch with room. */
+export const ROTATE_LOCK_SECONDS = 120;
+
+/**
+ * The deal steps (a stage, a teammate made responsible, the next action, a
+ * deal shared among the team), for actOnPeople. `held` is the store's
+ * sharing lock, taken by the caller for "rotate" only.
+ */
+async function actOnDeals(
+  store: Store,
+  statsId: string,
+  action: Extract<FlowAction, { do: "deal" | "assign" | "next" | "rotate" }>,
+  emails: string[],
+  at: { flow: Flow; step: FlowStep; index: number },
+  held: Held | null,
+): Promise<Acted[]> {
+  const pipelines = await readPipelines(statsId);
+  const stages = allStages(pipelines);
+  let deals: Awaited<ReturnType<typeof readDeals>>;
+  try {
+    deals = await readDeals(statsId, stages);
+  } catch {
+    // Nothing was written: tried again later, which is safe.
+    return each(emails, "deferred", "Your deals board could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
+  }
+  const now = Math.floor(Date.now() / 1000);
+  // Who may be responsible for a deal now, read again as for "assign": the owner, and teammates who can see orders.
+  // Their open deals counted, so each deal goes to whoever has the fewest, the owner first on a tie.
+  const load = new Map<string, number>();
+  // The team, read once for both steps that need it; unreadable, nothing is written and the step is tried again later.
+  let team: Awaited<ReturnType<typeof readTeam>> | null = null;
+  if (action.do === "rotate" || action.do === "assign") {
+    try {
+      team = await readTeam(store.sid);
+    } catch {
+      return each(emails, "deferred", "Your team could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
+    }
+  }
+  if (action.do === "rotate" && team) {
+    for (const who of [store.email.toLowerCase(), ...team.members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())]) load.set(who, 0);
+    const openStage = new Set(stages.filter((s) => s.kind === "open").map((s) => s.id));
+    for (const d of deals) if (d.assignee && openStage.has(d.stage) && load.has(d.assignee)) load.set(d.assignee, (load.get(d.assignee) ?? 0) + 1);
+  }
+  if (action.do === "assign" && team) {
+    // Checked again now: a teammate who left, or lost the role, is never made responsible.
+    const eligible = action.assignee === store.email.toLowerCase() || team.members.some((m) => m.email.toLowerCase() === action.assignee && can(m.role, "orders"));
+    if (!eligible) return each(emails, "failed", `${action.assignee} can no longer be responsible for deals in this store.`);
+  }
+  const stage = action.do === "deal" ? stages.find((s) => s.id === action.stage) : undefined;
+  if (action.do === "deal" && !stage) return each(emails, "failed", "The deal stage was removed from your board.");
+  // A deal step works in the pipeline of its stage: their open deal there moves, and another pipeline's deal is left as it is.
+  const inPipeline = stage ? new Set(pipelineOf(pipelines, stage.id)?.stages.map((s) => s.id) ?? []) : null;
+  const out: Acted[] = [];
+  const isOpen = (d: Deal | null, email: string): d is Deal => Boolean(d && d.email === email && (!inPipeline || inPipeline.has(d.stage)) && stages.find((s) => s.id === d.stage)?.kind === "open");
+  for (const email of emails) {
+    // Their open deal moves; with none open, a new one is made for them.
+    let open: Deal | undefined = deals.find((d) => isOpen(d, email));
+    // Read again just before it is written, and written only over that exact record (writeDealOver): a deal the creator
+    // moved, changed or deleted on the board while this batch ran is never overwritten with the copy read for the batch.
+    let before: string | null = null;
+    if (open) {
+      let fresh: Awaited<ReturnType<typeof readDealExact>>;
+      try {
+        fresh = await readDealExact(statsId, open.id, stages);
+      } catch {
+        out.push({ email, state: "deferred", note: "Your deals board could not be read; tried again in a few minutes.", wait: "board" });
+        continue;
+      }
+      if (!isOpen(fresh.deal, email) || fresh.raw === null) {
+        out.push({ email, state: "failed", note: CHANGED_ON_BOARD });
+        continue;
+      }
+      open = fresh.deal;
+      before = fresh.raw;
+    }
+    // A share decided on a lock that ran out could be decided twice: the rest wait for the next run.
+    if (held && !(await holdLock(held).catch(() => false))) {
+      out.push({ email, state: "deferred", note: "Deals are being shared on your team right now; tried again in a few minutes.", wait: "board" });
+      continue;
+    }
+    let deal: Deal;
+    if (action.do === "rotate") {
+      if (!open) {
+        out.push({ email, state: "failed", note: "They have no open deal to give to someone on your team." });
+        continue;
+      }
+      if (open.assignee && load.has(open.assignee)) {
+        out.push({ email, state: "confirmed", note: `${open.assignee} was already responsible for their deal.` });
+        continue;
+      }
+      const [who] = [...load.entries()].sort((a, b) => a[1] - b[1])[0];
+      deal = { ...open, assignee: who, updatedAt: now };
+    } else if (action.do === "next") {
+      if (!open) {
+        out.push({ email, state: "failed", note: "They have no open deal to set a next action on." });
+        continue;
+      }
+      // The due date as the deals board keeps it: a day, counted in UTC from when the step runs.
+      const dueDate = new Date((now + action.days * 86_400) * 1000).toISOString().slice(0, 10);
+      if (open.nextAction === action.text && open.dueDate === dueDate) {
+        out.push({ email, state: "confirmed", note: "Their deal already had this next action and due date." });
+        continue;
+      }
+      deal = { ...open, nextAction: action.text, dueDate, updatedAt: now };
+    } else if (action.do === "assign") {
+      if (!open) {
+        out.push({ email, state: "failed", note: "They have no open deal to make someone responsible for." });
+        continue;
+      }
+      if ((open.assignee ?? "") === action.assignee) {
+        out.push({ email, state: "confirmed", note: `${action.assignee} was already responsible for their deal.` });
+        continue;
+      }
+      deal = { ...open, assignee: action.assignee, updatedAt: now };
+    } else {
+      if (open && open.stage === stage!.id) {
+        out.push({ email, state: "confirmed", note: `Their deal was already in “${stage!.name}”.` });
+        continue;
+      }
+      deal = open
+        ? { ...open, stage: stage!.id, updatedAt: now }
+        : { id: newCrmId(10), title: (action.title || at.flow.name).slice(0, 90), email, cents: 0, stage: stage!.id, note: `Made by the sequence “${at.flow.name}”.`.slice(0, 500), createdAt: now, updatedAt: now };
+    }
+    try {
+      const outcome = before === null ? ((await writeDeal(statsId, deal, store)) ? "saved" : "full") : await writeDealOver(statsId, deal, before, store);
+      if (outcome === "changed") {
+        out.push({ email, state: "failed", note: CHANGED_ON_BOARD });
+        continue;
+      }
+      const written = outcome === "saved";
+      // Counted only once written, so a deal not written leaves the share as it was.
+      if (written && action.do === "rotate" && deal.assignee) load.set(deal.assignee, (load.get(deal.assignee) ?? 0) + 1);
+      out.push(written ? { email, state: "confirmed", changed: true, note: action.do === "rotate" ? (load.size === 1 ? `${deal.assignee} is now responsible for their deal: nobody else on your team can be responsible for deals.` : `${deal.assignee} is now responsible for their deal, as the one on your team with the fewest open deals.`) : action.do === "next" ? `Next action on their deal: “${action.text}”, due ${deal.dueDate}.` : action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
+    } catch (error) {
+      if (error instanceof DataRoomError) {
+        out.push({ email, state: "failed", note: "The deal was not written: the store's data room is full." });
+        continue;
+      }
+      // Not known whether it was written: counted, so the share leans away from them rather than onto them.
+      if (!(error instanceof CrmDealReadUnavailable) && action.do === "rotate" && deal.assignee) load.set(deal.assignee, (load.get(deal.assignee) ?? 0) + 1);
+      out.push(error instanceof CrmDealReadUnavailable ? { email, state: "deferred", note: "Your deals board could not be read; tried again in a few minutes.", wait: "board" } : { email, state: "uncertain", note: "Whether the deal was saved could not be confirmed." });
+    }
+  }
+  // A deal a step moves starts no workflow of its stage (lib/deal-stage-trigger.ts): a step that starts another workflow does that, priced as its own step.
+  return out;
 }
 
 /**
@@ -847,6 +1025,14 @@ export async function resolveHeldRun(store: Store, flowId: string, person: strin
 }
 
 /**
+ * A wait for someone taken out by another workflow meanwhile (act, "stop") ends their run at this step, as "ended",
+ * written over the stop's own note; never left "waiting" with nothing queued. Pure, so it is tested on its own.
+ */
+export function endedIfTakenOut(outcomes: Settled[], stay: ReadonlySet<string>): Settled[] {
+  return outcomes.map((o) => (stay.has(o.email) ? o : { ...o, status: "ended" as const, to: -1, note: "Taken out by another workflow before this step was done, so the run ended here." }));
+}
+
+/**
  * Sends every step that is due, and lines up the next one. For the scheduled
  * job. Everyone due for the same email of the same sequence goes in one batch.
  */
@@ -885,20 +1071,27 @@ export async function sendDueSteps(
     });
 
     for (const [group, emails] of groups) {
-      const release = [["ZREM", LEASE, ...emails.map((email) => `${group}|${email}`)]];
+      // Back in the queue for a later run, but only for whoever still holds this step's lease entry: a stop step of
+      // another workflow, done earlier in this batch, removes it (act, "stop"), and that run stays ended. As with the
+      // orphans above, whoever removes the lease entry is the one who puts it back.
+      const putBack = async (at: number) => {
+        const back = await redisPipeline(emails.map((email) => ["ZREM", LEASE, `${group}|${email}`]));
+        const held = emails.filter((_, i) => Number(back[i]) === 1);
+        if (held.length) await redisPipeline(held.map((email) => ["ZADD", QUEUE, at, `${group}|${email}`]));
+      };
       if (Date.now() > deadline) {
         // Out of time: back in the queue for the next run, untouched.
-        await redisPipeline([...emails.map((email) => ["ZADD", QUEUE, now, `${group}|${email}`]), ...release]);
+        await putBack(now);
         continue;
       }
       try {
         await sendGroup(group, emails);
-        await redisPipeline(release);
+        await redisPipeline([["ZREM", LEASE, ...emails.map((email) => `${group}|${email}`)]]);
       } catch (error) {
         // Put back for a later run rather than lost; the send's own key keeps
         // anybody it already reached from getting it twice.
         console.error("sending a sequence step failed", error);
-        await redisPipeline([...emails.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]), ...release]).catch(() => {});
+        await putBack(now + 600).catch(() => {});
       }
     }
   }
@@ -908,6 +1101,24 @@ export async function sendDueSteps(
     const now = Math.floor(Date.now() / 1000);
     const [listId, handle, flowId, stepRaw] = group.split("|");
     const index = Number(stepRaw);
+    // A stop step of another workflow takes someone out of this one by removing this step's lease entry (act,
+    // "stop"). Every attempt queued from here goes through QUEUE_IF_LEASED, so a run taken out is never queued again,
+    // however late the stop lands. The commands are ZADDs of QUEUE: [ZADD, QUEUE, score, member].
+    const personIn = (command: (string | number)[]) => String(command[3]).split("|").slice(4).join("|");
+    const queueHeld = async (commands: (string | number)[][], extra: (string | number)[][] = []): Promise<Set<string>> => {
+      const out = new Set<string>();
+      if (!commands.length && !extra.length) return out;
+      const sent = [...commands.map((c) => ["EVAL", QUEUE_IF_LEASED, 2, LEASE, QUEUE, `${group}|${personIn(c)}`, c[2], String(c[3])]), ...extra];
+      const reply = await redisPipeline(sent);
+      if (!Array.isArray(reply) || reply.length !== sent.length) throw new FlowWriteUnconfirmed();
+      commands.forEach((c, i) => {
+        const answer = Number(reply[i]);
+        if (answer === 0) out.add(personIn(c));
+        else if (answer !== 1) throw new FlowWriteUnconfirmed();
+      });
+      // Who was taken out: nothing was queued for them.
+      return out;
+    };
     if (!stores.has(handle)) stores.set(handle, await load(handle));
     const store = stores.get(handle);
     if (!store || store.listId !== listId) {
@@ -926,8 +1137,13 @@ export async function sendDueSteps(
       }
       return;
     }
-    const [rows] = await redisPipeline([["HMGET", leadsKey(listId), ...emails]]);
+    // With the rows, who still holds this step's lease entry. Taken out by another workflow's step since this batch was
+    // taken (act, "stop"): the stop wrote the run's end, so nothing is queued, noted or attempted for them, whatever
+    // the step's condition says.
+    const [rows, ...scores] = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
     const found = Array.isArray(rows) ? rows : [];
+    const held = new Set(emails.filter((_, i) => scores[i] !== null && scores[i] !== undefined));
+    counts.dropped += emails.length - held.size;
     // Who is still on the list, and of them, who has reached the sequence's
     // end and who this step is not for (lib/flow-rules.ts) — read from the
     // same rows, so a condition costs no read of its own.
@@ -946,6 +1162,7 @@ export async function sendDueSteps(
     let done = 0;
     let left = 0;
     emails.forEach((email, i) => {
+      if (!held.has(email)) return;
       const contact = parseContact(found[i]);
       if (!contact || !mailable(contact)) {
         counts.dropped += 1;
@@ -973,21 +1190,25 @@ export async function sendDueSteps(
     // Skipped: on to where the condition sends them, its wait counted from
     // now, as if this step had been done.
     const moved: (string | number)[][] = onward.map(({ email, to }) => ["ZADD", QUEUE, now + flow.steps[to].delayHours * 3600, `${listId}|${handle}|${flowId}|${to}|${email}`]);
-    if (done) moved.push(["HINCRBY", statsKey(flow.id), "reached", done]);
-    if (left + onward.length) moved.push(["HINCRBY", statsKey(flow.id), "skipped", left + onward.length]);
-    if (moved.length) await redisPipeline(moved);
-    await noteRuns(flow.id, notes, now).catch((error) => console.error("writing workflow history failed", error));
+    const tallies: (string | number)[][] = [];
+    if (done) tallies.push(["HINCRBY", statsKey(flow.id), "reached", done]);
+    if (left + onward.length) tallies.push(["HINCRBY", statsKey(flow.id), "skipped", left + onward.length]);
+    const skippedOut = await queueHeld(moved, tallies);
+    counts.dropped += skippedOut.size;
+    await noteRuns(flow.id, notes.filter((n) => !skippedOut.has(n.email)), now).catch((error) => console.error("writing workflow history failed", error));
     if (!still.length) return;
+    const mine = still;
 
     // The attempt is written down before anything is done (lib/flow-runs.ts).
     // Whoever already has an attempt open here is held, never tried again.
     let claim: { claimed: string[]; open: string[] };
     try {
-      claim = await claimAttempts(flow.id, still, index, step.id, kind, now);
+      claim = await claimAttempts(flow.id, mine, index, step.id, kind, now);
     } catch {
-      // Nothing was attempted: back in the queue, as before history existed.
-      await redisPipeline(still.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]));
-      counts.later += still.length;
+      // Nothing was attempted: back in the queue, as before history existed, unless taken out meanwhile.
+      const out = await queueHeld(mine.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]));
+      counts.later += mine.length - out.size;
+      counts.dropped += out.size;
       return;
     }
     if (claim.open.length) {
@@ -998,7 +1219,8 @@ export async function sendDueSteps(
     const to = afterIndex(flow.steps, index);
     const queueNext = (people: string[]): (string | number)[][] =>
       to < 0 ? [] : people.map((email) => ["ZADD", QUEUE, now + flow.steps[to].delayHours * 3600, `${listId}|${handle}|${flowId}|${to}|${email}`]);
-    const settled = (people: Acted[]): Settled[] => people.map((p) => ({ ...p, to: p.state === "deferred" ? index : to }));
+    const settled = (people: Acted[], stay: Set<string>): Settled[] =>
+      people.map((p) => (stay.has(p.email) || p.state === "deferred" ? { ...p, to: p.state === "deferred" ? index : to } : { ...p, to: -1, status: "ended" as const, note: `${p.note} Taken out by another workflow, so nothing after this step is sent.` }));
     // The next step is queued before the attempt is cleared. If clearing then
     // fails, the attempt stays open and the next step holds the run rather
     // than letting anything happen twice; if queueing fails, the run is held here.
@@ -1015,11 +1237,10 @@ export async function sendDueSteps(
         // A failed action is written down and the run goes on: one missing deal does not stop the emails after it.
         const onwards = all.filter((o) => o.state === "confirmed" || o.state === "failed").map((o) => o.email);
         const waiting = await waitOrStop(flow.id, group, index, all.filter((o) => o.state === "deferred").map((o) => ({ email: o.email, reason: o.wait ?? "retry", note: o.note })), now);
-        const after: (string | number)[][] = [...queueNext(onwards), ...waiting.queue];
-        if (confirmed.length) after.push(["HINCRBY", statsKey(flow.id), "acted", confirmed.length]);
-        if (after.length) await redisPipeline(after);
+        const out = await queueHeld([...queueNext(onwards), ...waiting.queue], confirmed.length ? [["HINCRBY", statsKey(flow.id), "acted", confirmed.length]] : []);
+        const stay = new Set(going.filter((email) => !out.has(email)));
         queued = true;
-        await settleAttempts(listId, flow.id, index, step.id, kind, [...settled(all.filter((o) => o.state !== "deferred")), ...waiting.outcomes], now);
+        await settleAttempts(listId, flow.id, index, step.id, kind, [...settled(all.filter((o) => o.state !== "deferred"), stay), ...endedIfTakenOut(waiting.outcomes, stay)], now);
         return;
       }
 
@@ -1031,16 +1252,15 @@ export async function sendDueSteps(
         return;
       }
       const uncertain = new Set(result.uncertain ?? []);
-      const outcomes: Settled[] = [
-        ...result.done.map((email) => ({ email, state: "confirmed" as const, note: "Handed to the sender.", to })),
-        ...[...uncertain].map((email) => ({ email, state: "uncertain" as const, note: "The sender's answer was lost: this email may or may not have gone out, so it is not sent again by itself.", to: index })),
-      ];
       const rest = result.rest.filter((email) => !uncertain.has(email));
-      const commands: (string | number)[][] = [];
+      const refused: Settled[] = [];
+      let waiting: { queue: (string | number)[][]; outcomes: Settled[] } | null = null;
+      const onQueue: (string | number)[][] = [];
+      const tallies: (string | number)[][] = [];
       if (rest.length) {
         if (result.stopped === "refused") {
           counts.dropped += rest.length;
-          outcomes.push(...rest.map((email) => ({ email, state: "failed" as const, note: "The sender refused this email as it is, so the run ended.", to: -1, status: "failed" as const })));
+          refused.push(...rest.map((email) => ({ email, state: "failed" as const, note: "The sender refused this email as it is, so the run ended.", to: -1, status: "failed" as const })));
         } else {
           // Tried again later rather than lost: when the month turns, at the next day, at the pause's end, or after
           // a growing delay; and at most MAX_WAITS_PER_RUN times a run (lib/flow-retry.ts).
@@ -1048,18 +1268,33 @@ export async function sendDueSteps(
           const why =
             result.stopped === "allowance" ? "Waiting: this month's emails ran out. It goes out when the month turns." : result.stopped === "day" || result.stopped === "portion" || result.stopped === "sender" ? "Waiting for room to send; it goes out by itself." : result.stopped === "paused" ? "Waiting: email to your list is paused for now." : "Waiting to be tried again later; it was not sent.";
           const window = allowanceWindow(store, now * 1000);
-          const waiting = await waitOrStop(flow.id, group, index, rest.map((email) => ({ email, reason, note: why })), now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null });
-          commands.push(...waiting.queue);
-          outcomes.push(...waiting.outcomes);
-          counts.later += waiting.queue.length;
-          counts.dropped += waiting.outcomes.length - waiting.queue.length;
+          waiting = await waitOrStop(flow.id, group, index, rest.map((email) => ({ email, reason, note: why })), now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null });
+          onQueue.push(...waiting.queue);
         }
       }
       if (result.done.length) {
         counts.sent += result.done.length;
-        commands.push(["HINCRBY", statsKey(flow.id), "sent", result.done.length], ...queueNext(result.done));
+        tallies.push(["HINCRBY", statsKey(flow.id), "sent", result.done.length]);
+        onQueue.push(...queueNext(result.done));
       }
-      if (commands.length) await redisPipeline(commands);
+      // Queued only for whoever is still in this run: a stop that landed meanwhile took them out.
+      const out = await queueHeld(onQueue, tallies);
+      const stay = new Set(going.filter((email) => !out.has(email)));
+      const outcomes: Settled[] = [
+        ...result.done.map((email) =>
+          stay.has(email)
+            ? { email, state: "confirmed" as const, note: "Handed to the sender.", to }
+            : { email, state: "confirmed" as const, note: "Handed to the sender. Taken out by another workflow, so nothing after this step is sent.", to: -1, status: "ended" as const },
+        ),
+        ...[...uncertain].map((email) => ({ email, state: "uncertain" as const, note: "The sender's answer was lost: this email may or may not have gone out, so it is not sent again by itself.", to: index })),
+        ...refused,
+      ];
+      if (waiting) {
+        const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
+        outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));
+        counts.later += later;
+        counts.dropped += waiting.outcomes.length - later;
+      }
       queued = true;
       await settleAttempts(listId, flow.id, index, step.id, kind, outcomes, now);
     } catch (error) {

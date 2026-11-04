@@ -1062,6 +1062,10 @@ export async function slotsForMove(
 ): Promise<Offer | null> {
   const kept = ownLength(product.call, bookedMs);
   if (kept === "unknown") return null;
+  // The team is read as it is kept, at the call's own length, as moveBooking reads it; only its hosts' times are read at the
+  // length paid for. Read at the paid length, a host stretch shorter than it would drop the whole team, and the page would
+  // fall back to the store's hours, which the move then refuses.
+  const listed = product;
   if (kept !== null) product = { ...product, call: { ...product.call, minutes: kept } };
   try {
     const now = Date.now();
@@ -1069,7 +1073,7 @@ export async function slotsForMove(
     // A team booking moves with the host it has: only their free times are offered. The
     // team as it was saved is used, so a plan that now allows fewer never takes a buyer's move away.
     const own = busy.find((b) => b.session === session && b.hosts && b.claim);
-    const team = own ? await teamForMove(store, product) : null;
+    const team = own ? await teamForMove(store, listed) : null;
     if (team && own && own.hosts && own.claim) {
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true, except: { session, claim: own.claim } });
       return { days: teamMoveDays(product.call, ctx, own.hosts, current, now), left: {}, sessions: [] };
@@ -1489,11 +1493,12 @@ export async function confirmBooking(input: {
   // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
   // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
   // (catchUpBookings, the daily job), which carries it, instead of sending both emails without it.
-  // The deadline promised when paying is read the same way, only when the product has one now (none now, none said).
+  // The deadline promised when paying is read the same way whenever it was not handed, whatever the product says now:
+  // a deadline the creator turned off after the sale is still the promise the buyer paid under (lib/call-setup.ts, readCancelPromise).
   let due = input.due;
   let cancel = input.cancel;
   const needDue = due === undefined && whereOf(product.call).kind === "place";
-  const needCancel = cancel === undefined && Boolean(product.call.cancelHours);
+  const needCancel = cancel === undefined;
   if (needDue || needCancel) {
     try {
       const sale = await paidCall(store, session);

@@ -12,6 +12,10 @@ import { HIDDEN_RULE, OVERVIEW_READ_MAX, type StudioRow, averageText, reviewsSin
 import { OVERVIEW_MONTHS, byMonth, monthAverage, monthStart } from "@/lib/review-overview";
 import { ReviewAskEditor, ReviewRow, SeenAllButton, type StudioReview } from "@/components/review-studio";
 import { ReviewQr } from "@/components/review-qr";
+import { ReviewThemes } from "@/components/review-themes";
+import { ReviewAiSummaries } from "@/components/review-ai-summaries";
+import { readReviewSummaries } from "@/lib/review-ai-summary";
+import { readVoice } from "@/lib/customer-voice";
 import { canRecover } from "@/lib/buyer-orders";
 import { storeBase } from "@/lib/purchase-email";
 import { AiOn } from "@/components/ai-assist";
@@ -85,6 +89,11 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   }));
   const pages = Math.max(1, Math.ceil(current.total / PAGE_SIZE));
   const reviewed = named.filter((p) => (numbers.get(p.id)?.visible ?? 0) + (numbers.get(p.id)?.hidden ?? 0) > 0);
+  // Each reviewed product's AI summary kept this week (636 [GL4](d)): read only, nothing made by opening the page,
+  // every product's in one request.
+  const summed = reviewed.slice(0, 30);
+  const keptSummaries = await readReviewSummaries(store.statsId, summed.map((p) => p.id)).catch(() => new Map<string, never>());
+  const aiSummaries = summed.map((p) => ({ id: p.id, title: p.title, reviews: numbers.get(p.id)?.visible ?? 0, summary: keptSummaries.get(p.id)?.summary ?? null, lastAt: keptSummaries.get(p.id)?.lastAt ?? 0 }));
   const tab = (view: "new" | "all", label: string) => (
     <Link
       href={studioPath(store, view === "new" ? "" : "view=all", "reviews")}
@@ -111,7 +120,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
         <p className="eyebrow">Reviews</p>
         <h1 className="t-h2 mt-3">What your buyers say</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
-          Only people who paid can review, from their thank-you page, their list of purchases or the one email that asks. Each
+          Only people who paid can review, from their thank-you page, their list of purchases or the email that asks. Each
           review is checked against its order with Stripe and keeps that order, so you can find the payment behind it. Reviews
           go on your product&apos;s page and store card as they arrive; a refund in full takes a review&apos;s stars out of
           the average.
@@ -274,16 +283,20 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
               )}
             </section>
 
+            <ReviewThemes voice={await readVoice(store).catch(() => null)} studioHome={studioPath(store)} />
+
+            <ReviewAiSummaries products={aiSummaries} now={Math.floor(now / 1000)} />
+
             <div className="card p-5 sm:p-6">
               <h2 id="asking-for-reviews" tabIndex={-1} className="font-semibold text-ink">Asking for reviews</h2>
               <div className="mt-3">
                 {/* The email is a store setting (lib/team-roles.ts): the owner and Admins switch it. */}
                 {can(view.role, "settings") ? (
-                  <ReviewAskEditor days={store.reviewAsk.days} canEmail={canWrite(store)} elsewhere={store.reviewAsk.elsewhere?.url ?? ""} />
+                  <ReviewAskEditor days={store.reviewAsk.days} canEmail={canWrite(store)} elsewhere={store.reviewAsk.elsewhere?.url ?? ""} again={store.reviewAsk.again ?? 0} />
                 ) : (
                   <p className="text-sm text-ink-soft">
                     {store.reviewAsk.days > 0
-                      ? `Buyers are emailed once, ${store.reviewAsk.days} days after buying, to ask for a review. The store's owner or an Admin changes this.`
+                      ? `Buyers are emailed ${store.reviewAsk.days} days after buying to ask for a review${store.reviewAsk.again ? `, with one reminder ${store.reviewAsk.again} days later if they have not reviewed` : ", once"}. The store's owner or an Admin changes this.`
                       : "Buyers are not emailed to ask for a review. The store's owner or an Admin can switch it on."}
                   </p>
                 )}

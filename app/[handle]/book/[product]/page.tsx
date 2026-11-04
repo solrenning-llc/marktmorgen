@@ -25,7 +25,7 @@ import { type SessionChoice, SessionPicker, type SessionWords } from "@/componen
 import { StoreTracking } from "@/components/store-tracking";
 import { readListing } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
-import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
+import { type BookingWords, bookingNotice, bookingWords } from "@/lib/buyer-words/booking";
 import { NewTab } from "@/components/new-tab";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
 
@@ -70,7 +70,6 @@ export default async function BookPage({ params, searchParams }: Params) {
 
   const { w, money, lang } = speech(store);
   const b = bookingWords(store.language);
-  const notice = b.notices[status] ?? null;
   // Booking from a package (lib/call-packages.ts): how many are left, said up top.
   const pkgToken = typeof query.pkg === "string" ? query.pkg : "";
   const found = pkgToken ? await boughtByToken(pkgToken) : null;
@@ -101,6 +100,8 @@ export default async function BookPage({ params, searchParams }: Params) {
     return `?${next.toString()}#times`;
   };
   const chosen = choices.length ? askedLength ?? choices[0] : null;
+  // A length taken off meanwhile asks for a length again only while the page still offers several (bookingNotice).
+  const notice = bookingNotice(b, status, choices, product.call.minutes);
   const pickedHost = (read && "picked" in read ? read.picked : null) ?? null;
   const days = read ? read.days : null;
   const starts = days ? days.flatMap((day) => day.starts) : [];
@@ -205,7 +206,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                           <a
                             href={lengthHref(l.minutes)}
                             aria-current={l.minutes === chosen.minutes ? "true" : undefined}
-                            className={`btn ${l.minutes === chosen.minutes ? "btn-primary" : "btn-secondary"} w-full justify-start`}
+                            className={`btn ${l.minutes === chosen.minutes ? "st-btn" : "st-btn-ghost"} w-full justify-start`}
                           >
                             {b.lengthOption(l.minutes, money(l.cents))}
                           </a>
@@ -227,7 +228,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                           <option key={h.key} value={h.key}>{h.label}</option>
                         ))}
                       </select>
-                      <button type="submit" className="btn btn-secondary">{b.hostShow}</button>
+                      <button type="submit" className="btn st-btn-ghost">{b.hostShow}</button>
                     </div>
                     {pickedHost ? <p className="mt-2 text-sm" role="status">{b.withHost(pickedHost.label)}</p> : null}
                   </form>

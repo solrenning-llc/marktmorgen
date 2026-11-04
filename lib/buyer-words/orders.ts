@@ -51,6 +51,10 @@ const en = {
       title: "This link has expired",
       body: "A link to your purchases works for 24 hours. Ask for a new one below; it takes a few seconds.",
     },
+    busy: {
+      title: "This store can't show your purchases right now",
+      body: "What you bought is kept. Try again later. If your link has expired by then, ask for a new one below.",
+    },
   } as Record<string, { title: string; body: string }>,
 
   // ---- Asking for the link -------------------------------------------------------
@@ -70,6 +74,13 @@ const en = {
 
   // ---- The list of purchases -------------------------------------------------------
   bookedCalls: (count: number): string => (count === 1 ? "Your booking" : "Your bookings"),
+  /** What the store waits on from them: payment requests and agreements still open (lib/buyer-waiting.ts). */
+  waiting: "Waiting for you",
+  waitingMore: (n: number) => `And ${n} more. Open the email each one came in to see it.`,
+  waitingUnread: "What is waiting for you could not be read just now. Try this page again in a moment.",
+  /** Each link names what it opens, so two of them never read the same (WCAG 2.4.9). `due` is a date already said, or "". */
+  openRequest: (amount: string, due: string): string => (due ? `Open the ${amount} payment request due ${due}` : `Open the ${amount} payment request`),
+  openToSign: (title: string): string => `Read and sign “${title}”`,
   nothingToOpen: (store: string) =>
     `There is nothing to open here anymore. A purchase that was refunded in full is no longer listed. If something is missing, reply to the order confirmation you were emailed when you paid, and it reaches ${store}.`,
   everythingSold: (store: string) =>
@@ -287,6 +298,10 @@ const es: OrdersWords = {
       title: "Este enlace ha caducado",
       body: "Un enlace a tus compras funciona durante 24 horas. Pide uno nuevo abajo; tarda unos segundos.",
     },
+    busy: {
+      title: "Esta tienda no puede mostrar tus compras ahora mismo",
+      body: "Lo que compraste se conserva. Vuelve a intentarlo más tarde. Si para entonces tu enlace ha caducado, pide uno nuevo abajo.",
+    },
   },
 
   getAgainTitle: "Vuelve a obtener lo que compraste",
@@ -304,6 +319,11 @@ const es: OrdersWords = {
   nothingArrived: "¿No te llegó nada? Puede que hayas pagado con otra dirección: la que escribiste al pagar. Prueba con esa abajo.",
 
   bookedCalls: (count) => (count === 1 ? "Tu reserva" : "Tus reservas"),
+  waiting: "Te espera",
+  waitingMore: (n) => `Y ${n} más. Abre el correo con el que llegó cada uno para verlo.`,
+  waitingUnread: "No pudimos leer ahora lo que te espera. Vuelve a abrir esta página en un momento.",
+  openRequest: (amount, due) => (due ? `Abrir la solicitud de pago de ${amount} con vencimiento el ${due}` : `Abrir la solicitud de pago de ${amount}`),
+  openToSign: (title) => `Leer y firmar «${title}»`,
   nothingToOpen: (store) =>
     `Aquí ya no hay nada que abrir. Una compra reembolsada por completo deja de aparecer. Si falta algo, responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
   everythingSold: (store) =>
@@ -497,6 +517,10 @@ const fr: OrdersWords = {
       title: "Ce lien a expiré",
       body: `Un lien vers vos achats est valable 24${S}heures. Demandez-en un nouveau ci-dessous${S}; cela ne prend que quelques secondes.`,
     },
+    busy: {
+      title: "Cette boutique ne peut pas afficher vos achats pour le moment",
+      body: "Ce que vous avez acheté est conservé. Réessayez plus tard. Si votre lien a expiré d'ici là, demandez-en un nouveau ci-dessous.",
+    },
   },
 
   getAgainTitle: "Récupérez ce que vous avez acheté",
@@ -514,6 +538,11 @@ const fr: OrdersWords = {
   nothingArrived: `Rien reçu${S}? Vous avez peut-être payé avec une autre adresse${S}: celle saisie lors du paiement. Essayez-la ci-dessous.`,
 
   bookedCalls: (count) => (count < 2 ? "Votre réservation" : "Vos réservations"),
+  waiting: "Ce qui vous attend",
+  waitingMore: (n) => `Et ${n} de plus. Ouvrez l’e-mail par lequel chacun est arrivé pour le voir.`,
+  waitingUnread: "Ce qui vous attend n’a pas pu être lu pour le moment. Rouvrez cette page dans un instant.",
+  openRequest: (amount, due) => (due ? `Ouvrir la demande de paiement de ${amount} à régler le ${due}` : `Ouvrir la demande de paiement de ${amount}`),
+  openToSign: (title) => `Lire et signer «${S}${title}${S}»`,
   nothingToOpen: (store) =>
     `Il n'y a plus rien à ouvrir ici. Un achat remboursé en totalité n'apparaît plus. S'il manque quelque chose, répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
   everythingSold: (store) =>
@@ -705,6 +734,10 @@ const de: OrdersWords = {
       title: "Dieser Link ist abgelaufen",
       body: "Ein Link zu Ihren Käufen gilt 24 Stunden. Fordern Sie unten einen neuen an; das dauert nur ein paar Sekunden.",
     },
+    busy: {
+      title: "Dieser Shop kann Ihre Käufe gerade nicht anzeigen",
+      body: "Was Sie gekauft haben, bleibt erhalten. Versuchen Sie es später noch einmal. Wenn Ihr Link bis dahin abgelaufen ist, fordern Sie unten einen neuen an.",
+    },
   },
 
   getAgainTitle: "Ihre Käufe erneut abrufen",
@@ -722,6 +755,11 @@ const de: OrdersWords = {
   nothingArrived: "Nichts angekommen? Vielleicht haben Sie mit einer anderen Adresse bezahlt: der, die Sie beim Bezahlen eingegeben haben. Versuchen Sie es unten mit dieser.",
 
   bookedCalls: (count) => (count === 1 ? "Ihre Buchung" : "Ihre Buchungen"),
+  waiting: "Wartet auf Sie",
+  waitingMore: (n) => `Und ${n} weitere. Öffnen Sie die E-Mail, mit der jeweils eines kam, um es zu sehen.`,
+  waitingUnread: "Was auf Sie wartet, konnte gerade nicht gelesen werden. Öffnen Sie diese Seite gleich noch einmal.",
+  openRequest: (amount, due) => (due ? `Zahlungsanfrage über ${amount}, fällig am ${due}, öffnen` : `Zahlungsanfrage über ${amount} öffnen`),
+  openToSign: (title) => `„${title}“ lesen und unterschreiben`,
   nothingToOpen: (store) =>
     `Hier gibt es nichts mehr zu öffnen. Ein vollständig erstatteter Kauf wird nicht mehr aufgeführt. Wenn etwas fehlt, antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
   everythingSold: (store) =>
@@ -918,6 +956,10 @@ const it: OrdersWords = {
       title: "Questo link è scaduto",
       body: "Un link ai tuoi acquisti funziona per 24 ore. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
     },
+    busy: {
+      title: "Questo negozio non può mostrare i tuoi acquisti in questo momento",
+      body: "Ciò che hai acquistato è conservato. Riprova più tardi. Se nel frattempo il tuo link è scaduto, chiedine uno nuovo qui sotto.",
+    },
   },
 
   getAgainTitle: "Recupera ciò che hai acquistato",
@@ -935,6 +977,11 @@ const it: OrdersWords = {
   nothingArrived: "Non è arrivato nulla? Forse hai pagato con un altro indirizzo: quello che hai inserito al momento del pagamento. Prova con quello qui sotto.",
 
   bookedCalls: (count) => (count === 1 ? "La tua prenotazione" : "Le tue prenotazioni"),
+  waiting: "Ti aspetta",
+  waitingMore: (n) => `E altri ${n}. Apri l’email con cui è arrivato ciascuno per vederlo.`,
+  waitingUnread: "Non è stato possibile leggere ora cosa ti aspetta. Riapri questa pagina tra un momento.",
+  openRequest: (amount, due) => (due ? `Apri la richiesta di pagamento di ${amount} con scadenza ${due}` : `Apri la richiesta di pagamento di ${amount}`),
+  openToSign: (title) => `Leggi e firma «${title}»`,
   nothingToOpen: (store) =>
     `Qui non c'è più nulla da aprire. Un acquisto rimborsato per intero non compare più. Se manca qualcosa, rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
   everythingSold: (store) =>
@@ -1127,6 +1174,10 @@ const nl: OrdersWords = {
       title: "Deze link is verlopen",
       body: "Een link naar je aankopen werkt 24 uur. Vraag hieronder een nieuwe aan; dat duurt maar een paar seconden.",
     },
+    busy: {
+      title: "Deze winkel kan je aankopen nu niet tonen",
+      body: "Wat je hebt gekocht, blijft bewaard. Probeer het later opnieuw. Is je link tegen die tijd verlopen, vraag dan hieronder een nieuwe aan.",
+    },
   },
 
   getAgainTitle: "Haal je aankopen opnieuw op",
@@ -1144,6 +1195,11 @@ const nl: OrdersWords = {
   nothingArrived: "Niets ontvangen? Misschien heb je met een ander adres betaald: het adres dat je bij het afrekenen hebt ingevuld. Probeer dat hieronder.",
 
   bookedCalls: (count) => (count === 1 ? "Je boeking" : "Je boekingen"),
+  waiting: "Wacht op jou",
+  waitingMore: (n) => `En nog ${n}. Open de e-mail waarmee elk binnenkwam om het te zien.`,
+  waitingUnread: "Wat op je wacht, kon nu niet worden gelezen. Open deze pagina zo meteen opnieuw.",
+  openRequest: (amount, due) => (due ? `Het betaalverzoek van ${amount}, te betalen op ${due}, openen` : `Het betaalverzoek van ${amount} openen`),
+  openToSign: (title) => `‘${title}’ lezen en ondertekenen`,
   nothingToOpen: (store) =>
     `Hier valt niets meer te openen. Een aankoop die volledig is terugbetaald, staat er niet meer bij. Mist er iets, beantwoord dan de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
   everythingSold: (store) =>
@@ -1335,6 +1391,10 @@ const pt: OrdersWords = {
       title: "Esta ligação expirou",
       body: "Uma ligação para as suas compras funciona durante 24 horas. Peça uma nova abaixo; demora apenas alguns segundos.",
     },
+    busy: {
+      title: "Esta loja não pode mostrar as suas compras neste momento",
+      body: "O que comprou fica guardado. Tente novamente mais tarde. Se entretanto a sua ligação expirar, peça uma nova abaixo.",
+    },
   },
 
   getAgainTitle: "Volte a obter o que comprou",
@@ -1352,6 +1412,11 @@ const pt: OrdersWords = {
   nothingArrived: "Não recebeu nada? Talvez tenha pago com outro endereço: o que introduziu no pagamento. Experimente esse abaixo.",
 
   bookedCalls: (count) => (count === 1 ? "A sua marcação" : "As suas marcações"),
+  waiting: "À sua espera",
+  waitingMore: (n) => `E mais ${n}. Abra o email com que cada um chegou para o ver.`,
+  waitingUnread: "Não foi possível ler agora o que está à sua espera. Volte a abrir esta página daqui a pouco.",
+  openRequest: (amount, due) => (due ? `Abrir o pedido de pagamento de ${amount} que vence a ${due}` : `Abrir o pedido de pagamento de ${amount}`),
+  openToSign: (title) => `Ler e assinar «${title}»`,
   nothingToOpen: (store) =>
     `Já não há nada para abrir aqui. Uma compra reembolsada na totalidade deixa de aparecer. Se faltar alguma coisa, responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
   everythingSold: (store) =>

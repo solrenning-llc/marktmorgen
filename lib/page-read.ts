@@ -246,7 +246,8 @@ export async function takeReading(pass: ReadPass, now = Date.now()): Promise<boo
     const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, keep]]);
     const n = Number(count);
     // The first reading past the ceiling marks the window, once: the studio then says it is partial even if the plan grows later.
-    if (n === pass.cap + 1) await redisPipeline([["SET", `${key}:over`, "1", "EX", keep]]).catch(() => undefined);
+    // It keeps the ceiling that was passed, so the studio says how many were counted, not how many came.
+    if (n === pass.cap + 1) await redisPipeline([["SET", `${key}:over`, String(pass.cap), "EX", keep]]).catch((error: unknown) => console.error("marking a window's readings partial failed", error));
     return Number.isSafeInteger(n) && n >= 1 && n <= pass.cap;
   } catch {
     return false;
@@ -274,10 +275,14 @@ export async function readingsPartial(store: WindowFields & { tier?: Tier; stats
     const key = readsKey(statsId, window.id);
     const [both] = await redisPipeline([["MGET", key, `${key}:over`]]);
     const [raw, over] = Array.isArray(both) ? both : [null, null];
+    if (raw === null || raw === undefined) return null;
     const n = Number(raw);
-    // Past the ceiling now, or once this window (the mark stays if the plan grew since).
-    if (!Number.isSafeInteger(n) || (n <= cap && over !== "1")) return null;
-    return { counted: Math.min(n, cap), opens: window.end };
+    const passed = Number(over);
+    // Past the ceiling now, or once this window (the mark keeps the ceiling passed, if the plan grew since).
+    if (!Number.isSafeInteger(n)) return null;
+    if (n > cap) return { counted: cap, opens: window.end };
+    if (Number.isSafeInteger(passed) && passed > 0) return { counted: Math.min(n, passed), opens: window.end };
+    return null;
   } catch {
     return null;
   }

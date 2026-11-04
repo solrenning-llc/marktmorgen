@@ -331,15 +331,22 @@ export function RightNow({ currency }: { currency: string }) {
   // rest of the studio down under a finger or a pointer already on its way (WCAG 2.4.3, 3.2.5). Only the list of where
   // people came from, there when someone is on the store, adds lines.
   const today = live?.today ?? null;
-  const waiting = "…";
+  // Shown as an ellipsis, read as a word.
+  const waiting = (
+    <>
+      <span aria-hidden="true">…</span>
+      <span className="sr-only">Loading</span>
+    </>
+  );
   return (
     <div className="mt-6 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line" aria-live="polite" aria-busy={live === null && !failed}>
-      {rested ? <p className="mb-2 text-xs text-ink-soft">Paused after ten minutes, to save your plan&apos;s studio requests. Reload the page to see it live again.</p> : null}
       <p className="flex items-center gap-2 text-sm font-bold text-ink">
         <span className={`inline-block h-2 w-2 rounded-full ${live?.visitors ? "bg-emerald-500" : "bg-line"}`} aria-hidden="true" />
         {live === null
           ? failed
-            ? "Who is on your store could not be read just now; it is asked again in half a minute"
+            ? rested
+              ? "Who is on your store could not be read; reload the page to try again"
+              : "Who is on your store could not be read just now; it is asked again in half a minute"
             : "Checking who has opened your store in the last 5 minutes"
           : live.visitors === 0
             ? "Nobody has opened your store in the last 5 minutes"
@@ -355,7 +362,12 @@ export function RightNow({ currency }: { currency: string }) {
           ))}
         </ul>
       ) : null}
-      <p className="mt-2 text-xs text-ink-soft">Your store page, each person once, updated every half minute. Nothing about who.</p>
+      {/* One line either way, so the pause never adds one above the rest of the studio. */}
+      <p className="mt-2 text-xs text-ink-soft">
+        {rested
+          ? "Paused after ten minutes, to save your plan's studio requests. Reload the page to see it live again."
+          : "Your store page, each person once, updated every half minute. Nothing about who."}
+      </p>
       <div className="mt-4 border-t border-line pt-3">
         <p className="text-sm font-bold text-ink">Today so far</p>
         <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">

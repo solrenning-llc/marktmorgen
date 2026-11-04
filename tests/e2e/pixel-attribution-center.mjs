@@ -9,7 +9,8 @@ export async function checkPixelAttributionCenter({browser,LOCAL,fixture,axeSour
  is("HT10 central consent visible "+width,(await panel.locator("[data-pixel-consent]").innerText()).includes("Brazil"),true);
  is("HT10 existing channel anchor "+width,await panel.getByRole("link",{name:"Attribution by channel",exact:true}).getAttribute("href"),"#numbers");
  const change=panel.getByRole("button",{name:"Change pixels",exact:true});
- await page.waitForFunction(()=>document.querySelector('section[aria-labelledby="pixels-title"] summary')?.getAttribute("aria-disabled")==="false");
+ // Ready when its fields are: the summary opens without script and is never marked off (inbox C4-35); the fieldset is held until the page is ready.
+ await page.waitForFunction(()=>document.querySelector('section[aria-labelledby="pixels-title"] fieldset')?.disabled===false);
  await change.focus();await page.keyboard.press("Enter");
  is("HT10 keyboard disclosure opens "+width,await panel.locator("details").evaluate(node=>node.open),true);
  const meta=panel.getByRole("textbox",{name:"Meta Pixel ID",exact:true});await meta.fill("999999999999999");

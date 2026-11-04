@@ -270,14 +270,16 @@ export const SIGN_IN_NOTES = [
  * Said under the list when it holds a locked session: everything such a
  * session is held back from, and that the rest is open to it. The
  * test holds it against lib/two-step.ts LOCKED_NEEDS (the studio's
- * permissions, lib/studio-route.ts) and against every route that refuses a
+ * permissions, lib/studio-route.ts), LOCKED_ACTIONS (each deleting action of
+ * an open permission) and against every route that refuses a
  * locked session on its own (app/api/auth/signout-all, passkey, two-step,
  * recovery-address, app/api/store/address), so it never claims less or more.
  */
 export const LOCKED_NOTE = [
   "A locked session got in without two-step login, so some things wait until its lock ends.",
   "It cannot change your plan, your Stripe connection, your team or your store settings.",
-  "It cannot delete your store, download or import lists, or send email to your list.",
+  "It cannot delete your store, download or import lists, or send email to your list or your members.",
+  "It cannot delete anything for good, like people, products, lessons, files, forms or posts.",
   'It cannot use "Sign out everywhere", add a passkey or change two-step login.',
   "It cannot change your recovery address or your sign-in address.",
   "Everything else in your studio is open to it.",

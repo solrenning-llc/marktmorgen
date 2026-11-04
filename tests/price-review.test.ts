@@ -7,7 +7,7 @@
  * already joined, which is what the code does.
  */
 import { readFileSync } from "node:fs";
-import { optionPriceReview, priceReview, type PricedProduct, type PriceDraft } from "@/lib/price-review";
+import { optionPriceReview, optionRemovalWords, priceReview, type PricedProduct, type PriceDraft } from "@/lib/price-review";
 import { formatMoney, readMoney } from "@/lib/money";
 import { done, is, part } from "./check";
 
@@ -141,6 +141,31 @@ is("the words the save checks are the route's own", [readFileSync("app/api/store
 part("Change goes to a field the new schedule still has");
 is("a yearly or introductory price a new schedule takes away: Change goes to the schedule", rows(review(withYearly, { price: "9", every: "", yearlyPrice: "90" }))?.filter((r) => r[0] !== "How buyers pay" && r[0] !== "Price").map((r) => r[3]), ["every", "every"]);
 is("a yearly price taken away by a weekly schedule goes to the schedule; the introductory price kept goes to its own", rows(review(withYearly, { price: "9", every: "week", yearlyPrice: "90", introPrice: "1", introCount: "3" }))?.map((r) => r[3]), ["every", "price", "intro", "every"]);
+
+part("Removing a price option");
+type Removal = Partial<{ hasFile: boolean; delivers: boolean; extra: boolean; options: number; interval: "month" | "year" | null; hidden: boolean; missing: "lesson" | "episode" | "delivery" | null; ownDelivery: boolean; introKept: boolean; yearlyKept: boolean; planBefore: boolean; planAfter: boolean }>;
+const removal = (m: Removal = {}) =>
+  optionRemovalWords(
+    { hasFile: m.hasFile ?? false, delivers: m.delivers ?? false, extra: m.extra ?? false },
+    { options: m.options ?? 3, interval: m.interval ?? null, hidden: m.hidden ?? false, ownPriceCents: 2900, missing: m.missing ?? null, ownDelivery: m.ownDelivery ?? false, introKept: m.introKept ?? false, yearlyKept: m.yearlyKept ?? false, planBefore: m.planBefore ?? false, planAfter: m.planAfter ?? false },
+    money,
+  );
+is("one of several handing nothing over (a course's price): nothing else changes", removal(), "Nothing else on the product changes.");
+is("one with its own file: the file goes, and its buyers can no longer get it from their order", removal({ hasFile: true, delivers: true }), "The file on it is deleted with it. Anyone who bought at it can no longer get its file or link from their order.");
+is("the last one, with the product's own file or link: its buyers get that instead, and buyers then pay the product's own price", removal({ delivers: true, options: 1, ownDelivery: true }), "Anyone who bought at it gets the product's own file or link from their order instead. It is the last price, so buyers then pay its own price, $29.");
+is("the last one on a draft, with the introductory or yearly price the checkout would then offer", [removal({ options: 1, hidden: true, introKept: true }), removal({ options: 1, yearlyKept: true })], ["It is the last price, so once published, buyers pay its own price, $29, with its introductory price.", "It is the last price, so buyers then pay its own price, $29, with its yearly price."]);
+is("on a membership, the product's own price said with its period, as buyers see it", [removal({ options: 1, interval: "month" }), removal({ options: 1, interval: "year" })], ["It is the last price, so buyers then pay its own price, $29 a month. Members who joined at it keep being charged what they joined at until they or you cancel.", "It is the last price, so buyers then pay its own price, $29 a year. Members who joined at it keep being charged what they joined at until they or you cancel."]);
+is("the last one, nothing to hand over on its own: said by what it lacks", [removal({ options: 1, missing: "lesson" }), removal({ options: 1, missing: "episode" }), removal({ options: 1, missing: "delivery" })], ["It is the last price, so this cannot be bought until it has a lesson.", "It is the last price, so this cannot be bought until it has an episode.", "It is the last price, so this cannot be bought until it has its own file or link."]);
+is("a course's or podcast's price with an extra file or link: its buyers keep access but lose the extra", [removal({ delivers: true, extra: true }), removal({ hasFile: true, delivers: true, extra: true })], ["Anyone who bought at it keeps access, but can no longer get its extra file or link from their order.", "The file on it is deleted with it. Anyone who bought at it keeps access, but can no longer get its extra file or link from their order."]);
+is("on a membership: members who joined at it keep being charged", removal({ interval: "month" }), "Members who joined at it keep being charged what they joined at until they or you cancel.");
+is("a payment plan that stops, or is offered again", [removal({ planBefore: true }), removal({ planAfter: true }), removal({ planBefore: true, planAfter: true })], ["Your payment plan stops being offered.", "Your payment plan is offered again.", "Nothing else on the product changes."]);
+const sellable = readFileSync("lib/store-checkout.ts", "utf8");
+const removalUi = readFileSync("components/product-editor.tsx", "utf8");
+is("the editor says an option's own file or link, and whether it is an extra on a course or podcast", removalUi.includes("{ hasFile: Boolean(option.file), delivers: Boolean(option.file || option.link), extra: Boolean(product.course || product.podcast) },"), true);
+is("never both an introductory and a yearly price said: the checkout offers one at most", readFileSync("lib/price-review.ts", "utf8").includes("with its introductory and yearly prices"), false);
+const orders = readFileSync("lib/buyer-orders.ts", "utf8");
+const optionsEditor = readFileSync("components/product-editor.tsx", "utf8");
+is("what it says rests on the code: what sells with no option, and an order's delivery read from its option", [sellable.includes("if (product.course) return product.course.lessons > 0;") && sellable.includes("if (product.podcast) return product.podcast.episodes > 0;") && sellable.includes("if (product.options.length > 0) return sellableOptions(product).length > 0;\n  return product.file !== null || product.link !== null;"), optionsEditor.includes('missing: product.course ? (product.course.lessons > 0 ? null : "lesson") : product.podcast ? (product.podcast.episodes > 0 ? null : "episode") : activeShipping(product) || product.file || product.link ? null : "delivery",'), optionsEditor.includes("planAfter: activePlan({ ...product, options: product.options.filter((o) => o.id !== option.id) } as Listing) !== null,"), optionsEditor.includes("introKept: activeIntro({ ...product, options: product.options.filter((o) => o.id !== option.id) }, tiers) !== null,") && optionsEditor.includes("yearlyKept: activeYearly({ ...product, options: product.options.filter((o) => o.id !== option.id) }, tiers) !== null,"), /deliveryOf/.test(orders)], [true, true, true, true, true]);
 
 part("What the member notes rest on");
 const checkout = readFileSync("lib/store-checkout.ts", "utf8");

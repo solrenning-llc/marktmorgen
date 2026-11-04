@@ -23,7 +23,10 @@
  *     v6 (including v4 dressed as v6), is refused, and so is a name with
  *     even one such address among its answers;
  *   - a redirect is a new address and passes the same checks, at most three
- *     times; a POST never follows one;
+ *     times; a POST never follows one; a redirect to another origin (scheme,
+ *     host or port) leaves the caller's credentials behind (sensitiveHeader),
+ *     as browsers do with Authorization, and they stay behind for every hop
+ *     after it;
  *   - the whole exchange has a deadline, and the answer a size cap, counted
  *     as it arrives rather than trusted from the header.
  *
@@ -228,6 +231,22 @@ async function publicAddressFor(host: string, resolve: Resolver): Promise<{ addr
 
 // ---- The request ------------------------------------------------------------
 
+/**
+ * Whether a header carries a credential, so it never follows a redirect to
+ * another origin: Authorization, Proxy-Authorization, Cookie, and any name
+ * holding "token", "secret", "key" or "signature", in any case. Security
+ * audit 506 [SG1], MM-SA-28 (tests/safe-fetch-redirect.test.ts).
+ */
+export function sensitiveHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower === "authorization" || lower === "proxy-authorization" || lower === "cookie" || /token|secret|key|signature/.test(lower);
+}
+
+/** The headers without any credential, for a request to another origin. */
+function withoutCredentials(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => !sensitiveHeader(name)));
+}
+
 /** A lookup that answers with the one address already checked, whatever it is asked. */
 function pinnedLookup(pinned: { address: string; family: number }): LookupFunction {
   return ((_host: string, opts: { all?: boolean }, callback: (...args: unknown[]) => void) => {
@@ -324,9 +343,10 @@ export async function safeFetch(raw: string, options: SafeFetchOptions): Promise
   const deadline = Date.now() + options.timeoutMs;
   const hops = options.method === "POST" ? 0 : options.maxRedirects ?? 3;
   let url = checkUrl(raw);
+  let headers = options.headers;
   for (let hop = 0; ; hop += 1) {
     const pinned = await publicAddressFor(url.hostname.replace(/^\[|\]$/g, ""), resolve);
-    const answer = await once(url, pinned, options, deadline);
+    const answer = await once(url, pinned, { ...options, headers }, deadline);
     if (answer.status >= 300 && answer.status < 400 && answer.headers.location) {
       if (hop >= hops) throw new SafeFetchError("redirect", options.method === "POST" ? "The address answered with a redirect, which is not followed." : "The address redirected too many times.");
       let next: string;
@@ -335,7 +355,11 @@ export async function safeFetch(raw: string, options: SafeFetchOptions): Promise
       } catch {
         throw new SafeFetchError("redirect", "The address redirected somewhere unreadable.");
       }
+      const from = url.origin;
       url = checkUrl(next);
+      // Another origin is somebody else: the caller's credentials stay
+      // behind, and once left they are not picked up again.
+      if (url.origin !== from && headers) headers = withoutCredentials(headers);
       continue;
     }
     return { ...answer, url: url.toString() };

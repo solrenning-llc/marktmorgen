@@ -1,6 +1,6 @@
 "use client";
 
-import { optionPriceReview, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
+import { optionPriceReview, optionRemovalWords, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
 import { isBundle } from "@/lib/bundle-rules";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
 import { PackageEditor } from "@/components/package-editor";
@@ -24,7 +24,7 @@ import type { BumpChoice, ProductPaging } from "@/lib/catalog";
 import { ProductUpdateBox } from "@/components/product-update-box";
 import { ShippingEditor } from "@/components/shipping-editor";
 import { MAX_SHIPPING_SKU } from "@/lib/shipping";
-import { confirmsOptionWrite } from "@/lib/option-confirmation";
+import { confirmsOptionWrite, OPTION_NOT_CONFIRMED, optionRefusalWords } from "@/lib/option-confirmation";
 import { CheckoutFieldsEditor } from "@/components/checkout-fields-editor";
 import { ProductImageEditor } from "@/components/product-image-editor";
 import type { CoverLook } from "@/components/cover-maker";
@@ -60,6 +60,7 @@ import {
   optionDelivers,
 } from "@/lib/product-option";
 import { activePlan } from "@/lib/product-extras";
+import { activeShipping } from "@/lib/shipping";
 import type { Listing } from "@/lib/store";
 import { LINK_PROBLEMS, type LinkProblem, linkHost } from "@/lib/product-link";
 import {
@@ -864,10 +865,13 @@ function OptionsBlock({
   onLink,
   onUnlink,
   taxOnTop,
+  tiers,
 }: {
   product: Product;
   /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
   taxOnTop: boolean;
+  /** The plans members switch between (lib/tier-switch.ts): none offers an introductory or yearly price. */
+  tiers: readonly string[];
   fileBusyId: string | null;
   percent: number;
   fileError: { id: string; message: string } | null;
@@ -924,9 +928,7 @@ function OptionsBlock({
               ? "Give this price a name the buyer will read, like “5 weeks.”"
               : reason === "price"
                 ? optionPrice(currency)
-                : reason && Object.hasOwn(OPTION_MESSAGES, reason)
-                  ? OPTION_MESSAGES[reason]
-                  : "The price change was not confirmed. Reload to check its status before trying again.",
+                : optionRefusalWords(reason, OPTION_MESSAGES),
         );
         return;
       }
@@ -934,7 +936,7 @@ function OptionsBlock({
       if (confirmation) toast(confirmation);
       router.refresh();
     } catch {
-      setError("The price change was not confirmed. Reload to check its status before trying again.");
+      setError(OPTION_NOT_CONFIRMED);
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -1276,9 +1278,24 @@ function OptionsBlock({
                   <div className="mt-2 rounded-2xl border-2 border-pink-brand/30 bg-white p-3">
                     <p className="text-sm text-ink-soft">
                       Remove <strong className="text-ink">{option.label}</strong>
-                      {option.file
-                        ? ". The file on it is deleted with it."
-                        : ". Nothing else on the product changes."}
+                      {`. ${optionRemovalWords(
+                        { hasFile: Boolean(option.file), delivers: Boolean(option.file || option.link), extra: Boolean(product.course || product.podcast) },
+                        {
+                          options: product.options.length,
+                          interval: product.recurring?.interval ?? null,
+                          hidden: product.hidden,
+                          ownPriceCents: product.priceCents,
+                          // What sells it with no option left (lib/store-checkout.ts, canSellProduct).
+                          missing: product.course ? (product.course.lessons > 0 ? null : "lesson") : product.podcast ? (product.podcast.episodes > 0 ? null : "episode") : activeShipping(product) || product.file || product.link ? null : "delivery",
+                          ownDelivery: Boolean(product.file || product.link),
+                          // What the checkout would offer without this option (lib/store-checkout.ts): read, never assumed from what is stored.
+                          introKept: activeIntro({ ...product, options: product.options.filter((o) => o.id !== option.id) }, tiers) !== null,
+                          yearlyKept: activeYearly({ ...product, options: product.options.filter((o) => o.id !== option.id) }, tiers) !== null,
+                          planBefore: activePlan(product as Listing) !== null,
+                          planAfter: activePlan({ ...product, options: product.options.filter((o) => o.id !== option.id) } as Listing) !== null,
+                        },
+                        (cents) => formatMoney(cents, currency),
+                      )}`}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
@@ -2467,6 +2484,7 @@ export function ProductEditor({
                   <OptionsBlock
                     product={product}
                     taxOnTop={taxOnTop}
+                    tiers={tiers}
                     fileBusyId={fileBusyId}
                     percent={percent}
                     fileError={fileError}
@@ -2502,6 +2520,7 @@ export function ProductEditor({
                 <OptionsBlock
                   product={product}
                   taxOnTop={taxOnTop}
+                  tiers={tiers}
                   fileBusyId={fileBusyId}
                   percent={percent}
                   fileError={fileError}
@@ -2526,6 +2545,7 @@ export function ProductEditor({
                   <OptionsBlock
                     product={product}
                     taxOnTop={taxOnTop}
+                    tiers={tiers}
                     fileBusyId={fileBusyId}
                     percent={percent}
                     fileError={fileError}

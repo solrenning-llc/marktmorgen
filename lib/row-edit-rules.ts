@@ -30,7 +30,23 @@ export type RowColumns = readonly (readonly RowElement[])[];
 /** Where an element is: its column and its place in it, both counted from 0. */
 export type RowPlace = { column: number; index: number };
 
-export type RowRefusal = "columns" | "column_full" | "row_full" | "fewer_full" | "edge" | "same_column" | "missing";
+export type RowRefusal = "columns" | "column_full" | "row_full" | "fewer_full" | "sending" | "edge" | "same_column" | "missing";
+
+/**
+ * The places held in each column, by position, for pictures still being
+ * sent there: a held place counts as a part, so nothing takes it before the
+ * picture arrives and the file sent always has a part to show it. Absent or
+ * shorter than the row means nothing held.
+ */
+export type RowHeld = readonly number[];
+
+const heldIn = (held: RowHeld, column: number) => Math.max(0, held[column] ?? 0);
+const heldAll = (held: RowHeld) => held.reduce((n, count) => n + Math.max(0, count), 0);
+
+/** The places held with one fewer in `column`: what a picture that has arrived takes its own place from. */
+export function releaseHeld(held: RowHeld, column: number): number[] {
+  return held.map((count, i) => (i === column ? Math.max(0, count - 1) : count));
+}
 
 /** A change made, with where the element it concerns now is (null when it is gone), or refused with why. */
 export type RowEdit = { ok: true; columns: RowElement[][]; at: RowPlace | null } | { ok: false; why: RowRefusal };
@@ -41,6 +57,7 @@ export const ROW_EDIT_WHY: Record<RowRefusal, string> = {
   column_full: `This column is full: a column holds up to ${MAX_COLUMN_ELEMENTS} parts. Remove one, or use another column.`,
   row_full: `This row is full: a row holds up to ${MAX_ROW_ELEMENTS} parts in all its columns. Remove one first.`,
   fewer_full: `Fewer columns would put more than ${MAX_COLUMN_ELEMENTS} parts in the last column, so nothing changed. Remove some parts first.`,
+  sending: "A picture is still being sent to a column that would be taken away. Wait until it arrives, then change the columns.",
   edge: "It is already at that end of its column.",
   same_column: "It is already in that column.",
   missing: "That part is no longer there.",
@@ -101,10 +118,10 @@ export function rowElementCount(columns: RowColumns): number {
 }
 
 /** Why nothing more can be added to this column now, or null when something can. */
-export function addRefusal(columns: RowColumns, column: number): RowRefusal | null {
+export function addRefusal(columns: RowColumns, column: number, held: RowHeld = []): RowRefusal | null {
   if (column < 0 || column >= columns.length) return "missing";
-  if (rowElementCount(columns) >= MAX_ROW_ELEMENTS) return "row_full";
-  if (columns[column].length >= MAX_COLUMN_ELEMENTS) return "column_full";
+  if (rowElementCount(columns) + heldAll(held) >= MAX_ROW_ELEMENTS) return "row_full";
+  if (columns[column].length + heldIn(held, column) >= MAX_COLUMN_ELEMENTS) return "column_full";
   return null;
 }
 
@@ -112,23 +129,26 @@ export function addRefusal(columns: RowColumns, column: number): RowRefusal | nu
  * The row with `count` columns. More columns are added empty at the end.
  * Fewer columns move every element of the columns taken away, in their
  * order, to the end of the last column that stays; refused when that column
- * would then hold more than a column may. The row's total never changes.
+ * would then hold more than a column may, its held places counted, or while
+ * a picture is on its way to a column taken away. The row's total never
+ * changes.
  */
-export function setColumnCount(columns: RowColumns, count: number): RowEdit {
+export function setColumnCount(columns: RowColumns, count: number, held: RowHeld = []): RowEdit {
   if (!Number.isInteger(count) || count < MIN_ROW_COLUMNS || count > MAX_ROW_COLUMNS || !valid(columns)) return { ok: false, why: "columns" };
   if (count === columns.length) return { ok: true, columns: copy(columns), at: null };
   if (count > columns.length) return { ok: true, columns: [...copy(columns), ...Array.from({ length: count - columns.length }, () => [])], at: null };
+  if (columns.some((_, i) => i >= count && heldIn(held, i) > 0)) return { ok: false, why: "sending" };
   const kept = copy(columns.slice(0, count));
   const moved = columns.slice(count).flat();
   const last = [...kept[count - 1], ...moved];
-  if (last.length > MAX_COLUMN_ELEMENTS) return { ok: false, why: "fewer_full" };
+  if (last.length + heldIn(held, count - 1) > MAX_COLUMN_ELEMENTS) return { ok: false, why: "fewer_full" };
   kept[count - 1] = last;
   return { ok: true, columns: kept, at: null };
 }
 
 /** The row with `element` at the end of `column`; `at` is where it went. */
-export function addElement(columns: RowColumns, column: number, element: RowElement): RowEdit {
-  const why = addRefusal(columns, column);
+export function addElement(columns: RowColumns, column: number, element: RowElement, held: RowHeld = []): RowEdit {
+  const why = addRefusal(columns, column, held);
   if (why) return { ok: false, why };
   const out = copy(columns);
   out[column].push(element);
@@ -138,9 +158,10 @@ export function addElement(columns: RowColumns, column: number, element: RowElem
 /**
  * The row with one element moved: one place up or down in its column, or
  * to the end of another column. `at` is where it is now. Moving to another
- * column is refused when that column is full; the row's total never changes.
+ * column is refused when that column is full, its held places counted; the
+ * row's total never changes.
  */
-export function moveElement(columns: RowColumns, from: RowPlace, to: "up" | "down" | { column: number }): RowEdit {
+export function moveElement(columns: RowColumns, from: RowPlace, to: "up" | "down" | { column: number }, held: RowHeld = []): RowEdit {
   if (!has(columns, from)) return { ok: false, why: "missing" };
   const out = copy(columns);
   if (to === "up" || to === "down") {
@@ -152,7 +173,7 @@ export function moveElement(columns: RowColumns, from: RowPlace, to: "up" | "dow
   }
   if (to.column < 0 || to.column >= out.length) return { ok: false, why: "missing" };
   if (to.column === from.column) return { ok: false, why: "same_column" };
-  if (out[to.column].length >= MAX_COLUMN_ELEMENTS) return { ok: false, why: "column_full" };
+  if (out[to.column].length + heldIn(held, to.column) >= MAX_COLUMN_ELEMENTS) return { ok: false, why: "column_full" };
   const [element] = out[from.column].splice(from.index, 1);
   out[to.column].push(element);
   return { ok: true, columns: out, at: { column: to.column, index: out[to.column].length - 1 } };
@@ -202,6 +223,9 @@ export function blankElement(kind: RowElementKind): RowElement | null {
   }
 }
 
+/** One line as the page's own reading makes it (lib/sales-page.ts, line): control characters and runs of space made one space, trimmed. */
+const oneLine = (text: string) => text.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim();
+
 /** Whether text holds anything once spaces and control characters are taken out, as the page's own reading does. */
 const hasWords = (text: string) => /[^\s\u0000-\u001f\u007f\u2028\u2029]/.test(text);
 
@@ -219,10 +243,12 @@ export function rowElementProblem(element: RowElement): string | null {
     case "paragraph":
       return hasWords(element.text) ? null : "Write the words, or remove this part.";
     case "list": {
-      if (element.items.length > MAX_ROW_LIST_ITEMS) return `A list holds up to ${MAX_ROW_LIST_ITEMS} points, one on each line. This one has ${element.items.length} lines: remove the extra lines.`;
-      const long = element.items.findIndex((item) => item.trim().length > MAX_ITEM);
-      if (long >= 0) return `A point holds up to ${MAX_ITEM} characters. Point ${long + 1} has ${element.items[long].trim().length}: shorten it.`;
-      return element.items.some(hasWords) ? null : "Write at least one point, one on each line, or remove this part.";
+      // Empty lines are left out before points are counted, as the page's own reading does.
+      const points = element.items.map(oneLine).filter(Boolean);
+      if (points.length > MAX_ROW_LIST_ITEMS) return `A list holds up to ${MAX_ROW_LIST_ITEMS} points, one on each line. This one has ${points.length}: remove the extra points.`;
+      const long = points.findIndex((point) => point.length > MAX_ITEM);
+      if (long >= 0) return `A point holds up to ${MAX_ITEM} characters. Point ${long + 1} has ${points[long].length}: shorten it.`;
+      return points.length ? null : "Write at least one point, one on each line, or remove this part.";
     }
     case "button": {
       if (!element.url.trim()) return null;

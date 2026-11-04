@@ -132,6 +132,7 @@ import {
   replaceElement,
   rowElementCount,
   rowElementProblem,
+  releaseHeld,
   rowProblem,
   setColumnCount,
 } from "@/lib/row-edit-rules";
@@ -2501,6 +2502,18 @@ function RowEditor({
   const [countNote, setCountNote] = useState<string | null>(null);
   const [addKind, setAddKind] = useState<RowElementKind[]>(["heading", "heading", "heading"]);
   const [addVideo, setAddVideo] = useState(["", "", ""]);
+  // Places held in each column for a picture still being sent there (lib/row-edit-rules.ts, RowHeld): drawn from
+  // `sending`, read from `held` by a picture that arrives after other changes. Nothing else can take such a place,
+  // so the file sent always gets its part; there is no way here to delete a file sent and not used.
+  const [sending, setSending] = useState([0, 0, 0]);
+  const held = useRef([0, 0, 0]);
+  const hold = (column: number, count: number) => {
+    held.current = held.current.map((n, i) => (i === column ? count : n));
+    setSending(held.current);
+  };
+  // Why a picture that arrived could not be added, said beside that column's Add control.
+  const [uploadNote, setUploadNote] = useState<(string | null)[]>([null, null, null]);
+  const noteFor = (column: number, note: string | null) => setUploadNote((all) => all.map((n, i) => (i === column ? note : n)));
   // A video address still being typed, kept with its own element until it is one we can play.
   const [typed, setTyped] = useState<Map<RowElement, string>>(() => new Map());
   // Where the keyboard goes once the change is drawn.
@@ -2529,7 +2542,7 @@ function RowEditor({
   }
 
   function countTo(count: number) {
-    const edit = setColumnCount(columns, count);
+    const edit = setColumnCount(columns, count, sending);
     if (!edit.ok) {
       setCountNote(ROW_EDIT_WHY[edit.why]);
       setSaid(ROW_EDIT_WHY[edit.why]);
@@ -2541,9 +2554,11 @@ function RowEditor({
     setSaid(`${count} ${count === 1 ? "column" : "columns"}.${moved ? ` ${moved === 1 ? "One part" : `${moved} parts`} moved to the end of column ${count}; nothing was removed.` : ""}`);
   }
 
-  function add(column: number, element: RowElement, from: RowColumns = columns) {
+  function add(column: number, element: RowElement, from: RowColumns = columns, places: readonly number[] = sending) {
+    const edit = addElement(from, column, element, places);
+    noteFor(column, null);
     apply(
-      addElement(from, column, element),
+      edit,
       (now, place) => (place ? first(place, now) : null),
       (place) => `Added ${name(element)} as part ${(place?.index ?? 0) + 1} of column ${column + 1}.`,
     );
@@ -2553,7 +2568,7 @@ function RowEditor({
     const element = columns[place.column]?.[place.index];
     if (!element) return;
     apply(
-      moveElement(columns, place, to),
+      moveElement(columns, place, to, sending),
       // Up and down keep the keyboard on the same button, so a part can be moved several places one press after another.
       (now, there) => (!there ? null : typeof to === "string" ? `${at(there.column, there.index)}-${to}` : first(there, now)),
       (there) => `Moved ${name(element)} to part ${(there?.index ?? 0) + 1} of column ${(there?.column ?? 0) + 1}.`,
@@ -2781,7 +2796,7 @@ function RowEditor({
   function adder(column: number) {
     const id = `${base}-c${column}-add`;
     const kind = addKind[column] ?? "heading";
-    const why = addRefusal(columns, column);
+    const why = addRefusal(columns, column, sending);
     const typedVideo = addVideo[column] ?? "";
     const video = kind === "video" ? readVideo(typedVideo) : null;
     const reason = why
@@ -2841,7 +2856,7 @@ function RowEditor({
             />
           </div>
         ) : null}
-        {kind === "image" && !reason ? (
+        {(kind === "image" && !reason) || sending[column] > 0 ? (
           <PicturesEditor
             base={`${id}-p`}
             productId={productId}
@@ -2850,13 +2865,21 @@ function RowEditor({
             items={[]}
             room={1}
             words={{ add: `Choose a picture for column ${column + 1}`, full: "", note: "Your own picture, shrunk before it is sent. You describe it next." }}
+            onSending={(count) => hold(column, count)}
             onChange={(items) => {
-              if (items[0]) add(column, { kind: "image", picture: items[0], decorative: false }, latest.current);
+              if (!items[0]) return;
+              // Checked again now that it has arrived, against the row as it is, its own held place given back to it.
+              const element: RowElement = { kind: "image", picture: items[0], decorative: false };
+              const places = releaseHeld(held.current, column);
+              const refused = addRefusal(latest.current, column, places);
+              if (refused) noteFor(column, `The picture you sent was not added: ${ROW_EDIT_WHY[refused]}`);
+              else add(column, element, latest.current, places);
             }}
           />
         ) : null}
-        <p id={reasonId} className={`text-xs ${why || (kind === "image" && reason) ? "font-semibold text-danger" : "text-ink-soft"}`}>
-          {reason ||
+        <p id={reasonId} className={`text-xs ${uploadNote[column] || why || (kind === "image" && reason) ? "font-semibold text-danger" : "text-ink-soft"}`}>
+          {uploadNote[column] ||
+            reason ||
             (video
               ? `${PROVIDER_NAMES[video.provider]} video recognized. Press Add to put it in column ${column + 1}.`
               : `${columns[column].length} of ${MAX_COLUMN_ELEMENTS} parts in this column, ${total} of ${MAX_ROW_ELEMENTS} in the row.`)}
@@ -2918,8 +2941,8 @@ function RowEditor({
                               key={k}
                               type="button"
                               className={small}
-                              aria-disabled={other.length >= MAX_COLUMN_ELEMENTS || undefined}
-                              aria-label={`Move to column ${k + 1}: ${what}${other.length >= MAX_COLUMN_ELEMENTS ? ". That column is full" : ""}`}
+                              aria-disabled={other.length + sending[k] >= MAX_COLUMN_ELEMENTS || undefined}
+                              aria-label={`Move to column ${k + 1}: ${what}${other.length + sending[k] >= MAX_COLUMN_ELEMENTS ? ". That column is full" : ""}`}
                               onClick={() => move(place, { column: k })}
                             >
                               {`Move to column ${k + 1}`}
@@ -3388,6 +3411,7 @@ function PicturesEditor({
   describedBy,
   invalid = false,
   single = false,
+  onSending,
 }: {
   base: string;
   productId: string;
@@ -3407,6 +3431,8 @@ function PicturesEditor({
   invalid?: boolean;
   /** One picture that is a part of something else, which moves and removes it: no buttons of its own for that. */
   single?: boolean;
+  /** How many pictures it is sending now, told when sending starts and once more (0) when it ends, after onChange. */
+  onSending?: (count: number) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(0);
@@ -3442,6 +3468,7 @@ function PicturesEditor({
     if (chosen.length === 0) return;
     setError(null);
     setBusy(chosen.length);
+    onSending?.(chosen.length);
     const added: Picture[] = [];
     try {
       for (const file of chosen) {
@@ -3472,6 +3499,7 @@ function PicturesEditor({
       }
     } finally {
       if (added.length) onChange([...items, ...added]);
+      onSending?.(0);
       setBusy(0);
       if (input.current) input.current.value = "";
     }

@@ -51,6 +51,7 @@ import {
   replaceElement,
   rowElementCount,
   rowElementProblem,
+  releaseHeld,
   rowProblem,
   setColumnCount,
 } from "@/lib/row-edit-rules";
@@ -167,8 +168,10 @@ part("What a part still needs before saving");
     ["empty words", { kind: "paragraph", text: "\n \n" }, false],
     ["a list with a point and empty lines", { kind: "list", items: ["", "Seven dinners", ""] }, true],
     ["a list of empty lines", { kind: "list", items: ["", " "] }, false],
-    [`a list of ${MAX_ROW_LIST_ITEMS + 1} lines`, { kind: "list", items: Array.from({ length: MAX_ROW_LIST_ITEMS + 1 }, (_, i) => `P${i}`) }, false],
+    [`a list of ${MAX_ROW_LIST_ITEMS + 1} points`, { kind: "list", items: Array.from({ length: MAX_ROW_LIST_ITEMS + 1 }, (_, i) => `P${i}`) }, false],
+    [`${MAX_ROW_LIST_ITEMS} points and empty lines (left out)`, { kind: "list", items: ["", ...Array.from({ length: MAX_ROW_LIST_ITEMS }, (_, i) => `P${i}`), " ", ""] }, true],
     [`a point longer than ${MAX_ITEM}`, { kind: "list", items: ["x".repeat(MAX_ITEM + 1)] }, false],
+    [`a point of ${MAX_ITEM} letters once runs of space are made one`, { kind: "list", items: [`${"x".repeat(MAX_ITEM - 2)}      xx`.replace(/x{2}$/, "x")] }, true],
     ["an icon without words", { kind: "icon", name: "clock", label: "" }, true],
     ["the page's own button, no words", { kind: "button", label: "", url: "" }, true],
     ["a button elsewhere with words", { kind: "button", label: "See the recipes", url: "https://example.com/recipes" }, true],
@@ -182,17 +185,33 @@ part("What a part still needs before saving");
   for (const [what, element, ready] of cases) {
     const problem = rowElementProblem(element);
     is(`${what}: ${ready ? "ready" : "says what it needs"}`, ready ? problem : typeof problem === "string" && problem.length > 20, ready ? null : true);
-    // The editor and the save route agree: what is ready is kept whole, what is not is refused. A point too
-    // long is the one exception: the route would cut it short, so the editor asks first and no word is lost.
+    // The editor and the save route agree: what is ready is kept whole, what is not is refused.
     const raw = { blocks: [{ id: "row00001", kind: "row", columns: [[element]] }] };
-    if (what.startsWith("a point longer")) {
-      const kept = parsePage(raw).blocks[0];
-      is(`${what}: the route would cut it to ${MAX_ITEM}, so the editor says so first`, kept?.kind === "row" && kept.columns[0][0].kind === "list" ? kept.columns[0][0].items[0].length : 0, MAX_ITEM);
-    } else is(`${what}: the save route ${ready ? "keeps it" : "refuses it"}`, pageProblem(raw, parsePage(raw)) === null, ready);
+    is(`${what}: the save route ${ready ? "keeps it" : "refuses it"}`, pageProblem(raw, parsePage(raw)) === null, ready);
   }
   const row: RowElement[][] = [[h("Fine")], [{ kind: "button", label: "", url: "https://example.com" }, h("")]];
   is("a row's first part that needs something, with where it is", rowProblem(row), { column: 1, index: 0, problem: rowElementProblem(row[1][0]) });
   is("a ready row: nothing", rowProblem([[h("Fine")], []]), null);
+}
+
+part("A slot held while a picture is being sent");
+{
+  // A picture being sent to a column holds its place there until it arrives, so nothing can take that place
+  // meanwhile and the file sent is never left over with no part to show it.
+  const seven: RowElement[][] = [full(MAX_COLUMN_ELEMENTS - 1, "A"), [h("B1")]];
+  const held = [1, 0];
+  is("a column with a held slot that makes it full takes nothing more", [addRefusal(seven, 0, held), addElement(seven, 0, h("X"), held).ok], ["column_full", false]);
+  is("nor a part moved into it", moveElement(seven, { column: 1, index: 0 }, { column: 0 }, held), { ok: false, why: "column_full" });
+  const eleven: RowElement[][] = [full(4, "A"), full(4, "B"), full(3, "C")];
+  is("a held slot counts toward the whole row", addRefusal(eleven, 2, [0, 1, 0]), "row_full");
+  is("fewer columns while a picture is on its way to one taken away: refused", setColumnCount([[h("A1")], []], 1, [0, 1]), { ok: false, why: "sending" });
+  is("fewer columns that would overfill the last one with its held slot: refused", setColumnCount([full(4, "A"), full(4, "B")], 1, [1, 0]), { ok: false, why: "fewer_full" });
+  is("fewer columns that fit with the held slot: allowed", setColumnCount([full(3, "A"), full(3, "B")], 1, [1, 0]).ok, true);
+  is("the picture that arrives takes its own held slot", addElement(seven, 0, h("Picture"), releaseHeld(held, 0)).ok, true);
+  is("releasing a slot leaves the others", [releaseHeld([1, 2, 0], 1), releaseHeld([0, 0], 0), held], [[1, 1, 0], [0, 0], [1, 0]]);
+  is("with nothing held, every rule is as before", [addRefusal(seven, 0), addRefusal(seven, 0, [])], [null, null]);
+  const editor = readFileSync("components/page-editor.tsx", "utf8");
+  is("the editor holds the slot while sending and says a refusal beside the Add control", [editor.includes("onSending="), editor.includes("releaseHeld(held.current"), /uploadNote\[column\]/.test(editor)], [true, true, true]);
 }
 
 part("Offered on a product's page only");

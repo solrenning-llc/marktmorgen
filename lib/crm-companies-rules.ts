@@ -10,6 +10,8 @@ export const MAX_COMPANY_NOTE = 300;
 export const MAX_COMPANY_PEOPLE = 50;
 export const COMPANY_ID = /^[a-f0-9]{10}$/;
 export const PERSON_KEY = /^[0-9a-f]{32}$/;
+/** A company's website address, at most this many characters as typed. */
+export const MAX_COMPANY_WEBSITE = 200;
 const PERSON = PERSON_KEY;
 
 export type Company = { id: string; name: string; website: string; note: string; people: string[]; createdAt: number };
@@ -42,7 +44,7 @@ function line(raw: unknown, max: number): string | null {
 export function readCompanyInput(raw: Record<string, unknown>): { ok: true; value: Pick<Company, "name" | "website" | "note"> } | { ok: false; error: CompanyRefusal } {
   const name = line(raw.name, MAX_COMPANY_NAME);
   if (!name) return { ok: false, error: "name" };
-  const typed = line(raw.website, 200);
+  const typed = line(raw.website, MAX_COMPANY_WEBSITE);
   const website = typed ? crmUrl(typed) : "";
   if (typed === null || website === null) return { ok: false, error: "website" };
   const note = line(raw.note, MAX_COMPANY_NOTE);
@@ -69,6 +71,20 @@ export function addCompany(companies: readonly Company[], value: Pick<Company, "
   if (companies.some((c) => sameName(c.name, value.name))) return { ok: false, error: "taken" };
   if (!COMPANY_ID.test(id) || companies.some((c) => c.id === id)) return { ok: false, error: "unknown" };
   return { ok: true, companies: [...companies, { id, ...value, people: [], createdAt: Math.floor(nowSeconds) }] };
+}
+
+/**
+ * A deleted company put back, with its people (the studio's undo): one
+ * change, so nobody is linked one at a time. Only the people who are not at
+ * another company now come back; someone who moved since stays where they
+ * went. `skipped` are those left out.
+ */
+export function restoreCompany(companies: readonly Company[], value: Pick<Company, "name" | "website" | "note">, id: string, nowSeconds: number, people: readonly unknown[]): { ok: true; companies: Company[]; skipped: string[] } | { ok: false; error: CompanyRefusal } {
+  const added = addCompany(companies, value, id, nowSeconds);
+  if (!added.ok) return added;
+  const asked = [...new Set(people.filter((p): p is string => typeof p === "string" && PERSON.test(p)))].slice(0, MAX_COMPANY_PEOPLE);
+  const back = asked.filter((p) => !companies.some((c) => c.people.includes(p)));
+  return { ok: true, companies: added.companies.map((c) => (c.id === id ? { ...c, people: back } : c)), skipped: asked.filter((p) => !back.includes(p)) };
 }
 
 /** A company's name, website and note changed in place; its people stay. */

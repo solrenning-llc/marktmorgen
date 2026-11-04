@@ -30,7 +30,8 @@ part("Adding and changing");
 is("every field labeled, the optional ones said to be, each with an example", ["Name", "Website (optional)", "Note (optional)"].every((label) => html.includes(`<span class="field-label">${label}</span>`)) && ["company-name-hint", "company-site-hint", "company-note-hint"].every((id) => html.includes(`aria-describedby="${id}"`)), true);
 is("refusals said in an alert, what was done in a status", html.includes('role="alert"') && html.includes('role="status"'), true);
 const screen = readFileSync("components/companies-editor.tsx", "utf8");
-is("a delete keeps the people, and is undone with the same people", screen.includes("Its people are still in your store.") && screen.includes('for (const person of gone.people) await send({ action: "link", id: added.id, person }'), true);
+is("a delete keeps the people, and is undone in one change with them, saying who had moved and stays", screen.includes("Its people are still in your store.") && screen.includes('send({ action: "restore", name: gone.name, website: gone.website, note: gone.note, people: gone.people }') && screen.includes("moved to another company since") && !screen.includes('action: "link", id: added.id'), true);
+is("Change takes the focus to the form it opens, and the website field has its limit (review A6)", screen.includes("nameField.current?.focus()") && screen.includes("maxLength={MAX_COMPANY_WEBSITE}"), true);
 
 part("The page");
 const page = readFileSync("app/studio/companies/page.tsx", "utf8");

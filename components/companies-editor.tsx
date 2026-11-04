@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "@/components/toast";
-import { type Company, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE } from "@/lib/crm-companies-rules";
+import { type Company, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE, MAX_COMPANY_WEBSITE } from "@/lib/crm-companies-rules";
 
 type Shown = Company & { addresses: Record<string, string> };
 
@@ -20,18 +20,22 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
   const [gone, setGone] = useState<Shown | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [putBack, setPutBack] = useState("");
+  const nameField = useRef<HTMLInputElement>(null);
 
-  async function send(body: Record<string, unknown>, done: string): Promise<Company[] | null> {
+  async function send(body: Record<string, unknown>, done: string): Promise<{ companies: Company[]; added?: string; skipped?: string[] } | null> {
     setBusy(true);
     setError("");
     try {
       const response = await fetch("/api/store/companies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; companies?: Company[]; message?: string; error?: string };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; companies?: Company[]; added?: string; skipped?: string[]; message?: string; error?: string };
       if (answer.ok && answer.companies) {
         const known = new Map(companies.map((c) => [c.id, c.addresses]));
+        // A company put back keeps the addresses it was shown with, under its new id.
+        if (answer.added && body.action === "restore" && gone) known.set(answer.added, gone.addresses);
         setCompanies(answer.companies.map((c) => ({ ...c, addresses: known.get(c.id) ?? {} })));
         toast(done);
-        return answer.companies;
+        return { companies: answer.companies, added: answer.added, skipped: answer.skipped };
       }
       setError(answer.message ?? (answer.error === "data_full" ? "Your store's data room is full. Delete something you no longer need first." : "That did not save. Try again in a moment."));
     } catch {
@@ -52,14 +56,19 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
   }
 
   async function remove(company: Shown) {
-    if (await send({ action: "remove", id: company.id }, "Company deleted.")) setGone(company);
+    if (await send({ action: "remove", id: company.id }, "Company deleted.")) {
+      setPutBack("");
+      setGone(company);
+    }
   }
 
+  // Put back in one change, with the people who are not at another company now (review A2/A3); says who did not come back.
   async function undo() {
     if (!gone) return;
-    const back = await send({ action: "add", name: gone.name, website: gone.website, note: gone.note }, "Company put back.");
-    const added = back?.find((c) => c.name === gone.name);
-    if (added) for (const person of gone.people) await send({ action: "link", id: added.id, person }, "Company put back.");
+    const back = await send({ action: "restore", name: gone.name, website: gone.website, note: gone.note, people: gone.people }, "Company put back.");
+    if (!back) return;
+    const left = back.skipped?.length ?? 0;
+    setPutBack(left ? `${gone.name} is back with ${gone.people.length - left} of its ${gone.people.length} people. ${left === 1 ? "One person had" : `${left} people had`} moved to another company since, and ${left === 1 ? "stays" : "stay"} there.` : "");
     setGone(null);
   }
 
@@ -72,14 +81,14 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <label className="block text-sm">
             <span className="field-label">Name</span>
-            <input className="field mt-1" value={form.name} maxLength={MAX_COMPANY_NAME} onChange={(event) => setForm({ ...form, name: event.target.value })} aria-describedby="company-name-hint" />
+            <input ref={nameField} className="field mt-1" value={form.name} maxLength={MAX_COMPANY_NAME} onChange={(event) => setForm({ ...form, name: event.target.value })} aria-describedby="company-name-hint" />
             <span id="company-name-hint" className="mt-1 block text-xs text-ink-soft">
               Example: North School
             </span>
           </label>
           <label className="block text-sm">
             <span className="field-label">Website (optional)</span>
-            <input type="url" className="field mt-1" value={form.website} onChange={(event) => setForm({ ...form, website: event.target.value })} aria-describedby="company-site-hint" />
+            <input type="url" className="field mt-1" value={form.website} maxLength={MAX_COMPANY_WEBSITE} onChange={(event) => setForm({ ...form, website: event.target.value })} aria-describedby="company-site-hint" />
             <span id="company-site-hint" className="mt-1 block text-xs text-ink-soft">
               Example: https://north.example.com
             </span>
@@ -121,6 +130,8 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
               Undo
             </button>
           </p>
+        ) : putBack ? (
+          <p className="text-sm text-ink [overflow-wrap:anywhere]">{putBack}</p>
         ) : null}
       </div>
       <section aria-labelledby="companies-title">
@@ -157,6 +168,11 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
                     onClick={() => {
                       setEditing(company.id);
                       setForm({ name: company.name, website: company.website, note: company.note });
+                      // The form it opens is above the list: the focus goes to it, so a keyboard or screen reader user lands where they type (review A6).
+                      requestAnimationFrame(() => {
+                        nameField.current?.focus();
+                        nameField.current?.scrollIntoView({ block: "center" });
+                      });
                     }}
                   >
                     Change

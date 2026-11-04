@@ -4,6 +4,7 @@ import {
   type CompanyRefusal,
   MAX_COMPANY_NAME,
   MAX_COMPANY_NOTE,
+  MAX_COMPANY_PEOPLE,
   addCompany,
   changeCompanies,
   companyOf,
@@ -13,6 +14,7 @@ import {
   newCompanyId,
   readCompanies,
   readCompanyInput,
+  restoreCompany,
   unlinkPerson,
 } from "@/lib/crm-companies";
 import { StoreFullError } from "@/lib/store";
@@ -23,14 +25,15 @@ import { jsonAccess } from "@/lib/studio-route";
  * Companies in the CRM: 639 [GL7](4), unit 1. GET lists every company, or
  * `?person=<key>` the one that person works at. POST `{ action: "add", name,
  * website?, note? }`, `{ action: "edit", id, name, website?, note? }`,
- * `{ action: "remove", id }`, `{ action: "link", id, person }` (moving them
+ * `{ action: "remove", id }`, `{ action: "restore", name, website?, note?,
+ * people }` (a delete undone, in one change), `{ action: "link", id, person }` (moving them
  * from any other company) or `{ action: "unlink", person }`. The same
  * permission as the deals and the tasks (orders): owner, Admin, Support.
  */
 
 const NO_STORE = { "Cache-Control": "private, no-store" };
 const PERSON = /^[0-9a-f]{32}$/;
-const MAX_BODY_BYTES = (MAX_COMPANY_NAME + 200 + MAX_COMPANY_NOTE) * 6 + 1_000;
+const MAX_BODY_BYTES = (MAX_COMPANY_NAME + 200 + MAX_COMPANY_NOTE) * 6 + MAX_COMPANY_PEOPLE * 40 + 1_000;
 
 export async function GET(request: NextRequest) {
   const access = await jsonAccess(request, "orders");
@@ -75,6 +78,19 @@ export async function POST(request: NextRequest) {
     } else if (body.action === "link") {
       if (!PERSON.test(person)) return refuse("unknown");
       result = await changeCompanies(statsId, store, (companies) => linkPerson(companies, id, person));
+    } else if (body.action === "restore") {
+      // The undo of a delete: the company and its people back in one change (review A2/A3).
+      const input = readCompanyInput(body);
+      if (!input.ok) return refuse(input.error);
+      if (!Array.isArray(body.people) || body.people.length > MAX_COMPANY_PEOPLE) return refuse("people");
+      const madeId = newCompanyId();
+      let skipped: string[] = [];
+      result = await changeCompanies(statsId, store, (companies) => {
+        const restored = restoreCompany(companies, input.value, madeId, Date.now() / 1000, body.people as unknown[]);
+        if (restored.ok) skipped = restored.skipped;
+        return restored;
+      });
+      if (result.ok) return Response.json({ ok: true, companies: result.companies, added: madeId, skipped }, { headers: NO_STORE });
     } else if (body.action === "unlink") {
       if (!PERSON.test(person)) return refuse("unknown");
       result = await changeCompanies(statsId, store, (companies) => ({ ok: true, companies: unlinkPerson(companies, person) }));

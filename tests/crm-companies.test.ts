@@ -13,6 +13,7 @@ import { forgetCrmPerson } from "@/lib/crm";
 import {
   COMPANY_REFUSALS,
   forgetCompanyPerson,
+  restoreCompany,
   type Company,
   MAX_COMPANIES,
   MAX_COMPANY_NAME,
@@ -35,7 +36,7 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
-type Reply = { ok?: boolean; error?: string; message?: string; companies?: Company[]; company?: Company | null; added?: string };
+type Reply = { ok?: boolean; error?: string; message?: string; companies?: Company[]; company?: Company | null; added?: string; skipped?: string[] };
 
 async function main(): Promise<void> {
   const a = "a".repeat(32);
@@ -121,6 +122,22 @@ async function main(): Promise<void> {
   redis.pipeline = pipe;
   const [left] = await redisPipeline([["GET", lock]]);
   is("and when a write fails too, so the next change is not refused", [failed.status >= 500, left, (await post({ action: "edit", id, name: "North School" })).status], [true, null, 200]);
+
+  part("A delete undone (review A2/A3)");
+  is("the rule: the company back with its people, except who is at another company now", (() => { const r = restoreCompany([{ ...base("bbbbbbbbbb", "South"), people: [b] }], { name: "North", website: "", note: "" }, "cccccccccc", 9, [a, b, "nope", a]); return r.ok ? [r.companies.find((c) => c.id === "cccccccccc")?.people, r.skipped] : r; })(), [[a], [b]]);
+  const ben = personKey(statsId, "ben@example.com");
+  const tmp = await post({ action: "add", name: "Temp School" });
+  const tmpId = tmp.body.added!;
+  await post({ action: "link", id: tmpId, person: ann });
+  await post({ action: "link", id: tmpId, person: ben });
+  await post({ action: "remove", id: tmpId });
+  await post({ action: "link", id, person: ben });
+  const restored = await post({ action: "restore", name: "Temp School", website: "", note: "", people: [ann, ben] });
+  const again = (await readCompanies(statsId)).find((c) => c.id === restored.body.added);
+  is("put back in one change: who is free comes back, who moved since stays where they went, and the screen is told", [restored.status, again?.name, again?.people, restored.body.skipped, (await readCompanies(statsId)).find((c) => c.id === id)?.people.includes(ben)], [200, "Temp School", [ann], [ben], true]);
+  is("too many people at once is refused", (await post({ action: "restore", name: "Other", people: Array.from({ length: 51 }, () => ann) })).body.error, "people");
+  await post({ action: "remove", id: restored.body.added });
+  await post({ action: "unlink", person: ben });
 
   part("Changed and removed");
   is("renamed", (await post({ action: "edit", id, name: "North Academy" })).body.companies?.[0].name, "North Academy");

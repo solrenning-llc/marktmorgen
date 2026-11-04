@@ -108,7 +108,10 @@ export async function POST(request: NextRequest) {
       const now = Math.floor(Date.now() / 1000);
       const deal = parseDeal({ ...existing, ...raw, ...follow.value, formResponseRef: existing?.formResponseRef, id: existing?.id ?? newCrmId(10), createdAt: existing?.createdAt ?? now, updatedAt: now }, stages);
       if (!deal) return refuse(typeof raw.title === "string" && raw.title.trim() ? "stage" : "title");
-      if (!(await writeDeal(statsId, deal, store))) return refuse("full");
+      // An edit writes only a deal still there: one deleted meanwhile (its person deleted, or someone else) is not written back.
+      const written = existing ? await writeDeal(statsId, deal, store, "edit") : await writeDeal(statsId, deal, store);
+      if (written === "gone") return refuse("unknown", 404);
+      if (!written) return refuse("full");
       // Saved first: the workflow its stage starts never holds up, or undoes, the deal itself.
       const workflows = await dealEnteredStage(store, deal, existing);
       return Response.json({ ok: true, deal, workflows });

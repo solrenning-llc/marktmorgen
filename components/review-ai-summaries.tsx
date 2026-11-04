@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { MIN_SUMMARY_REVIEWS, SUMMARY_REFRESH_SECONDS, type SummaryTheme, summaryLine } from "@/lib/review-ai-summary-rules";
 
 type Kept = { at: number; read: number; themes: SummaryTheme[] } | null;
 type Product = { id: string; title: string; reviews: number; summary: Kept };
 
-const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+const DAY = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 const day = (seconds: number) => DAY.format(new Date(seconds * 1000));
 
 const REFUSALS: Record<string, string> = {
@@ -29,10 +29,13 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
   const [shown, setShown] = useState(products);
   const [busy, setBusy] = useState<string | null>(null);
   const [said, setSaid] = useState<Record<string, string>>({});
+  // Where focus goes once a product's button is replaced by its result, so a keyboard user keeps their place.
+  const statusRefs = useRef<Record<string, HTMLParagraphElement | null>>({});
 
   async function make(product: Product) {
+    if (busy) return;
     setBusy(product.id);
-    setSaid((all) => ({ ...all, [product.id]: "" }));
+    setSaid((all) => ({ ...all, [product.id]: `Making the summary of ${product.title}'s reviews…` }));
     try {
       const response = await fetch("/api/store/review-summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product: product.id }) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; summary?: Kept; error?: string; left?: number | null };
@@ -46,6 +49,7 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
       setSaid((all) => ({ ...all, [product.id]: "That did not work. Check your connection and try again." }));
     } finally {
       setBusy(null);
+      window.setTimeout(() => statusRefs.current[product.id]?.focus(), 0);
     }
   }
 
@@ -74,15 +78,16 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
                   </p>
                 ) : null}
                 {canMake ? (
-                  <button type="button" className="btn btn-secondary btn-sm mt-2" disabled={busy !== null} onClick={() => void make(product)} aria-label={`Make the AI summary of ${product.title}'s reviews`}>
+                  <button type="button" className="btn btn-secondary btn-sm mt-2" aria-disabled={busy !== null} aria-busy={busy === product.id} onClick={() => void make(product)}>
                     {product.summary ? "Make this week's summary" : "Make the summary"}
+                    <span className="sr-only">{` of ${product.title}'s reviews`}</span>
                   </button>
                 ) : (
                   <p className="mt-1 text-xs text-ink-soft">
                     {product.reviews < MIN_SUMMARY_REVIEWS ? `A summary needs at least ${MIN_SUMMARY_REVIEWS} reviews; this one has ${product.reviews}.` : `A new one can be made from ${day(nextAt)}.`}
                   </p>
                 )}
-                <p className="mt-1 text-xs text-ink" role="status">
+                <p className="mt-1 text-xs text-ink" role="status" tabIndex={-1} ref={(node) => { statusRefs.current[product.id] = node; }}>
                   {said[product.id] ?? ""}
                 </p>
               </li>

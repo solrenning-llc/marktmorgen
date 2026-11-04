@@ -26,11 +26,15 @@ is("no new one before a week, and when one can be made", [html.includes("Make th
 
 part("When one can be made");
 const old = draw([{ id: "p1", title: "Pottery Course", reviews: 12, summary: { ...kept, at: NOW - SUMMARY_REFRESH_SECONDS } }]);
-is("a week later, the button, its name saying which product", old.includes("Make this week&#x27;s summary") && old.includes('aria-label="Make the AI summary of Pottery Course&#x27;s reviews"'), true);
+is("a week later, the button, its name starting with its visible words and saying which product", old.includes("Make this week&#x27;s summary<span class=\"sr-only\"> of Pottery Course&#x27;s reviews</span>") && !old.includes("aria-label=\"Make the AI"), true);
+is("never disabled under focus: busy is said, not taken away", old.includes('aria-disabled="false"') && !/<button[^>]* disabled=""/.test(old), true);
 is("never made yet, enough reviews: Make the summary", draw([{ id: "p1", title: "Pottery Course", reviews: 5, summary: null }]).includes(">Make the summary<"), true);
 is("too few reviews: said how many it needs", draw([{ id: "p1", title: "Pottery Course", reviews: 3, summary: null }]).includes("A summary needs at least 5 reviews; this one has 3."), true);
 is("no reviews anywhere", draw([]).includes("No product has reviews yet."), true);
-is("what happened said in a status", html.includes('role="status"'), true);
+is("what happened said in a status that can take focus when the button goes", html.includes('role="status"') && html.includes('tabindex="-1"'), true);
+is("months written out, not abbreviated", html.includes("Made ") && !/\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d/.test(html), true);
+const screenText = readFileSync("components/review-ai-summaries.tsx", "utf8");
+is("while it is made, that is said", screenText.includes("Making the summary of ${product.title}'s reviews…"), true);
 
 part("The page");
 const page = readFileSync("app/studio/reviews/page.tsx", "utf8");

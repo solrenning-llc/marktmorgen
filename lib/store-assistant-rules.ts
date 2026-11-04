@@ -332,9 +332,12 @@ function asciiDigit(digit: string): string {
  * capitals and the rest. Used only to find a deal word spelled with them;
  * Arabic, Hebrew, Han, kana and hangul are never mapped, so they never refuse.
  */
-const LOOKALIKES = new Map<number, string>(
-  Object.entries(CONFUSABLE_LATIN_SOURCES).flatMap(([latin, sources]) => sources.map((source): [number, string] => [source, latin])),
-);
+let lookalikes: Map<number, string> | null = null;
+/** Built on first use, so a page that only reads this module's constants never carries the table. */
+const lookalikeTable = () =>
+  (lookalikes ??= new Map<number, string>(
+    Object.entries(CONFUSABLE_LATIN_SOURCES).flatMap(([latin, sources]) => sources.map((source): [number, string] => [source, latin])),
+  ));
 /**
  * One sign as the plain letter it looks like, or itself. A vertical stroke
  * is read as `stroke` ("l" or "i"). Negative circled and squared letters and
@@ -345,8 +348,9 @@ function lookalike(sign: string, stroke: "l" | "i"): string {
   if (code >= 0x1f150 && code <= 0x1f169) return String.fromCharCode(97 + code - 0x1f150);
   if (code >= 0x1f170 && code <= 0x1f189) return String.fromCharCode(97 + code - 0x1f170);
   if (code >= 0x1f1e6 && code <= 0x1f1ff) return String.fromCharCode(97 + code - 0x1f1e6);
-  if (code >= 0xab70 && code <= 0xabbf && !LOOKALIKES.has(code)) code = code - 0xab70 + 0x13a0;
-  const latin = LOOKALIKES.get(code);
+  const table = lookalikeTable();
+  if (code >= 0xab70 && code <= 0xabbf && !table.has(code)) code = code - 0xab70 + 0x13a0;
+  const latin = table.get(code);
   return latin === undefined ? sign : latin === "l|i" ? stroke : latin;
 }
 
@@ -504,18 +508,23 @@ const TLDS = new Set([
 ]);
 /** Names that end like a site but are a library or a technology. */
 const NOT_SITES = new Set(["socket.io", "asp.net", "ado.net", "vb.net"]);
+/** Top-level domains that are also words: written "It" before a space ("great.It helps"), the dot ends a sentence. */
+const WORD_TLDS = new Set(["it", "in", "me", "be", "at", "us", "no", "de", "es"]);
 /**
- * A bare domain ("cheap.shop", "evil.example/deal"): labels and a dot, then a
- * common top-level domain in lowercase, or in capitals when a path follows,
- * never a capitalized word ("great.It") nor a file or library name
- * ("logo.ai", "Node.js").
+ * A bare domain ("cheap.shop", "Evil.Com", "evil.example/deal"): labels and
+ * a dot, then a common top-level domain in any case, never a file or
+ * library name ("logo.ai", "Node.js", "ASP.NET") nor a word that starts a
+ * sentence after a dot ("great.It helps").
  */
-const DOMAIN = /(?<![\p{L}\p{N}@._\-\/])((?:[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?\.)+)([a-z]{2,24}|[A-Z]{2,24}(?=\/))(?![\p{L}\p{N}])/gu;
-const sitesIn = (text: string) =>
-  [...(/[.\uFF0E\u3002\uFE52]/u.test(text) ? text.normalize("NFKC").matchAll(DOMAIN) : [])]
+const DOMAIN = /(?<![\p{L}\p{N}@.\-])((?:[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?\.)+)([A-Za-z]{2,24})(?![\p{L}\p{N}])/gu;
+const sitesIn = (text: string) => {
+  const normal = text.normalize("NFKC");
+  return [...(/[.\uFF0E\u3002\uFE52]/u.test(text) ? normal.matchAll(DOMAIN) : [])]
+    .filter((m) => !(WORD_TLDS.has(m[2].toLowerCase()) && /^[A-Z][a-z]$/.test(m[2]) && normal[m.index + m[0].length] === " "))
     .map((m) => ({ site: m[0].toLowerCase(), tld: m[2].toLowerCase() }))
     .filter(({ site, tld }) => TLDS.has(tld) && !NOT_SITES.has(site))
     .map(({ site }) => site);
+};
 
 /**
  * Whether a reply says only what the store published: every number in it

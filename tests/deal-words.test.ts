@@ -6,6 +6,7 @@
  * store can speak, whole words only (edge tests of 4 November 2026: plurals
  * such as "discounts" and "five stars" passed).
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { DEAL_WORDS, heldToFacts } from "@/lib/store-assistant-rules";
 import { latinLookalikes, renderTable, versionOf } from "../scripts/confusables-latin-table.mjs";
@@ -161,4 +162,15 @@ is("file names, libraries and a capital after a dot are not domains", [
 ], [true, true, true, true, true]);
 is("while a site with a path is still refused", [heldToFacts("See evil.example/deal for more.", probe), heldToFacts("See CHEAP.SHOP/now", probe)], [false, false]);
 is("more star ratings", caught(["\u22C6\u22C6\u22C6\u22C6\u22C6", "\u2B52", "\u{1F320}"]), []);
+
+part("Seventh review: the vendored copy, its license, domains in any case, and look-alikes with a mark");
+is("the copy of confusables.txt is the one read on 4 November 2026", createHash("sha256").update(readFileSync("tooling/unicode/confusables-18.0.0.txt")).digest("hex"), "6ed3ee967c9dfdf6677d563c9985182fbc50a2efb7d6059cd57b2e2ce18f5b92");
+is("its license is beside it, and the generated table cites it", [readFileSync("tooling/unicode/LICENSE", "utf8").startsWith("UNICODE LICENSE V3"), readFileSync("lib/confusables-latin.ts", "utf8").includes("Unicode License v3 (tooling/unicode/LICENSE)")], [true, true]);
+is("a domain in any case, or after a slash or an underscore, is refused", [
+  heldToFacts("Visit Evil.Com today", probe), heldToFacts("Visit EVIL.COM today", probe), heldToFacts("See //evil.com/x", probe), heldToFacts("See /evil.com", probe), heldToFacts("See _evil.com", probe),
+  heldToFacts("Visit Evil.Me/now", probe),
+], [false, false, false, false, false, false]);
+is("a word that starts a sentence after a dot, and the library names, still pass", [heldToFacts("That was great.It helped.", probe), heldToFacts("Go there.In the morning.", probe), heldToFacts("Built with ASP.NET.", probe), heldToFacts("It uses socket.io.", probe)], [true, true, true, true]);
+is("a look-alike that confusables.txt reads as a letter with a mark is read as the letter", [heldToFacts("Use the \uABAF\uABBB\u13A0\u13AC.", deals), heldToFacts("Everything is o\u03B7 sale.", deals)], [false, false]);
+is("so the table has them", [table.get(0x03b7), table.get(0x13eb), table.get(0xabbb)], ["n", "o", "o"]);
 done();

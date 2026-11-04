@@ -1072,6 +1072,26 @@ export const ENDED_UNITS: Record<Unit, number> = {
   webhook: NON_PAYING_ALLOWANCES.ended.webhook,
 };
 
+/**
+ * The units of a free trial's store once its trial is over, until its closing
+ * day: the trial's subscription is no longer running, so the store stands as
+ * one whose plan ended (lib/plan-standing.ts, standingOf: "ended" while it has
+ * a subscription id or an end date, "none" without), at the more of those two
+ * standings' figures where they have them, and a free trial's where they
+ * have none (ENDED_UNITS keeps a store with no plan's requests; a trial's,
+ * which are more, are kept here). So a trial's store keeps no webhook message
+ * after its trial: its month has no webhook deliveries, and a message made
+ * with none is not kept (lib/webhooks.ts, emitEvent).
+ */
+export const AFTER_TRIAL_UNITS: Record<Unit, number> = Object.fromEntries(
+  (Object.keys(TRIAL_UNITS) as Unit[]).map((unit) => {
+    const kind = unit === "own" ? "email" : unit === "access" ? "transactional" : unit;
+    const none = kind in NON_PAYING_ALLOWANCES.none ? NON_PAYING_ALLOWANCES.none[kind as keyof typeof NON_PAYING_ALLOWANCES.none] : TRIAL_UNITS[unit];
+    const fromNone = unit === "store" ? NON_PAYING_ALLOWANCES.none.email + NON_PAYING_ALLOWANCES.none.transactional : unit === "studio" ? NON_PAYING_ALLOWANCES.none.studio + ESSENTIAL_PER_DAY * 32 : none;
+    return [unit, Math.max(ENDED_UNITS[unit], unit === "request" ? TRIAL_UNITS.request : fromNone)];
+  }),
+) as Record<Unit, number>;
+
 /** The most a part keeps at one time at a free trial's units, or (`units`) another standing's. */
 export function trialPartPeak(part: Part, tier: Tier, units: Record<Unit, number> = TRIAL_UNITS): number {
   if ("capped" in part) return part.capped(tier);
@@ -1087,12 +1107,12 @@ const deletes = (name: string) => {
   return Boolean(rule && (rule.how === "erase" || rule.how === "token"));
 };
 
-/** What a part still keeps on a store's closing day, at least CLOSING_DAYS after its plan ended: what its paid windows wrote of a part kept longer than that (at `tier`, or for a free trial at its units), and whatever it wrote since, at an ended store's units (a free trial's after its trial). */
+/** What a part still keeps on a store's closing day, at least CLOSING_DAYS after its plan ended: what its paid windows wrote of a part kept longer than that (at `tier`, or for a free trial at its units), and whatever it wrote since, at an ended store's units (AFTER_TRIAL_UNITS after a free trial). */
 function keptAtClosing(part: Part, tier: Tier, trial: boolean): number {
   if ("capped" in part) return part.capped(tier);
   if (!("per" in part)) return 0;
   const paid = part.days > CLOSING_DAYS ? (trial ? trialPartPeak(part, tier) : partPeak(part, tier)) : 0;
-  return paid + trialPartPeak(part, tier, trial ? TRIAL_UNITS : ENDED_UNITS);
+  return paid + trialPartPeak(part, tier, trial ? AFTER_TRIAL_UNITS : ENDED_UNITS);
 }
 
 /**

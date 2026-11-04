@@ -247,13 +247,13 @@ export default async function BookPage({ params, searchParams }: Params) {
   );
 }
 
-/** What the time picker says, for this page, in the store's language. */
 /** The length a booking moves at, as moveBooking keeps it (lib/call-lengths.ts, ownLength). */
 function movesAt(setup: CallListing["call"], booking: { start: number; end: number }): number {
   const kept = ownLength(setup, booking.end - booking.start);
   return typeof kept === "number" ? kept : setup.minutes;
 }
 
+/** What the time picker says, for this page, in the store's language. */
 function slotWords(store: Store, b: BookingWords, minutes: number, price: string, move: boolean, fromPackage: boolean): SlotWords {
   const { w, lang } = speech(store);
   return {
@@ -391,7 +391,10 @@ async function MovePage({
   const moved = status === "moved";
   const notice = moved ? null : b.moveNotices[status] ?? null;
   const blocked = whyNotMove(setup, booking.start, booking.moves);
-  const movable = blocked === null;
+  // A paid booking of a length no call may have is never moved at a guess (moveBooking refuses it): said as such,
+  // never as times that could not be read, which a refresh would not change.
+  const lengthStuck = ownLength(setup, booking.end - booking.start) === "unknown";
+  const movable = blocked === null && !lengthStuck;
   const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start, booking.end - booking.start) : null;
   const leftMoves = MAX_MOVES - booking.moves;
   const until = movableUntil(setup, booking.start);
@@ -440,7 +443,9 @@ async function MovePage({
                 ? b.moveNotices.limit.title
                 : blocked === "late"
                   ? b.moveNotices.late.title
-                  : b.noOtherSession}
+                  : lengthStuck
+                    ? b.lengthNotMovable
+                    : b.noOtherSession}
             </p>
             <p className="mt-1 text-sm">{isHouseStore(store) ? DEMO_STAYS_NOTE : b.staysAsIs(store.name)}</p>
           </div>

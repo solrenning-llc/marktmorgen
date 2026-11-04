@@ -90,6 +90,11 @@ async function main(): Promise<void> {
     [route.includes('if (!now || now.cents !== Number(shown)) return back("price-changed");'), page.includes("shownCents={chosen ? chosen.cents : undefined}"), langs.every(([, w]) => Boolean(w.notices["price-changed"]?.title && w.notices["price-changed"]?.body.length > 40))],
     [true, true, true],
   );
+  is(
+    "a paid booking of a length no call may have is said to be unmovable here, never as times that could not be read",
+    [page.includes('const lengthStuck = ownLength(setup, booking.end - booking.start) === "unknown";'), page.includes("const movable = blocked === null && !lengthStuck;"), page.includes("? b.lengthNotMovable"), langs.every(([, w]) => w.lengthNotMovable.length > 20)],
+    [true, true, true, true],
+  );
   is("a question, each length with its price, and what is shown", langs.map(([, w]) => [Boolean(w.lengthPick), w.lengthOption(60, "$80").includes("60") && w.lengthOption(60, "$80").includes("$80"), w.lengthChosen("X").includes("X")]), langs.map(() => [true, true, true]));
   is("in US English", [BOOKING_WORDS.en.lengthPick, BOOKING_WORDS.en.lengthOption(60, "$80.00"), BOOKING_WORDS.en.lengthChosen("60 minutes, $80.00")], ["How long would you like?", "60 minutes, $80.00", "Showing times for 60 minutes, $80.00."]);
 }

@@ -9,8 +9,8 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PersonTasks, browserDay } from "@/components/person-tasks";
-import { MAX_PERSON_TASKS, type PersonTask, dayIn } from "@/lib/person-tasks";
+import { PersonTasks, addedTask, browserDay, staleRefusal, undoBody, untilNextDay, watchDay } from "@/components/person-tasks";
+import { MAX_PERSON_TASKS, type PersonTask, dayIn, readTaskInput } from "@/lib/person-tasks";
 import { done, is, part } from "./check";
 
 const PERSON = "a".repeat(32);
@@ -39,7 +39,10 @@ is("none yet", draw([]).includes("No tasks yet."), true);
 part("Undoing a removal");
 const source = readFileSync("components/person-tasks.tsx", "utf8");
 is("a status region, there before anything is removed, says what was removed", html.includes('<div role="status"') && source.includes("`Removed: ${removed.text}`"), true);
-is("undo puts back the words, the date and the teammate", source.includes('{ action: "add", text: task.text, due: task.due, assignee: task.assignee }'), true);
+const gone = task(7, { text: "Send the slides", due: "2026-11-05", assignee: "sam@example.com", done: true });
+is("undo puts back the words, the date and the teammate", undoBody(gone, ["owner@example.com", "sam@example.com"]), { body: { action: "add", text: "Send the slides", due: "2026-11-05", assignee: "sam@example.com" }, unassigned: false });
+is("a teammate who left since: the task comes back with nobody named, and it is said, instead of not coming back", [undoBody(gone, ["owner@example.com"]), source.includes("const { body, unassigned } = undoBody(task, assignees);") && source.includes("can no longer be responsible for tasks")], [{ body: { action: "add", text: "Send the slides", due: "2026-11-05", assignee: "" }, unassigned: true }, true]);
+is("the task put back is the one this add made, never one another tab added at the same moment", [addedTask([task(1)], [task(1), task(9), task(8)]), addedTask([task(1)], [task(1), task(9)])?.id, source.includes("const added = addedTask(before, back);")], [null, "task000009", true]);
 is("and marks it done again if it was", source.includes('if (task.done && added) await send({ action: "done", id: added.id, done: true }'), true);
 is("offered only after the removal was saved", source.includes('if (await send({ action: "remove", id: task.id }, "Task removed.")) setRemoved(task);'), true);
 
@@ -64,6 +67,40 @@ is("a browser in Fortaleza reads the 3rd", there, "2026-11-03");
 const evening = draw([task(1, { text: "Call back", due: "2026-11-03" }), task(2, { text: "Send the file", due: "2026-11-04" }), task(3, { text: "Pay the editor", due: "2026-11-02" })], there);
 is("a task due that day is due, not past", [evening.includes("Due Nov 3, 2026"), evening.includes("Was due Nov 3, 2026")], [true, false]);
 is("tomorrow's is still to come, yesterday's past", [evening.includes("Due Nov 4, 2026"), evening.includes("Was due Nov 2, 2026")], [true, true]);
-is("the browser's day takes over after the server's drawing, which it never mismatches", source.includes("useSyncExternalStore(noSubscription, () => browserDay(), () => serverDay)") && source.includes("const today = useCreatorDay(serverDay);"), true);
+is("the browser's day takes over after the server's drawing, which it never mismatches", source.includes("useSyncExternalStore(watchBrowserDay, () => browserDay(), () => serverDay)") && source.includes("const today = useCreatorDay(serverDay);"), true);
+
+part("A page left open past midnight (edge review)");
+process.env.TZ = "America/Fortaleza";
+is("the next day starts a second past midnight where the browser is", untilNextDay(Date.parse("2026-11-04T02:30:00Z")), 30 * 60 * 1_000 + 1_000);
+const timers: { run: () => void; ms: number; live: boolean }[] = [];
+const heard: (() => void)[] = [];
+let changes = 0;
+const stopWatching = watchDay(() => { changes += 1; }, {
+  now: () => Date.parse("2026-11-04T02:30:00Z"),
+  setTimer: (run, ms) => { const timer = { run, ms, live: true }; timers.push(timer); return timer; },
+  clearTimer: (timer) => { if (timer) (timer as { live: boolean }).live = false; },
+  listen: (run) => { heard.push(run); return () => heard.splice(heard.indexOf(run), 1); },
+});
+is("it waits for that midnight", [timers.length, timers[0].ms], [1, 30 * 60 * 1_000 + 1_000]);
+timers[0].run();
+is("at midnight the day is read again, and the next midnight awaited, one timer at a time", [changes, timers.length, timers.filter((t) => t.live).length], [1, 2, 1]);
+heard[0]();
+is("and again when the page is seen again (a laptop opened the next morning)", [changes, timers.length, timers.filter((t) => t.live).length], [2, 3, 1]);
+stopWatching();
+is("nothing is left waiting once the page is closed", [timers.some((t) => t.live), heard.length], [false, 0]);
+if (zoneBefore === undefined) delete process.env.TZ;
+else process.env.TZ = zoneBefore;
+
+part("A screen another tab changed (edge review)");
+is("a task gone or a list filled elsewhere says this screen is out of date", ["unknown", "full", "store_full", "text", "long", "date", "assignee", undefined].map(staleRefusal), [true, true, true, false, false, false, false, false]);
+is("then the tasks are read again, so what is shown is what is kept, and the refusal says so", source.includes("staleRefusal(answer.error) && (await reread())") && source.includes("/api/store/person-tasks?person=${encodeURIComponent(person)}") && source.includes("The list now shows the tasks as they are."), true);
+
+part("Words no one can see (edge review)");
+const typed = (text: string) => { const r = readTaskInput({ text }, () => true); return r.ok ? r.value.text : r.error; };
+is("only zero-width spaces, joiners or fillers are no task", ["\u200b\u200b", "\u2060", "\u3164", "\u200d", "\u0301"].map(typed), ["text", "text", "text", "text", "text"]);
+is("words shown backwards lose their direction signs", typed("\u202eCall Ana"), "Call Ana");
+is("half a character pair is shown as the replacement sign", typed("A\ud800B"), "A\ufffdB");
+is("C1 controls are made spaces, an accent typed as two characters kept as one", [typed("a\u0085b"), typed("Cafe\u0301")], ["a b", "Caf\u00e9"]);
+is("emoji joined by a joiner stay as typed", typed("Thank \u{1F469}\u200d\u{1F4BB}"), "Thank \u{1F469}\u200d\u{1F4BB}");
 
 done();

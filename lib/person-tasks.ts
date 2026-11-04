@@ -53,14 +53,33 @@ export const TASK_REFUSALS: Readonly<Record<TaskRefusal, string>> = {
 /** What a change refused while another one is being saved says (lib/crm.ts, changePersonTasks; answered 409 "busy"). */
 export const TASKS_BUSY = "Someone else is changing tasks in this store right now. Try again in a moment.";
 
-const line = (raw: unknown) => (typeof raw === "string" ? raw.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim() : "");
+/**
+ * Signs that change how the words around them are drawn without being seen:
+ * the bidirectional embeddings, overrides and isolates (words shown backwards,
+ * Unicode Technical Report 36), the byte order mark and the invisible
+ * "function" signs.
+ */
+const UNSEEN = /[\u202a-\u202e\u2066-\u2069\ufeff\u2060-\u2064]/g;
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+
+/**
+ * One line: control characters (C0 and C1) and runs of spaces made single
+ * spaces, the unseen signs taken out, half a character pair (a lone
+ * surrogate, never typed) shown as U+FFFD, in the composed form (NFC); trimmed.
+ */
+const line = (raw: unknown) =>
+  typeof raw === "string" ? raw.replace(LONE_SURROGATE, "\ufffd").normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(UNSEEN, "").replace(/\s+/g, " ").trim() : "";
+
+/** True when the words have a character that is drawn: not only spaces, joiners, marks or fillers. */
+const seen = (value: string) => /[^\s\p{C}\p{M}\u115f\u1160\u3164\uffa0\u2800]/u.test(value);
 
 export type TaskInput = { text: string; due: string; assignee: string };
 
 /** A task's words, date and teammate as typed, checked. `isAssignee` says who may be responsible. */
 export function readTaskInput(raw: { text?: unknown; due?: unknown; assignee?: unknown }, isAssignee: (email: string) => boolean): { ok: true; value: TaskInput } | { ok: false; error: TaskRefusal } {
   const text = line(raw.text);
-  if (!text) return { ok: false, error: "text" };
+  // Words no one can see (only zero-width spaces, joiners or fillers) are no task.
+  if (!text || !seen(text)) return { ok: false, error: "text" };
   if (text.length > MAX_TASK_TEXT) return { ok: false, error: "long" };
   const due = raw.due === undefined || raw.due === "" ? "" : raw.due;
   if (due !== "" && !validCrmDate(due)) return { ok: false, error: "date" };

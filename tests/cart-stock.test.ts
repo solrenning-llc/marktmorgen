@@ -13,14 +13,20 @@
  *     hold cannot be written is closed at Stripe; a provisional hold that
  *     lapsed is let go without asking Stripe;
  *   - a cart of unlimited products takes no lock and holds nothing;
+ *   - a product bought alone (withStockHold) takes the same lock and the
+ *     same provisional hold as a cart, so the two never both get the last
+ *     unit, even when its lock runs out while Stripe opens its checkout;
  *   - going back from Stripe and paying again closes the old checkout first
  *     and hands its units back; a paid one is never handed back, nor one
  *     Stripe will not close because it was just paid;
  *   - the thanks page marks each limited product of the cart sold;
  *   - the open cart says a sold out one is sold out and leaves it out of the
- *     total, and never says so of one whose count cannot be read; the route
+ *     total, and never says so of one whose count cannot be read; the unit
+ *     the browser back from Stripe holds (its cookie) is its own, until paid; the route
  *     sends a cart that sold out back to it, and sets the cookie that hands
  *     its units back;
+ *   - the open cart never offers a sold out pick, product bought together
+ *     or bundle, reading at most MAX_SUGGEST counts for each;
  *   - the store page, the product page, "Goes well with" and the cart's
  *     reminder leave a sold out one out (read in their source).
  */
@@ -28,8 +34,8 @@ import { NextRequest } from "next/server";
 import { cartable } from "@/lib/cart-rules";
 import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
-import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
-import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds, withStockHold } from "@/lib/stock";
+import { addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setProductPairs, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { GET as readCart, POST as payCart } from "@/app/api/store/cart/route";
 import { NO_DEAL } from "@/lib/cart-rules";
 import { NO_RECOVERY } from "@/lib/recovery-setting";
@@ -133,6 +139,38 @@ async function main(): Promise<void> {
   });
   is("a cart of unlimited products holds nothing and takes no lock", [free.ok, told], [true, false]);
 
+  part("One product bought alone and the same product in a cart");
+  // The last unit, bought alone while Stripe is slow to open its checkout: the lock it took runs out meanwhile (as one of
+  // 15 s does against Stripe's 20 s tries), and a cart with the same product is paid for in that time.
+  const last = limited("print20", 1);
+  const lockOf = (id: string) => `nl:stock:lock:${creator.statsId}:${id}`;
+  let cartWhileSlow: Awaited<ReturnType<typeof withCartStockHolds>> | null = null;
+  const alone = await withStockHold(creator, last, async () => {
+    await redis.pipeline([["DEL", lockOf("print20")]]);
+    cartWhileSlow = await withCartStockHolds(creator, [plain("guide1"), last], async () => ({ id: "cs_test_cartstockrace0001" }));
+    return { id: "cs_test_alonestockrace001" };
+  });
+  is("a product bought alone and a cart never both get the last unit", [alone.ok, (cartWhileSlow as { ok: boolean } | null)?.ok, await stockLeft(creator, last)], [true, false, 0]);
+  // The other way round: the cart holds the last unit first, and the one bought alone finds it gone.
+  const last2 = limited("print21", 1);
+  const cartFirst = await withCartStockHolds(creator, [last2], async () => ({ id: "cs_test_cartstockrace0002" }));
+  let aloneOpened = 0;
+  const aloneAfter = await withStockHold(creator, last2, async () => {
+    aloneOpened += 1;
+    return { id: "cs_test_alonestockrace002" };
+  });
+  is("a cart that holds the last unit first leaves none for the product bought alone", [cartFirst.ok, aloneAfter, aloneOpened], [true, { ok: false, reason: "soldout" }, 0]);
+  // At the same instant, each slow to open: exactly one gets it.
+  const last3 = limited("print22", 1);
+  const slow = (id: string) => async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    return { id };
+  };
+  const both = await Promise.all([withStockHold(creator, last3, slow("cs_test_alonestockrace003")), withCartStockHolds(creator, [last3], slow("cs_test_cartstockrace0003"))]);
+  is("pressed at the same instant, exactly one of them gets the last unit", [both.filter((one) => one.ok).length, await stockLeft(creator, last3)], [1, 0]);
+  const leftLocks = await redis.pipeline([["GET", lockOf("print20")], ["GET", lockOf("print21")], ["GET", lockOf("print22")]]);
+  is("and no lock is left behind", leftLocks, [null, null, null]);
+
   part("Going back, and paying");
   sessions.set("cs_test_cartstockfirst01", { id: "cs_test_cartstockfirst01", status: "open" });
   await releaseCartStockHolds(creator, [a, b], "cs_test_cartstockfirst01");
@@ -217,9 +255,63 @@ async function main(): Promise<void> {
   const open = await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${[made.Guide, made.Print].join(",")}`));
   const cart = (await open.json()) as { items: { id: string; ok: boolean; soldOut: boolean }[]; total: string };
   is("the open cart: the held print sold out, left out of the total", [cart.items.map((item) => [item.ok, item.soldOut]), cart.total], [[[true, false], [false, true]], "$20"]);
+  type Opened = { items: { id: string; ok: boolean; soldOut: boolean }[]; total: string };
+  const readWith = async (cookie: string) =>
+    (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${[made.Guide, made.Print].join(",")}`, { headers: { cookie } }))).json()) as Opened;
+  const backCookie = back.cookie.split(";")[0];
+  const mineBack = await readWith(backCookie);
+  is("the browser back from Stripe: the print it holds is its own, not sold out, and in its total", [mineBack.items.map((item) => [item.ok, item.soldOut]), mineBack.total], [[[true, false], [true, false]], "$40"]);
+  const otherBrowser = await readWith("nl_cart_hold=cs_test_cartstocknotmine01");
+  is("a cookie naming a checkout that holds nothing frees nothing", otherBrowser.items.map((item) => [item.ok, item.soldOut]), [[true, false], [false, true]]);
+  is("a cookie that is not a checkout's id frees nothing", (await readWith("nl_cart_hold=p_x")).items.map((item) => item.soldOut), [false, true]);
+  const printListing = parseProduct({ id: made.Print, title: "Print", summary: "", priceCents: 2000, stock: 1 }) as Listing;
+  is("the count for everyone else is unchanged", await stockLeft(owner, printListing), 0);
+  await confirmCartStock(owner, [printListing], backCookie.split("=")[1]);
+  is("once that checkout is paid, its print is sold out to that browser too", (await readWith(backCookie)).items.map((item) => item.soldOut), [false, true]);
   await redis.pipeline([["HSET", `nl:stock:${owner.statsId}:${made.Poster}`, "cs_test_cartstockjunk0001", "not a hold"]]);
   const unread = (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${made.Poster}`))).json()) as { items: { ok: boolean; soldOut: boolean }[] };
   is("a count that cannot be read is not paid for, and never said to be sold out", unread.items.map((item) => [item.ok, item.soldOut]), [[false, false]]);
+
+  part("What the open cart offers");
+  const SHOP = "mugs@example.com";
+  await claimHandle(SHOP, "mugshop", "Mug Shop", "");
+  await ensureStatsId(SHOP);
+  await setStripeAccount(SHOP, "acct_1TestMugs0001", true);
+  await setSubscription(SHOP, { customerId: "cus_Mugs000001", subscriptionId: "sub_Mugs000001", active: true, period: paidPeriod() });
+  const m: Record<string, string> = {};
+  for (const [title, price] of [["Guide", "20"], ["Pen", "20"], ["Cup", "20"], ["Mug", "20"], ["Set", "25"], ["Box", "30"]] as const) {
+    const added = await addProduct(SHOP, title, "", price, null);
+    if (!added.ok) throw new Error(`no ${title}`);
+    m[title] = added.product.id;
+    if (title !== "Set" && title !== "Box") await setProductLink(SHOP, added.product.id, `https://example.com/${title.toLowerCase()}`);
+  }
+  // What a bundle holds is never limited (lib/bundle-rules.ts); the bundle itself can be.
+  for (const bundle of ["Set", "Box"]) if (!(await setProductBundle(SHOP, m[bundle], [m.Guide, m.Pen])).ok) throw new Error(`no bundle ${bundle}`);
+  for (const [title, stock] of [["Cup", 2], ["Mug", 1], ["Set", 1]] as const) {
+    if (!(await setProductExtras(SHOP, m[title], { stock })).ok) throw new Error(`no stock on ${title}`);
+  }
+  if (!(await setProductPairs(SHOP, m.Guide, [m.Mug, m.Cup])).ok) throw new Error("no pairs");
+  const mugs = (await storeForEmail(SHOP))!;
+  const listed = async (id: string) => (await (await import("@/lib/catalog")).readListing(mugs, id))!;
+  const sell = async (id: string) => confirmCartStock(mugs, [await listed(id)], `cs_test_mugsold${id.slice(0, 10).padEnd(10, "0")}`);
+  type Offered = { suggest: { id: string }[]; bundle: { id: string } | null };
+  const offered = async (ids: string[]) => (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=mugshop&ids=${ids.join(",")}`))).json()) as Offered;
+  const before = await offered([m.Guide]);
+  is("before any sells out, both picks are offered", before.suggest.map((one) => one.id), [m.Mug, m.Cup]);
+  is("and the limited bundle that makes the cart cheaper", (await offered([m.Guide, m.Pen])).bundle?.id, m.Set);
+  await sell(m.Mug);
+  await sell(m.Set);
+  is("a pick that sold out is never offered; one with units left still is", (await offered([m.Guide])).suggest.map((one) => one.id), [m.Cup]);
+  is("a bundle that sold out is never offered; the next one that makes the cart cheaper is", (await offered([m.Guide, m.Pen])).bundle?.id, m.Box);
+  const reads: string[] = [];
+  const pipe = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    for (const command of commands) if (command[0] === "HGETALL" && String(command[1]).startsWith(`nl:stock:${mugs.statsId}:`)) reads.push(String(command[1]));
+    return pipe(commands);
+  };
+  await offered([m.Guide]);
+  redis.pipeline = pipe;
+  is("the offers read each limited count once, never more than MAX_SUGGEST", reads.filter((key) => key.endsWith(m.Mug) || key.endsWith(m.Cup)).length <= 3, true);
 
   part("Where else a sold out one is not offered");
   const { readFileSync } = await import("node:fs");
@@ -228,6 +320,12 @@ async function main(): Promise<void> {
     readFileSync("app/[handle]/p/[product]/page.tsx", "utf8").includes("cartable(product) && remaining !== 0"),
     readFileSync("app/[handle]/p/[product]/page.tsx", "utf8").includes("!pairedOut.has(p.id)"),
   ], [true, true, true]);
+  const productPage = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
+  is("Goes well with: a count that cannot be read is offered, as the store page does (the cart's own read refuses it)", [
+    productPage.includes("(await stockLeft(store, p).catch(() => null)) === 0 ? p.id : null"),
+    productPage.includes("stockLeft(store, p).catch(() => 0)"),
+    readFileSync("app/[handle]/page.tsx", "utf8").includes("stockLeft(store, product).catch(() => null)"),
+  ], [true, false, true]);
   is("the thanks page marks the cart's limited products sold", readFileSync("app/[handle]/thanks/page.tsx", "utf8").includes("confirmCartStock(store, order.bumps.map((added) => added.product), sessionId)"), true);
   is("nor in the cart's reminder", readFileSync("lib/checkout-recovery.ts", "utf8").includes("return kept.filter((_, i) => left[i] !== 0);"), true);
 

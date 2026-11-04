@@ -63,7 +63,11 @@ export async function GET(request: NextRequest) {
   const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => ({ soon: new Set<string>() }))]);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
-  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)));
+  // The unit this browser holds with the cart's checkout it last opened is its own (the cookie it was given then):
+  // a buyer back from Stripe is not told it is sold out. Paying again closes that checkout before holding anew.
+  const mine = request.cookies.get(CART_HOLD_COOKIE)?.value ?? "";
+  const hold = /^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(mine) ? mine : undefined;
+  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p, Date.now(), hold).catch(() => undefined)] as const)));
   const selling = canSell(store);
   const sw = shippingWords(store.language);
   const items = ids.flatMap((id) => {
@@ -136,7 +140,7 @@ export async function GET(request: NextRequest) {
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
   const suggest = await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []);
-  const bundle = bundleSwap(store, payable, ids, coming.soon, country, locale);
+  const bundle = await bundleSwap(store, payable, ids, coming.soon, country, locale).catch(() => null);
   return Response.json(
     {
       ok: true,
@@ -157,9 +161,11 @@ export async function GET(request: NextRequest) {
 /**
  * The creator's own bundle that holds what is in the cart and makes the cart
  * cost less, when there is one (lib/cart-bundle.ts): only the bundles the
- * store's record already carries for its first page, so nothing more is read.
+ * store's record already carries for its first page. A limited bundle with
+ * none left is never offered (lib/stock.ts): its count is read, at most
+ * MAX_SUGGEST times, and past that nothing is offered.
  */
-function bundleSwap(
+async function bundleSwap(
   store: Store,
   payable: { id: string; title: string; cents: number }[],
   ids: string[],
@@ -171,14 +177,26 @@ function bundleSwap(
   const offers = store.catalog.head.filter(
     (product) => product.bundle && !ids.includes(product.id) && !soon.has(product.id) && !product.keys && cartable(product) && canSellProduct(store, product),
   );
-  if (offers.length === 0) return null;
-  const swap = bestBundleSwap(
-    payable.map((line) => ({ id: line.id, cents: line.cents })),
-    offers.map((product) => ({ id: product.id, cents: cartPrice(store, product, country).cents, items: product.bundle ?? [] })),
-    store.cartDeal,
-  );
-  if (!swap) return null;
-  const product = offers.find((p) => p.id === swap.id)!;
+  let swap: ReturnType<typeof bestBundleSwap> = null;
+  let product: (typeof offers)[number] | undefined;
+  for (let reads = 0; offers.length > 0; ) {
+    swap = bestBundleSwap(
+      payable.map((line) => ({ id: line.id, cents: line.cents })),
+      offers.map((offer) => ({ id: offer.id, cents: cartPrice(store, offer, country).cents, items: offer.bundle ?? [] })),
+      store.cartDeal,
+    );
+    if (!swap) return null;
+    const found = swap.id;
+    product = offers.find((p) => p.id === found)!;
+    if (product.stock === null) break;
+    if (reads >= MAX_SUGGEST) return null;
+    reads += 1;
+    // Unknown is offered, as the store page does; the cart's own read refuses it if it is added.
+    if ((await stockLeft(store, product).catch(() => undefined)) !== 0) break;
+    offers.splice(offers.indexOf(product), 1);
+    swap = null;
+  }
+  if (!swap || !product) return null;
   const words = cartWords(store.language);
   const titles = payable.filter((line) => swap.replaces.includes(line.id)).map((line) => line.title);
   const held = titles.length > 1 ? `${titles.slice(0, -1).join(", ")} ${words.and} ${titles.at(-1)}` : titles[0];
@@ -229,10 +247,18 @@ async function suggestions(
   if (wanted.length === 0) return [];
   const listed = await readListings(store, wanted.map((want) => want.id));
   const out: Suggestion[] = [];
+  // A limited one with none left is never offered (lib/stock.ts): its count is read, at most MAX_SUGGEST times; past that, no
+  // more limited ones are offered. Unknown is offered, as the store page does; the cart's own read refuses it if it is added.
+  let stockReads = 0;
   for (const want of wanted) {
     const product = listed.find((p) => p.id === want.id);
     if (!product || !cartable(product) || !canSellProduct(store, product)) continue;
     if (product.keys && (await outOfKeys(store, product).catch(() => true))) continue;
+    if (product.stock !== null) {
+      if (stockReads >= MAX_SUGGEST) continue;
+      stockReads += 1;
+      if ((await stockLeft(store, product).catch(() => undefined)) === 0) continue;
+    }
     out.push({
       id: want.id,
       title: product.title,

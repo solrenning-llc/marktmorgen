@@ -412,6 +412,7 @@ async function main(): Promise<void> {
   is("and nothing was taken away", [(await redisPipeline([["HGET", dealsKey, keptDeal]]))[0] !== null, String((await redisPipeline([["GET", pipesKey]]))[0]) === keptPipes, (await redisPipeline([["GET", `nl:crm:fields:${statsId}`]]))[0] === keptFields], [true, true, true]);
   const stillOpen = await asLocked({ action: "deal", version: await versionOf(keptDeal), deal: { id: keptDeal, title: "Kept, renamed" } });
   is("changing a deal is not", [stillOpen.status, stillOpen.body.ok], [200, true]);
+  is("the board says why, never that the change could not be confirmed", readFileSync("components/deals-board.tsx", "utf8").includes("locked: \"You got in without your second step, so removing a deal, a pipeline or a field waits until two-step login turns off. Nothing was removed."), true);
   is("a full session still removes it", [(await crm(owner, { action: "undeal", id: keptDeal })).status], [200]);
 
   done();

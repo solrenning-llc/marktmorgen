@@ -183,6 +183,11 @@ try{
       const field=document.querySelector("#help-search"),section=document.getElementById(id);
       return field?.value===""&&section&&!section.hidden&&section.getBoundingClientRect().height>0;
      },sectionId);
+     // The current fragment has not changed: following it again emits no hashchange.
+     await search.fill("zzzz-no-answer-fixture");
+     await page.waitForFunction(()=>document.querySelectorAll("details[data-help-item]:not([hidden])").length===0);
+     await sectionLink.focus();await page.keyboard.press("Enter");
+     await page.waitForFunction(id=>document.querySelector("#help-search")?.value===""&&!document.getElementById(id)?.hidden,sectionId);
      await search.fill("zzzz-no-answer-fixture");
      await page.waitForFunction(()=>document.querySelectorAll("details[data-help-item]:not([hidden])").length===0);
      await page.goto(origin+"/help#"+encodeURIComponent(answerId));
@@ -200,7 +205,7 @@ try{
       if(await search.inputValue()!=="Stripe")throw Error("Unrelated or malformed help fragment cleared the search");
      }
      if(errors.length||writes)throw Error("Help navigation raised an error or attempted a write: "+errors.join("; "));
-     console.log("HELP_FRAGMENT_NAVIGATION_REGRESSION:"+JSON.stringify({engine,width:helpWidth,malformedEntry:true,keyboardSection:true,hiddenAnswer:true,queryPreserved:true,writes,foreign}));
+     console.log("HELP_FRAGMENT_NAVIGATION_REGRESSION:"+JSON.stringify({engine,width:helpWidth,malformedEntry:true,keyboardSection:true,repeatedSection:true,hiddenAnswer:true,queryPreserved:true,writes,foreign}));
     }
    }
 

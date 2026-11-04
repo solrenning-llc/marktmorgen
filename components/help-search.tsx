@@ -51,9 +51,23 @@ export function HelpSearch() {
       setQuery("");
       setShown(narrow(""));
     });
+    const followCurrentHash = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!link || link.hasAttribute("download")) return;
+      const target = link.getAttribute("target");
+      if (target && target !== "_self") return;
+      const href = link.getAttribute("href");
+      // The browser does not emit hashchange when the same link is followed twice.
+      if (href?.startsWith("#") && href === window.location.hash) reveal();
+    };
     reveal();
     window.addEventListener("hashchange", reveal);
-    return () => window.removeEventListener("hashchange", reveal);
+    document.addEventListener("click", followCurrentHash);
+    return () => {
+      window.removeEventListener("hashchange", reveal);
+      document.removeEventListener("click", followCurrentHash);
+    };
   }, []);
 
   const search = (value: string) => {

@@ -60,6 +60,8 @@ async function main(): Promise<void> {
   const words: SlotWords = { locale: "en-US", pickDay: "Pick a day", pickTime: "Pick a time", noneTitle: "None", noneBody: "None", yours: "Times are in your time zone, {zone}.", creators: "", chosen: " · 60 minutes", submit: "Continue", note: "" };
   const html = renderToStaticMarkup(createElement(SlotPicker, { starts: [Date.now() + 3 * 86_400_000], creatorTz: NY, handle: "lena", productId: "p1", minutes: 60, words }));
   is("sends the length chosen with the time", html.includes('name="minutes" value="60"'), true);
+  const priced = renderToStaticMarkup(createElement(SlotPicker, { starts: [Date.now() + 3 * 86_400_000], creatorTz: NY, handle: "lena", productId: "p1", minutes: 60, shownCents: 8000, words }));
+  is("and the price it showed for it, only beside a chosen length, only to be compared", [priced.includes('name="shown" value="8000"'), html.includes('name="shown"'), renderToStaticMarkup(createElement(SlotPicker, { starts: [Date.now() + 3 * 86_400_000], creatorTz: NY, handle: "lena", productId: "p1", shownCents: 8000, words })).includes('name="shown"')], [true, false, false]);
   const plain = renderToStaticMarkup(createElement(SlotPicker, { starts: [Date.now() + 3 * 86_400_000], creatorTz: NY, handle: "lena", productId: "p1", words }));
   const moving = renderToStaticMarkup(createElement(SlotPicker, { starts: [Date.now() + 3 * 86_400_000], creatorTz: NY, handle: "lena", productId: "p1", minutes: 60, move: "cs_test_x", words }));
   is("and nothing when there is no choice, or when a booking moves at its own length", [plain.includes('name="minutes"'), moving.includes('name="minutes"')], [false, false]);
@@ -83,6 +85,11 @@ async function main(): Promise<void> {
 
   part("In every language");
   const langs = Object.entries(BOOKING_WORDS);
+  is(
+    "a length's price changed while the buyer chose is refused and said, never charged at a price the page did not show",
+    [route.includes('if (!now || now.cents !== Number(shown)) return back("price-changed");'), page.includes("shownCents={chosen ? chosen.cents : undefined}"), langs.every(([, w]) => Boolean(w.notices["price-changed"]?.title && w.notices["price-changed"]?.body.length > 40))],
+    [true, true, true],
+  );
   is("a question, each length with its price, and what is shown", langs.map(([, w]) => [Boolean(w.lengthPick), w.lengthOption(60, "$80").includes("60") && w.lengthOption(60, "$80").includes("$80"), w.lengthChosen("X").includes("X")]), langs.map(() => [true, true, true]));
   is("in US English", [BOOKING_WORDS.en.lengthPick, BOOKING_WORDS.en.lengthOption(60, "$80.00"), BOOKING_WORDS.en.lengthChosen("60 minutes, $80.00")], ["How long would you like?", "60 minutes, $80.00", "Showing times for 60 minutes, $80.00."]);
 }

@@ -234,6 +234,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                   pkg={fromPackage ? pkgToken : undefined}
                   host={pickedHost}
                   minutes={chosen ? chosen.minutes : undefined}
+                  shownCents={chosen ? chosen.cents : undefined}
                   words={{ ...slotWords(store, b, chosen ? chosen.minutes : setup.minutes, payNow, false, fromPackage), code }}
                 />
               </>

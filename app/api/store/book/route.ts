@@ -1,3 +1,4 @@
+import { bookingLength } from "@/lib/call-lengths";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { adsCheckout } from "@/lib/ad-events";
 import { holdSession, prepareSession } from "@/lib/call-packages";
@@ -51,6 +52,8 @@ export async function POST(request: NextRequest) {
   let hostLabel = "";
   // On a call with several lengths: the one chosen, in minutes (lib/call-lengths.ts); its price is read from the creator's record, never from the form.
   let minutes = "";
+  // The price the page showed for that length, only compared with the record (price-changed), never charged.
+  let shown = "";
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (name: string) => {
@@ -67,6 +70,7 @@ export async function POST(request: NextRequest) {
     hostKey = /^[0-5]$/.test(read("host")) ? read("host") : "";
     hostLabel = read("host_label").slice(0, 60);
     minutes = read("minutes").slice(0, 4);
+    shown = read("shown").slice(0, 10);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -93,6 +97,11 @@ export async function POST(request: NextRequest) {
   if (!canSellProduct(store, product)) return back("unavailable");
   if (await isSoon(store, product.id).catch(() => false)) return back("unavailable");
   if (!Number.isFinite(start)) return back("invalid");
+  // A length's price the creator changed while the buyer chose: said, never charged at a price the page did not show.
+  if (minutes && /^\d{1,9}$/.test(shown)) {
+    const now = bookingLength(product.call, product.priceCents, minutes);
+    if (!now || now.cents !== Number(shown)) return back("price-changed");
+  }
   // Each try holds a time for half an hour while Stripe's page is open, so
   // one connection gets fifteen in ten minutes per store: enough to change
   // one's mind many times, not enough to hold a creator's whole week.

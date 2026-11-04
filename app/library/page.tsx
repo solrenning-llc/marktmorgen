@@ -9,6 +9,8 @@ import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { libraryOwner, storesBoughtFrom } from "@/lib/buyer-library";
+import { waitingFor, waitingLine } from "@/lib/buyer-waiting";
+import { requestsOpen } from "@/lib/payment-requests";
 
 export const metadata: Metadata = {
   title: "Your library — Marktmorgen",
@@ -37,12 +39,16 @@ export default async function LibraryPage({ searchParams }: Params) {
   const email = token ? await libraryOwner(token) : null;
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
-  const shelves: { store: Store; open: string | null }[] = [];
+  const shelves: { store: Store; open: string | null; waiting: string }[] = [];
   if (email) {
     const stores = (await Promise.all((await storesBoughtFrom(email)).map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
     for (const store of stores) {
       const base = storeBase(store);
-      shelves.push({ store, open: canRecover(store) ? await ordersLinkFor(store, email, base).catch(() => null) : null });
+      const open = canRecover(store) ? await ordersLinkFor(store, email, base).catch(() => null) : null;
+      // What waits on them there (lib/buyer-waiting.ts), shown only where its orders page opens to act on it.
+      const found = open ? await waitingFor(store, email).catch(() => null) : null;
+      const waiting = found ? waitingLine({ ...found, requests: requestsOpen(store) ? found.requests : [] }) : "";
+      shelves.push({ store, open, waiting });
     }
     shelves.sort((a, b) => a.store.name.localeCompare(b.store.name, "en"));
   }
@@ -71,7 +77,7 @@ export default async function LibraryPage({ searchParams }: Params) {
               </p>
               {shelves.length ? (
                 <ul className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {shelves.map(({ store, open }) => (
+                  {shelves.map(({ store, open, waiting }) => (
                     <li key={store.sid} className="card flex min-w-0 flex-col p-5" data-library-store={store.handle}>
                       <div className="flex items-center gap-3">
                         {store.photoId ? (
@@ -84,6 +90,7 @@ export default async function LibraryPage({ searchParams }: Params) {
                         )}
                         <p className="min-w-0 truncate text-lg font-semibold">{store.name}</p>
                       </div>
+                      {waiting ? <p className="mt-4 text-sm font-semibold text-ink">{waiting}</p> : null}
                       {!open ? (
                         <p role="status" className="mt-4 text-sm text-ink-soft">
                           Your purchases could not be opened just now. Try again in a moment, or visit the store for help.

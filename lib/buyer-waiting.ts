@@ -58,3 +58,17 @@ export async function waitingFor(store: Store, email: string, now = Date.now()):
   );
   return { requests: openRequestsFor(requests ?? [], email, now), agreements: titled.filter((item): item is WaitingAgreement => item !== null) };
 }
+
+/**
+ * What the library says on a store's card (app/library): how many payment
+ * requests and things to sign wait there, in words, or "" for none. The
+ * library is Marktmorgen's own page, so it is in US English.
+ */
+export function waitingLine(waiting: Waiting): string {
+  const parts: string[] = [];
+  const requests = waiting.requests.length;
+  const toSign = waiting.agreements.length;
+  if (requests) parts.push(`${requests} payment ${requests === 1 ? "request" : "requests"} to pay`);
+  if (toSign) parts.push(`${toSign} ${toSign === 1 ? "proposal or agreement" : "proposals or agreements"} to sign`);
+  return parts.length ? `Waiting for you: ${parts.join(" and ")}.` : "";
+}

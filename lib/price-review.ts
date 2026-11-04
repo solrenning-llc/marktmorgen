@@ -8,10 +8,11 @@
  * choose); the price, or the lowest price they may choose; the price their
  * box starts at; a membership's introductory price and its yearly price,
  * also when a change of schedule takes them away. On a product with several
- * price options, each priced in its own editor, only how buyers pay. Not
- * reviewed yet: a membership's free trial and its number of payments;
- * drafts, which no buyer sees. A save the product route would refuse is not
- * reviewed either (WCAG 3.3.6): the save says what is wrong.
+ * price options, only how buyers pay here; each option's price is reviewed
+ * in its own editor (optionPriceReview). Not reviewed yet: a membership's
+ * free trial and its number of payments; drafts, which no buyer sees. A save
+ * the product route would refuse is not reviewed either (WCAG 3.3.6): the
+ * save says what is wrong.
  *
  * The price said is the store's price: a sale, an offer or a discount code
  * can lower what a buyer pays (lib/store-checkout.ts), and sales tax or VAT is
@@ -30,6 +31,7 @@ import { introProblem } from "@/lib/intro-price";
 import { yearlyProblem } from "@/lib/yearly-price";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
+import { readShippingSku } from "@/lib/shipping";
 
 export type PricedProduct = {
   /** A draft is seen by no buyer: nothing to review. */
@@ -180,4 +182,61 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
       ? `New members join at this once you save.${store} A checkout already open keeps what it opened with. Members who already joined keep the price and schedule they joined at.`
       : `Members who already joined are still charged what they joined at. Saving does not cancel them. Each membership ends when they or you cancel it, or after its last payment. To stop them, cancel their memberships in your Stripe dashboard. New buyers see this once you save.${store}`;
   return { rows, note: note + planned };
+}
+
+/**
+ * The review for saving one of several price options of a product buyers
+ * can see with a new price, or null when the price is the same, cannot be
+ * read or is out of range (the save says why), the product is a draft, or the
+ * option is not offered (`shown` false: it has nothing to hand over yet).
+ * `label` is the name as typed: none, or one the route refuses, is not
+ * reviewed. On a membership, members who joined at that
+ * price keep it, as for the product's own price. The price is the store's,
+ * before a sale, an offer or a code, with tax on top where the store adds it.
+ *
+ * With a payment plan set on the product, what the new price does to it is
+ * said, from whether buyers are offered it now (`planBefore`) and with the
+ * new price (`planAfter`; lib/product-extras.ts, activePlan): a price above
+ * what the option's payments add up to stops it for the whole product
+ * (uncoveredOption), a lower one can bring a paused plan back, and below
+ * what they add up to, buyers who pay in parts still pay that.
+ *
+ * Not reviewed yet: adding or removing an option, and changing which is
+ * recommended.
+ */
+export function optionPriceReview(
+  /** The name and lines as typed, and the SKU sent (undefined unless the product is shipped). */
+  option: { label: string; priceCents: number; details: string; sku: string | undefined },
+  typed: string,
+  product: {
+    hidden: boolean;
+    interval: Interval | null;
+    shown: boolean;
+    taxOnTop: boolean;
+    /** This option's payment in the product's payment plan, offered or not; null when it has none. */
+    plan: { payments: number; cents: number } | null;
+    /** Whether buyers are offered the plan now, and would be with this option at a price. */
+    planBefore: boolean;
+    planAfter: (cents: number) => boolean;
+  },
+  read: (typed: string) => number | null,
+  money: (cents: number) => string,
+): PriceReview | null {
+  if (product.hidden || !product.shown) return null;
+  // Nor a save the option route refuses for its words (app/api/store/option/route.ts, lib/store.ts readOption):
+  // no name, a promise of fast money in its name or lines, or a SKU it cannot keep.
+  const label = option.label.trim();
+  if (!label || fastMoneyRefusal({ title: label, summary: option.details, about: "" }) || readShippingSku(option.sku) === null) return null;
+  const price = read(typed.trim());
+  if (price === null || price === option.priceCents) return null;
+  const notes = [
+    product.interval
+      ? `New members who pick it join at this once you save. ${storePriceWords(product.taxOnTop)} A checkout already open keeps what it opened with. Members who already joined keep the price they joined at.`
+      : `Your store shows this as soon as you save. ${storePriceWords(product.taxOnTop)}`,
+  ];
+  notes.push(...planWords(product.plan, product.planBefore, product.planAfter(price), price, money));
+  return {
+    rows: [{ key: "option", label: `“${label}”`, now: money(option.priceCents), then: money(price), field: "price" }],
+    note: notes.join(" "),
+  };
 }

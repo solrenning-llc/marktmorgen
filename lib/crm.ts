@@ -12,6 +12,7 @@
  *   nl:crm:tasks:<statsId>           hash  person -> their tasks (JSON, lib/person-tasks.ts), gone with the person;
  *                                    and TASK_COUNT_FIELD -> how many tasks the store keeps in all
  *   nl:crm:tasklock:<statsId>        one change of the store's tasks at a time (lib/redis-lock.ts), ten seconds at the most
+ *   nl:crm:taskrecount:<statsId>     one paid recount of the store's tasks at a time (lib/redis-lock.ts), thirty seconds at the most
  *
  * A value is kept under the person's key, never the address (as a note
  * about them is), one hash a field, so the list's file reads each field once
@@ -20,7 +21,7 @@
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
@@ -99,6 +100,15 @@ const TASKS_FORGET_WAIT_MS = 5_000;
  * paid for first (TASKS_RECOUNT_UNITS), when a store kept tasks before it.
  */
 export const TASK_COUNT_FIELD = "count";
+/**
+ * One paid recount of a store's tasks at a time: a second change that needs
+ * one waits for the first, then finds the count made and pays nothing. Held
+ * while the studio is asked to pay (which may read Stripe), so longer than
+ * the tasks' lock, which is never held while paying.
+ */
+const recountLockKey = (statsId: string) => `nl:crm:taskrecount:${statsId}`;
+const RECOUNT_LOCK_SECONDS = 30;
+const RECOUNT_WAIT_MS = 5_000;
 /** What the count takes in the store's data room: its field at the largest it can be. */
 export const TASK_COUNT_WEIGHT = dataBytes([TASK_COUNT_FIELD, String(MAX_STORE_TASKS)], 1);
 /**
@@ -650,8 +660,9 @@ return {value, redis.call("HDEL", KEYS[1], ARGV[4])}`;
  * takes some away); the count to start from when there is none yet ("" to
  * leave it absent); the count's field. Answers -1, with nothing written, when
  * the person's tasks are no longer what was read (a lock that ran out let
- * another change in); 1 once written. A count that is there is moved by the
- * change; one that is not a whole number is dropped, to be made again.
+ * another change in); 1 once written; 2 once written when a count that was
+ * not a whole number was dropped or replaced, whose room goes back. A count
+ * that is there is moved by the change.
  */
 export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v1
 local before = redis.call("HGET", KEYS[1], ARGV[1]) or ""
@@ -663,9 +674,23 @@ if n then
   redis.call("HSET", KEYS[1], ARGV[6], tostring(math.max(0, n + tonumber(ARGV[4]))))
 elseif ARGV[5] ~= "" then
   redis.call("HSET", KEYS[1], ARGV[6], ARGV[5])
+  if kept then return 2 end
 elseif kept then
   redis.call("HDEL", KEYS[1], ARGV[6])
+  return 2
 end
+return 1`;
+
+/**
+ * The store's count saved on its own, once every task was read to make it:
+ * 0 when a whole number is there already (nothing written), 1 when written
+ * where there was none, 2 when written over one that was not a whole number.
+ */
+export const SAVE_TASK_COUNT = `-- marktmorgen:crm-tasks-count-save:v1
+local kept = redis.call("HGET", KEYS[1], ARGV[1])
+if kept and string.match(kept, "^%d+$") then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+if kept then return 2 end
 return 1`;
 
 /** The count as kept: a whole number, or null when there is none (or it is not one). */
@@ -676,9 +701,12 @@ function countOf(raw: unknown): number | null {
 
 /** A change that needs every task of the store read to make its count again, and the studio would not pay for it. */
 export class TasksRecountRefused extends Error {
-  constructor() {
+  /** What the studio said when it refused, for the person who asked. */
+  readonly words: string;
+  constructor(words: string) {
     super("The store's tasks were not counted: the studio requests for it were refused");
     this.name = "TasksRecountRefused";
+    this.words = words;
   }
 }
 
@@ -720,7 +748,11 @@ export async function readAllTasks(statsId: string | null): Promise<DueTask[]> {
  * not there yet while it keeps tasks (it kept them before the count) has it
  * made once from every task, when a change first grows its tasks: `pay` is
  * asked for tasksRecountUnits(people) studio requests first, outside the
- * lock, and a refusal throws TasksRecountRefused with nothing written. Room
+ * tasks' lock and one recount at a time (a second change waits, then finds
+ * the count made), and a refusal throws TasksRecountRefused with nothing
+ * written. The count is saved as soon as it is made, before the change is
+ * checked against the cap and the room, so a change refused after it never
+ * loses what was paid for. Room
  * in the store's data room is taken before writing (DataRoomError when it
  * does not fit); a shorter list gives it back. The read, the change, the
  * room and the write happen under the store's tasks lock, the write and the
@@ -733,19 +765,26 @@ export async function changePersonTasks(
   person: string,
   room: DataStore,
   change: (tasks: PersonTask[]) => TaskResult,
-  pay: (units: number) => Promise<boolean> = async () => false,
+  pay: (units: number) => Promise<{ ok: true } | { ok: false; message: string }> = async () => ({ ok: false, message: "" }),
 ): Promise<TaskResult> {
   if (!PERSON.test(person)) return { ok: false, error: "unknown" };
-  let paid = 0;
-  // At most three passes: the second after paying for a recount, the third
-  // only when more people were added meanwhile than were paid for.
-  for (let pass = 0; pass < 3; pass += 1) {
-    const outcome = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, paid, held));
-    if ("result" in outcome) return outcome.result;
-    if (!(await pay(outcome.units - paid))) throw new TasksRecountRefused();
-    paid = outcome.units;
-  }
-  throw new LockBusyError();
+  const first = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, 0, held));
+  if ("result" in first) return first.result;
+  // A recount: one at a time for the store, so two changes never both pay.
+  // Its first pass looks again, and pays nothing when the one before made it.
+  return withLock(recountLockKey(statsId), RECOUNT_LOCK_SECONDS, RECOUNT_WAIT_MS, async () => {
+    let paid = 0;
+    // At most three passes: the second after paying, the third only when
+    // more people were added meanwhile than were paid for.
+    for (let pass = 0; pass < 3; pass += 1) {
+      const outcome = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, paid, held));
+      if ("result" in outcome) return outcome.result;
+      const answer = await pay(outcome.units - paid);
+      if (!answer.ok) throw new TasksRecountRefused(answer.message);
+      paid = outcome.units;
+    }
+    throw new LockBusyError();
+  });
 }
 
 /** One pass of changePersonTasks, under the lock: its answer, or the studio requests a recount needs before it can be made. */
@@ -769,9 +808,26 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
     if (people > 0) {
       const units = tasksRecountUnits(people);
       if (units > paid) return { units };
+      count = (await readAllTasks(statsId)).length;
+      // Saved at once, before the cap and the room are checked, so what was
+      // paid for is kept whatever this change comes to. Its field is counted
+      // as written (noteData, never refused): the count stands for tasks
+      // already kept, and a full room must not throw the recount away.
+      if (!(await holdLock(held))) throw new LockBusyError();
+      let saved: unknown;
+      try {
+        [saved] = await redisPipeline([["EVAL", SAVE_TASK_COUNT, 1, tasksKey(statsId), TASK_COUNT_FIELD, String(count)]]);
+      } catch {
+        throw new CrmValueWriteUnconfirmed();
+      }
+      if (saved !== 0 && saved !== 1 && saved !== 2) throw new CrmValueWriteUnconfirmed();
+      // 0: a whole number was there after all (never under the lock): this pass is read again.
+      if (saved === 0) throw new LockBusyError();
+      if (saved === 1) await noteData(room, [{ slot: TASKS_SLOT, bytes: TASK_COUNT_WEIGHT }]);
+    } else {
+      count = 0;
+      start = String(added);
     }
-    count = people > 0 ? (await readAllTasks(statsId)).length : 0;
-    start = String(count + added);
   }
   if (added > 0 && (count ?? 0) + added > MAX_STORE_TASKS) return { result: { ok: false, error: "store_full" } };
   const value = result.tasks.length ? JSON.stringify(result.tasks) : "";
@@ -785,7 +841,7 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   let written: unknown;
   try {
     const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 1, tasksKey(statsId), person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD]]);
-    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 1 && response[0] !== -1)) throw new CrmValueWriteUnconfirmed();
+    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 1 && response[0] !== 2 && response[0] !== -1)) throw new CrmValueWriteUnconfirmed();
     written = response[0];
   } catch {
     throw new CrmValueWriteUnconfirmed();
@@ -795,7 +851,9 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
     if (grown > 0) await giveData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
     throw new LockBusyError();
   }
-  if (grown < 0) await giveData(room, [{ slot: TASKS_SLOT, bytes: -grown }]);
+  // A count that was not a whole number, dropped or replaced: the room it took goes back.
+  const freed = (grown < 0 ? -grown : 0) + (written === 2 ? TASK_COUNT_WEIGHT : 0);
+  if (freed > 0) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
   return { result };
 }
 

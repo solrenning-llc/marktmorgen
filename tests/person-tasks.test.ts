@@ -5,7 +5,7 @@
  * person, a thousand a store; grouped by date as deals' next actions are.
  */
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS, MAX_TASK_TEXT, TASKS_BUSY, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
-import { CrmValueWriteUnconfirmed, TASK_COUNT_FIELD, TASK_COUNT_WEIGHT, TASK_KEPT_BYTES, TasksRecountRefused, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks, tasksRecountUnits } from "@/lib/crm";
+import { CrmValueWriteUnconfirmed, TASKS_RECOUNT_UNITS, TASK_COUNT_FIELD, TASK_COUNT_WEIGHT, TASK_KEPT_BYTES, TasksRecountRefused, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks, tasksRecountUnits } from "@/lib/crm";
 import { LockBusyError } from "@/lib/redis-lock";
 import { dataUsed } from "@/lib/store-data";
 import { dataBytes, utf8Length } from "@/lib/store-data-rules";
@@ -360,14 +360,14 @@ async function countChecks(): Promise<void> {
   const legacy = (n: number, count: number) => JSON.stringify(Array.from({ length: count }, (_, i) => ({ id: id(i + 1), text: `Old ${n}.${i}`, due: "", assignee: "", done: false, createdAt: NOW, doneAt: 0 })));
   await redis.pipeline([["HSET", `nl:crm:tasks:${OLD}`, person(1), legacy(1, 3), person(2), legacy(2, 2), person(3), legacy(3, 1)]]);
   const asked: number[] = [];
-  const refusing = async (units: number) => { asked.push(units); return false; };
+  const refusing = async (units: number) => { asked.push(units); return { ok: false as const, message: "No studio requests left." }; };
   const notPaid = await changePersonTasks(OLD, person(4), ROOM, fill(1), refusing).catch((error: unknown) => error);
-  is("not paid for: refused, nothing written, no count made", [notPaid instanceof TasksRecountRefused, asked, await readPersonTasks(OLD, person(4)), await counted(OLD)], [true, [tasksRecountUnits(3)], [], null]);
+  is("not paid for: refused with the studio's words, nothing written, no count made", [notPaid instanceof TasksRecountRefused && notPaid.words, asked, await readPersonTasks(OLD, person(4)), await counted(OLD)], ["No studio requests left.", [tasksRecountUnits(3)], [], null]);
   is("what it asks for covers what three people can keep", tasksRecountUnits(3), Math.ceil((3 * MAX_PERSON_TASKS * (TASK_KEPT_BYTES + 64)) / 50_000));
   const shrink = await watched(() => changePersonTasks(OLD, person(1), ROOM, (t) => ({ ok: true, tasks: dropTask(t, t[0].id) }), refusing));
   is("a removal needs no count: kept without reading every task or paying", [shrink.result.ok, shrink.commands.some((c) => c[0] === "HGETALL"), asked.length, await counted(OLD)], [true, false, 1, null]);
   const paidFor: number[] = [];
-  const paying = async (units: number) => { paidFor.push(units); return true; };
+  const paying = async (units: number) => { paidFor.push(units); return { ok: true as const }; };
   const firstAdd = await watched(() => changePersonTasks(OLD, person(4), ROOM, fill(1), paying));
   is("paid for, then every task read once and counted", [firstAdd.result.ok, paidFor, firstAdd.commands.filter((c) => c[0] === "HGETALL").length, await counted(OLD)], [true, [tasksRecountUnits(3)], 1, "6"]);
   const secondAdd = await watched(() => changePersonTasks(OLD, person(4), ROOM, fill(1), paying));
@@ -399,8 +399,35 @@ async function countChecks(): Promise<void> {
   await changePersonTasks(OLD, person(6), ROOM, fill(1), paying);
   is("paid for once, then counted as it should be", [afterFix, paidFor.length, await agrees(OLD)], [3, 3, true]);
   await redis.pipeline([["HSET", `nl:crm:tasks:${OLD}`, TASK_COUNT_FIELD, "-1"]]);
+  const sixBefore = String((await redis.pipeline([["HGET", `nl:crm:tasks:${OLD}`, person(6)]]))[0]);
+  const roomBeforeDrop = (await dataUsed(ROOM))?.used ?? 0;
   await changePersonTasks(OLD, person(6), ROOM, (t) => ({ ok: true, tasks: dropTask(t, t[0].id) }), refusing);
+  const sixAfter = String((await redis.pipeline([["HGET", `nl:crm:tasks:${OLD}`, person(6)]]))[0]);
   is("a removal drops it, and asks nothing", [await counted(OLD), asked.length], [null, 1]);
+  is("the room the dropped count took goes back with the task's (review of 2eda6da36, 2)", roomBeforeDrop - ((await dataUsed(ROOM))?.used ?? 0), dataBytes([person(6), sixBefore], 1) - dataBytes([person(6), sixAfter], 1) + TASK_COUNT_WEIGHT);
+
+  part("A recount paid for is kept even when the change is refused after it (review of 2eda6da36, MEDIUM)");
+  const FULLOLD = "f".repeat(16);
+  const many: (string | number)[] = [];
+  for (let n = 1; n <= MAX_STORE_TASKS / MAX_PERSON_TASKS; n += 1) many.push(person(n), legacy(n, MAX_PERSON_TASKS));
+  await redis.pipeline([["HSET", `nl:crm:tasks:${FULLOLD}`, ...many]]);
+  const paidFull: number[] = [];
+  const payFull = async (units: number) => { paidFull.push(units); return { ok: true as const }; };
+  const tries = [await changePersonTasks(FULLOLD, person(900), ROOM, fill(1), payFull), await changePersonTasks(FULLOLD, person(901), ROOM, fill(1), payFull)];
+  is("a store kept full before the count: both adds refused as full", tries.map((r) => (r.ok ? "ok" : r.error)), ["store_full", "store_full"]);
+  is("paid for once: the count was saved before the cap refused the first", [paidFull, await counted(FULLOLD)], [[TASKS_RECOUNT_UNITS], String(MAX_STORE_TASKS)]);
+  const noteRoom = (await dataUsed(ROOM))?.used ?? 0;
+  await changePersonTasks(FULLOLD, person(1), ROOM, (t) => ({ ok: true, tasks: dropTask(t, t[0].id) }));
+  is("and it moves with the next change", [await counted(FULLOLD), noteRoom > 0], [String(MAX_STORE_TASKS - 1), true]);
+
+  part("Two adds at once in a store kept before the count: one recount, paid for once (review of 2eda6da36, 1)");
+  const TWO = "w".repeat(16);
+  await redis.pipeline([["HSET", `nl:crm:tasks:${TWO}`, person(1), legacy(1, 2), person(2), legacy(2, 3)]]);
+  const paidTwice: number[] = [];
+  const slowPay = async (units: number) => { paidTwice.push(units); await new Promise((r) => setTimeout(r, 50)); return { ok: true as const }; };
+  const both = await Promise.all([changePersonTasks(TWO, person(3), ROOM, fill(1), slowPay), changePersonTasks(TWO, person(4), ROOM, fill(1), slowPay)]);
+  is("both kept, the recount paid for once", [both.map((r) => r.ok), paidTwice, await counted(TWO), await agrees(TWO)], [[true, true], [tasksRecountUnits(2)], "7", true]);
+  is("its lock let go", (await redis.pipeline([["EXISTS", `nl:crm:taskrecount:${TWO}`]]))[0], 0);
 
   part("A deleted store's count goes with it");
   await forgetCrm(OLD);

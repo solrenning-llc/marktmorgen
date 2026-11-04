@@ -390,7 +390,18 @@ export class MemoryRedis {
           else if (start !== "") hash.set(field, start);
           else if (kept !== undefined) hash.delete(field);
           if (hash.size === 0) this.data.delete(target);
-          return 1;
+          return n === null && kept !== undefined ? 2 : 1;
+        }
+        if (key.startsWith("-- marktmorgen:crm-tasks-count-save:v1\n") && args[0] === "1" && args.length === 4) {
+          // lib/crm.ts SAVE_TASK_COUNT: the count saved once made, never over a whole number.
+          const [, target, field, value] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const kept = held instanceof Map ? held.get(field) : undefined;
+          if (kept !== undefined && /^\d+$/.test(kept)) return 0;
+          this.hash(target).set(field, value);
+          return kept === undefined ? 1 : 2;
         }
         if (key.startsWith("-- marktmorgen:crm-tasks-forget:v1\n") && args[0] === "1" && args.length === 6) {
           // lib/crm.ts FORGET_PERSON_TASKS: a person's tasks deleted, the count moved with them or dropped.

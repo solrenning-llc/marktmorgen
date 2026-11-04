@@ -73,8 +73,6 @@ export async function POST(request: NextRequest) {
   const person = typeof body.person === "string" ? body.person : "";
   const id = typeof body.id === "string" ? body.id : "";
   if (!store.statsId || !PERSON.test(person)) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
-  // The studio's own words when it would not pay for counting the store's tasks again.
-  let unpaid = "";
   const refuse = (error: TaskRefusal) => Response.json({ ok: false, error, message: TASK_REFUSALS[error] }, { status: error === "unknown" ? 404 : 400 });
   try {
     const team = await readTeam(store.sid);
@@ -83,10 +81,9 @@ export async function POST(request: NextRequest) {
     const read = (kept = "") => readTaskInput({ text: body.text, due: body.due, assignee: body.assignee }, (email) => assignees.has(email) || (kept !== "" && email === kept));
     const now = Date.now() / 1000;
     // What making the store's count of tasks again costs, taken before it is made, at most once a store.
-    const pay = async (units: number) => {
+    const pay = async (units: number): Promise<{ ok: true } | { ok: false; message: string }> => {
       const counted = await countStudio(store, null, units);
-      if (!counted.ok) unpaid = counted.message;
-      return counted.ok;
+      return counted.ok ? { ok: true } : { ok: false, message: counted.message };
     };
     let result;
     if (body.action === "add") {
@@ -110,7 +107,7 @@ export async function POST(request: NextRequest) {
     return result.ok ? Response.json({ ok: true, tasks: result.tasks }, { headers: NO_STORE }) : refuse(result.error);
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full" }, { status: 409 });
-    if (error instanceof TasksRecountRefused) return Response.json({ ok: false, error: "studio_used", message: unpaid || "Your studio has no requests left this month for this. Try again next month, or change your plan." }, { status: 429 });
+    if (error instanceof TasksRecountRefused) return Response.json({ ok: false, error: "studio_used", message: error.words || "Your studio has no requests left this month for this. Try again next month, or change your plan." }, { status: 429 });
     if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy", message: TASKS_BUSY }, { status: 409 });
     console.error("saving a task failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

@@ -48,7 +48,11 @@ export type FallbackInvoice = {
 export type MonthlyFallback = {
   /** One month at the product's monthly price, charged now if they switch. */
   monthly: number;
-  /** The yearly payment that did not go through, never charged if they switch. */
+  /**
+   * The yearly price that did not go through, never charged if they switch: the membership's own price, before tax
+   * and before any credit, so it is compared with the monthly price on the same footing (never the invoice's
+   * amount due, which can carry tax on top or a credit taken off).
+   */
   yearly: number;
   /** What twelve months cost more than the year: never negative, said in the email. */
   extraPerYear: number;
@@ -93,7 +97,9 @@ export function monthlyFallback(
   const price = item.price;
   if (!price?.recurring || price.recurring.interval !== "year" || (price.recurring.interval_count ?? 1) !== 1) return null;
   if (String(price.currency ?? "").toLowerCase() !== storeCurrency.toLowerCase()) return null;
-  const yearly = num(invoice.amount_due);
+  // Still owed, and compared on one footing: the membership's own yearly price, before tax and credit.
+  if (num(invoice.amount_due) <= 0) return null;
+  const yearly = num(price.unit_amount);
   if (yearly <= 0) return null;
   // The product still sells monthly with a yearly price beside it: its own monthly price, today.
   if (!activeYearly(product, tiers)) return null;
@@ -108,13 +114,18 @@ export function monthlyFallback(
 /**
  * The lines the email adds below the link that pays the year, in plain US
  * English (the other languages come with the email unit): the monthly price,
- * that the year is then not charged, and what twelve months cost more.
+ * that the year is then not charged, and what twelve months cost more. Every
+ * amount is before tax; where the store adds tax on top (`taxOnTop`), each
+ * says so, so no price reads lower than what is charged.
  */
-export function fallbackLines(offer: MonthlyFallback, money: (cents: number) => string): string[] {
+export function fallbackLines(offer: MonthlyFallback, money: (cents: number) => string, taxOnTop: boolean): string[] {
+  const plus = taxOnTop ? " plus tax" : "";
   const lines = [
-    `If a whole year is too much right now, you can stay a member at ${money(offer.monthly)} a month instead.`,
-    `Then the yearly payment of ${money(offer.yearly)} is not charged.`,
+    `If a whole year is too much now, you can stay a member at ${money(offer.monthly)}${plus} a month.`,
+    `Then the yearly payment of ${money(offer.yearly)}${plus} is not charged.`,
   ];
-  lines.push(offer.extraPerYear > 0 ? `Twelve months cost ${money(offer.extraPerYear)} more than the year.` : "Twelve months cost the same as the year.");
+  lines.push(
+    offer.extraPerYear > 0 ? `Twelve months cost ${money(offer.extraPerYear)} more than the year${taxOnTop ? ", before tax" : ""}.` : "Twelve months cost the same as the year.",
+  );
   return lines;
 }

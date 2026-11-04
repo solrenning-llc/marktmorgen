@@ -68,19 +68,34 @@ is(
   [offer(sub, { ...invoice, subscription: undefined, parent: { subscription_details: { subscription: "sub_1" } } }) !== null, offer(sub, { ...invoice, subscription: "sub_1", parent: { subscription_details: { subscription: "sub_other" } } })],
   [true, null],
 );
-is("never offered as a saving: a monthly price whose twelve months cost less than the failed year is not offered", offer(sub, { ...invoice, amount_due: 30000 }), null);
+is(
+  "never offered as a saving: a membership whose own yearly price is more than twelve months at today's monthly price is not offered",
+  offer({ ...sub, items: { data: [{ quantity: 1, price: { unit_amount: 30000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] } }),
+  null,
+);
+is(
+  "compared on one footing, before tax and credit: tax added on the invoice, or a credit taken off it, never changes the figures",
+  [offer(sub, { ...invoice, amount_due: 22000 }), offer(sub, { ...invoice, amount_due: 25400 }), offer(sub, { ...invoice, amount_due: 5000 })],
+  [{ monthly: 2000, yearly: 20000, extraPerYear: 4000 }, { monthly: 2000, yearly: 20000, extraPerYear: 4000 }, { monthly: 2000, yearly: 20000, extraPerYear: 4000 }],
+);
 is("the monthly price is the product's own today, never the failed year's amount divided", offer(sub, invoice, { ...product, priceCents: 1800, yearly: { cents: 20000 } })?.monthly, 1800);
 
 part("What the email says");
 const money = (cents: number) => formatMoney(cents, "usd");
-const lines = fallbackLines({ monthly: 2000, yearly: 20000, extraPerYear: 4000 }, money);
+const lines = fallbackLines({ monthly: 2000, yearly: 20000, extraPerYear: 4000 }, money, false);
 is(
   "the monthly price, that the year is then not charged, and what twelve months cost more",
   lines,
-  ["If a whole year is too much right now, you can stay a member at $20 a month instead.", "Then the yearly payment of $200 is not charged.", "Twelve months cost $40 more than the year."],
+  ["If a whole year is too much now, you can stay a member at $20 a month.", "Then the yearly payment of $200 is not charged.", "Twelve months cost $40 more than the year."],
 );
-is("when twelve months cost the same, it says so, never a saving", fallbackLines({ monthly: 2000, yearly: 24000, extraPerYear: 0 }, money).at(-1), "Twelve months cost the same as the year.");
-is("in plain words: every sentence under twenty words", lines.every((line) => line.split(/\s+/).length <= 20), true);
+is("when twelve months cost the same, it says so, never a saving", fallbackLines({ monthly: 2000, yearly: 24000, extraPerYear: 0 }, money, false).at(-1), "Twelve months cost the same as the year.");
+const taxed = fallbackLines({ monthly: 2000, yearly: 20000, extraPerYear: 4000 }, money, true);
+is(
+  "where the store adds tax on top, every amount says so",
+  taxed,
+  ["If a whole year is too much now, you can stay a member at $20 plus tax a month.", "Then the yearly payment of $200 plus tax is not charged.", "Twelve months cost $40 more than the year, before tax."],
+);
+is("in plain words: every sentence under twenty words", [...lines, ...taxed].every((line) => line.split(/\s+/).length <= 20), true);
 
 part("Nothing is sent or charged yet");
 const source = readFileSync("lib/yearly-fallback-rules.ts", "utf8").replace(/\/\*\*[\s\S]*?\*\//g, "");

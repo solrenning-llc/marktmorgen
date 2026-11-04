@@ -1492,15 +1492,20 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
     throw new Error("Subscription search member ownership is unknown");
   }
   const customer = searchDataRecord(member.customer, "expanded customer");
-  // Stripe's DeletedCustomer has id/object/deleted, without an email. Only
-  // a known canceled legacy owner or a proved foreign released-handle row
-  // can use that partial shape. Unknown funding is never terminal absence.
+  // Stripe's DeletedCustomer has id/object/deleted, without an email.
+  // A proved canceled prior owner is terminal history, including a name
+  // this store acquired later. Unknown own funding is never adopted.
   if (customer.deleted === true) {
     const valid = customer.object === "customer" && !Object.hasOwn(customer, "email") &&
       typeof customer.id === "string" && CUSTOMER_PATTERN.test(customer.id) && member.status === "canceled";
     if (valid && ownership.released.has(named) && customer.id !== ownership.customerId) return null;
+    const marked = [member, metadata].some(record => Object.keys(record).some(key => /^(funding_|restart_|cf_)/.test(key)));
+    // A name can have belonged to another store before this one acquired it.
+    // Stripe documents customer deletion as canceling subscriptions and
+    // preventing further operations (customers/delete, read 2026-11-04).
+    // This is terminal history, never a candidate to adopt or charge again.
+    if (valid && handles.has(named) && customer.id !== ownership.customerId) return null;
     if (valid && ownership.customerId && handles.has(named)) {
-      const marked = [member, metadata].some(record => Object.keys(record).some(key => /^(funding_|restart_|cf_)/.test(key)));
       if (customer.id === ownership.customerId && !marked) {
         member.metadata = metadata;
         member.customer = customer;

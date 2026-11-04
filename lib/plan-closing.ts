@@ -904,8 +904,12 @@ async function refuseLatePlans(store: Store): Promise<boolean> {
   }
   for (const [id, customerId] of ids) {
     try {
-      const result = await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId });
-      if (result !== "returned" && result !== "returned-early") complete = false;
+      let stopped = false;
+      const result = await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId, onStopped: () => { stopped = true; } });
+      // A pending refund is self-contained in UNDO_KEY and retried after the
+      // store is gone. Only a proved cancellation may hand it over: merely
+      // returning "returning" can also mean an unreadable queue or live plan.
+      if (result !== "returned" && result !== "returned-early" && !(result === "returning" && stopped)) complete = false;
     } catch (error) {
       complete = false;
       console.error("refusing a plan paid for a closing store failed", error);

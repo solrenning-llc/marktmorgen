@@ -12,6 +12,16 @@ Decision: CX-61, 2026-11-04, superseding the stopped CX-55 block-search diagnosi
 
 [Stripe List subscriptions](https://docs.stripe.com/api/subscriptions/list), read 2026-11-04: customer filters by customer ID; status=all includes canceled subscriptions; limit is at most 100. This implementation deliberately refuses has_more rather than fetching a third page. It does not claim strongly consistent Stripe Search.
 
+## Independent-review corrections
+
+The Revisor 2's medium finding was reproduced with failing tests before these corrections:
+
+- A valid canceled DeletedCustomer from a prior owner of a current/previous name, or a terminal row with no captured customer identity, is ignored rather than permanently blocking checkout. Its row is never adopted, the missing email never becomes ownership evidence, and unknown own funding still refuses. [Stripe customer deletion](https://docs.stripe.com/api/customers/delete), read 2026-11-04, states that deletion cancels subscriptions and prevents later customer operations.
+- File retention may finish while a refund remains in the independent UNDO_KEY queue only after that queue entry was read and Stripe confirmed the plan stopped. The existing settlement call reports this observation in memory; no new provider/Redis operation, persisted field, supplier, quota, deadline or cost rate is added. A journey test proves the refund fails once, the store is erased and the independent worker refunds exactly once afterward.
+- A missing queue acknowledgement previously let the helper report returned while the plan remained active. A new regression failed before correction; a returned result now requires a positive confirmed done timestamp.
+
+Counterexamples remain explicit: returning can mean an unreadable queue or refused cancellation with an active subscription. Those states remain held. Unknown Search/List coverage (including has_more=true) also remains held as CX-61 expressly requires. No new day limit, forced removal or funded-exposure approval is invented. The generic indefinite-retention concern is still with Claude 1 for a decision consistent with these requirements; this source must not be merged while that review is unresolved. Unknown financed exposure remains unknown, never zero.
+
 ## Function-memory cost
 
 [Vercel function pricing](https://vercel.com/docs/functions/usage-and-pricing), read 2026-11-04: memory is billed during I/O waits; its regional table's highest memory rate is $0.0183 per GB-hour. This row uses that rate instead of relying on an unverified IAD1 deployment. Existing CPU/invocation/other cost lines remain intact.
@@ -35,7 +45,7 @@ The line is charged only to checkout, deletion and scheduled closing, never to v
 
 ## Validation and generated analysis
 
-The exact runtime now passes 43 billing metadata tests, including two-read counts at 1/10/11/21/40/1000 released names, ten current names, captured ownership, cross-store isolation, incomplete own pages, overlap, funding acknowledgement and fractional tax fields. Three new CX-61 cases failed against the block-search source before the runtime fix; the overlap fractional-field regression also failed before its correction. store-closing-fair passes 103 checks, plan-closing 88, closing-plan-guard 44 and closing-plan-routes 15. plan-margin passes all 39 tests with the existing MR and cost room; the complete cost registry passes 23 and this row's own tests pass 2. These synthetic model checks do not certify live taxes, missing reviews, fixed LLC costs or commercial opening.
+The exact runtime now passes 44 billing metadata tests, including two-read counts at 1/10/11/21/40/1000 released names, ten current names, captured ownership, cross-store isolation, incomplete own pages, overlap, funding acknowledgement and fractional tax fields. Three new CX-61 cases failed against the block-search source before the runtime fix; the overlap fractional-field regression also failed before its correction. store-closing-fair passes 103 checks, plan-closing 88, closing-plan-guard 52 and closing-plan-routes 15. plan-margin passes all 39 tests with the existing MR and cost room; the complete cost registry passes 23 and this row's own tests pass 2. These synthetic model checks do not certify live taxes, missing reviews, fixed LLC costs or commercial opening.
 
 The new cost exposed a historical optimization oracle discrepancy: it used rounded printed shares and omitted the solver's five-cent reserve while claiming to enumerate the same problem. A new regression failed before correction. The oracle now enumerates the same raw shares, linear budgets and objective as the solver, with printed-rights validation retained afterward. All seven optimization tests and eight margin-alignment tests pass. Generated financial documents and the current model rows in value-presentation are refreshed without changing any published price, allowance, commission, flag or protection. Historical assumptions remain explicitly historical.
 

@@ -35,7 +35,7 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
-type Reply = { ok?: boolean; error?: string; message?: string; companies?: Company[]; company?: Company | null };
+type Reply = { ok?: boolean; error?: string; message?: string; companies?: Company[]; company?: Company | null; added?: string };
 
 async function main(): Promise<void> {
   const a = "a".repeat(32);
@@ -83,6 +83,7 @@ async function main(): Promise<void> {
   const added = await post({ action: "add", name: "North School", website: "north.example.com" });
   is("added", [added.status, added.body.companies?.map((c) => [c.name, c.website])], [200, [["North School", "https://north.example.com/"]]]);
   const id = added.body.companies![0].id;
+  is("the new company's own id comes back, so the screen links to it and never to one added elsewhere at the same moment", added.body.added, id);
   const [room] = await redisPipeline([["HGET", dataKey(store)!, "crm:co"]]);
   is("its room in the store's data room taken first", Number(room) > 0, true);
   is("a name taken is refused, saying what to do", [(await post({ action: "add", name: "NORTH SCHOOL" })).body.error, (await post({ action: "add", name: "NORTH SCHOOL" })).body.message], ["taken", COMPANY_REFUSALS.taken]);

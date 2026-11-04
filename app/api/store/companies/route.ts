@@ -65,7 +65,11 @@ export async function POST(request: NextRequest) {
     if (body.action === "add" || body.action === "edit") {
       const input = readCompanyInput(body);
       if (!input.ok) return refuse(input.error);
-      result = await changeCompanies(statsId, store, (companies) => (body.action === "add" ? addCompany(companies, input.value, newCompanyId(), Date.now() / 1000) : editCompany(companies, id, input.value)));
+      // The new company's id is made here and sent back, so the screen links the person to this one, never to one
+      // another tab added at the same moment.
+      const madeId = newCompanyId();
+      result = await changeCompanies(statsId, store, (companies) => (body.action === "add" ? addCompany(companies, input.value, madeId, Date.now() / 1000) : editCompany(companies, id, input.value)));
+      if (result.ok && body.action === "add") return Response.json({ ok: true, companies: result.companies, added: madeId }, { headers: NO_STORE });
     } else if (body.action === "remove") {
       result = await changeCompanies(statsId, store, (companies) => dropCompany(companies, id));
     } else if (body.action === "link") {

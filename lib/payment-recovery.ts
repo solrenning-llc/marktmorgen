@@ -54,6 +54,7 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import { CARD_NOTICE_DAYS, cardNoticeDue, reminderDue } from "@/lib/dunning-rules";
 import { cardLink, finishCardUpdate, openKey } from "@/lib/card-update";
 import { countSent, sentKey } from "@/lib/dunning-keys";
+import { settleFallbacks } from "@/lib/yearly-fallback-sweep";
 
 const CURSOR_KEY = "nl:dun:cursor";
 const stepKey = (account: string, invoice: string, step: number) => `${sentKey(account, invoice)}:${step}`;
@@ -449,10 +450,17 @@ async function sweepStore(store: Store, deadline: number): Promise<number> {
 /**
  * Walks the stores that sell memberships until the deadline, remembering where
  * it stopped, exactly as the checkout sweep does (lib/checkout-sweep.ts).
+ *
+ * First of all, before any email and whether or not email is set up: the
+ * moves of yearly members to the monthly price that could not be finished
+ * while they waited (lib/yearly-fallback-sweep.ts), because a year and a
+ * month must never both be kept.
  */
-export async function recoverFailedPayments(deadline: number): Promise<{ stores: number; sent: number }> {
-  const counts = { stores: 0, sent: 0 };
-  if (!isRedisConfigured() || !platformKey() || !isSenderConfigured()) return counts;
+export async function recoverFailedPayments(deadline: number): Promise<{ stores: number; sent: number; settled: number }> {
+  const counts = { stores: 0, sent: 0, settled: 0 };
+  if (!isRedisConfigured() || !platformKey()) return counts;
+  counts.settled = (await settleFallbacks(deadline)).settled;
+  if (!isSenderConfigured()) return counts;
 
   const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
   const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];

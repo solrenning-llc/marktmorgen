@@ -53,6 +53,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/tier-switch.ts` | FOLLOW-UP-CHARGE | 94/135: the new tier's Price made in the store's currency; 196/271 preview and receipt in the invoice's | partly: no check that the subscription is in the store's currency |
 | `lib/upsell.ts` | FOLLOW-UP-CHARGE | 353: the one-click charge in the store's currency; 272 refuses an order in another | partly: refused, not charged in the order's currency |
 | `lib/yearly-ask.ts` | FOLLOW-UP-CHARGE | 83/116: the yearly offer email and its saving in the store's currency | partly: no email on a mismatch |
+| `lib/yearly-fallback.ts` | FOLLOW-UP-CHARGE | 130: a failed yearly renewal offered at the monthly Price only in the store's currency (monthlyFallback compares the invoice's and the price's); 171: the month's receipt in the invoice's own | yes: guarded by monthlyFallback |
 | `lib/yearly-switch.ts` | FOLLOW-UP-CHARGE | 96/113: the yearly Price made in the store's currency; 182/250 preview and receipt in the invoice's | partly: guarded by yearlyChoice |
 | `app/api/store/discount/route.ts` | NEW-CHARGE | 61–68, 98–105: a fixed-amount code and its minimum made in the store's currency | no |
 | `app/api/v1/codes/route.ts` | NEW-CHARGE | 38–39: a fixed-amount code and its minimum read in the store's currency, through the same reader as the studio (lib/discount-input.ts), and its refusal said in it | no |

@@ -892,6 +892,13 @@ export const FAMILIES: Record<string, Family> = {
   "nl:yearly-offer:@lib/yearly-offer.ts": company("A yearly offer made", "The company's offer to a creator about their own plan."),
   "nl:tier:@lib/yearly-switch.ts": short("A membership's lock while it goes yearly", "request", 1, 128, REQ("tier switch")),
   "nl:yearly:link:@lib/yearly-switch.ts": short("A link to go yearly", "own", 30, LINK_BYTES, MAIL("yearly")),
+  // 630 [HN6](14): a yearly member moved to the monthly price (lib/yearly-fallback.ts) and what the daily job settles (lib/yearly-fallback-sweep.ts).
+  "nl:tier:@lib/yearly-fallback.ts": short("A membership's lock while it moves to the monthly price", "request", 1, 128, REQ("tier switch")),
+  "nl:yearly:fallback:try:@lib/yearly-fallback.ts": short("Tries at a move to the monthly price, counted per failed yearly invoice", "request", 2, MARK, REQ("tier switch")),
+  "nl:yearly:fallback:refunded:@lib/yearly-fallback-sweep.ts": short("A monthly invoice whose refund, after the year was paid as well, is settled: REFUNDED_SECONDS (2 days)", "request", 2, MARK, REQ("tier switch")),
+  "nl:yearly:fallback:void@lib/yearly-fallback.ts": company("Yearly invoices to void after a paid move to monthly", "One set for every store, a member a move left to settle; taken off by the daily job (lib/yearly-fallback-sweep.ts) once Stripe answers."),
+  "nl:yearly:fallback:check@lib/yearly-fallback.ts": company("Moves to monthly whose outcome is read again", "One set for every store, a member a move left to settle; taken off by the daily job (lib/yearly-fallback-sweep.ts), at the latest FALLBACK_CHECK_DAYS after the move's invoice."),
+  "nl:yearly:fallback:both@lib/yearly-fallback.ts": company("Memberships that paid the year and the month", "One set for every store, a member a move left to settle; taken off by the daily job (lib/yearly-fallback-sweep.ts) once the month is undone."),
   "nl:yearly:price:@lib/yearly-switch.ts": { what: "A yearly price made, per product and currency: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
 };
 

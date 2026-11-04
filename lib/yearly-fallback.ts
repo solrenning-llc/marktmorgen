@@ -35,8 +35,9 @@
  *      both kept. Moved with the month not paid yet: the year is voided only
  *      once the month is (FALLBACK_CHECK_KEY).
  *
- * The daily job behind those three lists is unit 2c; until it exists, nothing
- * calls this (found by the independent review, 4 November 2026).
+ * The daily job behind those three lists is settleFallbacks (unit 2c,
+ * lib/yearly-fallback-sweep.ts), run first by the daily recovery job. Nothing
+ * offers the move to a member yet (the email and its page are the next unit).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -60,19 +61,23 @@ export const FALLBACK_STRIPE_VERSION = "2026-08-26.dahlia";
 
 /**
  * Left for the daily recovery job (unit 2c), each "account|…":
- *   - VOID: a yearly invoice to void again after a paid move whose void failed ("account|invoice");
+ *   - VOID: a yearly invoice to void again after a paid move whose void failed, with the month's invoice that paid
+ *     the move, so a year found paid meanwhile has its month refunded ("account|yearly|monthly");
  *   - CHECK: a move whose outcome is not known yet (Stripe did not answer, or it applied with the first month not
  *     paid yet): the year stays with no automatic retry until the job reads the membership again
  *     ("account|subscription|invoice");
  *   - BOTH: the year was paid while the month was charged; the month is refunded ("account|yearly|monthly").
+ * The daily job is settleFallbacks (lib/yearly-fallback-sweep.ts).
  */
 export const FALLBACK_VOID_KEY = "nl:yearly:fallback:void";
 export const FALLBACK_CHECK_KEY = "nl:yearly:fallback:check";
 export const FALLBACK_BOTH_KEY = "nl:yearly:fallback:both";
+/** The same lock as a switch between plans or to yearly: one change to a membership at a time (lib/tier-switch.ts). */
+export const fallbackLockKey = (subscription: string) => `nl:tier:${subscription}:lock`;
 /** One try at a move counted per failed invoice, so a second try after a decline is never Stripe's saved answer to the first. */
 const tryKey = (invoice: string) => `nl:yearly:fallback:try:${invoice}`;
 /** Longer than every Stripe call here at its ceiling, in a row (lib/stripe-account.ts, STRIPE_TIMEOUT_MS). */
-const LOCK_SECONDS = 150;
+export const FALLBACK_LOCK_SECONDS = 150;
 
 /** The move itself: the product's monthly price from now, no proration, made only if the first month is paid. */
 export function fallbackBody(itemId: string, monthlyPrice: string, failedInvoice: string): URLSearchParams {
@@ -113,7 +118,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
   const v = FALLBACK_STRIPE_VERSION;
   try {
     // The same lock as a switch between plans or to yearly: one change to a membership at a time.
-    return await withLock(`nl:tier:${subscription}:lock`, LOCK_SECONDS, 5_000, async (): Promise<FallbackResult> => {
+    return await withLock(fallbackLockKey(subscription), FALLBACK_LOCK_SECONDS, 5_000, async (): Promise<FallbackResult> => {
       const sub = (await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}`, undefined, v)) as SubRead;
       if (sub.customer !== customer) return { ok: false, reason: "gone" };
       const invoice = await onAccount("GET", account, `/invoices/${encodeURIComponent(failedInvoice)}`, undefined, v);
@@ -184,7 +189,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
           await redisPipeline([["SADD", FALLBACK_BOTH_KEY, `${account}|${failedInvoice}|${String(latest?.id ?? "")}`]]).catch(() => {});
         } else if (again?.status !== "void") {
           console.error("voiding the yearly invoice after a monthly move failed; kept for the daily job", error);
-          await redisPipeline([["SADD", FALLBACK_VOID_KEY, `${account}|${failedInvoice}`]]).catch(() => {});
+          await redisPipeline([["SADD", FALLBACK_VOID_KEY, `${account}|${failedInvoice}|${String(latest?.id ?? "")}`]]).catch(() => {});
         }
       }
       return result;

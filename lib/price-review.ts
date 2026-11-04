@@ -93,10 +93,12 @@ function how(interval: string | null, chooses: boolean): string {
  * plan (planState "short"), a lower one can bring a paused plan back, and
  * below what they add up to, buyers who pay in parts still pay that.
  */
-export function planWords(plan: { payments: number; cents: number } | null, before: boolean, after: boolean, price: number, money: (cents: number) => string): string[] {
+export function planWords(plan: { payments: number; cents: number } | null, before: boolean, after: boolean, price: number, money: (cents: number) => string, membership = false): string[] {
   const total = plan ? plan.payments * plan.cents : 0;
   const parts = plan ? `Buyers who pay in ${plan.payments} payments` : "";
   if (before && !after) {
+    // A membership never takes a payment plan (lib/product-extras.ts, isOneOff): raising the payment would not bring it back.
+    if (membership) return ["Your payment plan stops being offered, because a membership has no payment plan."];
     const said = ["Your payment plan stops being offered on this product."];
     if (plan && total < price) said.push(`Its ${plan.payments} payments of ${money(plan.cents)} add up to ${money(total)}, less than ${money(price)}. Raise that payment in the plan to offer it again.`);
     return said;
@@ -170,7 +172,7 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
   // Said only under a price that is charged: a sale, an offer or a code can lower it, and tax can be added on top.
   const store = price > 0 && rows.some((row) => MONEY_ROWS.has(row.key)) ? ` ${storePriceWords(product.taxOnTop)}` : "";
   // A price buyers choose is refused beside a plan (above), so the plan is read with none.
-  const plan = planWords(optioned ? null : product.plan, product.planBefore, product.planAfter({ priceCents: price, interval: every as Interval | null }), price, money);
+  const plan = planWords(optioned ? null : product.plan, product.planBefore, product.planAfter({ priceCents: price, interval: every as Interval | null }), price, money, Boolean(every));
   const planned = plan.length ? ` ${plan.join(" ")}` : "";
   const note = !product.interval
     ? `Your store shows this as soon as you save.${store}`

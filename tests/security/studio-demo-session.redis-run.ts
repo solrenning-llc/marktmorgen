@@ -1,5 +1,5 @@
 /**
- * 256 [KJ1], unit 2: the studio demo's three scripts (lib/studio-demo.ts),
+ * 256 [KJ1], unit 2: the studio demo's four scripts (lib/studio-demo.ts),
  * run by a real Redis rather than by the in-memory stand-in, which only
  * imitates them. The switch is forced on through the functions' own
  * parameter; STUDIO_DEMO_ON stays false in the code.
@@ -7,11 +7,13 @@
  * Proves: two doors at the day's last place give it to one; the session's
  * record and first drafts are written with one absolute end, in the demo's
  * namespace only; a session reads back; an action is counted at its caps'
- * exact edges and two actions at the last place pass one.
+ * exact edges and two actions at the last place pass one; refusals at the
+ * same moment count no more than an address's share, nor past the day's cap.
  */
 import { STUDIO_DEMO_SEED_VALUES, openStudioDemo, readStudioDemo, takeDemoAction } from "@/lib/studio-demo";
 import {
-  DEMO_ACTIONS_PER_SESSION, DEMO_BYTES_PER_SESSION, DEMO_COOKIE, DEMO_NAMESPACE, DEMO_REFUSALS_PER_DAY, DEMO_SESSIONS_PER_ADDRESS_PER_DAY, DEMO_SESSIONS_PER_DAY,
+  DEMO_ACTIONS_PER_SESSION, DEMO_BYTES_PER_SESSION, DEMO_COOKIE, DEMO_NAMESPACE, DEMO_REFUSALS_PER_ADDRESS_PER_DAY, DEMO_REFUSALS_PER_DAY, DEMO_SESSIONS_PER_ADDRESS_PER_DAY,
+  DEMO_SESSIONS_PER_DAY,
   DEMO_SESSION_SECONDS, sandboxKey,
 } from "@/lib/studio-demo-rules";
 import { redisPipeline } from "@/lib/redis";
@@ -20,6 +22,7 @@ import { check, finish } from "./check";
 const now = Date.now();
 const day = new Date(now).toISOString().slice(0, 10);
 const dayKey = `${DEMO_NAMESPACE}day:${day}`;
+const addrKey = `${DEMO_NAMESPACE}addr:${day}`;
 const ON = { on: true, isAutomated: async () => false, now: () => now };
 const door = (address: string) => new Request("https://marktmorgen.com/api/studio-demo", { method: "POST", headers: { "x-forwarded-for": address } });
 const one = async (command: (string | number)[]) => (await redisPipeline([command]))[0];
@@ -45,24 +48,30 @@ async function main(): Promise<void> {
   check("the addresses' counts end with the day", await one(["PEXPIRETIME", `${DEMO_NAMESPACE}addr:${day}`]), (Math.floor(now / 86_400_000) + 1) * 86_400_000);
   const network: boolean[] = [];
   for (let i = 0; i < DEMO_SESSIONS_PER_ADDRESS_PER_DAY; i += 1) network.push((await openStudioDemo(door(`2001:db8:abcd:${i + 1}::1`), ON)).ok);
-  const refusedBefore = Number(await one(["HGET", dayKey, "refused"]) ?? 0);
-  check("one network opens its own, then is refused from yet another /64, the refusal counted", [network, await openStudioDemo(door("2001:db8:abcd:ff::1"), ON), Number(await one(["HGET", dayKey, "refused"])) - refusedBefore], [network.map(() => true), { ok: false, reason: "address" }, 1]);
-  await one(["HSET", dayKey, "refused", String(DEMO_REFUSALS_PER_DAY)]);
-  check("past the day's refusals the door is closed and counts nothing more", [await openStudioDemo(door("192.0.2.9"), ON), await one(["HGET", dayKey, "refused"])], [{ ok: false, reason: "closed" }, String(DEMO_REFUSALS_PER_DAY)]);
-  await one(["HSET", dayKey, "refused", "0"]);
+  const refusedBefore = Number(await one(["HGET", addrKey, "refused"]) ?? 0);
+  check("one network opens its own, then is refused from yet another /64, the refusal counted", [network, await openStudioDemo(door("2001:db8:abcd:ff::1"), ON), Number(await one(["HGET", addrKey, "refused"])) - refusedBefore], [network.map(() => true), { ok: false, reason: "address" }, 1]);
+  const flood = await Promise.all(Array.from({ length: 4 * DEMO_REFUSALS_PER_ADDRESS_PER_DAY }, () => openStudioDemo(door("2001:db8:abcd:fe::1"), ON)));
+  check("that network's doors at once: all refused, and the day counts only its share", [flood.every((o) => !o.ok), Number(await one(["HGET", addrKey, "refused"])) - refusedBefore], [true, DEMO_REFUSALS_PER_ADDRESS_PER_DAY]);
+  check("so another address still opens", (await openStudioDemo(door("192.0.2.8"), ON)).ok, true);
+  await one(["HSET", addrKey, "refused", String(DEMO_REFUSALS_PER_DAY - 1)]);
+  const ghost = (i: number) => new Request("https://marktmorgen.com/", { headers: { cookie: `${DEMO_COOKIE}=sd${"0".repeat(32)}`, "x-forwarded-for": `198.51.100.${i + 1}` } });
+  await Promise.all(Array.from({ length: 20 }, (_, i) => readStudioDemo(ghost(i), ON)));
+  check("twenty made-up cookies at once, one place left: the day's refusals stop at their cap", await one(["HGET", addrKey, "refused"]), String(DEMO_REFUSALS_PER_DAY));
+  check("past the day's refusals the door is closed and counts nothing more", [await openStudioDemo(door("192.0.2.9"), ON), await one(["HGET", addrKey, "refused"])], [{ ok: false, reason: "closed" }, String(DEMO_REFUSALS_PER_DAY)]);
+  await one(["HSET", addrKey, "refused", "0"]);
   check("the house key is untouched", await one(["GET", "nl:store:0123456789abcdef0123456789abcdef"]), "house");
-  check("the session reads back", await readStudioDemo(new Request("https://marktmorgen.com/", { headers: { cookie: `${DEMO_COOKIE}=${s.id}` } }), ON), s);
+  check("the session reads back", await readStudioDemo(new Request("https://marktmorgen.com/", { headers: { cookie: `${DEMO_COOKIE}=${s.id}`, "x-forwarded-for": "192.0.2.3" } }), ON), s);
   check("its life is its DEMO_SESSION_SECONDS", s.expiresAt - s.startedAt, DEMO_SESSION_SECONDS * 1000);
 
   const cost = { commands: 12, bytes: 100 };
-  check("an action is counted", (await takeDemoAction(s, cost, ON)).ok, true);
+  check("an action is counted", (await takeDemoAction(door("192.0.2.3"), s, cost, ON)).ok, true);
   await one(["HSET", keys[0], "actions", String(DEMO_ACTIONS_PER_SESSION - 1)]);
-  const race = await Promise.all([takeDemoAction(s, cost, ON), takeDemoAction(s, cost, ON)]);
+  const race = await Promise.all([takeDemoAction(door("192.0.2.3"), s, cost, ON), takeDemoAction(door("192.0.2.3"), s, cost, ON)]);
   check("two actions at the last place: one passes", race.map((r) => (r.ok ? "ok" : r.reason)).sort(), ["actions", "ok"]);
   await one(["HSET", keys[0], "actions", "0", "bytes", String(DEMO_BYTES_PER_SESSION - 100)]);
-  check("filling the bytes exactly runs", (await takeDemoAction(s, cost, ON)).ok, true);
-  check("one byte past them is refused", await takeDemoAction(s, { commands: 12, bytes: 1 }, ON), { ok: false, reason: "bytes" });
-  check("at its end it is over", await takeDemoAction(s, cost, { ...ON, now: () => s.expiresAt }), { ok: false, reason: "expired" });
+  check("filling the bytes exactly runs", (await takeDemoAction(door("192.0.2.3"), s, cost, ON)).ok, true);
+  check("one byte past them is refused", await takeDemoAction(door("192.0.2.3"), s, { commands: 12, bytes: 1 }, ON), { ok: false, reason: "bytes" });
+  check("at its end it is over", await takeDemoAction(door("192.0.2.3"), s, cost, { ...ON, now: () => s.expiresAt }), { ok: false, reason: "expired" });
   finish();
 }
 

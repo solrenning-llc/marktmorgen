@@ -3,7 +3,7 @@
  *
  * Off, the route is a 404 that sends no Redis command. With the switch
  * forced on through the functions' own parameter (STUDIO_DEMO_ON stays false
- * in the code): a program is refused, an address opens five sessions a day,
+ * in the code): a program is refused, an address opens its sessions a day and counts only its share of the refusals,
  * two doors at the day's last place give it to one, every key written is the
  * demo's own with an expiry, the real stores' keys are untouched, a session
  * reads back until it ends, an action is counted at its caps' exact edges
@@ -60,6 +60,10 @@ const fresh = () => {
   store.now = () => clock;
 };
 const dayKey = "nl:sdemo:day:2026-11-04";
+const addrKey = "nl:sdemo:addr:2026-11-04";
+// A different address for each call that is not about addresses, so a part's refusals never meet an address's own cap.
+let nth = 0;
+const asker = () => door(`198.18.${Math.floor(nth / 250) % 250}.${(nth++ % 250) + 1}`);
 
 async function run(): Promise<void> {
   part("Off: a path that does not exist, and not one Redis command");
@@ -76,17 +80,18 @@ async function run(): Promise<void> {
   const offLib = await billed(async () => [
     (await openStudioDemo(door())).ok,
     (await answerStudioDemoOpen(door())).status,
-    (await takeDemoAction({ id: "sd" + "a".repeat(32), day: "2026-11-04", startedAt: T0, expiresAt: T0 + 1, actions: 0, bytes: 0 }, { commands: 12, bytes: 1 })).ok,
+    (await takeDemoAction(door(), { id: "sd" + "a".repeat(32), day: "2026-11-04", startedAt: T0, expiresAt: T0 + 1, actions: 0, bytes: 0 }, { commands: 12, bytes: 1 })).ok,
+    await readStudioDemo(withCookie(`${DEMO_COOKIE}=sd${"0".repeat(32)}`)),
   ]);
-  is("off, the functions refuse too", offLib.result, [false, 404, false]);
+  is("off, the functions refuse too, a read with a made-up cookie included", offLib.result, [false, 404, false, null]);
   is("zero Redis commands while off", offRoute.commands + offLib.commands, 0);
   is("no key in Redis", store.keys(), []);
 
   part("A program is refused before anything is counted or written");
   fresh();
   const bot = await billed(() => openStudioDemo(door(), { on: true, isAutomated: async () => true, now: () => clock }));
-  // The stand-in keeps an empty hash for a key HGET asked about; Redis does not, so a field count is what tells a write.
-  is("after the day's refusals read alone (one command), nothing is counted or written", [bot.commands, store.keys().filter((k) => k !== dayKey), store.run(["HLEN", dayKey])], [1, [], 0]);
+  // The stand-in keeps an empty hash for a key HMGET asked about; Redis does not, so a field count is what tells a write.
+  is("after the day's and the address's refusals read (one command), nothing is counted or written", [bot.commands, store.keys().filter((k) => k !== addrKey), store.run(["HLEN", addrKey])], [1, [], 0]);
   is("the bot check's verdict refuses", bot.result, { ok: false, reason: "automated" });
   const honeypot = await billed(() => answerStudioDemoOpen(door("203.0.113.7", { "content-type": "application/json" }, JSON.stringify({ website: "https://spam.example" })), at(clock)));
   is("the hidden field filled reads as a program, with no command", [honeypot.result.status, honeypot.commands], [403, 0]);
@@ -167,7 +172,7 @@ async function run(): Promise<void> {
   is("every key written has an expiry", written.filter((k) => Number(store.run(["PTTL", k])) <= 0), []);
   is("every key written is the demo's", written.filter((k) => !k.startsWith(DEMO_NAMESPACE)), []);
   is("the sandbox's keys all end when the session does, at the same instant", [...new Set(sandbox.map((k) => store.run(["PEXPIRETIME", k])))], [session.expiresAt]);
-  is("the session lives its 30 minutes from its whole second", [session.startedAt, session.expiresAt - session.startedAt], [Math.floor(T0 / 1000) * 1000, DEMO_SESSION_SECONDS * 1000]);
+  is("the session lives its DEMO_SESSION_SECONDS from its whole second", [session.startedAt, session.expiresAt - session.startedAt], [Math.floor(T0 / 1000) * 1000, DEMO_SESSION_SECONDS * 1000]);
   is("the day's counts are kept 400 days", store.run(["TTL", dayKey]), DEMO_DAY_KEEP_SECONDS);
   is("the day reserved the session's whole worst", [store.run(["HGET", dayKey, "commands"]), store.run(["HGET", dayKey, "sent"])], [String(4 * DEMO_SESSION_WORST_COMMANDS), String(4 * DEMO_START_COMMANDS)]);
   is("the first drafts are the fixed fictional ones", sandbox.slice(1).map((k) => store.run(["GET", k])), STUDIO_DEMO_SEED_VALUES);
@@ -186,18 +191,18 @@ async function run(): Promise<void> {
 
   part("Reading a session");
   const cookieHeader = `${DEMO_COOKIE}=${session.id}`;
-  is("the cookie reads its live session", await readStudioDemo(withCookie(`nl_session=x; ${cookieHeader}`), { now: () => clock }), session);
-  is("no cookie, no session", await readStudioDemo(withCookie("nl_session=x"), { now: () => clock }), null);
-  is("a malformed id reads nothing and sends nothing", (await billed(() => readStudioDemo(withCookie(`${DEMO_COOKIE}=0123456789abcdef0123456789abcdef`), { now: () => clock }))).commands, 0);
-  is("an unknown id, null", await readStudioDemo(withCookie(`${DEMO_COOKIE}=sd${"f".repeat(32)}`), { now: () => clock }), null);
-  is("the cookie given twice, null", await readStudioDemo(withCookie(`${cookieHeader}; ${cookieHeader}`), { now: () => clock }), null);
-  is("its last millisecond, live", (await readStudioDemo(withCookie(cookieHeader), { now: () => session.expiresAt - 1 }))?.id, session.id);
-  is("at its end, null", await readStudioDemo(withCookie(cookieHeader), { now: () => session.expiresAt }), null);
+  is("the cookie reads its live session", await readStudioDemo(withCookie(`nl_session=x; ${cookieHeader}`), at(clock)), session);
+  is("no cookie, no session", await readStudioDemo(withCookie("nl_session=x"), at(clock)), null);
+  is("a malformed id reads nothing and sends nothing", (await billed(() => readStudioDemo(withCookie(`${DEMO_COOKIE}=0123456789abcdef0123456789abcdef`), at(clock)))).commands, 0);
+  is("an unknown id, null", await readStudioDemo(withCookie(`${DEMO_COOKIE}=sd${"f".repeat(32)}`), at(clock)), null);
+  is("the cookie given twice, null", await readStudioDemo(withCookie(`${cookieHeader}; ${cookieHeader}`), at(clock)), null);
+  is("its last millisecond, live", (await readStudioDemo(withCookie(cookieHeader), at(session.expiresAt - 1)))?.id, session.id);
+  is("at its end, null", await readStudioDemo(withCookie(cookieHeader), at(session.expiresAt)), null);
   store.run(["HSET", sandbox[0], "bytes", "lots"]);
-  is("a record that does not read as written, null", await readStudioDemo(withCookie(cookieHeader), { now: () => clock }), null);
+  is("a record that does not read as written, null", await readStudioDemo(withCookie(cookieHeader), at(clock)), null);
   store.run(["HSET", sandbox[0], "bytes", String(STUDIO_DEMO_SEED_BYTES)]);
   clock = session.expiresAt;
-  is("expired in Redis too: the record is gone", [store.run(["EXISTS", sandbox[0]]), await readStudioDemo(withCookie(cookieHeader), { now: () => clock })], [0, null]);
+  is("expired in Redis too: the record is gone", [store.run(["EXISTS", sandbox[0]]), await readStudioDemo(withCookie(cookieHeader), at(clock))], [0, null]);
   clock = T0;
 
   part("An action: checked and counted at its caps' exact edges");
@@ -207,72 +212,73 @@ async function run(): Promise<void> {
   const s: StudioDemoSession = o.session;
   const record = sandboxKey(s.id, "session")!;
   const cost = { commands: DEMO_COMMANDS_PER_ACTION, bytes: 100 };
-  const first = await billed(() => takeDemoAction(s, cost, at(clock)));
+  const first = await billed(() => takeDemoAction(asker(), s, cost, at(clock)));
   is("the first action is counted", first.result, { ok: true, actions: 1, bytes: STUDIO_DEMO_SEED_BYTES + 100 });
   is("its check and count bill DEMO_TAKE_COMMANDS", first.commands, DEMO_TAKE_COMMANDS);
   is("under an action's commands", DEMO_TAKE_COMMANDS < DEMO_COMMANDS_PER_ACTION, true);
   is(`and move no more than DEMO_TAKE_DB_BYTES (${first.bytes})`, first.bytes <= DEMO_TAKE_DB_BYTES, true);
-  is("and touch only the day (its refusals read first) and the session record", [...new Set(first.keys)], [dayKey, record]);
+  is("and touch only the day's addresses (the refusals read first), the session record and the day", [...new Set(first.keys)], [addrKey, record, dayKey]);
   is("the day counts the commands sent", store.run(["HGET", dayKey, "sent"]), String(DEMO_START_COMMANDS + DEMO_COMMANDS_PER_ACTION));
   store.run(["HSET", record, "actions", String(DEMO_ACTIONS_PER_SESSION - 1)]);
-  is("the last action runs", (await takeDemoAction(s, cost, at(clock))).ok, true);
-  is("one past it is refused", await takeDemoAction(s, cost, at(clock)), { ok: false, reason: "actions" });
+  is("the last action runs", (await takeDemoAction(asker(), s, cost, at(clock))).ok, true);
+  is("one past it is refused", await takeDemoAction(asker(), s, cost, at(clock)), { ok: false, reason: "actions" });
   store.run(["HSET", record, "actions", String(DEMO_ACTIONS_PER_SESSION - 1)]);
-  const race = await Promise.all([takeDemoAction(s, cost, at(clock)), takeDemoAction(s, cost, at(clock))]);
+  const race = await Promise.all([takeDemoAction(asker(), s, cost, at(clock)), takeDemoAction(asker(), s, cost, at(clock))]);
   is("two actions at the last place: one runs, one is refused", race.map((r) => (r.ok ? "ok" : r.reason)).sort(), ["actions", "ok"]);
   store.run(["HSET", record, "actions", "0", "bytes", String(DEMO_BYTES_PER_SESSION - 100)]);
-  is("filling the session's bytes exactly runs", (await takeDemoAction(s, cost, at(clock))).ok, true);
-  is("one byte past them is refused", await takeDemoAction(s, { commands: DEMO_TAKE_COMMANDS, bytes: 1 }, at(clock)), { ok: false, reason: "bytes" });
+  is("filling the session's bytes exactly runs", (await takeDemoAction(asker(), s, cost, at(clock))).ok, true);
+  is("one byte past them is refused", await takeDemoAction(asker(), s, { commands: DEMO_TAKE_COMMANDS, bytes: 1 }, at(clock)), { ok: false, reason: "bytes" });
   store.run(["HSET", record, "bytes", "0"]);
   is("an action dearer than the worst costed is refused", [
-    await takeDemoAction(s, { commands: DEMO_COMMANDS_PER_ACTION + 1, bytes: 0 }, at(clock)),
-    await takeDemoAction(s, { commands: DEMO_TAKE_COMMANDS, bytes: DEMO_ACTION_MAX_BYTES + 1 }, at(clock)),
+    await takeDemoAction(asker(), s, { commands: DEMO_COMMANDS_PER_ACTION + 1, bytes: 0 }, at(clock)),
+    await takeDemoAction(asker(), s, { commands: DEMO_TAKE_COMMANDS, bytes: DEMO_ACTION_MAX_BYTES + 1 }, at(clock)),
   ], [{ ok: false, reason: "too_big" }, { ok: false, reason: "too_big" }]);
-  is("its last millisecond runs", (await takeDemoAction(s, cost, at(s.expiresAt - 1))).ok, true);
-  is("at its end it is over", await takeDemoAction(s, cost, at(s.expiresAt)), { ok: false, reason: "expired" });
+  is("its last millisecond runs", (await takeDemoAction(asker(), s, cost, at(s.expiresAt - 1))).ok, true);
+  is("at its end it is over", await takeDemoAction(asker(), s, cost, at(s.expiresAt)), { ok: false, reason: "expired" });
   store.run(["HSET", dayKey, "sent", String(DEMO_COMMANDS_PER_DAY - DEMO_COMMANDS_PER_ACTION + 1)]);
-  is("one command past the day's is refused", await takeDemoAction(s, cost, at(clock)), { ok: false, reason: "commands" });
+  is("one command past the day's is refused", await takeDemoAction(asker(), s, cost, at(clock)), { ok: false, reason: "commands" });
   store.run(["HDEL", dayKey, "sent"]);
-  is("the day's count missing refuses", await takeDemoAction(s, cost, at(clock)), { ok: false, reason: "unknown" });
+  is("the day's count missing refuses", await takeDemoAction(asker(), s, cost, at(clock)), { ok: false, reason: "unknown" });
   store.run(["HSET", dayKey, "sent", "0"]);
 
   part("Unknown counts refuse, before any command");
   const unknown = await billed(async () => [
-    await takeDemoAction(s, { commands: Number.NaN, bytes: 0 }, at(clock)),
-    await takeDemoAction(s, { commands: -1, bytes: 0 }, at(clock)),
-    await takeDemoAction(s, { commands: 12, bytes: Number.POSITIVE_INFINITY }, at(clock)),
-    await takeDemoAction(s, { commands: 12, bytes: 1.5 }, at(clock)),
-    await takeDemoAction(s, { commands: DEMO_TAKE_COMMANDS - 1, bytes: 0 }, at(clock)),
-    await takeDemoAction({ ...s, id: "0123456789abcdef0123456789abcdef" }, cost, at(clock)),
-    await takeDemoAction(s, cost, at(Number.NaN)),
+    await takeDemoAction(asker(), s, { commands: Number.NaN, bytes: 0 }, at(clock)),
+    await takeDemoAction(asker(), s, { commands: -1, bytes: 0 }, at(clock)),
+    await takeDemoAction(asker(), s, { commands: 12, bytes: Number.POSITIVE_INFINITY }, at(clock)),
+    await takeDemoAction(asker(), s, { commands: 12, bytes: 1.5 }, at(clock)),
+    await takeDemoAction(asker(), s, { commands: DEMO_TAKE_COMMANDS - 1, bytes: 0 }, at(clock)),
+    await takeDemoAction(asker(), { ...s, id: "0123456789abcdef0123456789abcdef" }, cost, at(clock)),
+    await takeDemoAction(asker(), s, cost, at(Number.NaN)),
   ]);
   is("each refuses as unknown", unknown.result.map((r) => (r.ok ? "ok" : r.reason)), Array(7).fill("unknown"));
   const sentBefore = store.run(["HGET", dayKey, "sent"]);
-  is("the day is the record's, never the caller's", (await takeDemoAction({ ...s, day: "2026-01-01" }, cost, at(clock))).ok, true);
+  is("the day is the record's, never the caller's", (await takeDemoAction(asker(), { ...s, day: "2026-01-01" }, cost, at(clock))).ok, true);
   is("so the opening day counts it", [Number(store.run(["HGET", dayKey, "sent"])) - Number(sentBefore), store.run(["EXISTS", "nl:sdemo:day:2026-01-01"])], [DEMO_COMMANDS_PER_ACTION, 0]);
   is("and sends nothing", unknown.commands, 0);
   store.run(["HSET", record, "actions", "x"]);
-  is("a record that does not read as written refuses", await takeDemoAction(s, cost, at(clock)), { ok: false, reason: "unknown" });
+  is("a record that does not read as written refuses", await takeDemoAction(asker(), s, cost, at(clock)), { ok: false, reason: "unknown" });
   store.run(["DEL", record]);
-  is("a session whose record is gone is over", await takeDemoAction(s, cost, at(clock)), { ok: false, reason: "expired" });
+  is("a session whose record is gone is over", await takeDemoAction(asker(), s, cost, at(clock)), { ok: false, reason: "expired" });
 
   part("Refusals: each counted, the day's capped, and past the cap one command each");
   fresh();
   const RN = rulesNs as unknown as Record<string, unknown>;
   const REFUSALS = Number(RN.DEMO_REFUSALS_PER_DAY), REFUSAL_WORST = Number(RN.DEMO_REFUSAL_WORST_COMMANDS);
+  const REFUSALS_ADDRESS = Number(RN.DEMO_REFUSALS_PER_ADDRESS_PER_DAY), REFUSAL_BYTES = DEMO_TAKE_DB_BYTES;
   is("the day's refusals and a refusal's commands are capped", [Number.isSafeInteger(REFUSALS) && REFUSALS > 0, Number.isSafeInteger(REFUSAL_WORST) && REFUSAL_WORST > 0], [true, true]);
   const live = await openStudioDemo(door("192.0.2.50"), at(clock));
   if (!live.ok) throw new Error("no session");
   const liveRecord = sandboxKey(live.session.id, "session")!;
   for (let i = 0; i < DEMO_SESSIONS_PER_ADDRESS_PER_DAY; i += 1) await openStudioDemo(door("192.0.2.60"), at(clock));
-  const refusedNow = () => Number(store.run(["HGET", dayKey, "refused"]) ?? 0);
+  const refusedNow = () => Number(store.run(["HGET", addrKey, "refused"]) ?? 0);
   const ghost: StudioDemoSession = { ...live.session, id: "sd" + "e".repeat(32) };
   const paths: [string, () => Promise<unknown>, () => void][] = [
     ["an address past its sessions", () => openStudioDemo(door("192.0.2.60"), at(clock)), () => {}],
     ["a day with no session left", () => openStudioDemo(door("192.0.2.61"), at(clock)), () => store.run(["HSET", dayKey, "sessions", String(DEMO_SESSIONS_PER_DAY)])],
-    ["a session whose record is gone", () => takeDemoAction(ghost, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => {}],
-    ["an action past the day's commands", () => takeDemoAction(live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => store.run(["HSET", dayKey, "sent", String(DEMO_COMMANDS_PER_DAY)])],
-    ["an action past the session's, refused by its script", () => takeDemoAction(live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => {
+    ["a session whose record is gone", () => takeDemoAction(door(), ghost, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => {}],
+    ["an action past the day's commands", () => takeDemoAction(door(), live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => store.run(["HSET", dayKey, "sent", String(DEMO_COMMANDS_PER_DAY)])],
+    ["an action past the session's, refused by its script", () => takeDemoAction(door(), live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => {
       store.run(["HSET", dayKey, "sent", "0"]);
       // As if another request took the last place between this one's read and its count.
       const run = store.run.bind(store);
@@ -284,7 +290,7 @@ async function run(): Promise<void> {
         return run(command);
       };
     }],
-    ["a cookie naming no session", () => readStudioDemo(withCookie(`${DEMO_COOKIE}=${ghost.id}`), { now: () => clock }), () => {}],
+    ["a cookie naming no session", () => readStudioDemo(withCookie(`${DEMO_COOKIE}=${ghost.id}`), at(clock)), () => {}],
   ];
   for (const [name, work, setUp] of paths) {
     setUp();
@@ -292,15 +298,66 @@ async function run(): Promise<void> {
     const step = await billed(work);
     const result = step.result as { ok?: boolean } | null;
     is(`${name}: refused, counted once, in ${step.commands} commands at most DEMO_REFUSAL_WORST_COMMANDS`, [result === null || result.ok === false, refusedNow() - was, step.commands <= REFUSAL_WORST], [true, 1, true]);
+    is(`${name}: and moves no more than the bytes a refusal is priced with (${step.bytes})`, step.bytes <= REFUSAL_BYTES, true);
   }
-  store.run(["HSET", dayKey, "sessions", "0", "refused", String(REFUSALS)]);
+  store.run(["HSET", dayKey, "sessions", "0"]);
+  store.run(["HSET", addrKey, "refused", String(REFUSALS)]);
   const shut = () => store.keys().map((k) => [k, store.run(["TYPE", k]) === "hash" ? store.run(["HGETALL", k]) : store.run(["GET", k])]);
   const beforeShut = shut();
   const closedOpen = await billed(() => openStudioDemo(door("192.0.2.70"), at(clock)));
-  const closedTake = await billed(() => takeDemoAction(live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)));
-  const closedRead = await billed(() => readStudioDemo(withCookie(`${DEMO_COOKIE}=${live.session.id}`), { now: () => clock }));
+  const closedTake = await billed(() => takeDemoAction(door(), live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)));
+  const closedRead = await billed(() => readStudioDemo(withCookie(`${DEMO_COOKIE}=${live.session.id}`), at(clock)));
   is("past the day's refusals, a door, an action and a read are each answered after one command", [closedOpen.result, closedTake.result, closedRead.result, closedOpen.commands, closedTake.commands, closedRead.commands], [{ ok: false, reason: "closed" }, { ok: false, reason: "closed" }, null, 1, 1, 1]);
   is("and nothing is written", shut(), beforeShut);
+
+  part("One address, or made-up cookies, never close the demo for everyone");
+  const refusedToday = () => Number(store.run(["HGET", addrKey, "refused"]) ?? 0);
+  is("an address counts a small share of the day's refusals", [Number.isSafeInteger(REFUSALS_ADDRESS) && REFUSALS_ADDRESS > 0, REFUSALS_ADDRESS * 100 <= REFUSALS], [true, true]);
+  fresh();
+  const flood: Record<string, number> = {};
+  for (let i = 0; i < REFUSALS + 4; i += 1) {
+    const o = await openStudioDemo(door("198.51.100.200"), at(clock));
+    const k = o.ok ? "ok" : o.reason;
+    flood[k] = (flood[k] ?? 0) + 1;
+  }
+  is(`one address with ${REFUSALS + 4} doors opens its own and is then refused as an address, never closing the day`, flood, { ok: DEMO_SESSIONS_PER_ADDRESS_PER_DAY, address: REFUSALS + 4 - DEMO_SESSIONS_PER_ADDRESS_PER_DAY });
+  is("only the address's own share of refusals reached the day", refusedToday(), REFUSALS_ADDRESS);
+  const pastShare = await billed(() => openStudioDemo(door("198.51.100.200"), at(clock)));
+  is("past its share, the address is answered after one command and nothing is written", [pastShare.result, pastShare.commands, refusedToday()], [{ ok: false, reason: "address" }, 1, REFUSALS_ADDRESS]);
+  is("so another address still opens", (await openStudioDemo(door("198.51.100.201"), at(clock))).ok, true);
+  fresh();
+  const busy = await openStudioDemo(door("198.51.100.205"), at(clock));
+  if (!busy.ok) throw new Error("no session");
+  store.run(["HSET", sandboxKey(busy.session.id, "session")!, "actions", String(DEMO_ACTIONS_PER_SESSION)]);
+  const spent: Record<string, number> = {};
+  for (let i = 0; i < REFUSALS + 4; i += 1) {
+    const r = await takeDemoAction(door("198.51.100.205"), busy.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock));
+    const k = r.ok ? "ok" : r.reason;
+    spent[k] = (spent[k] ?? 0) + 1;
+  }
+  is(`one address sending ${REFUSALS + 4} actions past its session's is refused, its share counted`, [spent, refusedToday()], [{ actions: REFUSALS_ADDRESS, address: REFUSALS + 4 - REFUSALS_ADDRESS }, REFUSALS_ADDRESS]);
+  const other = await openStudioDemo(door("198.51.100.206"), at(clock));
+  is("so another address still opens and acts", [other.ok, other.ok && (await takeDemoAction(door("198.51.100.206"), other.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock))).ok], [true, true]);
+  fresh();
+  const kept = await openStudioDemo(door("198.51.100.210"), at(clock));
+  if (!kept.ok) throw new Error("no session");
+  const fake = withCookie(`${DEMO_COOKIE}=sd${"0".repeat(32)}`);
+  let fakeRead: unknown = "unread";
+  for (let i = 0; i < REFUSALS + 4; i += 1) fakeRead = await readStudioDemo(fake, at(clock));
+  is(`${REFUSALS + 4} reads with a made-up cookie read nothing`, fakeRead, null);
+  is("and count no more than one address's share", refusedToday(), REFUSALS_ADDRESS);
+  is("and close nothing: a new visitor still opens", (await openStudioDemo(door("198.51.100.211"), at(clock))).ok, true);
+  const keptRead = new Request("https://marktmorgen.com/api/studio-demo", { headers: { cookie: `${DEMO_COOKIE}=${kept.session.id}`, "x-forwarded-for": "198.51.100.210" } });
+  is("and a live session still reads from its own address", (await readStudioDemo(keptRead, at(clock)))?.id, kept.session.id);
+  fresh();
+  store.run(["HSET", addrKey, "refused", String(REFUSALS - 1)]);
+  const together = await Promise.all(Array.from({ length: 20 }, (_, i) => readStudioDemo(new Request("https://marktmorgen.com/api/studio-demo", { headers: { cookie: `${DEMO_COOKIE}=sd${"0".repeat(32)}`, "x-forwarded-for": `203.0.113.${100 + i}` } }), at(clock))));
+  is("twenty refusals at once, one place left: none reads", together.filter((x) => x !== null).length, 0);
+  is("and the day's refusals stop exactly at their cap", refusedToday(), REFUSALS);
+  fresh();
+  const sameAddress = new Request("https://marktmorgen.com/api/studio-demo", { headers: { cookie: `${DEMO_COOKIE}=sd${"0".repeat(32)}`, "x-forwarded-for": "203.0.113.250" } });
+  await Promise.all(Array.from({ length: 4 * REFUSALS_ADDRESS }, () => readStudioDemo(sameAddress, at(clock))));
+  is(`${4 * REFUSALS_ADDRESS} refusals at once from one address count exactly its share`, refusedToday(), REFUSALS_ADDRESS);
 
   part("Its first drafts, and what the module may reach");
   const seedFile = readFileSync("lib/demo-seed.ts", "utf8");

@@ -3,7 +3,8 @@
  * boundary, every capability is classified and the closed list is refused,
  * a demo key never leaves its namespace or its families, every example AI
  * answer carries its label, the demo stays off while a cost is unknown, and
- * docs/studio-demo.md states the worst day this file works out.
+ * docs/studio-demo.md states the worst day this file works out and how many
+ * addresses it takes to close the demo for everyone.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -132,5 +133,10 @@ is("a refusal's commands are bounded and its day's refusals capped", [Number.isS
 is("no text says refusals are bounded per address", DEMO_UNKNOWN_COSTS.some((t) => /bounded per address/.test(t)), false);
 const addresses = Math.ceil(reachable / DEMO_SESSIONS_PER_ADDRESS_PER_DAY);
 is(`the doc states how many addresses or networks can take the day (${addresses})`, doc.includes(`${addresses} addresses`), true);
+const perAddress = num("DEMO_REFUSALS_PER_ADDRESS_PER_DAY");
+is("one address counts only a small share of the day's refusals", Number.isSafeInteger(perAddress) && perAddress > 0 && perAddress * 100 <= refusals, true);
+const closers = Math.ceil(refusals / perAddress);
+is(`the doc states how many addresses or networks it takes to close the day for everyone (${closers})`, doc.includes(`${closers} addresses or networks, each spending its ${perAddress}`), true);
+is(`the doc states a counted refusal at its worst (${perRefusal.toFixed(2)} µ$, ${num("DEMO_REFUSAL_WORST_COMMANDS")} commands)`, doc.includes(`${num("DEMO_REFUSAL_WORST_COMMANDS")} commands, 2 KB through the database, CDN | ${perRefusal.toFixed(2)} µ$`), true);
 
 done();

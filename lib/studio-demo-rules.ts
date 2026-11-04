@@ -56,15 +56,24 @@ export const DEMO_COMMANDS_PER_ACTION = 12;
 export const DEMO_START_COMMANDS = 19;
 /**
  * Refused demo requests the whole site counts in a day (UTC). Every request
- * that reaches Redis reads this count first; past it, the demo answers "closed"
- * for the rest of the day after that one command, and writes nothing.
+ * that reaches Redis reads this count first, with its address's own; past it,
+ * the demo answers "closed" for the rest of the day after that one command,
+ * and writes nothing. A refusal reaches it only through its address's
+ * DEMO_REFUSALS_PER_ADDRESS_PER_DAY, so one address alone can never fill it.
  */
 export const DEMO_REFUSALS_PER_DAY = 5_000;
+/**
+ * Refused demo requests one address (a new-kind one by its network, as
+ * DEMO_SESSIONS_PER_ADDRESS_PER_DAY) counts in a day (UTC), each counted for
+ * the whole site too. Past it, that address alone is answered after the first
+ * read for the rest of the day, and nothing is written.
+ */
+export const DEMO_REFUSALS_PER_ADDRESS_PER_DAY = 10;
 /** Database commands a refused request sends at the most, its own counting included (held in tests/studio-demo.test.ts). */
-export const DEMO_REFUSAL_WORST_COMMANDS = 7;
+export const DEMO_REFUSAL_WORST_COMMANDS = 10;
 /** Bytes opening a session moves through the database at the most, both ways (held in tests/studio-demo.test.ts). */
 export const DEMO_START_DB_BYTES = 4_096;
-/** Bytes an action's own check and count move through the database at the most, both ways (held in tests/studio-demo.test.ts). */
+/** Bytes an action's own check and count, or a refused request with its counting, move through the database at the most, both ways (held in tests/studio-demo.test.ts). */
 export const DEMO_TAKE_DB_BYTES = 2_048;
 /** What one answer of the demo may send to the browser, as it travels; the screens' unit holds its pages under it. */
 export const DEMO_RESPONSE_MAX_BYTES = 120_000;
@@ -122,7 +131,10 @@ export function demoDayKey(day: string): string | null {
 }
 const DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
-/** The day's sessions by address, each by a one-way hash of its address or network, kept only until the day ends. */
+/**
+ * The day's sessions and refusals by address, each by a one-way hash of its
+ * address or network, and the whole site's refusals, kept only until the day ends.
+ */
 export function demoAddressKey(day: string): string | null {
   return DAY.test(day) ? `${DEMO_NAMESPACE}addr:${day}` : null;
 }
@@ -317,5 +329,5 @@ export function demoDayFunctionWorstMicroUsd(): number {
 export const DEMO_UNKNOWN_COSTS: readonly string[] = [
   "The script and style files a demo studio page loads from the CDN: not measured for the studio (tests/traffic-cost.ts measured 13 on a store's page).",
   "The bot check at its basic level: lib/bot-check.ts records no charge per check, without a dated official source in the repository.",
-  "Requests refused without being counted: a program the bot check refuses, and every request past the day's DEMO_REFUSALS_PER_DAY. Each sends one database command at the most and writes nothing, but is still a function call, and nothing bounds how many arrive across addresses; the bot check is the brake.",
+  "Requests refused without being counted: a program the bot check refuses, and every request past the day's DEMO_REFUSALS_PER_DAY or past its own address's DEMO_REFUSALS_PER_ADDRESS_PER_DAY, each one database command at the most and nothing written; and requests that passed that first read together while one place was left and found it taken when counting, each up to DEMO_REFUSAL_WORST_COMMANDS and nothing written. Each is still a function call, and nothing bounds how many arrive across addresses; the bot check is the brake for the door, and reads and actions have none yet.",
 ];

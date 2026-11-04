@@ -64,7 +64,15 @@ export const DRAFT_UNITS: readonly { unit: DraftUnit; fields: readonly DraftFiel
 /** A part both the creator and somebody else changed: the creator's words stay, and `saved` is what is saved now. */
 export type DraftConflict = { unit: DraftUnit; saved: Partial<DealDraft> };
 
-const differs = (fields: readonly DraftField[], a: DealDraft, b: DealDraft) => fields.some((field) => a[field] !== b[field]);
+/** Two values of a field are the same: an amount by what it is worth in cents ("1500" and "1500.00" are one), the rest as typed. */
+function sameValue(field: DraftField, a: string, b: string, currency: string): boolean {
+  if (a === b) return true;
+  if (field !== "value") return false;
+  const cents = (v: string) => (v.trim() ? readMoney(v, currency as Currency) : 0);
+  const [x, y] = [cents(a), cents(b)];
+  return x !== null && x === y;
+}
+const differs = (fields: readonly DraftField[], a: DealDraft, b: DealDraft, currency: string) => fields.some((field) => !sameValue(field, a[field], b[field], currency));
 
 /**
  * The creator's changes put back on the deal as it is now: every part from
@@ -78,9 +86,9 @@ export function rebaseDraft(base: DealDraft, draft: DealDraft, current: Deal, cu
   const next = { ...now };
   const conflicts: DraftConflict[] = [];
   for (const { unit, fields } of DRAFT_UNITS) {
-    if (!differs(fields, base, draft)) continue;
+    if (!differs(fields, base, draft, currency)) continue;
     for (const field of fields) next[field] = draft[field];
-    if (differs(fields, base, now) && differs(fields, draft, now)) conflicts.push({ unit, saved: Object.fromEntries(fields.map((field) => [field, now[field]])) });
+    if (differs(fields, base, now, currency) && differs(fields, draft, now, currency)) conflicts.push({ unit, saved: Object.fromEntries(fields.map((field) => [field, now[field]])) });
   }
   return { draft: next, conflicts };
 }
@@ -140,8 +148,41 @@ export function savedNowText(conflict: DraftConflict, currency: string, stageNam
   }
 }
 
-/** What the board says when a deal it was changing moved to a pipeline this person cannot see. */
-export const DEAL_HIDDEN = "This deal moved where you cannot see it. Nothing was saved.";
+/** What the board says when a deal it was changing moved to a pipeline this person cannot see or cannot change. */
+export const DEAL_HIDDEN = "This deal moved where you cannot change it. Nothing was saved.";
+export const DEAL_HIDDEN_ID = "deal-hidden";
+
+/**
+ * What the creator typed in a deal they can no longer change, as plain text
+ * to copy (3.3.7): one line a part they changed, with its label. Empty when
+ * they changed nothing.
+ */
+export function typedText(base: DealDraft, draft: DealDraft): string {
+  return DRAFT_UNITS.filter(({ fields }) => fields.some((field) => draft[field] !== base[field]))
+    .map(({ unit, label }) => {
+      const words = unit === "followUp" ? [draft.nextAction, draft.dueDate].filter(Boolean).join(", ") : draft[unit as DraftField];
+      return `${label[0].toUpperCase()}${label.slice(1)}: ${words || "(empty)"}`;
+    })
+    .join("\n");
+}
+
+/** The id of the "Saved now" words beside a part, which its fields point to (aria-describedby). */
+export const savedNowId = (unit: DraftUnit) => `deal-saved-${unit}`;
+
+/** The part a field belongs to. */
+export const unitOf = (field: DraftField): DraftUnit => DRAFT_UNITS.find((u) => u.fields.includes(field))!.unit;
+
+/**
+ * Taking what is saved now for a part in conflict ("Use this"): its values
+ * replace the creator's, the conflict goes, focus goes to the part's first
+ * field (the button is gone), and the change is said in a status region.
+ */
+export function takeSaved<T extends DealDraft & { conflicts: DraftConflict[] }>(draft: T, unit: DraftUnit): { draft: T; focus: string; said: string } {
+  const conflict = draft.conflicts.find((c) => c.unit === unit);
+  const part = DRAFT_UNITS.find((u) => u.unit === unit)!;
+  if (!conflict) return { draft, focus: dealFieldId(part.fields[0]), said: "" };
+  return { draft: { ...draft, ...conflict.saved, conflicts: draft.conflicts.filter((c) => c.unit !== unit) }, focus: dealFieldId(part.fields[0]), said: `Using what is saved now for ${part.label}.` };
+}
 
 /**
  * What the board does with a refused change: "rebase" puts the creator's
@@ -149,7 +190,20 @@ export const DEAL_HIDDEN = "This deal moved where you cannot see it. Nothing was
  * deal changed and moved where this person cannot see it (sending again
  * would only be refused again); "message" shows the refusal's own words.
  */
-export function refusalKind(action: unknown, answer: { error: string; current?: unknown }): "rebase" | "hidden" | "message" {
+export function refusalKind(action: unknown, answer: { error: string; current?: { deal: { stage: string } } }, canChangeStage: (stage: string) => boolean = () => true): "rebase" | "hidden" | "message" {
   if (action !== "deal" || answer.error !== "crm_conflict") return "message";
-  return answer.current ? "rebase" : "hidden";
+  // A deal now in a stage this board may not change (a view-only pipeline) is never put in the editor.
+  return answer.current && canChangeStage(answer.current.deal.stage) ? "rebase" : "hidden";
+}
+
+/**
+ * A card's stage select (3.2.5): choosing a stage only marks it; the move
+ * is sent on Enter or when the select is left, so a keyboard stepping
+ * through the stages never moves the deal, or starts a stage's workflow, at
+ * each one on the way.
+ */
+export function stageMoveStep(pending: string | undefined, event: { kind: "change"; value: string } | { kind: "enter" } | { kind: "blur" }, current: string): { pending: string | undefined; commit?: string } {
+  if (event.kind === "change") return { pending: event.value === current ? undefined : event.value };
+  if (pending === undefined || pending === current) return { pending: undefined };
+  return { pending: undefined, commit: pending };
 }

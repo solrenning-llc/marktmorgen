@@ -4,7 +4,7 @@
  * (lib/deal-draft.ts), so nothing typed is lost and nothing written by a
  * workflow step meanwhile is overwritten.
  */
-import { DEAL_HIDDEN, DEAL_SAVE_ID, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText } from "@/lib/deal-draft";
+import { DEAL_HIDDEN, DEAL_SAVE_ID, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText, stageMoveStep, takeSaved, typedText } from "@/lib/deal-draft";
 import type { Deal } from "@/lib/crm-rules";
 import { done, is, part } from "./check";
 
@@ -59,11 +59,35 @@ is("what is saved now, in words", [
 ], ["Call Dana back, on 2026-11-10", "Call, with no date", "no next action", "Unassigned", "1250.5 USD", "Won", "nothing"]);
 
 part("A refused change: put back, closed, or said");
-is("an edit's conflict with the deal as it is now: put back", refusalKind("deal", { error: "crm_conflict", current: {} }), "rebase");
-is("an edit's conflict with nothing sent back (moved where they cannot see it): closed", [refusalKind("deal", { error: "crm_conflict" }), DEAL_HIDDEN], ["hidden", "This deal moved where you cannot see it. Nothing was saved."]);
+is("an edit's conflict with the deal as it is now: put back", refusalKind("deal", { error: "crm_conflict", current: { deal: { stage: "lead00" } } }), "rebase");
+is("an edit's conflict with nothing sent back (moved where they cannot change it): closed", [refusalKind("deal", { error: "crm_conflict" }), DEAL_HIDDEN], ["hidden", "This deal moved where you cannot change it. Nothing was saved."]);
+is("an edit's conflict onto a stage this board may only see: closed, never put in an editor that cannot show that stage", refusalKind("deal", { error: "crm_conflict", current: { deal: { stage: "wnew01" } } }, (stage) => stage !== "wnew01"), "hidden");
 is("a pipeline change's conflict, or any other refusal: its own words", [refusalKind("pipeline", { error: "crm_conflict" }), refusalKind("deal", { error: "title" })], ["message", "message"]);
 
 part("One change at a time, decided at once");
 const gate = oneAtATime();
 is("the first change goes, a second before its answer does not, the next one after it does", [gate.enter(), gate.enter(), (gate.leave(), gate.enter())], [true, false, true]);
+
+part("An amount is compared by what it is worth (review, round 2)");
+const fifteen = draftFromDeal({ ...opened, cents: 150000 }, "usd");
+const retyped = rebaseDraft(fifteen, { ...fifteen, value: "1500.00", note: "x" }, { ...opened, cents: 160000 }, "usd");
+is("retyping the same amount is no change of the creator's: what is saved now comes in", [retyped.draft.value, retyped.conflicts], ["1600", []]);
+const same = rebaseDraft(fifteen, { ...fifteen, value: "1600.00" }, { ...opened, cents: 160000 }, "usd");
+is("both made it worth the same: no conflict", same.conflicts, []);
+
+part("Taking what is saved now, and what was typed in a deal that moved away");
+const withConflicts = { ...both.draft, conflicts: both.conflicts };
+const taken = takeSaved(withConflicts, "followUp");
+is("Use this: the saved pair comes in, its conflict goes, focus goes to its first field, and it is said", [taken.draft.nextAction, taken.draft.dueDate, taken.draft.conflicts.map((c) => c.unit), taken.focus, taken.said], ["Call Dana back", "2026-11-10", ["assignee"], dealFieldId("nextAction"), "Using what is saved now for the next action and its date."]);
+is("the creator's other part is untouched", taken.draft.assignee, "sam@example.com");
+is("what was typed, to copy: one line a part changed", typedText(base, { ...base, note: "Sent the proposal", nextAction: "Send the contract", dueDate: "2026-11-12" }), "The next action and its date: Send the contract, 2026-11-12\nThe note: Sent the proposal");
+is("a part emptied says so, and nothing changed is empty", [typedText(base, { ...base, email: "" }), typedText(base, base)], ["Their email: (empty)", ""]);
+
+part("A card's stage select moves the deal only on Enter or when it is left (3.2.5)");
+let pending: string | undefined;
+const steps: (string | undefined)[] = [];
+for (const value of ["talk00", "won000", "lost00"]) { const step = stageMoveStep(pending, { kind: "change", value }, "lead00"); pending = step.pending; steps.push(step.commit); }
+is("arrowing through three stages sends none of them", [steps, pending], [[undefined, undefined, undefined], "lost00"]);
+is("Enter sends the last one chosen, once", [stageMoveStep(pending, { kind: "enter" }, "lead00"), stageMoveStep(undefined, { kind: "enter" }, "lead00")], [{ pending: undefined, commit: "lost00" }, { pending: undefined }]);
+is("leaving the select sends it too; back on its own stage, nothing is sent", [stageMoveStep("won000", { kind: "blur" }, "lead00"), stageMoveStep(undefined, { kind: "change", value: "lead00" }, "lead00"), stageMoveStep(undefined, { kind: "blur" }, "lead00")], [{ pending: undefined, commit: "won000" }, { pending: undefined }, { pending: undefined }]);
 done();

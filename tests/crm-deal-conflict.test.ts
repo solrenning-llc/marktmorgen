@@ -189,11 +189,26 @@ async function main(): Promise<void> {
   const gus = await newDeal("Package for Gus");
   await writePipelineAccess(statsId, "sam@example.com", { [sales.id]: "view" }, store);
   const beforeView = await stored(gus.id);
-  for (const version of [gus.version, "0".repeat(32), undefined]) {
-    const refused = await post({ action: "deal", ...(version === undefined ? {} : { version }), deal: { id: gus.id, note: "Mine" } }, "sam");
-    is(`refused with 403 before any version is compared (${version === gus.version ? "right" : version ? "wrong" : "no"} version), and the deal is never sent`, [refused.status, refused.body.error, "current" in refused.body, "deal" in refused.body], [403, "pipeline_access", false, false]);
+  const right = await post({ action: "deal", version: gus.version, deal: { id: gus.id, note: "Mine" } }, "sam");
+  is("with the version they read: 403, saying why, and the deal is never sent", [right.status, right.body.error, "current" in right.body, "deal" in right.body], [403, "pipeline_access", false, false]);
+  for (const version of ["0".repeat(32), undefined]) {
+    const stale = await post({ action: "deal", ...(version === undefined ? {} : { version }), deal: { id: gus.id, note: "Mine" } }, "sam");
+    is(`with an older copy (${version ? "another" : "no"} version): the conflict, without the deal, since they may not change it there`, [stale.status, stale.body.error, "current" in stale.body, "deal" in stale.body], [409, "crm_conflict", false, false]);
   }
   is("nothing written", await stored(gus.id), beforeView);
+
+  part("A colleague whose deal was moved meanwhile to a pipeline they cannot see (review, round 2)");
+  const kim = await newDeal("Retreat for Kim");
+  await writePipelineAccess(statsId, "sam@example.com", { wkshp1: "none" }, store);
+  const opened = (await post({ action: "deal", version: kim.version, deal: { id: kim.id, note: "Booked the room" } }, "sam"));
+  is("(their own edit goes through while it is theirs)", opened.status, 200);
+  // The owner moves it to Workshops, which Sam may not see.
+  const ownerMove = await post({ action: "deal", version: opened.body.version, deal: { id: kim.id, stage: "wnew01" } });
+  is("(the owner moves it there)", ownerMove.status, 200);
+  const afterMove = await stored(kim.id);
+  const samSaves = await post({ action: "deal", version: opened.body.version, deal: { id: kim.id, note: "Booked the room and the cook" } }, "sam");
+  is("Sam's save over the copy they read: 409, the deal not sent, not 403 on every save", [samSaves.status, samSaves.body.error, "current" in samSaves.body], [409, "crm_conflict", false]);
+  is("and nothing written", await stored(kim.id), afterMove);
 
   done();
 }

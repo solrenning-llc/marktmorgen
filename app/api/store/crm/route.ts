@@ -99,20 +99,23 @@ export async function POST(request: NextRequest) {
       const existing = exact?.deal ?? null;
       if (asked && !existing) return refuse("unknown", 404);
       const pipelines = restricted ? await readPipelines(statsId) : null;
+      // The deal as it is now, for the board to put the creator's changes back on: never to someone who may not
+      // change it there (a pipeline they cannot see, or may only see), who gets the conflict alone.
+      const conflict = (current: { deal: Deal | null; raw: string | null }) => {
+        if (!current.deal || current.raw === null) return refuse("unknown", 404);
+        // A stage in no pipeline is in none this person may change.
+        const where = pipelines === null ? null : pipelineOfStage(pipelines, current.deal.stage);
+        const closed = pipelines !== null && (where === null || accessOf(guarded.role, access, where) !== "edit");
+        return Response.json({ ok: false, error: "crm_conflict", ...(closed ? {} : { current: { deal: current.deal, version: dealVersion(current.raw) } }) }, { status: 409 });
+      };
+      // A board that read an older copy hears first that the deal changed (and, if it moved where they cannot
+      // change it, that it did), never only "your access does not let you change this pipeline" on every save.
+      if (exact && (typeof body.version !== "string" || body.version !== dealVersion(exact.raw!))) return conflict(exact);
       if (pipelines) {
         const target = typeof raw.stage === "string" ? raw.stage : (existing?.stage ?? "");
         // Both the pipeline it is in and the one it goes to must be theirs to change.
         if ((existing && !mayEdit(pipelineOfStage(pipelines, existing.stage))) || !mayEdit(pipelineOfStage(pipelines, target))) return noAccess();
       }
-      // The deal as it is now, for the board to put the creator's changes back on; never to someone who may not see it.
-      const conflict = (current: { deal: Deal | null; raw: string | null }) => {
-        if (!current.deal || current.raw === null) return refuse("unknown", 404);
-        // A stage in no pipeline is in none this person may see.
-        const where = pipelines === null ? null : pipelineOfStage(pipelines, current.deal.stage);
-        const hidden = pipelines !== null && (where === null || accessOf(guarded.role, access, where) === "none");
-        return Response.json({ ok: false, error: "crm_conflict", ...(hidden ? {} : { current: { deal: current.deal, version: dealVersion(current.raw) } }) }, { status: 409 });
-      };
-      if (exact && (typeof body.version !== "string" || body.version !== dealVersion(exact.raw!))) return conflict(exact);
       const merged = { ...existing, ...raw };
       const follow = readFollowUp(merged);
       if (!follow.ok) return refuse(follow.error);

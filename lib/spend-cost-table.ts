@@ -202,6 +202,11 @@ export function protocolInfrastructureMicroUsd(
           !Number.isSafeInteger(field.value) || field.value < 0) return null;
       values.push(BigInt(field.value));
     }
+    // Native structured serialization rejects Proxy exotic objects even
+    // when their reflection traps conceal fields. Only validated numeric
+    // data reaches this step, so ordinary accessors are never executed.
+    // https://html.spec.whatwg.org/multipage/structured-data.html#structuredserializeinternal
+    structuredClone(input);
   } catch { return null; }
   const [calls, memory, cpu, commands, transfer, retained, months, copies] = values;
   if (copies < BigInt(1) || (retained > BigInt(0) && months === BigInt(0))) return null;

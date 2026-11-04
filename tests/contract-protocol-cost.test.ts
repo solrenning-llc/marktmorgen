@@ -82,6 +82,18 @@ test("the original matrix and every original profile reject proxies before any p
  });
  assert.equal(contractProtocolInfrastructureCosts(computed), null);
  assert.equal(getters, 0);
+ const changedByTrap = profiles();
+ const original = changedByTrap.creator_month;
+ changedByTrap.creator_month = new Proxy(original, {
+  ownKeys() {
+   Object.defineProperty(changedByTrap, "creator_year", {
+    enumerable: true, get(){ getters++; return input.creator_year; },
+   });
+   return Object.keys(original);
+  },
+ });
+ assert.equal(contractProtocolInfrastructureCosts(changedByTrap), null);
+ assert.equal(getters, 0, "a trap must not cause another profile's getter to run");
  assert.deepEqual(contractProtocolInfrastructureCosts(Object.freeze({...input})), contractProtocolInfrastructureCosts(input));
  assert.deepEqual(contractProtocolInfrastructureCosts(Object.assign(Object.create(null), input)), contractProtocolInfrastructureCosts(input));
 });

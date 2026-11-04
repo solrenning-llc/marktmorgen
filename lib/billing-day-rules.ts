@@ -49,9 +49,13 @@
  *     there is worked out from what was actually paid, not from today's
  *     price. Older subscriptions may still be classic. The subscription
  *     says which in `billing_mode.type`; one that does not say is refused.
+ *     The same page says that with flexible mode "the billing cycle anchor
+ *     remains unchanged" in the cases it lists, so until a test clock shows
+ *     the anchor really moves on a reset to now, a flexible subscription is
+ *     refused (`FLEXIBLE_MOVE_PROVEN`, false).
  *
- * The design, so the creator never gives away a day they did not agree to
- * and the member is never charged more than one full period:
+ * The design, so the creator gives away at most the run window (two hours,
+ * below) and the member is never charged more than one full period:
  *
  *   - The member picks a day from 1 to 28, so every month has it, never the
  *     day they pay on now. The change happens on the last such day before
@@ -64,10 +68,14 @@
  *     (whenever the caller's run reaches it), and lapses after that. The
  *     anchor is reset to that real instant (`now`), with `proration_date`
  *     at `on`, `always_invoice` and `off_session` (`moveBody`). The member
- *     pays one full period from then, less a credit for the days already
- *     paid that they no longer use. If the payment fails, Stripe refuses the
- *     change (`error_if_incomplete`, as lib/membership-pause.ts does on an
- *     early return), and the payment day stays as it was.
+ *     pays one full period from then, less a credit for the paid days they
+ *     will no longer use. The credit is worked out from `on` while the new
+ *     period starts at the real instant, so the time between the two, at
+ *     most `MOVE_GRACE_SECONDS` (two hours), is neither paid nor charged:
+ *     that is all the creator gives away, never a day. If the payment
+ *     fails, Stripe refuses the change (`error_if_incomplete`, as
+ *     lib/membership-pause.ts does on an early return), and the payment day
+ *     stays as it was.
  *   - The preview made when the member asks gives two amounts, both kept
  *     with the request (`requestMeta`): what it charges today
  *     (`previewAmount`, its whole `amount_due`, tax added on top included),
@@ -97,22 +105,40 @@
  *     verifier (`RequestVerifier`), and a request whose signature is
  *     missing or wrong is read as no request at all. The subscription and
  *     customer ids in the text keep a request copied from another
- *     membership from being read.
- *   - After a 402 Stripe leaves the subscription as it was, but the
- *     proration invoice it made may stay open, and an open last invoice
- *     refuses every later request ("invoice"). So the route that runs the
- *     change must: remember `latest_invoice`'s id before the update; on a
- *     402, read the subscription again with `latest_invoice` expanded;
- *     void the invoice `openMoveInvoice` names (as lib/yearly-switch.ts
- *     voids a declined move to yearly) before clearing the request
- *     (`clearMoveBody`); and if it cannot be voided, leave it, so the
- *     "invoice" refusal keeps holding.
+ *     membership from being read; the price id kept and signed with it
+ *     (`META_PRICE`) makes a request for a price since changed "changed".
+ *     The last change made (`META_DONE`) is signed the same way, with the
+ *     subscription and customer (`doneSigText`, `META_DONE_SIG`): one
+ *     edited, or a signature without its time, is read as made just now,
+ *     so an edit can only refuse the member ("recent"), never allow more.
+ *   - The route previews, checks `mayRun` and updates under the same
+ *     subscription lock (`withLock` on `nl:tier:{subscription}:lock`, as
+ *     lib/yearly-switch.ts does), so no other change to the membership
+ *     slips between the fresh preview and the update.
+ *   - After a 402 Stripe "doesn't update the subscription", so its
+ *     `latest_invoice` stays the old paid one, but a proration invoice it
+ *     made may be left open (or draft) outside it, and could later be
+ *     collected for a change that never happened. So the route must, on a
+ *     402: list `/invoices?subscription={id}&status=open` and
+ *     `status=draft` with `created[gte]` the second it sent the update, and
+ *     add the invoice reached from the 402's `payment_intent` (through
+ *     `/invoice_payments`) when there is one; take every invoice
+ *     `invoicesToVoid` names; void each open one and delete each draft,
+ *     with retries; and if voiding still fails, mark it uncollectible
+ *     (`/invoices/{id}/mark_uncollectible`), never leaving it collectible;
+ *     only then clear the request (`clearMoveBody`). Before every request
+ *     and every run the route lists the subscription's open and draft
+ *     invoices and passes them as `MoveContext.openInvoices`; while any is
+ *     known, or the list was not read, the member is refused ("invoice").
  *   - Not verified yet, and needed before the unit that calls Stripe: on a
  *     test clock, in both classic and flexible billing modes, how far the
  *     preview made a day ahead, the fresh one at the moment and the invoice
- *     the change makes differ, that the anchor really moves in flexible
- *     mode, and whether a 402 leaves an open invoice. The ceiling keeps the
- *     member safe if they differ; it does not show by how much.
+ *     the change makes differ; that the anchor really moves in flexible
+ *     mode (until then `FLEXIBLE_MOVE_PROVEN` stays false); and "does the
+ *     402 leave an open invoice, and where?" (in `latest_invoice`, only in
+ *     the subscription's invoice list, or reached only from the 402's
+ *     payment). The ceiling keeps the member safe if the amounts differ; it
+ *     does not show by how much.
  *   - The day is the member's own, in their time zone (UTC when it is not
  *     known), worked out for that very date. Stripe repeats the anchor's UTC
  *     day and time every month (a day past a month's end going to its last
@@ -130,8 +156,9 @@
  *     declined or lapsed does not count.
  *
  * Offered only on a membership running normally: monthly or yearly, until
- * canceled, active and paid up, its billing mode known, its last invoice
- * paid, not in a trial, not paused or set to pause, not set to end, one item
+ * canceled, active and paid up, its billing mode known (and classic
+ * until flexible is proven), a licensed price (never metered), its last
+ * invoice paid and no other invoice of it open or in draft, not in a trial, not paused or set to pause, not set to end, one item
  * of one, no discount on the subscription, its item or the customer (a
  * coupon for a few months would land differently on the moved payment), not
  * a payment plan, no affiliate share for a set number of months still
@@ -165,6 +192,16 @@ export const MOVE_GRACE_SECONDS = 2 * 60 * 60;
 /** The local hour the new payment falls on where it fits: noon. */
 export const MOVE_LOCAL_HOUR = 12;
 
+/**
+ * Whether a test clock has shown that, in flexible billing mode, resetting
+ * the anchor to now with these bodies really moves the payment day (Stripe's
+ * billing-mode page says the anchor "remains unchanged" in the cases it
+ * lists). Not a product flag: a rule toggle the unit that calls Stripe
+ * flips only with that recorded proof. While false, a flexible
+ * subscription is refused ("state").
+ */
+export const FLEXIBLE_MOVE_PROVEN = false;
+
 /** Room kept from the edges of the day, for a daylight-saving change in a later month. */
 const EDGE_MS = 60 * 60 * 1000;
 
@@ -174,10 +211,11 @@ const EDGE_MS = 60 * 60 * 1000;
  * (seconds), the amount Stripe's preview showed (`amount_due`, in the
  * smallest unit of the currency, never below zero), the ceiling (the full
  * new period with its tax, same unit), the period it was priced on (its end
- * in seconds, and its months), and the server's signature over all of it
- * (`META_SIG`, hex). The request is removed once the change ran, was
- * declined or lapsed. `META_DONE` is when the last change was made
- * (seconds), written only by the change that succeeded.
+ * in seconds, its months and its price id), and the server's signature over
+ * all of it (`META_SIG`, hex). The request is removed once the change ran,
+ * was declined or lapsed. `META_DONE` is when the last change was made
+ * (seconds), written only by the change that succeeded, with its own
+ * signature (`META_DONE_SIG`).
  */
 export const META_AT = "billing_day_at";
 export const META_ON = "billing_day_on";
@@ -185,11 +223,13 @@ export const META_SHOWN = "billing_day_shown";
 export const META_CEILING = "billing_day_ceiling";
 export const META_END = "billing_day_end";
 export const META_MONTHS = "billing_day_months";
+export const META_PRICE = "billing_day_price";
 export const META_SIG = "billing_day_sig";
 export const META_DONE = "billing_day_done";
+export const META_DONE_SIG = "billing_day_done_sig";
 
 /** What a request writes and the end of a request clears. */
-const REQUEST_KEYS = [META_AT, META_ON, META_SHOWN, META_CEILING, META_END, META_MONTHS, META_SIG] as const;
+const REQUEST_KEYS = [META_AT, META_ON, META_SHOWN, META_CEILING, META_END, META_MONTHS, META_PRICE, META_SIG] as const;
 
 /**
  * What the caller expands when it reads the subscription for these rules, so
@@ -224,18 +264,30 @@ export type BillingDaySub = {
       discounts?: unknown;
       current_period_start?: unknown;
       current_period_end?: unknown;
-      price?: { recurring?: { interval?: unknown; interval_count?: unknown } | null } | null;
+      price?: {
+        id?: unknown;
+        unit_amount?: unknown;
+        recurring?: { interval?: unknown; interval_count?: unknown; usage_type?: unknown } | null;
+      } | null;
     }[];
   } | null;
 };
 
 /**
- * Whether the request kept on this subscription carries the server's own
- * signature over `requestSigText(sub, sub.metadata)`. On the server:
- * HMAC-SHA256 under `deriveKey("billing-day-request")`, compared with
- * `timingSafeEqual`; false when the text is null or the key is missing.
+ * Whether `sig` is the server's own signature of `text` (a
+ * `requestSigText` or a `doneSigText`). On the server: HMAC-SHA256 under
+ * `deriveKey("billing-day-request")`, compared with `timingSafeEqual`;
+ * false when the key is missing or the signature is not 64 hex digits.
  */
-export type RequestVerifier = (sub: BillingDaySub) => boolean;
+export type RequestVerifier = (text: string, sig: string) => boolean;
+
+/**
+ * What the route read beside the subscription, for the checks that need it:
+ * the verifier, and the subscription's invoices found open or in draft
+ * (`/invoices?subscription={id}&status=open`, and `status=draft`), or null
+ * when they were not read. Any such invoice, or a list not read, refuses.
+ */
+export type MoveContext = { verify: RequestVerifier; openInvoices: readonly unknown[] | null };
 
 /** The server's signer: HMAC-SHA256 of the text, as hex, or null when it cannot sign. */
 export type RequestSigner = (text: string) => string | null;
@@ -310,26 +362,71 @@ export function periodMonths(sub: BillingDaySub): 0 | 1 | 12 {
   return recurring.interval === "month" ? 1 : recurring.interval === "year" ? 12 : 0;
 }
 
+/** The price id of the membership's one item, or null when not read. */
+const priceIdOf = (sub: BillingDaySub): string | null => stripeId(sub.items?.data?.[0]?.price?.id);
+
+/**
+ * What one full period of the membership's one item costs before tax: its
+ * price's `unit_amount` times its quantity (one), or null when not read.
+ */
+export function periodPrice(sub: BillingDaySub): number | null {
+  const item = sub.items?.data?.[0];
+  const unit = item?.price?.unit_amount;
+  if ((item?.quantity ?? 1) !== 1 || typeof unit !== "number" || !Number.isInteger(unit) || unit < 0) return null;
+  return unit;
+}
+
+const DIGITS = /^\d{1,12}$/;
+
 /**
  * The exact text the server signs for a request, or null when any part is
  * not as these rules write it (so nothing is signed or read):
- * `billing-day:v1|{sub.id}|{customer}|{at}|{on}|{shown}|{ceiling}|{end}|{months}`.
+ * `billing-day:v1|{sub.id}|{customer}|{at}|{on}|{shown}|{ceiling}|{end}|{months}|{price}`.
  */
 export function requestSigText(sub: BillingDaySub, meta: Record<string, string>): string | null {
   const id = stripeId(sub.id);
   const customer = customerIdOf(sub);
-  if (!id || !customer) return null;
+  const price = stripeId(meta[META_PRICE]);
+  if (!id || !customer || !price) return null;
   const parts = [meta[META_AT], meta[META_ON], meta[META_SHOWN], meta[META_CEILING], meta[META_END], meta[META_MONTHS]];
-  if (!parts.every((part) => typeof part === "string" && /^\d{1,12}$/.test(part))) return null;
-  return ["billing-day:v1", id, customer, ...parts].join("|");
+  if (!parts.every((part) => typeof part === "string" && DIGITS.test(part))) return null;
+  return ["billing-day:v1", id, customer, ...parts, price].join("|");
 }
+
+/**
+ * The exact text the server signs for the last change made, or null when
+ * any part is not as these rules write it:
+ * `billing-day-done:v1|{sub.id}|{customer}|{done}`.
+ */
+export function doneSigText(sub: BillingDaySub, done: string): string | null {
+  const id = stripeId(sub.id);
+  const customer = customerIdOf(sub);
+  if (!id || !customer || !DIGITS.test(done)) return null;
+  return ["billing-day-done:v1", id, customer, done].join("|");
+}
+
+const checks = (verify: RequestVerifier, text: string | null, sig: unknown) =>
+  text !== null && typeof sig === "string" && /^[0-9a-f]{64}$/.test(sig) && verify(text, sig);
 
 /** The request kept on this subscription, only when the server's signature over it holds. */
 function signedMeta(sub: BillingDaySub, verify: RequestVerifier): Record<string, string> | null {
   const meta = sub.metadata;
-  if (!meta || typeof meta[META_SIG] !== "string" || !meta[META_SIG]) return null;
-  if (requestSigText(sub, meta) === null) return null;
-  return verify(sub) ? meta : null;
+  if (!meta) return null;
+  return checks(verify, requestSigText(sub, meta), meta[META_SIG]) ? meta : null;
+}
+
+/**
+ * When the last change was made, in seconds: 0 when none was ever recorded
+ * (neither the time nor its signature is there). A time or signature that
+ * was edited, or one without the other, is read as a change made just now,
+ * so an edit can only refuse the member, never let them change sooner.
+ */
+export function lastDone(sub: BillingDaySub, nowSeconds: number, verify: RequestVerifier): number {
+  const meta = sub.metadata ?? {};
+  const raw = meta[META_DONE];
+  const sig = meta[META_DONE_SIG];
+  if (!raw && !sig) return 0;
+  return typeof raw === "string" && checks(verify, doneSigText(sub, raw), sig) && seconds(raw) ? seconds(raw) : nowSeconds;
 }
 
 /** When a signed change this membership is waiting for runs, in seconds; null when none waits. */
@@ -347,20 +444,25 @@ export function moveDue(sub: BillingDaySub, nowSeconds: number, verify: RequestV
 
 /**
  * Whether the billing mode is read and the period is known where that mode
- * keeps it: on the item in flexible mode; on the item or, failing that, the
- * subscription in classic mode.
+ * keeps it: on the item or, failing that, the subscription in classic mode;
+ * on the item in flexible mode, which is accepted only once
+ * `flexibleProven` (`FLEXIBLE_MOVE_PROVEN`) is true.
  */
-function periodKnown(sub: BillingDaySub): boolean {
+export function periodKnown(sub: BillingDaySub, flexibleProven: boolean = FLEXIBLE_MOVE_PROVEN): boolean {
   const mode = record(sub.billing_mode)?.type;
   const item = sub.items?.data?.[0];
-  if (mode === "flexible") return typeof item?.current_period_end === "number" && typeof item?.current_period_start === "number" && endOf(sub) > 0;
+  if (mode === "flexible") return flexibleProven && typeof item?.current_period_end === "number" && typeof item?.current_period_start === "number" && endOf(sub) > 0;
   if (mode === "classic") return endOf(sub) > 0;
   return false;
 }
 
+/** Whether the route read the subscription's open and draft invoices and found none. */
+const noOpenInvoices = (openInvoices: readonly unknown[] | null) => Array.isArray(openInvoices) && openInvoices.length === 0;
+
 /** The checks that hold both when a member asks and when the change runs. */
-function cannotHold(sub: BillingDaySub, nowSeconds: number): MoveRefusal | null {
+function cannotHold(sub: BillingDaySub, nowSeconds: number, context: MoveContext): MoveRefusal | null {
   if (!periodMonths(sub)) return "interval";
+  if (sub.items?.data?.[0]?.price?.recurring?.usage_type !== "licensed") return "interval";
   const status = String(sub.status ?? "");
   if (status === "trialing") return "trial";
   if (status === "past_due" || status === "unpaid") return "behind";
@@ -372,12 +474,13 @@ function cannotHold(sub: BillingDaySub, nowSeconds: number): MoveRefusal | null 
   if (meta.kind === "plan") return "plan";
   const items = sub.items?.data ?? [];
   if (items.length !== 1 || (items[0].quantity ?? 1) !== 1) return "items";
+  if (periodPrice(sub) === null || !priceIdOf(sub)) return "items";
   const customer = record(sub.customer);
   if (customer?.deleted === true) return "state";
   if (discounted(sub) || nonEmpty(items[0].discounts) || nonEmpty(customer?.discount)) return "discount";
   if (affiliateMonthsLeft(meta, nowSeconds)) return "affiliate";
   if (sub.schedule || sub.pending_update || (sub.collection_method !== undefined && sub.collection_method !== "charge_automatically")) return "managed";
-  if (record(sub.latest_invoice)?.status !== "paid") return "invoice";
+  if (record(sub.latest_invoice)?.status !== "paid" || !noOpenInvoices(context.openInvoices)) return "invoice";
   if (!customer || customer.balance !== 0) return "balance";
   if (!chargesCard(sub, customer)) return "card";
   if (!periodKnown(sub)) return "state";
@@ -385,11 +488,11 @@ function cannotHold(sub: BillingDaySub, nowSeconds: number): MoveRefusal | null 
 }
 
 /** Why the member cannot ask to move this membership's day now, or null when they can. */
-export function cannotMove(sub: BillingDaySub, nowSeconds: number, verify: RequestVerifier): MoveRefusal | null {
-  const held = cannotHold(sub, nowSeconds);
+export function cannotMove(sub: BillingDaySub, nowSeconds: number, context: MoveContext): MoveRefusal | null {
+  const held = cannotHold(sub, nowSeconds, context);
   if (held) return held;
-  if (pendingMove(sub, nowSeconds, verify) !== null) return "pending";
-  const done = seconds(sub.metadata?.[META_DONE]);
+  if (pendingMove(sub, nowSeconds, context.verify) !== null) return "pending";
+  const done = lastDone(sub, nowSeconds, context.verify);
   if (done && nowSeconds < addMonths(done, periodMonths(sub))) return "recent";
   return null;
 }
@@ -397,20 +500,20 @@ export function cannotMove(sub: BillingDaySub, nowSeconds: number, verify: Reque
 /**
  * Why the change waiting on this membership must not run now, or null when it
  * may. The membership must still be running normally, its signed request
- * due, inside the period it was priced on (the same end and the same months
+ * due, inside the period it was priced on (the same end, months and price
  * as kept with the request, its moment not before that period started), and
  * still before the payment it brings forward, as Stripe's `proration_date`
  * needs. The fresh preview is checked after this, in `mayRun`.
  */
-export function cannotRun(sub: BillingDaySub, nowSeconds: number, verify: RequestVerifier): MoveRefusal | "due" | null {
-  const held = cannotHold(sub, nowSeconds);
+export function cannotRun(sub: BillingDaySub, nowSeconds: number, context: MoveContext): MoveRefusal | "due" | null {
+  const held = cannotHold(sub, nowSeconds, context);
   if (held) return held;
-  const on = pendingMove(sub, nowSeconds, verify);
+  const on = pendingMove(sub, nowSeconds, context.verify);
   if (on === null || nowSeconds < on) return "due";
   const end = endOf(sub);
   const meta = sub.metadata ?? {};
   const start = startOf(sub);
-  if (seconds(meta[META_END]) !== end || meta[META_MONTHS] !== String(periodMonths(sub)) || !start || on < start) return "changed";
+  if (seconds(meta[META_END]) !== end || meta[META_MONTHS] !== String(periodMonths(sub)) || meta[META_PRICE] !== priceIdOf(sub) || !start || on < start) return "changed";
   if (on >= end) return "due";
   return null;
 }
@@ -511,8 +614,8 @@ export function moveOn(sub: BillingDaySub, day: number, timeZone: string, nowSec
 }
 
 /** The days the member may choose now, each with when the change would happen. */
-export function daysOffered(sub: BillingDaySub, timeZone: string, nowSeconds: number, verify: RequestVerifier): { day: number; on: number }[] {
-  if (cannotMove(sub, nowSeconds, verify)) return [];
+export function daysOffered(sub: BillingDaySub, timeZone: string, nowSeconds: number, context: MoveContext): { day: number; on: number }[] {
+  if (cannotMove(sub, nowSeconds, context)) return [];
   const out: { day: number; on: number }[] = [];
   for (let day = FIRST_DAY; day <= LAST_DAY; day += 1) {
     const on = moveOn(sub, day, timeZone, nowSeconds);
@@ -545,15 +648,17 @@ const wholeAmount = (value: number) => Number.isInteger(value) && value >= 0 && 
 
 /**
  * The metadata the request writes: when asked, when it runs, the amount
- * shown, the ceiling, the period it was priced on, and the server's
- * signature (`sign(requestSigText(...))`). Null when an amount is not a
- * whole number from zero up, the amount shown is above the ceiling, the
- * period or the ids are not known, or the signer cannot sign.
+ * shown, the ceiling, the period it was priced on (end, months, price id),
+ * and the server's signature (`sign(requestSigText(...))`). Null when an
+ * amount is not a whole number from zero up, the amount shown is above the
+ * ceiling, the period, the price or the ids are not known, or the signer
+ * cannot sign.
  */
 export function requestMeta(sub: BillingDaySub, on: number, shown: number, ceiling: number, nowSeconds: number, sign: RequestSigner): Record<string, string> | null {
   const end = endOf(sub);
   const months = periodMonths(sub);
-  if (!wholeAmount(shown) || !wholeAmount(ceiling) || shown > ceiling || !end || !months) return null;
+  const price = priceIdOf(sub);
+  if (!wholeAmount(shown) || !wholeAmount(ceiling) || shown > ceiling || !end || !months || !price) return null;
   const meta: Record<string, string> = {
     [META_AT]: String(nowSeconds),
     [META_ON]: String(on),
@@ -561,6 +666,7 @@ export function requestMeta(sub: BillingDaySub, on: number, shown: number, ceili
     [META_CEILING]: String(ceiling),
     [META_END]: String(end),
     [META_MONTHS]: String(months),
+    [META_PRICE]: price,
   };
   const text = requestSigText(sub, meta);
   const sig = text === null ? null : sign(text);
@@ -605,37 +711,36 @@ export type MovePreview = {
 };
 
 /**
- * The ceiling: the full new period with its tax, the sum of the preview's
- * lines that are not prorations (each line's amount, less its discounts,
- * plus the tax added on top of it; a tax included in the price is already in
- * the amount). Null when it cannot be read exactly: no such line, a line
- * whose proration flag is not a yes or no, an amount that is not whole, a
- * tax whose behavior is neither, or the older `tax_amounts` form.
+ * The ceiling: the full new period with its tax. The preview must hold
+ * exactly one line that is not a proration (the new period), its amount the
+ * membership's own `periodPrice` (so nothing metered or added rides along),
+ * with no discount on it; the ceiling is that amount plus the tax added on
+ * top of it (a tax included in the price is already in the amount). Null
+ * when it cannot be read exactly: no such line or more than one, a line
+ * whose proration flag is not a yes or no, an amount that is not the
+ * price, a discount, a tax whose behavior is neither, or the older
+ * `tax_amounts` form.
  */
-export function previewCeiling(invoice: MovePreview): number | null {
+export function previewCeiling(invoice: MovePreview, sub: BillingDaySub): number | null {
   const lines = invoice.lines?.data;
-  if (!Array.isArray(lines)) return null;
-  let sum = 0;
-  let periods = 0;
+  const price = periodPrice(sub);
+  if (!Array.isArray(lines) || price === null) return null;
+  let ceiling: number | null = null;
   for (const line of lines) {
     const proration = record(line.parent?.subscription_item_details)?.proration;
     if (typeof proration !== "boolean") return null;
     if (proration) continue;
-    if (nonEmpty(line.tax_amounts)) return null;
-    if (typeof line.amount !== "number" || !Number.isInteger(line.amount)) return null;
-    sum += line.amount;
-    for (const d of line.discount_amounts ?? []) {
-      if (typeof d?.amount !== "number" || !Number.isInteger(d.amount)) return null;
-      sum -= d.amount;
-    }
+    if (ceiling !== null || line.amount !== price || nonEmpty(line.tax_amounts)) return null;
+    if ((line.discount_amounts ?? []).some((d) => d?.amount !== 0)) return null;
+    let sum = price;
     for (const t of line.taxes ?? []) {
       if (typeof t?.amount !== "number" || !Number.isInteger(t.amount)) return null;
       if (t.tax_behavior === "exclusive") sum += t.amount;
       else if (t.tax_behavior !== "inclusive") return null;
     }
-    periods += 1;
+    ceiling = sum;
   }
-  return periods > 0 && wholeAmount(sum) ? sum : null;
+  return ceiling !== null && wholeAmount(ceiling) ? ceiling : null;
 }
 
 /**
@@ -647,7 +752,7 @@ export function previewCeiling(invoice: MovePreview): number | null {
  * `amount_due` must be a whole number from zero up, and its ceiling
  * (`previewCeiling`) readable and not below it ("amount").
  */
-export function previewRefusal(invoice: MovePreview): PreviewRefusal | null {
+export function previewRefusal(invoice: MovePreview, sub: BillingDaySub): PreviewRefusal | null {
   const lines = invoice.lines?.data;
   if (!Array.isArray(lines) || lines.length === 0 || invoice.lines?.has_more === true) return "extra";
   for (const line of lines) {
@@ -657,14 +762,14 @@ export function previewRefusal(invoice: MovePreview): PreviewRefusal | null {
   if (invoice.starting_balance !== 0) return "balance";
   const due = invoice.amount_due;
   if (typeof due !== "number" || !Number.isInteger(due) || due < 0) return "amount";
-  const ceiling = previewCeiling(invoice);
+  const ceiling = previewCeiling(invoice, sub);
   if (ceiling === null || !withinCeiling(ceiling, due)) return "amount";
   return null;
 }
 
 /** The amount to show: the preview's whole `amount_due`, or null when the preview is refused. */
-export function previewAmount(invoice: MovePreview): number | null {
-  return previewRefusal(invoice) ? null : (invoice.amount_due as number);
+export function previewAmount(invoice: MovePreview, sub: BillingDaySub): number | null {
+  return previewRefusal(invoice, sub) ? null : (invoice.amount_due as number);
 }
 
 /**
@@ -675,7 +780,7 @@ export function previewAmount(invoice: MovePreview): number | null {
  * in flexible mode the credit is worked out from what was actually paid.
  */
 export function runPreviewRefusal(sub: BillingDaySub, fresh: MovePreview, verify: RequestVerifier): PreviewRefusal | "above" | null {
-  const refused = previewRefusal(fresh);
+  const refused = previewRefusal(fresh, sub);
   if (refused) return refused;
   const ceiling = ceilingOf(sub, verify);
   return ceiling !== null && withinCeiling(ceiling, fresh.amount_due as number) ? null : "above";
@@ -684,24 +789,49 @@ export function runPreviewRefusal(sub: BillingDaySub, fresh: MovePreview, verify
 /**
  * The only door to `moveBody`: why the change waiting on this membership
  * must not be made now, or null when it may. Both `cannotRun` (the
- * membership, the moment, the period) and `runPreviewRefusal` (the fresh
- * preview, against the ceiling) must pass, with the same verifier. The
- * caller makes the fresh preview with `previewMoveBody` just before.
+ * membership, its invoices, the moment, the period) and
+ * `runPreviewRefusal` (the fresh preview, against the ceiling) must pass,
+ * with the same context. The caller makes the fresh preview with
+ * `previewMoveBody` just before, under the same subscription lock as the
+ * update.
  */
-export function mayRun(sub: BillingDaySub, fresh: MovePreview, nowSeconds: number, verify: RequestVerifier): MoveRefusal | PreviewRefusal | "due" | "above" | null {
-  return cannotRun(sub, nowSeconds, verify) ?? runPreviewRefusal(sub, fresh, verify);
+export function mayRun(sub: BillingDaySub, fresh: MovePreview, nowSeconds: number, context: MoveContext): MoveRefusal | PreviewRefusal | "due" | "above" | null {
+  return cannotRun(sub, nowSeconds, context) ?? runPreviewRefusal(sub, fresh, context.verify);
 }
 
+/** What the route found after a 402: from the invoice list, and from the 402's own payment. */
+export type FoundInvoice = { id?: unknown; status?: unknown; created?: unknown; subscription?: unknown; parent?: unknown };
+
+/** Which invoices to clear after a declined change, and how. */
+export type InvoicesToClear = { void: string[]; remove: string[] };
+
 /**
- * The invoice to void after the change was declined (402), or null: the last
- * invoice read after the decline, when it is open and is not the one that
- * was last before the update. Stripe changed nothing else, but an open
- * invoice left there would refuse every later request ("invoice").
+ * Every invoice to clear after the change was declined (402): those found
+ * (in `/invoices?subscription=...&status=open` and `status=draft` from the
+ * second the update was sent, and the one reached from the 402's
+ * `payment_intent`) that belong to this subscription and were made from
+ * `sentAt` on (a minute's leeway for clocks). Open ones are voided (if a
+ * void keeps failing, marked uncollectible, never left collectible), drafts
+ * deleted. An invoice whose subscription or time cannot be read is
+ * included: clearing one more is safer than leaving one collectible.
  */
-export function openMoveInvoice(before: { id?: unknown } | null, after: { id?: unknown; status?: unknown } | null): string | null {
-  const id = stripeId(after?.id);
-  if (!id || after?.status !== "open") return null;
-  return id === stripeId(before?.id) ? null : id;
+export function invoicesToVoid(found: readonly FoundInvoice[], subscription: string, sentAt: number): InvoicesToClear {
+  const out: InvoicesToClear = { void: [], remove: [] };
+  const seen = new Set<string>();
+  for (const invoice of found) {
+    const id = stripeId(invoice?.id);
+    if (!id || seen.has(id)) continue;
+    const details = record(record(invoice.parent)?.subscription_details);
+    const of = details ? details.subscription : invoice.subscription;
+    const ofId = typeof of === "string" ? of : record(of)?.id;
+    if (ofId !== undefined && ofId !== null && ofId !== subscription) continue;
+    if (typeof invoice.created === "number" && invoice.created < sentAt - 60) continue;
+    if (invoice.status === "open") out.void.push(id);
+    else if (invoice.status === "draft") out.remove.push(id);
+    else continue;
+    seen.add(id);
+  }
+  return out;
 }
 
 /**
@@ -725,10 +855,14 @@ export function previewMoveBody(customer: string, subscription: string, itemId: 
  * The change itself, made only after `mayRun` passed: charged at once with
  * prorations at the previewed second, the anchor at the real instant, with
  * nobody present, and made only if it is paid. The request is cleared and
- * the change marked done in the same update, so both are written only when
- * Stripe makes it.
+ * the change marked done, with its signature (`doneSigText`), in the same
+ * update, so both are written only when Stripe makes it. Null when the
+ * signer cannot sign.
  */
-export function moveBody(on: number): URLSearchParams {
+export function moveBody(sub: BillingDaySub, on: number, sign: RequestSigner): URLSearchParams | null {
+  const text = doneSigText(sub, String(on));
+  const sig = text === null ? null : sign(text);
+  if (typeof sig !== "string" || !/^[0-9a-f]{64}$/.test(sig)) return null;
   const body = new URLSearchParams({
     "billing_cycle_anchor[type]": "now",
     proration_behavior: "always_invoice",
@@ -738,13 +872,14 @@ export function moveBody(on: number): URLSearchParams {
   });
   for (const key of REQUEST_KEYS) body.set(`metadata[${key}]`, "");
   body.set(`metadata[${META_DONE}]`, String(on));
+  body.set(`metadata[${META_DONE_SIG}]`, sig);
   body.append("expand[]", "latest_invoice");
   return body;
 }
 
 /**
  * The update that clears a request after its change was declined (402, once
- * an open invoice it left was voided: `openMoveInvoice`), was refused at run
+ * every invoice it left was cleared: `invoicesToVoid`), was refused at run
  * time or lapsed. Metadata only: the payment day and every past change stay
  * as they were, so the member may ask again at once.
  */
@@ -790,7 +925,7 @@ export function moveWords(input: { from: number; on: number; months: 1 | 12; amo
   const month = new Intl.DateTimeFormat("en-US", { timeZone: zone, month: "long" }).format(new Date(input.on * 1000));
   return [
     `Your next payment moves from ${from}, to ${on}.`,
-    `On ${on}, you pay one full ${span}, less the days you already paid for.`,
+    `On ${on}, you pay one full ${span}, less the paid days you will no longer use.`,
     `Today, Stripe works that out as ${input.amount}.`,
     `It is never more than one full ${span}, ${input.ceiling}. If it would be, nothing changes.`,
     input.months === 1

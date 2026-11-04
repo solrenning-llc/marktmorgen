@@ -43,7 +43,6 @@ export type RowHeld = readonly number[];
 const heldIn = (held: RowHeld, column: number) => Math.max(0, held[column] ?? 0);
 const heldAll = (held: RowHeld) => held.reduce((n, count) => n + Math.max(0, count), 0);
 
-/** The places held with one fewer in `column`: what a picture that has arrived takes its own place from. */
 /**
  * The held places after one picture field's count in a column changed by `by`
  * (its new count less the one it said before). Added to what is held, never
@@ -54,6 +53,7 @@ export function shiftHeld(held: RowHeld, column: number, by: number): number[] {
   return held.map((count, i) => (i === column ? Math.max(0, count + by) : count));
 }
 
+/** The places held with one fewer in `column`: what a picture that has arrived takes its own place from. */
 export function releaseHeld(held: RowHeld, column: number): number[] {
   return held.map((count, i) => (i === column ? Math.max(0, count - 1) : count));
 }

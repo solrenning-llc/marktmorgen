@@ -8,7 +8,7 @@ import { PageAnswers } from "@/components/page-answers";
 import type { WhyNot } from "@/lib/why-not-rules";
 import type { VideoReach } from "@/lib/page-depth";
 
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SavedSections } from "@/components/saved-sections";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
@@ -506,7 +506,8 @@ export function PageEditor({
   const [heldShown, setHeldShown] = useState<ReadonlyMap<string, number[]>>(() => new Map());
   // Both versions as last drawn, for a picture that arrives: is its row still on the page?
   const pagesNow = useRef({ drafts, other });
-  useEffect(() => {
+  // Before anything else can run after a change is drawn: a picture that arrives always sees the page as drawn.
+  useLayoutEffect(() => {
     pagesNow.current = { drafts, other };
   }, [drafts, other]);
   const heldElsewhere = (row: string) =>
@@ -1772,8 +1773,9 @@ export function PageEditor({
               setOther((all) => (all ? change(all) : all));
               return true;
             }}
-            // Said here when the row's own editor is no longer drawn (closed, or its version switched away).
-            sayAside={setSaid}
+            // Said here when the row's own editor is no longer drawn (closed, or its version switched away): in a
+            // notice everyone sees, not only in the status line a screen reader reads.
+            sayAside={(text) => toast(text)}
             held={rowHeld}
             onHeld={() => setHeldShown(new Map(rowHeld.current))}
             sendingNow={heldShown.get(block.id) ?? NONE_HELD}
@@ -2782,8 +2784,8 @@ function RowEditor({
   // Places held in each column for a picture still being sent there (lib/row-edit-rules.ts, RowHeld): drawn from
   // `sending`, read from `held` by a picture that arrives after other changes. Nothing else can take such a place,
   // so the file sent always gets its part; there is no way here to delete a file sent and not used.
-  // Read from the page editor on every drawing, never copied into this editor's own state: a send that began before
-  // the row was closed and reopened ends in the editor drawn now (inbox C4-31).
+  // Drawn from the page editor's copy of the held places (sendingNow), read from `held` when acting: a send that began
+  // before the row was closed and reopened ends in the editor drawn now (inbox C4-31).
   const heldNow = () => heldByRow.current.get(block.id) ?? [0, 0, 0];
   const sending = sendingNow;
   // What this drawing's own picture fields said they are sending: the change is added to what is held, so a send
@@ -3202,7 +3204,7 @@ function RowEditor({
         <p id={reasonId} className={`text-xs ${uploadNote[column] || why || (kind === "image" && reason) ? "font-semibold text-danger" : "text-ink-soft"}`}>
           {uploadNote[column] ||
             reason ||
-            (kind === "image" && sending[column] - mineShown[column] > 0
+            (sending[column] - mineShown[column] > 0
               ? `A picture is still being sent to column ${column + 1}. It is added when it arrives.`
               : null) ||
             (video

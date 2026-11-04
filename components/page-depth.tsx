@@ -24,6 +24,17 @@ function quartile(percent: number): string {
 }
 
 /**
+ * Which player a message came from, by its exact origin: the page's videos
+ * are framed from these (embedUrl, VIDEO_FRAME_ORIGINS in lib/sales-page.ts).
+ * Any other origin, "https://evilyoutube.example" among them, is no player.
+ */
+export function playerOfOrigin(origin: string): "youtube" | "vimeo" | null {
+  if (origin === "https://www.youtube-nocookie.com" || origin === "https://www.youtube.com") return "youtube";
+  if (origin === "https://player.vimeo.com") return "vimeo";
+  return null;
+}
+
+/**
  * How a sales page was read, for one visitor in READ_SAMPLE, chosen here at
  * random, so the measure stays inside what a visit costs (lib/page-read.ts):
  * sent once, when they leave the page or switch away from it, as one count.
@@ -110,6 +121,9 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
     // What the players say back: YouTube its time and length, Vimeo its share played.
     const onMessage = (event: MessageEvent) => {
       if (!videoBlock) return;
+      // Only a video player framed on this page is heard.
+      const player = playerOfOrigin(event.origin);
+      if (!player || ![...document.querySelectorAll<HTMLIFrameElement>(".sp-video iframe")].some((frame) => frame.contentWindow === event.source)) return;
       let data: unknown = event.data;
       if (typeof data === "string") {
         try {
@@ -120,14 +134,14 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
       }
       if (!data || typeof data !== "object") return;
       const message = data as { event?: string; info?: { currentTime?: number; duration?: number }; data?: { percent?: number } };
-      if (/youtube/.test(event.origin) && (message.event === "infoDelivery" || message.event === "initialDelivery")) {
+      if (player === "youtube" && (message.event === "infoDelivery" || message.event === "initialDelivery")) {
         // YouTube says the length once, near the start, and the time on every
         // message after: the length is kept from whichever message carried it.
         const d = Number(message.info?.duration);
         if (d > 0) youtubeLength = d;
         const t = Number(message.info?.currentTime);
         if (t > 0 && youtubeLength > 0) reached(quartile(t / youtubeLength));
-      } else if (/vimeo\.com$/.test(event.origin) && message.event === "timeupdate") {
+      } else if (player === "vimeo" && message.event === "timeupdate") {
         const p = Number(message.data?.percent);
         if (p > 0) reached(quartile(p));
       }

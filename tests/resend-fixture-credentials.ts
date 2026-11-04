@@ -21,6 +21,7 @@ const CREDENTIALS = [
   "re_test_api_write_only_a_stand_in",
   "re_test_assignments_only_a_stand_in",
   "re_test_assist_reminder_only",
+  "re_test_auto_approve_stand_in",
   "re_test_call_cancel_only",
   "re_test_call_place_only",
   "re_test_call_reminder_only",

@@ -162,6 +162,17 @@ async function apiKeyed(
   return { store, keyId: found.id, write: found.write, agent: found.agent };
 }
 
+/**
+ * `n` more of the store's API requests, for a request that weighs more than
+ * one (API_NUMBERS_UNITS), taken before its work: null when taken, or the
+ * refusal the guard itself answers with.
+ */
+export async function takeMoreApi(store: Store, n: number): Promise<Response | null> {
+  if (n <= 0) return null;
+  const taken = await takeAllowance(store, "api", n);
+  return taken.ok ? null : apiError(429, taken.reason === "used" ? "monthly_limit" : taken.reason === "pool" ? "no_place" : "unavailable", taken.message);
+}
+
 /** Most a write request's body may weigh. */
 const MAX_BODY_BYTES = 4_000;
 

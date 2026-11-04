@@ -439,7 +439,7 @@ export function StatsPanel({
   const [pickDates, setPickDates] = useState(false);
   const [notes, setNotes] = useState(notesGiven);
   const [spends, setSpends] = useState(spendsGiven);
-  const [all, setAll] = useState<{ state: "idle" | "loading" | "error" } | { state: "ok"; sales: AllTimeSales }>({ state: "idle" });
+  const [all, setAll] = useState<{ state: "idle" | "loading" } | { state: "error"; message?: string } | { state: "ok"; sales: AllTimeSales }>({ state: "idle" });
   const salesKnown = data.sales === "ok";
 
   async function loadAll() {
@@ -447,8 +447,9 @@ export function StatsPanel({
     setAll({ state: "loading" });
     try {
       const response = await fetch("/api/store/stats?range=all", { cache: "no-store" });
-      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; sales?: AllTimeSales };
-      setAll(body.ok && body.sales ? { state: "ok", sales: body.sales } : { state: "error" });
+      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; sales?: AllTimeSales };
+      // Not counted in the studio's requests: their own sentence (how many this needs, how many are left), nothing read.
+      setAll(body.ok && body.sales ? { state: "ok", sales: body.sales } : body.error === "studio_used" && typeof body.message === "string" && body.message ? { state: "error", message: body.message } : { state: "error" });
     } catch {
       setAll({ state: "error" });
     }
@@ -477,7 +478,7 @@ export function StatsPanel({
       : "Stripe did not answer"
     : range === "all" && !allSales
       ? all.state === "error"
-        ? "Stripe did not answer"
+        ? all.message ?? "Stripe did not answer"
         : "Reading Stripe…"
       : !salesHere
         ? "Incomplete reading; paid totals unavailable"

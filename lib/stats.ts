@@ -1756,7 +1756,7 @@ const datesBetween = (from: string, to: string) => {
  * the sales from the creator's own Stripe account, as the 90 days are read.
  * Beside it, the same number of days just before, where they are kept.
  */
-export async function readRange(store: Store, from: string, to: string, now = Date.now(), options: { fullDetails?: boolean } = {}): Promise<RangeData | null> {
+export async function readRange(store: Store, from: string, to: string, now = Date.now(), options: { fullDetails?: boolean; count?: SalesCount } = {}): Promise<RangeData | null> {
   if (!store.statsId || !isRedisConfigured() || rangeProblem(from, to, now)) return null;
   const statsId = store.statsId;
   const dates = datesBetween(from, to);
@@ -1820,6 +1820,8 @@ export async function readRange(store: Store, from: string, to: string, now = Da
   if (readsSales(store)) {
     const start = Date.parse(`${(before ? beforeFrom : from)}T00:00:00Z`);
     const end = Date.parse(`${to}T00:00:00Z`) + 86400_000;
+    // Counted before Stripe and the PayPal sales are read again (SalesNotCounted when not: nothing was read).
+    if (options.count && !(await options.count.read().catch(() => false))) throw new SalesNotCounted();
     try {
       const { sales, partial } = await readPaidSales(store, Math.floor(start / 1000), 20);
       // Different providers and record types have independent pagination. An old
@@ -1878,6 +1880,22 @@ export async function readRange(store: Store, from: string, to: string, now = Da
 /** The most pages of a hundred read for all-time sales. */
 export const ALL_TIME_PAGES = 30;
 const allSalesKey = (statsId: string) => `nl:stats:${statsId}:allsales`;
+
+/**
+ * How a reader of the store's paid sales counts what it reads before it
+ * reads it (lib/segments.ts, salesCount): `copy` with the size of a copy
+ * kept, before it is read; `read` before Stripe and the PayPal sales are
+ * read again. Each answers whether it was counted.
+ */
+export type SalesCount = { copy: (bytes: number) => Promise<boolean>; read: () => Promise<boolean> };
+
+/** Thrown by a reader given a SalesCount when what it would read could not be counted first: nothing was read. */
+export class SalesNotCounted extends Error {
+  constructor() {
+    super("the reading of the store's sales could not be counted");
+    this.name = "SalesNotCounted";
+  }
+}
 /** How long an all-time reading is reused, so the button can be pressed freely. */
 const ALL_SALES_SECONDS = 600;
 
@@ -1885,10 +1903,19 @@ const ALL_SALES_SECONDS = 600;
  * Every sale the store has made, as far back as ALL_TIME_PAGES pages of
  * checkouts reach, read when the creator asks for it and kept ten minutes.
  */
-export async function readAllTimeSales(store: Store): Promise<AllTimeSales | null> {
+export async function readAllTimeSales(store: Store, count?: SalesCount): Promise<AllTimeSales | null> {
   if (!readsSales(store)) return null;
   if (store.statsId && isRedisConfigured()) {
-    const [cached] = await redisPipeline([["GET", allSalesKey(store.statsId)]]);
+    // With a count, the copy is measured first and counted by its size, then read no further than that size.
+    let cached: unknown = null;
+    if (count) {
+      const [size] = await redisPipeline([["STRLEN", allSalesKey(store.statsId)]]);
+      const bytes = Number(size) || 0;
+      if (bytes > 0 && !(await count.copy(bytes).catch(() => false))) throw new SalesNotCounted();
+      [cached] = bytes > 0 ? await redisPipeline([["GETRANGE", allSalesKey(store.statsId), 0, bytes - 1]]) : [null];
+    } else {
+      [cached] = await redisPipeline([["GET", allSalesKey(store.statsId)]]);
+    }
     if (typeof cached === "string" && cached) {
       try {
         const kept = JSON.parse(cached) as AllTimeSales;
@@ -1899,6 +1926,7 @@ export async function readAllTimeSales(store: Store): Promise<AllTimeSales | nul
       }
     }
   }
+  if (count && !(await count.read().catch(() => false))) throw new SalesNotCounted();
   const { sales, partial } = await readPaidSales(store, 0, ALL_TIME_PAGES);
   const out: AllTimeSales = { totals: { sales: 0, cents: 0 }, byProduct: {}, since: "", partial, currency: store.currency, elsewhere: 0 };
   for (const sale of sales) {

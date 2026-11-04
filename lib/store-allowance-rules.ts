@@ -110,6 +110,14 @@ export function askedCeiling(limit: number): number {
 /** A contact added or a product given through the API is this many of the window's API requests, the request included (lib/api-write.ts). */
 export const API_WRITE_UNITS = 5;
 
+/**
+ * Reading the store's numbers through the API or MCP is this many of the
+ * window's API requests, the request included: their sales are read again
+ * from Stripe and the PayPal sales kept, as a studio page that shows them
+ * does (STUDIO_PAGE_UNITS studio requests; tests/plan-cost-registry.test.ts).
+ */
+export const API_NUMBERS_UNITS = 5;
+
 /** How each kind is named in a sentence: "studio requests", "API requests". */
 export const KIND_WORDS: Record<AllowanceKind, { many: string; what: string }> = {
   studio: { many: "studio requests", what: "Your studio's requests" },

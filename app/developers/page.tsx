@@ -5,7 +5,7 @@ import { API_PAGE } from "@/lib/api-read";
 import { API_RATE } from "@/lib/api-guard";
 import { MAX_KEYS } from "@/lib/api-key-rules";
 import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
-import { API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { API_NUMBERS_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { PLAN_TITLES } from "@/lib/plan";
 
 export const metadata: Metadata = {
@@ -93,7 +93,7 @@ export default function DevelopersPage() {
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
         <p>
-          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Past it, the answer is 429 `}
+          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Reading your numbers counts as ${API_NUMBERS_UNITS}, because your sales are read again from Stripe each time: GET /api/v1/stats, and the MCP tools get_numbers, get_revenue_by_channel, get_funnel, get_product_numbers, get_buyers, get_worth_knowing and get_emails. Past it, the answer is 429 `}
           <code className="font-mono">monthly_limit</code>
           {", and its message says when the figure opens again, if it does. A trial or a store without a paid plan also needs one of the month's places for such stores; without one, the answer is 429 "}
           <code className="font-mono">no_place</code>

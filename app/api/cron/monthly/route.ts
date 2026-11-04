@@ -1,4 +1,6 @@
 import type { NextRequest } from "next/server";
+import { countUnits } from "@/lib/person-agenda-read";
+import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest) {
   if (got === null) return Response.json({ ok: true, busy: true });
 
   const started = Date.now();
-  const out = { looked: 0, sent: 0, posted: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
+  const out = { looked: 0, sent: 0, posted: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0, deferred: 0 };
   try {
     const month = lastMonthOf(Date.now());
     // The stores that had visitors in the month just ended.
@@ -58,6 +60,14 @@ export async function GET(request: NextRequest) {
         continue;
       }
       if (!(await claimMonth(store.handle, month))) continue;
+      // Its numbers are read again from Stripe, as the studio page that shows them does: counted in the store's
+      // studio requests first. Not counted, nothing is read or sent, and the month is let go for a later run.
+      const counted = await countUnits(store, STUDIO_PAGE_UNITS).catch(() => null);
+      if (!counted?.ok) {
+        await releaseMonth(store.handle, month).catch(() => undefined);
+        out.deferred += 1;
+        continue;
+      }
       out.looked += 1;
       const data = await readNumbers(store).catch(() => null);
       if (!data) {

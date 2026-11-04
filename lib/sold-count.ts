@@ -25,6 +25,9 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
 import { type Together, parseTogether } from "@/lib/also-bought";
+import { paypalKept } from "@/lib/paypal-sales";
+import { paidSalesReadUnits } from "@/lib/segments";
+import { countStudio } from "@/lib/studio-route";
 
 /** Below this, nothing is said. */
 export const SHOWN_FROM = 10;
@@ -70,7 +73,11 @@ export function stale(counts: SoldCounts | null, now = Date.now()): boolean {
 /**
  * Reads the counts again from Stripe and keeps them. One store reads at most
  * once at a time, whoever asks; meant to run after a page has been sent
- * (next/server's after), never while a visitor waits.
+ * (next/server's after), never while a visitor waits. What reading every
+ * sale again can cost is counted in the store's studio requests first, at
+ * the most (the all-time copy may answer instead): not counted, nothing is
+ * read, the counts kept stay as they are, and a later visit tries again once
+ * the lock has run out.
  */
 export async function refreshSoldCounts(
   store: Store,
@@ -81,6 +88,10 @@ export async function refreshSoldCounts(
   const [mine] = await redisPipeline([["SET", lockKey(store.statsId), "1", "NX", "EX", 300]]);
   if (mine !== "OK") return null;
   try {
+    const kept = await paypalKept(store.statsId, false).catch(() => null);
+    if (!kept) return null;
+    const counted = await countStudio(store, null, paidSalesReadUnits(store, kept.sales)).catch(() => null);
+    if (!counted?.ok) return null;
     const all = await read(store);
     if (!all) return null;
     const p: Record<string, number> = {};

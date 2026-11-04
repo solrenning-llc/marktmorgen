@@ -9,6 +9,7 @@
  * Moved here unchanged from app/api/mcp/route.ts, where the tools themselves
  * are still dispatched.
  */
+import { API_NUMBERS_UNITS } from "@/lib/store-allowance-rules";
 export type McpTool = {
   name: string;
   description: string;
@@ -19,7 +20,7 @@ export type McpTool = {
 export const MCP_SERVER = { name: "marktmorgen", version: "1.1.0" } as const;
 
 export const MCP_INSTRUCTIONS =
-  "Read a Marktmorgen store's numbers, products, memberships, emails and affiliate program, never anybody's name or address. Money fields are in the smallest unit of the store's currency. A channel named 'direct' is a visit or sale from nowhere the store could name. Tools that take `days` read the last 7, 30 or 90 days.";
+  `Read a Marktmorgen store's numbers, products, memberships, emails and affiliate program, never anybody's name or address. Money fields are in the smallest unit of the store's currency. A channel named 'direct' is a visit or sale from nowhere the store could name. Tools that take \`days\` read the last 7, 30 or 90 days. A tool that reads the store's sales (its numbers, and what each email sold) counts as ${API_NUMBERS_UNITS} of the store's API requests.`;
 
 export const MCP_PROTOCOL = "2025-06-18";
 

@@ -62,11 +62,13 @@ export function CustomRange({ today, currency }: { today: string; currency: stri
     setError(null);
     try {
       const response = await fetch(`/api/store/stats/range?${new URLSearchParams({ from: period?.from ?? (fullDetails && result ? result.range.from : from), to: period?.to ?? (fullDetails && result ? result.range.to : to), ...(fullDetails ? { details: "all" } : {}) })}`, { cache: "no-store" });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; range?: RangeData & { products: Products }; marks?: AutoMark[] };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; range?: RangeData & { products: Products }; marks?: AutoMark[] };
       if (data.ok && data.range) {
         setResult({ range: data.range, marks: data.marks ?? [], fullDetails, receivedAt: new Date().toISOString() });
         if (period && !keepDraftDates) { setFrom(data.range.from); setTo(data.range.to); }
       }
+      // Not counted in the studio's requests: their own sentence (how many this needs, how many are left), nothing read.
+      else if (data.error === "studio_used" && typeof data.message === "string" && data.message) setError(data.message);
       else setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
     } catch {
       setError(MESSAGES.server_error);

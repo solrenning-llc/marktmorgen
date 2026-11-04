@@ -1,4 +1,5 @@
-import { apiStore } from "@/lib/api-guard";
+import { apiStore, takeMoreApi } from "@/lib/api-guard";
+import { API_NUMBERS_UNITS } from "@/lib/store-allowance-rules";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { readNumbers, summaryOf } from "@/lib/stats-report";
@@ -44,6 +45,8 @@ const json = (body: unknown, status = 200) =>
   Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 const result = (id: unknown, value: unknown) => json({ jsonrpc: "2.0", id, result: value });
 const failure = (id: unknown, code: number, message: string) => json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
+/** The tools that read the store's sales again (lib/mcp-tools.ts): counted as API_NUMBERS_UNITS. */
+const SALES_TOOLS = new Set(["get_numbers", "get_revenue_by_channel", "get_funnel", "get_product_numbers", "get_buyers", "get_worth_knowing", "get_emails"]);
 const said = (value: unknown, isError = false) => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }], isError });
 
 export async function GET() {
@@ -90,6 +93,15 @@ export async function POST(request: Request) {
   if (method !== "tools/call") return failure(id, -32601, "Method not found");
 
   const params = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
+  // A tool that reads the store's sales again from Stripe (the numbers, and what each email sold) counts as
+  // API_NUMBERS_UNITS of the store's API requests, taken before it reads; refused, the figure's own sentence.
+  if (typeof params.name === "string" && SALES_TOOLS.has(params.name)) {
+    const refused = await takeMoreApi(store, API_NUMBERS_UNITS - 1);
+    if (refused) {
+      const words = (await refused.json().catch(() => null)) as { message?: unknown } | null;
+      return result(id, said({ error: typeof words?.message === "string" && words.message ? words.message : "That could not be counted just now. Try again in a moment." }, true));
+    }
+  }
   try {
     if (params.name === "get_store") return result(id, said(storeInfo(store)));
     if (params.name === "get_numbers") {

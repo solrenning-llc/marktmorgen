@@ -63,6 +63,8 @@ import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
 import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
 import { productsInStats, reachProducts, readAllTimeSales, readSales, readStats, studioStats } from "@/lib/stats";
+import { salesCount } from "@/lib/segments";
+import { countLedger } from "@/lib/person-agenda-read";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
 import { readSpends } from "@/lib/ad-spend";
@@ -1502,7 +1504,8 @@ export default async function StudioPage({
                   if (!store.stripeAccountId) return null;
                   const paths = await readPaths(store.statsId).catch(() => null);
                   if (pathsStale(paths) && (await claimPathsRead(store.statsId).catch(() => false))) {
-                    after(() => readAllTimeSales(store).then(() => undefined).catch(() => undefined));
+                    // Counted in the studio's requests before it reads; not counted, nothing is read and it is tried another time.
+                    after(() => readAllTimeSales(store, salesCount(store, countLedger(store).count)).then(() => undefined).catch(() => undefined));
                   }
                   if (!paths) return null;
                   const pairs = Object.entries(paths.next)

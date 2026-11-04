@@ -626,14 +626,14 @@ export const COST_LINES: CostLine[] = [
   },
   {
     id: "rest-api",
-    feature: "The REST API: every request with one of the store's keys, a contact added or a product given as API_WRITE_UNITS of them (17 October 2026)",
+    feature: "The REST API: every request with one of the store's keys, a contact added or a product given as API_WRITE_UNITS of them (17 October 2026), a reading of the numbers (v1 stats and the MCP tools that read sales) as API_NUMBERS_UNITS (4 November 2026)",
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "api"),
     sources: [
-      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "API_WRITE_UNITS"] },
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "API_WRITE_UNITS", "API_NUMBERS_UNITS"] },
       { file: "lib/api-guard.ts", names: ["takeAllowance", "API_RATE"] },
       { file: "lib/api-write.ts", names: ["ADDS_PER_DAY", "GIVES_PER_DAY", "monthly_limit"] },
     ],
-    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs (held below). The per-minute and daily limits only spread them.",
+    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs, and a reading of the numbers API_NUMBERS_UNITS, at least what a studio page that shows them costs (both held below). The per-minute and daily limits only spread them.",
   },
   {
     id: "inbox",

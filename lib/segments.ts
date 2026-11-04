@@ -31,7 +31,7 @@ import { WHO, type Who, readTags } from "@/lib/contacts";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, paypalKept, paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
 import { rfmGroup } from "@/lib/rfm-rules";
 import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
-import { ALL_TIME_PAGES, readInvoicePayments, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
+import { ALL_TIME_PAGES, type SalesCount, readInvoicePayments, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { MAX_SEGMENTS, MAX_SEGMENT_NAME, type Narrow, type Segment, isNarrowed, readNarrow } from "@/lib/segments-rules";
@@ -101,6 +101,35 @@ export const ledgerUnits = (bytes: number) => (bytes <= PAGE_INCLUDED_BYTES ? 0 
  */
 export function ledgerReadBytes(kept: { imported: number; paypalSales: number; paypalRefunds: number }): number {
   return kept.imported * IMPORTED_BUYER_BYTES + Math.min(kept.paypalSales, ALL_TIME_PAGES * 100) * MAX_PAID_BYTES + Math.min(kept.paypalRefunds, PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES;
+}
+
+/**
+ * Studio requests reading the store's paid sales again costs (lib/stats.ts,
+ * readPaidSales, up to ALL_TIME_PAGES pages of each list), before it is read:
+ * when Stripe is read (a Stripe account), as much as a reading of its buyers
+ * from Stripe (BUYER_LEDGER_UNITS, which reads these pages and more); and the
+ * PayPal sales kept (`paypalSales`), read whenever the store reads sales, by
+ * their weight. Nothing when it reads no sales.
+ */
+export function paidSalesReadUnits(store: Pick<Store, "stripeAccountId" | "paypalSeller">, paypalSales: number): number {
+  if (!readsSales(store)) return 0;
+  return (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales, paypalRefunds: 0 }));
+}
+
+/**
+ * A SalesCount (lib/stats.ts) over `count`: a copy kept by its size, a
+ * reading again by paidSalesReadUnits from how many PayPal sales are kept,
+ * measured before anything is read.
+ */
+export function salesCount(store: Store, count: (units: number) => Promise<boolean>): SalesCount {
+  const counted = async (units: number) => units <= 0 || (await count(units).catch(() => false));
+  return {
+    copy: (bytes) => counted(ledgerUnits(bytes)),
+    read: async () => {
+      const kept = readsSales(store) ? await paypalKept(store.statsId, false).catch(() => null) : { sales: 0, refunds: 0 };
+      return kept !== null && (await counted(paidSalesReadUnits(store, kept.sales)));
+    },
+  };
 }
 
 /**

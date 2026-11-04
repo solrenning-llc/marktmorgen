@@ -1034,6 +1034,10 @@ export async function slotsForMove(
 ): Promise<Offer | null> {
   const kept = ownLength(product.call, bookedMs);
   if (kept === "unknown") return null;
+  // The team is read as it is kept, at the call's own length, as moveBooking reads it; only its hosts' times are read at the
+  // length paid for. Read at the paid length, a host stretch shorter than it would drop the whole team, and the page would
+  // fall back to the store's hours, which the move then refuses.
+  const listed = product;
   if (kept !== null) product = { ...product, call: { ...product.call, minutes: kept } };
   try {
     const now = Date.now();
@@ -1041,7 +1045,7 @@ export async function slotsForMove(
     // A team booking moves with the host it has: only their free times are offered. The
     // team as it was saved is used, so a plan that now allows fewer never takes a buyer's move away.
     const own = busy.find((b) => b.session === session && b.hosts && b.claim);
-    const team = own ? await teamForMove(store, product) : null;
+    const team = own ? await teamForMove(store, listed) : null;
     if (team && own && own.hosts && own.claim) {
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true, except: { session, claim: own.claim } });
       return { days: teamMoveDays(product.call, ctx, own.hosts, current, now), left: {}, sessions: [] };

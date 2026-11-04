@@ -25,7 +25,7 @@
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
-import { type CallListing, confirmBooking, holdAndCheckout, moveBooking, releaseOwnHold, slotsForProduct } from "@/lib/calls";
+import { type CallListing, confirmBooking, holdAndCheckout, moveBooking, releaseOwnHold, slotsForMove, slotsForProduct } from "@/lib/calls";
 import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
 import { putMember } from "@/lib/team";
 import {
@@ -391,6 +391,26 @@ async function main(): Promise<void> {
   is("a move whose paid hour would run past the host's 17:00 is refused, though the call's 30 minutes now would fit", pastHours.ok ? "moved" : pastHours.reason, "taken");
   const fits = await moveBooking({ store: quay.store, product: shorter, session: hq.session, booked: { start: Q, end: Q + HOUR, email: "lee@example.com", buyerTz: NY }, start: Q + 5 * HOUR, origin: "https://marktmorgen.com" });
   is("one that fits the whole hour moves, and the host is held for the whole hour", [fits.ok, ((await readClaims([hostId("quay@example.com")])).get(hostId("quay@example.com")) ?? []).find((c) => c.start === Q + 5 * HOUR)?.end], [true, Q + 6 * HOUR]);
+
+  // The times offered for that move are the host's own at the paid length too: a host stretch that fits the call's 30
+  // minutes but not the paid hour never makes the page fall back to the store's hours, which the move would refuse.
+  const pier = await storeWithCalls("pier@example.com", "pier", "acct_1TestPier00001", "pro", 1);
+  const [pierCall] = pier.products;
+  const mornings: [number, number][][] = [[], [[540, 780]], [[540, 780]], [[540, 780]], [[540, 780]], [[540, 780]], []];
+  await writeTeam(pier.store, pierCall.id, { mode: "round_robin", hosts: [host("pier@example.com", { weekly: mornings })], createdAt: "2026-10-07T00:00:00.000Z" });
+  const P = weekdayAt(10, 600);
+  const hp = await hold(pier.store, pierCall, P);
+  if (!hp.ok) throw new Error("no hold on the pier call");
+  await confirmBooking({ store: pier.store, product: pierCall, session: hp.session, start: P, end: P + HOUR, buyerEmail: "kai@example.com", buyerTz: NY, origin: "https://marktmorgen.com" });
+  // Since then the call is 30 minutes, and the host added a 45-minute stretch on Saturdays.
+  await writeTeam(pier.store, pierCall.id, { mode: "round_robin", hosts: [host("pier@example.com", { weekly: [...mornings.slice(0, 6), [[540, 585]]] })], createdAt: "2026-10-07T00:00:00.000Z" });
+  const pierShorter: CallListing = { ...pierCall, call: { ...pierCall.call, minutes: 30 } };
+  const moveTimes = ((await slotsForMove(pier.store, pierShorter, hp.session, P, HOUR))?.days ?? []).flatMap((d) => d.starts);
+  is(
+    "the move page offers the host's free hours at the paid length, never the store's afternoon the move would refuse",
+    [moveTimes.includes(P + HOUR), moveTimes.includes(P + 5 * HOUR), moveTimes.every((t) => new Date(t).getUTCDay() !== 6)],
+    [true, false, true],
+  );
 
   part("When her calendar cannot be read");
   freeBusy = () => new Response(JSON.stringify({ error: { message: "backend" } }), { status: 503 });

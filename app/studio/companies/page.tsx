@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
@@ -39,13 +40,23 @@ export default async function StudioCompaniesPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store, "", "people"), label: "Back to buyers", short: "Buyers" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page max-w-3xl pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Buyers</p>
+          <nav aria-label="Breadcrumb" className="text-sm text-ink-soft">
+            <ol className="flex flex-wrap items-center gap-2">
+              <li>
+                <Link href={studioPath(store, "", "people")} className="inline-flex min-h-11 items-center underline underline-offset-4 hover:text-violet-deep">
+                  Buyers
+                </Link>
+                <span aria-hidden="true"> /</span>
+              </li>
+              <li aria-current="page">Companies</li>
+            </ol>
+          </nav>
           <h1 className="t-h2 mt-3">Companies</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">The schools, teams and businesses you sell to, with the people who work at each. For you and your team only.</p>
           {companies ? (
             <div className="mt-8">
               {people.size && !known ? <p className="notice notice-warn mb-6">Stripe could not be read just now, so who works at each company is not shown. Try again in a moment.</p> : null}
-              <CompaniesEditor initial={shown} peopleBase={studioPath(store, "", "people")} />
+              <CompaniesEditor initial={shown} peopleBase={studioPath(store, "", "people")} addressesRead={!people.size || Boolean(known)} />
             </div>
           ) : (
             <p className="notice notice-warn mt-8">Your companies could not be read just now. Nothing was changed. Try again in a moment.</p>

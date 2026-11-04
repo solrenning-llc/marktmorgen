@@ -1,10 +1,17 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/toast";
-import { type Company, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE, MAX_COMPANY_WEBSITE } from "@/lib/crm-companies-rules";
+import { COMPANY_REFUSALS, type Company, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE, MAX_COMPANY_WEBSITE } from "@/lib/crm-companies-rules";
 
 type Shown = Company & { addresses: Record<string, string> };
+type Field = "name" | "website" | "note";
+/** Where the focus goes once the screen has drawn a change, so it is never left on a button that went away (AAA audit C1). */
+type FocusTo = { to: Field | "undo" | "list"; scroll?: boolean } | { to: "change" | "company"; id: string; scroll?: boolean };
+
+/** The field each refusal is about (lib/crm-companies-rules.ts), so the message is told beside that field (AAA audit C2). */
+const FIELD_OF: Partial<Record<string, Field>> = { name: "name", taken: "name", website: "website", note: "note" };
+const DATA_FULL = "Your store has no room left for more records. Delete some you no longer need first.";
 
 /**
  * The store's companies in the studio (639 [GL7](4), unit 3): each with its
@@ -12,7 +19,7 @@ type Shown = Company & { addresses: Record<string, string> };
  * keeps its people, only no longer linked, and is undone by adding it back
  * with the same people.
  */
-export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peopleBase: string }) {
+export function CompaniesEditor({ initial, peopleBase, addressesRead = true }: { initial: Shown[]; peopleBase: string; /** False when Stripe could not be read, so nobody's address is known just now. */ addressesRead?: boolean }) {
   const peopleHref = (person: string) => `${peopleBase}${peopleBase.includes("?") ? "&" : "?"}who=${person}`;
   const [companies, setCompanies] = useState(initial);
   const [form, setForm] = useState({ name: "", website: "", note: "" });
@@ -20,12 +27,50 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
   const [gone, setGone] = useState<Shown | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [errorField, setErrorField] = useState<Field | null>(null);
   const [putBack, setPutBack] = useState("");
+  const [focusAsk, setFocusAsk] = useState(0);
+  const working = useRef(false);
+  const focusNext = useRef<FocusTo | null>(null);
   const nameField = useRef<HTMLInputElement>(null);
+  const websiteField = useRef<HTMLInputElement>(null);
+  const noteField = useRef<HTMLInputElement>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  const listTitle = useRef<HTMLHeadingElement>(null);
+  const changeButtons = useRef(new Map<string, HTMLButtonElement>());
+  const headings = useRef(new Map<string, HTMLHeadingElement>());
+  const full = !editing && companies.length >= MAX_COMPANIES;
 
-  async function send(body: Record<string, unknown>, done: string): Promise<{ companies: Company[]; added?: string; skipped?: string[] } | null> {
+  function focusAfterDrawing(next: FocusTo) {
+    focusNext.current = next;
+    setFocusAsk((n) => n + 1);
+  }
+
+  // Once the change asked for is drawn: the field, button or heading named, or the list's title when it is gone.
+  useEffect(() => {
+    const next = focusNext.current;
+    focusNext.current = null;
+    if (!next) return;
+    const fields = { name: nameField, website: websiteField, note: noteField };
+    const target =
+      next.to === "change" ? changeButtons.current.get(next.id) : next.to === "company" ? headings.current.get(next.id) : next.to === "undo" ? undoButton.current : next.to === "list" ? listTitle.current : fields[next.to].current;
+    const shown = target ?? listTitle.current;
+    shown?.focus();
+    if (next.scroll) shown?.scrollIntoView({ block: "center" });
+  }, [focusAsk]);
+
+  function refuse(text: string, field: Field | null) {
+    setError(text);
+    setErrorField(field);
+    if (field) focusAfterDrawing({ to: field });
+  }
+
+  async function send(body: Record<string, unknown>, done: string | null): Promise<{ companies: Company[]; added?: string; skipped?: string[] } | null> {
+    if (working.current) return null;
+    working.current = true;
     setBusy(true);
     setError("");
+    setErrorField(null);
     try {
       const response = await fetch("/api/store/companies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; companies?: Company[]; added?: string; skipped?: string[]; message?: string; error?: string };
@@ -34,13 +79,17 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
         // A company put back keeps the addresses it was shown with, under its new id.
         if (answer.added && body.action === "restore" && gone) known.set(answer.added, gone.addresses);
         setCompanies(answer.companies.map((c) => ({ ...c, addresses: known.get(c.id) ?? {} })));
-        toast(done);
+        // Said once: a change also told in the status line beside it is not said again in a toast (AAA audit C6).
+        if (done) toast(done);
         return { companies: answer.companies, added: answer.added, skipped: answer.skipped };
       }
-      setError(answer.message ?? (answer.error === "data_full" ? "Your store's data room is full. Delete something you no longer need first." : "That did not save. Try again in a moment."));
+      // Only the form's own fields are named: an undo is refused as a whole, under the form.
+      const field = body.action === "add" || body.action === "edit" ? (FIELD_OF[answer.error ?? ""] ?? null) : null;
+      refuse(answer.message ?? (answer.error === "data_full" ? DATA_FULL : "That did not save. Try again in a moment."), field);
     } catch {
-      setError("That did not save. Check your connection and try again.");
+      refuse("That did not save. Check your connection and try again.", null);
     } finally {
+      working.current = false;
       setBusy(false);
     }
     return null;
@@ -48,29 +97,61 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    const done = await send(editing ? { action: "edit", id: editing, ...form } : { action: "add", ...form }, editing ? "Company saved." : "Company added.");
+    if (busy || full) return;
+    if (!form.name.trim()) return refuse("Type the company's name.", "name");
+    const was = editing;
+    const done = await send(was ? { action: "edit", id: was, ...form } : { action: "add", ...form }, was ? "Company saved." : "Company added.");
     if (done) {
       setForm({ name: "", website: "", note: "" });
       setEditing(null);
+      // A change saved goes back to the button that opened it; an add stays in the field, ready for the next one.
+      focusAfterDrawing(was ? { to: "change", id: was } : { to: "name" });
     }
   }
 
+  function cancel() {
+    const was = editing;
+    setEditing(null);
+    setForm({ name: "", website: "", note: "" });
+    setError("");
+    setErrorField(null);
+    if (was) focusAfterDrawing({ to: "change", id: was });
+  }
+
   async function remove(company: Shown) {
-    if (await send({ action: "remove", id: company.id }, "Company deleted.")) {
+    if (busy) return;
+    if (await send({ action: "remove", id: company.id }, null)) {
       setPutBack("");
       setGone(company);
+      if (editing === company.id) cancel();
+      focusAfterDrawing({ to: "undo" });
     }
   }
 
   // Put back in one change, with the people who are not at another company now (review A2/A3); says who did not come back.
   async function undo() {
-    if (!gone) return;
-    const back = await send({ action: "restore", name: gone.name, website: gone.website, note: gone.note, people: gone.people }, "Company put back.");
+    if (!gone || busy) return;
+    const back = await send({ action: "restore", name: gone.name, website: gone.website, note: gone.note, people: gone.people }, null);
     if (!back) return;
     const left = back.skipped?.length ?? 0;
-    setPutBack(left ? `${gone.name} is back with ${gone.people.length - left} of its ${gone.people.length} people. ${left === 1 ? "One person had" : `${left} people had`} moved to another company since, and ${left === 1 ? "stays" : "stay"} there.` : "");
+    setPutBack(
+      left
+        ? `${gone.name} is back with ${gone.people.length - left} of its ${gone.people.length} people. ${left === 1 ? "One person had" : `${left} people had`} moved to another company since, and ${left === 1 ? "stays" : "stay"} there.`
+        : gone.people.length
+          ? `${gone.name} is back with its people.`
+          : `${gone.name} is back.`,
+    );
     setGone(null);
+    focusAfterDrawing(back.added ? { to: "company", id: back.added } : { to: "list" });
   }
+
+  const described = (field: Field, hint: string) => (errorField === field ? `${hint} company-${field}-error` : hint);
+  const fieldError = (field: Field) =>
+    errorField === field ? (
+      <span id={`company-${field}-error`} className="field-error mt-1 block [overflow-wrap:anywhere]">
+        {error}
+      </span>
+    ) : null;
 
   return (
     <div className="space-y-8">
@@ -79,54 +160,89 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
           {editing ? "Change the company" : "Add a company"}
         </h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <label className="block text-sm">
-            <span className="field-label">Name</span>
-            <input ref={nameField} className="field mt-1" value={form.name} maxLength={MAX_COMPANY_NAME} onChange={(event) => setForm({ ...form, name: event.target.value })} aria-describedby="company-name-hint" />
+          <div className="block text-sm">
+            <label htmlFor="company-name" className="field-label">
+              Name
+            </label>
+            <input
+              id="company-name"
+              ref={nameField}
+              className="field mt-1"
+              value={form.name}
+              maxLength={MAX_COMPANY_NAME}
+              onChange={(event) => setForm({ ...form, name: event.target.value })}
+              aria-invalid={errorField === "name" || undefined}
+              aria-describedby={described("name", "company-name-hint")}
+            />
             <span id="company-name-hint" className="mt-1 block text-xs text-ink-soft">
               Example: North School
             </span>
-          </label>
-          <label className="block text-sm">
-            <span className="field-label">Website (optional)</span>
-            <input type="url" className="field mt-1" value={form.website} maxLength={MAX_COMPANY_WEBSITE} onChange={(event) => setForm({ ...form, website: event.target.value })} aria-describedby="company-site-hint" />
+            {fieldError("name")}
+          </div>
+          <div className="block text-sm">
+            <label htmlFor="company-website" className="field-label">
+              Website (optional)
+            </label>
+            <input
+              id="company-website"
+              ref={websiteField}
+              type="url"
+              className="field mt-1"
+              value={form.website}
+              maxLength={MAX_COMPANY_WEBSITE}
+              onChange={(event) => setForm({ ...form, website: event.target.value })}
+              aria-invalid={errorField === "website" || undefined}
+              aria-describedby={described("website", "company-site-hint")}
+            />
             <span id="company-site-hint" className="mt-1 block text-xs text-ink-soft">
               Example: https://north.example.com
             </span>
-          </label>
-          <label className="block text-sm sm:col-span-2">
-            <span className="field-label">Note (optional)</span>
-            <input className="field mt-1" value={form.note} maxLength={MAX_COMPANY_NOTE} onChange={(event) => setForm({ ...form, note: event.target.value })} aria-describedby="company-note-hint" />
+            {fieldError("website")}
+          </div>
+          <div className="block text-sm sm:col-span-2">
+            <label htmlFor="company-note" className="field-label">
+              Note (optional)
+            </label>
+            <input
+              id="company-note"
+              ref={noteField}
+              className="field mt-1"
+              value={form.note}
+              maxLength={MAX_COMPANY_NOTE}
+              onChange={(event) => setForm({ ...form, note: event.target.value })}
+              aria-invalid={errorField === "note" || undefined}
+              aria-describedby={described("note", "company-note-hint")}
+            />
             <span id="company-note-hint" className="mt-1 block text-xs text-ink-soft">
               For you and your team only. Example: Buys seats each term.
             </span>
-          </label>
+            {fieldError("note")}
+          </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-3">
-          <button type="submit" className="btn btn-primary" disabled={busy || !form.name.trim() || (!editing && companies.length >= MAX_COMPANIES)}>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button type="submit" className="btn btn-primary" aria-disabled={busy || full || undefined} aria-describedby={full ? "companies-full" : undefined}>
             {editing ? "Save the company" : "Add the company"}
           </button>
           {editing ? (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => {
-                setEditing(null);
-                setForm({ name: "", website: "", note: "" });
-              }}
-            >
+            <button type="button" className="btn btn-ghost" onClick={cancel}>
               Cancel
             </button>
           ) : null}
         </div>
+        {full ? (
+          <p id="companies-full" className="mt-2 text-sm text-ink">
+            {COMPANY_REFUSALS.full}
+          </p>
+        ) : null}
         <p className="mt-2 text-sm text-danger-text" role="alert">
-          {error}
+          {errorField ? "" : error}
         </p>
       </form>
       <div role="status">
         {gone ? (
           <p className="flex flex-wrap items-center gap-3 text-sm text-ink">
             <span className="[overflow-wrap:anywhere]">{`Deleted ${gone.name}. Its people are still in your store.`}</span>
-            <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void undo()}>
+            <button ref={undoButton} type="button" className="btn btn-secondary btn-sm" aria-disabled={busy || undefined} onClick={() => void undo()}>
               Undo
             </button>
           </p>
@@ -135,12 +251,21 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
         ) : null}
       </div>
       <section aria-labelledby="companies-title">
-        <h2 id="companies-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Your companies (${companies.length})`}</h2>
+        <h2 ref={listTitle} id="companies-title" tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Your companies (${companies.length})`}</h2>
         {companies.length ? (
           <ul className="mt-4 space-y-4">
             {companies.map((company) => (
               <li key={company.id} className="card p-5">
-                <h3 className="font-semibold text-ink [overflow-wrap:anywhere]">{company.name}</h3>
+                <h3
+                  ref={(element) => {
+                    if (element) headings.current.set(company.id, element);
+                    else headings.current.delete(company.id);
+                  }}
+                  tabIndex={-1}
+                  className="font-semibold text-ink [overflow-wrap:anywhere]"
+                >
+                  {company.name}
+                </h3>
                 {company.website ? <p className="mt-1 text-sm text-ink-soft [overflow-wrap:anywhere]">{company.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}</p> : null}
                 {company.note ? <p className="mt-1 text-sm text-ink-soft [overflow-wrap:anywhere]">{company.note}</p> : null}
                 <p className="mt-3 text-sm text-ink">{company.people.length ? `${company.people.length} ${company.people.length === 1 ? "person" : "people"}:` : "Nobody linked yet. Link someone from their page under Buyers."}</p>
@@ -151,9 +276,10 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
                         {company.addresses[person] ? (
                           <a href={peopleHref(person)} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">
                             {company.addresses[person]}
+                            <span className="sr-only">: open their page</span>
                           </a>
                         ) : (
-                          <span className="text-ink-soft">Someone not among the buyers read from your Stripe account</span>
+                          <span className="text-ink-soft">{addressesRead ? "A person we could not find among your Stripe buyers" : "A person whose address could not be read just now"}</span>
                         )}
                       </li>
                     ))}
@@ -161,23 +287,27 @@ export function CompaniesEditor({ initial, peopleBase }: { initial: Shown[]; peo
                 ) : null}
                 <div className="mt-3 flex flex-wrap gap-3">
                   <button
+                    ref={(element) => {
+                      if (element) changeButtons.current.set(company.id, element);
+                      else changeButtons.current.delete(company.id);
+                    }}
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    disabled={busy}
+                    aria-disabled={busy || undefined}
                     aria-label={`Change ${company.name}`}
                     onClick={() => {
+                      if (busy) return;
                       setEditing(company.id);
                       setForm({ name: company.name, website: company.website, note: company.note });
+                      setError("");
+                      setErrorField(null);
                       // The form it opens is above the list: the focus goes to it, so a keyboard or screen reader user lands where they type (review A6).
-                      requestAnimationFrame(() => {
-                        nameField.current?.focus();
-                        nameField.current?.scrollIntoView({ block: "center" });
-                      });
+                      focusAfterDrawing({ to: "name", scroll: true });
                     }}
                   >
                     Change
                   </button>
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} aria-label={`Delete ${company.name}`} onClick={() => void remove(company)}>
+                  <button type="button" className="btn btn-ghost btn-sm" aria-disabled={busy || undefined} aria-label={`Delete ${company.name}`} onClick={() => void remove(company)}>
                     Delete
                   </button>
                 </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/components/toast";
 import { MAX_PERSON_TASKS, MAX_TASK_TEXT, type PersonTask, dayIn } from "@/lib/person-tasks";
 
@@ -15,6 +15,12 @@ export function browserDay(nowMs = Date.now()): string {
 }
 
 const noSubscription = () => () => {};
+
+type Field = "text" | "due" | "assignee";
+/** Where the focus goes once the screen has drawn a change, so it is never left on a button that went away (AAA audit C1). */
+type FocusTo = { to: Field | "undo" | "full" | "count" } | { to: "task"; id: string };
+/** The field of the add form each refusal is about (lib/person-tasks.ts), so the message is told beside it (AAA audit C2). */
+const FIELD_OF: Partial<Record<string, Field>> = { text: "text", long: "text", date: "due", assignee: "assignee" };
 
 /**
  * The creator's own day for comparing tasks' dates. The server's page is
@@ -42,11 +48,48 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
   const [assignee, setAssignee] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [errorField, setErrorField] = useState<Field | null>(null);
   const [removed, setRemoved] = useState<PersonTask | null>(null);
+  const [focusAsk, setFocusAsk] = useState(0);
+  const working = useRef(false);
+  const focusNext = useRef<FocusTo | null>(null);
+  const textField = useRef<HTMLInputElement>(null);
+  const dueField = useRef<HTMLInputElement>(null);
+  const assigneeField = useRef<HTMLSelectElement>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  const fullLine = useRef<HTMLParagraphElement>(null);
+  const countLine = useRef<HTMLParagraphElement>(null);
+  const boxes = useRef(new Map<string, HTMLInputElement>());
+  const full = tasks.length >= MAX_PERSON_TASKS;
 
-  async function send(body: Record<string, unknown>, done: string): Promise<PersonTask[] | null> {
+  function focusAfterDrawing(next: FocusTo) {
+    focusNext.current = next;
+    setFocusAsk((n) => n + 1);
+  }
+
+  // Once the change asked for is drawn: the field, box or button named, or the count of tasks when it is gone.
+  useEffect(() => {
+    const next = focusNext.current;
+    focusNext.current = null;
+    if (!next) return;
+    const named = { text: textField, due: dueField, assignee: assigneeField, undo: undoButton, full: fullLine, count: countLine };
+    const target = next.to === "task" ? boxes.current.get(next.id) : named[next.to].current;
+    (target ?? countLine.current)?.focus();
+  }, [focusAsk]);
+
+  function refuse(message: string, field: Field | null) {
+    setError(message);
+    setErrorField(field);
+    if (field) focusAfterDrawing({ to: field });
+  }
+
+  /** `form` when the change is the add form's own, so a refusal is told beside the field at fault. */
+  async function send(body: Record<string, unknown>, done: string | null, form = false): Promise<PersonTask[] | null> {
+    if (working.current) return null;
+    working.current = true;
     setBusy(true);
     setError("");
+    setErrorField(null);
     try {
       const response = await fetch("/api/store/person-tasks", {
         method: "POST",
@@ -56,31 +99,69 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; tasks?: PersonTask[]; message?: string; error?: string };
       if (answer.ok && answer.tasks) {
         setTasks(answer.tasks);
-        toast(done);
+        // Said once: a change also told in the status line beside it is not said again in a toast (AAA audit C6).
+        if (done) toast(done);
         return answer.tasks;
       }
-      setError(answer.message ?? (answer.error === "data_full" ? "Your store's data room is full. Delete something you no longer need first." : "That did not save. Try again in a moment."));
+      refuse(
+        answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need first." : "That did not save. Try again in a moment."),
+        form ? (FIELD_OF[answer.error ?? ""] ?? null) : null,
+      );
     } catch {
-      setError("That did not save. Check your connection and try again.");
+      refuse("That did not save. Check your connection and try again.", null);
     } finally {
+      working.current = false;
       setBusy(false);
     }
     return null;
   }
 
-  /** The removed task put back with its words, date and teammate, done again if it was. */
+  async function remove(task: PersonTask) {
+    if (busy) return;
+    if (await send({ action: "remove", id: task.id }, null)) {
+      setRemoved(task);
+      focusAfterDrawing({ to: "undo" });
+    }
+  }
+
+  /** The removed task put back with its words, date and teammate, done again if it was; said once. */
   async function undoRemove(task: PersonTask) {
-    const back = await send({ action: "add", text: task.text, due: task.due, assignee: task.assignee }, "Task put back.");
+    if (busy || full) return;
+    const back = await send({ action: "add", text: task.text, due: task.due, assignee: task.assignee }, task.done ? null : "Task put back.");
     if (!back) return;
     setRemoved(null);
     const added = back[back.length - 1];
     if (task.done && added) await send({ action: "done", id: added.id, done: true }, "Task put back.");
+    focusAfterDrawing(added ? { to: "task", id: added.id } : { to: "count" });
   }
+
+  async function add(event: React.FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    if (!text.trim()) return refuse("Write what needs doing.", "text");
+    const after = await send({ action: "add", text, due, assignee }, "Task added.", true);
+    if (after) {
+      setText("");
+      setDue("");
+      // Ready for the next one; at the most a person can have, the line that says so takes the focus.
+      focusAfterDrawing({ to: after.length >= MAX_PERSON_TASKS ? "full" : "text" });
+    }
+  }
+
+  const described = (field: Field, hint?: string) => [hint, errorField === field ? `task-${field}-error` : ""].filter(Boolean).join(" ") || undefined;
+  const fieldError = (field: Field) =>
+    errorField === field ? (
+      <span id={`task-${field}-error`} className="field-error mt-1 block [overflow-wrap:anywhere]">
+        {error}
+      </span>
+    ) : null;
 
   const open = tasks.filter((task) => !task.done).length;
   return (
     <div>
-      <p className="mt-1 text-sm text-ink-soft">{tasks.length ? `${open} open, ${tasks.length - open} done.` : "No tasks yet."}</p>
+      <p ref={countLine} tabIndex={-1} className="mt-1 text-sm text-ink-soft">
+        {tasks.length ? `${open} open, ${tasks.length - open} done.` : "No tasks yet."}
+      </p>
       {tasks.length ? (
         <ul className="mt-4 space-y-3">
           {tasks.map((task) => {
@@ -89,11 +170,19 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
               <li key={task.id} className="rounded-xl bg-paper p-4 text-sm ring-1 ring-line">
                 <label className="flex min-h-11 items-start gap-3">
                   <input
+                    ref={(element) => {
+                      if (element) boxes.current.set(task.id, element);
+                      else boxes.current.delete(task.id);
+                    }}
                     type="checkbox"
                     className="mt-1 h-5 w-5 shrink-0"
                     checked={task.done}
-                    disabled={busy}
-                    onChange={(event) => void send({ action: "done", id: task.id, done: event.target.checked }, event.target.checked ? "Marked done." : "Open again.")}
+                    aria-disabled={busy || undefined}
+                    onChange={(event) => {
+                      // Kept enabled while a change is saved, so the focus stays on it; a click then is ignored (AAA audit C1).
+                      if (busy) return;
+                      void send({ action: "done", id: task.id, done: event.target.checked }, event.target.checked ? "Marked done." : "Marked as not done.");
+                    }}
                   />
                   <span className={`[overflow-wrap:anywhere] ${task.done ? "text-ink-soft line-through" : "text-ink"}`}>
                     {task.text}
@@ -105,9 +194,7 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
                     {task.due ? (late ? `Was due ${dayWords(task.due)}` : `Due ${dayWords(task.due)}`) : "No date"}
                     {task.assignee ? ` · ${task.assignee}` : " · Nobody named"}
                   </p>
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={async () => {
-                      if (await send({ action: "remove", id: task.id }, "Task removed.")) setRemoved(task);
-                    }} aria-label={`Remove the task: ${task.text}`}>
+                  <button type="button" className="btn btn-ghost btn-sm" aria-disabled={busy || undefined} onClick={() => void remove(task)} aria-label={`Remove the task: ${task.text}`}>
                     Remove
                   </button>
                 </div>
@@ -118,45 +205,61 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
       ) : null}
       <div role="status" className="mt-3">
         {removed ? (
-          <p className="flex flex-wrap items-center gap-3 text-sm text-ink">
-            <span className="[overflow-wrap:anywhere]">{`Removed: ${removed.text}`}</span>
-            <button type="button" className="btn btn-secondary btn-sm" disabled={busy || tasks.length >= MAX_PERSON_TASKS} onClick={() => void undoRemove(removed)}>
-              Undo
-            </button>
-          </p>
+          <>
+            <p className="flex flex-wrap items-center gap-3 text-sm text-ink">
+              <span className="[overflow-wrap:anywhere]">{`Removed: ${removed.text}`}</span>
+              <button
+                ref={undoButton}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                aria-disabled={busy || full || undefined}
+                aria-describedby={full ? "task-undo-full" : undefined}
+                onClick={() => void undoRemove(removed)}
+              >
+                Undo
+              </button>
+            </p>
+            {full ? (
+              <p id="task-undo-full" className="mt-1 text-sm text-ink">{`It cannot be put back now: this person has ${MAX_PERSON_TASKS} tasks, the most one person can have. Remove a done one first.`}</p>
+            ) : null}
+          </>
         ) : null}
       </div>
-      {tasks.length < MAX_PERSON_TASKS ? (
-        <form
-          className="mt-4 grid gap-3 sm:grid-cols-2"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            if (await send({ action: "add", text, due, assignee }, "Task added.")) {
-              setText("");
-              setDue("");
-            }
-          }}
-        >
-          <label className="block text-sm sm:col-span-2">
-            <span className="field-label">New task</span>
+      {!full ? (
+        <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={add} noValidate>
+          <div className="block text-sm sm:col-span-2">
+            <label htmlFor="task-text" className="field-label">
+              New task
+            </label>
             <input
+              id="task-text"
+              ref={textField}
               required
               maxLength={MAX_TASK_TEXT}
               className="field mt-1"
-              placeholder="Send the workbook"
               value={text}
               onChange={(event) => setText(event.target.value)}
-              aria-describedby="task-length"
+              aria-invalid={errorField === "text" || undefined}
+              aria-describedby={described("text", "task-hint task-length")}
             />
-            <span id="task-length" className="mt-1 block text-xs text-ink-soft">{`${text.length}/${MAX_TASK_TEXT}`}</span>
-          </label>
-          <label className="block text-sm">
-            <span className="field-label">Due (optional)</span>
-            <input type="date" className="field mt-1" value={due} onChange={(event) => setDue(event.target.value)} />
-          </label>
-          <label className="block text-sm">
-            <span className="field-label">Responsible (optional)</span>
-            <select className="field mt-1" value={assignee} onChange={(event) => setAssignee(event.target.value)}>
+            <span id="task-hint" className="mt-1 block text-xs text-ink-soft">
+              Example: Send the workbook.
+            </span>
+            <span id="task-length" className="mt-1 block text-xs text-ink-soft">{`${text.length} of ${MAX_TASK_TEXT} characters`}</span>
+            {fieldError("text")}
+          </div>
+          <div className="block text-sm">
+            <label htmlFor="task-due" className="field-label">
+              Due (optional)
+            </label>
+            <input id="task-due" ref={dueField} type="date" className="field mt-1" value={due} onChange={(event) => setDue(event.target.value)} aria-invalid={errorField === "due" || undefined} aria-describedby={described("due")} />
+            {fieldError("due")}
+          </div>
+          <div className="block text-sm">
+            <label htmlFor="task-assignee" className="field-label">
+              Responsible (optional)
+            </label>
+            <select id="task-assignee" ref={assigneeField} className="field mt-1" value={assignee} onChange={(event) => setAssignee(event.target.value)} aria-invalid={errorField === "assignee" || undefined} aria-describedby={described("assignee")}>
               <option value="">Nobody</option>
               {assignees.map((email) => (
                 <option key={email} value={email}>
@@ -164,18 +267,19 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
                 </option>
               ))}
             </select>
-          </label>
+            {fieldError("assignee")}
+          </div>
           <div className="sm:col-span-2">
-            <button type="submit" className="btn btn-secondary btn-sm" disabled={busy || !text.trim()}>
+            <button type="submit" className="btn btn-secondary btn-sm" aria-disabled={busy || undefined}>
               Add task
             </button>
           </div>
         </form>
       ) : (
-        <p className="mt-4 text-sm text-ink-soft">{`This person has ${MAX_PERSON_TASKS} tasks, the most one person can have. Remove a done one to add another.`}</p>
+        <p ref={fullLine} tabIndex={-1} className="mt-4 text-sm text-ink-soft">{`This person has ${MAX_PERSON_TASKS} tasks, the most one person can have. Remove a done one to add another.`}</p>
       )}
       <p className="mt-2 text-sm text-danger-text" role="alert">
-        {error}
+        {errorField ? "" : error}
       </p>
     </div>
   );

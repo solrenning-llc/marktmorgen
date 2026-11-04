@@ -28,9 +28,11 @@ is("each remove button says which task", html.includes('aria-label="Remove the t
 is("rows tall enough to tap", html.includes("min-h-11"), true);
 
 part("Adding one");
-is("every field labeled, the date and teammate optional", ["New task", "Due (optional)", "Responsible (optional)"].every((label) => html.includes(label)), true);
+is("every field labeled, the date and teammate optional", [["text", "New task"], ["due", "Due (optional)"], ["assignee", "Responsible (optional)"]].every(([id, label]) => html.includes(`<label for="task-${id}" class="field-label">${label}</label>`) && html.includes(`id="task-${id}"`)), true);
+is("the example stays while typing, never a placeholder (3.3.2)", html.includes("Example: Send the workbook.") && !html.includes("placeholder="), true);
 is("the teammates who can see deals, or nobody", /<option value=""[^>]*>Nobody<\/option>/.test(html) && /<option value="sam@example.com"[^>]*>sam@example.com<\/option>/.test(html), true);
-is("the length counted beside the field", html.includes('aria-describedby="task-length"') && html.includes("0/200"), true);
+is("the length counted beside the field, in words", html.includes('aria-describedby="task-hint task-length"') && html.includes("0 of 200 characters") && !html.includes("0/200"), true);
+is("no box or button switched off, so the focus never falls off one (C1, C3)", [html.includes("disabled="), html.includes("aria-disabled")], [false, false]);
 is("refusals are said in an alert region", html.includes('role="alert"'), true);
 const full = draw(Array.from({ length: MAX_PERSON_TASKS }, (_, i) => task(i + 1)));
 is("at the most a person can have, the form says so instead", [full.includes("New task"), full.includes(`This person has ${MAX_PERSON_TASKS} tasks`)], [false, true]);
@@ -41,7 +43,17 @@ const source = readFileSync("components/person-tasks.tsx", "utf8");
 is("a status region, there before anything is removed, says what was removed", html.includes('<div role="status"') && source.includes("`Removed: ${removed.text}`"), true);
 is("undo puts back the words, the date and the teammate", source.includes('{ action: "add", text: task.text, due: task.due, assignee: task.assignee }'), true);
 is("and marks it done again if it was", source.includes('if (task.done && added) await send({ action: "done", id: added.id, done: true }'), true);
-is("offered only after the removal was saved", source.includes('if (await send({ action: "remove", id: task.id }, "Task removed.")) setRemoved(task);'), true);
+is("offered only after the removal was saved", source.includes('if (await send({ action: "remove", id: task.id }, null)) {\n      setRemoved(task);'), true);
+
+part("The AAA audit of 4 November 2026");
+is("C1: busy boxes and buttons are said to be, never switched off, and ignore a press then", !/(?<![-\w])disabled=\{/.test(source) && (source.match(/aria-disabled=\{busy \|\| undefined\}/g) ?? []).length === 3 && source.includes("aria-disabled={busy || full || undefined}") && (source.match(/if \(busy\) return;/g) ?? []).length === 3 && source.includes("if (busy || full) return;"), true);
+is("C1: the focus is moved by refs once the change is drawn, never by a timer", source.includes("}, [focusAsk]);") && !/setTimeout|requestAnimationFrame/.test(source), true);
+is("C1: a removal takes the focus to Undo; the undo to the task put back; an add to the field, or to the line saying the list is full", source.includes('focusAfterDrawing({ to: "undo" })') && source.includes('focusAfterDrawing(added ? { to: "task", id: added.id } : { to: "count" })') && source.includes('focusAfterDrawing({ to: after.length >= MAX_PERSON_TASKS ? "full" : "text" })') && source.includes("<p ref={fullLine} tabIndex={-1}"), true);
+is("C2: a refusal of the add form names its field, marked invalid and described by the message beside it", source.includes('const FIELD_OF: Partial<Record<string, Field>> = { text: "text", long: "text", date: "due", assignee: "assignee" };') && ["text", "due", "assignee"].every((field) => source.includes(`aria-invalid={errorField === "${field}" || undefined}`)) && source.includes("`task-${field}-error`") && source.includes('send({ action: "add", text, due, assignee }, "Task added.", true)'), true);
+is("C3: Add with nothing typed says what to do; Undo at the most a person can have says why", source.includes('if (!text.trim()) return refuse("Write what needs doing.", "text");') && source.includes('aria-describedby={full ? "task-undo-full" : undefined}') && source.includes("It cannot be put back now: this person has"), true);
+is("C6: a removal and its undo are said once each", !source.includes('"Task removed."') && source.includes('task.done ? null : "Task put back."') && (source.match(/"Task put back\."/g) ?? []).length === 2, true);
+is("a box checked off again is said in plain words", source.includes('"Marked as not done."') && !source.includes('"Open again."'), true);
+is("C7: a full store said in plain words", source.includes("Your store has no room left for more records. Delete some you no longer need first.") && !source.includes("data room"), true);
 
 part("On the person's page");
 const page = readFileSync("app/studio/people/page.tsx", "utf8");

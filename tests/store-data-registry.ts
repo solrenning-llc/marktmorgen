@@ -55,6 +55,7 @@ import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
+import { TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
@@ -459,9 +460,15 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ref:owed@lib/creator-invites.ts": company("Credits owed", "The company's program for creators."),
   "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research."),
   "nl:crm:deals:@lib/crm.ts": { what: "Deals: one slot a deal, at what it weighs, at most MAX_DEALS", room: ["lib/crm.ts"] },
-  "nl:crm:tasks:@lib/crm.ts": { what: "Tasks about a person, at what they weigh, at most MAX_STORE_TASKS", room: ["lib/crm.ts"] },
+  "nl:crm:tasks:@lib/crm.ts": {
+    what: "Tasks about a person, at what they weigh, at most MAX_STORE_TASKS, and the store's count of them (TASK_COUNT_WEIGHT)",
+    room: ["lib/crm.ts"],
+    // room + TASK_COUNT_WEIGHT: a paid recount saves the count and notes its field even past a full room (noteData, never refused), so at most this much over the room, once a store.
+    parts: [capped(TASK_COUNT_WEIGHT, "The count's field noted once past a full room, when a paid recount saves it.", src("lib/crm.ts", "TASK_COUNT_WEIGHT", "noteData(room, [{ slot: TASKS_SLOT, bytes: TASK_COUNT_WEIGHT }])"))],
+  },
   "nl:crm:tasks:@lib/person-agenda-read.ts": { what: "Tasks about a person, only counted here (one HLEN, tasksKept) before the agenda reads them; kept and counted by lib/crm.ts", room: ["lib/crm.ts"] },
   "nl:crm:tasklock:@lib/crm.ts": short("One change of a store's tasks at a time, ten seconds at the most", "studio", 1, 128),
+  "nl:crm:taskrecount:@lib/crm.ts": short("One paid recount of a store's tasks at a time, thirty seconds at the most", "studio", 1, 128),
   "nl:crm:fields:@lib/crm.ts": { what: "The store's own fields", parts: [capped(MAX_CRM_FIELDS * (MAX_FIELD_OPTIONS + 2) * 160, "MAX_CRM_FIELDS fields and their choices.", src("lib/crm-rules.ts", "MAX_CRM_FIELDS", "MAX_FIELD_OPTIONS"))] },
   "nl:crm:stages:@lib/crm.ts": { what: "The first pipeline's stages, as the board kept them before pipelines", parts: [capped(MAX_STAGES * 256, "MAX_STAGES stages.", src("lib/crm-rules.ts", "MAX_STAGES"))] },
   "nl:crm:pipes:@lib/crm.ts": { what: "The deals' pipelines and their stages (17 October 2026): one slot, at what the record weighs", room: ["lib/crm.ts"] },

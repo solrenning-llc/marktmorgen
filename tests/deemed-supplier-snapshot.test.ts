@@ -71,3 +71,65 @@ test("oversized treatment reviews stop before key enumeration or member inspecti
   assert.equal(deemedSupplierProblems([]).length, DEEMED_SUPPLIER_JURISDICTIONS.length);
   assert.deepEqual([DEEMED_SUPPLIER_RECORDS.length, deemedSupplierReady(), PLANS_ON_SALE], [0, false, false]);
 });
+
+test("missing review fields cannot be supplied by descriptor-map prototype data", () => {
+  for (const key of ["registration", "evidence"] as const) {
+    const original = Object.getOwnPropertyDescriptor(Object.prototype, key);
+    const records = rows();
+    delete (records[0] as Partial<typeof records[0]>)[key];
+    Object.defineProperty(records[0], "unexpected", { value: "keeps the own-field count", enumerable: true });
+    try {
+      Object.defineProperty(Object.prototype, key, {
+        configurable: true, writable: true,
+        value: { value: "inherited synthetic evidence" },
+      });
+      assert.equal(deemedSupplierReady(records), false, key);
+      assert.deepEqual(deemedSupplierProblems(records), ["tax-treatment records: complete own data required"], key);
+    } finally {
+      if (original) Object.defineProperty(Object.prototype, key, original);
+      else Reflect.deleteProperty(Object.prototype, key);
+    }
+  }
+});
+
+test("missing review fields never execute descriptor-map prototype getters", () => {
+  for (const key of ["registration", "evidence"] as const) {
+    const original = Object.getOwnPropertyDescriptor(Object.prototype, key);
+    const records = rows(); let reads = 0;
+    delete (records[0] as Partial<typeof records[0]>)[key];
+    Object.defineProperty(records[0], "unexpected", { value: "keeps the own-field count", enumerable: true });
+    try {
+      Object.defineProperty(Object.prototype, key, {
+        configurable: true,
+        get() { reads++; return { value: "inherited synthetic evidence" }; },
+      });
+      assert.equal(deemedSupplierReady(records), false, key);
+      assert.equal(reads, 0, key);
+    } finally {
+      if (original) Object.defineProperty(Object.prototype, key, original);
+      else Reflect.deleteProperty(Object.prototype, key);
+    }
+  }
+  assert.deepEqual(deemedSupplierProblems(rows()), []);
+  assert.deepEqual([DEEMED_SUPPLIER_RECORDS.length, deemedSupplierReady(), PLANS_ON_SALE], [0, false, false]);
+});
+
+test("detaching own treatment data never invokes inherited setters or replacement getters", () => {
+  for (const key of ["jurisdiction", "treatment", "implementedIn", "recordedOn", "registration", "evidence"] as const) {
+    const original = Object.getOwnPropertyDescriptor(Object.prototype, key);
+    const records = rows(); let reads = 0, writes = 0;
+    try {
+      Object.defineProperty(Object.prototype, key, {
+        configurable: true,
+        get() { reads++; return "inherited substitution"; },
+        set() { writes++; },
+      });
+      assert.deepEqual(deemedSupplierProblems(records), [], key);
+      assert.deepEqual([reads, writes], [0, 0], key);
+    } finally {
+      if (original) Object.defineProperty(Object.prototype, key, original);
+      else Reflect.deleteProperty(Object.prototype, key);
+    }
+  }
+  assert.deepEqual([DEEMED_SUPPLIER_RECORDS.length, deemedSupplierReady(), PLANS_ON_SALE], [0, false, false]);
+});

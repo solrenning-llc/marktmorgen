@@ -86,8 +86,10 @@ function readText(text: string): string {
 
 /**
  * A course's own page, on the store's own site, as one address: https, the
- * store's host, a path of its own (not the store's root), no credentials,
- * no query and no fragment, no trailing slash. Null otherwise.
+ * store's host, a path under the store's own path (on marktmorgen.com,
+ * "/@handle/…", never another store's or the site's own pages) and not the
+ * store's root, no credentials, no query and no fragment, no trailing slash.
+ * Null otherwise.
  */
 function courseUrl(url: string, site: string): string | null {
   try {
@@ -95,7 +97,8 @@ function courseUrl(url: string, site: string): string | null {
     const home = new URL(site);
     if (at.protocol !== "https:" || at.host !== home.host || at.username || at.password) return null;
     const path = at.pathname.replace(/\/+$/, "");
-    if (!path) return null;
+    const base = home.pathname.replace(/\/+$/, "");
+    if (!path || path === base || !path.startsWith(`${base}/`)) return null;
     return `${at.origin}${path}`;
   } catch {
     return null;

@@ -43,7 +43,7 @@ Each pack of the proposal at its price, on its own payment, used in full. Every 
 | Pack | Price | Use (cost) | Fee, percentages | Fee, fixed | Remittance | Refund reserve | Dispute reserve, % | Dispute reserve, fixed | Free-account share | Profit tax | Unused room | Net |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 5,000 visits | **$44** | $1.36 (3.09%) | $3.71 (8.43%) | $0.30 (0.68%) | $0.66 (1.50%) | $0.44 (1.00%) | $0.56 (1.27%) | $0.30 (0.68%) | $0.00 (0.00%) | $10.09 (22.93%) | $0.25 (0.57%) | $26.58 (60.41%) |
-| 250 orders, with their access and store emails | **$35** | $0.89 (2.54%) | $2.96 (8.46%) | $0.30 (0.86%) | $0.53 (1.51%) | $0.35 (1.00%) | $0.45 (1.29%) | $0.30 (0.86%) | $0.00 (0.00%) | $8.04 (22.97%) | $0.25 (0.71%) | $21.18 (60.51%) |
+| 250 orders, with their access and store emails | **$37** | $0.99 (2.68%) | $3.12 (8.43%) | $0.30 (0.81%) | $0.56 (1.51%) | $0.37 (1.00%) | $0.47 (1.27%) | $0.30 (0.81%) | $0.00 (0.00%) | $8.50 (22.97%) | $0.26 (0.70%) | $22.39 (60.51%) |
 | 2,500 list emails | **$62** | $2.25 (3.63%) | $5.23 (8.44%) | $0.30 (0.48%) | $0.93 (1.50%) | $0.62 (1.00%) | $0.79 (1.27%) | $0.30 (0.48%) | $0.00 (0.00%) | $14.19 (22.89%) | $0.26 (0.42%) | $37.39 (60.31%) |
 | 20 AI writing jobs and 100 answers | **$50** | $1.60 (3.20%) | $4.22 (8.44%) | $0.30 (0.60%) | $0.75 (1.50%) | $0.50 (1.00%) | $0.64 (1.28%) | $0.30 (0.60%) | $0.00 (0.00%) | $11.47 (22.94%) | $0.31 (0.62%) | $30.22 (60.44%) |
 | 25 GB of storage | **$43** | $1.29 (3.00%) | $3.63 (8.44%) | $0.30 (0.70%) | $0.65 (1.51%) | $0.43 (1.00%) | $0.55 (1.28%) | $0.30 (0.70%) | $0.00 (0.00%) | $9.86 (22.93%) | $0.26 (0.60%) | $25.99 (60.44%) |
@@ -51,7 +51,7 @@ Each pack of the proposal at its price, on its own payment, used in full. Every 
 
 Every column but the unused room adds up to the price: use, fee, remittance, reserves and tax are the unit's costs, and the net is what is left. The unused room is part of the net: what the whole-dollar price leaves above 60%, the add-on's 25¢ included.
 
-- **Of the fee and the dispute reserve, what is charged on the buyer's tax added on top**: visits $0.92, orders $0.73, list-email $1.30, ai $1.06, storage $0.89, video $0.52. The providers charge their percentages on the whole amount the buyer pays, 27% more than the price at the worst.
+- **Of the fee and the dispute reserve, what is charged on the buyer's tax added on top**: visits $0.92, orders $0.76, list-email $1.30, ai $1.06, storage $0.89, video $0.52. The providers charge their percentages on the whole amount the buyer pays, 27% more than the price at the worst.
 - **Free-account share: none.** A pack's own payment carries none of the stores that pay nothing; their share (line free-share, 1/40 of a free store's worst window) is in each plan's own payment. Selling packs to stores whose plan carries that share leaves it where it is.
 - **Sales tax on top** is not revenue and not a cost of its own here: it is collected for the state and passed on; what it costs is the fee and dispute reserve charged on it, in the line above.
 
@@ -60,7 +60,7 @@ The four factors, for every pack:
 | Pack | Floor and tax | Percentages | Fixed cents | Whole dollar and room | Price over cost |
 | --- | --- | --- | --- | --- | --- |
 | 5,000 visits | 5.80× | 3.43× | 1.37× | 1.18× | **32.35×** |
-| 250 orders, with their access and store emails | 5.80× | 3.47× | 1.53× | 1.28× | **39.33×** |
+| 250 orders, with their access and store emails | 5.81× | 3.44× | 1.48× | 1.26× | **37.37×** |
 | 2,500 list emails | 5.81× | 3.43× | 1.24× | 1.12× | **27.56×** |
 | 20 AI writing jobs and 100 answers | 5.80× | 3.43× | 1.31× | 1.19× | **31.25×** |
 | 25 GB of storage | 5.80× | 3.45× | 1.39× | 1.20× | **33.33×** |
@@ -97,7 +97,7 @@ The same packs at one, four, ten and forty times their amount, each prepaid on i
 | Pack | 1×: price, per unit, price over cost | 4×: price, per unit, price over cost | 10×: price, per unit, price over cost | 40×: price, per unit, price over cost |
 | --- | --- | --- | --- | --- |
 | 5,000 visits | $44, $8.80 per 1,000 visits, 32.35× | $124, $6.20 per 1,000 visits, 22.88× | $284, $5.68 per 1,000 visits, 20.96× | $1,083, $5.42 per 1,000 visits, 19.98× |
-| 250 orders, with their access and store emails | $35, $0.14 per order, 39.33× | $87, $0.09 per order, 24.65× | $191, $0.08 per order, 21.66× | $711, $0.07 per order, 20.16× |
+| 250 orders, with their access and store emails | $37, $0.15 per order, 37.37× | $96, $0.10 per order, 24.24× | $212, $0.08 per order, 21.41× | $796, $0.08 per order, 20.10× |
 | 2,500 list emails | $62, $24.80 per 1,000 emails, 27.56× | $195, $19.50 per 1,000 emails, 21.67× | $460, $18.40 per 1,000 emails, 20.44× | $1,786, $17.86 per 1,000 emails, 19.84× |
 | 20 AI writing jobs and 100 answers | $50, $2.50 per writing job with 5 answers, 31.25× | $143, $1.79 per writing job with 5 answers, 22.45× | $331, $1.66 per writing job with 5 answers, 20.78× | $1,269, $1.59 per writing job with 5 answers, 19.92× |
 | 25 GB of storage | $43, $1.72 per GB, 33.33× | $118, $1.18 per GB, 22.96× | $270, $1.08 per GB, 21.01× | $1,028, $1.03 per GB, 20.01× |
@@ -111,10 +111,10 @@ A credit balance bought on its own payment and spent on any of the six resources
 
 | Credit bought | Price over cost | Per 1,000 visits | Per order | Per 1,000 emails | Per writing job with 5 answers | Per GB | Per hour | Net, the whole credit on its dearest-to-serve resource |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| $50 | 30.12× | $8.17 | $0.11 | $27.11 | $2.40 | $1.55 | $0.44 | 60.36% |
-| $100 | 23.70× | $6.43 | $0.09 | $21.33 | $1.89 | $1.22 | $0.35 | 60.18% |
-| $250 | 21.11× | $5.73 | $0.08 | $19.01 | $1.69 | $1.09 | $0.31 | 60.07% |
-| $500 | 20.35× | $5.52 | $0.08 | $18.32 | $1.63 | $1.05 | $0.30 | 60.03% |
+| $50 | 30.12× | $8.17 | $0.12 | $27.11 | $2.40 | $1.55 | $0.44 | 60.36% |
+| $100 | 23.70× | $6.43 | $0.10 | $21.33 | $1.89 | $1.22 | $0.35 | 60.18% |
+| $250 | 21.11× | $5.73 | $0.09 | $19.01 | $1.69 | $1.09 | $0.31 | 60.07% |
+| $500 | 20.35× | $5.52 | $0.09 | $18.32 | $1.63 | $1.05 | $0.30 | 60.03% |
 | $1,000 | 19.98× | $5.42 | $0.08 | $17.99 | $1.60 | $1.03 | $0.29 | 60.01% |
 
 Each rate column is per the unit its pack prints (per 1,000 visits, per order with its emails, per 1,000 list emails, per writing job with 5 answers, per GB of storage for a window and its closing days, per video hour watched).

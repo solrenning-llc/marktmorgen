@@ -7,17 +7,20 @@
  * next unit; keeping the list needs a key family of its own
  * (lib/data-families.ts).
  *
- *   - Each entry says when, how the creator signed in (the way lib/auth.ts
- *     names, and apart from it the two ways that matter most to recognize:
- *     "rescue", the link to the recovery address that turned two-step login
- *     off, app/api/auth/rescue; and "locked", a session opened without the
- *     second step that is held back from everything LOCKED_NEEDS names,
- *     app/api/auth/lost/confirm and the code page's reset), the second step
- *     used (lib/two-step.ts: a code from the app, a recovery code, or none; a
- *     passkey is its own check), the browser as
- *     browserName says it ("Chrome on macOS", never the full user agent) and
- *     the approximate place the hosting's own headers give (a city and a
- *     country, cleaned; never the IP address, which is not kept).
+ *   - Each entry says when; how the creator got in (`way`: the ways lib/auth.ts
+ *     names, plus "rescue", the link to the recovery address that turned
+ *     two-step login off, app/api/auth/rescue; "locked", a session opened
+ *     without the second step and held back from what LOCKED_NOTE says; and
+ *     "move", the session the change of sign-in address opens); apart from
+ *     it, which address the way went through (`via`: the sign-in address or
+ *     the recovery address, so a session opened from the recovery inbox is
+ *     never shown as a plain login link); the second step used (lib/two-step.ts:
+ *     a code from the app, a recovery code, or none; a passkey is its own
+ *     check); the browser as browserName says it ("Chrome on macOS", never the
+ *     full user agent); and the approximate place the hosting's own headers
+ *     give (a city and a country, cleaned; never the IP address, which is not
+ *     kept). The country is kept as its two-letter code and shown by its
+ *     English name (Intl.DisplayNames), never as the bare code (AX274 3.1.4).
  *   - At most MAX_SIGN_INS entries, newest first, none shown older than
  *     SIGN_IN_DAYS: enough to see a sign-in that was not yours, small enough
  *     to hold little about the creator.
@@ -34,13 +37,50 @@
  *     browser is what the device reported. The list says both (SIGN_IN_NOTES).
  *
  * What the unit that writes and shows it must do:
+ *   - Key: one sorted set per person, named from a hash of the NORMALISED
+ *     sign-in email, exactly as the remembered browsers are
+ *     (lib/auth.ts devicesKey: `nl:auth:devices:` + sha256Hex of a prefix and
+ *     normaliseEmail(email), cut to 40 hex), with its own prefix and its own
+ *     hash input; never the email in clear in a key or a member.
  *   - Read the place headers only on the hosting that sets them
  *     (process.env.VERCEL === "1", as lib/bot-check.ts does), never from a
  *     client elsewhere, after checking the hosting's official, dated docs.
- *   - Write each sign-in with signInWrite's commands, all in ONE transaction
- *     (Upstash's /multi-exec, MULTI ... EXEC; lib/redis.ts has only the
- *     pipeline today, which is not atomic, so that unit adds the call), in
- *     a key family of its own, its cost counted per sign-in.
+ *     Check there too whether x-vercel-ip-city encodes a space as "+":
+ *     decodeURIComponent leaves "+" as it is, placeFrom then refuses the
+ *     city and keeps the country only (left out, never guessed); if Vercel
+ *     uses "+", turn it into a space before placeFrom, with a test.
+ *   - Write each sign-in with signInWrite's commands, all in ONE MULTI/EXEC
+ *     transaction (Upstash's /multi-exec). This is required, not a choice:
+ *     lib/redis.ts has only the pipeline today, which is not atomic, so the
+ *     unit adds the call; a pipeline is never acceptable here, because a
+ *     ZADD that lands without its EXPIRE leaves a set with no end. That unit
+ *     tests the failure of EXPIRE (and of each other command): the whole
+ *     write is undone or never applied, never a set left without expiry.
+ *     In a key family of its own, its cost counted per sign-in.
+ *   - Write the entry's way from what really happened, never "link" for
+ *     everything as noteSignIn's callers pass today:
+ *       app/api/auth/lost/confirm (the "lost" link sent to the recovery
+ *       address) has three paths, and throughLostLink names each: two-step
+ *       login on, the code page then writes "link" via "recovery" with the
+ *       code used, or "locked" via "recovery" when the code page's reset is
+ *       used; no two-step login and a recovery lock running, "locked" via
+ *       "recovery"; no two-step login and no lock, "link" via "recovery".
+ *       app/api/auth/code needs to know the hold came through the recovery
+ *       address: CONTRACT for the next unit, lib/two-step.ts finishSignIn
+ *       answers `viaRecovery` beside `byGoogle` (its hold already keeps `v`),
+ *       and the reset reads heldInfo(held).viaRecovery before enterLocked
+ *       spends the hold. That change belongs to lib/two-step.ts and is not
+ *       made in this unit. app/api/auth/rescue writes "rescue" via "recovery".
+ *   - The change of sign-in address IS a sign-in: app/api/auth/move ends
+ *     every session of the old address and opens a new one with
+ *     openSession(moved.to), without noteSignIn today; a session opened is
+ *     a way in, so it is written as "move" via "sign-in", second step none,
+ *     said "with the link that changed your sign-in address". The move must
+ *     also take the history with it, beside moveDevices
+ *     (app/api/auth/move/route.ts, the Promise.all with moveDevices): the
+ *     old address's set is moved to the new address's key and the old key
+ *     deleted, in one transaction, before the "move" entry is written to the
+ *     new key; if moving fails, the old key is deleted, never left behind.
  *   - Read with signInRead's commands and show only what signInsToShow
  *     keeps, which applies the same age and count limits again, so nothing
  *     older than SIGN_IN_DAYS is shown even if a write was missed.
@@ -48,7 +88,7 @@
  *     (nl:auth:devices:) are; put it in the creator's own export; say it in
  *     the privacy policy (lib/person-data.ts).
  *   - Not show it in a locked session (lib/two-step.ts LOCKED_NEEDS), which
- *     may be somebody who got into the recovery inbox.
+ *     may be somebody who got into the sign-in or the recovery inbox.
  */
 import type { SignInWay } from "@/lib/auth";
 import { countryOf } from "@/lib/source-rules";
@@ -58,32 +98,74 @@ export const SIGN_IN_DAYS = 90;
 const DAY = 86_400_000;
 /** How far from the server's clock a sign-in's time may be and still count as of this moment. */
 const SKEW_MS = 60_000;
+/** The last moment a Date can hold (ECMAScript's time value limit): past it, nothing can be said about when. */
+const LAST_TIME = 8.64e15;
 
 export type SecondStep = "code" | "recovery" | "none";
-/** How a sign-in happened, as the history says it: lib/auth.ts's ways, and the two through the recovery address. */
-export type HistoryWay = SignInWay | "rescue" | "locked";
-export type SignInEntry = { at: number; way: HistoryWay; second: SecondStep; device: string; place: string };
+/**
+ * How a sign-in happened, as the history says it: lib/auth.ts's ways; "rescue",
+ * the recovery address's link that turned two-step login off; "locked", a
+ * session opened without the second step, through either address (see `via`);
+ * "move", the session the change of sign-in address opens.
+ */
+export type HistoryWay = SignInWay | "rescue" | "locked" | "move";
+/** Which address the way went through: the sign-in address, or the recovery address. */
+export type Via = "sign-in" | "recovery";
+export type SignInEntry = { at: number; way: HistoryWay; via: Via; second: SecondStep; device: string; place: string };
 
-const WAY_WORDS: Record<HistoryWay, string> = {
-  link: "with a login link",
-  passkey: "with a passkey",
-  invitation: "by accepting a team invitation",
-  google: "with Google",
-  rescue: "with a link sent to your recovery address, which turned two-step login off",
-  locked: "without two-step login, in a locked session",
+/** What each way is said as, and through which addresses it can come. A new way gets both, or the types refuse it. */
+const WAY_RULES: Record<HistoryWay, { via: readonly Via[]; words: (via: Via) => string }> = {
+  link: { via: ["sign-in", "recovery"], words: (via) => (via === "recovery" ? "with a login link sent to your recovery address" : "with a login link") },
+  passkey: { via: ["sign-in"], words: () => "with a passkey" },
+  invitation: { via: ["sign-in"], words: () => "by accepting a team invitation" },
+  google: { via: ["sign-in"], words: () => "with Google" },
+  rescue: { via: ["recovery"], words: () => "with a link sent to your recovery address, which turned two-step login off" },
+  locked: {
+    via: ["sign-in", "recovery"],
+    words: (via) =>
+      via === "recovery"
+        ? "without two-step login, through a link sent to your recovery address, in a locked session"
+        : "without two-step login, through your sign-in address, in a locked session",
+  },
+  move: { via: ["sign-in"], words: () => "with the link that changed your sign-in address" },
 };
-/** Every way the history knows, from the words for it: a new way gets words, or the types refuse it. */
-const WAYS = Object.keys(WAY_WORDS) as HistoryWay[];
-/** Ways that never take a second step: a passkey is its own check; an invitation opens a new account; the recovery ways go without it. */
-const ON_ITS_OWN: readonly HistoryWay[] = ["passkey", "invitation", "rescue", "locked"];
+const WAYS = Object.keys(WAY_RULES) as HistoryWay[];
+/** Ways that never take a second step: a passkey is its own check; an invitation opens a new account; the others go without it. */
+const ON_ITS_OWN: readonly HistoryWay[] = ["passkey", "invitation", "rescue", "locked", "move"];
 const SECONDS: readonly SecondStep[] = ["code", "recovery", "none"];
+
+/**
+ * The three paths of app/api/auth/lost/confirm, the "lost" link sent to the
+ * recovery address, as the history writes each (tests/sign-in-history-rules
+ * reads the route to hold them):
+ *   - "two-step": two-step login is on, so it leads to the code page with a
+ *     hold that says "through the recovery address"; a code there makes it a
+ *     login link via the recovery address with that code ("code" or
+ *     "recovery"), and the code page's reset, with no code ("none"), a
+ *     locked session via the recovery address.
+ *   - "locked": no two-step login and the recovery lock still running.
+ *   - "open": no two-step login and no lock: a full session, still a link
+ *     sent to the recovery address, never a plain login link.
+ */
+export function throughLostLink(path: "two-step" | "locked" | "open", second: SecondStep = "none"): Pick<SignInEntry, "way" | "via" | "second"> {
+  if (path === "two-step" && second !== "none") return { way: "link", via: "recovery", second };
+  if (path === "open") return { way: "link", via: "recovery", second: "none" };
+  return { way: "locked", via: "recovery", second: "none" };
+}
+
+/** A city's name: letters, each with at most two combining marks, and spaces, dots, apostrophes and hyphens, starting with a letter. */
+const CITY = String.raw`\p{L}\p{M}{0,2}(?:\p{L}\p{M}{0,2}|[ .'’-])*`;
+const CITY_ONLY = new RegExp(`^${CITY}$`, "u");
+const CITY_CHARS = 60;
+/** Kept only in the shape placeFrom writes: "City, CC", "CC" or a city alone. */
+const PLACE = new RegExp(`^(?:(${CITY})(?:, [A-Z]{2})?|[A-Z]{2})$`, "u");
 
 /**
  * The approximate place, from the hosting's headers (on Vercel,
  * x-vercel-ip-city, URL-encoded, and x-vercel-ip-country): "Fortaleza, BR",
- * "BR" with no city, "" with neither. Only letters, marks, spaces, dots,
- * apostrophes and hyphens in a city of up to 60 characters; a country of two
- * capital letters. Anything else is left out, never guessed.
+ * "BR" with no city, "" with neither. A city of up to 60 characters as CITY
+ * reads it; a country of two capital letters. Anything else is left out,
+ * never guessed.
  */
 export function placeFrom(city: string | null | undefined, country: string | null | undefined): string {
   let name = "";
@@ -94,7 +176,7 @@ export function placeFrom(city: string | null | undefined, country: string | nul
       name = "";
     }
     name = name.normalize("NFC").replace(/\s+/g, " ").trim();
-    if (!/^[\p{L}\p{M}][\p{L}\p{M} .'’-]{0,59}$/u.test(name)) name = "";
+    if (name.length > CITY_CHARS || !CITY_ONLY.test(name)) name = "";
   }
   // The same reading of a country the rest of the code makes (lib/source-rules.ts): two capital letters, never "XX" for unknown.
   const code = countryOf(typeof country === "string" ? country.trim().toUpperCase() : "");
@@ -105,18 +187,19 @@ export function placeFrom(city: string | null | undefined, country: string | nul
 export function readEntry(raw: unknown): SignInEntry | null {
   if (!raw || typeof raw !== "object") return null;
   const v = raw as Record<string, unknown>;
-  if (typeof v.at !== "number" || !Number.isSafeInteger(v.at) || v.at <= 0) return null;
+  if (typeof v.at !== "number" || !Number.isSafeInteger(v.at) || v.at <= 0 || v.at > LAST_TIME) return null;
   if (!WAYS.includes(v.way as HistoryWay) || !SECONDS.includes(v.second as SecondStep)) return null;
-  // A combination that cannot happen is not an entry.
-  if (ON_ITS_OWN.includes(v.way as HistoryWay) && v.second !== "none") return null;
+  const way = v.way as HistoryWay;
+  // A combination that cannot happen is not an entry: a way through an address it never uses, or a second step where none is taken.
+  if (!WAY_RULES[way].via.includes(v.via as Via)) return null;
+  if (ON_ITS_OWN.includes(way) && v.second !== "none") return null;
   const device = typeof v.device === "string" && /^[A-Za-z ]{1,40}$/.test(v.device) ? v.device : "";
   if (!device) return null;
-  // Kept only in the shape placeFrom writes: "City, CC", "CC" or a city alone.
-  const place = typeof v.place === "string" && PLACE.test(v.place) ? v.place : "";
-  return { at: v.at, way: v.way as HistoryWay, second: v.second as SecondStep, device, place };
+  const place = typeof v.place === "string" && v.place.length <= CITY_CHARS + 4 ? v.place : "";
+  const match = PLACE.exec(place);
+  const kept = match && (match[1] ?? "").length <= CITY_CHARS ? place : "";
+  return { at: v.at, way, via: v.via as Via, second: v.second as SecondStep, device, place: kept };
 }
-
-const PLACE = /^(?:[\p{L}\p{M}][\p{L}\p{M} .'’-]{0,59}(?:, [A-Z]{2})?|[A-Z]{2})$/u;
 
 /** The oldest `at` still kept and shown: anything at or before now - SIGN_IN_DAYS is gone. */
 function oldestKept(now: number): number {
@@ -133,7 +216,7 @@ function oldestKept(now: number): number {
 export function signInWrite(key: string, entry: SignInEntry, now: number): (string | number)[][] {
   const fresh = readEntry(entry);
   if (!fresh || Math.abs(fresh.at - now) > SKEW_MS) return [];
-  const member = JSON.stringify({ at: fresh.at, way: fresh.way, second: fresh.second, device: fresh.device, place: fresh.place });
+  const member = JSON.stringify({ at: fresh.at, way: fresh.way, via: fresh.via, second: fresh.second, device: fresh.device, place: fresh.place });
   return [
     ["ZADD", key, String(fresh.at), member],
     ["ZREMRANGEBYSCORE", key, "-inf", String(oldestKept(now) - 1)],
@@ -184,13 +267,20 @@ export const SIGN_IN_NOTES = [
 ] as const;
 
 /**
- * Said under the list when it holds a locked session: what such a session
- * could and could not do (lib/two-step.ts LOCKED_NEEDS, held in the test).
+ * Said under the list when it holds a locked session: everything such a
+ * session is held back from, and that the rest is open to it. The
+ * test holds it against lib/two-step.ts LOCKED_NEEDS (the studio's
+ * permissions, lib/studio-route.ts) and against every route that refuses a
+ * locked session on its own (app/api/auth/signout-all, passkey, two-step,
+ * recovery-address, app/api/store/address), so it never claims less or more.
  */
 export const LOCKED_NOTE = [
-  "A locked session can sell, edit or delete products and pages, answer buyers and see orders and your numbers.",
-  "It cannot change billing, payments, your team or settings.",
-  "It cannot delete your store, export or import lists, or send to your list.",
+  "A locked session got in without two-step login, so some things wait until its lock ends.",
+  "It cannot change your plan, your Stripe connection, your team or your store settings.",
+  "It cannot delete your store, download or import lists, or send email to your list.",
+  'It cannot use "Sign out everywhere", add a passkey or change two-step login.',
+  "It cannot change your recovery address or your sign-in address.",
+  "Everything else in your studio is open to it.",
 ] as const;
 
 /** The notes to show under a list: always where the facts come from, and what a locked session is when one is listed. */
@@ -198,16 +288,36 @@ export function historyNotes(entries: readonly SignInEntry[]): string[] {
   return [...SIGN_IN_NOTES, ...(entries.some((e) => e.way === "locked") ? LOCKED_NOTE : [])];
 }
 
+/** The country's English name, or "" when the code names none (never the bare code). */
+function countryName(code: string): string {
+  try {
+    const name = new Intl.DisplayNames(["en-US"], { type: "region" }).of(code);
+    return name && name !== code && name !== "Unknown Region" ? name : "";
+  } catch {
+    return "";
+  }
+}
+
+/** The place as shown: "Fortaleza, Brazil", "Brazil", or "" when nothing can be said. */
+function placeWords(place: string): string {
+  const match = /^(?:(.+), )?([A-Z]{2})$/u.exec(place);
+  if (!match) return place;
+  const country = countryName(match[2]);
+  return [match[1], country].filter(Boolean).join(", ");
+}
+
 /** One line of the list in the studio, in the creator's time zone (UTC when that is not one). */
 export function entryWords(entry: SignInEntry, timeZone: string): string {
-  const format = (zone: string) =>
-    new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: zone }).format(entry.at);
-  let when: string;
-  try {
-    when = format(timeZone);
-  } catch {
-    when = format("UTC");
+  let when = "time unknown";
+  for (const zone of [timeZone, "UTC"]) {
+    try {
+      when = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: zone }).format(entry.at);
+      break;
+    } catch {
+      // A zone that is not one, or a time no Date can hold: the next try, then "time unknown".
+    }
   }
-  const place = entry.place ? `near ${entry.place} (approximate)` : "place unknown";
-  return [when, entry.device, place, `${WAY_WORDS[entry.way]}${SECOND_WORDS[entry.second]}`].join(" · ");
+  const shown = placeWords(entry.place);
+  const place = shown ? `near ${shown} (approximate)` : "place unknown";
+  return [when, entry.device, place, `${WAY_RULES[entry.way].words(entry.via)}${SECOND_WORDS[entry.second]}`].join(" · ");
 }

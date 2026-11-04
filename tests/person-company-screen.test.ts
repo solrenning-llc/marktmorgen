@@ -51,7 +51,7 @@ is("the browser gets the rules, never the storage", screen.includes('from "@/lib
 part("On the person's page");
 const page = readFileSync("app/studio/people/page.tsx", "utf8");
 is("a named section with its heading", page.includes('aria-labelledby="company-title"') && page.includes('<h2 id="company-title"'), true);
-is("read with the page, and said when it cannot be", page.includes("readCompanies(store.statsId).catch(() => null)") && page.includes("This person&apos;s company could not be read just now."), true);
+is("read with the page, and said when it cannot be", page.includes("readPersonCompanies(store, profile.person).catch(() => null)") && page.includes("This person&apos;s company could not be read just now."), true);
 
 is("add and link uses the id the server made, never one guessed from the list (review A5)", (() => { const code = readFileSync("components/person-company.tsx", "utf8"); return code.includes("await link(made.added, ") && !code.includes("!companies.some((old) => old.id === c.id)"); })(), true);
 done();

@@ -101,7 +101,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
-import { MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_ADDRESS_BYTES, MAX_COMPANY_LISTED_BYTES, MAX_COMPANY_PEOPLE, MAX_COMPANY_RECORD_BYTES } from "@/lib/crm-companies-rules";
+import { MAX_COMPANIES_BYTES, MAX_COMPANY_RECORD_BYTES, STUDIO_UNIT_SENT_BYTES } from "@/lib/crm-companies-rules";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -300,16 +300,14 @@ export const PATH_BOARD_JOIN = request("heavy",70,30_000);
  */
 export const COMPANIES_REQUEST = request("heavy", 12 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES + 2 * MAX_COMPANY_RECORD_BYTES + 4_096) + MAX_COMPANIES_BYTES * ORIGIN_PER_BYTE;
 /**
- * The companies page at the most (app/studio/companies/page.tsx): a studio page that reads every company besides its
- * own reads, and sends them on with the address of everyone at them. Counted as STUDIO_PAGE_UNITS and
- * COMPANIES_PAGE_UNITS studio requests.
+ * A page's reading of every company at the most (the companies page, a person's page; 639 [GL7](4)): about a
+ * megabyte from the database and its studio requests counted. Counted as COMPANIES_READ_UNITS studio requests
+ * before it reads. What the page sends on is counted apart by its size (companiesSentUnits, STUDIO_UNIT_SENT_BYTES),
+ * and its reading of the buyers from Stripe as BUYER_LEDGER.
  */
-export const COMPANIES_PAGE = request("heavy", 80, 400_000 + MAX_COMPANIES_BYTES) + (MAX_COMPANIES_BYTES + MAX_COMPANIES * MAX_COMPANY_PEOPLE * MAX_COMPANY_ADDRESS_BYTES) * ORIGIN_PER_BYTE;
-/**
- * A person's page with their company (app/studio/people/page.tsx): every company read, and sent on by its id and
- * name only but the person's own (companiesForPerson). Within STUDIO_PAGE_UNITS.
- */
-export const PERSON_COMPANY_PAGE = request("heavy", 80, 400_000 + MAX_COMPANIES_BYTES) + (MAX_COMPANIES * MAX_COMPANY_LISTED_BYTES + MAX_COMPANY_RECORD_BYTES) * ORIGIN_PER_BYTE;
+export const COMPANIES_PAGE_READ = request("heavy", 4 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES);
+/** What sending STUDIO_UNIT_SENT_BYTES on to the browser costs: within one studio request. */
+export const STUDIO_UNIT_SENT = STUDIO_UNIT_SENT_BYTES * ORIGIN_PER_BYTE;
 /**
  * One reading of a store's buyers from the creator's Stripe account at the
  * most (lib/segments.ts, buyerLedger), when its ten-minute copy ran out: its

@@ -6,7 +6,8 @@ import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { CompaniesEditor } from "@/components/companies-editor";
-import { COMPANIES_PAGE_UNITS, readCompanies } from "@/lib/crm-companies";
+import { COMPANIES_READ_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, companiesSentUnits, readCompaniesAndUnreadable } from "@/lib/crm-companies";
+import { BUYER_LEDGER_UNITS } from "@/lib/segments";
 import { personAddresses } from "@/lib/person-agenda";
 
 export const metadata: Metadata = {
@@ -31,13 +32,19 @@ export default async function StudioCompaniesPage({ searchParams }: Params) {
   }
   const { view } = found;
   const { store } = view;
-  // Every company and the addresses of everyone at them, up to some megabytes: more than a studio page is priced at,
-  // so the page counts COMPANIES_PAGE_UNITS more studio requests first (tests/plan-cost-registry.ts, COMPANIES_PAGE).
-  const counted = await countStudio(store, null, COMPANIES_PAGE_UNITS).catch(() => null);
-  const companies = counted?.ok ? await readCompanies(store.statsId).catch(() => null) : null;
-  const people = new Set((companies ?? []).flatMap((c) => c.people));
-  const known = companies && people.size ? await personAddresses(store, people).catch(() => null) : null;
-  const shown = (companies ?? []).map((company) => ({ ...company, addresses: Object.fromEntries(company.people.flatMap((p) => (known?.addresses.get(p) ? [[p, known.addresses.get(p)!]] : []))) }));
+  // Every company read, about a megabyte at the most: COMPANIES_READ_UNITS studio requests first
+  // (tests/plan-cost-registry.ts, COMPANIES_PAGE_READ); the buyers read from Stripe only when their copy ran out
+  // (BUYER_LEDGER_UNITS); and what the page sends on, by its size, before it is drawn (companiesSentUnits).
+  const counted = await countStudio(store, null, COMPANIES_READ_UNITS).catch(() => null);
+  const read = counted?.ok ? await readCompaniesAndUnreadable(store.statsId).catch(() => null) : null;
+  const people = new Set((read?.companies ?? []).flatMap((c) => c.people));
+  const known = read && people.size ? await personAddresses(store, people, async () => (await countStudio(store, null, BUYER_LEDGER_UNITS)).ok).catch(() => null) : null;
+  const shown = (read?.companies ?? []).map((company) => ({ ...company, addresses: Object.fromEntries(company.people.flatMap((p) => (known?.addresses.get(p) ? [[p, known.addresses.get(p)!]] : []))) }));
+  const unreadable = read?.unreadable ?? [];
+  const sending = read ? companiesSentUnits(Buffer.byteLength(JSON.stringify(shown)) + unreadable.length * 16, (shown.length + unreadable.length) * COMPANY_MARKUP_BYTES + people.size * COMPANY_PERSON_MARKUP_BYTES) : 0;
+  const sent = read ? await countStudio(store, null, sending).catch(() => null) : null;
+  const companies = read && sent?.ok ? shown : null;
+  const refusal = [counted, sent].find((c) => c && !c.ok && c.message);
   return (
     <div className="min-h-screen bg-paper text-ink">
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store, "", "people"), label: "Back to buyers", short: "Buyers" }} />
@@ -59,10 +66,10 @@ export default async function StudioCompaniesPage({ searchParams }: Params) {
           {companies ? (
             <div className="mt-8">
               {people.size && !known ? <p className="notice notice-warn mb-6">Stripe could not be read just now, so who works at each company is not shown. Try again in a moment.</p> : null}
-              <CompaniesEditor initial={shown} peopleBase={studioPath(store, "", "people")} addressesRead={!people.size || Boolean(known)} addressesPartial={known?.partial ?? false} />
+              <CompaniesEditor initial={companies} unreadable={unreadable} peopleBase={studioPath(store, "", "people")} addressesRead={!people.size || Boolean(known)} addressesPartial={known?.partial ?? false} />
             </div>
           ) : (
-            <p className="notice notice-warn mt-8">{counted && !counted.ok && counted.message ? counted.message : "Your companies could not be read just now. Nothing was changed. Try again in a moment."}</p>
+            <p className="notice notice-warn mt-8">{refusal && !refusal.ok ? refusal.message : "Your companies could not be read just now. Nothing was changed. Try again in a moment."}</p>
           )}
         </main>
       </StudioStorePin>

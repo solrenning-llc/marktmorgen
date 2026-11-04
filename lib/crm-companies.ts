@@ -85,10 +85,27 @@ async function readStored(statsId: string): Promise<Stored> {
   return { companies: companies.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)).slice(0, MAX_COMPANIES), weights };
 }
 
+/** The ids of the records kept that cannot be read as companies (round 3, L3). */
+const unreadableOf = (stored: Stored) => {
+  const read = new Set(stored.companies.map((c) => c.id));
+  return [...stored.weights.keys()].filter((id) => !read.has(id)).sort();
+};
+
 /** Every company of the store, oldest first; none when they cannot be read. */
 export async function readCompanies(statsId: string | null): Promise<Company[]> {
   if (!statsId || !isRedisConfigured()) return [];
   return (await readStored(statsId)).companies;
+}
+
+/**
+ * Every company of the store, and the ids of the records kept that cannot be
+ * read as one: they still take a place among MAX_COMPANIES and room in the
+ * store, so the creator is shown them and can delete them.
+ */
+export async function readCompaniesAndUnreadable(statsId: string | null): Promise<{ companies: Company[]; unreadable: string[] }> {
+  if (!statsId || !isRedisConfigured()) return { companies: [], unreadable: [] };
+  const stored = await readStored(statsId);
+  return { companies: stored.companies, unreadable: unreadableOf(stored) };
 }
 
 const total = (weights: Map<string, number>) => [...weights.values()].reduce((sum, n) => sum + n, 0);
@@ -101,7 +118,7 @@ const total = (weights: Map<string, number>) => [...weights.values()].reduce((su
  * is written), given back when the lock was lost and nothing was written, or
  * after a written change that shrank it. False when the lock was lost.
  */
-async function writeChanges(statsId: string, held: Held, stored: Stored, after: readonly Company[], room: DataStore | null): Promise<boolean> {
+async function writeChanges(statsId: string, held: Held, stored: Stored, after: readonly Company[], room: DataStore | null, drop: readonly string[] = []): Promise<boolean> {
   const was = new Map(stored.companies.map((c) => [c.id, c]));
   const now = new Map(after.map((c) => [c.id, c]));
   const weights = new Map(stored.weights);
@@ -117,6 +134,12 @@ async function writeChanges(statsId: string, held: Held, stored: Stored, after: 
     if (now.has(company.id)) continue;
     weights.delete(company.id);
     pairs.push(company.id, "");
+  }
+  // Unreadable records deleted with the change (round 3, L3): only ones that are there, and never a company read.
+  for (const id of drop) {
+    if (!weights.has(id) || was.has(id) || now.has(id)) continue;
+    weights.delete(id);
+    pairs.push(id, "");
   }
   if (!pairs.length) return true;
   // What the change grows (or shrinks) the hash by, against what every record in it weighs as read under the lock.
@@ -140,7 +163,10 @@ async function writeChanges(statsId: string, held: Held, stored: Stored, after: 
  * another is being written ("busy"), or one whose lock ran out before its
  * write landed ("busy").
  */
-export async function changeCompanies(statsId: string, room: DataStore, change: (companies: Company[]) => CompanyResult): Promise<CompanyResult> {
+/** A change asked of the companies: given them and the ids of the unreadable records; it may delete some of those (`drop`). */
+export type CompanyChange = (companies: Company[], unreadable: readonly string[]) => CompanyResult | { ok: true; companies: Company[]; drop: string[] };
+
+export async function changeCompanies(statsId: string, room: DataStore, change: CompanyChange): Promise<CompanyResult> {
   let held: Held;
   try {
     held = await takeLock(lockKey(statsId), LOCK_SECONDS, 0);
@@ -150,9 +176,15 @@ export async function changeCompanies(statsId: string, room: DataStore, change: 
   }
   try {
     const stored = await readStored(statsId);
-    const result = change(stored.companies);
-    if (result.ok && !(await writeChanges(statsId, held, stored, result.companies, room))) return { ok: false, error: "busy" };
-    return result;
+    const unreadable = unreadableOf(stored);
+    const asked = change(stored.companies, unreadable);
+    if (!asked.ok) return asked;
+    const drop = "drop" in asked ? asked.drop : [];
+    // An unreadable record still takes its place: a change that adds a company counts them (round 3, L3).
+    const left = unreadable.filter((id) => !drop.includes(id)).length;
+    if (asked.companies.length > stored.companies.length && asked.companies.length + left > MAX_COMPANIES) return { ok: false, error: "full" };
+    if (!(await writeChanges(statsId, held, stored, asked.companies, room, drop))) return { ok: false, error: "busy" };
+    return { ok: true, companies: asked.companies };
   } finally {
     await releaseLock(held);
   }

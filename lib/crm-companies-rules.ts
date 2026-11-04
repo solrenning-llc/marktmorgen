@@ -29,16 +29,41 @@ export const MAX_COMPANIES_BYTES = MAX_COMPANIES * (MAX_COMPANY_RECORD_BYTES + 1
  * (tests/plan-cost-registry.ts, COMPANIES_REQUEST).
  */
 export const COMPANIES_REQUEST_UNITS = 3;
-/** The most one person's address and key weigh as the companies page sends them on, in bytes. */
-export const MAX_COMPANY_ADDRESS_BYTES = 320;
-/** The most one company weighs in a person's page, where only its id and name are sent (companiesForPerson). */
-export const MAX_COMPANY_LISTED_BYTES = 3 * MAX_COMPANY_NAME + 160;
 /**
- * Studio requests the companies page counts besides its own page: it reads
- * every company and sends them on with the address of everyone at them
- * (tests/plan-cost-registry.ts, COMPANIES_PAGE).
+ * Studio requests a page counts before it reads every company (the
+ * companies page, a person's page): about a megabyte from the database at
+ * the most (tests/plan-cost-registry.ts, COMPANIES_PAGE_READ). What it then
+ * sends on is counted apart, by its size (companiesSentUnits).
  */
-export const COMPANIES_PAGE_UNITS = 5;
+export const COMPANIES_READ_UNITS = 2;
+/**
+ * Bytes sent on to the browser that one studio request covers
+ * (tests/plan-cost-registry.ts holds it against the price of what a
+ * function sends on, ORIGIN_PER_BYTE).
+ */
+export const STUDIO_UNIT_SENT_BYTES = 1_000_000;
+/** The page's own markup around one company (its heading, buttons and lines), in bytes at the most. */
+export const COMPANY_MARKUP_BYTES = 1_500;
+/** A person's page's own markup around one company it offers to choose (an option), in bytes at the most. */
+export const COMPANY_OPTION_MARKUP_BYTES = 150;
+/** The page's own markup around one person at a company (their line, link and button), in bytes at the most. */
+export const COMPANY_PERSON_MARKUP_BYTES = 250;
+/**
+ * How many times what the page shows is sent: written in the page, then
+ * again, escaped, in what React reads to take it over (each quote and
+ * backslash written twice there).
+ */
+export const SENT_TIMES = 3;
+
+/**
+ * Studio requests what a page sends on costs, counted before it is drawn:
+ * the records it shows (`jsonBytes`, as JSON) SENT_TIMES over, and its own
+ * markup around them.
+ */
+export function companiesSentUnits(jsonBytes: number, markupBytes: number): number {
+  const sent = SENT_TIMES * Math.max(0, jsonBytes) + Math.max(0, markupBytes);
+  return Math.max(1, Math.ceil(sent / STUDIO_UNIT_SENT_BYTES));
+}
 const PERSON = PERSON_KEY;
 
 export type Company = { id: string; name: string; website: string; note: string; people: string[]; createdAt: number };
@@ -99,11 +124,14 @@ const seen = (value: string) => /[^\s\p{C}\p{M}\u115f\u1160\u3164\uffa0\u2800]/u
  * (sharp s is "ss", a final sigma is a sigma).
  */
 export function companyNameKey(name: string): string {
-  const plain = name.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/g, " ").trim();
+  // Fillers drawn as blank are a space; every sign Unicode says to ignore when drawing (zero-width signs, the
+  // combining grapheme joiner, variation selectors, tags) is taken out, so a name never differs only by them.
+  const plain = name.normalize("NFKC").replace(/[\u115f\u1160\u2800\u3164\uffa0]/g, " ").replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, "").replace(/\s+/g, " ").trim();
   // Each character folded on its own, as Unicode's full case folding does: the Turkish dotless ı has no folding
   // there and stays itself ("Ilık" and "Ilik" are two names), and İ folds to i with its dot ("İstanbul" and
   // "Istanbul" are two names too), never through the upper case, where ı would become I and then i.
-  return [...plain].map((ch) => (ch === "\u0131" ? ch : ch.toUpperCase().toLowerCase())).join("");
+  // The capital sharp S (U+1E9E) folds to "ss" as the small one does.
+  return [...plain].map((ch) => (ch === "\u0131" ? ch : ch === "\u1e9e" ? "ss" : ch.toUpperCase().toLowerCase())).join("");
 }
 
 /** What the creator typed for a company, made safe, or what is wrong with it. Never cut. */

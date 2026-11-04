@@ -12,7 +12,7 @@ import { PersonNotes } from "@/components/person-notes";
 import { PersonTasks } from "@/components/person-tasks";
 import { PersonCompany } from "@/components/person-company";
 import { readCompanies } from "@/lib/crm-companies";
-import { type Company, companiesForPerson } from "@/lib/crm-companies-rules";
+import { COMPANIES_READ_UNITS, COMPANY_OPTION_MARKUP_BYTES, type Company, companiesForPerson, companiesSentUnits } from "@/lib/crm-companies-rules";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
@@ -117,7 +117,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   const values = profile?.person ? await readValues(store.statsId, profile.person, fields) : {};
   // Tasks about this person (639 [GL7](6)), and who may be made responsible: the owner and teammates who can see orders.
   const [tasks, team, companies] = profile?.person
-    ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null), readCompanies(store.statsId).catch(() => null)])
+    ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null), readPersonCompanies(store, profile.person).catch(() => null)])
     : [null, null, null];
   const assignees = [store.email.toLowerCase(), ...(team?.members ?? []).filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())];
   // Deleting the person needs the page's token, never the address in a link (lib/person-erasure.ts).
@@ -195,6 +195,21 @@ function TasksAgendaWaiting() {
       <p className="mt-2 text-sm text-ink-soft" role="status">Reading your team&apos;s tasks…</p>
     </section>
   );
+}
+
+/**
+ * The companies a person's page offers, counted first (round 3, M2): every
+ * company read (COMPANIES_READ_UNITS studio requests, tests/plan-cost-registry.ts,
+ * COMPANIES_PAGE_READ), then what is sent on, by its size: the person's own
+ * company whole and the others by id and name (companiesForPerson). Null when
+ * either is not counted.
+ */
+async function readPersonCompanies(store: Store, person: string): Promise<Company[] | null> {
+  const read = await countStudio(store, null, COMPANIES_READ_UNITS);
+  if (!read.ok) return null;
+  const offered = companiesForPerson(await readCompanies(store.statsId), person);
+  const sent = await countStudio(store, null, companiesSentUnits(Buffer.byteLength(JSON.stringify(offered)), offered.length * COMPANY_OPTION_MARKUP_BYTES));
+  return sent.ok ? offered : null;
 }
 
 /**
@@ -495,7 +510,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
       <section aria-labelledby="company-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="company-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Company</h2>
         {profile.person && companies ? (
-          <PersonCompany key={profile.person} person={profile.person} initial={companiesForPerson(companies, profile.person)} />
+          <PersonCompany key={profile.person} person={profile.person} initial={companies} />
         ) : profile.person ? (
           <p className="mt-2 text-sm text-ink-soft" role="status">This person&apos;s company could not be read just now. Open this page again in a moment.</p>
         ) : null}

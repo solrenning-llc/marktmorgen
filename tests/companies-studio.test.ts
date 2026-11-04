@@ -37,7 +37,7 @@ is("at the most a store can keep, the add button says why it does nothing, besid
 const screen = readFileSync("components/companies-editor.tsx", "utf8");
 
 part("The AAA audit of 4 November 2026");
-is("C1: busy buttons are said to be, never switched off, and do nothing then", !/(?<![-\w])disabled=\{/.test(screen) && (screen.match(/aria-disabled=\{busy \|\| undefined\}/g) ?? []).length === 3 && (screen.match(/if \(busy\) return;/g) ?? []).length === 3 && screen.includes("if (!gone || busy) return;"), true);
+is("C1: busy buttons are said to be, never switched off, and do nothing then", !/(?<![-\w])disabled=\{/.test(screen) && (screen.match(/aria-disabled=\{busy \|\| undefined\}/g) ?? []).length === 4 && (screen.match(/if \(busy\) return;/g) ?? []).length === 4 && screen.includes("if (!gone || busy) return;"), true);
 is("C1: the focus is moved by refs once the change is drawn, never by a timer", screen.includes("useEffect(() => {") && screen.includes("}, [focusAsk]);") && !/setTimeout|requestAnimationFrame/.test(screen), true);
 is("C1: a delete takes the focus to Undo; an undo to the company put back; Cancel and a save to the Change button; an add to the name", screen.includes('focusAfterDrawing({ to: "undo" })') && screen.includes('focusAfterDrawing(back.added ? { to: "company", id: back.added } : { to: "list" })') && screen.includes('if (was) focusAfterDrawing({ to: "change", id: was })') && screen.includes('focusAfterDrawing(was ? { to: "change", id: was } : { to: "name" })'), true);
 is("C2: a refusal names its field, marked invalid and described by the message beside it", screen.includes('const FIELD_OF: Partial<Record<string, Field>> = { name: "name", taken: "name", website: "website", note: "note" };') && ["name", "website", "note"].every((field) => screen.includes(`aria-invalid={errorField === "${field}" || undefined}`)) && screen.includes("`${hint} company-${field}-error`") && screen.includes('className="field-error'), true);
@@ -57,7 +57,7 @@ is("Change takes the focus to the form it opens, and the website field has its l
 part("The page");
 const page = readFileSync("app/studio/companies/page.tsx", "utf8");
 is("for those who see the people's pages", page.includes('"orders");'), true);
-is("the people found among the buyers, never stored by address", page.includes("personAddresses(store, people)"), true);
+is("the people found among the buyers, never stored by address", page.includes("personAddresses(store, people, async () => (await countStudio(store, null, BUYER_LEDGER_UNITS)).ok)"), true);
 is("said when Stripe or the companies cannot be read", page.includes("Stripe could not be read just now, so who works at each company is not shown.") && page.includes("Your companies could not be read just now. Nothing was changed."), true);
 is("the editor told when Stripe could not be read, or read only in part", page.includes("addressesRead={!people.size || Boolean(known)}") && page.includes("addressesPartial={known?.partial ?? false}"), true);
 is("where it is said by a breadcrumb back to the buyers (2.4.8)", page.includes('<nav aria-label="Breadcrumb"') && page.includes('<li aria-current="page">Companies</li>') && page.includes('<Link href={studioPath(store, "", "people")} className="inline-flex min-h-11') && !page.includes('<p className="eyebrow">Buyers</p>'), true);

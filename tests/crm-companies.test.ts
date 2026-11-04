@@ -14,6 +14,8 @@ import { forgetCrmPerson } from "@/lib/crm";
 import {
   COMPANIES_REQUEST_UNITS,
   COMPANY_REFUSALS,
+  companiesSentUnits,
+  readCompaniesAndUnreadable,
   MAX_COMPANIES_BYTES,
   MAX_COMPANY_NOTE,
   MAX_COMPANY_RECORD_BYTES,
@@ -42,6 +44,7 @@ import { redisPipeline } from "@/lib/redis";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { dataKey } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { allowanceFor } from "@/lib/store-allowance-rules";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -90,6 +93,7 @@ async function main(): Promise<void> {
   // \u0131 has no folding there and stays itself, and \u0130 folds to i with a dot above, so neither is merged with
   // the plain i: names that differ only there are two names.
   is("the dotless \u0131 and the dotted \u0130 are kept apart from i, as full case folding does", [companyNameKey("Il\u0131k") === companyNameKey("Ilik"), companyNameKey("\u0130stanbul") === companyNameKey("Istanbul"), companyNameKey("IL\u0130K") === companyNameKey("il\u0069\u0307k")], [false, false, true]);
+  is("the capital sharp S folds to ss too, and signs Unicode ignores when drawing never make a name differ (round 3, L2)", [companyNameKey("STRA\u1e9eE AG") === companyNameKey("strasse ag"), companyNameKey("No\u034frth") === companyNameKey("North"), companyNameKey("North\ufe0f") === companyNameKey("North"), companyNameKey("North\u{E0100}") === companyNameKey("North"), companyNameKey("North\u3164School") === companyNameKey("North School"), companyNameKey("North\u2800School") === companyNameKey("North School"), companyNameKey("North\u115fSchool") === companyNameKey("North School")], [true, true, true, true, true, true, true]);
   // Round 2, L3: two companies kept before names were compared this way (only a folding apart) can still be edited.
   const twins = [base("aaaaaaaaaa", "Stra\u00dfe AG"), base("bbbbbbbbbb", "STRASSE AG")];
   is("a company whose name folds like another's can still have its note changed, or its name written another way", [editCompany(twins, "aaaaaaaaaa", { name: "Stra\u00dfe AG", note: "Pays by card" }).ok, editCompany(twins, "bbbbbbbbbb", { name: "Strasse AG" }).ok], [true, true]);
@@ -245,17 +249,50 @@ async function main(): Promise<void> {
   const keptRoom = (await slotOf()) - roomBefore;
   is("keeps the room it took, so the room never counts less than is kept", [failedAdd.status, keptRoom > 0, await weighs() <= (await slotOf())], [500, true, true]);
 
+  part("A record that cannot be read (round 3, L3)");
+  const hashKey = `nl:crm:co:${statsId}`;
+  await redisPipeline([["HSET", hashKey, "0123456789", "{not a company"]]);
+  const seen = await readCompaniesAndUnreadable(statsId);
+  is("it is told apart from the companies, so the creator can see it", [seen.unreadable, seen.companies.some((c) => c.id === "0123456789")], [["0123456789"], false]);
+  const filled = Array.from({ length: MAX_COMPANIES - seen.companies.length - 1 }, (_, i) => base(i.toString(16).padStart(10, "a"), `Filler ${i}`));
+  is("it still takes its place: the 300th company is refused while it is there", await changeCompanies(statsId, store, (companies) => ({ ok: true, companies: [...companies, ...filled, base("ffffffffff", "One More")] })), { ok: false, error: "full" });
+  const roomWith = await slotOf();
+  const dropped = await post({ action: "remove", id: "0123456789" });
+  is("and the creator can delete it, which gives back its room", [dropped.status, (await readCompaniesAndUnreadable(statsId)).unreadable, (await slotOf()) < roomWith], [200, [], true]);
+  is("an id that is neither a company nor a record kept is still unknown", (await post({ action: "remove", id: "9999999999" })).body.error, "unknown");
+  const editor = readFileSync("components/companies-editor.tsx", "utf8");
+  is("the companies page shows each such record with a button to delete it", editor.includes("Records that can't be read") && editor.includes("aria-label={`Delete unreadable record ${i + 1}`}") && readFileSync("app/studio/companies/page.tsx", "utf8").includes("unreadable={unreadable}"), true);
+
   part("What reading the companies costs (round 2, M2)");
   const worst = parseCompany({ id: "abcdef0123", name: "\u4e2d".repeat(MAX_COMPANY_NAME), website: "https://example.com/" + "a".repeat(MAX_COMPANY_WEBSITE - 21), note: "\u4e2d".repeat(MAX_COMPANY_NOTE), people: Array.from({ length: MAX_COMPANY_PEOPLE }, (_, i) => i.toString(16).padStart(32, "0")), createdAt: 4_102_444_800 });
   const quoted = parseCompany({ ...worst, name: '"'.repeat(MAX_COMPANY_NAME), note: "\\".repeat(MAX_COMPANY_NOTE) });
   is("the heaviest company kept weighs no more than MAX_COMPANY_RECORD_BYTES", [worst, quoted].map((c) => c !== null && Buffer.byteLength(JSON.stringify(c)) <= MAX_COMPANY_RECORD_BYTES), [true, true]);
   is("so every company weighs no more than MAX_COMPANIES_BYTES", MAX_COMPANIES_BYTES >= MAX_COMPANIES * (MAX_COMPANY_RECORD_BYTES + 10), true);
   const route = readFileSync("app/api/store/companies/route.ts", "utf8");
-  is("every companies request counts COMPANIES_REQUEST_UNITS studio requests before it reads them all", [COMPANIES_REQUEST_UNITS > 1, route.includes("countStudio(store, null, COMPANIES_REQUEST_UNITS - 1)"), (route.match(/if \(\(refused = await countRead\(store\)\)\) return refused;\n\s+result = await changeCompanies\(/g) ?? []).length, route.includes("const refused = await countRead(store);\n    if (refused) return refused;\n    const companies = await readCompanies(")], [true, true, 5, true]);
-  is("the companies page counts COMPANIES_PAGE_UNITS more first", readFileSync("app/studio/companies/page.tsx", "utf8").includes("countStudio(store, null, COMPANIES_PAGE_UNITS)"), true);
+  is("every companies request counts COMPANIES_REQUEST_UNITS studio requests before it reads them all", [COMPANIES_REQUEST_UNITS > 1, route.includes("countStudio(store, null, COMPANIES_REQUEST_UNITS - 1)"), (route.match(/if \(\(refused = await countRead\(store\)\)\) return refused;\n(?:\s+\/\/[^\n]*\n)*\s+result = await changeCompanies\(/g) ?? []).length, route.includes("const refused = await countRead(store);\n    if (refused) return refused;\n    const companies = await readCompanies(")], [true, true, 5, true]);
+  const companiesPage = readFileSync("app/studio/companies/page.tsx", "utf8");
+  is("the companies page counts its reading first, the buyers only when Stripe is read, and what it sends by its size before drawing it (round 3, M1/M2)", [companiesPage.indexOf("countStudio(store, null, COMPANIES_READ_UNITS)") < companiesPage.indexOf("readCompaniesAndUnreadable(store.statsId)"), companiesPage.includes("countStudio(store, null, BUYER_LEDGER_UNITS)"), companiesPage.includes("const sent = read ? await countStudio(store, null, sending)") && companiesPage.includes("const companies = read && sent?.ok ? shown : null;")], [true, true, true]);
+  is("what is sent is counted SENT_TIMES over with its markup, one studio request a megabyte", [companiesSentUnits(0, 0), companiesSentUnits(300_000, 100_000), companiesSentUnits(1_000_000, 0)], [1, 1, 3]);
   const slim = companiesForPerson([{ ...base("aaaaaaaaaa", "North"), note: "Big note", website: "https://north.example.com/", people: [b] }, { ...base("bbbbbbbbbb", "South"), note: "Theirs", people: [a] }], a);
   is("a person's page sends their own company whole and every other by its id and name", slim.map((c) => [c.name, c.note, c.website, c.people]), [["North", "", "", []], ["South", "Theirs", "", [a]]]);
-  is("as the people page does", readFileSync("app/studio/people/page.tsx", "utf8").includes("initial={companiesForPerson(companies, profile.person)}"), true);
+  const peoplePage = readFileSync("app/studio/people/page.tsx", "utf8");
+  is("as the people page does, counting its reading and what it sends first (round 3, M2)", peoplePage.includes("const offered = companiesForPerson(await readCompanies(store.statsId), person);") && peoplePage.indexOf("countStudio(store, null, COMPANIES_READ_UNITS)") < peoplePage.indexOf("await readCompanies(store.statsId)") && peoplePage.includes("companiesSentUnits(Buffer.byteLength(JSON.stringify(offered))"), true);
+
+  part("The studio requests a companies request takes (round 3, L6)");
+  const usedKey = () => redis.keys().find((k) => k.startsWith("nl:allow:studio:"));
+  const used = async () => { const k = usedKey(); return k ? Number((await redisPipeline([["GET", k]]))[0] ?? 0) : 0; };
+  const beforeOne = await used();
+  await post({ action: "add", name: "Counted School" });
+  is("one change takes COMPANIES_REQUEST_UNITS studio requests: its own and what reading every company costs", (await used()) - beforeOne, COMPANIES_REQUEST_UNITS);
+  const beforeGet = await used();
+  await get();
+  is("and so does a reading of them", (await used()) - beforeGet, COMPANIES_REQUEST_UNITS);
+  const limit = allowanceFor(store, "studio");
+  await redisPipeline([["SET", usedKey()!, String(limit - 1)]]);
+  const spent = await post({ action: "add", name: "Over School" });
+  is("when only the request itself fits, the change is refused as used, reads nothing and keeps nothing", [spent.status, spent.body.error, (await readCompanies(statsId)).some((c) => c.name === "Over School")], [429, "studio_used", false]);
+  await redisPipeline([["SET", usedKey()!, "0"]]);
+  for (const c of await readCompanies(statsId)) if (c.name === "Counted School") await post({ action: "remove", id: c.id });
 
   part("An edit through the route keeps what it leaves out (edge review)");
   await post({ action: "edit", id, name: "North School", website: "north.example.com", note: "Pays by invoice" });

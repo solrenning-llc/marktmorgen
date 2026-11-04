@@ -24,8 +24,11 @@ export function CompaniesEditor({
   peopleBase,
   addressesRead = true,
   addressesPartial = false,
+  unreadable: unreadableAtFirst = [],
 }: {
   initial: Shown[];
+  /** Records kept that cannot be read as a company: each still takes a place among MAX_COMPANIES, and can be deleted. */
+  unreadable?: string[];
   peopleBase: string;
   /** False when Stripe could not be read, so nobody's address is known just now. */
   addressesRead?: boolean;
@@ -34,6 +37,7 @@ export function CompaniesEditor({
 }) {
   const peopleHref = (person: string) => `${peopleBase}${peopleBase.includes("?") ? "&" : "?"}who=${person}`;
   const [companies, setCompanies] = useState(initial);
+  const [unreadable, setUnreadable] = useState(unreadableAtFirst);
   const [form, setForm] = useState({ name: "", website: "", note: "" });
   const [editing, setEditing] = useState<string | null>(null);
   const [gone, setGone] = useState<Shown | null>(null);
@@ -54,7 +58,7 @@ export function CompaniesEditor({
   const listTitle = useRef<HTMLHeadingElement>(null);
   const changeButtons = useRef(new Map<string, HTMLButtonElement>());
   const headings = useRef(new Map<string, HTMLHeadingElement>());
-  const full = !editing && companies.length >= MAX_COMPANIES;
+  const full = !editing && companies.length + unreadable.length >= MAX_COMPANIES;
 
   function focusAfterDrawing(next: FocusTo) {
     focusNext.current = next;
@@ -145,6 +149,15 @@ export function CompaniesEditor({
     setForm({ name: "", website: "", note: "" });
     clearError();
     if (was) focusAfterDrawing({ to: "change", id: was });
+  }
+
+  /** A record that cannot be read deleted, so its place is free again (round 3, L3); nothing to undo, since nothing of it could be shown. */
+  async function removeUnreadable(id: string) {
+    if (busy) return;
+    if (await send({ action: "remove", id }, "The record that could not be read is deleted.")) {
+      setUnreadable((left) => left.filter((other) => other !== id));
+      focusAfterDrawing({ to: "list" });
+    }
   }
 
   async function remove(company: Shown) {
@@ -349,6 +362,25 @@ export function CompaniesEditor({
           <p className="mt-2 text-sm text-ink-soft">No companies yet. Add the first one above, or from a person&apos;s page.</p>
         )}
       </section>
+      {unreadable.length ? (
+        <section aria-labelledby="unreadable-title" className="card p-6 sm:p-8">
+          <h2 id="unreadable-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Records that can't be read (${unreadable.length})`}</h2>
+          <p className="mt-2 text-sm text-ink-soft">
+            {unreadable.length === 1 ? "A company record was saved here that can't be read now. It still takes one of your " : "Some company records were saved here that can't be read now. Each still takes one of your "}
+            {`${MAX_COMPANIES} places. Delete ${unreadable.length === 1 ? "it" : "them"} to free ${unreadable.length === 1 ? "its place" : "their places"}.`}
+          </p>
+          <ul className="mt-4 space-y-3">
+            {unreadable.map((id, i) => (
+              <li key={id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-paper p-4 text-sm ring-1 ring-line">
+                <span>{`Unreadable record ${i + 1}`}</span>
+                <button type="button" className="btn btn-ghost btn-sm" aria-disabled={busy || undefined} aria-label={`Delete unreadable record ${i + 1}`} onClick={() => void removeUnreadable(id)}>
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

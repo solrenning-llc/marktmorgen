@@ -1,7 +1,7 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
-import { COMPANIES_PAGE, COMPANIES_REQUEST, PERSON_COMPANY_PAGE } from "./plan-cost-registry";
-import { COMPANIES_PAGE_UNITS, COMPANIES_REQUEST_UNITS } from "@/lib/crm-companies-rules";
+import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
+import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, companiesSentUnits } from "@/lib/crm-companies-rules";
 import { AGENDA_READ, BUYER_LEDGER } from "./plan-cost-registry";
 import { AGENDA_UNITS } from "@/lib/person-agenda";
 import { BUYER_LEDGER_UNITS } from "@/lib/segments";
@@ -250,9 +250,15 @@ test("Path page and its actual usage count fit its reserved studio page", () => 
 test("a companies request fits its studio requests, and each page that reads every company fits what it counts", () => {
  assert.ok(COMPANIES_REQUEST <= UNIT_COST.studio * COMPANIES_REQUEST_UNITS, `${COMPANIES_REQUEST} > ${COMPANIES_REQUEST_UNITS} x ${UNIT_COST.studio}`);
  assert.ok(COMPANIES_REQUEST > UNIT_COST.studio * (COMPANIES_REQUEST_UNITS - 1), "fewer studio requests would be enough: lower COMPANIES_REQUEST_UNITS");
- assert.ok(COMPANIES_PAGE <= UNIT_COST.studio * (STUDIO_PAGE_UNITS + COMPANIES_PAGE_UNITS), `${COMPANIES_PAGE} > ${STUDIO_PAGE_UNITS + COMPANIES_PAGE_UNITS} x ${UNIT_COST.studio}`);
- assert.ok(COMPANIES_PAGE > UNIT_COST.studio * (STUDIO_PAGE_UNITS + COMPANIES_PAGE_UNITS - 1), "fewer studio requests would be enough: lower COMPANIES_PAGE_UNITS");
- assert.ok(PERSON_COMPANY_PAGE <= UNIT_COST.studio * STUDIO_PAGE_UNITS, `${PERSON_COMPANY_PAGE} > ${STUDIO_PAGE_UNITS} x ${UNIT_COST.studio}`);
+ assert.ok(COMPANIES_PAGE_READ <= UNIT_COST.studio * COMPANIES_READ_UNITS, `${COMPANIES_PAGE_READ} > ${COMPANIES_READ_UNITS} x ${UNIT_COST.studio}`);
+ assert.ok(COMPANIES_PAGE_READ > UNIT_COST.studio * (COMPANIES_READ_UNITS - 1), "fewer studio requests would be enough: lower COMPANIES_READ_UNITS");
+ // What a page sends on is counted by its size: one studio request for each STUDIO_UNIT_SENT_BYTES.
+ assert.ok(STUDIO_UNIT_SENT <= UNIT_COST.studio, `${STUDIO_UNIT_SENT} > ${UNIT_COST.studio}`);
+ // The companies page at its most (every company, every person at them with an address of 254 characters): the
+ // records written in the page and again for React, and the markup around them.
+ const sent = companiesSentUnits(MAX_COMPANIES_BYTES + MAX_COMPANIES * MAX_COMPANY_PEOPLE * 320, MAX_COMPANIES * COMPANY_MARKUP_BYTES + MAX_COMPANIES * MAX_COMPANY_PEOPLE * COMPANY_PERSON_MARKUP_BYTES);
+ assert.ok(sent >= 17, `the fullest companies page sends ${sent} studio requests' worth: never less than the review's 17`);
+ console.log(`the fullest companies page: ${STUDIO_PAGE_UNITS} + ${COMPANIES_READ_UNITS} + ${sent} studio requests, and its reading of the buyers when Stripe is read`);
 });
 
 test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {

@@ -96,7 +96,8 @@ export async function POST(request: NextRequest) {
       if (result.ok && body.action === "add") return Response.json({ ok: true, companies: result.companies, added: madeId }, { headers: NO_STORE });
     } else if (body.action === "remove") {
       if ((refused = await countRead(store))) return refused;
-      result = await changeCompanies(statsId, store, (companies) => dropCompany(companies, id));
+      // A record that cannot be read is deleted the same way, so the creator can free its place (round 3, L3).
+      result = await changeCompanies(statsId, store, (companies, unreadable) => (unreadable.includes(id) ? { ok: true, companies, drop: [id] } : dropCompany(companies, id)));
     } else if (body.action === "link") {
       if (!PERSON.test(person)) return refuse("unknown");
       if ((refused = await countRead(store))) return refused;

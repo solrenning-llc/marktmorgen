@@ -180,6 +180,19 @@ export const COMMANDS = {
    */
   feedFirst: 13,
   feed: 9,
+  /**
+   * A signal that is not a page (app/api/store/hit, k "l", "a" or "f"): a
+   * click on one of the store's links, an arrival through an affiliate's
+   * link, a step of a funnel. Measured on the path that counts (4 November
+   * 2026, independent review of #1496), by a visitor signed in to another
+   * store, whose session is read, with an approved affiliate and a funnel's
+   * real step, each taking its place on the store's count of signals
+   * (lib/traffic.ts, takeSignal): held in tests/traffic.test.ts at the
+   * heaviest of the three, never more than two over it. 15 measured for a
+   * link's click (its count script billed with what it runs), 13 for an
+   * affiliate's visit and 10 for a funnel's step.
+   */
+  signal: 15,
 };
 
 /**
@@ -210,6 +223,8 @@ export const EVALS = {
   laterCount: 1,
   /** A reading of a page (lib/page-depth.ts): 1 measured. */
   readBeacon: 1,
+  /** A signal that is not a page: a link's click is one count script, an affiliate's visit and a funnel's step none. */
+  signal: 1,
 };
 const evalCost = (n: number) => n * EVAL_BYTES * DB_BYTE;
 
@@ -222,8 +237,9 @@ const evalCost = (n: number) => n * EVAL_BYTES * DB_BYTE;
  * sends (app/api/store/hit) once more, and the live room's leave once
  * (app/api/store/community/chat). A reading of a page does not read it.
  */
-export const STORE_READS = { page: 1, count: 1, roomLeave: 1 };
+export const STORE_READS = { page: 1, count: 1, roomLeave: 1, signal: 1 };
 const storeReadCost = (n: number) => n * MAX_STORE_BYTES * DB_BYTE;
+
 
 /**
  * The busy-day email (lib/stats-report.ts, maybeBusyAlert), asked by a
@@ -317,6 +333,28 @@ export function visitCost(): number {
  */
 export function laterPageCost(): number {
   return (1 + 1 + PICTURES_ON_A_LATER_PAGE) * CDN_PER_REQUEST + (COMMANDS.laterPage + COMMANDS.laterCount) * COMMAND + evalCost(EVALS.laterCount) + storeReadCost(STORE_READS.page + STORE_READS.count) + PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE;
+}
+
+/**
+ * What a signal reads from the database besides the store's record and the
+ * count script's answer, at the most: the session of a visitor signed in
+ * elsewhere, a funnel at its most steps and names, an approved affiliate.
+ * 893 bytes measured at the most (a funnel's step), held in
+ * tests/traffic.test.ts; priced at 8,000, room for an affiliate's record with
+ * every field it can carry.
+ */
+export const SIGNAL_READ_BYTES = 8_000;
+
+/**
+ * One signal that is not a page (app/api/store/hit, k "l", "a", "f"): its
+ * request at the CDN, the call, its commands, its count script, the store's
+ * record and what else it reads, a hundredth of a second of work, memory held
+ * while the database is waited on, and an empty answer. Priced on its own
+ * line, SIGNALS_PER_VISIT for each visit of a plan's figure
+ * (tests/plan-cost-registry.ts, signals).
+ */
+export function signalCost(): number {
+  return CDN_PER_REQUEST + CALL + COMMANDS.signal * COMMAND + evalCost(EVALS.signal) + storeReadCost(STORE_READS.signal) + SIGNAL_READ_BYTES * DB_BYTE + 0.01 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
 }
 
 /**

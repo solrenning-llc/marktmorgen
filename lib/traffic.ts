@@ -9,6 +9,7 @@
  *   nl:traffic:x:<folder>:<window>   the live room, in hundredths of a visit
  *   nl:traffic:r:<folder>:<window>   pages drawn and public requests answered
  *   nl:traffic:c:<folder>:<window>   each connection's share of them, by day (MM-SA-01)
+ *   nl:traffic:s:<folder>:<window>   signals that are not a page: link clicks, affiliate arrivals, funnel steps
  *   nl:traffic:folders:<month>       the stores that had any, that calendar month
  *
  * The window is the store's billing month when it pays us, and the calendar
@@ -42,13 +43,14 @@ import { admitNonPaying } from "@/lib/free-pool";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { deriveKey } from "@/lib/secret-box";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
-import { PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, publicVisitLimit, requestLimitFor, shareAddress, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
+import { PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, publicVisitLimit, requestLimitFor, shareAddress, signalLimitFor, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
 
 const dayKey = (folder: string, day: string) => `nl:traffic:day:${folder}:${day}`;
 const countKey = (folder: string, month: string) => `nl:traffic:n:${folder}:${month}`;
 const partsKey = (folder: string, month: string) => `nl:traffic:x:${folder}:${month}`;
 const requestsKey = (folder: string, window: string) => `nl:traffic:r:${folder}:${window}`;
 const shareKey = (folder: string, window: string) => `nl:traffic:c:${folder}:${window}`;
+const signalsKey = (folder: string, window: string) => `nl:traffic:s:${folder}:${window}`;
 const foldersKey = (month: string) => `nl:traffic:folders:${month}`;
 
 /** A day's set is kept until the day after it is over, and a little longer. */
@@ -288,6 +290,38 @@ export async function takePublicRequest(store: Store, who: "public" | "buyer" = 
     if (!window) return false;
     if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
     return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, await askingConnection());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One more signal that is not a page (app/api/store/hit: a click on one of
+ * the store's links, an arrival through an affiliate's link, a step of a
+ * funnel), counted in the store's window on a count of its own: true when it
+ * fits under signalLimitFor (lib/traffic-rules.ts). Never one of the requests
+ * the store's pages are drawn from, so these never bring its pages to rest;
+ * past the figure the signal is simply not counted. A store that pays nothing
+ * counts one only while it holds one of the month's places, as its requests
+ * (lib/free-pool.ts). A count that cannot be made is a signal not counted.
+ */
+export async function takeSignal(store: Store, now = Date.now()): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  try {
+    const window = allowanceWindow(store, now);
+    if (!window) return false;
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
+    const limit = signalLimitFor(store, now / 1000);
+    if (!Number.isSafeInteger(limit) || limit <= 0) return false;
+    const folder = await storeFolder(storeRef(store));
+    if (!FOLDER_PATTERN.test(folder)) return false;
+    if (!(await admitNonPaying(store, now))) return false;
+    const key = signalsKey(folder, window.id);
+    const [count] = await redisPipeline([["INCR", key]]);
+    const n = Number(count);
+    if (!Number.isSafeInteger(n) || n < 1) return false;
+    if (n === 1) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
+    return n <= limit;
   } catch {
     return false;
   }

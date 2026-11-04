@@ -844,6 +844,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:traffic:folders:@lib/traffic.ts": company("The stores with visits, a month", "One set a month for every store."),
   "nl:traffic:n:@lib/traffic.ts": { what: "Visits in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:traffic:r:@lib/traffic.ts": { what: "Requests in the window", parts: [capped(2 * KEY, "One a window.")] },
+  "nl:traffic:s:@lib/traffic.ts": { what: "Signals that are not a page in the window: link clicks, affiliate arrivals, funnel steps", parts: [capped(2 * KEY, "One a window.")] },
   "nl:traffic:x:@lib/traffic.ts": { what: "The live room in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:nudge:@lib/trial-nudges.ts": company("A trial's nudges sent", "The company's emails to a creator about their own plan."),
   "nl:2fa:@lib/two-step.ts": company("An account's second step", "An account's."),

@@ -145,6 +145,33 @@ export function requestLimitFor(store: PlanFields & { tier?: Tier }, nowSeconds 
 }
 
 /**
+ * What a store's pages say happened that is not a page of a visit
+ * (app/api/store/hit, kinds "l", "a" and "f"): a click on one of its links,
+ * an arrival through an affiliate's link and a step of a funnel of pages.
+ * Counted in the store's window on a count of their own (lib/traffic.ts,
+ * takeSignal; 4 November 2026, independent review of #1496), never against
+ * the requests its pages are drawn from, so a funnel or a link-in-bio never
+ * brings a store's pages to rest sooner than the visits its plan prints.
+ * Past them a signal is simply not counted; nothing rests.
+ *
+ * Six for each visit of the plan's figure, the fewest that covers a whole
+ * funnel and a link-in-bio in the same visit: a visit is sized at three pages
+ * (REQUESTS_PER_VISIT), and each page of a funnel sends one step, so a visit
+ * that walks a three-page funnel sends three; it can have come through an
+ * affiliate's link, one more; and somebody who opens a store as a link in
+ * bio clicks one or two of its links, two more. The count is the store's
+ * for the window, not each visit's, so a visit that sends more is paid for
+ * by the many that send none. Each is priced at what it costs on its own
+ * line (tests/plan-cost-registry.ts, signals).
+ */
+export const SIGNALS_PER_VISIT = 6;
+
+/** The signals a store's window holds: SIGNALS_PER_VISIT for each visit of its figure. */
+export function signalLimitFor(store: PlanFields & { tier?: Tier }, nowSeconds = Date.now() / 1000): number {
+  return SIGNALS_PER_VISIT * visitLimitFor(store, nowSeconds);
+}
+
+/**
  * The most of a store's window one connection may take in a day (added 18
  * October 2026; docs/security-audit-2026-10-18.md, MM-SA-01).
  *

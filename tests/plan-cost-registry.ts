@@ -45,9 +45,9 @@
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
-import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
+import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, SIGNALS_PER_VISIT, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
-import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
+import { TRIAL_DAYS, TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
@@ -93,7 +93,7 @@ import {
   UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { PAGES_PER_VISIT, busyDayCommands, busySendFunctionCost, laterPageCost, visitCost } from "./traffic-cost";
+import { PAGES_PER_VISIT, busyDayCommands, busySendFunctionCost, laterPageCost, signalCost, visitCost } from "./traffic-cost";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -377,6 +377,17 @@ export const COST_LINES: CostLine[] = [
     basis: "Asked by a store's views at 64, 128, 256 and so on in a day, which no plan figure bounds: every day of the month at every power of two a day's count can reach, the fortnight before read once a day, its one email a day at the company's cost, the time its send holds the view's function, and the site's one notice a day when Amazon refuses (tests/traffic-cost.ts, BUSY; measured in tests/numbers-three.test.ts on Resend, read from the code for Amazon). A line of its own, so a cut to the visits never takes it off.",
   },
   {
+    id: "signals",
+    feature: "Signals that are not a page: a click on one of the store's links, a visit through an affiliate's link, a step of a funnel of pages (counted on their own since 4 November 2026)",
+    monthlyUsd: (tier) => SIGNALS_PER_VISIT * VISITS_INCLUDED[tier] * signalCost(),
+    sources: [
+      { file: "lib/traffic-rules.ts", names: ["SIGNALS_PER_VISIT", "signalLimitFor"] },
+      { file: "lib/traffic.ts", names: ["takeSignal", "signalsKey"] },
+      { file: "app/api/store/hit/route.ts", names: ["takeSignal(store)"] },
+    ],
+    basis: "Each takes one of the store's signals before it is counted (lib/traffic.ts, takeSignal), after everything that costs nothing has passed and the store's own people are known not to be looking, and past SIGNALS_PER_VISIT for each visit of the plan's figure it is not counted: a count of its own, never the requests the store's pages are drawn from, so a funnel or a link in bio never brings the pages to rest before the printed visits. Every one at what the heaviest of the three is measured to cost on the path that counts (tests/traffic.test.ts; tests/traffic-cost.ts, signalCost). Until 4 November 2026 they were bounded only by each address's allowance.",
+  },
+  {
     id: "orders",
     feature: "Orders (checkouts, carts, offers after paying, PayPal orders, places, free copies; since 17 October 2026 call packages, and each booked call as CALL_ORDER_UNITS; since 18 October 2026 each paid payment request)",
     monthlyUsd: (tier) => ORDERS_INCLUDED[tier] * ORDER_COST,
@@ -580,10 +591,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
-      // A click on a store's link, an affiliate's visit and a funnel's step each take one before they are counted (4 November 2026).
-      { file: "app/api/store/hit/route.ts", names: ["takePublicRequest(store)"] },
     ],
-    basis: "A click on one of a store's links, a visit through an affiliate's link and a step of a funnel of pages (app/api/store/hit) each take one of the window's requests before they are counted, and are not counted past them (4 November 2026); each costs less than a later page, held in tests/traffic.test.ts. An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
+    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
   },
   {
     id: "studio",
@@ -847,13 +856,15 @@ export function nonPayingWorst(): number {
   const allowances = NON_PAYING_ALLOWANCES.trial;
   const requests = (REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * (REQUEST_COMMANDS + 1) * COMMAND + TRIAL_EXTRA_REQUESTS * laterPageCost();
   return TRIAL_VISITS * visitCost()
-    // The busy-day email its views can ask for, on each of the fifteen UTC days a trial touches.
-    + 15 * busyDayCost()
+    // The busy-day email its views can ask for, on each UTC day a trial touches: its TRIAL_DAYS and the one it starts in.
+    + (TRIAL_DAYS + 1) * busyDayCost()
+    // Its signals that are not a page (signals), SIGNALS_PER_VISIT for each of the trial's visits.
+    + SIGNALS_PER_VISIT * TRIAL_VISITS * signalCost()
     + requests
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
     + TRIAL_VIDEO_HOURS * hourCost()
-    + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
+    + TRIAL_DAILY_RUNS * (TRIAL_DAYS + 1) * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // Its students' work and its community's pictures, kept for the trial and then to its closing day (lib/plan-closing.ts).

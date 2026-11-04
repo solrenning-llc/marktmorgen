@@ -73,6 +73,9 @@ const centsUp = (usd: number) => Math.ceil(Math.round(usd * 1e7) / 1e5);
 export function usageCents(tier: Tier, cycle: Cycle, share: Partial<Record<Printed, number>>): number {
   let monthly = COST_LINES.reduce((sum, line) => sum + line.monthlyUsd(tier), 0);
   for (const id of ORDER) monthly -= lineUsd(tier, id) * (1 - (share[id] ?? 1));
+  // A store's signals that are not a page are SIGNALS_PER_VISIT for each visit of its figure (lib/traffic-rules.ts,
+  // signalLimitFor): they follow the visits line wherever it is put (4 November 2026).
+  monthly -= lineUsd(tier, "signals") * (1 - (share.visits ?? 1));
   // Only the plan's storage is taken off what is kept after the end; anything else a cut might save there is left in, so a proposal never counts on it.
   const after = perPaymentCost(tier) - retainedStorageUsd(tier) * (1 - (share.storage ?? 1));
   return centsUp(months(cycle) * monthly + after);

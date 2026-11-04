@@ -7,7 +7,8 @@ import { funnelMark, stepIndex } from "@/lib/page-funnel";
 import { countFunnelStep, funnelVisitor, readPageFunnel } from "@/lib/page-funnel-store";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { productIdFor } from "@/lib/catalog";
-import { takePublicRequest } from "@/lib/traffic";
+import { takeSignal } from "@/lib/traffic";
+import { affiliatesOn } from "@/lib/affiliates";
 
 const MAX_BODY_BYTES = 1_500;
 
@@ -72,27 +73,34 @@ export async function POST(request: NextRequest) {
   } else if (kind === "l") {
     // A click on one of the store's links, an affiliate's visit and a
     // funnel's step are not a page of a visit: each takes one of the store's
-    // public requests before it is counted (4 November 2026; until then they
-    // were bounded only by the address's allowance), and past them it is not
-    // counted (tests/plan-cost-registry.ts, public-requests).
+    // signals (lib/traffic.ts, takeSignal; lib/traffic-rules.ts,
+    // SIGNALS_PER_VISIT) once everything that costs nothing has passed and the
+    // store's own people are known not to be the ones looking, and past them
+    // it is simply not counted (4 November 2026, independent review of #1496;
+    // until then they were bounded only by the address's allowance). Never the
+    // requests the store's pages are drawn from: these never bring its pages
+    // to rest.
     const id = read("id", 40);
-    if (store.links.some((link) => link.id === id) && (await takePublicRequest(store))) await countHit(request, store, { kind: "link", id });
+    if (store.links.some((link) => link.id === id) && !isBot(request.headers.get("user-agent") ?? "")) {
+      await countHit(request, store, { kind: "link", id }, () => takeSignal(store));
+    }
   } else if (kind === "f") {
     // A step of a funnel of pages was opened (lib/page-funnel.ts): one person
     // once for that step, never the store's own people, and only for a page
     // or product that is one of the funnel's steps.
-    if (!(await takePublicRequest(store))) return done();
+    const userAgent = request.headers.get("user-agent") ?? "";
+    if (!store.statsId || isBot(userAgent)) return done();
     const funnel = await readPageFunnel(store.statsId, funnelMark(read("f", 10))).catch(() => null);
     const step = read("t", 1) === "g" ? "page" : "product";
     const index = funnel?.on ? stepIndex(funnel, step, read("id", 40)) : -1;
-    const userAgent = request.headers.get("user-agent") ?? "";
-    if (funnel && index >= 0 && store.statsId && !isBot(userAgent) && !(await isStorePeople(request, store))) {
+    if (funnel && index >= 0 && !(await isStorePeople(request, store)) && (await takeSignal(store))) {
       await countFunnelStep(store.statsId, funnel, index, funnelVisitor(store.statsId, funnel.id, clientAddress(request), userAgent));
     }
   } else if (kind === "a") {
     // A visit through an affiliate's link: counted for them, once a day.
     // `p`: the link was reached from a paid search ad (components/affiliate-click.tsx), counted apart.
-    if (await takePublicRequest(store)) await countAffiliateClick(request, store, read("c", 20).toLowerCase(), read("p", 2) === "1");
+    const code = read("c", 20).toLowerCase();
+    if (code && affiliatesOn(store)) await countAffiliateClick(request, store, code, read("p", 2) === "1", () => takeSignal(store));
   }
   return done();
 }

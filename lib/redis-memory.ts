@@ -181,6 +181,19 @@ export class MemoryRedis {
           this.run(["DEL", target]); removeDue(); return 1;
         }
 
+        // lib/review-ai-summary.ts KEEP_REVIEW_SUMMARY: the summary and its week kept only while the reviews' mark is the one read.
+        if (key.startsWith("-- marktmorgen:review-summary-keep:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, mark, summary, last, lock, expected, value, seconds, at, mine] = args;
+          this.live(mark); this.live(lock);
+          const held = this.data.get(mark), locked = this.data.get(lock);
+          if ((held !== undefined && typeof held !== "string") || (locked !== undefined && typeof locked !== "string")) throw new Error("WRONGTYPE");
+          if ((held ?? "-") !== expected) return 0;
+          if (locked !== mine) return 0;
+          this.run(["SET", summary, value, "EX", seconds]);
+          this.run(["SET", last, at, "EX", seconds]);
+          return 1;
+        }
+
         if (key.startsWith("-- marktmorgen:ab-sale:v1\n") && args[0] === "2" && args.length === 6) {
           const [, target, marker, version, rawCents, rawSquare] = args;
           this.live(target); this.live(marker);

@@ -99,7 +99,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
-  "nl:rsum:", "nl:rsum:lock:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:sweep:cursor", "nl:tasks:bytes:", "nl:tasks:doors",
+  "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:sweep:cursor", "nl:tasks:bytes:", "nl:tasks:doors",
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:x:", "nl:upd:job:",
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
@@ -371,7 +371,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:verified:": E, "nl:verified:cursor": C,
   "nl:voice:": E, "nl:voice:lock:": E,
   // A product's AI summary of its reviews (lib/review-ai-summary.ts): kept eight days, and goes with the store.
-  "nl:rsum:": E, "nl:rsum:lock:": E,
+  "nl:rsum:": E, "nl:rsum:last:": E, "nl:rsum:lock:": E, "nl:rsum:ver:": E,
   "nl:watch:due": I, "nl:watch:folders:": I, "nl:watch:last:": E, "nl:watch:monthly:": C, "nl:watch:opened:": E, "nl:watch:sec:": E,
   "nl:wb:": E, "nl:wb:cursor": C, "nl:wb:link:": T("nl:erase:ix:", 60), "nl:wb:n:": E, "nl:wb:once:": E,
   "nl:weekly:lock": C, "nl:weekly:off": I, "nl:weekly:sent:": Cr(14), "nl:weekly:to:": { how: "erase", by: "handle" },

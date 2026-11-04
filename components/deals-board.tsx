@@ -5,6 +5,7 @@ import { PIPELINE_ACCESS_REFUSAL } from "@/lib/pipeline-access-rules";
 import { dealActionFilter, filterDeals, type DealActionFilter } from "@/lib/crm-deal-filter";
 import { dealOrder, orderDeals, dealWorklistCsv, type DealOrder, type DealView } from "@/lib/crm-deal-worklist";
 import { DealAgenda } from "@/components/deal-agenda";
+import { useCreatorDay } from "@/components/person-tasks";
 import { crmAnswer, type CrmAnswer } from "@/lib/crm-response";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -93,7 +94,10 @@ function StageOptions({ pipelines, except }: { pipelines: readonly Pipeline[]; e
   return <>{shown.map(p => <optgroup key={p.id} label={p.name}>{p.stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</optgroup>)}</>;
 }
 
-export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipelines, pipelineMax = 1, fields, currency, assignees, today, initialFilter = "all", requestHref, viewOnly, someHidden = false }: { deals: Deal[]; stages: Stage[]; /** The store's pipelines (lib/crm-rules.ts); the first holds the board it always had. */ pipelines?: Pipeline[]; /** How many pipelines the store's plan may have. */ pipelineMax?: number; fields: CrmField[]; currency: string; assignees: string[]; today: string; initialFilter?: DealActionFilter; /** The payment requests page, for a role that may send them; a deal with a person links to it, filled in. */ requestHref?: string; /** Pipelines this person may see but not change (639 [GL7](7)): their deals are shown without the controls that change them. */ viewOnly?: string[]; /** Someone who may not see every pipeline (639 [GL7](7)): the store's pipeline count is never said, so it cannot tell how many are hidden. */ someHidden?: boolean }) {
+export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipelines, pipelineMax = 1, fields, currency, assignees, today: serverDay, initialFilter = "all", requestHref, viewOnly, someHidden = false }: { deals: Deal[]; stages: Stage[]; /** The store's pipelines (lib/crm-rules.ts); the first holds the board it always had. */ pipelines?: Pipeline[]; /** How many pipelines the store's plan may have. */ pipelineMax?: number; fields: CrmField[]; currency: string; assignees: string[]; /** The server's (UTC) day, for its own drawing; the creator's own day takes over in the browser. */ today: string; initialFilter?: DealActionFilter; /** The payment requests page, for a role that may send them; a deal with a person links to it, filled in. */ requestHref?: string; /** Pipelines this person may see but not change (639 [GL7](7)): their deals are shown without the controls that change them. */ viewOnly?: string[]; /** Someone who may not see every pipeline (639 [GL7](7)): the store's pipeline count is never said, so it cannot tell how many are hidden. */ someHidden?: boolean }) {
+  // The creator's own calendar day, as on the tasks (components/person-tasks.tsx): a deal due today in Fortaleza at
+  // 22:30 is due today there, not overdue because it is already tomorrow in UTC.
+  const today = useCreatorDay(serverDay);
   const router = useRouter();
   const pipelines: Pipeline[] = savedPipelines?.length ? savedPipelines : [firstPipeline(everyStage)];
   const [pipelineId, setPipelineId] = useState(pipelines[0].id);
@@ -288,7 +292,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
         <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label="Filter deals by next action">
           {([{ key: "all", label: "All deals" }, { key: "overdue", label: `Overdue (${followUps.overdue.length})` }, { key: "today", label: `Due today (${followUps.today.length})` }, { key: "upcoming", label: `Upcoming (${followUps.upcoming.length})` }, { key: "unplanned", label: `No dated action (${followUps.unplanned.length})` }]).map(item => <button key={item.key} type="button" aria-pressed={filter === item.key} className={`btn btn-sm ${filter === item.key ? "btn-primary" : "btn-secondary"}`} onClick={() => setFilter(dealActionFilter(item.key))}>{item.label}</button>)}
         </div>
-        <p className="mt-2 text-xs text-ink-mute">Dates use the calendar day shown here, {today} (UTC). Won and lost deals are left out of action filters. Nothing is sent automatically.</p>
+        <p className="mt-2 text-xs text-ink-mute">Dates use your own calendar day, {today}, where this browser is. Won and lost deals are left out of action filters. Nothing is sent automatically.</p>
 
         <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Deal view">
           <button type="button" className={`btn btn-sm ${view === "board" ? "btn-primary" : "btn-secondary"}`} aria-pressed={view === "board"} onClick={() => setView("board")}>Board</button>

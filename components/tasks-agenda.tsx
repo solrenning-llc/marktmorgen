@@ -10,6 +10,26 @@ function dayWords(date: string): string {
   return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
 }
 
+/**
+ * What a task's link says: where it goes and whose page it is, so the link's
+ * own words say what it does (WCAG 2.4.9), never an address alone that reads
+ * like an email to write.
+ */
+export function agendaLinkWords(email: string): string {
+  return `Open the buyer page of ${email}`;
+}
+
+/**
+ * The day the agenda's groups are drawn for: the creator's own when the
+ * server made them for it (agendaForDays), and the server's otherwise, said
+ * to be `stale` (a page left open two midnights later, whose groups the
+ * server never made): the creator is told and offered to read them again,
+ * never moved by the page on its own.
+ */
+export function agendaDay(days: Readonly<Record<string, unknown>>, creatorDay: string, serverDay: string): { today: string; stale: boolean } {
+  return Object.prototype.hasOwnProperty.call(days, creatorDay) ? { today: creatorDay, stale: false } : { today: serverDay, stale: true };
+}
+
 /** A task in the agenda, with the address and page of the person it is about when found. */
 export type AgendaListRow = DueTask & { email: string | null; href: string };
 
@@ -21,10 +41,18 @@ export type AgendaListRow = DueTask & { email: string | null; href: string };
  */
 export function TasksAgendaList({ rows, days, serverDay, found }: { rows: AgendaListRow[]; days: Record<string, AgendaDayGroup[]>; serverDay: string; /** Whether the buyers were read from Stripe, and whether that reading was cut short; null when it failed. */ found: { partial: boolean } | null }) {
   const creatorDay = useCreatorDay(serverDay);
-  const today = days[creatorDay] ? creatorDay : serverDay;
+  const { today, stale } = agendaDay(days, creatorDay, serverDay);
   const groups = days[today] ?? [];
   return (
     <>
+      {stale ? (
+        <p className="notice notice-info mt-4" role="status">
+          {"A new day has started since this page was opened, so these groups may be out of date. "}
+          <button type="button" className="btn btn-secondary btn-sm ml-1" onClick={() => window.location.reload()}>
+            Reload the tasks
+          </button>
+        </p>
+      ) : null}
       {groups.map((group) => (
         <div key={group.key} className="mt-6">
           <h3 className="text-base font-semibold text-ink">{`${group.title} (${group.rows.length + group.more})`}</h3>
@@ -41,7 +69,7 @@ export function TasksAgendaList({ rows, days, serverDay, found }: { rows: Agenda
                   </p>
                   {row.email && row.href ? (
                     <Link href={row.href} className="mt-1 inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">
-                      {row.email}
+                      {agendaLinkWords(row.email)}
                     </Link>
                   ) : found ? (
                     <p className="mt-1 text-xs text-ink-soft">{`About someone not among the buyers read from your Stripe account${found.partial ? " (the oldest are not read)" : ""}: find them by their address above.`}</p>

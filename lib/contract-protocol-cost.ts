@@ -32,13 +32,13 @@ export function contractProtocolInfrastructureCosts(input:unknown):ContractProto
    const cost=protocolInfrastructureMicroUsd(field.value as ProtocolInfrastructureBounds);
    if(!cost)return null;
    const [tier,cycle]=key.split("_") as ["creator"|"pro"|"scale","month"|"year"];
-   result[key]={
+   Object.defineProperty(result,key,{value:{
     contractKey:key,
     paidMonths:CONTRACT_FUNDING_RULES.paidMonths[cycle],
     publishedPriceCents:PUBLISHED_PLAN_PRICES[tier][cycle],
     infrastructure:cost,
     infrastructureCents:Number((BigInt(cost.totalMicroUsd)+BigInt(9_999))/BigInt(10_000)),
-   };
+   },enumerable:true,writable:true,configurable:true});
   }
   // Every original profile is now validated plain numeric data. Reject a
   // Proxy at the matrix root without cloning unvalidated accessor graphs.

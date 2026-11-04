@@ -664,10 +664,14 @@ async function main(): Promise<void> {
   const heldBusy = (await claimRefresh(roomy))!;
   const busy = await admitAffiliatePage(roomy, as(idOf(0)), T2);
   await releaseRefresh(heldBusy);
-  is("with room again, while another load works it out, the figures are being updated", busy.admitted && busy.book, "soon");
+  is("with room again, while another load works it out: the figures are not ready yet", busy.admitted && busy.book, "soon");
   for (const [code, words] of Object.entries(AFFILIATES_WORDS)) {
     is(`${code}: the words for no room promise no time, and the short refresh says only that it can`, [/\d/.test(words.figuresNoRoom), words.figuresNoRoom !== words.figuresSoon, words.figuresShort.includes("15")], [false, true, true]);
   }
+  for (const [code, words] of Object.entries(AFFILIATES_WORDS)) {
+    is(`${code}: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day`, [/\d/.test(words.figuresSoon), /minut/i.test(words.figuresSoon)], [false, false]);
+  }
+  is("in English, plainly", AFFILIATES_WORDS.en.figuresSoon, "Your figures are not ready yet.");
   is("in English: \"can refresh again\", as \"at most once a day\" says", [AFFILIATES_WORDS.en.figuresShort, AFFILIATES_WORDS.en.figuresDaily], ["They can refresh again after 15 minutes.", "They refresh at most once a day."]);
   const pageText = readFileSync("app/[handle]/affiliates/page.tsx", "utf8");
   is("the page draws each in its own place", [pageText.includes('kept === "noRoom" ?'), pageText.includes("{a.figuresNoRoom}"), pageText.includes("{a.figuresSoon}")], [true, true, true]);

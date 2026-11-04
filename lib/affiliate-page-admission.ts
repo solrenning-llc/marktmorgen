@@ -51,7 +51,9 @@ export type AffiliatePageAdmission =
   | { admitted: true; book: null }
   /**
    * The affiliate's own part of the book and when it was worked out; "soon"
-   * while another load is working it out and none is kept; "noRoom" when
+   * when none is kept and none is worked out for this load (another load is
+   * working it out, or a recent refresh that kept nothing holds the next
+   * off, up to a day: the page promises no time); "noRoom" when
    * none is kept and working it out was refused for want of room in the
    * store's requests (or this connection's share of them), which may last
    * days: the page promises no time then.

@@ -129,8 +129,10 @@ try {
       const style = getComputedStyle(node);
       const sample = document.createElement("span"); sample.style.color = "CanvasText"; node.append(sample);
       const color = getComputedStyle(sample).color; sample.remove();
-      return { width: style.outlineWidth, color: style.outlineColor === color, shadow: style.boxShadow, adjust: style.forcedColorAdjust };
-    }), { width: "3px", color: true, shadow: "none", adjust: "auto" });
+      const adjust = style.getPropertyValue("forced-color-adjust");
+      const supportsAdjust = CSS.supports("forced-color-adjust", "auto");
+      return { width: style.outlineWidth, color: style.outlineColor === color, shadow: style.boxShadow, adjust: supportsAdjust ? adjust === "auto" : adjust === "" };
+    }), { width: "3px", color: true, shadow: "none", adjust: true });
   }
   check("no browser errors", errors, []);
   console.log(`BUYER_ORDERS_ACTIONS: ${engine}, ${checks} checks passed`);

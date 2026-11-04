@@ -2,7 +2,7 @@ import { type NextRequest, after } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { linkOrigin } from "@/lib/request-origin";
 import { noticeCreator } from "@/lib/account-notice";
-import { inviteMember, logTeam, readTeam, removeMember, revokeInvite, setMemberRole, setRequireTwoStep } from "@/lib/team";
+import { KeysNotSwept, inviteMember, logTeam, readTeam, removeMember, revokeInvite, setMemberRole, setRequireTwoStep } from "@/lib/team";
 import { applyPause, pauseForRule, pausePreview, planPause, tellPaused, undoPause } from "@/lib/api-key-pause";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
@@ -53,6 +53,12 @@ export async function POST(request: NextRequest) {
   const session = request.cookies.get(SESSION_COOKIE)?.value;
   const action = text(body.action, 20);
   const fail = (error: string) => Response.json({ ok: false, error }, { status: ANSWERS[error] ?? 400 });
+  // Taken off, but their API keys could not all be paused after: said, so the removal is repeated (owner C3-100).
+  const repeat = () =>
+    Response.json(
+      { ok: false, error: "repeat", message: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish." },
+      { status: 503 },
+    );
   if (!store.sid) return fail("unknown");
 
   try {
@@ -83,7 +89,10 @@ export async function POST(request: NextRequest) {
 
     if (action === "remove") {
       const who = text(body.email, 300);
-      if (!(await removeMember(store, who))) return fail("unknown");
+      const removed = await removeMember(store, who).catch((error: unknown) => (error instanceof KeysNotSwept ? "repeat" : Promise.reject(error)));
+      if (removed === "repeat") return repeat();
+      // Already off the team (a removal repeated): its API keys were swept again all the same (lib/team.ts removeMember).
+      if (!removed) return Response.json({ ok: true, already: true });
       await forgetDevices(store, who);
       await logTeam(store.sid, { who: email, role, what: `Took ${who.toLowerCase()} off the team` });
       return Response.json({ ok: true });
@@ -150,7 +159,10 @@ export async function POST(request: NextRequest) {
 
     if (action === "leave") {
       if (role === "owner" || !parseTeamRole(role)) return fail("owner");
-      if (!(await removeMember(store, email))) return fail("unknown");
+      // Off the team even when the sweep after could not finish: a request with any key they made is refused all the same,
+      // as its maker is on the team no more (lib/api-keys.ts pauseWhy), and the owner's next removal of anybody sweeps again.
+      const left = await removeMember(store, email).catch((error: unknown) => (error instanceof KeysNotSwept ? true : Promise.reject(error)));
+      if (!left) return fail("unknown");
       await forgetDevices(store, email);
       await logTeam(store.sid, { who: email, role, what: "Left the team" });
       return Response.json({ ok: true });

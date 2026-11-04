@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
-import { MAKER_FORMER, MAKER_UNRECORDED, MAX_KEY_NAME, MAX_KEYS, type ShownKey } from "@/lib/api-key-rules";
+import { MAKER_UNRECORDED, MAX_KEY_NAME, MAX_KEYS, pausedWords, type ShownKey, turnOnNote } from "@/lib/api-key-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -50,6 +50,8 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
   // Revoking asks twice, in the page: a key revoked by a slip stops a
   // creator's automation, and there is no putting it back.
   const [revoking, setRevoking] = useState<string | null>(null);
+  // Turning a paused key back on asks once too, saying what it means (turnOnNote): it is not paused again by the rule.
+  const [turning, setTurning] = useState<string | null>(null);
 
   async function send(payload: Record<string, unknown>, which: string) {
     setBusy(which);
@@ -97,6 +99,7 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
   // A key the team's two-step rule paused (owner C3-100), turned back on by whoever made it.
   async function turnOn(id: string) {
     const data = await send({ action: "turn_on", id }, `on:${id}`);
+    setTurning(null);
     if (data) toast("Key turned back on. Anything using it works again.");
   }
 
@@ -171,16 +174,22 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
                     <span className="mt-1 block text-sm">
                       <span className="font-semibold text-ink">Paused.</span>{" "}
                       <span className="text-ink-soft">
-                        {key.maker === MAKER_FORMER
-                          ? "Whoever made it is no longer on the team. Anything using it is refused, and the webhook endpoints it added are sent nothing. It can only be revoked, by the store's owner."
-                          : key.mayTurnOn
-                            ? "The team now logs in with a second step, and this key was made without one. Anything using it is refused, and the webhook endpoints it added are sent nothing, until you turn it back on."
-                            : "The team now logs in with a second step, and this key was made without one. Anything using it is refused, and the webhook endpoints it added are sent nothing, until whoever made it turns it back on."}
+                        {pausedWords(key)}
                       </span>
                     </span>
                   ) : null}
                 </span>
-                {revoking === key.id ? (
+                {turning === key.id ? (
+                  <span className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="max-w-xl text-ink">
+                      <span className="font-semibold">Turn it back on?</span> {turnOnNote(key)}
+                    </span>
+                    <button type="button" onClick={() => turnOn(key.id)} disabled={busy !== null} aria-busy={busy === `on:${key.id}`} className="btn btn-primary btn-sm">
+                      {busy === `on:${key.id}` ? "Turning on…" : "Yes, turn it on"}
+                    </button>
+                    <button type="button" onClick={() => setTurning(null)} className="btn btn-ghost btn-sm">Keep it paused</button>
+                  </span>
+                ) : revoking === key.id ? (
                   <span className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-semibold text-ink">Revoke it? Anything using it stops working, and so do the webhook endpoints it added.</span>
                     <button type="button" onClick={() => revoke(key.id)} disabled={busy !== null} aria-busy={busy === `revoke:${key.id}`} className="btn btn-danger btn-sm">
@@ -191,8 +200,8 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
                 ) : (
                   <span className="flex flex-wrap items-center gap-2">
                     {key.mayTurnOn ? (
-                      <button type="button" onClick={() => turnOn(key.id)} disabled={busy !== null} aria-busy={busy === `on:${key.id}`} className="btn btn-primary btn-sm">
-                        {busy === `on:${key.id}` ? "Turning on…" : "Turn back on"}
+                      <button type="button" onClick={() => setTurning(key.id)} disabled={busy !== null} className="btn btn-primary btn-sm">
+                        Turn back on
                       </button>
                     ) : null}
                     {key.mayRevoke ? (

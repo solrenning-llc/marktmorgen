@@ -12,7 +12,7 @@
  * page can copy, and a browser refusing the request is the kinder way to learn
  * that.
  */
-import { type AgentScope, keyFromHeader, resolveKey } from "@/lib/api-keys";
+import { type AgentScope, type PauseWhy, keyFromHeader, resolveKey } from "@/lib/api-keys";
 import { agentMay } from "@/lib/api-key-rules";
 import { storeForId, type Store } from "@/lib/store";
 import { BodyTooLarge, limited, withinLimit } from "@/lib/request-guard";
@@ -24,6 +24,14 @@ import { API_READ_PAUSED_WORDS, API_WRITE_PAUSED_WORDS, integrationPauseWord } f
 export const API_RATE = 120;
 
 const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
+
+/** What a paused key's request is told, by why it is paused (lib/api-keys.ts PauseWhy): who can turn it back on, if anybody. */
+export const KEY_PAUSED_WORDS: Readonly<Record<PauseWhy, string>> = {
+  rule: "This key is paused: the store's team now logs in with a second step, and the key was made without one. Whoever made it can turn it back on under API keys in the studio, after logging in with a passkey or an authenticator app's code.",
+  left: "This key is paused for good: it was made by someone who is no longer on the store's team. The store's owner can revoke it under API keys in the studio and make a new one.",
+  role: "This key is paused: the role of the person who made it no longer allows it. The store's owner can turn it back on under API keys in the studio.",
+  unrecorded: "This key is paused: someone left the store's team, and nobody is recorded as this key's maker, so it may have been theirs. The store's owner can turn it back on under API keys in the studio.",
+};
 
 export function apiError(status: number, error: string, message: string, extra: Record<string, string> = {}): Response {
   return Response.json({ error, message }, { status, headers: { ...headers, ...extra } });
@@ -134,9 +142,7 @@ async function apiKeyed(
   if (!found) return unauthorized();
   // Paused by the team's two-step rule (owner C3-100, lib/api-key-pause.ts):
   // the key is real and kept, so its holder is told why and what to do.
-  if (found.paused) {
-    return apiError(403, "key_paused", "This key is paused: the store's team now logs in with a second step, and the key was made without one. Whoever made it can turn it back on under API keys in the studio, after logging in with a passkey or an authenticator app's code.");
-  }
+  if (found.paused) return apiError(403, "key_paused", KEY_PAUSED_WORDS[found.why ?? "rule"]);
   if (!(await withinLimit("api", found.id, API_RATE, 60))) {
     return apiError(429, "rate_limited", `At most ${API_RATE} requests a minute per key. Try again in a minute.`, { "Retry-After": "60" });
   }

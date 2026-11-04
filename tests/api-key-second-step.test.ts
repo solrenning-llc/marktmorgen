@@ -34,10 +34,11 @@ import { POST as keysRoute } from "@/app/api/store/api-keys/route";
 import { POST as teamRoute } from "@/app/api/store/team/route";
 import { POST as postHook } from "@/app/api/v1/hooks/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { HOLD_SWAP, keyRecords, makeKey, makerPrint, resolveKey, revokeKey, rewriteMakers, swapHolds } from "@/lib/api-keys";
+import { HOLD_SWAP, RECORD_SWAP, keyRecords, makeKey, makerPrint, resolveKey, revokeKey, rewriteMakers, swapHolds } from "@/lib/api-keys";
 import { afterMake, applyPause, leftTeam, makerFor, planPause, pausePreview, pausesUnderRule, shownKeys, tellPaused, undoPause } from "@/lib/api-key-pause";
-import { MAKER_FORMER, MAKER_UNRECORDED } from "@/lib/api-key-rules";
-import { apiStore } from "@/lib/api-guard";
+import { MAKER_FORMER, MAKER_UNRECORDED, turnOnNote } from "@/lib/api-key-rules";
+import { TAKE_COMMANDS } from "./plan-cost-registry";
+import { KEY_PAUSED_WORDS, apiStore } from "@/lib/api-guard";
 import { moveMemberships, putMember, readTeam, removeMember, setMemberRole } from "@/lib/team";
 import { type Store, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { addEndpoint, emitEvent, sendTest, setSendHooksForTests, webhooksView } from "@/lib/webhooks";
@@ -92,6 +93,11 @@ const CAL = "cal-admin@example.com";
 const DOT = "dot-admin@example.com";
 const EVE = "eve-admin@example.com";
 const ADA2 = "ada-moved@example.com";
+const OWNER4 = "owner-four@example.com";
+const FIN = "fin-admin@example.com";
+const GIA = "gia-admin@example.com";
+const HAL = "hal-admin@example.com";
+const FIN2 = "fin-moved@example.com";
 
 async function newStore(owner: string, handle: string): Promise<Store> {
   await claimHandle(owner, handle, handle, "");
@@ -109,6 +115,7 @@ async function main(): Promise<void> {
   const store = await newStore(OWNER, "keys-two-step");
   const other = await newStore(OWNER2, "keys-former");
   const third = await newStore(OWNER3, "keys-races");
+  const fourth = await newStore(OWNER4, "keys-third-round");
   for (const email of [PIA, NED, LOU]) await putMember(store, email, "admin");
   for (const email of [FAY, GUS, MO]) await putMember(other, email, "admin");
 
@@ -129,9 +136,14 @@ async function main(): Promise<void> {
   const make = (session: string, name: string, on = store, write = false) => keys(session, { action: "make", name, write }, on);
   const asApi = async (key: string) => {
     const found = await apiStore(new Request(`${ORIGIN}/api/v1/store`, { headers: { authorization: `Bearer ${key}` } }));
-    if (found instanceof Response) return { status: found.status, error: ((await found.json()) as { error?: string }).error };
+    if (found instanceof Response) {
+      const said = (await found.json()) as { error?: string; message?: string };
+      lastMessage = said.message ?? "";
+      return { status: found.status, error: said.error };
+    }
     return { status: 200, error: "" };
   };
+  let lastMessage = "";
   const addHook = async (key: string, url: string) => {
     const response = await postHook(new Request(`${ORIGIN}/api/v1/hooks`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ url, events: ["sale.completed"] }) }));
     return ((await response.json()) as { data?: { id: string } }).data?.id ?? "";
@@ -142,7 +154,7 @@ async function main(): Promise<void> {
   // Keys are handed out under "export", which has a small daily figure of its own (lib/studio-route.ts countStudio):
   // this test makes more than a day's worth, so each part starts a new day.
   const newDay = () =>
-    redis.pipeline([store, other, third].map((s) => ["DEL", `nl:rl:studio-essential:${createHash("sha256").update(`nimbus-studio-essential:${s.sid}`).digest("hex").slice(0, 32)}`]));
+    redis.pipeline([store, other, third, fourth].map((s) => ["DEL", `nl:rl:studio-essential:${createHash("sha256").update(`nimbus-studio-essential:${s.sid}`).digest("hex").slice(0, 32)}`]));
   const teamRaw = async () => String((await realPipeline([["GET", `nl:team:${store.sid}`]]))[0]);
   const nobody = new Map<string, string>();
 
@@ -541,7 +553,7 @@ async function main(): Promise<void> {
   await putMember(third, ADA, "admin");
   const adaKey = await make(await openSession(ADA), "Ada's sheet", third);
   hook = async (commands) => {
-    if (!commands.some((c) => c[0] === "HSET" && c[1] === `nl:api:keys:${third.sid}`)) return;
+    if (!commands.some((c) => (c[0] === "HSET" || (c[0] === "EVAL" && c[1] === RECORD_SWAP)) && (c[1] === `nl:api:keys:${third.sid}` || c[3] === `nl:api:keys:${third.sid}`))) return;
     hook = null;
     throw new Error("a stand-in for a failed rewrite");
   };
@@ -550,6 +562,137 @@ async function main(): Promise<void> {
   is("the membership stayed on the old address", [(await readTeam(third.sid)).members.some((m) => m.email === ADA), (await readTeam(third.sid)).members.some((m) => m.email === ADA2)], [true, false]);
   is("and the key is still hers there", (await shownKeys(third, ADA, "admin")).find((k) => k.name === "Ada's sheet")?.maker, "you");
   is("and still works", (await asApi(adaKey.body.key ?? "")).status, 200);
+
+
+  // ------------------------------------------------------------------ the third review
+  for (const email of [FIN, GIA, HAL]) await putMember(fourth, email, "admin");
+  await makePasskey(OWNER4, "pk-owner4").keep();
+  const owner4Passkey = await openSession(OWNER4, "passkey", "pk-owner4");
+  const hold4 = async (id: string) => (await realPipeline([["HGET", `nl:api:hold:${fourth.sid}`, id]]))[0];
+  const finLink = await openSession(FIN);
+
+  await newDay();
+  part("M5 (b): a teammate's key whose maker matches nobody on the team is refused at the door, at one command more");
+  const finKey = await make(finLink, "Fin's sheet", fourth);
+  let doorCommands = 0;
+  hook = async (commands) => {
+    doorCommands += commands.length;
+  };
+  is("a teammate's key works", await asApi(finKey.body.key ?? ""), { status: 200, error: "" });
+  hook = null;
+  is("within an API request's own commands", doorCommands <= 20 + TAKE_COMMANDS, true);
+  // As if the secret its fingerprint was made under were gone: it matches nobody now.
+  const ghost = await makeKey(fourth.sid, "Ghost's sync", Date.now(), false, "none", makerFor(fourth.sid, "admin", "ghost@example.com", false));
+  if (!ghost.ok) throw new Error("ghost key not made");
+  is("refused, as made by someone not on the team", [await asApi(ghost.key), lastMessage], [{ status: 403, error: "key_paused" }, KEY_PAUSED_WORDS.left]);
+  is("and the endpoints it added would hear nothing", (await shownKeys(fourth, OWNER4, "owner")).find((k) => k.name === "Ghost's sync")?.why, "left");
+
+  part("M5 (a): a teammate leaving holds every key whose maker matches nobody, for good");
+  await removeMember(fourth, HAL);
+  is("the ghost's key is held as left", await hold4(ghost.made.id), "left");
+  is("Fin's is untouched", [await hold4(finKey.body.made?.id ?? ""), (await asApi(finKey.body.key ?? "")).status], [null, 200]);
+
+  part("M6: the owner is told which keys a teammate leaving paused, and each refusal says why");
+  const unknownKey = await makeKey(fourth.sid, "Owner's old zap");
+  if (!unknownKey.ok) throw new Error("old key not made");
+  const mailsBefore = sent.length;
+  await putMember(fourth, HAL, "admin");
+  await removeMember(fourth, HAL);
+  const ownerMail = sent.slice(mailsBefore).find((m) => m.to === OWNER4);
+  is("one email to the owner", sent.slice(mailsBefore).filter((m) => m.to === OWNER4).length, 1);
+  is(
+    "it names the key, says why, and how to turn it back on, in plain words",
+    [ownerMail?.subject, ownerMail?.text.includes("- Owner's old zap"), ownerMail?.text.includes("nobody is recorded as having made them"), ownerMail?.text.includes('press "Turn back on"'), /urgent|immediately|asap/i.test(ownerMail?.text ?? "")],
+    ["Some API keys for keys-third-round were paused", true, true, true, false],
+  );
+  is("the unrecorded key's refusal says the owner can turn it back on", [(await asApi(unknownKey.key)).error, lastMessage], ["key_paused", KEY_PAUSED_WORDS.unrecorded]);
+  await swapHolds(fourth.sid, [finKey.body.made?.id ?? ""], "told", [null]);
+  is("a key paused by the rule says whoever made it can turn it on", [(await asApi(finKey.body.key ?? "")).error, lastMessage], ["key_paused", KEY_PAUSED_WORDS.rule]);
+  await swapHolds(fourth.sid, [finKey.body.made?.id ?? ""], "role", ["told"]);
+  is("one paused for its maker's role says it waits for the owner", [(await asApi(finKey.body.key ?? "")).error, lastMessage], ["key_paused", KEY_PAUSED_WORDS.role]);
+  await swapHolds(fourth.sid, [finKey.body.made?.id ?? ""], null, ["role"]);
+  await revokeKey(fourth.sid, unknownKey.made.id);
+  await revokeKey(fourth.sid, ghost.made.id);
+
+  await newDay();
+  part("M5 (c): when the sweep after a removal fails, the route says to repeat it, and repeating finishes it");
+  await putMember(fourth, HAL, "admin");
+  const halKey = await make(await openSession(HAL), "Hal's sync", fourth);
+  let teamSaved = false;
+  hook = async (commands) => {
+    if (writes(commands, "SET", `nl:team:${fourth.sid}`)) teamSaved = true;
+    else if (teamSaved && commands.some((c) => c[0] === "HGETALL" && c[1] === `nl:api:keys:${fourth.sid}`)) {
+      hook = null;
+      // Its hold as if the sweep before had missed it (a key made in between), then the sweep after fails.
+      await realPipeline([["HDEL", `nl:api:hold:${fourth.sid}`, halKey.body.made?.id ?? ""]]);
+      throw new Error("a stand-in for a failed sweep");
+    }
+  };
+  const cutRemove = await team(owner4Passkey, { action: "remove", email: HAL }, fourth);
+  hook = null;
+  is("answered: repeat the removal", [cutRemove.status, cutRemove.body.error], [503, "repeat"]);
+  is("Hal is off the team, and his key is refused all the same", [(await readTeam(fourth.sid)).members.some((m) => m.email === HAL), (await asApi(halKey.body.key ?? "")).error], [false, "key_paused"]);
+  const repeated = await team(owner4Passkey, { action: "remove", email: HAL }, fourth);
+  is("repeated: answered, not a silent 404", [repeated.status, repeated.body.ok, (repeated.body as { already?: boolean }).already], [200, true, true]);
+  is("and his key is held for good", await hold4(halKey.body.made?.id ?? ""), "left");
+  await revokeKey(fourth.sid, halKey.body.made?.id ?? "");
+
+  await newDay();
+  part("L5: a role change that cannot be saved undoes its pause; one whose pause fails changes nothing");
+  const giaLink = await openSession(GIA);
+  const giaKey = await make(giaLink, "Gia's writer", fourth, true);
+  const noMaker = await makeKey(fourth.sid, "Nobody's sync", Date.now(), true);
+  if (!noMaker.ok) throw new Error("key not made");
+  hook = async (commands) => {
+    if (!writes(commands, "SET", `nl:team:${fourth.sid}`)) return;
+    hook = null;
+    throw new Error("a stand-in for a failed save");
+  };
+  const unsavedRole = await setMemberRole(fourth, GIA, "editor").then(() => "saved", () => "refused");
+  is("the change is refused", unsavedRole, "refused");
+  is("and the keys it paused are back on", [await hold4(giaKey.body.made?.id ?? ""), await hold4(noMaker.made.id), (await readTeam(fourth.sid)).members.find((m) => m.email === GIA)?.role], [null, null, "admin"]);
+  hook = async (commands) => {
+    if (!commands.some((c) => c[0] === "EVAL" && c[1] === HOLD_SWAP && c[5] === "role")) return;
+    hook = null;
+    throw new Error("a stand-in for a failed pause");
+  };
+  const pauseFailed = await setMemberRole(fourth, GIA, "editor").then(() => "saved", () => "refused");
+  is("a pause that fails changes no role", [pauseFailed, (await readTeam(fourth.sid)).members.find((m) => m.email === GIA)?.role], ["refused", "admin"]);
+  const demoted = await setMemberRole(fourth, GIA, "editor");
+  is("tried again, it goes through", demoted.ok, true);
+  is("her key and the unrecorded writer wait for the owner", [await hold4(giaKey.body.made?.id ?? ""), await hold4(noMaker.made.id)], ["role", "role"]);
+  is("and the refusal says so", [(await asApi(giaKey.body.key ?? "")).error, lastMessage], ["key_paused", KEY_PAUSED_WORDS.role]);
+  await revokeKey(fourth.sid, giaKey.body.made?.id ?? "");
+  await revokeKey(fourth.sid, noMaker.made.id);
+
+  part("L7: turning a key back on says it will not be paused by the rule again, before it is done");
+  is("the note for a key paused for its maker's role", turnOnNote({ why: "role" }), "It works again at once, and the team's two-step rule will not pause it again. Its maker's role no longer allows such a key, so turn it on only if you want it to keep working for them.");
+  is("and for one nobody is recorded as making", turnOnNote({ why: "unrecorded" }).includes("will not pause it again"), true);
+  const editorSource = readFileSync("components/api-key-editor.tsx", "utf8");
+  is("the panel asks with it before turning on", editorSource.includes("{turnOnNote(key)}") && editorSource.includes("Yes, turn it on") && editorSource.includes("onClick={() => setTurning(key.id)}"), true);
+
+  await newDay();
+  part("M4: a move whose team cannot be saved puts the keys back on the old address");
+  const finMove = await make(finLink, "Fin's move", fourth);
+  hook = async (commands) => {
+    if (!writes(commands, "SET", `nl:team:${fourth.sid}`)) return;
+    hook = null;
+    throw new Error("a stand-in for a failed save");
+  };
+  await moveMemberships(FIN, FIN2).catch(() => undefined);
+  hook = null;
+  is("the key still reads as Fin's", (await shownKeys(fourth, FIN, "admin")).find((k) => k.name === "Fin's move")?.maker, "you");
+  is("and works", (await asApi(finMove.body.key ?? "")).status, 200);
+
+  part("L6: rewriting who made a key never brings back one revoked meanwhile");
+  hook = async (commands) => {
+    if (!commands.some((c) => c[0] === "EVAL" && c[1] === RECORD_SWAP)) return;
+    hook = null;
+    await revokeKey(fourth.sid, finMove.body.made?.id ?? "");
+  };
+  await rewriteMakers(fourth.sid, (m) => (!m.owner && m.by === makerPrint(fourth.sid, FIN) ? { ...m, step: true } : null));
+  hook = null;
+  is("the revoked key's record stays gone", await realPipeline([["HGET", `nl:api:keys:${fourth.sid}`, finMove.body.made?.id ?? ""]]), [null]);
 
   part("The developers page names the answer");
   const docs = readFileSync("app/developers/page.tsx", "utf8");

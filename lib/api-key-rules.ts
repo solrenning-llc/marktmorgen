@@ -60,7 +60,22 @@ export type ShownKey = ApiKey & {
   mayTurnOn: boolean;
   /** Whether the person looking may revoke it: a key whose maker left the team is the owner's alone to revoke. */
   mayRevoke: boolean;
+  /** Why it is paused (lib/api-keys.ts PauseWhy), or null. */
+  why: "rule" | "left" | "role" | "unrecorded" | null;
 };
+
+/**
+ * What the owner is told before turning a paused key back on (WCAG 3.3.6):
+ * it works again at once, and, turned on with a second step, no later
+ * two-step rule pauses it again; one paused for its maker's role works as it
+ * did, whatever that role is now.
+ */
+export function turnOnNote(key: Pick<ShownKey, "why">): string {
+  const base = "It works again at once, and the team's two-step rule will not pause it again.";
+  if (key.why === "role") return `${base} Its maker's role no longer allows such a key, so turn it on only if you want it to keep working for them.`;
+  if (key.why === "unrecorded") return `${base} Nobody is recorded as its maker, so turn it on only if you know it is yours or one you trust.`;
+  return base;
+}
 
 /** The words for a key whose maker was never recorded: every key made before 4 November 2026. */
 export const MAKER_UNRECORDED = "someone not recorded";
@@ -76,3 +91,13 @@ export type PauseLine = { who: string; count: number; endpoints: number; emailed
  * their email; `stamp`, made from exactly which ids, sent back with the save.
  */
 export type PausePreview = { total: number; endpoints: number; untold: number; stamp: string; people: PauseLine[] };
+
+/** Why a paused key is paused and who can turn it back on, in the words of the key panel, by why (lib/api-keys.ts PauseWhy). */
+export function pausedWords(key: Pick<ShownKey, "why" | "mayTurnOn">): string {
+  const stopped = "Anything using it is refused, and the webhook endpoints it added are sent nothing";
+  const until = key.mayTurnOn ? "until you turn it back on" : "until the store's owner turns it back on";
+  if (key.why === "left") return `Whoever made it is no longer on the team. ${stopped}. It can only be revoked, by the store's owner.`;
+  if (key.why === "role") return `The role of whoever made it no longer allows such a key. ${stopped}, ${until}.`;
+  if (key.why === "unrecorded") return `Someone left the team, and nobody is recorded as this key's maker, so it may have been theirs. ${stopped}, ${until}.`;
+  return `The team now logs in with a second step, and this key was made without one. ${stopped}, ${key.mayTurnOn ? "until you turn it back on" : "until whoever made it turns it back on"}.`;
+}

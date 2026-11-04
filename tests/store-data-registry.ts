@@ -856,6 +856,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:callteam:@lib/team-booking.ts": { what: "A team event type: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:callteam:rr:@lib/team-booking.ts": { what: "Round-robin counts of a team event type: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:rl:team-invite:@lib/team.ts": short("Invites a day", "studio", 1, 128),
+  "nl:team:@lib/api-keys.ts": { what: "The team, only read here (with a key, to refuse one whose maker is no longer on it); kept and bounded by lib/team.ts", parts: [capped((MAX_TEAM + 10) * KB, "The same record as lib/team.ts keeps: MAX_TEAM members and their invites, read, never written.", src("lib/team.ts", "MAX_TEAM"))] },
   "nl:team:@lib/team.ts": { what: "The team and its invites", parts: [capped((MAX_TEAM + 10) * KB, "MAX_TEAM members and their invites.", src("lib/team.ts", "MAX_TEAM"))] },
   "nl:team:invite:@lib/team.ts": short("An invite's link, seven days", "studio", 7, 512),
   "nl:team:lock:@lib/team.ts": short("The team's lock", "studio", 1, 128),

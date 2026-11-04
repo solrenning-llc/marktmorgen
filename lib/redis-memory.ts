@@ -461,6 +461,17 @@ export class MemoryRedis {
           return value;
         }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
+        // lib/api-keys.ts RECORD_SWAP: each record written only over exactly the text read; nothing for one gone.
+        if (key.startsWith("-- marktmorgen:api-key-record-swap:v1\n") && args[0] === "1" && (args.length - 2) % 3 === 0) {
+          const [, list, ...triples] = args;
+          const changed: string[] = [];
+          for (let i = 0; i + 2 < triples.length; i += 3) {
+            if (this.run(["HGET", list, triples[i]]) !== triples[i + 1]) continue;
+            this.run(["HSET", list, triples[i], triples[i + 2]]);
+            changed.push(triples[i]);
+          }
+          return changed;
+        }
         // lib/api-keys.ts HOLD_SWAP: each field still in the list, whose hold is one of the allowed, takes the new one.
         if (key.startsWith("-- marktmorgen:api-hold-swap:v1\n") && args[0] === "2" && args.length >= 5) {
           const [, holds, list, next, rawCount, ...rest] = args;

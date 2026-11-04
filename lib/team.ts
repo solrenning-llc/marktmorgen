@@ -404,23 +404,26 @@ export async function setMemberRole(store: Store, email: string, rawRole: unknow
   const role = parseTeamRole(rawRole);
   if (!role) return { ok: false, reason: "role" };
   const address = normaliseEmail(email);
+  // Loaded here, as lib/api-key-pause.ts reads the team through this file.
+  const { roleChanged, undoPause } = await import("@/lib/api-key-pause");
   return withTeam(store.sid, async () => {
     const team = await readTeam(store.sid);
     const member = team.members.find((m) => m.email === address);
     if (!member) return { ok: false as const, reason: "unknown" as const };
     if (member.role === role) return { ok: false as const, reason: "same" as const };
-    await saveTeam(store.sid, {
-      members: team.members.map((m) => (m.email === address ? { ...m, role } : m)),
-      invites: team.invites,
-    });
-    return { ok: true as const, before: member.role, role };
-  }).then(async (result) => {
-    // API keys the new role may not hand out wait for the owner (owner C3-100, lib/api-key-pause.ts roleChanged).
-    if (result.ok) {
-      const { roleChanged } = await import("@/lib/api-key-pause");
-      await roleChanged(store, address, result.role);
+    // API keys the new role may not hand out wait for the owner (owner C3-100), paused before the role is
+    // saved, under the same lock: if this fails, the role is not changed; if the save fails, the pause is undone.
+    const paused = await roleChanged(store, address, role);
+    try {
+      await saveTeam(store.sid, {
+        members: team.members.map((m) => (m.email === address ? { ...m, role } : m)),
+        invites: team.invites,
+      });
+    } catch (error) {
+      await undoPause(store, paused).catch((undo: unknown) => console.error("undoing the API keys paused for a role change failed", undo));
+      throw error;
     }
-    return result;
+    return { ok: true as const, before: member.role, role };
   });
 }
 
@@ -456,6 +459,14 @@ export async function putMember(store: Store, email: string, role: TeamRole): Pr
   return added;
 }
 
+/** A teammate was taken off the team but their API keys could not all be paused after: the removal is to be repeated. */
+export class KeysNotSwept extends Error {
+  constructor() {
+    super("The API keys of a teammate taken off the team could not all be paused; repeat the removal.");
+    this.name = "KeysNotSwept";
+  }
+}
+
 /**
  * Takes someone off the team, whether the owner does it or they leave. Every
  * API key they made is paused, whatever the team's two-step rule (owner
@@ -463,21 +474,33 @@ export async function putMember(store: Store, email: string, role: TeamRole): Pr
  * it, and only the owner may revoke it now. Done before the team is written,
  * and again after, so a key they made in between is caught too (one written
  * after that is checked by the route that made it, lib/api-key-pause.ts
- * afterMake). If the first cannot be done, nobody is taken off; it runs even
- * for an address no longer on the team, so trying again finishes it.
+ * afterMake). If the first cannot be done, nobody is taken off. If the
+ * second cannot, they are off the team but the sweep is not finished: this
+ * throws KeysNotSwept, and the route asks for the removal to be repeated,
+ * which runs the sweep again even for an address no longer on the team (it
+ * then answers false). The owner is emailed which keys were paused and why.
  */
 export async function removeMember(store: Store, email: string): Promise<boolean> {
   const address = normaliseEmail(email);
   // Loaded here, as lib/api-key-pause.ts reads the team through this file.
-  const { leftTeam } = await import("@/lib/api-key-pause");
-  await leftTeam(store, address);
+  const { leftTeam, tellOwnerOfExit } = await import("@/lib/api-key-pause");
+  const first = await leftTeam(store, address);
   const removed = await withTeam(store.sid, async () => {
     const team = await readTeam(store.sid);
     if (!team.members.some((m) => m.email === address)) return false;
     await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
     return true;
   });
-  await leftTeam(store, address);
+  let second: Awaited<ReturnType<typeof leftTeam>>;
+  try {
+    second = await leftTeam(store, address);
+  } catch (error) {
+    console.error("pausing a former teammate's API keys after taking them off failed; the removal is to be repeated", error);
+    throw new KeysNotSwept();
+  }
+  await tellOwnerOfExit(store, address, { left: [...first.left, ...second.left], unrecorded: [...first.unrecorded, ...second.unrecorded] }).catch((error: unknown) =>
+    console.error("telling the owner which API keys a teammate leaving paused failed", error),
+  );
   if (removed) await redisPipeline([["SREM", indexKey(address), store.sid]]).catch(() => {});
   // What they could do with each pipeline (639 [GL7](7)) goes with them.
   if (removed) await forgetPipelineAccess(store, address).catch(() => {});
@@ -611,7 +634,14 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
         stayed.push(sid);
         return null;
       }
-      await saveTeam(sid, { members: team.members.map((m) => (m.email === before ? { ...m, email: after } : m)), invites: team.invites });
+      try {
+        await saveTeam(sid, { members: team.members.map((m) => (m.email === before ? { ...m, email: after } : m)), invites: team.invites });
+      } catch (error) {
+        // Not saved: the keys go back to the old address with the membership.
+        const { movedMaker } = await import("@/lib/api-key-pause");
+        await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
+        throw error;
+      }
       return team.members.find((m) => m.email === before)?.role ?? "support";
     });
     if (!role) continue;

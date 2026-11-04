@@ -338,7 +338,7 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
                     {d.lastError && d.state !== "delivered" ? <span className="block text-xs text-ink-soft">{d.lastError}</span> : null}
                     {d.resentFrom ? <span className="block text-xs text-ink-soft">Sent again by hand</span> : null}
                   </span>
-                  {d.state === "failed" && d.type !== "test" && !d.resentFrom && (!d.resentAs || view.log.find((x) => x.id === d.resentAs)?.state === "failed") ? (
+                  {d.state === "failed" && d.type !== "test" && !d.givenUp && !d.resentFrom && (!d.resentAs || view.log.find((x) => x.id === d.resentAs)?.state === "failed") ? (
                     <button type="button" onClick={() => resend(d.id)} disabled={busy !== null} aria-busy={busy === `resend:${d.id}`} aria-label={`Send again: ${EVENTS.find((e) => e.key === d.type)?.label ?? d.type}, ${when(d.createdAt)}, to ${d.endpoint}`} className="btn btn-secondary btn-sm shrink-0">
                       {busy === `resend:${d.id}` ? "Sending…" : "Send again"}
                     </button>

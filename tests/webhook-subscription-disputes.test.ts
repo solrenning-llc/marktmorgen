@@ -8,8 +8,9 @@
  * only; the endpoint's name resolves to a private address, so nothing leaves
  * this machine.
  */
-import { DISPUTE_LOOKUPS_PER_STORE, STRIPE_LOOKUPS_PER_STORE, STRIPE_WAIT_RUNS, addEndpoint, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
-import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
+import { DISPUTE_LOOKUPS_PER_STORE, STRIPE_LOOKUPS_PER_STORE, STRIPE_WAIT_RUNS, addEndpoint, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
+import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -30,6 +31,8 @@ type Failure = "500" | "network" | "403" | "400";
 const failing: Record<string, { left: number; how: Failure }> = {};
 /** A canceled member's customer record, as GET /v1/customers answers. */
 const customers: Record<string, string> = {};
+/** Customers deleted on the account: Stripe answers 200 with { deleted: true } and no address. */
+const deletedCustomers = new Set<string>();
 const asked: { path: string; version: string | null }[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -64,6 +67,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const invoice = url.pathname.match(/^\/v1\/invoices\/(in_\w+)$/)?.[1];
   if (invoice && invoices[invoice]) return Response.json({ id: invoice, object: "invoice", ...invoices[invoice] });
   const customer = url.pathname.match(/^\/v1\/customers\/(cus_\w+)$/)?.[1];
+  if (customer && deletedCustomers.has(customer)) return Response.json({ id: customer, object: "customer", deleted: true });
   if (customer && customers[customer]) return Response.json({ id: customer, object: "customer", email: customers[customer] });
   return Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such object" } }, { status: 404 });
 }) as typeof fetch;
@@ -222,6 +226,8 @@ async function main() {
 
   part("A lookup Stripe keeps refusing waits a bounded number of runs, then is passed over loudly");
   store = await setup(["dispute.opened"]);
+  // A paid plan, so the store has webhook deliveries this month for the line the passed-over event leaves.
+  await setSubscription(OWNER, { customerId: "cus_SubDisputesPlan", subscriptionId: "sub_SubDisputesPlan", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
   timeline = [
     evt("evt_KBefore", "charge.dispute.created", 1_790_090_000, dispute("dp_kbefore", "pi_Once")),
     evt("evt_Refused", "charge.dispute.created", 1_790_090_100, dispute("dp_refused", "pi_Member")),
@@ -241,10 +247,23 @@ async function main() {
   is("still waiting at the last run before the cap", [await waitRecord(), await sentIds(store, "dispute.opened", "dispute")], [`evt_Refused|${STRIPE_WAIT_RUNS}`, ["dp_kbefore"]]);
   said.length = 0;
   asked.length = 0;
-  await watchStripe(Date.now() + 10_000);
+  const givingUp = await watchStripe(Date.now() + 10_000);
   is("past the cap it is passed over, asking Stripe nothing for it", lookups().map((a) => a.path), ["/v1/payment_intents/pi_Once"]);
+  is("and it is not counted among the events read; the one after it is", givingUp.events, 1);
+  const view = await webhooksView(store);
+  const line = view.log.find((d) => d.givenUp);
+  is("it leaves a line in the store's delivery log, which the studio shows", [line?.type, line?.state, line?.attempts, line?.endpoint], ["dispute.opened", "failed", 0, "hooks.example.net/in"]);
+  is("saying what was skipped and where to look", [line?.lastError.includes("dispute dp_refused"), line?.lastError.includes(`after ${STRIPE_WAIT_RUNS} tries`), line?.lastError.includes("Stripe dashboard")], [true, true, true]);
+  is("with nothing to send again by hand", (await resendDelivery(store, line?.id ?? "dlv_000000000000000000000000")).ok, false);
+  is("and no message made of it", (await recentMessages(store, "dispute.opened", 10)).map((m) => (m.data as { dispute: string }).dispute).sort(), ["dp_kafter", "dp_kbefore"]);
   is("said loudly in the log", said.some((line) => line.startsWith("WEBHOOK EVENT GIVEN UP") && line.includes("evt_Refused")), true);
   is("what came after is sent, the anchor moves on and the wait is let go", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_kafter", "dp_kbefore"], "evt_KAfter", null]);
+  store = await setup(["dispute.opened"]);
+  timeline = [evt("evt_NoRoom", "charge.dispute.created", 1_790_095_000, dispute("dp_noroom", "pi_Member"))];
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "403" };
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_NoRoom|${STRIPE_WAIT_RUNS}`, "EX", 30 * 86400]]);
+  await watchStripe(Date.now() + 10_000);
+  is("a store with no webhook delivery left this month: passed over, said in the server log only", [(await webhooksView(store)).log.some((d) => d.givenUp), said.some((l) => l.includes("could not be written in the store's log")), await anchor()], [false, true, "evt_NoRoom"]);
   is("about a day of five-minute runs", STRIPE_WAIT_RUNS * 5 / 60, 24);
 
   part("membership.canceled waits for the member's address instead of going out without it");
@@ -274,6 +293,29 @@ async function main() {
   (timeline[0].data as Record<string, unknown>).previous_attributes = cancelPrevious;
   await watchStripe(Date.now() + 10_000);
   is("a customer Stripe no longer has goes out without an address, not held", await cancels(), [null]);
+  store = await setup(["membership.canceled"]);
+  deletedCustomers.add("cus_Cancel98");
+  timeline = [cancel(98)];
+  (timeline[0].data as Record<string, unknown>).previous_attributes = cancelPrevious;
+  await watchStripe(Date.now() + 10_000);
+  is("a deleted customer (200, deleted: true) goes out without an address, and nothing waits", [await cancels(), await waitRecord(), await anchor()], [[null], null, "evt_Cancel98"]);
+
+  part("Nothing is asked of Stripe, and nothing waits, for an event no endpoint hears");
+  store = await setup(["sale.completed"]);
+  failing["/v1/customers/cus_Cancel0"] = { left: 1_000_000, how: "500" };
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
+  const unheardCancel = cancel(0);
+  (unheardCancel.data as Record<string, unknown>).previous_attributes = cancelPrevious;
+  timeline = [
+    unheardCancel,
+    evt("evt_UnRefund", "charge.refunded", 1_790_100_100, refund("ch_unheard", "pi_Member")),
+    evt("evt_UnDispute", "charge.dispute.created", 1_790_100_200, dispute("dp_unheard", "pi_Member")),
+    evt("evt_Sale", "checkout.session.completed", 1_790_100_300, { id: "cs_Sale01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } }),
+  ];
+  await watchStripe(Date.now() + 10_000);
+  is("the sale goes out in the same run", (await recentMessages(store, "sale.completed", 10)).map((m) => (m.data as { checkout_session: string }).checkout_session), ["cs_Sale01"]);
+  is("with no call about a customer, a payment or an invoice", lookups().map((a) => a.path), []);
+  is("nothing waits and the anchor reaches the newest", [await waitRecord(), await anchor()], [null, "evt_Sale"]);
 
   part("Forgetting a store's webhooks forgets its wait too");
   await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, "evt_Any|3", "EX", 60]]);

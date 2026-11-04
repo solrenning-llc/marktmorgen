@@ -194,6 +194,14 @@ function keys(r: Pick<Row, "id" | "session" | "statsId" | "person">): string[] {
  * an expired dispatch lease, absent provider response or a lost ACK as absence.
  * Tests count EVAL itself plus every internal redis.call on real Redis.
  */
+/** Read at most one existing pending ID atomically. SCARD followed by a
+ * separate SMEMBERS may race with physical admissions and transfer a whole
+ * store index. This read-only script is billed at most3 commands, not1. */
+export const RENEWAL_PENDING_READ_SCRIPT = `-- marktmorgen:renewal-pending-singleton:v1
+if #KEYS~=1 or #ARGV~=0 then return redis.error_reply('renewal-pending: arguments') end
+if redis.call('SCARD',KEYS[1])~=1 then return {} end
+return redis.call('SMEMBERS',KEYS[1])`;
+
 export const SHIPMENT_MAIL_SCRIPT = `-- marktmorgen:shipment-mail-outbox:v1
 local op, expected, supplied = ARGV[1], ARGV[2], ARGV[3]
 local now, maxbytes = tonumber(ARGV[4]), tonumber(ARGV[5])
@@ -272,6 +280,13 @@ if op == 'enqueue' then
   a={0,0}
  end
  if not b then if redis.call('SCARD',KEYS[4])~=0 then return {'unknown'} end; b={0,0} end
+ -- Private renewal custody: at most one pending confirmation for this store.
+ -- The shared pool retains one full same-store physical source envelope; a
+ -- renewal can never take the last slot/bytes needed by an ordinary sale.
+ -- Existing exact requests were returned above, before these admission checks.
+ if n.originKind=='single_digital_renewal' then
+  if redis.call('SCARD',KEYS[4])~=0 or a[1]+1>=p.globalItems or b[1]+1>=p.storeItems or a[2]+2*n.bytes>p.globalBytes or b[2]+2*n.bytes>p.storeBytes then return {'full'} end
+ end
  if a[1]>=p.globalItems or b[1]>=p.storeItems or a[2]+n.bytes>p.globalBytes or b[2]+n.bytes>p.storeBytes then return {'full'} end
  redis.call('HSET',KEYS[6],'items',a[1]+1,'bytes',a[2]+n.bytes)
  redis.call('HSET',KEYS[7],'items',b[1]+1,'bytes',b[2]+n.bytes)

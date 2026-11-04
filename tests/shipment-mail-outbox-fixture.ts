@@ -3,7 +3,7 @@
  * real Redis in scripts/test_shipment_mail_outbox_redis.py.
  */
 import { store } from "./redis-stub";
-import { SHIPMENT_MAIL_SCRIPT, type ShipmentMailPolicy, type ShipmentMailPipeline } from "@/lib/shipment-mail-outbox";
+import { SHIPMENT_MAIL_SCRIPT, RENEWAL_PENDING_READ_SCRIPT, type ShipmentMailPolicy, type ShipmentMailPipeline } from "@/lib/shipment-mail-outbox";
 
 export const shipmentPolicy = (now = Date.now()): ShipmentMailPolicy => ({
   reviewId: "SYNTHETIC_SHIPMENT_ONLY", evidence: "SYNTHETIC; no live funding or account",
@@ -21,6 +21,9 @@ export function shipmentOutboxFixture() {
     const answers: unknown[] = [];
     for (const c of batch) {
       commands.push([...c]);
+      if(c[0]==="EVAL" && c[1]===RENEWAL_PENDING_READ_SCRIPT){
+        answers.push(Number(store.run(["SCARD",c[3]]))===1?store.run(["SMEMBERS",c[3]]):[]);continue;
+      }
       if (c[0] !== "EVAL" || c[1] !== SHIPMENT_MAIL_SCRIPT) {
         answers.push(...await base([c])); continue;
       }
@@ -36,6 +39,7 @@ export function shipmentOutboxFixture() {
         else if (source) answer = ["legacy", source];
         else {
           const value = JSON.parse(supplied);
+          if(value.originKind==="single_digital_renewal" && Number(store.run(["SCARD",k[3]]))!==0){answers.push(["full"]);continue;}
           store.run(["SET", k[0], supplied]); store.run(["SET", k[1], value.sourceValue]);
           store.run(["ZADD", k[2], now, value.id]);
           for (const index of [3, 4, 7]) store.run(["SADD", k[index], value.id]);

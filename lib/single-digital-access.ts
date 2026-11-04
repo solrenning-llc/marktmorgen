@@ -141,17 +141,30 @@ export function singleDigitalRenewalCopy(sealed: string, statsId: string, accoun
   } catch { return null; }
 }
 
+export type SingleDigitalRenewalCheck = { status: "paid"; claim: SingleDigitalCapsule; store: Store; product: Listing } | { status: "not_paid" } | { status: "unknown" };
+/** A negative entitlement needs positive provider evidence. Missing or failed
+ * reads remain unknown; they never become a claim that a buyer did not pay. */
+export async function checkSingleDigitalRenewal(store: Store, sealed: string): Promise<SingleDigitalRenewalCheck> {
+  try {
+    const c = singleDigitalRenewalIdentity(store, sealed);
+    const current = c ? await storeForEmail(storeRef(store)) : null;
+    if (!c || !current || !singleDigitalRenewalIdentity(current, sealed) || await erased(current, c.email)) return {status:"unknown"};
+    const session = await onAccount("GET", c.accountId, `/checkout/sessions/${encodeURIComponent(c.sessionId)}?expand[]=line_items&expand[]=payment_intent.latest_charge`);
+    const s=record(session),pi=record(s?.payment_intent),charge=record(pi?.latest_charge);
+    if (!s || s.object!=="checkout.session" || s.id!==c.sessionId) return {status:"unknown"};
+    if (s.status==="expired" || s.payment_status==="unpaid" ||
+        charge?.object==="charge" && charge.refunded===true && charge.currency===c.currency &&
+        typeof charge.amount_refunded==="number" && Number.isSafeInteger(charge.amount_refunded) && charge.amount_refunded>=c.paidCents) return {status:"not_paid"};
+    if (!singleDigitalPaid(session,c)) return {status:"unknown"};
+    const product=await readListing(current,c.productId),latest=await storeForEmail(storeRef(current));
+    if (!product?.file || product.options.length || product.recurring || product.course || product.podcast || product.shipping || product.bundle || product.call || product.keys ||
+        !latest || !singleDigitalRenewalIdentity(latest,sealed) || await erased(latest,c.email)) return {status:"unknown"};
+    return {status:"paid",claim:c,store:latest,product};
+  } catch { return {status:"unknown"}; }
+}
 export async function verifySingleDigitalRenewal(store: Store, sealed: string): Promise<{ claim: SingleDigitalCapsule; store: Store; product: Listing } | null> {
-  const c = singleDigitalRenewalIdentity(store, sealed);
-  const current = c ? await storeForEmail(storeRef(store)) : null;
-  if (!c || !current || !singleDigitalRenewalIdentity(current, sealed) || await erased(current, c.email)) return null;
-  const session = await onAccount("GET", c.accountId, `/checkout/sessions/${encodeURIComponent(c.sessionId)}?expand[]=line_items&expand[]=payment_intent.latest_charge`);
-  if (!singleDigitalPaid(session, c)) return null;
-  const product = await readListing(current, c.productId);
-  const latest = await storeForEmail(storeRef(current));
-  if (!product?.file || product.options.length || product.recurring || product.course || product.podcast || product.shipping || product.bundle || product.call || product.keys ||
-    !latest || !singleDigitalRenewalIdentity(latest, sealed) || await erased(latest, c.email)) return null;
-  return { claim: c, store: latest, product };
+  const result=await checkSingleDigitalRenewal(store,sealed);
+  return result.status==="paid" ? {claim:result.claim,store:result.store,product:result.product} : null;
 }
 export type SingleDigitalRenewalDraft = { token: string; accessUrl: string; message: { from: string; to: string; subject: string; text: string; replyTo: string } };
 /** Random URL nonce is NOT an issued grant. No SET happens until beforePost,

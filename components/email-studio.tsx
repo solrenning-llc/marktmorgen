@@ -769,6 +769,8 @@ function Compose(props: {
   const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, activeDays, more, savedContent, uncertain: draftSaveBlocked, label, buyerGroup });
   useImperativeHandle(props.composerState, () => ({ dirty, busy: locked, snapshot }));
 
+  // The sentence the last count showed, so a count that then goes through takes away its own message and no other.
+  const countError = useRef<string | null>(null);
   useEffect(() => {
     if (invalidSpent) return;
     let live = true;
@@ -784,7 +786,13 @@ function Compose(props: {
           setKinds(Object.fromEntries(RFM_GROUPS.flatMap((g) => (Number.isSafeInteger(read[g.id]) && (read[g.id] as number) >= 0 ? [[g.id, read[g.id] as number]] : []))));
         }
         if (typeof a.partial === "boolean") setPartial(a.partial);
-      } else if (a.error === "stripe" || a.error === "studio_used") setError(message(a));
+        const shown = countError.current;
+        countError.current = null;
+        if (shown !== null) setError((current) => (current === shown ? null : current));
+      } else if (a.error === "stripe" || a.error === "studio_used") {
+        countError.current = message(a);
+        setError(countError.current);
+      }
     });
     return () => {
       live = false;

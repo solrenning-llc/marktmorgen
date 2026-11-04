@@ -41,7 +41,7 @@ import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, rel
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
-import { ALL_TIME_PAGES, readPaidSales } from "@/lib/stats";
+import { ALL_TIME_PAGES, readPaidSales, readsSales } from "@/lib/stats";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -137,11 +137,16 @@ export type StartResult =
 
 /**
  * Studio requests reading every paid sale of the store costs, before it is
- * read: as much as a reading of its buyers from Stripe (lib/segments.ts,
- * BUYER_LEDGER_UNITS, which reads these pages and more), with the PayPal
- * sales kept (`paypalSales`), which are read with them, by their weight.
+ * read (lib/stats.ts, readPaidSales): when Stripe is read (a Stripe account),
+ * as much as a reading of its buyers from Stripe (lib/segments.ts,
+ * BUYER_LEDGER_UNITS, which reads these pages and more); and the PayPal sales
+ * kept (`paypalSales`), read whenever the store reads sales, by their weight.
+ * Nothing when it reads no sales.
  */
-export const updateReadUnits = (paypalSales: number) => BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales, paypalRefunds: 0 }));
+export function updateReadUnits(store: Pick<Store, "stripeAccountId" | "paypalSeller">, paypalSales: number): number {
+  if (!readsSales(store)) return 0;
+  return (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales, paypalRefunds: 0 }));
+}
 
 /** When this product's buyers may next be told, in seconds; 0 when they may now. */
 export async function nextUpdateAt(store: Store, productId: string): Promise<number> {
@@ -160,7 +165,7 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   // Every paid sale, read again from Stripe each time: counted in the studio's requests first, nothing read when not.
   const kept = await paypalKept(store.statsId, false).catch(() => null);
   if (!kept) return { ok: false, reason: "stripe" };
-  const counted = await countUnits(store, updateReadUnits(kept.sales)).catch(() => null);
+  const counted = await countUnits(store, updateReadUnits(store, kept.sales)).catch(() => null);
   if (!counted?.ok) return { ok: false, reason: "studio_used", message: counted && !counted.ok ? counted.message : "" };
   let rows: Record<string, unknown>[];
   try {

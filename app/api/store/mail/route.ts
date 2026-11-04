@@ -17,7 +17,7 @@ import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
-import { countLedger } from "@/lib/person-agenda-read";
+import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
 import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, saveFlow, setFlowActive } from "@/lib/flows";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FlowRunUnavailable, PERSON_KEY, listRuns, readRun } from "@/lib/flow-runs";
@@ -33,9 +33,6 @@ import { readListings } from "@/lib/catalog";
 import type { Permission } from "@/lib/team-roles";
 
 export const maxDuration = 60;
-
-/** Said when what reading the store's buyers costs could not be counted, and no sentence came with the refusal. */
-const NOT_COUNTED = "Your studio's requests could not be counted just now, so your buyers were not read. Nothing was changed. Try again in a minute.";
 
 /** Refusals of "keep sending" that have words of their own in the studio. */
 const KEEP_REFUSALS = new Set(["unsent", "excludes", "money", "already", "full"]);
@@ -271,7 +268,9 @@ export async function POST(request: NextRequest) {
       if (created.broadcast.sendAt <= Math.floor(Date.now() / 1000) + 60) {
         // Starts as soon as the studio has its answer; the scheduled job
         // finishes anything this run does not.
-        after(() => advanceBroadcast(id, storeForHandle, Date.now() + 50_000).then(() => undefined));
+        // With the narrowing read and counted just now: not read or counted again.
+        const keep = created.keep;
+        after(() => advanceBroadcast(id, storeForHandle, Date.now() + 50_000, { keep }).then(() => undefined));
       }
       return Response.json({ ok: true, broadcast: created.broadcast, draftCleanupConfirmed });
     }

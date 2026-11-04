@@ -29,7 +29,8 @@ import { broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links"
 import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest, parseTest, partAt, splitFor } from "@/lib/mail-test";
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
-import { type Narrow, isNarrowed, keepFor, readNarrow } from "@/lib/segments";
+import { LedgerNotCounted, type Narrow, isNarrowed, keepFor, readNarrow } from "@/lib/segments";
+import { countLedger } from "@/lib/person-agenda-read";
 import { sameNarrow } from "@/lib/segments-rules";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
@@ -105,6 +106,8 @@ export const MAX_SCHEDULE_DAYS = 365;
 /** How long a broadcast's record is kept after its last change, and who it went to after it was made. */
 const RECORD_DAYS = 400;
 const RECIPIENT_DAYS = 60;
+/** The longest note a broadcast's record was given room for (createBroadcast). */
+export const NOTE_ROOM = 300;
 const QUEUE = "nl:mail:queue";
 const bcKey = (id: string) => `nl:mail:bc:${id}`;
 const toKey = (id: string) => `nl:mail:bc:${id}:to`;
@@ -213,7 +216,8 @@ export function whoOf(store: Store, kind: Who): { kind: Who; paid: ReadonlySet<s
 }
 
 export type CreateResult =
-  | { ok: true; broadcast: Broadcast }
+  // `keep`: the narrowing read and counted here, for a send that starts in the same request (advanceBroadcast's `given`).
+  | { ok: true; broadcast: Broadcast; keep: ((email: string) => boolean) | undefined }
   | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" };
 
 const LINK = /https:\/\/[^\s<>"')\]]+/g;
@@ -272,7 +276,8 @@ export async function createBroadcast(
     sendAt = Math.max(at, now);
   }
   // Checked now for a send that starts now; a scheduled one is checked again when it starts.
-  const reach = (await audience(store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), await keepFor(store, narrow, count), label ?? undefined)).length;
+  const keep = await keepFor(store, narrow, count);
+  const reach = (await audience(store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), keep, label ?? undefined)).length;
   if (reach === 0) return { ok: false, reason: "empty" };
   // A second subject line, when one was asked for. Refused here, with the
   // reason, whenever it could not be a real test: the creator finds out while
@@ -318,7 +323,7 @@ export async function createBroadcast(
   // change, which comes at the latest when it goes out), and its place in
   // the store's list of broadcasts.
   await needData(store, [
-    { until: (now + (MAX_SCHEDULE_DAYS + RECORD_DAYS + 1) * 86_400) * 1000, bytes: dataBytes([JSON.stringify({ ...broadcast, note: "x".repeat(300) })], 1) },
+    { until: (now + (MAX_SCHEDULE_DAYS + RECORD_DAYS + 1) * 86_400) * 1000, bytes: dataBytes([JSON.stringify({ ...broadcast, note: "x".repeat(NOTE_ROOM) })], 1) },
     { slot: "bc", bytes: dataBytes([broadcast.id], 1) },
   ]);
   try {
@@ -333,7 +338,7 @@ export async function createBroadcast(
     // Do not retry or roll back: any of these writes may already have happened.
     throw new BroadcastWriteUnconfirmed();
   }
-  return { ok: true, broadcast };
+  return { ok: true, broadcast, keep };
 }
 
 /** Stops a broadcast that has not started. One under way is not stopped halfway. */
@@ -360,6 +365,18 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
   }
 }
 
+/**
+ * Why a narrowed broadcast waits when reading the store's buyers could not be
+ * counted: the refusal's own sentence (how many this needs, how many are left
+ * and when they come back), and that it goes on by itself.
+ */
+export function notCountedNote(said: string): string {
+  const after = " Nothing was sent. It is tried again automatically.";
+  // Within the 300 characters the record's room was taken for when it was written down (createBroadcast).
+  const words = said && said.length + after.length <= NOTE_ROOM ? said : "Your studio's requests could not be counted just now, so the list of who it goes to could not be made.";
+  return `${words}${after}`;
+}
+
 /** Only an explicit lock acknowledgement permits a reader to become a writer. */
 async function takeBroadcastLock(id: string): Promise<boolean> {
   if (!BROADCAST_ID.test(id)) return false;
@@ -371,11 +388,20 @@ async function takeBroadcastLock(id: string): Promise<boolean> {
 /**
  * Moves one broadcast on for as long as `deadline` allows. Safe to call from
  * two places at once: only one holds the broadcast at a time.
+ *
+ * Its list of who it goes to reads the store's buyers when it is narrowed:
+ * `given` is that narrowing, already read and counted when the broadcast was
+ * written down in the same request (createBroadcast's `keep`), so it is
+ * neither read nor counted twice. Otherwise the reading is counted in the
+ * store's studio requests before it is read (lib/segments.ts, buyerLedger);
+ * when it is not counted, nothing is read or sent, and the broadcast waits,
+ * saying why, and is tried again by the scheduled job.
  */
 export async function advanceBroadcast(
   id: string,
   load: (handle: string) => Promise<Store | null>,
   deadline: number,
+  given?: { keep: ((email: string) => boolean) | undefined },
 ): Promise<Broadcast | null> {
   const seconds = () => Math.floor(Date.now() / 1000);
   if (!await takeBroadcastLock(id)) return null;
@@ -410,7 +436,19 @@ export async function advanceBroadcast(
         await save(b);
         return b;
       }
-      const to = await audience(b.listId, b.productId ?? undefined, b.notProductId ?? undefined, whoOf(store, b.who), await keepFor(store, b.narrow), b.label ?? undefined);
+      let keep = given?.keep;
+      if (!given) {
+        const counting = countLedger(store);
+        try {
+          keep = await keepFor(store, b.narrow, counting.count);
+        } catch (error) {
+          if (!(error instanceof LedgerNotCounted)) throw error;
+          b = { ...b, status: "waiting", note: notCountedNote(counting.said.message) };
+          await save(b);
+          return b;
+        }
+      }
+      const to = await audience(b.listId, b.productId ?? undefined, b.notProductId ?? undefined, whoOf(store, b.who), keep, b.label ?? undefined);
       let test = b.test;
       if (test) {
         if (to.length < MIN_TEST_REACH) {

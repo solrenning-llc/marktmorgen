@@ -74,7 +74,7 @@ export function ProductUpdateBox({ product }: { product: Product }) {
             data.error === "soon" && data.until
               ? `This product's buyers were told of an update in the last 7 days. The next one can go on ${when(data.until)}.`
               : data.error === "studio_used" && typeof data.message === "string" && data.message
-                ? `${data.message} Nothing was sent.`
+                ? data.message
                 : (MESSAGES[data.error ?? ""] ?? "Something went wrong on our side. Nothing was sent. Try again in a moment."),
           );
         } catch {

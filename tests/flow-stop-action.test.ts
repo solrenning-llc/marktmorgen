@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { readAction } from "@/lib/flow-rules";
 import { parseFlowList } from "@/lib/flow-list";
 import { flowConfigurationIssues } from "@/lib/flow-review";
-import { enroll, flowsStartedFor, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
+import { endedIfTakenOut, enroll, flowsStartedFor, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
 import { listRuns } from "@/lib/flow-runs";
 import { upsertContact } from "@/lib/contacts";
 import { redisPipeline } from "@/lib/redis";
@@ -122,6 +122,25 @@ async function main(): Promise<void> {
   is(
     "a step under way when the stop lands queues nothing after it, and says why",
     [flowsSource.includes("queueNext(result.done.filter((email) => stay.has(email)))"), flowsSource.includes("queueNext(onwards.filter((email) => stay.has(email)))"), flowsSource.includes("Taken out by another workflow, so nothing after this step is sent.")],
+    [true, true, true],
+  );
+
+  part("Waiting for room to send when the stop lands");
+  // The review's finding on c6b18967: a run put off at this step and taken out meanwhile ends there, never "waiting".
+  const waits = [
+    { email: "eve@example.com", state: "deferred" as const, note: "Waiting for room to send; it goes out by itself.", to: 0 },
+    { email: "fay@example.com", state: "deferred" as const, note: "Waiting for room to send; it goes out by itself.", to: 0 },
+  ];
+  const settledWaits = endedIfTakenOut(waits, new Set(["fay@example.com"]));
+  is(
+    "taken out: ended there, said why; still in it: the wait as it was",
+    settledWaits.map((o) => [o.email, o.status ?? "waiting", o.to]),
+    [["eve@example.com", "ended", -1], ["fay@example.com", "waiting", 0]],
+  );
+  const flowsCode = readFileSync("lib/flows.ts", "utf8");
+  is(
+    "both places a step is put off use it, and a wait taken out is not counted as later",
+    [flowsCode.includes("...endedIfTakenOut(waiting.outcomes, stay)]"), flowsCode.includes("outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));"), flowsCode.includes("counts.later += later.length;")],
     [true, true, true],
   );
 

@@ -950,6 +950,14 @@ export async function resolveHeldRun(store: Store, flowId: string, person: strin
  * Sends every step that is due, and lines up the next one. For the scheduled
  * job. Everyone due for the same email of the same sequence goes in one batch.
  */
+/**
+ * A wait for someone taken out by another workflow meanwhile (act, "stop") ends their run at this step, as "ended",
+ * written over the stop's own note; never left "waiting" with nothing queued. Pure, so it is tested on its own.
+ */
+export function endedIfTakenOut(outcomes: Settled[], stay: ReadonlySet<string>): Settled[] {
+  return outcomes.map((o) => (stay.has(o.email) ? o : { ...o, status: "ended" as const, to: -1, note: "Taken out by another workflow before this step was done, so the run ended here." }));
+}
+
 export async function sendDueSteps(
   load: (handle: string) => Promise<Store | null>,
   deadline: number,
@@ -1136,7 +1144,7 @@ export async function sendDueSteps(
         if (confirmed.length) after.push(["HINCRBY", statsKey(flow.id), "acted", confirmed.length]);
         if (after.length) await redisPipeline(after);
         queued = true;
-        await settleAttempts(listId, flow.id, index, step.id, kind, [...settled(all.filter((o) => o.state !== "deferred"), stay), ...waiting.outcomes], now);
+        await settleAttempts(listId, flow.id, index, step.id, kind, [...settled(all.filter((o) => o.state !== "deferred"), stay), ...endedIfTakenOut(waiting.outcomes, stay)], now);
         return;
       }
 
@@ -1171,10 +1179,11 @@ export async function sendDueSteps(
             result.stopped === "allowance" ? "Waiting: this month's emails ran out. It goes out when the month turns." : result.stopped === "day" || result.stopped === "portion" || result.stopped === "sender" ? "Waiting for room to send; it goes out by itself." : result.stopped === "paused" ? "Waiting: email to your list is paused for now." : "Waiting to be tried again later; it was not sent.";
           const window = allowanceWindow(store, now * 1000);
           const waiting = await waitOrStop(flow.id, group, index, rest.map((email) => ({ email, reason, note: why })), now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null });
-          commands.push(...onlyStaying(waiting.queue, stay));
-          outcomes.push(...waiting.outcomes);
-          counts.later += waiting.queue.length;
-          counts.dropped += waiting.outcomes.length - waiting.queue.length;
+          const later = onlyStaying(waiting.queue, stay);
+          commands.push(...later);
+          outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));
+          counts.later += later.length;
+          counts.dropped += waiting.outcomes.length - later.length;
         }
       }
       if (result.done.length) {

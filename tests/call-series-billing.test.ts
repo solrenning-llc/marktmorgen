@@ -17,6 +17,7 @@ import {
   chargeAttempt,
   holdGoodUntil,
   keptOnCharge,
+  moveCase,
   keptWhen,
   unpaidCancel,
   payBy,
@@ -31,10 +32,13 @@ import {
   seriesCharges,
   sessionCharge,
   sessionRefunded,
+  seriesMetadata,
   stepKey,
   toStop,
 } from "@/lib/call-series-billing";
 import { toCancel } from "@/lib/call-series-rules";
+import { SERIES_MOVE_WORDS, seriesMoveMessage } from "@/lib/buyer-words/series-move";
+import { LANGUAGE_CODES } from "@/lib/store-language";
 import { done, is, part } from "./check";
 
 const HOUR = 3_600_000;
@@ -50,10 +54,10 @@ is("the first: reserved at booking, charged at its deadline when the hold lasts 
 const none = seriesCharges(starts, 8000, BOOKED, LEAST)!;
 is("no deadline (or zero): reserved a day before the session, charged at its start", [none.slice(1).map((c) => [c.at, c.captureAt]), seriesCharges(starts, 8000, BOOKED, LEAST, 0)], [starts.slice(1).map((s) => [s - 24 * HOUR, s]), none]);
 const lateFirst = [BOOKED + 20 * HOUR, BOOKED + 7 * DAY + 20 * HOUR];
-is("a first session already inside its deadline at booking: charged at once, never refunded to the buyer, no refund fee", seriesCharges(lateFirst, 8000, BOOKED, LEAST, 48)![0], { index: 0, cents: 8000, at: BOOKED, captureAt: BOOKED, way: "charge", refundFee: false });
+is("a first session already inside its deadline at booking: charged at once, never refunded to the buyer, no refund fee", seriesCharges(lateFirst, 8000, BOOKED, LEAST, 48)![0], { index: 0, cents: 8000, at: BOOKED, captureAt: BOOKED, way: "charge", refundFee: false, movedBy: null, cancelBy: lateFirst[0] - 48 * HOUR });
 const farFirst = [BOOKED + 10 * DAY, BOOKED + 17 * DAY];
 is("a first session whose hold would not last until its deadline: charged at once, marked as carrying the refund fee", seriesCharges(farFirst, 8000, BOOKED, LEAST, 48)!.map((c) => [c.way, c.refundFee]), [["charge", true], ["hold", false]]);
-is("a moved session: worked out again from its new start", sessionCharge(2, starts[2] + 2 * DAY, BOOKED, 8000, 48), { index: 2, cents: 8000, at: starts[2] + 2 * DAY - 72 * HOUR, captureAt: starts[2] + 2 * DAY - 48 * HOUR, way: "hold", refundFee: false });
+is("a moved session: worked out again from its new start", sessionCharge(2, starts[2] + 2 * DAY, BOOKED, 8000, 48), { index: 2, cents: 8000, at: starts[2] + 2 * DAY - 72 * HOUR, captureAt: starts[2] + 2 * DAY - 48 * HOUR, way: "hold", refundFee: false, movedBy: null, cancelBy: starts[2] + 2 * DAY - 48 * HOUR });
 is("refused: an amount that is not a whole positive one, below the currency's smallest charge, or a deadline not on the list", [seriesCharges(starts, 0, BOOKED, LEAST), seriesCharges(starts, 80.5, BOOKED, LEAST), seriesCharges(starts, -1, BOOKED, LEAST), seriesCharges(starts, Number.NaN, BOOKED, LEAST), seriesCharges(starts, 40, BOOKED, LEAST), seriesCharges(starts, 8000, BOOKED, LEAST, 0.5), seriesCharges(starts, 8000, BOOKED, LEAST, Number.POSITIVE_INFINITY), seriesCharges(starts, 8000, BOOKED, LEAST, 200)], [null, null, null, null, null, null, null, null]);
 is("deadlines read: none or zero is the start, the list as it is, anything else refused", [readDeadline(undefined), readDeadline(null), readDeadline(0), readDeadline(72), readDeadline(36), readDeadline("24")], [0, 0, 0, 72, null, null]);
 
@@ -82,8 +86,8 @@ for (const deadline of [undefined, 0, ...SERIES_DEADLINES]) {
 is("no two charges together, none before booking, every capture inside its hold, and only a first session ever charged directly", broken, []);
 is("and the direct charge with the refund fee happens only for a first session far ahead", directCharges > 0, true);
 const held = with48[2];
-type Hold = { heldAt: number | null; captureBefore?: number | null; created?: number; capture?: "manual" | "automatic" };
-const intent = (id: string, status: IntentStatus, h: Hold = { heldAt: null }) => ({ id, status, capture: h.capture ?? ("manual" as const), created: h.created ?? BOOKED, heldAt: h.heldAt, captureBefore: h.captureBefore ?? null });
+type Hold = { heldAt: number | null; captureBefore?: number | null; created?: number; capture?: "manual" | "automatic"; attempt?: number | null };
+const intent = (id: string, status: IntentStatus, h: Hold = { heldAt: null }) => ({ id, status, capture: h.capture ?? ("manual" as const), created: h.created ?? BOOKED, heldAt: h.heldAt, captureBefore: h.captureBefore ?? null, attempt: h.attempt ?? null });
 const GOOD = (AUTH_WINDOW_HOURS - CAPTURE_MARGIN_HOURS) * HOUR;
 const at = (heldAt: number, captureBefore: number | null = null) => intent("pi_h", "requires_capture", { heldAt, captureBefore });
 is("a hold is captured a minute after the deadline while it is good: Stripe's capture_before, or the shortest window from the hold when unsaid", [captureTime(held, at(held.at), held.at), captureTime(held, at(held.at, held.captureAt + 10 * HOUR), held.at), holdGoodUntil(held.at, null)], [{ do: "capture", at: held.captureAt + CAPTURE_DELAY_MS }, { do: "capture", at: held.captureAt + CAPTURE_DELAY_MS }, held.at + GOOD]);
@@ -110,10 +114,10 @@ is("a hold with no time stored or listed counts from its PaymentIntent's creatio
 part("A session moved");
 const NOW = BOOKED + 10 * DAY;
 const inside = sessionCharge(2, NOW + 10 * HOUR, BOOKED, 8000, 48, NOW);
-is("moved inside its deadline: never planned in the past, charged at once and not refunded to a buyer canceling", [inside.at >= NOW && inside.captureAt >= NOW, inside], [true, { index: 2, cents: 8000, at: NOW, captureAt: NOW, way: "charge", refundFee: false }]);
+is("moved inside its deadline: never planned in the past, charged at once and not refunded to a buyer canceling", [inside.at >= NOW && inside.captureAt >= NOW, inside], [true, { index: 2, cents: 8000, at: NOW, captureAt: NOW, way: "charge", refundFee: false, movedBy: null, cancelBy: NOW + 10 * HOUR - 48 * HOUR }]);
 is("moved inside its deadline with a hold still good: that hold is captured at once, not left uncaptured", captureTime(inside, at(NOW - 2 * HOUR), NOW), { do: "capture", at: NOW });
-is("moved to a day after its deadline would come: held now, captured at the deadline", sessionCharge(2, NOW + 60 * HOUR, BOOKED, 8000, 48, NOW), { index: 2, cents: 8000, at: NOW, captureAt: NOW + 12 * HOUR, way: "hold", refundFee: false });
-is("a first session moved later is held a day before its deadline like the others, never charged early", sessionCharge(0, NOW + 20 * DAY, BOOKED, 8000, 48, NOW), { index: 0, cents: 8000, at: NOW + 20 * DAY - 72 * HOUR, captureAt: NOW + 20 * DAY - 48 * HOUR, way: "hold", refundFee: false });
+is("moved to a day after its deadline would come: held now, captured at the deadline", sessionCharge(2, NOW + 60 * HOUR, BOOKED, 8000, 48, NOW), { index: 2, cents: 8000, at: NOW, captureAt: NOW + 12 * HOUR, way: "hold", refundFee: false, movedBy: null, cancelBy: NOW + 12 * HOUR });
+is("a first session moved later is held a day before its deadline like the others, never charged early", sessionCharge(0, NOW + 20 * DAY, BOOKED, 8000, 48, NOW), { index: 0, cents: 8000, at: NOW + 20 * DAY - 72 * HOUR, captureAt: NOW + 20 * DAY - 48 * HOUR, way: "hold", refundFee: false, movedBy: null, cancelBy: NOW + 20 * DAY - 48 * HOUR });
 is("a charge made at or after the deadline is kept; one made before it is not", [keptWhen(NOW, NOW + 10 * HOUR, 48), keptWhen(held.captureAt + CAPTURE_DELAY_MS, starts[2], 48), keptWhen(BOOKED, farFirst[0], 48)], [true, true, false]);
 
 part("A payment that fails");
@@ -131,18 +135,29 @@ is("owed: asked to pay, never told its time is open again", [fw("buyer", "owed",
 is("no deadline mentioned without a deadline", (["pay_by_link", "cancel", "owed"] as const).flatMap((w) => (["hold", "charge"] as const).map((st) => fw("buyer", w, st, 0))).some((t) => t.includes("deadline")), false);
 
 part("Stopping sessions");
-const rec = (index: number, status: IntentStatus | null, extra: Partial<ChargeRecord> = {}, h: Hold = { heldAt: null }): ChargeRecord => ({ index, cents: 8000, attempt: status === null ? 0 : 1, intent: status === null ? null : intent(`pi_${index}`, status, h), refunded: false, kept: false, ...extra });
+const rec = (index: number, status: IntentStatus | null, extra: Partial<ChargeRecord> = {}, h: Hold = { heldAt: null }): ChargeRecord => ({ index, cents: 8000, attempt: status === null ? 0 : 1, attemptAt: null, attemptCapture: null, intent: status === null ? null : intent(`pi_${index}`, status, h), refunded: false, kept: false, refused: [], ...extra });
 const ended = starts[1] + HOUR;
 const canceled = toCancel(starts, ended);
-const listed = (id: string, status: IntentStatus, session: number, h: Hold = { heldAt: null }, series = "s1", refunded = false): FoundIntent => ({ ...intent(id, status, h), metadata: { series, session: String(session) }, refunded });
-const by = (who: "creator" | "buyer", when: number, found: FoundIntent[] = [], s: readonly number[] = starts, deadlineHours = 48) => ({ seriesId: "s1", found, starts: s, at: when, by: who, deadlineHours });
+const SER = { id: "s1", application: "ca_platform", currency: "usd" };
+const listed = (id: string, status: IntentStatus, session: number, h: Hold = { heldAt: null }, series = "s1", refunded = false, extra: Partial<FoundIntent> = {}): FoundIntent => ({
+  ...intent(id, status, h),
+  metadata: { mm_series: series, mm_session: String(session), ...(h.attempt ? { mm_attempt: String(h.attempt) } : {}) },
+  amount: 8000,
+  currency: "usd",
+  application: "ca_platform",
+  amountReceived: status === "succeeded" ? 8000 : 0,
+  amountRefunded: refunded ? 8000 : 0,
+  disputed: false,
+  ...extra,
+});
+const by = (who: "creator" | "buyer", when: number, found: FoundIntent[] = [], s: readonly number[] = starts, deadlineHours = 48) => ({ series: SER, found, starts: s, at: when, by: who, deadlineHours, cents: 8000 });
 type Stop = ReturnType<typeof toStop>;
-const S = (o: Partial<Stop> = {}): Stop => ({ never: [], close: [], refund: [], capture: [], charge: [], owed: [], pending: [], ...o });
+const S = (o: Partial<Stop> = {}): Stop => ({ never: [], close: [], refund: [], capture: [], charge: [], owed: [], pending: [], postpone: [], unrefundable: [], ...o });
 const release = (id: string) => ({ id, action: "release" as const, key: `series:cancel:${id}` });
 const cancel = (id: string) => ({ id, action: "cancel" as const, key: `series:cancel:${id}` });
-const refund = (id: string, index: number) => ({ id, index, key: `series:refund:${id}` });
+const refund = (id: string, index: number, cents = 8000) => ({ id, index, key: `series:refund:${id}`, cents });
 const capture = (id: string) => ({ id, key: `series:capture:${id}` });
-const charge = (index: number, attempt: number) => ({ index, attempt, key: `series:s1:${index}:${attempt}` });
+const charge = (index: number, attempt: number, capture: "manual" | "automatic" = "automatic") => ({ index, attempt, key: `series:s1:${index}:${attempt}`, capture });
 const stop = toStop(canceled, [rec(0, "succeeded"), rec(1, "succeeded"), rec(2, "requires_payment_method"), rec(3, "requires_capture", {}, { heldAt: with48[3].at })], by("buyer", ended));
 is("ended in time: the failed charge's PaymentIntent is canceled and the hold released, so no pay link can charge them", stop, S({ never: [2, 3], close: [cancel("pi_2"), release("pi_3")] }));
 is("an attempt with no id stored is read from the list; one never started needs nothing; a canceled one stays canceled; one captured is refunded when the creator stops it", toStop([0, 1, 2, 3], [rec(0, null, { attempt: 1 }), rec(1, null), rec(2, "canceled"), rec(3, "succeeded")], by("creator", BOOKED, [listed("pi_x", "requires_capture", 0, { heldAt: BOOKED })])), S({ never: [0, 1, 2, 3], close: [release("pi_x")], refund: [refund("pi_3", 3)] }));
@@ -173,14 +188,14 @@ const many = toStop([2, 3], [rec(2, "succeeded"), rec(3, "succeeded")], by("crea
 is("one key per PaymentIntent refunded, never one key for two refunds", [many.refund.map((r) => r.key), new Set(many.refund.map((r) => r.key)).size, stepKey("refund", "pi_a") === stepKey("refund", "pi_b"), stepKey("refund", "pi_a") === stepKey("capture", "pi_a")], [["series:refund:pi_2", "series:refund:pi_d2", "series:refund:pi_3", "series:refund:pi_d3"], 4, false, false]);
 is("a duplicate processing beside a payment is reported, not refunded until it settles, and never counted paid", toStop([2], [rec(2, "succeeded")], by("creator", ended, [listed("pi_p", "processing", 2)])), S({ never: [2], refund: [refund("pi_2", 2)], pending: [{ id: "pi_p", index: 2 }] }));
 is("late, with only a payment processing: nothing charged, captured or owed until it settles", toStop([2], [rec(2, "requires_payment_method", {}, auto)], by("buyer", late, [listed("pi_p", "processing", 2, auto)])), S({ close: [cancel("pi_2")], pending: [{ id: "pi_p", index: 2 }] }));
-is("late, with a good hold and a duplicate processing: the hold is captured, the duplicate reported (refunded if it succeeds)", toStop([2], [rec(2, "requires_capture", {}, { heldAt: with48[2].at })], by("buyer", late, [listed("pi_p", "processing", 2, auto)])), S({ capture: [capture("pi_2")], pending: [{ id: "pi_p", index: 2 }] }));
+is("late, with a good hold and a duplicate processing: the hold is neither captured nor released while it stays good, the duplicate reported", toStop([2], [rec(2, "requires_capture", {}, { heldAt: with48[2].at })], by("buyer", late, [listed("pi_p", "processing", 2, auto)])), S({ pending: [{ id: "pi_p", index: 2 }], postpone: [{ id: "pi_2", index: 2, until: holdGoodUntil(with48[2].at, null) }] }));
 const every = [stop, lateStop, many, toStop([2], [rec(2, "requires_capture", {}, { heldAt: late - 5 * DAY })], by("buyer", late))];
 is("every call toStop asks for carries its key", every.every((o) => o.close.every((c) => typeof c.key === "string" && c.key.length > 0) && o.capture.every((c) => c.key.length > 0) && o.charge.every((c) => c.key.length > 0) && o.refund.every((r) => r.key.length > 0)), true);
 is("a session already started when it is stopped took place: nothing done for it", toStop([1], [rec(1, "succeeded")], by("creator", ended)), S());
 
 part("Canceled for non-payment only on the list just read");
-is("a link paid a moment ago keeps the session: held, processing or paid", (["requires_capture", "processing", "succeeded"] as IntentStatus[]).map((st) => unpaidCancel("s1", rec(2, "requires_payment_method"), [listed("pi_2", st, 2)]).do), ["keep", "keep", "keep"]);
-is("still unpaid on the list: canceled, its PaymentIntents closed, each under its key", [unpaidCancel("s1", rec(2, "requires_payment_method"), [listed("pi_2", "requires_payment_method", 2)]), unpaidCancel("s1", rec(2, null, { attempt: 1 }), [])], [{ do: "cancel", close: [cancel("pi_2")] }, { do: "cancel", close: [] }]);
+is("a link paid a moment ago keeps the session: held, processing or paid", (["requires_capture", "processing", "succeeded"] as IntentStatus[]).map((st) => unpaidCancel(SER, rec(2, "requires_payment_method"), [listed("pi_2", st, 2)]).do), ["keep", "keep", "keep"]);
+is("still unpaid on the list: canceled, its PaymentIntents closed, each under its key", [unpaidCancel(SER, rec(2, "requires_payment_method"), [listed("pi_2", "requires_payment_method", 2)]), unpaidCancel(SER, rec(2, null, { attempt: 1 }), [])], [{ do: "cancel", close: [cancel("pi_2")] }, { do: "cancel", close: [] }]);
 
 part("The pay link re-checks the session");
 const link = { stopped: false, status: "requires_payment_method" as IntentStatus | null, now: starts[2] - 80 * HOUR, payBy: payBy(starts[2], 72, "hold") };
@@ -198,20 +213,20 @@ part("A retry days later never creates a second PaymentIntent");
 const go = (charge = held, now = charge.at) => ({ charge, stopped: false, now });
 is("the key carries the attempt", [chargeKey("s1", 3, 1), chargeKey("s1", 3, 2)], ["series:s1:3:1", "series:s1:3:2"]);
 // The attempt was written, the PaymentIntent created, and the id never stored: 70 hours later the key may be gone, but the list still shows it.
-is("an attempt with no id stored: the one found on the account is reused, whatever the key's age", chargeAttempt("s1", rec(2, null, { attempt: 1 }), [listed("pi_x", "requires_payment_method", 2)], go()), { do: "reuse", id: "pi_x", close: [] });
-is("a stored one is reused", chargeAttempt("s1", rec(2, "requires_action"), [], go()), { do: "reuse", id: "pi_2", close: [] });
-is("only PaymentIntents of this series and this session count", chargeAttempt("s1", rec(2, null), [listed("pi_a", "succeeded", 3), listed("pi_b", "succeeded", 2, { heldAt: null }, "s2")], go()), { do: "create", attempt: 1, key: "series:s1:2:1", capture: "manual", close: [] });
-is("only canceled ones: a new one, under the next attempt's key", chargeAttempt("s1", rec(2, "canceled"), [listed("pi_2", "canceled", 2)], go()), { do: "create", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [] });
-is("from the deadline on, a new one is a charge at once, never a hold", chargeAttempt("s1", rec(2, "canceled"), [], go(held, held.captureAt)), { do: "create", attempt: 2, key: "series:s1:2:2", capture: "automatic", close: [] });
-is("never anything new before the session's planned time: it waits until then, never earlier", [chargeAttempt("s1", rec(2, null), [], go(held, held.at - HOUR)), chargeAttempt("s1", rec(2, null), [], go(held, held.at))], [{ do: "wait", at: held.at, close: [] }, { do: "create", attempt: 1, key: "series:s1:2:1", capture: "manual", close: [] }]);
-is("two found: the one furthest along is kept and the other closed (refunded if paid), each under its key", chargeAttempt("s1", rec(2, "requires_payment_method"), [listed("pi_new", "succeeded", 2), listed("pi_old", "succeeded", 2)], go()), { do: "reuse", id: "pi_new", close: [{ id: "pi_old", action: "refund_in_full", key: "series:refund:pi_old" }, cancel("pi_2")] });
-is("a duplicate processing is waited on, never counted paid nor closed; one refunded already is left as it is", chargeAttempt("s1", rec(2, "succeeded"), [listed("pi_p", "processing", 2, auto), listed("pi_r", "succeeded", 2, auto, "s1", true)], go()), { do: "reuse", id: "pi_2", close: [{ id: "pi_p", action: "wait", key: null }] });
-is("a hold good until the capture is reused", chargeAttempt("s1", rec(2, "requires_capture", {}, { heldAt: held.at }), [], go()), { do: "reuse", id: "pi_2", close: [] });
-is("a hold the list shows without its charge keeps the hold time stored, never turning stale", chargeAttempt("s1", rec(2, "requires_capture", {}, { heldAt: held.at }), [listed("pi_2", "requires_capture", 2, { heldAt: null, created: held.at - 10 * DAY })], go()), { do: "reuse", id: "pi_2", close: [] });
-is("a moved session's old hold that would not last is released, never reused: a new one is placed", chargeAttempt("s1", rec(2, "requires_capture", {}, { heldAt: held.at }), [], go(moved, held.at + HOUR)), { do: "wait", at: moved.at, close: [release("pi_2")] });
-is("the moved session's new hold is placed at its planned time, the old one released", chargeAttempt("s1", rec(2, "requires_capture", {}, { heldAt: held.at }), [], go(moved, moved.at)), { do: "create", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [release("pi_2")] });
-is("stale is judged at the moment of capture: a capture job running late on a hold no longer good does not reuse it", chargeAttempt("s1", rec(2, "requires_capture", {}, { heldAt: held.at }), [], go(held, held.at + GOOD + 1)).do, "create");
-is("a stopped session never gets a new one, even when its last was canceled", [chargeAttempt("s1", rec(3, "canceled"), [], { charge: with48[3], stopped: true, now: with48[3].at }), chargeAttempt("s1", rec(3, null), [], { charge: with48[3], stopped: true, now: with48[3].at })], [{ do: "stop" }, { do: "stop" }]);
+is("an attempt with no id stored: the one found on the account is reused, whatever the key's age", chargeAttempt(SER, rec(2, null, { attempt: 1 }), [listed("pi_x", "requires_payment_method", 2)], go()), { do: "reuse", id: "pi_x", close: [] });
+is("a stored one is reused", chargeAttempt(SER, rec(2, "requires_action"), [], go()), { do: "reuse", id: "pi_2", close: [] });
+is("only PaymentIntents of this series and this session count", chargeAttempt(SER, rec(2, null), [listed("pi_a", "succeeded", 3), listed("pi_b", "succeeded", 2, { heldAt: null }, "s2")], go()), { do: "create", attempt: 1, key: "series:s1:2:1", capture: "manual", close: [] });
+is("only canceled ones: a new one, under the next attempt's key", chargeAttempt(SER, rec(2, "canceled"), [listed("pi_2", "canceled", 2)], go()), { do: "create", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [] });
+is("from the deadline on, a new one is a charge at once, never a hold", chargeAttempt(SER, rec(2, "canceled"), [], go(held, held.captureAt)), { do: "create", attempt: 2, key: "series:s1:2:2", capture: "automatic", close: [] });
+is("never anything new before the session's planned time: it waits until then, never earlier", [chargeAttempt(SER, rec(2, null), [], go(held, held.at - HOUR)), chargeAttempt(SER, rec(2, null), [], go(held, held.at))], [{ do: "wait", at: held.at, close: [] }, { do: "create", attempt: 1, key: "series:s1:2:1", capture: "manual", close: [] }]);
+is("two found: the one furthest along is kept and the other closed (refunded if paid), each under its key", chargeAttempt(SER, rec(2, "requires_payment_method"), [listed("pi_new", "succeeded", 2), listed("pi_old", "succeeded", 2)], go()), { do: "reuse", id: "pi_new", close: [{ id: "pi_old", action: "refund_in_full", key: "series:refund:pi_old" }, cancel("pi_2")] });
+is("a duplicate processing is waited on, never counted paid nor closed; one refunded already is left as it is", chargeAttempt(SER, rec(2, "succeeded"), [listed("pi_p", "processing", 2, auto), listed("pi_r", "succeeded", 2, auto, "s1", true)], go()), { do: "reuse", id: "pi_2", close: [{ id: "pi_p", action: "wait", key: null }] });
+is("a hold good until the capture is reused", chargeAttempt(SER, rec(2, "requires_capture", {}, { heldAt: held.at }), [], go()), { do: "reuse", id: "pi_2", close: [] });
+is("a hold the list shows without its charge keeps the hold time stored, never turning stale", chargeAttempt(SER, rec(2, "requires_capture", {}, { heldAt: held.at }), [listed("pi_2", "requires_capture", 2, { heldAt: null, created: held.at - 10 * DAY })], go()), { do: "reuse", id: "pi_2", close: [] });
+is("a moved session's old hold that would not last is released, never reused: a new one is placed", chargeAttempt(SER, rec(2, "requires_capture", {}, { heldAt: held.at }), [], go(moved, held.at + HOUR)), { do: "wait", at: moved.at, close: [release("pi_2")] });
+is("the moved session's new hold is placed at its planned time, the old one released", chargeAttempt(SER, rec(2, "requires_capture", {}, { heldAt: held.at }), [], go(moved, moved.at)), { do: "create", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [release("pi_2")] });
+is("stale is judged at the moment of capture: a capture job running late on a hold no longer good does not reuse it", chargeAttempt(SER, rec(2, "requires_capture", {}, { heldAt: held.at }), [], go(held, held.at + GOOD + 1)).do, "create");
+is("a stopped session never gets a new one, even when its last was canceled", [chargeAttempt(SER, rec(3, "canceled"), [], { charge: with48[3], stopped: true, now: with48[3].at }), chargeAttempt(SER, rec(3, null), [], { charge: with48[3], stopped: true, now: with48[3].at })], [{ do: "stop" }, { do: "stop" }]);
 
 part("Refunds when a series ends");
 const paid = [rec(0, "succeeded"), rec(1, "succeeded"), rec(2, "succeeded")];
@@ -224,15 +239,74 @@ is("only what was captured: a hold is released by toStop, never refunded, and on
 is("a first session already inside the deadline when booked is never refunded by the buyer ending it, even at once", ends(BOOKED, "buyer", [rec(0, "succeeded")], lateFirst), []);
 is("no deadline: a buyer canceling before the start is refunded what was captured", ends(BOOKED + HOUR, "buyer", [rec(0, "succeeded")], farFirst, 0), [0]);
 
-const one = (record: ChargeRecord, start: number, when: number, who: "creator" | "buyer", found: FoundIntent[] = []) => sessionRefunded(record, found, { seriesId: "s1", start, at: when, by: who, deadlineHours: 48 }).map((r) => r.id);
+const one = (record: ChargeRecord, start: number, when: number, who: "creator" | "buyer", found: FoundIntent[] = []) => sessionRefunded(record, found, { series: SER, start, at: when, by: who, deadlineHours: 48 }).map((r) => r.id);
 is("a kept charge (made at or after the deadline) is never refunded to the buyer, even after a move; the creator canceling still refunds it", [one(rec(2, "succeeded", { kept: true }), starts[2] + 21 * DAY, starts[2] + 21 * DAY - 49 * HOUR, "buyer"), one(rec(2, "succeeded", { kept: true }), starts[2] + 21 * DAY, starts[2] + 21 * DAY - 49 * HOUR, "creator")], [[], ["pi_2"]]);
 // Charged at its deadline, then the creator moves the session three weeks later, and a duplicate hold made before the move is captured after it.
-const keptRecord = rec(2, "succeeded", { kept: keptOnCharge(rec(2, "requires_capture"), starts[2] - 48 * HOUR + CAPTURE_DELAY_MS, starts[2], 48) });
-is("a creator's move never clears kept: a capture after the move, before the new deadline, leaves it kept", [keptRecord.kept, keptOnCharge(keptRecord, starts[2] + DAY, starts[2] + 21 * DAY, 48), keptOnCharge(rec(2, "succeeded"), starts[2] + DAY, starts[2] + 21 * DAY, 48), keptOnCharge(rec(2, "succeeded"), starts[2] + 21 * DAY - 48 * HOUR, starts[2] + 21 * DAY, 48)], [true, true, false, true]);
+const keptRecord = rec(2, "succeeded", { kept: keptOnCharge(rec(2, "requires_capture"), starts[2] - 48 * HOUR + CAPTURE_DELAY_MS, with48[2]) });
+const movedLater = sessionCharge(2, starts[2] + 21 * DAY, BOOKED, 8000, 48, starts[2] - DAY, "creator");
+is("a creator's move never clears kept: a capture after the move, before the new deadline, leaves it kept", [keptRecord.kept, keptOnCharge(keptRecord, starts[2] + DAY, movedLater), keptOnCharge(rec(2, "succeeded"), starts[2] + DAY, movedLater), keptOnCharge(rec(2, "succeeded"), starts[2] + 21 * DAY - 48 * HOUR, movedLater)], [true, true, false, true]);
 
 part("One session canceled on its own");
 is("the buyer canceling one captured session at least the deadline before it is refunded; later, not; the creator canceling it, always before it starts", [one(rec(2, "succeeded"), starts[2], starts[2] - 48 * HOUR, "buyer"), one(rec(2, "succeeded"), starts[2], starts[2] - 47 * HOUR, "buyer"), one(rec(2, "succeeded"), starts[2], starts[2] - HOUR, "creator"), one(rec(2, "succeeded"), starts[2], starts[2] + HOUR, "creator")], [["pi_2"], [], ["pi_2"], []]);
 is("from what was found, never the record alone: a payment never stored is refunded, and a duplicate too", [one(rec(2, null, { attempt: 1 }), starts[2], starts[2] - 48 * HOUR, "buyer", [listed("pi_z", "succeeded", 2, auto)]), one(rec(2, "succeeded"), starts[2], starts[2] - HOUR, "creator", [listed("pi_dup", "succeeded", 2, auto)])], [["pi_z"], ["pi_2", "pi_dup"]]);
+
+part("A request that died is sent again under its own key, never a second payment");
+const sent = (extra: Partial<ChargeRecord> = {}) => rec(2, null, { attempt: 1, attemptAt: held.at - HOUR, attemptCapture: "automatic", ...extra });
+// The attempt was written and the create sent; the function died before Stripe answered, and the list does not show it yet.
+is("the latest attempt unknown: the same key and the same body again, never the next attempt", chargeAttempt(SER, sent(), [], go()), { do: "repeat", attempt: 1, key: "series:s1:2:1", capture: "automatic" });
+is("once its PaymentIntent is known canceled, the next attempt; with nothing listed after Stripe's 24 hours, the next attempt too", [chargeAttempt(SER, sent(), [listed("pi_1", "canceled", 2, { heldAt: null, attempt: 1 })], go()).do, chargeAttempt(SER, sent({ attemptAt: held.at - 25 * HOUR }), [], go())], ["create", { do: "create", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [] }]);
+is("a PaymentIntent stored for the latest attempt is known: it is reused, never sent again", chargeAttempt(SER, sent({ intent: intent("pi_1", "requires_payment_method", { heldAt: null, attempt: 1 }) }), [], go()), { do: "reuse", id: "pi_1", close: [] });
+is("a late stop with the latest attempt unknown: that attempt sent again, same key and body, never a second charge", toStop([2], [sent({ attemptAt: late - HOUR, attemptCapture: "manual" })], by("buyer", late)), S({ charge: [charge(2, 1, "manual")] }));
+
+part("Refunds: what is left, never a disputed or refused one again");
+const partly = listed("pi_z", "succeeded", 2, auto, "s1", false, { amountRefunded: 3000 });
+is("a payment refunded in part: what is left is refunded (the call carries no amount)", toStop([2], [rec(2, null, { attempt: 1 })], by("creator", ended, [partly])).refund, [refund("pi_z", 2, 5000)]);
+is("refunded in full by its amounts: never again", toStop([2], [rec(2, null, { attempt: 1 })], by("creator", ended, [listed("pi_z", "succeeded", 2, auto, "s1", false, { amountRefunded: 8000 })])).refund, []);
+is("a disputed charge, or one whose refund Stripe refused: reported, never sent again", [toStop([2], [rec(2, null, { attempt: 1 })], by("creator", ended, [listed("pi_z", "succeeded", 2, auto, "s1", false, { disputed: true })])), toStop([2], [rec(2, "succeeded", { refused: ["pi_2"] })], by("creator", ended)).unrefundable], [S({ never: [2], unrefundable: [{ id: "pi_z", index: 2, why: "disputed" }] }), [{ id: "pi_2", index: 2, why: "refused" }]]);
+is("a disputed duplicate beside a payment is reported, never refunded", chargeAttempt(SER, rec(2, "succeeded"), [listed("pi_d", "succeeded", 2, auto, "s1", false, { disputed: true })], go()), { do: "reuse", id: "pi_2", close: [{ id: "pi_d", action: "report", key: null }] });
+
+part("Never a hold captured beside a payment processing");
+const goodHold = rec(2, "requires_capture", {}, { heldAt: held.at });
+is("a good hold and one processing: no capture while the hold stays good; then it is released and the other decides", [chargeAttempt(SER, goodHold, [listed("pi_p", "processing", 2, auto)], go(held, held.captureAt + CAPTURE_DELAY_MS)), chargeAttempt(SER, goodHold, [listed("pi_p", "processing", 2, auto)], go(held, holdGoodUntil(held.at, null) + 1))], [{ do: "wait", at: holdGoodUntil(held.at, null) + 1, close: [] }, { do: "reuse", id: "pi_p", close: [release("pi_2")] }]);
+
+part("A payment refunded in full is never counted paid");
+const refundedDup = listed("pi_r", "succeeded", 2, auto, "s1", true);
+is("a good hold beside a payment refunded in full is reused, never released for it", chargeAttempt(SER, goodHold, [refundedDup], go()), { do: "reuse", id: "pi_2", close: [] });
+is("a late stop with only a payment refunded in full: its good hold is captured", toStop([2], [rec(2, "requires_capture", {}, { heldAt: with48[2].at })], by("buyer", late, [refundedDup])), S({ capture: [capture("pi_2")] }));
+
+part("Only this series' own PaymentIntents count");
+const theirs = [listed("pi_amt", "succeeded", 2, auto, "s1", false, { amount: 9000 }), listed("pi_cur", "succeeded", 2, auto, "s1", false, { currency: "eur" }), listed("pi_app", "succeeded", 2, auto, "s1", false, { application: "ca_other" }), { ...listed("pi_old", "succeeded", 2, auto), metadata: { series: "s1", session: "2" } }];
+is("another amount, currency, application, or metadata not prefixed: never refunded, reused or counted", [toStop([2], [rec(2, null)], by("creator", ended, theirs)).refund, chargeAttempt(SER, rec(2, null), theirs, go()).do], [[], "create"]);
+is("a listed object without its application is matched by the rest", toStop([2], [rec(2, null)], by("creator", ended, [listed("pi_na", "succeeded", 2, auto, "s1", false, { application: undefined })])).refund, [refund("pi_na", 2)]);
+is("the metadata written on every PaymentIntent is prefixed", seriesMetadata("s1", 2, 3), { mm_series: "s1", mm_session: "2", mm_attempt: "3" });
+
+part("A series never starts before it is booked");
+is("a session at or before the booking: refused", [seriesCharges([BOOKED, BOOKED + 7 * DAY], 8000, BOOKED, LEAST, 48), seriesCharges([BOOKED - HOUR, BOOKED + 7 * DAY], 8000, BOOKED, LEAST, 48)], [null, null]);
+
+part("The creator moving a session inside its deadline (owner, C2-62)");
+const creatorMoved = sessionCharge(2, NOW + 30 * HOUR, BOOKED, 8000, 48, NOW, "creator");
+is("only held at once and captured at the session's start, free to cancel until then", creatorMoved, { index: 2, cents: 8000, at: NOW, captureAt: NOW + 30 * HOUR, way: "hold", refundFee: false, movedBy: "creator", cancelBy: NOW + 30 * HOUR });
+is("the buyer moving it there keeps today's rule: charged at once and kept", sessionCharge(2, NOW + 30 * HOUR, BOOKED, 8000, 48, NOW, "buyer"), { index: 2, cents: 8000, at: NOW, captureAt: NOW, way: "charge", refundFee: false, movedBy: "buyer", cancelBy: NOW - 18 * HOUR });
+is("created as a hold, captured a minute after the start, never before it", [chargeAttempt(SER, rec(2, "canceled"), [], go(creatorMoved, NOW)), captureTime(creatorMoved, at(NOW), NOW + HOUR), captureTime(creatorMoved, at(NOW), NOW + 30 * HOUR)], [{ do: "create", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [] }, { do: "capture", at: NOW + 30 * HOUR + CAPTURE_DELAY_MS }, { do: "capture", at: NOW + 30 * HOUR + CAPTURE_DELAY_MS }]);
+const farMoved = sessionCharge(2, NOW + 70 * HOUR, BOOKED, 8000, 72, NOW, "creator");
+is("a hold that would expire before the start is placed again inside its window, never captured early", [farMoved.way, farMoved.captureAt, captureTime(farMoved, at(NOW, NOW + 50 * HOUR), NOW + 40 * HOUR)], ["hold", NOW + 70 * HOUR, { do: "rehold", at: NOW + 40 * HOUR }]);
+const cancelBy: number[] = [];
+cancelBy[2] = creatorMoved.cancelBy;
+const movedStarts = [...starts];
+movedStarts[2] = NOW + 30 * HOUR;
+is("the buyer canceling before the start: the hold is released, nothing charged, nothing kept; after the start's own time it is a late stop", [toStop([2], [rec(2, "requires_capture", {}, { heldAt: NOW })], { ...by("buyer", NOW + 29 * HOUR, [], movedStarts), cancelBy }), keptOnCharge(rec(2, "requires_capture"), NOW + HOUR, creatorMoved), keptOnCharge(rec(2, "requires_capture"), NOW + 30 * HOUR + CAPTURE_DELAY_MS, creatorMoved)], [S({ never: [2], close: [release("pi_2")] }), false, true]);
+is("the change message follows the charge: held until the start, charged now, kept, or as before", [moveCase(creatorMoved, rec(2, null), NOW + 30 * HOUR, 48), moveCase(sessionCharge(2, NOW + 30 * HOUR, BOOKED, 8000, 48, NOW, "buyer"), rec(2, null), NOW + 30 * HOUR, 48), moveCase(creatorMoved, rec(2, "succeeded", { kept: true }), NOW + 30 * HOUR, 48), moveCase(sessionCharge(2, NOW + 5 * DAY, BOOKED, 8000, 48, NOW, "creator"), rec(2, null), NOW + 5 * DAY, 48), moveCase(sessionCharge(2, NOW + 10 * HOUR, BOOKED, 8000, 0, NOW, "creator"), rec(2, null), NOW + 10 * HOUR, 0)], ["held_until_start", "charged_now", "kept", "planned", "planned"]);
+
+part("The change message, in every store language");
+const moveCases = ["held_until_start", "planned", "kept", "charged_now"] as const;
+const moveInput = { date: "Friday, November 20 at 9:00 AM EST", store: "Lena Coaching", hours: 48, by: "creator" as const };
+is("the buyer told in plain words what the creator's move inside the deadline does", seriesMoveMessage("en", "buyer", "held_until_start", moveInput), "Lena Coaching moved your session to Friday, November 20 at 9:00 AM EST. That is less than 48 hours away, so your card is only reserved now. It is charged when the session starts. Cancel any time before then and you pay nothing for it.");
+is("the creator told the same, without the buyer's name", seriesMoveMessage("en", "creator", "held_until_start", moveInput), "You moved the session to Friday, November 20 at 9:00 AM EST. That is inside your 48-hour cancellation deadline, so the buyer's card is only reserved. It is charged when the session starts. If the buyer cancels before then, the reservation is released and nothing is charged.");
+const everyMessage = LANGUAGE_CODES.flatMap((lang) => (["buyer", "creator"] as const).flatMap((to) => moveCases.flatMap((which) => (["creator", "buyer"] as const).flatMap((who) => [0, 48].map((hours) => ({ lang, to, which, lines: SERIES_MOVE_WORDS[lang][to][which]({ ...moveInput, by: who, hours }) }))))));
+is("every language has every message for both sides, each with the date and no empty line", everyMessage.filter((m) => !m.lines.length || m.lines.some((l) => !l.trim()) || !m.lines[0].includes(moveInput.date)).map((m) => `${m.lang} ${m.to} ${m.which}`), []);
+is("every sentence under 21 words, in every language", everyMessage.flatMap((m) => m.lines.filter((l) => l.split(/\s+/).length >= 21).map((l) => `${m.lang}: ${l}`)), []);
+is("the seven languages, each its own words", [Object.keys(SERIES_MOVE_WORDS).sort(), new Set(LANGUAGE_CODES.map((l) => SERIES_MOVE_WORDS[l].buyer.held_until_start(moveInput).join(" "))).size], [[...LANGUAGE_CODES].sort(), 7]);
+is("an unknown language reads as English", seriesMoveMessage("xx", "buyer", "kept", moveInput), seriesMoveMessage("en", "buyer", "kept", moveInput));
 
 part("Not with a deposit, a code or a package");
 is("refused, each said", [seriesBillingProblem({ deposit: true, code: false, fromPackage: false }), seriesBillingProblem({ deposit: false, code: true, fromPackage: false }), seriesBillingProblem({ deposit: false, code: false, fromPackage: true }), seriesBillingProblem({ deposit: false, code: false, fromPackage: false })], ["deposit", "code", "package", null]);
@@ -241,7 +315,7 @@ part("What the buyer agrees to before booking");
 const money = (cents: number) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`;
 const dates = ["Friday, November 6 at 9:00 AM EST", "Friday, November 13 at 9:00 AM EST", "Friday, November 20 at 9:00 AM EST", "Friday, November 27 at 9:00 AM EST"];
 const said = seriesChargeWords({ charges: with48, starts, dates, money, store: "Lena Coaching", bookedAt: BOOKED, deadlineHours: 48 });
-is("the count and total from the charges, the dates, the saved card, when each is reserved and charged, a failed card, canceling, the creator canceling", said, "You book 4 sessions for $320 in all. The dates: Friday, November 6 at 9:00 AM EST; Friday, November 13 at 9:00 AM EST; Friday, November 20 at 9:00 AM EST; Friday, November 27 at 9:00 AM EST. Your card is saved with Lena Coaching's payment account and used without you there, as described here. For each session, $80 is reserved on your card a day before the cancellation deadline. It is charged at the deadline, 48 hours before the session starts. For the first session, it is reserved now. If your card cannot be reserved, we email you a link to pay. Pay by the cancellation deadline, or that session is canceled and you are not charged. If the charge at the deadline fails, the link works until the session starts. If it is not paid by then, that session is canceled and you are not charged. Cancel a session at least 48 hours before it starts and you pay nothing for it. The reservation is released, and anything already charged is refunded. If you cancel later or miss it, it is not refunded. If you cancel later and its charge failed, you still owe it. If Lena Coaching cancels, you get back what was charged for every session that does not take place. This does not affect your rights under the law.");
+is("the count and total from the charges, the dates, the saved card, when each is reserved and charged, a failed card, canceling, the creator canceling", said, "You book 4 sessions for $320 in all. The dates: Friday, November 6 at 9:00 AM EST; Friday, November 13 at 9:00 AM EST; Friday, November 20 at 9:00 AM EST; Friday, November 27 at 9:00 AM EST. Your card is saved with Lena Coaching's payment account and used without you there, as described here. For each session, $80 is reserved on your card a day before the cancellation deadline. It is charged at the deadline, 48 hours before the session starts. For the first session, it is reserved now. If your card cannot be reserved, we email you a link to pay. Pay by the cancellation deadline, or that session is canceled and you are not charged. If the charge at the deadline fails, the link works until the session starts. If it is not paid by then, that session is canceled and you are not charged. Cancel a session at least 48 hours before it starts and you pay nothing for it. The reservation is released, and anything already charged is refunded. If you cancel later or miss it, it is not refunded. If you cancel later and its charge failed, you still owe it. Once a session is charged at its deadline, it is not refunded, even if its time changes later. If you move a session to less than 48 hours away, it is charged at once and not refunded. If Lena Coaching moves a session to less than 48 hours away, your card is only reserved. It is charged when the session starts, and you can cancel for free until then. If Lena Coaching cancels, you get back what was charged for every session that does not take place. This does not affect your rights under the law.");
 const lateSaid = seriesChargeWords({ charges: seriesCharges(lateFirst, 8000, BOOKED, LEAST, 48)!, starts: lateFirst, dates: ["a", "b"], money, store: "Lena Coaching", bookedAt: BOOKED, deadlineHours: 48 });
 is("a first session already inside the deadline: charged now and not refunded, said", lateSaid.includes("The first session starts in less than 48 hours, so it is charged now and not refunded if you cancel."), true);
 is("a first session charged directly: said", seriesChargeWords({ charges: seriesCharges(farFirst, 8000, BOOKED, LEAST, 48)!, starts: farFirst, dates: ["a", "b"], money, store: "Lena Coaching", bookedAt: BOOKED, deadlineHours: 48 }).includes("The first session is charged now."), true);

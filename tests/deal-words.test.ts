@@ -6,7 +6,9 @@
  * store can speak, whole words only (edge tests of 4 November 2026: plurals
  * such as "discounts" and "five stars" passed).
  */
+import { readFileSync } from "node:fs";
 import { DEAL_WORDS, heldToFacts } from "@/lib/store-assistant-rules";
+import { latinLookalikes, renderTable, versionOf } from "../scripts/confusables-latin-table.mjs";
 import { neutralLine } from "@/lib/assistant-reminder-rules";
 import { done, is, part } from "./check";
 
@@ -68,20 +70,20 @@ is("hidden with no deal in the facts too", [heldToFacts("A dis\u0441ount.", "not
 is("a number in another script is compared as its ASCII digits", [
   heldToFacts("It costs $\uFF12\uFF10.", probe), heldToFacts("It costs $\u0662\u0660.", probe),
   heldToFacts("It costs $\uFF13\uFF10.", probe), heldToFacts("It costs $\u0663\u0660.", probe), heldToFacts("Only \u09E9\u09E6 lessons.", probe),
-  heldToFacts("It costs $2\u200B0.", probe), heldToFacts("Only 2² left.", "Only 2 left."),
+  heldToFacts("It costs $2\u200B0.", probe), heldToFacts("Only 2\u00B2 left.", "Only 2 left."),
 ], [true, true, false, false, false, true, false]);
 is("a link in fullwidth letters is refused", heldToFacts("See \uFF57\uFF57\uFF57\uFF0Eexample\uFF0Ecom", probe), false);
 is("the reply shown is never changed by the folding", (() => { const text = "Ask about the Cupón."; heldToFacts(text, probe); return text; })(), "Ask about the Cupón.");
 
 part("Fourth review: forms that were missed");
-is("English", caught(["bestselling", "best-selling", "promotion", "promotions", "on sale", "promocode", "promo code", "20%  off", "20%off", "20 percent off", "★★★★★", "☆", "⭐"]), []);
+is("English", caught(["bestselling", "best-selling", "promotion", "promotions", "on sale", "promocode", "promo code", "20%  off", "20%off", "20 percent off", "\u2605\u2605\u2605\u2605\u2605", "\u2606", "\u2B50"]), []);
 is("German", caught(["garantiert", "Garantie", "kostenlosen Versand", "kostenloser Versand", "Gratisversand", "versandkostenfrei", "Gutscheinen", "Gutscheincode", "rabattiert", "Rabattcode", "Sommerrabatte", "Sonderangebot"]), []);
 is("French", caught(["garanti", "garantie", "soldes", "promotion"]), []);
 is("Spanish", caught(["garantizado", "garantía", "rebajado", "rebajas", "promoción"]), []);
 is("Portuguese", caught(["promoção", "promoções", "garantido", "garantia"]), []);
 is("Italian", caught(["promozione", "garantito", "garanzia", "saldi"]), []);
 is("Dutch", caught(["gegarandeerd", "uitverkoop", "garantie", "kortingsactie"]), []);
-is("and in a reply they are refused when the store never wrote them", ["It is bestselling.", "It is on sale.", "Use the promocode.", "Rated ★★★★★.", "It is 20%  off.", "Kostenlosen Versand.", "Mit Gutscheinen.", "Garantiert.", "Rabattiert.", "Les soldes.", "Garanti.", "Garantizado.", "Rebajado.", "Em promoção.", "Garantido.", "In promozione.", "Gegarandeerd.", "De uitverkoop."].filter((reply) => heldToFacts(reply, "Pottery course. 20 lessons.")), []);
+is("and in a reply they are refused when the store never wrote them", ["It is bestselling.", "It is on sale.", "Use the promocode.", "Rated \u2605\u2605\u2605\u2605\u2605.", "It is 20%  off.", "Kostenlosen Versand.", "Mit Gutscheinen.", "Garantiert.", "Rabattiert.", "Les soldes.", "Garanti.", "Garantizado.", "Rebajado.", "Em promoção.", "Garantido.", "In promozione.", "Gegarandeerd.", "De uitverkoop."].filter((reply) => heldToFacts(reply, "Pottery course. 20 lessons.")), []);
 
 part("Fourth review: honest replies are allowed by the store's word in any of its forms");
 is("the store's plural allows the singular, its accent the plain word", [heldToFacts("Ask about a discount for teams.", probe), heldToFacts("Use the cupon at checkout.", probe), heldToFacts("Use the cupón at checkout.", probe), heldToFacts("DISCOUNTS for teams.", probe)], [true, true, true, true]);
@@ -96,10 +98,10 @@ is("ordinary replies pass", [heldToFacts("The Course costs $20 and has 20 lesson
 part("Fifth review: honest text in any script, and compounds the store wrote with a hyphen");
 const sameFacts = (reply: string) => heldToFacts(reply, reply);
 is("text in another script, with a Latin word inside, passes", [
-  heldToFacts("Pythonコ\u30FCスは初心者向けです。", "Pythonコ\u30FCス 初心者向け"), heldToFacts("Excelの使い方を学べます。", "Excelの使い方"), heldToFacts("这是Python课程。", "Python课程"),
-  sameFacts("Python으로 배우는 데이터 분석"), sameFacts("\u05D4\u05E7\u05D5\u05E8\u05E1 \u05D1-Python \u05DE\u05D9\u05D5\u05E2\u05D3 \u05DC\u05DE\u05EA\u05D7\u05D9\u05DC\u05D9\u05DD"), sameFacts("\u062F\u0648\u0631\u0629 \u0627\u0644\u0640Python \u0644\u0644\u0645\u0628\u062A\u062F\u0626\u064A\u0646"),
-  heldToFacts("Each capsule has 500 µg.", "500 µg per capsule"), heldToFacts("Each capsule has 500 μg.", "500 μg per capsule"), heldToFacts("Rich in β-carotene.", "Rich in β-carotene"),
-  heldToFacts("Uses a 10 kΩ resistor.", "10 kΩ resistor"), heldToFacts("\u0627\u0644\u0633\u0639\u0631 \u0662\u0667 \u062F\u0648\u0644\u0627\u0631", "\u0627\u0644\u0633\u0639\u0631 27 \u062F\u0648\u0644\u0627\u0631"),
+  heldToFacts("Python\u30B3\u30FC\u30B9\u306F\u521D\u5FC3\u8005\u5411\u3051\u3067\u3059\u3002", "Python\u30B3\u30FC\u30B9 \u521D\u5FC3\u8005\u5411\u3051"), heldToFacts("Excel\u306E\u4F7F\u3044\u65B9\u3092\u5B66\u3079\u307E\u3059\u3002", "Excel\u306E\u4F7F\u3044\u65B9"), heldToFacts("\u8FD9\u662FPython\u8BFE\u7A0B\u3002", "Python\u8BFE\u7A0B"),
+  sameFacts("Python\uC73C\uB85C \uBC30\uC6B0\uB294 \uB370\uC774\uD130 \uBD84\uC11D"), sameFacts("\u05D4\u05E7\u05D5\u05E8\u05E1 \u05D1-Python \u05DE\u05D9\u05D5\u05E2\u05D3 \u05DC\u05DE\u05EA\u05D7\u05D9\u05DC\u05D9\u05DD"), sameFacts("\u062F\u0648\u0631\u0629 \u0627\u0644\u0640Python \u0644\u0644\u0645\u0628\u062A\u062F\u0626\u064A\u0646"),
+  heldToFacts("Each capsule has 500 \u00B5g.", "500 \u00B5g per capsule"), heldToFacts("Each capsule has 500 \u03BCg.", "500 \u03BCg per capsule"), heldToFacts("Rich in \u03B2-carotene.", "Rich in \u03B2-carotene"),
+  heldToFacts("Uses a 10 k\u03A9 resistor.", "10 k\u03A9 resistor"), heldToFacts("\u0627\u0644\u0633\u0639\u0631 \u0662\u0667 \u062F\u0648\u0644\u0627\u0631", "\u0627\u0644\u0633\u0639\u0631 27 \u062F\u0648\u0644\u0627\u0631"),
 ], [true, true, true, true, true, true, true, true, true, true, true]);
 is("a compound the store wrote with a hyphen may be repeated", [
   heldToFacts("Der Sommer-Rabatt gilt bis Juli.", "Sommer-Rabatt bis Juli."), heldToFacts("Ein Geschenk-Gutschein ist erhältlich.", "Geschenk-Gutschein erhältlich."),
@@ -124,5 +126,39 @@ is("while ordinary punctuation and letters pass", [heldToFacts("Lessons 1/2 and 
 
 part("Fifth review: links and bare domains");
 is("a bare domain the facts do not have is refused", [heldToFacts("See evil.example/deal for more.", probe), heldToFacts("Visit cheap-courses.shop today.", probe), heldToFacts("Visit \uFF43\uFF48\uFF45\uFF41\uFF50\uFF0E\uFF53\uFF48\uFF4F\uFF50 today.", probe), heldToFacts("See www.example.com", probe)], [false, false, false, false]);
-is("one the store wrote is allowed, and names with a dot are not domains", [heldToFacts("Write to us at mystore.com.", "Our site is mystore.com."), heldToFacts("Learn Node.js, e.g. Vue.js.", "Node.js course"), heldToFacts("Email ana@example.com.", "Pottery.")], [true, true, true]);
+is("one the store wrote is allowed, and names with a dot are not domains", [heldToFacts("Write to us at mystore.com.", "Our site is mystore.com."), heldToFacts("Learn Node.js, e.g. Vue.js.", "Node.js course")], [true, true]);
+
+part("Sixth review: a split is joined only inside a sentence, and the store's own split word may be repeated");
+const plans = "Plans: Basic and Pro. Pro-Mode included.";
+is("a line that ends a sentence or starts with a capital is never joined to the next", [
+  heldToFacts("Choose Pro.\nMost creators start there.", plans), heldToFacts("Pick Pro!\nMore help below.", plans),
+  heldToFacts("Upgrade to Pro\nMonthly or yearly.", plans), heldToFacts("Grab a cup\nOn Monday", plans),
+], [true, true, true, true]);
+is("the store's own split word, written the same way", [heldToFacts("Pro-Mode is included.", plans), heldToFacts("The Pro/Monthly plan.", "The Pro/Monthly plan."), heldToFacts("Pro\u00B7Mobile app.", "Pro\u00B7Mobile app.")], [true, true, true]);
+is("but not the split word written another way, nor one the store never wrote", [heldToFacts("Pro.Mode is included.", plans), heldToFacts("Pro-Motion today.", plans), heldToFacts("Get a dis\ncount.", probe)], [false, false, false]);
+
+part("Sixth review: look-alike letters from Unicode's confusables, in every script");
+const deals = `${probe} Use the code. On sale. 20% off.`;
+is("each is refused, though the facts have the word in Latin letters", [
+  "Ask for a \uA4D3\uA4F2\uA4E2\uA4DA\uA4F3\uA4F4\uA4E0\uA4D4.", "On \uA4E2\uA4EE\uA4E1\uA4F0 now.", "It is 20 % \uA4F3\uA4DD\uA4DD.", "Ask for a \u2CA5\u2C9F\u057D\u2CA3\u2C9F\u0578.", "Use the \u0441\u043E\uA4D3\u0435.", "Use the c\u{104EB}de.", "Use the \u{10302}\u{104EB}de.", "Use the \u1455\u1D0F\u15EA\u1D07.", "Use the c\u2D54de.",
+  "Ask for a D\u0406SCOUNT.", "Ask for a d\u0406scount.",
+].filter((reply) => heldToFacts(reply, deals)), []);
+is("honest Lisu, Coptic and Tifinagh text passes", [heldToFacts("\uA4E1\uA4F2-\uA4E2\uA4F4 \uA4DF\uA4EC \uA4D2\uA4F5.", "Lisu."), heldToFacts("\u2CA0\u2C93\u2C9B\u2C9F\u2CA9\u03EF.", "Coptic."), heldToFacts("\u2D5C\u2D30\u2D4E\u2D30\u2D63\u2D49\u2D56\u2D5C.", "Tifinagh.")], [true, true, true]);
+const copy = readFileSync("tooling/unicode/confusables-18.0.0.txt", "utf8");
+is("the table is made from the committed copy of confusables.txt, version 18.0.0", [versionOf(copy).version, readFileSync("lib/confusables-latin.ts", "utf8") === renderTable(copy)], ["18.0.0", true]);
+const table = new Map(latinLookalikes(copy));
+is("it keeps letters of other scripts and leaves accented letters, digits, Arabic, Hebrew and Han out", [
+  table.get(0xa4d3), table.get(0x2ca5), table.get(0x10302), table.get(0x2d54), table.get(0x0441), table.get(0x0406),
+  table.has(0x00e9), table.has(0x0660), table.has(0x0627), table.has(0x05d5), table.has(0x4e00), table.has(0x2282),
+], ["d", "c", "c", "o", "c", "l|i", false, false, false, false, false, false]);
+
+part("Sixth review: email addresses, domains and stars");
+is("an email address the facts do not have is refused", [heldToFacts("Email refunds@other-shop.com for help.", probe), heldToFacts("Write to mailto:x@evil.com", probe), heldToFacts("Email ana@example.com.", "Pottery.")], [false, false, false]);
+is("one the store wrote is allowed", heldToFacts("Email hello@mystore.com for help.", "Write to hello@mystore.com."), true);
+is("file names, libraries and a capital after a dot are not domains", [
+  heldToFacts("Download logo.ai here.", probe), heldToFacts("It uses socket.io.", probe), heldToFacts("Built with ASP.NET.", probe),
+  heldToFacts("That was great.It helped.", probe), heldToFacts("Learn Node.js/React.", probe),
+], [true, true, true, true, true]);
+is("while a site with a path is still refused", [heldToFacts("See evil.example/deal for more.", probe), heldToFacts("See CHEAP.SHOP/now", probe)], [false, false]);
+is("more star ratings", caught(["\u22C6\u22C6\u22C6\u22C6\u22C6", "\u2B52", "\u{1F320}"]), []);
 done();

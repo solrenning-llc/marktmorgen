@@ -67,8 +67,12 @@ export type Signature = {
   sha256: string;
 };
 
-/** What the record keeps of each version: its fingerprint and, once signed, its signature. */
-export type VersionMark = { n: number; sha256: string; createdAt: number; signature: Signature | null };
+/**
+ * What the record keeps of each version: its fingerprint, its title (so a
+ * list shows it without reading the version's whole text; "" on a version
+ * kept before titles were) and, once signed, its signature.
+ */
+export type VersionMark = { n: number; sha256: string; title?: string; createdAt: number; signature: Signature | null };
 
 export type AgreementState = "open" | "withdrawn";
 export type AgreementStatus = "open" | "signed" | "expired" | "withdrawn";
@@ -315,7 +319,8 @@ export function parseAgreement(raw: unknown): Agreement | null {
           s && typeof s.name === "string" && typeof s.at === "number" && typeof s.sha256 === "string"
             ? { name: s.name.slice(0, MAX_SIGNED_NAME), at: s.at, ipHash: str(s.ipHash, 64), consent: str(s.consent, 400), consentVersion: num(s.consentVersion), sha256: s.sha256.slice(0, 64) }
             : null;
-        return [{ n: row.n as number, sha256: row.sha256, createdAt: num(row.createdAt), signature }];
+        const title = typeof row.title === "string" ? row.title.slice(0, MAX_TITLE) : "";
+        return [{ n: row.n as number, sha256: row.sha256, ...(title ? { title } : {}), createdAt: num(row.createdAt), signature }];
       }).slice(0, MAX_VERSIONS)
     : [];
   if (!versions.length) return null;

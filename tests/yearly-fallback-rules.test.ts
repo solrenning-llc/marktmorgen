@@ -76,6 +76,23 @@ is(
   ],
   [null, null, null, null, null, null, null, null],
 );
+is(
+  "never with an older source on the membership, which Stripe charges before the customer's default and may be a bank debit",
+  [paidWith(null, { type: "card" }), offer({ ...sub, default_payment_method: null, default_source: "ba_old", customer: { invoice_settings: { default_payment_method: { type: "card" } } } })].map((o) => o !== null),
+  [true, false],
+);
+const customerWith = (discount: unknown) => offer({ ...sub, customer: { discount, invoice_settings: { default_payment_method: { type: "card" } } } });
+is(
+  "never with a coupon on the customer or a discount on the invoice: the email would quote prices nobody is charged",
+  [
+    customerWith(null) !== null,
+    customerWith({ coupon: { percent_off: 50, duration: "forever" } }),
+    offer(sub, { ...invoice, discounts: ["di_1"] }),
+    offer(sub, { ...invoice, total_discount_amounts: [{ amount: 10000, discount: "di_1" }] }),
+    offer(sub, { ...invoice, discounts: [], total_discount_amounts: [] }) !== null,
+  ],
+  [true, null, null, null, true],
+);
 is("a card, a wallet or Link, its own or the customer's default", [paidWith({ type: "link" }) !== null, paidWith(null, { type: "card" }) !== null, paidWith({ type: "paypal" }) !== null], [true, true, true]);
 is(
   "only once a year, one item of one, in the store's currency",

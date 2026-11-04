@@ -52,6 +52,12 @@ Motivo: o GitHub Pro permite 40 tarefas simultâneas (5 macOS); o Enterprise, 50
 8. Confirmar mais de 40 tarefas rodando ao mesmo tempo.
 9. Mensagem na caixa liberando os agentes.
 
+## Conferido em 03/11/2026, 15h58 a 16h00, depois da transferência (só leitura)
+
+- Repositório `solrenning-llc/marktmorgen`, público, dono do tipo organização.
+- Fila do Actions: 288 execuções esperando; tarefas rodando ao mesmo tempo, contadas uma a uma pela API: 7 numa leitura e 13 na seguinte, todas `ubuntu-latest`. Uma tarefa curta ("Documentation scope") esperava havia 26 minutos.
+- O passo 8 do roteiro ("mais de 40 tarefas rodando ao mesmo tempo") **não está confirmado**: o número observado fica abaixo até do limite antigo do GitHub Pro (40). Não verificado por esta sessão, porque a API da organização e a de cobrança são recusadas a ela: se o Enterprise foi ativado como pago ("Activate Enterprise") ou se a organização ainda está no plano gratuito ou no teste, que não aumenta o limite. A conferência fica com o dono na tela de cobrança da organização.
+
 ## Volta atrás
 
 O repositório pode ser transferido de volta para `viniciussucupira` (o redirecionamento passa a valer no outro sentido) e o Enterprise pode ser cancelado. Os guardas do CI aceitam os dois endereços.

@@ -91,7 +91,8 @@ export function AddToCart({
 }
 
 /** `ships`: for a product the creator ships, its line about shipping, as its own page says it (lib/shipping.ts). */
-type Line = { id: string; title: string; href: string; price: string; ok: boolean; ships?: string | null; soldOut?: boolean };
+/** `heldMinutes`: a limited product whose units left are all in other buyers' checkouts, and at most how long they stay there. */
+type Line = { id: string; title: string; href: string; price: string; ok: boolean; ships?: string | null; soldOut?: boolean; heldMinutes?: number | null };
 /** What shipping comes to and where it can go, said before paying (lib/cart-shipping.ts). */
 type ShippingRow = { amount: string | null; label: string; where: string; notTo: string | null };
 /** Products that cannot ship with the rest: the cart cannot be paid for until they are taken out. */
@@ -219,7 +220,7 @@ export function CartButton({
                   <li key={line.id} className="flex items-start justify-between gap-3 py-3" style={{ borderColor: "var(--st-line)" }}>
                     <span className="min-w-0">
                       <a href={line.href} className="st-title-link block font-semibold">{line.title}</a>
-                      {line.ok ? null : <span className="st-muted block text-xs">{line.soldOut ? c.soldOut : c.gone}</span>}
+                      {line.ok ? null : <span className="st-muted block text-xs">{line.soldOut ? c.soldOut : line.heldMinutes ? c.held(line.heldMinutes) : c.gone}</span>}
                       {line.ok && line.ships ? <span className="st-muted block text-xs">{line.ships}</span> : null}
                     </span>
                     <span className="flex shrink-0 items-center gap-3">

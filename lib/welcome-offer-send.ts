@@ -21,7 +21,9 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeForId } from "@/lib/store";
 import { type Listing, readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
-import { withStockHold } from "@/lib/stock";
+import { STOCK_ATTEMPT_UNITS, withStockHold } from "@/lib/stock";
+import { limitedStock } from "@/lib/product-extras";
+import { takePublicRequest } from "@/lib/traffic";
 import { fromLine, render } from "@/lib/mail";
 import { tokensFor } from "@/lib/contacts";
 import { type Claim, readClaimFull } from "@/lib/free";
@@ -170,7 +172,7 @@ export async function welcomesOffered(store: Store): Promise<number> {
   return Number(n) || 0;
 }
 
-export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "refused" | "consent" };
+export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "refused" | "consent" | "limited" };
 
 /**
  * The checkout the offer's button opens: the offered product, the address
@@ -192,6 +194,10 @@ export async function openWelcome(
   if (offer.ended) return { ok: false, reason: "expired" };
   const product = await readProduct(store, offer.product.id);
   if (!product || !canOfferWelcome(store, offer.product)) return { ok: false, reason: "unavailable" };
+  // A limited product's stock work (its lock, its count, its hold) is done whatever it ends in: STOCK_ATTEMPT_UNITS of
+  // the store's requests, taken before any of it, as for a cart or a product bought alone (4 November 2026). Not taken:
+  // nothing is counted or held, and the button says to wait.
+  if (limitedStock(product) !== null && !(await takePublicRequest(store, "buyer", Date.now(), STOCK_ATTEMPT_UNITS))) return { ok: false, reason: "limited" };
   try {
     const held = await withStockHold(store, product, (holding) =>
       createCheckout(store, product, origin, undefined, { coupon: store.welcomeOffer.coupon, email: claim.e, welcome: true, held: holding, digitalConsent: consent }),

@@ -22,6 +22,14 @@
  *   nl:stock:sold:<statsId>:<product>            units sold
  *   nl:stock:paid:<statsId>:<product>:<session>  that checkout's unit is in the sold count (PAID_KEEP_SECONDS)
  *   nl:stock:lock:<statsId>:<product>            one count at a time
+ *
+ * The sold count only moves forward (4 November 2026): units sold since
+ * this change are in nl:stock:sold: and no longer in the hash, which code
+ * from before it never reads. Once paid selling is open, the deployment must
+ * not be rolled back to a commit before that change (513 [PF1], unit 3,
+ * commit a958137b) without first putting the
+ * sold counts back into the hashes ({"until":0,"paid":true} for each checkout
+ * named by nl:stock:paid:); otherwise those units would be offered again.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -68,9 +76,9 @@ export type StockOptions = {
   /** The questions to Stripe this reading may ask; MAX_CHECKS of its own when left out. */
   checks?: StripeChecks;
   /**
-   * Read under the product's lock (withCartStockHolds): only then are lapsed
-   * provisional holds let go and units marked sold the old way moved to the
-   * sold count.
+   * Read under the product's lock (withCartStockHolds): only then are units
+   * marked sold the old way moved to the sold count. Lapsed provisional holds
+   * are let go by every reading that is not only shown (since 4 November 2026).
    */
   underLock?: boolean;
 };
@@ -94,6 +102,15 @@ export type StockReading = { left: number; unchecked: number; holds: number };
 export const STOCK_ENTRIES_MAX = 1_600;
 /** The most bytes one hold takes in the hash: its checkout's id and {until, asked}. */
 export const STOCK_ENTRY_BYTES = 130;
+/** The longest value a hold keeps: {until, asked}, each a time in milliseconds of 13 digits (until the year 2286). */
+const HOLD_VALUE_BYTES = JSON.stringify({ until: 9_999_999_999_999, asked: 9_999_999_999_999 }).length;
+/**
+ * The longest checkout id a hold is written under (4 November 2026), so a
+ * hold never takes more than STOCK_ENTRY_BYTES: a checkout whose id is longer
+ * is closed at Stripe and nothing is held for it (withCartStockHolds), and a
+ * cookie naming one is not read (CHECKOUT_ID). Stripe's ids today are 66.
+ */
+export const STOCK_SESSION_MAX = STOCK_ENTRY_BYTES - HOLD_VALUE_BYTES;
 /** How long a checkout whose unit was counted sold is remembered, so it is never counted twice. */
 export const PAID_KEEP_SECONDS = 400 * 86_400;
 /** How many units marked sold the old way one count under the lock moves to the sold count. */
@@ -158,8 +175,8 @@ export const CART_READ_STOCK_UNITS = 1;
  * tests/cart-stock.test.ts against ORDER_STOCK (4 November 2026).
  */
 export const STOCK_ATTEMPT_UNITS = 11;
-/** A Stripe Checkout session's id, as it may be named in a cookie. */
-const CHECKOUT_ID = /^cs_(test|live)_[A-Za-z0-9]{8,200}$/;
+/** A Stripe Checkout session's id, as it may be named in a cookie: no longer than a hold may be written under (STOCK_SESSION_MAX). */
+const CHECKOUT_ID = new RegExp(`^cs_(test|live)_[A-Za-z0-9]{8,${STOCK_SESSION_MAX - "cs_test_".length}}$`);
 
 /**
  * A hold, and when Stripe was last asked about it (`asked`, written only if
@@ -297,9 +314,14 @@ export async function stockReading(store: Store, product: Listing, now = Date.no
       continue;
     }
     // A cart's provisional hold that lapsed: every checkout opened under it has closed, and none bears its name
-    // (withCartStockHolds). Free; let go of under the lock, MAX_LAPSED at a time, so one count's writes stay bounded.
+    // (withCartStockHolds). Free; let go of by every count that may write, under the lock or not (the store's and the
+    // product's pages, as they settle any hold that ran out), MAX_LAPSED at a time, so one count's writes stay bounded.
+    // Since 4 November 2026 not only under the lock: a reading only shown cannot tell it from a live hold, so until it is
+    // let go the open cart says the unit is in another checkout while the product's page offers it. Letting it go
+    // without the lock is as safe: every count already takes it for free, and the checkout that wrote it is closed
+    // when its own take-back finds it gone.
     if (session.startsWith(PENDING)) {
-      if (options.underLock && lapsed < MAX_LAPSED) writes.push(["HDEL", key, session]);
+      if (lapsed < MAX_LAPSED) writes.push(["HDEL", key, session]);
       lapsed += 1;
       continue;
     }
@@ -499,7 +521,8 @@ export type CartStockHold<T> = { ok: true; value: T } | { ok: false; reason: "so
  * covers the checkout's whole life (HOLD_MS, from before it is opened) and
  * the longest the opening can take at Stripe, so a checkout opened under it
  * has always closed before it lapses; a lapsed one is let go without asking
- * Stripe (stockLeft), since no checkout bears its name.
+ * Stripe by any count that is not only shown (stockLeft), since no checkout
+ * bears its name.
  */
 const PENDING = "p_";
 const PENDING_MS = HOLD_MS + 5 * 60 * 1000;
@@ -579,7 +602,13 @@ export async function withCartStockHolds<T extends { id: string }>(
   }
   // Counted from after the checkout exists, so its hold outlasts it; the provisional one goes.
   const hold = JSON.stringify({ until: Date.now() + HOLD_MS });
-  const receipt = await redisPipeline(limited.flatMap((product) => [["HSET", stockKey(statsId, product.id), value.id, hold], ["HDEL", stockKey(statsId, product.id), pending]])).catch(() => null);
+  // A checkout id longer than a hold may be written under (STOCK_SESSION_MAX) is never written: every hold stays
+  // inside STOCK_ENTRY_BYTES, as every reading of the hash is priced. The checkout is closed below, as one whose hold
+  // could not be written.
+  const fits = typeof value.id === "string" && Buffer.byteLength(value.id) <= STOCK_SESSION_MAX;
+  const receipt = fits
+    ? await redisPipeline(limited.flatMap((product) => [["HSET", stockKey(statsId, product.id), value.id, hold], ["HDEL", stockKey(statsId, product.id), pending]])).catch(() => null)
+    : null;
   // Each HDEL must say it took the provisional hold away (1): that hold was there until the checkout's own was written just
   // before it, so no other checkout could count the unit in between. A 0 means it was already gone (it lapsed, which the
   // open's own time limits rule out, or Redis lost it); then the unit may have been counted free meanwhile, so the checkout

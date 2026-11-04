@@ -41,6 +41,9 @@ import { CART_READ_STOCK_UNITS, HOLD_COOKIE_PATH, type ReleaseOutcome, STOCK_ATT
 import { takePublicRequest } from "@/lib/traffic";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 
+/** At most how long a unit held by another buyer's checkout stays held, in whole minutes (lib/stock.ts). */
+const HOLD_MINUTES = Math.ceil(HOLD_SECONDS / 60);
+
 
 /**
  * What a cart holds, as the store has it now (`GET ?handle=&ids=a,b`): each
@@ -88,8 +91,13 @@ export async function GET(request: NextRequest) {
     // Sold out only when every unit counted as used is known to be; one counted so only because Stripe was not asked is unknown.
     const reading = left.get(id);
     const soldOut = reading !== undefined && reading !== null && reading.left === 0 && reading.unchecked === 0;
-    const unknown = left.has(id) && (reading === undefined || (reading !== null && reading.left === 0 && reading.unchecked > 0));
-    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
+    // None free, but some only held by other buyers' checkouts (or not settled yet): said so, with when they come back
+    // (HOLD_SECONDS), never "buy it from its own page": that page then says sold out with no button (4 November 2026,
+    // review of 513 [PF1]).
+    const held = reading !== undefined && reading !== null && reading.left === 0 && reading.unchecked > 0;
+    // A count that cannot be read (or was not taken): not available in a cart right now.
+    const unknown = left.has(id) && reading === undefined;
+    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && !coming.soon.has(id) && !soldOut && !held && !unknown, ships, soldOut, heldMinutes: held ? HOLD_MINUTES : null }];
   });
   // What ships, as the checkout will ask Stripe for it (lib/cart-shipping.ts), from what can be paid for.
   const shippable = items.filter((item) => item.ok).flatMap((item) => listings.filter((p) => p.id === item.id));

@@ -20,7 +20,10 @@ const en = {
   checkout: (total: string) => `Check out · ${total}`,
   note: "You pay once, on Stripe's secure page. Each product is handed over exactly as if you had bought it on its own.",
   empty: "Your cart is empty.",
+  /** Only for what cannot go in a cart for another reason (its count cannot be read, not for sale in a cart). */
   gone: "Not available in a cart right now: buy it from its own page.",
+  /** A limited product whose units left are all in other buyers' checkouts (lib/stock.ts): at most how many minutes they stay there. */
+  held: (minutes: number) => `All that are left are in other buyers' checkouts right now. Try again in about ${minutes} minutes.`,
   /** Products that cannot ship to the one country the rest of the cart ships to (lib/cart-shipping.ts): "A, B and C", how many, and that country. */
   apart: (titles: string, count: number, country: string) =>
     count === 1
@@ -77,6 +80,7 @@ const es: CartWords = {
   note: "Pagas una sola vez, en la página segura de Stripe. Cada producto se entrega igual que si lo compraras por separado.",
   empty: "Tu carrito está vacío.",
   gone: "No está disponible en un carrito ahora mismo: cómpralo desde su propia página.",
+  held: (minutes: number) => `Todas las unidades que quedan están ahora en el pago de otros compradores. Vuelve a intentarlo en unos ${minutes} minutos.`,
   apart: (titles, count, country) =>
     count === 1
       ? `No se puede enviar con el resto de tu carrito (país de envío: ${country}): ${titles}. Quítalo para pagar y cómpralo desde su propia página.`
@@ -126,6 +130,7 @@ const fr: CartWords = {
   note: "Vous payez une seule fois, sur la page sécurisée de Stripe. Chaque produit est remis exactement comme s'il était acheté seul.",
   empty: "Votre panier est vide.",
   gone: `Pas disponible dans un panier pour l'instant${S}: achetez-le depuis sa propre page.`,
+  held: (minutes: number) => `Toutes les unités restantes sont en cours de paiement par d'autres acheteurs. Réessayez dans environ ${minutes} minutes.`,
   apart: (titles, count, country) =>
     count === 1
       ? `Ne peut pas être livré avec le reste de votre panier (pays de livraison${S}: ${country})${S}: ${titles}. Retirez-le pour payer, et achetez-le depuis sa propre page.`
@@ -175,6 +180,7 @@ const de: CartWords = {
   note: "Sie bezahlen einmal, auf der sicheren Seite von Stripe. Jedes Produkt wird genau so übergeben, als hätten Sie es einzeln gekauft.",
   empty: "Ihr Warenkorb ist leer.",
   gone: "Gerade nicht im Warenkorb erhältlich: Kaufen Sie es auf seiner eigenen Seite.",
+  held: (minutes: number) => `Alle übrigen Stück sind gerade im Bezahlvorgang anderer Käufer. Versuchen Sie es in etwa ${minutes} Minuten erneut.`,
   apart: (titles, count, country) =>
     count === 1
       ? `Kann nicht mit dem Rest Ihres Warenkorbs geliefert werden (Lieferland: ${country}): ${titles}. Entfernen Sie es, um zu bezahlen, und kaufen Sie es auf seiner eigenen Seite.`
@@ -224,6 +230,7 @@ const it: CartWords = {
   note: "Paghi una volta sola, sulla pagina sicura di Stripe. Ogni prodotto viene consegnato esattamente come se lo comprassi da solo.",
   empty: "Il tuo carrello è vuoto.",
   gone: "Al momento non disponibile in un carrello: compralo dalla sua pagina.",
+  held: (minutes: number) => `Tutte le unità rimaste sono ora nel pagamento di altri acquirenti. Riprova tra circa ${minutes} minuti.`,
   apart: (titles, count, country) =>
     count === 1
       ? `Non può essere spedito con il resto del carrello (paese di spedizione: ${country}): ${titles}. Toglilo per pagare e compralo dalla sua pagina.`
@@ -273,6 +280,7 @@ const nl: CartWords = {
   note: "Je betaalt één keer, op de beveiligde pagina van Stripe. Elk product wordt precies zo geleverd als wanneer je het los koopt.",
   empty: "Je winkelwagen is leeg.",
   gone: "Nu niet beschikbaar in een winkelwagen: koop het op zijn eigen pagina.",
+  held: (minutes: number) => `Alle overgebleven stuks zitten nu in de betaling van andere kopers. Probeer het over ongeveer ${minutes} minuten opnieuw.`,
   apart: (titles, count, country) =>
     count === 1
       ? `Kan niet met de rest van je winkelwagen worden verzonden (verzendland: ${country}): ${titles}. Haal het eruit om te betalen en koop het op zijn eigen pagina.`
@@ -322,6 +330,7 @@ const pt: CartWords = {
   note: "Paga uma única vez, na página segura da Stripe. Cada produto é entregue exatamente como se o comprasse em separado.",
   empty: "O seu carrinho está vazio.",
   gone: "Não está disponível num carrinho neste momento: compre-o na sua própria página.",
+  held: (minutes: number) => `Todas as unidades que restam estão agora no pagamento de outros compradores. Tente de novo em cerca de ${minutes} minutos.`,
   apart: (titles, count, country) =>
     count === 1
       ? `Não pode ser enviado com o resto do carrinho (país de envio: ${country}): ${titles}. Retire-o para pagar e compre-o na sua própria página.`

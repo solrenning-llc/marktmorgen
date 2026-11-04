@@ -35,8 +35,13 @@ import { readFileSync } from "node:fs";
 import { cartable } from "@/lib/cart-rules";
 import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
-import { CART_READ_STOCK_UNITS, MAX_LAPSED, SHOWN_READ_COMMANDS, STOCK_ATTEMPT_UNITS, STOCK_ENTRIES_MAX, STOCK_ENTRY_BYTES, STOCK_ORDER_COMMANDS, confirmCartStock, confirmStock, heldCheckout, holdCookieNames, holdCookieValue, releaseCartStockHolds, shownOnly, stockLeft, stockReading, withCartStockHolds, withStockHold } from "@/lib/stock";
+import { CART_READ_STOCK_UNITS, MAX_LAPSED, SHOWN_READ_COMMANDS, STOCK_ATTEMPT_UNITS, STOCK_ENTRIES_MAX, STOCK_ENTRY_BYTES, STOCK_ORDER_COMMANDS, STOCK_SESSION_MAX, confirmCartStock, confirmStock, heldCheckout, holdCookieNames, holdCookieValue, releaseCartStockHolds, shownOnly, stockLeft, stockReading, withCartStockHolds, withStockHold } from "@/lib/stock";
 import { cartItems } from "@/lib/checkout-recovery";
+import { CART_WORDS } from "@/lib/buyer-words/cart";
+import { HOLD_SECONDS } from "@/lib/stripe-account";
+import { CLOSING, closingFamilyOf } from "@/lib/data-families";
+import { ownerOfKey } from "@/lib/closed-store-data";
+import { FAMILIES } from "./store-data-registry";
 import { MAX_CART } from "@/lib/cart-rules";
 import { COMMAND, DB_BYTE, ORDER_STOCK } from "./plan-cost-registry";
 import { laterPageCost } from "./traffic-cost";
@@ -203,11 +208,18 @@ async function main(): Promise<void> {
   part("What can go wrong between the count and the checkout");
   const key = (id: string) => `nl:stock:${creator.statsId}:${id}`;
   await redis.pipeline([["HSET", key("print7"), "p_lapsed0000000000000000000000000", JSON.stringify({ until: Date.now() - 1000 })]]);
+  // A reading only shown cannot tell it from a live hold (it reads only how many there are): until a count that may write
+  // lets it go, the open cart says the unit is in another checkout. Since 4 November 2026 (review of 513 [PF1], L-5) every
+  // such count lets it go, under the lock or not, so the product's page and the open cart then say the same.
+  const shownBefore = await stockReading(creator, limited("print7", 1), Date.now(), { checks: shownOnly() });
   const lapsedFree = await stockLeft(creator, limited("print7", 1));
   const lapsedKept = ((await redis.pipeline([["HGETALL", key("print7")]]))[0] as string[]).length;
+  const shownAfter = await stockReading(creator, limited("print7", 1), Date.now(), { checks: shownOnly() });
   const lapsedHold = await withCartStockHolds(creator, [limited("print7", 1)], async () => ({ id: "cs_test_cartstocklapse01" }));
   const lapsedAfter = ((await redis.pipeline([["HGETALL", key("print7")]]))[0] as string[]).filter((_, i) => i % 2 === 0);
-  is("a provisional hold that lapsed is free, let go only under the lock and without asking Stripe", [lapsedFree, lapsedKept, lapsedHold.ok, gets.some((id) => id.startsWith("p_")), lapsedAfter], [1, 2, true, false, ["cs_test_cartstocklapse01"]]);
+  is("a provisional hold that lapsed is free, let go by the page's count without asking Stripe, and the open cart then says the same",
+    [shownBefore, lapsedFree, lapsedKept, shownAfter, lapsedHold.ok, gets.some((id) => id.startsWith("p_")), lapsedAfter],
+    [{ left: 0, unchecked: 1, holds: 1 }, 1, 0, { left: 1, unchecked: 0, holds: 0 }, true, false, ["cs_test_cartstocklapse01"]]);
   await redis.pipeline([["HSET", key("print8"), "cs_test_cartstockold00001", JSON.stringify({ until: Date.now() - 1000 })]]);
   onGet = async () => {
     await redis.pipeline([["DEL", `nl:stock:lock:${creator.statsId}:print8`]]);
@@ -330,6 +342,21 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:stock:sold:${owner.statsId}:${made.Poster}`, "not a count"]]);
   const unread = (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${made.Poster}`))).json()) as { items: { ok: boolean; soldOut: boolean }[] };
   is("a count that cannot be read is not paid for, and never said to be sold out", unread.items.map((item) => [item.ok, item.soldOut]), [[false, false]]);
+  is("nor said to be in other buyers' checkouts: its line says to buy it from its own page", (unread.items as { heldMinutes?: number | null }[]).map((item) => item.heldMinutes), [null]);
+  await redis.pipeline([["DEL", `nl:stock:sold:${owner.statsId}:${made.Poster}`]]);
+  // Review of 513 [PF1], 4 November 2026 (M-A): limit 5, none sold, five other buyers' checkouts open. The cart said "buy it
+  // from its own page", and that page says sold out with no button: the cart now says the units are in other checkouts,
+  // and when they come back (HOLD_SECONDS), never sold out.
+  const posterKey = `nl:stock:${owner.statsId}:${made.Poster}`;
+  const [posterKept] = (await redis.pipeline([["HGETALL", posterKey]])) as [string[]];
+  await redis.pipeline([["DEL", posterKey], ["HSET", posterKey, ...[1, 2, 3, 4, 5].flatMap((n) => [`cs_test_otherbuyer0000${n}`, JSON.stringify({ until: Date.now() + 600_000 })])]]);
+  const heldCart = (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${made.Poster}`))).json()) as { items: { ok: boolean; soldOut: boolean; heldMinutes: number | null }[] };
+  is("five units in five other buyers' checkouts: not paid for, not sold out, said held, with the hold's minutes", heldCart.items.map((item) => [item.ok, item.soldOut, item.heldMinutes]), [[false, false, Math.ceil(HOLD_SECONDS / 60)]]);
+  is("the hold's minutes are its real length (32: the checkout's 31 and one more)", Math.ceil(HOLD_SECONDS / 60), 32);
+  is("its words, in plain English", CART_WORDS.en.held(32), "All that are left are in other buyers' checkouts right now. Try again in about 32 minutes.");
+  is("said in every language, never as the line for what cannot go in a cart", Object.values(CART_WORDS).every((words) => words.held(32).includes("32") && words.held(32) !== words.gone), true);
+  is("the cart shows it, and keeps \"buy it from its own page\" for the rest", readFileSync("components/store-cart.tsx", "utf8").includes("{line.soldOut ? c.soldOut : line.heldMinutes ? c.held(line.heldMinutes) : c.gone}"), true);
+  await redis.pipeline([["DEL", posterKey], ...(posterKept.length ? [["HSET", posterKey, ...posterKept]] : [])]);
   await redis.pipeline([["DEL", `nl:stock:sold:${owner.statsId}:${made.Poster}`]]);
 
   part("What is only shown never asks Stripe, and a checkout asks it a bounded number of times");
@@ -447,8 +474,11 @@ async function main(): Promise<void> {
   is("a day after its end, a hold Stripe does not know is taken for sold: never free, never asked about again", [firstLook, secondLook, gets.length - asks, Object.keys(gone), await soldOf(creator, "print41", "cs_test_longgone00001")], [1, 1, 0, [], { sold: 2, paid: true }]);
   for (let n = 0; n < MAX_LAPSED + 2; n += 1) await redis.pipeline([["HSET", key("print42"), `p_lapsed${String(n).padStart(25, "0")}`, ranOut]]);
   const lapsedLeft = await stockLeft(creator, limited("print42", 2));
+  const lapsedKept42 = Object.keys(await readEntriesOf(creator, "print42")).length;
   const lapsedHeld = await withCartStockHolds(creator, [limited("print42", 2)], async () => ({ id: "cs_test_cartstocklaps042" }));
-  is("lapsed provisional holds are free, and one count under the lock lets go of MAX_LAPSED at the most", [lapsedLeft, lapsedHeld.ok, Object.keys(await readEntriesOf(creator, "print42")).length], [2, true, 2 + 1]);
+  is("lapsed provisional holds are free, and each count lets go of MAX_LAPSED at the most, the next count the rest",
+    [lapsedLeft, lapsedKept42, lapsedHeld.ok, Object.keys(await readEntriesOf(creator, "print42"))],
+    [2, 2, true, ["cs_test_cartstocklaps042"]]);
 
   part("A product bought alone and the cart know each other's hold");
   const vaseMade = await addProduct(LAMPS, "Vase", "", "20", null);
@@ -540,6 +570,27 @@ async function main(): Promise<void> {
   });
   is("a product whose hash keeps STOCK_ENTRIES_MAX holds takes no new one", [fullHash, fullOpened], [{ ok: false, reason: "busy" }, 0]);
   await redis.pipeline([["DEL", key("print52")]]);
+
+  part("Review of 4 November 2026: a hold's size, the paid marks, the hash's real size");
+  // L-4: a checkout id longer than a hold may be written under is never written; the checkout is closed and nothing is held.
+  is("the longest id a hold is written under, with the longest value, fits STOCK_ENTRY_BYTES", [STOCK_SESSION_MAX, STOCK_SESSION_MAX + JSON.stringify({ until: 9_999_999_999_999, asked: 9_999_999_999_999 }).length <= STOCK_ENTRY_BYTES], [85, true]);
+  const longId = `cs_test_${"L".repeat(STOCK_SESSION_MAX - 8 + 1)}`;
+  const expiredBeforeLong = expired.length;
+  const tooLong = await withCartStockHolds(creator, [limited("print60", 3)], async () => ({ id: longId }));
+  is("a checkout whose id is longer is closed at Stripe and holds nothing, not even its provisional hold",
+    [tooLong, expired.slice(expiredBeforeLong), Object.keys(await readEntriesOf(creator, "print60")), await stockLeft(creator, limited("print60", 3))],
+    [{ ok: false, reason: "busy" }, [longId], [], 3]);
+  const longestOk = `cs_test_${"K".repeat(STOCK_SESSION_MAX - 8)}`;
+  const fitting = await withCartStockHolds(creator, [limited("print61", 3)], async () => ({ id: longestOk }));
+  is("one exactly as long as it may be is held", [fitting.ok, Object.keys(await readEntriesOf(creator, "print61"))], [true, [longestOk]]);
+  is("a cookie naming a longer one is never made nor read", [holdCookieValue(creator, longId), heldCheckout(creator, `${longId}.${"0".repeat(32)}`)], [null, null]);
+  // L-2: the marks that a checkout's unit was counted sold name the store's id, and go with the store.
+  const closingOwners = { byMark: new Map([["a".repeat(32), "closing@example.com"]]), byHandle: new Map<string, string>(), byRef: new Map<string, string>() };
+  const paidMark = `nl:stock:paid:${"a".repeat(32)}:print1:cs_test_closingmark0001`;
+  is("a paid mark is erased with its store, not left to expire", [closingFamilyOf(paidMark), CLOSING["nl:stock:paid:"].how, ownerOfKey(paidMark, CLOSING["nl:stock:paid:"], closingOwners)], ["nl:stock:paid:", "erase", "closing@example.com"]);
+  // L-3: the registry says the hash's real worst size, which PRODUCT_SIDE_BYTES does not hold.
+  const stockFamily = FAMILIES["nl:stock:@lib/stock.ts"].what;
+  is("the registry gives the hash's worst size, STOCK_ENTRIES_MAX holds of STOCK_ENTRY_BYTES", [STOCK_ENTRIES_MAX * STOCK_ENTRY_BYTES, stockFamily.includes((STOCK_ENTRIES_MAX * STOCK_ENTRY_BYTES).toLocaleString("en-US")), stockFamily.includes("does not hold")], [208_000, true, true]);
 
   part("What the stock reads cost, and who pays for them");
   const shownCost = (2 * 3 + MAX_CART) * SHOWN_READ_COMMANDS * COMMAND + (2 * 3 + MAX_CART) * 2 * STOCK_ENTRY_BYTES * DB_BYTE;

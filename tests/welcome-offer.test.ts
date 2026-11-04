@@ -21,6 +21,11 @@ import { readListing } from "@/lib/catalog";
 import { discountKindOf, entryOf } from "@/lib/discount-impact";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWelcomeOffer, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { readFileSync } from "node:fs";
+import { setProductExtras, storeFolder, storeRef, type Store } from "@/lib/store";
+import { requestsIn } from "@/lib/traffic";
+import { allowanceWindow } from "@/lib/allowance-window";
+import { STOCK_ATTEMPT_UNITS } from "@/lib/stock";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -101,6 +106,25 @@ async function main(): Promise<void> {
   const ended = await openWelcome(store, token, "https://marktmorgen.com", asked + 48 * HOUR, TEST_CONSENT);
   is("at the end, no checkout opens", [ended.ok ? "" : ended.reason, checkouts.length], ["expired", 0]);
   is("a link for another store opens nothing", (await openWelcome({ ...store, handle: "other" }, token, "https://marktmorgen.com", asked + HOUR)).ok, false);
+
+  part("A limited product's button pays for its stock work first (review of 513 [PF1], 4 November 2026)");
+  // The button holds a unit as a product bought alone does (lib/stock.ts, withStockHold): its lock, its count, its hold,
+  // whatever it ends in. It takes STOCK_ATTEMPT_UNITS of the store's requests first, as the cart and the product's own
+  // checkout do; a product that is not limited takes none of them.
+  const requestsNow = async (of: Store) => requestsIn(await storeFolder(storeRef(of)), allowanceWindow(of, Date.now())!.id);
+  const beforePlain = await requestsNow(store);
+  const plainOpen = await openWelcome(store, token, "https://marktmorgen.com", asked + HOUR, TEST_CONSENT);
+  const plainTaken = (await requestsNow(store)) - beforePlain;
+  if (!(await setProductExtras(OWNER, paid.product.id, { stock: 3 })).ok) throw new Error("no stock");
+  const limitedStore = (await storeForEmail(OWNER))!;
+  const beforeLimited = await requestsNow(limitedStore);
+  const limitedOpen = await openWelcome(limitedStore, token, "https://marktmorgen.com", asked + HOUR, TEST_CONSENT);
+  const limitedTaken = (await requestsNow(limitedStore)) - beforeLimited;
+  is("a limited product's button takes STOCK_ATTEMPT_UNITS more of the store's requests than one that is not limited",
+    [plainOpen.ok, limitedOpen.ok, limitedTaken - plainTaken, plainTaken < STOCK_ATTEMPT_UNITS], [true, true, STOCK_ATTEMPT_UNITS, true]);
+  is("the button's route says \"limited\" when they cannot be taken, as its notices do", readFileSync("lib/welcome-offer-send.ts", "utf8").includes('return { ok: false, reason: "limited" };'), true);
+  if (!(await setProductExtras(OWNER, paid.product.id, { stock: null })).ok) throw new Error("no stock reset");
+  store = (await storeForEmail(OWNER))!;
 
   part("One reminder, to someone who agreed and confirmed");
   await recordLead(store, claim, "Pantry Guide");

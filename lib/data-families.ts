@@ -347,7 +347,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:sold:": E, "nl:sold:lock:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),
   "nl:stats:": E,
-  "nl:stock:": E, "nl:stock:lock:": E, "nl:stock:paid:": X(400), "nl:stock:sold:": E,
+  "nl:stock:": E, "nl:stock:lock:": E, "nl:stock:paid:": E, "nl:stock:sold:": E,
   "nl:storage:pending:": X(1),
   "nl:store:before-catalog:": T("prepare"), "nl:store:delivery:": E, "nl:store:delivery:over:": I, "nl:store:folder-owner:": E,
   "nl:store:handle:": Cr(30), "nl:store:id:": E, "nl:store:leads:": E, "nl:store:lock:": E, "nl:store:owner:*": C,

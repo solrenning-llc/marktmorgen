@@ -10,6 +10,7 @@ import { type Piece, aboutBlocks } from "@/lib/product-about";
 import { CELL_NO, CELL_YES, type CtaBlock, type HeroBlock, type PageBlock, type PageStyle, type RowBlock, type RowElement, bandsOf, quoteHost } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import { markHolds } from "@/lib/page-translate";
+import { VideoTranscript } from "@/components/video-transcript";
 import type { PageFacts } from "@/lib/page-facts";
 import { MAX_LONG_ANSWER, MAX_SHORT_ANSWER, type FormDef, type FormField, branches, formOpen, offersKeep, scheduleWhen } from "@/lib/forms";
 import { FormBranching } from "@/components/form-branching";
@@ -321,6 +322,7 @@ function RowElementView({ element, ctx, level }: { element: RowElement; ctx: Blo
       return (
         <div className="sp-row-video">
           <VideoEmbed video={element.video} title={element.title || ctx.productTitle} poster={null} inert={ctx.preview} lang={ctx.lang ?? DEFAULT_LANGUAGE} />
+          <VideoTranscript text={element.transcript} lang={ctx.lang ?? DEFAULT_LANGUAGE} />
         </div>
       );
     case "video-window":
@@ -332,7 +334,7 @@ function RowElementView({ element, ctx, level }: { element: RowElement; ctx: Blo
           </span>
         );
       }
-      return <VideoWindow video={element.video} title={element.title} label={element.label} lang={ctx.lang ?? DEFAULT_LANGUAGE} />;
+      return <VideoWindow video={element.video} title={element.title} label={element.label} transcript={element.transcript} lang={ctx.lang ?? DEFAULT_LANGUAGE} />;
   }
 }
 
@@ -496,6 +498,7 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
             <VideoEmbed video={block.video} title={block.heading || ctx.productTitle} poster={null} inert={ctx.preview} lang={ctx.lang ?? DEFAULT_LANGUAGE} />
           </div>
           {block.caption ? <PlainText text={block.caption} preview={ctx.preview} className="st-muted mt-3" /> : null}
+          <VideoTranscript text={block.transcript} lang={ctx.lang ?? DEFAULT_LANGUAGE} />
         </section>
       );
     case "pictures":

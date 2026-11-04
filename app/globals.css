@@ -3315,6 +3315,15 @@ a.sp-product:focus-visible {
   width: min(100%, calc((100dvh - 6rem) * 16 / 9));
   margin-inline: auto;
 }
+/* A video's transcript in its window: the window scrolls when it is opened (components/video-transcript.tsx). */
+.vw-dialog .pv-frame {
+  max-height: 100dvh;
+  overflow-y: auto;
+}
+.vw-dialog .sp-transcript {
+  width: min(100%, calc((100dvh - 6rem) * 16 / 9));
+  margin-inline: auto;
+}
 @media (prefers-reduced-motion: reduce) {
   .vw-dialog .pv-button {
     transition: none;

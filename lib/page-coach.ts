@@ -20,7 +20,7 @@ import { PAGE_TEST_PAID_WORDS, PAGE_TEST_RUNNING_WORDS } from "@/lib/headline-te
  *
  * Pure, so the studio's editor and the server ask the same function.
  */
-import { type BlockKind, type PageBlock, type RowElement, type SalesPage, picturesOf } from "@/lib/sales-page";
+import { type BlockKind, type PageBlock, type RowElement, type SalesPage, type VideoWords, picturesOf, saysInWords } from "@/lib/sales-page";
 import type { PageFacts } from "@/lib/page-facts";
 import { vagueLinkTitle } from "@/lib/link-purpose";
 
@@ -233,6 +233,22 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
       label: bare ? `Every picture described (${bare === 1 ? "1 has no description" : `${bare} have none`})` : "Every picture described",
       why: "Some buyers use a screen reader, which reads the page aloud and says a picture's description in its place. In the box beside each picture, say what it shows; the picture at the top uses the product's own description.",
       done: bare === 0,
+      weight: 2,
+    });
+  }
+  // Every video says what it shows in words (inbox C4-16 (g), C4-26 (3); WCAG 1.2.2, 1.2.8): a transcript beside it,
+  // or the creator's word that it has captions of its own. Nobody can tell from here whether a video on another site
+  // has captions, so the creator says so. The video block, a row's video and a video in a window, both versions.
+  const videos = [...input.page.blocks, ...(input.page.variant?.blocks ?? [])].flatMap((block): VideoWords[] =>
+    block.kind === "video" ? (block.video ? [block] : []) : block.kind === "row" ? block.columns.flat().flatMap((part) => (part.kind === "video" || part.kind === "video-window" ? [part] : [])) : [],
+  );
+  if (videos.length > 0) {
+    const silent = videos.filter((video) => !saysInWords(video)).length;
+    checks.push({
+      id: "video_words",
+      label: silent ? `Every video says what it shows in words (${silent === 1 ? "1 does not" : `${silent} do not`})` : "Every video says what it shows in words",
+      why: "Some buyers cannot hear a video, and some cannot see it. Under each video, write what it says (a transcript), or tick that the video has captions of its own.",
+      done: silent === 0,
       weight: 2,
     });
   }

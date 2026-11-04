@@ -38,7 +38,7 @@ const FULL = parsePage({
     { id: "fact0001", kind: "facts", heading: "", show: ["lessons"] },
     { id: "bene0001", kind: "benefits", heading: "", items: ["One", "Two", "Three"] },
     { id: "step0001", kind: "steps", heading: "", items: [{ title: "Pay" }, { title: "Watch" }, { title: "Cook" }] },
-    { id: "pict0001", kind: "video", heading: "", video: { provider: "youtube", id: "dQw4w9WgXcQ", hash: "" }, caption: "" },
+    { id: "pict0001", kind: "video", heading: "", video: { provider: "youtube", id: "dQw4w9WgXcQ", hash: "" }, caption: "", captioned: true },
     { id: "fit00001", kind: "fit", heading: "", yesLabel: "", noLabel: "", yes: ["You cook daily", "You fear knives"], no: ["You are a chef"] },
     { id: "bio00001", kind: "bio", heading: "", body: "I teach cooking.", photo: true },
     { id: "faq00001", kind: "faq", heading: "", items: [{ q: "A?", a: "a" }, { q: "B?", a: "b" }, { q: "C?", a: "c" }] },

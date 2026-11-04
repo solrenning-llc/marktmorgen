@@ -203,7 +203,27 @@ const REVIEW_ID_PATTERN = /^[0-9a-f]{24}$/;
  * page may now have as many as it has blocks. Each is the same lazy player
  * the hero uses: nothing loads from YouTube, Vimeo or Loom until play.
  */
-export type VideoBlock = { id: string; kind: "video"; heading: string; video: Video | null; caption: string };
+/**
+ * What a video says, in words (inbox C4-16 (g), C4-26 (3); WCAG 1.2.2,
+ * 1.2.8): the creator's transcript, shown under it, or the creator's word
+ * that the video has captions of its own. Either is optional; the page
+ * coach asks for one on every video (lib/page-coach.ts, "Every video says
+ * what it shows in words"). Kept only when given, so a page saved before
+ * keeps its exact shape.
+ */
+export type VideoWords = { transcript?: string; captioned?: boolean };
+/**
+ * The longest transcript a video may have, in characters: one part of a
+ * page's translation at most (lib/page-translate.ts, TRANSLATE_PART_CHARS,
+ * held in tests/video-words.test.ts), so translating it stays inside the
+ * cost each part is priced at. About five minutes of speech; a longer video
+ * says it has captions of its own instead.
+ */
+export const MAX_TRANSCRIPT = 4_000;
+/** Whether a video says what it shows in words: captions the creator says it has, or a transcript. */
+export const saysInWords = (video: VideoWords): boolean => video.captioned === true || Boolean(video.transcript?.trim());
+
+export type VideoBlock = { id: string; kind: "video"; heading: string; video: Video | null; caption: string } & VideoWords;
 
 /**
  * One picture on a page: a file in the store's own picture folder
@@ -445,14 +465,14 @@ export type RowElement =
   | { kind: "icon"; name: RowIcon; label: string }
   | { kind: "button"; label: string; url: string }
   | { kind: "image"; picture: Picture; decorative: boolean }
-  | { kind: "video"; video: Video; title: string }
+  | ({ kind: "video"; video: Video; title: string } & VideoWords)
   /**
    * A video behind a button (unit 5): the button's own words open a window
    * with the player. A kind of its own, not a flag on "video", so every
    * switch over the parts has to say how it draws, reads and copies one,
    * and a part made before it can never be read as one.
    */
-  | { kind: "video-window"; video: Video; title: string; label: string };
+  | ({ kind: "video-window"; video: Video; title: string; label: string } & VideoWords);
 export type RowElementKind = RowElement["kind"];
 export const ROW_ELEMENT_KINDS: readonly RowElementKind[] = ["heading", "subheading", "paragraph", "list", "icon", "button", "image", "video", "video-window"];
 
@@ -720,6 +740,12 @@ function line(value: unknown, max: number): string {
     .slice(0, max);
 }
 
+/** A video's words as stored or sent: only those given (VideoWords). */
+function videoWords(value: Record<string, unknown>): VideoWords {
+  const transcript = lines(value.transcript, MAX_TRANSCRIPT);
+  return { ...(transcript ? { transcript } : {}), ...(value.captioned === true ? { captioned: true } : {}) };
+}
+
 /**
  * Several lines, as a message box writes them: line endings made one kind,
  * control characters other than the line break dropped, space at line ends
@@ -924,12 +950,12 @@ export function parseRowElement(raw: unknown): RowElement | null {
     }
     case "video": {
       const video = parseVideo(value.video);
-      return video ? { kind: "video", video, title: line(value.title, MAX_HEADING) } : null;
+      return video ? { kind: "video", video, title: line(value.title, MAX_HEADING), ...videoWords(value) } : null;
     }
     case "video-window": {
       const video = parseVideo(value.video);
       const label = line(value.label, MAX_CTA_LABEL);
-      return video && label ? { kind: "video-window", video, title: line(value.title, MAX_HEADING), label } : null;
+      return video && label ? { kind: "video-window", video, title: line(value.title, MAX_HEADING), label, ...videoWords(value) } : null;
     }
     default:
       return null;
@@ -1084,7 +1110,7 @@ function parseBlock(raw: unknown): PageBlock | null {
       return { id, kind: "reviews", heading, first };
     }
     case "video":
-      return { id, kind: "video", heading, video: parseVideo(value.video), caption: lines(value.caption, MAX_CAPTION) };
+      return { id, kind: "video", heading, video: parseVideo(value.video), caption: lines(value.caption, MAX_CAPTION), ...videoWords(value) };
     case "pictures": {
       const seen = new Set<string>();
       const items = Array.isArray(value.items)

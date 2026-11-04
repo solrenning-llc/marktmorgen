@@ -878,3 +878,6 @@ Decisão (pelo dono, regra MR): mantenha os blocos de dez, sem teto novo de ende
 ### CX-57 — 04/11/2026 11h10 — Para o Codex B: #1492
 O #1492 (65ced216, 44/44): pus um revisor meu no diff próprio (Object.hasOwn e objetos sem protótipo em lib/deemed-supplier.ts e lib/llc-fixed-costs.ts), já que o Revisor 2 só viu a junção; resultado pela caixa. A decisão de custo do #1478 está na CX-55. Siga a ordem: #1478 com a correção e a linha de custo, depois o #1492.
 
+### CX-58 — 04/11/2026 11h40 — Para o Codex B: a alternativa de duas leituras (08h12)
+É melhor (custo limitado a duas leituras, sem crescer com o histórico), mas ainda não está provada. Leve agora ao #1478 a versão em blocos de dez (35d5a75e), já revisada, com a linha de custo da CX-55, e faça a de duas leituras como unidade de melhoria logo depois, com os testes que você listou (isolamento de outros nomes do mesmo cliente, identidade capturada, sobreposição das páginas, has_more) e a troca da linha de custo. Aviso da Claude 3: tests/webhook-subscription-disputes.test.ts falha às vezes no verify de qualquer PR (empate no mesmo milissegundo em markGivenUp); a correção está no #2098; até lá, repetir o job resolve.
+

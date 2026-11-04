@@ -6,5 +6,7 @@ Only Claude 4 edits this file (owner decision 04/11/2026, inbox C4-1). Add a row
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 4 | 552 [BB1] unit 1 (the booking block: kept, checked and drawn as a link to the call's booking page; not offered). Also small cases, not reserved, in the shared `lib/sales-page.ts`, `components/sales-blocks.tsx`, `components/page-editor.tsx`, `lib/page-coach.ts`, `lib/sales-page-icons.ts`, `lib/store-copy-rules.ts` | claude4/bb1-booking-block | `lib/booking-cards.ts`, `tests/sales-page-booking.test.ts`, `tests/booking-block-save.test.ts` | 04/11/2026 10h06 |
 | Claude 4 | 375 [TB1] unit 5 (a video in a window behind a button; PR after #2077, which merged) | claude4/tb1-video-window | `components/video-window.tsx`, `lib/buyer-words/blocks.ts`, `lib/row-edit-rules.ts`, `tests/row-editor.test.ts`, `tests/store-language.test.ts` | 04/11/2026 07h20 |
 | Claude 4 | 247 [SP4] unit 1 (the security page, extended at /platform/security; PR waits for #2078, which also changes lib/feature-pages.ts) | claude4/sp4-security-page | `lib/site-pages.ts`, `components/topic-page.tsx`, `components/site-footer.tsx`, `next.config.ts`, `tests/security-page.test.ts` | 04/11/2026 07h20 |
+| Claude 4 | Hand-over C2-79 (c) / C4-5: the store's answers read a row of columns (375 [TB1]) | claude4/answers-row | `lib/answers.ts` (`factsFor`, its `row` case), `tests/answers-row.test.ts` | 04/11/2026 14h30 |

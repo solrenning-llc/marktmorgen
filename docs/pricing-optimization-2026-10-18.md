@@ -179,7 +179,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | --- | --- | --- | --- | --- |
 | Store | $69: 477 | $79: 173 | $99: 80 | $129: 46 |
 | Studio | $449: 435 | $559: 28 | $669: 15 | $889: 8 |
-| Scale | $999: 165 | $1,239: 13 | $1,489: 7 | $1,989: 4 |
+| Scale | $999: 166 | $1,239: 13 | $1,489: 7 | $1,989: 4 |
 
 **Alternative C, what a cut is worth.** The profit index at C's best price over A's best, per scenario. It is an **upper bound**: the demand model cannot see the value a cut takes away, so it always prefers the cut.
 

@@ -41,7 +41,7 @@ const en = {
     },
     unavailable: {
       title: "This store cannot look up purchases right now",
-      body: "Its payments are not connected to Stripe right now. Reply to the order confirmation you were emailed when you paid, and it reaches the store.",
+      body: "Its payments are not connected to Stripe right now. Try again later.",
     },
     error: {
       title: "Something went wrong on our side",
@@ -62,15 +62,15 @@ const en = {
   getAgainIntro: (store: string) =>
     `Lost a download, or got a new phone? Type the email you paid ${store} with, and we will email you a link to everything you bought here. No account and no password.`,
   cannotLookUp: (store: string) =>
-    `${store} cannot take payments through Stripe right now, so there is nothing to look up from here. Reply to the order confirmation you were emailed when you paid, and it reaches them.`,
+    `${store} cannot take payments through Stripe right now, so there is nothing to look up from here. Try again later.`,
   emailYouPaidWith: "The email you paid with",
   emailMe: "Email me my purchases",
   formNote: (store: string) =>
     `If that address bought something from ${store}, a link to all of it usually arrives within a minute and works for 24 hours. We say the same thing whether or not it did, so nobody can use this page to find out who bought what.`,
   checkInbox: "Check your inbox",
   sentBody: (store: string) =>
-    `If that address bought something from ${store}, the link is on its way. It comes from ${store} via Marktmorgen and usually arrives within a minute. If it is not there, look in spam.`,
-  nothingArrived: "Nothing arrived? You may have paid with a different address: the one you typed at checkout. Try that one below.",
+    `If that address bought something from ${store}, a link is normally on its way. It comes from ${store} via Marktmorgen and can take a few minutes. If it is not there, look in spam.`,
+  nothingArrived: "Nothing arrived? You may have paid with a different address: the one you typed at checkout. Try that one below. If it was the right one, try again later.",
 
   // ---- The list of purchases -------------------------------------------------------
   bookedCalls: (count: number): string => (count === 1 ? "Your booking" : "Your bookings"),
@@ -288,7 +288,7 @@ const es: OrdersWords = {
     },
     unavailable: {
       title: "Esta tienda no puede buscar compras en este momento",
-      body: "Sus pagos no están conectados a Stripe en este momento. Responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a la tienda.",
+      body: "Sus pagos no están conectados a Stripe en este momento. Inténtalo de nuevo más tarde.",
     },
     error: {
       title: "Algo salió mal por nuestra parte",
@@ -308,15 +308,15 @@ const es: OrdersWords = {
   getAgainIntro: (store) =>
     `¿Perdiste una descarga o cambiaste de teléfono? Escribe el email con el que le pagaste a ${store} y te enviaremos por email un enlace a todo lo que compraste aquí. Sin cuenta y sin contraseña.`,
   cannotLookUp: (store) =>
-    `${store} no puede recibir pagos a través de Stripe en este momento, así que desde aquí no hay nada que buscar. Responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
+    `${store} no puede recibir pagos a través de Stripe en este momento, así que desde aquí no hay nada que buscar. Inténtalo de nuevo más tarde.`,
   emailYouPaidWith: "El email con el que pagaste",
   emailMe: "Envíame mis compras por email",
   formNote: (store) =>
     `Si esa dirección le compró algo a ${store}, normalmente en menos de un minuto llega un enlace a todo ello, que funciona durante 24 horas. Decimos lo mismo tanto si compró como si no, para que nadie pueda usar esta página para averiguar quién compró qué.`,
   checkInbox: "Revisa tu bandeja de entrada",
   sentBody: (store) =>
-    `Si esa dirección le compró algo a ${store}, el enlace va en camino. Llega de ${store} vía Marktmorgen, normalmente en menos de un minuto. Si no está, mira en la carpeta de spam.`,
-  nothingArrived: "¿No te llegó nada? Puede que hayas pagado con otra dirección: la que escribiste al pagar. Prueba con esa abajo.",
+    `Si esa dirección le compró algo a ${store}, normalmente el enlace va en camino. Llega de ${store} vía Marktmorgen y puede tardar unos minutos. Si no está, mira en la carpeta de spam.`,
+  nothingArrived: "¿No te llegó nada? Puede que hayas pagado con otra dirección: la que escribiste al pagar. Prueba con esa abajo. Si era la correcta, inténtalo de nuevo más tarde.",
 
   bookedCalls: (count) => (count === 1 ? "Tu reserva" : "Tus reservas"),
   waiting: "Te espera",
@@ -507,7 +507,7 @@ const fr: OrdersWords = {
     },
     unavailable: {
       title: "Cette boutique ne peut pas rechercher d'achats pour le moment",
-      body: "Ses paiements ne sont pas reliés à Stripe pour le moment. Répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à la boutique.",
+      body: "Ses paiements ne sont pas reliés à Stripe pour le moment. Réessayez plus tard.",
     },
     error: {
       title: "Un problème est survenu de notre côté",
@@ -527,15 +527,15 @@ const fr: OrdersWords = {
   getAgainIntro: (store) =>
     `Vous avez perdu un téléchargement ou changé de téléphone${S}? Saisissez l'e-mail avec lequel vous avez payé ${store}, et nous vous enverrons par e-mail un lien vers tout ce que vous avez acheté ici. Sans compte ni mot de passe.`,
   cannotLookUp: (store) =>
-    `${store} ne peut pas accepter de paiements via Stripe pour le moment, il n'y a donc rien à rechercher ici. Répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
+    `${store} ne peut pas accepter de paiements via Stripe pour le moment, il n'y a donc rien à rechercher ici. Réessayez plus tard.`,
   emailYouPaidWith: "L'e-mail avec lequel vous avez payé",
   emailMe: "M'envoyer mes achats par e-mail",
   formNote: (store) =>
     `Si cette adresse a acheté quelque chose chez ${store}, un lien vers tous ses achats arrive généralement en moins d'une minute et reste valable 24${S}heures. Nous affichons le même message dans tous les cas, pour que personne ne puisse se servir de cette page pour savoir qui a acheté quoi.`,
   checkInbox: "Consultez votre boîte de réception",
   sentBody: (store) =>
-    `Si cette adresse a acheté quelque chose chez ${store}, le lien est en route. Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute. S'il n'y est pas, regardez dans les spams.`,
-  nothingArrived: `Rien reçu${S}? Vous avez peut-être payé avec une autre adresse${S}: celle saisie lors du paiement. Essayez-la ci-dessous.`,
+    `Si cette adresse a acheté quelque chose chez ${store}, le lien est normalement en route. Il vient de ${store} via Marktmorgen et peut mettre quelques minutes. S'il n'y est pas, regardez dans les spams.`,
+  nothingArrived: `Rien reçu${S}? Vous avez peut-être payé avec une autre adresse${S}: celle saisie lors du paiement. Essayez-la ci-dessous. Si c'était la bonne, réessayez plus tard.`,
 
   bookedCalls: (count) => (count < 2 ? "Votre réservation" : "Vos réservations"),
   waiting: "Ce qui vous attend",
@@ -724,7 +724,7 @@ const de: OrdersWords = {
     },
     unavailable: {
       title: "Dieser Shop kann gerade keine Käufe nachschlagen",
-      body: "Seine Zahlungen sind gerade nicht mit Stripe verbunden. Antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht den Shop.",
+      body: "Seine Zahlungen sind gerade nicht mit Stripe verbunden. Versuchen Sie es später noch einmal.",
     },
     error: {
       title: "Bei uns ist etwas schiefgelaufen",
@@ -744,15 +744,15 @@ const de: OrdersWords = {
   getAgainIntro: (store) =>
     `Einen Download verloren oder ein neues Handy? Geben Sie die E-Mail-Adresse ein, mit der Sie bei ${store} bezahlt haben, und wir schicken Ihnen per E-Mail einen Link zu allem, was Sie hier gekauft haben. Ohne Konto und ohne Passwort.`,
   cannotLookUp: (store) =>
-    `${store} kann gerade keine Zahlungen über Stripe annehmen, daher gibt es hier nichts nachzuschlagen. Antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
+    `${store} kann gerade keine Zahlungen über Stripe annehmen, daher gibt es hier nichts nachzuschlagen. Versuchen Sie es später noch einmal.`,
   emailYouPaidWith: "Die E-Mail-Adresse, mit der Sie bezahlt haben",
   emailMe: "Meine Käufe per E-Mail senden",
   formNote: (store) =>
     `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, kommt ein Link zu allem in der Regel innerhalb einer Minute an und gilt 24 Stunden. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand über diese Seite herausfinden kann, wer was gekauft hat.`,
   checkInbox: "Sehen Sie in Ihrem Posteingang nach",
   sentBody: (store) =>
-    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, ist der Link unterwegs. Er kommt von ${store} über Marktmorgen und trifft in der Regel innerhalb einer Minute ein. Wenn er nicht da ist, sehen Sie im Spam-Ordner nach.`,
-  nothingArrived: "Nichts angekommen? Vielleicht haben Sie mit einer anderen Adresse bezahlt: der, die Sie beim Bezahlen eingegeben haben. Versuchen Sie es unten mit dieser.",
+    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, ist der Link normalerweise unterwegs. Er kommt von ${store} über Marktmorgen und kann ein paar Minuten dauern. Wenn er nicht da ist, sehen Sie im Spam-Ordner nach.`,
+  nothingArrived: "Nichts angekommen? Vielleicht haben Sie mit einer anderen Adresse bezahlt: der, die Sie beim Bezahlen eingegeben haben. Versuchen Sie es unten mit dieser. Wenn es die richtige war, versuchen Sie es später noch einmal.",
 
   bookedCalls: (count) => (count === 1 ? "Ihre Buchung" : "Ihre Buchungen"),
   waiting: "Wartet auf Sie",
@@ -946,7 +946,7 @@ const it: OrdersWords = {
     },
     unavailable: {
       title: "Questo negozio non può cercare acquisti in questo momento",
-      body: "I suoi pagamenti non sono collegati a Stripe in questo momento. Rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà al negozio.",
+      body: "I suoi pagamenti non sono collegati a Stripe in questo momento. Riprova più tardi.",
     },
     error: {
       title: "Qualcosa è andato storto da parte nostra",
@@ -966,15 +966,15 @@ const it: OrdersWords = {
   getAgainIntro: (store) =>
     `Hai perso un download o hai cambiato telefono? Inserisci l'email con cui hai pagato ${store} e ti invieremo via email un link a tutto ciò che hai acquistato qui. Nessun account e nessuna password.`,
   cannotLookUp: (store) =>
-    `${store} non può accettare pagamenti tramite Stripe in questo momento, quindi da qui non c'è nulla da cercare. Rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
+    `${store} non può accettare pagamenti tramite Stripe in questo momento, quindi da qui non c'è nulla da cercare. Riprova più tardi.`,
   emailYouPaidWith: "L'email con cui hai pagato",
   emailMe: "Inviami i miei acquisti via email",
   formNote: (store) =>
     `Se quell'indirizzo ha acquistato qualcosa da ${store}, di solito entro un minuto arriva un link a tutto, valido per 24 ore. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi ha comprato cosa.`,
   checkInbox: "Controlla la tua casella di posta",
   sentBody: (store) =>
-    `Se quell'indirizzo ha acquistato qualcosa da ${store}, il link è in arrivo. Arriva da ${store} tramite Marktmorgen, di solito entro un minuto. Se non lo trovi, guarda nella cartella spam.`,
-  nothingArrived: "Non è arrivato nulla? Forse hai pagato con un altro indirizzo: quello che hai inserito al momento del pagamento. Prova con quello qui sotto.",
+    `Se quell'indirizzo ha acquistato qualcosa da ${store}, di norma il link è in arrivo. Arriva da ${store} tramite Marktmorgen e può richiedere qualche minuto. Se non lo trovi, guarda nella cartella spam.`,
+  nothingArrived: "Non è arrivato nulla? Forse hai pagato con un altro indirizzo: quello che hai inserito al momento del pagamento. Prova con quello qui sotto. Se era quello giusto, riprova più tardi.",
 
   bookedCalls: (count) => (count === 1 ? "La tua prenotazione" : "Le tue prenotazioni"),
   waiting: "Ti aspetta",
@@ -1164,7 +1164,7 @@ const nl: OrdersWords = {
     },
     unavailable: {
       title: "Deze winkel kan nu geen aankopen opzoeken",
-      body: "De betalingen van deze winkel zijn nu niet aan Stripe gekoppeld. Beantwoord de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij de winkel aan.",
+      body: "De betalingen van deze winkel zijn nu niet aan Stripe gekoppeld. Probeer het later opnieuw.",
     },
     error: {
       title: "Er ging aan onze kant iets mis",
@@ -1184,15 +1184,15 @@ const nl: OrdersWords = {
   getAgainIntro: (store) =>
     `Een download kwijt, of een nieuwe telefoon? Vul het e-mailadres in waarmee je ${store} hebt betaald, en we mailen je een link naar alles wat je hier hebt gekocht. Geen account en geen wachtwoord.`,
   cannotLookUp: (store) =>
-    `${store} kan nu geen betalingen via Stripe ontvangen, dus hier valt niets op te zoeken. Beantwoord de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
+    `${store} kan nu geen betalingen via Stripe ontvangen, dus hier valt niets op te zoeken. Probeer het later opnieuw.`,
   emailYouPaidWith: "Het e-mailadres waarmee je hebt betaald",
   emailMe: "Mail me mijn aankopen",
   formNote: (store) =>
     `Als met dat adres iets is gekocht bij ${store}, komt er meestal binnen een minuut een link naar alles, die 24 uur werkt. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie wat heeft gekocht.`,
   checkInbox: "Kijk in je inbox",
   sentBody: (store) =>
-    `Als met dat adres iets is gekocht bij ${store}, is de link onderweg. Hij komt van ${store} via Marktmorgen en komt meestal binnen een minuut aan. Staat hij er niet, kijk dan in je spam.`,
-  nothingArrived: "Niets ontvangen? Misschien heb je met een ander adres betaald: het adres dat je bij het afrekenen hebt ingevuld. Probeer dat hieronder.",
+    `Als met dat adres iets is gekocht bij ${store}, is de link normaal gesproken onderweg. Hij komt van ${store} via Marktmorgen en kan een paar minuten duren. Staat hij er niet, kijk dan in je spam.`,
+  nothingArrived: "Niets ontvangen? Misschien heb je met een ander adres betaald: het adres dat je bij het afrekenen hebt ingevuld. Probeer dat hieronder. Was het het juiste adres, probeer het dan later opnieuw.",
 
   bookedCalls: (count) => (count === 1 ? "Je boeking" : "Je boekingen"),
   waiting: "Wacht op jou",
@@ -1381,7 +1381,7 @@ const pt: OrdersWords = {
     },
     unavailable: {
       title: "Esta loja não pode procurar compras neste momento",
-      body: "Os pagamentos da loja não estão ligados à Stripe neste momento. Responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega à loja.",
+      body: "Os pagamentos da loja não estão ligados à Stripe neste momento. Tente novamente mais tarde.",
     },
     error: {
       title: "Algo correu mal do nosso lado",
@@ -1401,15 +1401,15 @@ const pt: OrdersWords = {
   getAgainIntro: (store) =>
     `Perdeu um ficheiro descarregado ou mudou de telemóvel? Introduza o email com que pagou a ${store} e enviamos-lhe por email uma ligação para tudo o que comprou aqui. Sem conta e sem palavra-passe.`,
   cannotLookUp: (store) =>
-    `${store} não pode receber pagamentos através da Stripe neste momento, por isso não há nada a procurar aqui. Responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
+    `${store} não pode receber pagamentos através da Stripe neste momento, por isso não há nada a procurar aqui. Tente novamente mais tarde.`,
   emailYouPaidWith: "O email com que pagou",
   emailMe: "Enviar-me as minhas compras por email",
   formNote: (store) =>
     `Se esse endereço comprou algo a ${store}, uma ligação para tudo chega normalmente em menos de um minuto e funciona durante 24 horas. Dizemos o mesmo quer tenha comprado quer não, para que ninguém possa usar esta página para descobrir quem comprou o quê.`,
   checkInbox: "Verifique a sua caixa de entrada",
   sentBody: (store) =>
-    `Se esse endereço comprou algo a ${store}, a ligação está a caminho. Chega de ${store} via Marktmorgen, normalmente em menos de um minuto. Se não estiver lá, veja na pasta de spam.`,
-  nothingArrived: "Não recebeu nada? Talvez tenha pago com outro endereço: o que introduziu no pagamento. Experimente esse abaixo.",
+    `Se esse endereço comprou algo a ${store}, a ligação normalmente está a caminho. Chega de ${store} via Marktmorgen e pode demorar alguns minutos. Se não estiver lá, veja na pasta de spam.`,
+  nothingArrived: "Não recebeu nada? Talvez tenha pago com outro endereço: o que introduziu no pagamento. Experimente esse abaixo. Se era o correto, tente novamente mais tarde.",
 
   bookedCalls: (count) => (count === 1 ? "A sua marcação" : "As suas marcações"),
   waiting: "À sua espera",

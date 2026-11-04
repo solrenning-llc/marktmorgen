@@ -40,14 +40,17 @@ export function pickFields(body: unknown, fields: string[] | null): { ok: true; 
 }
 
 /**
- * The 400 for a `?fields=` that cannot be read, or null when it can (or none
- * was sent). A reading that takes more than its request checks this before it
- * takes or reads anything, so a mistyped field costs only the request.
+ * The 400 for a `?fields=` that cannot be read, or that names a field the
+ * route's rows never have (`known`, its fixed list); null when it can be
+ * answered (or none was sent). A reading that takes more than its request
+ * checks this before it takes or reads anything, so a mistyped field costs
+ * only the request.
  */
-export function badFields(request: Request): Response | null {
+export function badFields(request: Request, known?: readonly string[]): Response | null {
   const asked = fieldsAsked(request.url);
-  if (asked.ok) return null;
-  return apiError(400, "fields", asked.bad ? `“${asked.bad}” cannot be a field name. Use letters, digits and underscores, at most ${MAX_FIELDS_ASKED} fields.` : "Name at least one field, separated by commas.");
+  if (!asked.ok) return apiError(400, "fields", asked.bad ? `“${asked.bad}” cannot be a field name. Use letters, digits and underscores, at most ${MAX_FIELDS_ASKED} fields.` : "Name at least one field, separated by commas.");
+  const unknown = known && asked.fields?.find((f) => !known.includes(f));
+  return unknown ? apiError(400, "unknown_field", `No item in this answer has a field named “${unknown}”.`) : null;
 }
 
 /** apiOk with `?fields=` applied, or the 400 that names the field. */

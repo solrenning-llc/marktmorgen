@@ -198,7 +198,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:bench:ranges": C, "nl:bench:s:": Cr(21),
   "nl:billing:sync:after": C, "nl:billing:sync:cursor": C,
   "nl:blog:body:": E, "nl:blog:meta:": E, "nl:blog:pub:": E,
-  "nl:busy:": Cr(1),
+  "nl:busy:": Cr(2),
   // ---------------------------------------------------------------- c
   "nl:cal:busy:": T("nl:cal:cfg:", 1), "nl:cal:cfg:": E, "nl:cal:err:": T("nl:cal:cfg:", 1), "nl:cal:good:": T("nl:cal:cfg:", 1),
   "nl:cal:lock:": T("nl:cal:cfg:", 1), "nl:cal:out:": E, "nl:cal:tok:": T("nl:cal:cfg:"),

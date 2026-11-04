@@ -93,7 +93,7 @@ import {
   UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { PAGES_PER_VISIT, busyDayCommands, laterPageCost, visitCost } from "./traffic-cost";
+import { PAGES_PER_VISIT, busyDayCommands, busySendFunctionCost, laterPageCost, visitCost } from "./traffic-cost";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -111,9 +111,14 @@ export const FETCHED_AHEAD = 1.25;
 export const PER_EMAIL = 0.0009;
 /** Days a billing month can have, for what is asked at most once a day. */
 export const BUSY_DAYS_A_MONTH = 31;
-/** A store's day of the busy-day email at the most: its commands and the one email (tests/traffic-cost.ts, BUSY). */
+/**
+ * A store's day of the busy-day email at the most (tests/traffic-cost.ts,
+ * BUSY): its commands, the time the send holds the view's function, the
+ * email, and the day's one notice to the site's inbox when Amazon refuses,
+ * which a store's email can be the one to set off.
+ */
 export function busyDayCost(): number {
-  return busyDayCommands() * COMMAND + PER_EMAIL;
+  return busyDayCommands() * COMMAND + busySendFunctionCost() + 2 * PER_EMAIL;
 }
 /** An order's pages and jobs, set well over a visit's whole page (tests/traffic-cost.ts). */
 export const ORDER_COMPUTE = 0.0003;
@@ -369,7 +374,7 @@ export const COST_LINES: CostLine[] = [
     feature: "The busy-day email to the creator (added 11 October 2026; costed 4 November 2026)",
     monthlyUsd: ALL_TIERS_SAME(BUSY_DAYS_A_MONTH * busyDayCost()),
     sources: [{ file: "lib/stats-report.ts", names: ["maybeBusyAlert", "BUSY_FLOOR"] }],
-    basis: "Asked by a store's views at 64, 128, 256 and so on in a day, which no plan figure bounds: every day of the month at every power of two a day's count can reach, the fortnight before read once a day, and its one email a day at the company's cost (tests/traffic-cost.ts, BUSY; measured in tests/numbers-three.test.ts). A line of its own, so a cut to the visits never takes it off.",
+    basis: "Asked by a store's views at 64, 128, 256 and so on in a day, which no plan figure bounds: every day of the month at every power of two a day's count can reach, the fortnight before read once a day, its one email a day at the company's cost, the time its send holds the view's function, and the site's one notice a day when Amazon refuses (tests/traffic-cost.ts, BUSY; measured in tests/numbers-three.test.ts on Resend, read from the code for Amazon). A line of its own, so a cut to the visits never takes it off.",
   },
   {
     id: "orders",
@@ -575,8 +580,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
+      // A click on a store's link, an affiliate's visit and a funnel's step each take one before they are counted (4 November 2026).
+      { file: "app/api/store/hit/route.ts", names: ["takePublicRequest(store)"] },
     ],
-    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
+    basis: "A click on one of a store's links, a visit through an affiliate's link and a step of a funnel of pages (app/api/store/hit) each take one of the window's requests before they are counted, and are not counted past them (4 November 2026); each costs less than a later page, held in tests/traffic.test.ts. An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
   },
   {
     id: "studio",

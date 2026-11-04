@@ -67,6 +67,8 @@
  */
 import { CAPPED_COUNT } from "@/lib/capped-count";
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
+import { MAX_STORE_BYTES } from "@/lib/store";
+import { RESEND_TIMEOUT_MS, SES_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { UPSTASH_MICRO_USD_PER_GB_TRANSFER } from "@/lib/spend-cost-table";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
 
@@ -212,6 +214,18 @@ export const EVALS = {
 const evalCost = (n: number) => n * EVAL_BYTES * DB_BYTE;
 
 /**
+ * The store's record is read whole from the database (lib/store.ts,
+ * storeForHandle and storeForPage), up to MAX_STORE_BYTES, and every byte read
+ * is billed as the EVAL's are. Until 4 November 2026 (independent review of
+ * #1496) no visit paid for it. Reads of the record, measured in
+ * tests/traffic.test.ts: each page drawn reads it once, each count a page
+ * sends (app/api/store/hit) once more, and the live room's leave once
+ * (app/api/store/community/chat). A reading of a page does not read it.
+ */
+export const STORE_READS = { page: 1, count: 1, roomLeave: 1 };
+const storeReadCost = (n: number) => n * MAX_STORE_BYTES * DB_BYTE;
+
+/**
  * The busy-day email (lib/stats-report.ts, maybeBusyAlert), asked by a
  * view when the day's views reach 64, 128, 256 and so on: at most once a
  * store a day for each power of two a day's count can reach, and a day's
@@ -229,9 +243,31 @@ export const BUSY = {
   later: 1,
   /** On a busy day before the email has gone, each ask also: whether the creator stopped the emails. */
   busy: 1,
-  /** The one that sends: the day's email claim and its mark, today's channels, and the email's own bookkeeping: 5 measured, held at 6. */
-  send: 6,
+  /**
+   * The one that sends: the day's email claim and its mark and today's
+   * channels (3), and the sender's own bookkeeping. Measured on Resend, 2
+   * (its monthly count), 5 in all. Read from lib/email.ts and lib/ses.ts for
+   * Amazon, which tests here cannot reach: Amazon's state read and, when
+   * stale, written again (2), and either what Amazon took counted (2) or,
+   * when the account refuses, its state set down (2), the day's notice to
+   * the site's inbox claimed (1) and sent through Resend (2), and the email
+   * itself sent through Resend (2): 9 at the most. 12 in all.
+   */
+  send: 12,
 };
+/**
+ * How long the one that sends can hold its function, waiting on the
+ * senders, all of it inside the view's request (lib/visit.ts awaits it):
+ * Amazon's key borrowed and its account asked (8 s each, SES_TIMEOUT_MS),
+ * three tries at Amazon (8 s each) with 1.2 s of pauses, and Resend twice,
+ * the site's notice and the email, each three tries of 10 s
+ * (RESEND_TIMEOUT_MS) with 3 s of pauses for a 429: 107.2 s, rounded up.
+ */
+export const BUSY_SEND_SECONDS = Math.ceil((2 * SES_TIMEOUT_MS + 3 * SES_TIMEOUT_MS + 1_200 + 2 * (3 * RESEND_TIMEOUT_MS + 3_000)) / 1000);
+/** That time, at the memory held while waiting and a tenth of a second of work. */
+export function busySendFunctionCost(): number {
+  return BUSY_SEND_SECONDS * MEMORY_PER_SECOND + 0.1 * CPU_PER_SECOND;
+}
 export const BUSY_POWERS = 62 - 6 + 1;
 
 /**
@@ -266,7 +302,8 @@ export function visitCost(): number {
   // share of visitors the pages send it for: the store's page and two sales pages.
   const reading = (PAGES_PER_VISIT / READ_SAMPLE) * readBeaconCost();
   const evals = evalCost(EVALS.frontCount + later * EVALS.laterCount);
-  return requests * CDN_PER_REQUEST + commands * COMMAND + evals + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE) + reading;
+  const records = storeReadCost(PAGES_PER_VISIT * (STORE_READS.page + STORE_READS.count));
+  return requests * CDN_PER_REQUEST + commands * COMMAND + evals + records + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE) + reading;
 }
 
 /**
@@ -279,7 +316,7 @@ export function visitCost(): number {
  * more than a page does.
  */
 export function laterPageCost(): number {
-  return (1 + 1 + PICTURES_ON_A_LATER_PAGE) * CDN_PER_REQUEST + (COMMANDS.laterPage + COMMANDS.laterCount) * COMMAND + evalCost(EVALS.laterCount) + PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE;
+  return (1 + 1 + PICTURES_ON_A_LATER_PAGE) * CDN_PER_REQUEST + (COMMANDS.laterPage + COMMANDS.laterCount) * COMMAND + evalCost(EVALS.laterCount) + storeReadCost(STORE_READS.page + STORE_READS.count) + PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE;
 }
 
 /**
@@ -295,7 +332,7 @@ export function roomLookCost(): number {
 
 /** Being handed ten minutes' leave to look: once, at the route that knows who is asking. */
 export function roomLeaveCost(): number {
-  return CDN_PER_REQUEST + CALL + COMMANDS.roomLeave * COMMAND + 0.03 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 4_000 * ORIGIN_PER_BYTE;
+  return CDN_PER_REQUEST + CALL + COMMANDS.roomLeave * COMMAND + storeReadCost(STORE_READS.roomLeave) + 0.03 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 4_000 * ORIGIN_PER_BYTE;
 }
 
 /** Ten minutes of the room for one member, at a number of looks. */

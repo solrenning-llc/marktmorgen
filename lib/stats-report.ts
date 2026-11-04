@@ -594,8 +594,9 @@ export const BUSY_CLAIM_SECONDS = 60;
  * two, before the day's email was claimed. "sent" once the day's email has
  * gone; null while another request holds the claim and has not written the
  * days yet: that power of two is not checked, and a later one is. The claim
- * lapses after BUSY_CLAIM_SECONDS if its request died before writing (4
- * November 2026: it was kept two days, so one timeout lost the day's email).
+ * is let go at once when the read fails, and lapses after
+ * BUSY_CLAIM_SECONDS if its request died before writing (4 November 2026:
+ * it was kept two days, so one failed read lost the day's email).
  */
 async function busyBefore(store: Store, day: string, now: number): Promise<number[] | typeof BUSY_SENT | null> {
   const key = busyDayKey(store.handle, day);
@@ -612,9 +613,17 @@ async function busyBefore(store: Store, day: string, now: number): Promise<numbe
   if (held !== null && held !== undefined) return null;
   const [claimed] = await redisPipeline([["SET", key, "", "NX", "EX", BUSY_CLAIM_SECONDS]]);
   if (claimed === null) return null;
-  const before = await viewsBefore(store, 14, now);
-  await redisPipeline([["SET", key, JSON.stringify(before), "XX", "EX", 2 * 86400]]);
-  return before;
+  try {
+    const before = await viewsBefore(store, 14, now);
+    await redisPipeline([["SET", key, JSON.stringify(before), "XX", "EX", 2 * 86400]]);
+    return before;
+  } catch {
+    // The read failed: let the claim go at once, so the next power of two
+    // tries again. A request that dies here without this (a timeout) leaves
+    // a claim that lapses after BUSY_CLAIM_SECONDS.
+    await redisPipeline([["DEL", key]]).catch(() => undefined);
+    return null;
+  }
 }
 
 /**

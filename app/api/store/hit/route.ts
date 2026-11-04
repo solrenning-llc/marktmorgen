@@ -7,6 +7,7 @@ import { funnelMark, stepIndex } from "@/lib/page-funnel";
 import { countFunnelStep, funnelVisitor, readPageFunnel } from "@/lib/page-funnel-store";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { productIdFor } from "@/lib/catalog";
+import { takePublicRequest } from "@/lib/traffic";
 
 const MAX_BODY_BYTES = 1_500;
 
@@ -69,12 +70,18 @@ export async function POST(request: NextRequest) {
     const product = read("p", 40);
     if (product && productIdFor(store, product) === product) await countHit(request, store, { kind: "product", id: product });
   } else if (kind === "l") {
+    // A click on one of the store's links, an affiliate's visit and a
+    // funnel's step are not a page of a visit: each takes one of the store's
+    // public requests before it is counted (4 November 2026; until then they
+    // were bounded only by the address's allowance), and past them it is not
+    // counted (tests/plan-cost-registry.ts, public-requests).
     const id = read("id", 40);
-    if (store.links.some((link) => link.id === id)) await countHit(request, store, { kind: "link", id });
+    if (store.links.some((link) => link.id === id) && (await takePublicRequest(store))) await countHit(request, store, { kind: "link", id });
   } else if (kind === "f") {
     // A step of a funnel of pages was opened (lib/page-funnel.ts): one person
     // once for that step, never the store's own people, and only for a page
     // or product that is one of the funnel's steps.
+    if (!(await takePublicRequest(store))) return done();
     const funnel = await readPageFunnel(store.statsId, funnelMark(read("f", 10))).catch(() => null);
     const step = read("t", 1) === "g" ? "page" : "product";
     const index = funnel?.on ? stepIndex(funnel, step, read("id", 40)) : -1;
@@ -85,7 +92,7 @@ export async function POST(request: NextRequest) {
   } else if (kind === "a") {
     // A visit through an affiliate's link: counted for them, once a day.
     // `p`: the link was reached from a paid search ad (components/affiliate-click.tsx), counted apart.
-    await countAffiliateClick(request, store, read("c", 20).toLowerCase(), read("p", 2) === "1");
+    if (await takePublicRequest(store)) await countAffiliateClick(request, store, read("c", 20).toLowerCase(), read("p", 2) === "1");
   }
   return done();
 }

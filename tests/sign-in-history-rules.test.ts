@@ -6,7 +6,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { LOCKED_NOTE, MAX_SIGN_INS, SIGN_IN_DAYS, SIGN_IN_NOTES, type SignInEntry, entryWords, historyNotes, placeFrom, readEntry, signInRead, signInWrite, signInsToShow, throughLostLink } from "@/lib/sign-in-history-rules";
 import { browserName } from "@/lib/auth";
-import { LOCKED_NEEDS } from "@/lib/two-step";
+import { LOCKED_ACTIONS, LOCKED_NEEDS } from "@/lib/two-step";
 import { ROLE_PERMISSIONS } from "@/lib/team-roles";
 import { MemoryRedis } from "@/lib/redis-memory";
 import { done, is, part } from "./check";
@@ -103,9 +103,10 @@ is("every entry of the three paths is kept, and each line names the recovery add
 part("What a locked session cannot do: the note against the code");
 const note = LOCKED_NOTE.join(" ");
 // Each permission a locked session is held back from (lib/two-step.ts, checked in lib/studio-route.ts), named in the note; a new one fails here until the note says it.
-const NEED_WORDS: Record<string, RegExp> = { billing: /\byour plan\b/, payments: /\byour Stripe connection\b/, team: /\byour team\b/, delete: /\bdelete your store\b/, export: /\bdownload\b/, settings: /\bsettings\b/, send: /\bsend email to your list\b/, import: /\bimport\b/ };
+const NEED_WORDS: Record<string, RegExp> = { billing: /\byour plan\b/, payments: /\byour Stripe connection\b/, team: /\byour team\b/, delete: /\bdelete your store\b/, export: /\bdownload\b/, settings: /\bsettings\b/, send: /\bsend email to your list\b/, import: /\bimport\b/, erase: /\bdelete anything for good\b[^.]*\bpeople\b/ };
 is("the note names every permission a locked session is held back from", LOCKED_NEEDS.map((need) => [need, NEED_WORDS[need]?.test(note) ?? false]), LOCKED_NEEDS.map((need) => [need, true]));
 is("every studio permission is either held back (and named) or open, as the note's last sentence says, and the held-back ones are real permissions", [[...ROLE_PERMISSIONS.owner].every((p) => LOCKED_NEEDS.includes(p) ? NEED_WORDS[p] !== undefined : true), LOCKED_NEEDS.every((need) => ROLE_PERMISSIONS.owner.has(need as never)), /^Everything else in your studio is open to it\.$/.test(LOCKED_NOTE[LOCKED_NOTE.length - 1])], [true, true, true]);
+is("the note says that deleting for good waits too, as lib/two-step.ts LOCKED_ACTIONS holds it within the open permissions", [/\bdelete anything for good\b/.test(note), Object.values(LOCKED_ACTIONS).every((actions) => actions.length > 0)], [true, true]);
 // The account's own actions that refuse a locked session by themselves, each read in its route and named in the note.
 const ACCOUNT_LOCKS: Record<string, RegExp> = {
   "app/api/auth/signout-all/route.ts": /"Sign out everywhere"/,

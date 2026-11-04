@@ -69,7 +69,8 @@ async function main(): Promise<void> {
     ["HSET", `nl:aff:${store.statsId}:people`, "0123456789ab", JSON.stringify({ id: "0123456789ab", email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 1, note: "" })],
     ["HSET", `nl:aff:${store.statsId}:clicks`, "0123456789ab", "12"],
   ]);
-  const affiliates = await affiliatesTool(store);
+  const affiliates = await affiliatesTool(store, async () => null);
+  if (affiliates instanceof Response) throw new Error("not charged here");
   is("each by their code, with their clicks", (affiliates.affiliates ?? []).map((a) => [a.code, a.clicks, a.status]), [["sara", 12, "approved"]]);
   is("and never their address", /@/.test(JSON.stringify(affiliates)), false);
 

@@ -12,6 +12,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { forgetCrmPerson } from "@/lib/crm";
 import {
   COMPANY_REFUSALS,
+  forgetCompanyPerson,
   type Company,
   MAX_COMPANIES,
   MAX_COMPANY_NAME,
@@ -60,7 +61,7 @@ async function main(): Promise<void> {
   is("taken off every company", unlinkPerson(two, a).map((c) => c.people), [[], []]);
   is("deleted", dropCompany(two, "bbbbbbbbbb"), { ok: true, companies: [two[0]] });
   is("read back, checked again", [parseCompany({ ...two[1], people: [a, a, "nope"] })?.people, parseCompany({ ...two[1], name: "" })], [[a], null]);
-  is("every refusal says what to do", Object.values(COMPANY_REFUSALS).every((words) => /^(Type|You|Keep|Your|A company|That)/.test(words)), true);
+  is("every refusal says what to do", Object.values(COMPANY_REFUSALS).every((words) => /^(Type|You|Keep|Your|A company|That|Someone)/.test(words)), true);
 
   part("Through the studio's route");
   redis.clear();
@@ -93,6 +94,32 @@ async function main(): Promise<void> {
   await forgetCrmPerson(statsId, ann, "ann@example.com");
   is("no longer linked", (await readCompanies(statsId))[0].people, []);
   is("the company stays", (await readCompanies(statsId)).map((c) => c.name), ["North School"]);
+
+  part("One change at a time");
+  const lock = `nl:crm:co:lock:${statsId}`;
+  await redisPipeline([["SET", lock, "someone", "EX", 10]]);
+  const busy = await post({ action: "add", name: "South School" });
+  is("while another change is being written, a change is refused, saying so", [busy.status, busy.body.error, busy.body.message], [409, "busy", COMPANY_REFUSALS.busy]);
+  is("and nothing of it is kept", (await readCompanies(statsId)).map((c) => c.name), ["North School"]);
+  let threw = false;
+  await forgetCompanyPerson(statsId, ann, 300).catch(() => { threw = true; });
+  is("a deletion that cannot take the lock is never skipped quietly: it fails, so it is reported as not done", threw, true);
+  await redisPipeline([["DEL", lock]]);
+  const both = await Promise.all([post({ action: "add", name: "East School" }), post({ action: "add", name: "West School" })]);
+  const names = (await readCompanies(statsId)).map((c) => c.name);
+  is("two at once never write over each other: every change that went through is kept", both.filter((r) => r.status === 200).length === names.length - 1 && both.every((r) => r.status === 200 || r.body.error === "busy"), true);
+  const [after] = await redisPipeline([["GET", lock]]);
+  is("the lock is let go after each change", after, null);
+  for (const c of await readCompanies(statsId)) if (c.name !== "North School") await post({ action: "remove", id: c.id });
+  const pipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HSET" && String(c[1]).startsWith("nl:crm:co:"))) throw new Error("down");
+    return pipe(commands);
+  }) as typeof redis.pipeline;
+  const failed = await post({ action: "add", name: "Failing School" });
+  redis.pipeline = pipe;
+  const [left] = await redisPipeline([["GET", lock]]);
+  is("and when a write fails too, so the next change is not refused", [failed.status >= 500, left, (await post({ action: "edit", id, name: "North School" })).status], [true, null, 200]);
 
   part("Changed and removed");
   is("renamed", (await post({ action: "edit", id, name: "North Academy" })).body.companies?.[0].name, "North Academy");

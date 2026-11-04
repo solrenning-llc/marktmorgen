@@ -133,6 +133,32 @@ export function salesCount(store: Store, count: (units: number) => Promise<boole
 }
 
 /**
+ * The studio requests one reading of the buyers (buyerLedger, below) costs at
+ * the most, as what is kept is measured now: its ten-minute copy by size, and,
+ * should that copy be gone or unusable, the reading from Stripe with the
+ * imported buyers and the PayPal sales and refunds by how many are kept, each
+ * counted exactly as buyerLedger counts it. What a narrowed email the
+ * scheduled job starts holds when it is written down (lib/broadcasts.ts,
+ * createBroadcast; C3-80 (d)). Throws LedgerNotCounted when what is kept
+ * cannot be measured: unknown is never none.
+ */
+export async function ledgerReadingUnits(store: Store): Promise<number> {
+  if (!readsSales(store) && !store.pastBuyers) return 0;
+  let copy = 0;
+  let imported = 0;
+  if (store.statsId && isRedisConfigured()) {
+    const reply: unknown = await redisPipeline([["STRLEN", ledgerKey(store.statsId)], ["HLEN", importedWhoKey(store.statsId)]]).catch(() => null);
+    const sizes = Array.isArray(reply) && reply.length === 2 && reply.every((n) => n !== null && n !== undefined) ? reply.map(Number) : [];
+    if (sizes.length !== 2 || sizes.some((n) => !Number.isSafeInteger(n) || n < 0)) throw new LedgerNotCounted();
+    copy = sizes[0] > 0 ? ledgerUnits(sizes[0]) : 0;
+    imported = sizes[1];
+  }
+  const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)).catch(() => null) : { sales: 0, refunds: 0 };
+  if (!paypal) throw new LedgerNotCounted();
+  return copy + (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds }));
+}
+
+/**
  * `count`, when given, is asked before anything big is read, with the studio
  * requests it costs, and answers whether they were counted; when they were
  * not, nothing more is read and LedgerNotCounted is thrown. The ten-minute

@@ -241,6 +241,8 @@ export async function POST(request: NextRequest) {
 
     if (action === "broadcast") {
       // A narrowed email reads the store's buyers again when their copy ran out: counted first, nothing written when not.
+      // One the scheduled job starts also holds, here, what its reading then costs at the most, so that job never
+      // refuses it (C3-80 (d)): without that room it is refused now, with the same sentence, and nothing is written.
       const counting = countLedger(store);
       const created = await createBroadcast(store, {
         subject: text(body.subject, 400),
@@ -269,7 +271,7 @@ export async function POST(request: NextRequest) {
         // Starts as soon as the studio has its answer; the scheduled job
         // finishes anything this run does not.
         // With the narrowing read and counted just now: not read or counted again. When the scheduled job takes the
-        // lock first, it reads the copy that reading kept, counted by its size (lib/broadcasts.ts, advanceBroadcast).
+        // lock first, it reads the copy that reading kept, never refused (lib/broadcasts.ts, advanceBroadcast).
         const keep = created.keep;
         after(() => advanceBroadcast(id, storeForHandle, Date.now() + 50_000, { keep }).then(() => undefined));
       }

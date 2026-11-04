@@ -154,6 +154,7 @@ import {
   hasProduct,
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
+import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
 import { noteData, takeData } from "@/lib/store-data";
 import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
 import { PRODUCT_SIDE_BYTES } from "@/lib/store-data-rules";
@@ -684,6 +685,12 @@ export type Store = {
   /** One line of the creator's own news across the top of the store page, or null. */
   announcement: Announcement | null;
   /**
+   * "Visit us" under the products, for a business with an address (521
+   * [LB2], lib/visit-us.ts): its address, opening hours and phone, as the
+   * creator typed them; null on every store until its creator writes one.
+   */
+  visitUs: VisitUs | null;
+  /**
    * Whether visitors' questions about a product are answered from its page
    * (lib/answers-rules.ts), and the creator's notes for those answers. Off on
    * every store until its creator switches it on.
@@ -1040,6 +1047,7 @@ function parseStore(raw: unknown): Store | null {
       collections: parseCollections(value.collections),
       sitePages: parseSitePages(value.sitePages),
       announcement: parseAnnouncement(value.announcement),
+      visitUs: parseVisitUs(value.visitUs),
       answers: parseAnswers(value.answers),
       assistant: parseAssistant(value.assistant),
       assistantPlan: parseAssistantPlan(value.assistantPlan),
@@ -1344,6 +1352,7 @@ async function freshStore(fields: {
     collections: [],
     sitePages: [],
     announcement: null,
+    visitUs: null,
     answers: { ...NO_ANSWERS },
     assistant: { ...NO_ASSISTANT },
     assistantPlan: null,
@@ -4268,6 +4277,17 @@ export async function setFair(email: string, raw: unknown): Promise<Store | null
 /** Sets the language the store speaks to its buyers in (lib/store-language.ts). */
 export async function setLanguage(email: string, raw: unknown): Promise<Store | null> {
   return patchStore(email, () => ({ language: parseLanguage(raw) }));
+}
+
+/**
+ * Sets the "Visit us" block (lib/visit-us.ts), or takes it away when
+ * nothing is in it. Says which part cannot be kept, and changes nothing then.
+ */
+export async function setVisitUs(email: string, raw: unknown): Promise<{ ok: true; store: Store } | { ok: false; reason: "place" | "hours" | "phone" | "none" }> {
+  const read = readVisitUs(raw);
+  if (typeof read === "string") return { ok: false, reason: read };
+  const store = await patchStore(email, () => ({ visitUs: read }));
+  return store ? { ok: true, store } : { ok: false, reason: "none" };
 }
 
 /** Sets the line of news across the top of the store page, or takes it away (null or empty). */

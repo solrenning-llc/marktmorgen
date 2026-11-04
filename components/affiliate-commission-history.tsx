@@ -3,7 +3,7 @@ import { readAffiliatePromotion } from "@/lib/affiliate-promotion";
 import { affiliateCreditGroups, affiliateLineScope, type AffiliateCommissionLine } from "@/lib/affiliate-commission-view";
 import type { Credit } from "@/lib/affiliates";
 const CREDIT_WORDS: Record<Credit, string> = {
-  click: "Their link", code: "Their code", buyer: "A buyer who was already theirs",
+  click: "Their link", code: "Their code", buyer: "A buyer who was already theirs", contact: "A confirmed lead of theirs who bought",
   partner: "Partner share", recurring: "A membership or plan payment",
   bonus: "A monthly goal reached", tier2: "A sale by somebody they brought",
   lead: "A confirmed lead",

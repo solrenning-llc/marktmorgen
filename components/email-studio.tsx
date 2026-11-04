@@ -1,5 +1,6 @@
 "use client";
 
+import { type ImportReportLine, type ImportedStep, SequenceImportBox, reportWords } from "@/components/sequence-import-box";
 import type { LibraryEmailDraft, LibrarySequenceDraft } from "@/lib/template-library-intents";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { sendCount } from "@/lib/send-count";
@@ -2073,6 +2074,13 @@ function Flows({
   const availableCounts = SEQUENCE_DRAFT_COUNTS.filter(count => count <= availableSlots);
   const invalidWait = draft?.steps.some(step => flowWaitHours(step.wait, step.unit) === null) ?? false;
   const [draftBaseline, setDraftBaseline] = useState<string | null>(null);
+  // What a file brought in left out or changed (544 [SQ9]): shown in the editor until the sequence is saved or closed.
+  const [imported, setImported] = useState<ImportReportLine[] | null>(null);
+  const importedHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    // The editor that opened takes the focus the box's button had, at its report's heading.
+    if (imported) importedHeading.current?.focus();
+  }, [imported]);
   useLeaveGuard(aiBusy || (draft !== null && JSON.stringify(draft) !== draftBaseline));
   const [draftCount, setDraftCount] = useState<number>(DEFAULT_SEQUENCE_DRAFT);
   const requestedCount = availableCounts.some(count => count === draftCount) ? draftCount : (availableCounts[0] ?? DEFAULT_SEQUENCE_DRAFT);
@@ -2110,6 +2118,30 @@ function Flows({
         ? "Starts the first time someone who agreed to hear from you buys anything"
         : // A paid call starts the sequences of its product (lib/buyer-list.ts): said as booking it.
           `Starts when someone who agreed to hear from you ${f.productId && calls.includes(f.productId) ? "books" : "gets"} ${products.find((p) => p.id === f.productId)?.title ?? "a product"}`;
+
+  /**
+   * A sequence brought in from a file (544 [SQ9]): its emails open here as a
+   * new sequence, for the creator to pick what starts it, read every email and
+   * save it, paused. Nothing is saved until they do.
+   */
+  function openImported(steps: ImportedStep[], report: ImportReportLine[]) {
+    if (locked || draft !== null) return;
+    const first = products[0]?.id ?? "";
+    const next: FlowDraft = {
+      ...toDraft(null, products),
+      name: "Brought in",
+      steps: steps.map((s) => ({
+        ...blankStep(s.delayHours % 24 === 0 ? String(s.delayHours / 24) : String(s.delayHours), s.delayHours % 24 === 0 ? "days" : "hours", first),
+        subject: s.subject,
+        body: s.body,
+      })),
+    };
+    // Unsaved from the start, so leaving the page asks first.
+    setDraftBaseline(null);
+    setError(null);
+    setImported(report);
+    setDraft(next);
+  }
 
   function openDraft(flow: FlowRow | null) {
     if (locked || draft !== null) return;
@@ -2161,6 +2193,7 @@ function Flows({
       return;
     }
     setDraft(null);
+    setImported(null);
     toast(draft.id ? "Sequence saved." : "Saved, paused. Preview it and switch it on from its card when it is ready.");
     refreshFlows();
   }
@@ -2399,6 +2432,20 @@ function Flows({
             save();
           }}
         >
+          {imported ? (
+            <div className="rounded-[var(--r-sm)] border border-line bg-lilac/30 p-3" data-imported-report="">
+              <h3 ref={importedHeading} tabIndex={-1} className="font-semibold text-ink">Brought in from your file: read each email, pick what starts it, then save</h3>
+              {imported.length ? (
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink-soft">
+                  {imported.map((r, i) => (
+                    <li key={i}>{reportWords(r)}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-sm text-ink-soft">Every email in the file came in as it was.</p>
+              )}
+            </div>
+          ) : null}
           <fieldset disabled={busy} className="min-w-0 space-y-4">
           <legend className="sr-only">Sequence configuration</legend>
           <label className="block">
@@ -2932,7 +2979,14 @@ function Flows({
           )}
           <div className="flex flex-wrap items-center gap-3">
             <button type="submit" aria-busy={busy} disabled={locked || invalidWait || overCapacity} className="btn btn-primary">Save the sequence</button>
-            <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" onClick={() => setDraft(null)}>
+            <button
+              type="button"
+              className="text-sm font-bold text-ink-soft underline underline-offset-4"
+              onClick={() => {
+                setDraft(null);
+                setImported(null);
+              }}
+            >
               Close
             </button>
           </div>
@@ -2940,9 +2994,12 @@ function Flows({
           </fieldset>
         </form>
       ) : flows.length < MAX_FLOWS ? (
-        <button type="button" className="btn btn-secondary mt-5" disabled={locked} onClick={() => openDraft(null)}>
-          New sequence
-        </button>
+        <>
+          <button type="button" className="btn btn-secondary mt-5" disabled={locked} onClick={() => openDraft(null)}>
+            New sequence
+          </button>
+          <SequenceImportBox disabled={locked} onRead={openImported} describe={(code) => MESSAGES[code] ?? null} />
+        </>
       ) : null}
     </section>
   );

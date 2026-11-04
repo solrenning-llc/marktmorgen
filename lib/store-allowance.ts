@@ -100,6 +100,21 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
   }
 }
 
+/**
+ * Gives back `n` of a kind that this same use took at `now` and did not need
+ * (lib/api-guard.ts, holdMoreApi: a reading set aside at its most, then
+ * measured). Only ever what was taken a moment before, in the same window;
+ * best effort: a give-back that fails leaves the figure counted higher, never
+ * lower.
+ */
+export async function giveAllowance(store: AllowanceStore, kind: AllowanceKind, n: number, now = Date.now()): Promise<void> {
+  if (!Number.isSafeInteger(n) || n < 1) return;
+  const window = allowanceWindow(store, now);
+  const id = idOf(store);
+  if (!window || !id || !isRedisConfigured()) return;
+  await redisPipeline([["DECRBY", key(kind, id, window.id), n]]).catch(() => {});
+}
+
 /** Fixed-size own-data reply from the existing SET NX + INCRBY pipeline. */
 function acknowledgedAllowanceCount(reply: unknown, n: number): number | null {
  try {

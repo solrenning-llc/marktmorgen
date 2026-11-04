@@ -64,6 +64,23 @@ export type BlockContext = {
   formTarget?: { handle: string; page: string; funnel: string; listOpen: boolean };
   /** What happened to a form just sent from this page, to say above it. */
   formNotice?: { form: string; status: string };
+  /** The store's calls a booking block may show (lib/booking-cards.ts), by id: none, and the block is not drawn. */
+  bookings?: Record<string, BookingCard>;
+};
+
+/** A call, as a booking block shows it (552 [BB1]): today's name, length and place, and where its time is picked. */
+export type BookingCard = {
+  title: string;
+  /** How long and where, in the store's language: "30-minute call · online; you get the link when you book". */
+  line: string;
+  /** Its own booking page, or null when it has no date on sale right now (then `closed` says so). */
+  href: string | null;
+  /** The link's words: "Pick a time", or "Pick a session" for dated sessions. */
+  pick: string;
+  /** What joins them to the call's name for a screen reader: "Pick a time: Intro call". */
+  colon: string;
+  /** Said in place of the link when there is no date on sale; "" otherwise. */
+  closed: string;
 };
 
 /** Another product, as its card on a sales page shows it: today's name, picture and price. */
@@ -742,6 +759,36 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
     }
     case "row":
       return RowView({ block, ctx });
+    case "booking": {
+      // One of the store's calls (lib/booking-cards.ts): gone, a draft, not a call or not on sale, and nothing is drawn.
+      const call = block.product ? ctx.bookings?.[block.product] : undefined;
+      if (!call) return null;
+      // The link's name says where it leads on its own (WCAG 2.4.9): the visible words, then the call's name for a screen reader.
+      const words = (
+        <>
+          {call.pick}
+          <span className="sr-only">{`${call.colon}${call.title}`}</span>
+        </>
+      );
+      return (
+        <section className="sp-section">
+          <Heading text={block.heading || call.title} />
+          {block.heading ? <h3 className="mt-3 text-lg font-semibold leading-snug">{call.title}</h3> : null}
+          <p className="st-muted mt-2 text-sm font-semibold">{call.line}</p>
+          <div className="mt-5">
+            {call.href === null ? (
+              <p className="st-muted text-sm">{call.closed}</p>
+            ) : ctx.preview ? (
+              <span className="btn st-btn sp-cta-btn">{words}</span>
+            ) : (
+              <a href={call.href} className="btn st-btn sp-cta-btn">
+                {words}
+              </a>
+            )}
+          </div>
+        </section>
+      );
+    }
     case "facts": {
       // Only numbers the store counted, and only those the creator chose; none, and the block is not drawn.
       const shown = block.show.map((key) => ctx.facts?.[key]).filter((fact): fact is NonNullable<typeof fact> => Boolean(fact));

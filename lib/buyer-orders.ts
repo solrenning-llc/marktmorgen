@@ -29,10 +29,11 @@ import { readPreorder, soonOne } from "@/lib/preorders";
 import { isGroupJob } from "@/lib/group-buy";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
+import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { onAccount, platformKey } from "@/lib/stripe-account";
+import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
 import { isLiveSub, soldAMembership } from "@/lib/membership-access";
@@ -43,10 +44,13 @@ import { paidCalls } from "@/lib/calls";
 import { roomsFor } from "@/lib/call-rooms";
 import type { CallSetup } from "@/lib/call-setup";
 import { type BumpKey, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
-import { IMPORTED_REFERENCE, importedFor, importedKey, importedReference } from "@/lib/imported-purchases";
+import { IMPORTED_REFERENCE, type ImportedPurchase, importedFor, importedFrom, importedKey, importedReference } from "@/lib/imported-purchases";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { takePublicRequest } from "@/lib/traffic";
 import {
+  ORDERS_LINK_READ_MS,
+  DOWNLOAD_LOOKUP_MS,
+  DOWNLOAD_LOOKUP_UNITS,
   ORDERS_CALL_MOVES,
   ORDERS_IMPORTED_COMMANDS,
   ORDERS_IMPORTED_ENTRY_COMMANDS,
@@ -65,6 +69,10 @@ export const ORDERS_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 export const MAX_LISTED = 40;
 
 export {
+  ORDERS_LINK_READ_MS,
+  DOWNLOAD_LOOKUP_COMMANDS,
+  DOWNLOAD_LOOKUP_MS,
+  DOWNLOAD_LOOKUP_UNITS,
   ORDERS_CALL_MOVES,
   ORDERS_FEED_COMMANDS,
   ORDERS_IMPORTED_COMMANDS,
@@ -416,6 +424,231 @@ function rows(listed: Listed): Row[] {
 /** Whether Stripe says this charge was given back in full: the shared rule (lib/refunds.ts). */
 const refunded = refundedInFull;
 
+/** Looks a product up by id, each read once, and, with a meter, taken from it the first time it is asked for. */
+type Finder = (id: string | undefined) => Promise<Listing | null>;
+
+function finderFor(store: Store, meter?: OrdersMeter): Finder {
+  const listing = listingFinder(store);
+  const asked = new Set<string>();
+  return async (id) => {
+    if (meter && id && !asked.has(id)) {
+      asked.add(id);
+      await meter.take(ORDERS_LISTING_COMMANDS);
+    }
+    return listing(id);
+  };
+}
+
+/**
+ * What one checkout of the address hands over again, as its list shows it, or
+ * null when it hands over nothing there: the same reading for the whole list
+ * (purchasesFor) and for one download (findPurchase). `customer` is the Stripe
+ * customer a sale created, whose payments in one click after it are on the list.
+ */
+async function purchaseFromSession(
+  store: Store,
+  session: Row,
+  find: Finder,
+  meter?: OrdersMeter,
+): Promise<{ purchase: Purchase; customer: string | null } | null> {
+  const account = store.stripeAccountId as string;
+  const id = typeof session.id === "string" ? session.id : "";
+  if (!SESSION_ID_PATTERN.test(id)) return null;
+  // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
+  const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
+  if (!saleHandles(store).has(meta.store ?? "")) return null;
+  if (!isSettled(session)) return null;
+  if (meta.kind === "call") return null;
+  // A gift is on its recipient's list, not its buyer's (lib/gifts.ts).
+  if (meta.gift) return null;
+  // Bought for several: each place is on the list of whoever took it (lib/group-buy.ts).
+  if (meta.group) return null;
+  // A pre-order: on the list as one until it is handed over; from then on
+  // it is on the list under the buyer's address, as a gift is (lib/preorders.ts).
+  if (meta.preorder) {
+    const product = await find(meta.product);
+    if (!product) return null;
+    meter?.alive();
+    if (await purchaseRefunded(account, session)) return null;
+    await meter?.take(ORDERS_PREORDER_COMMANDS);
+    const entry = await readPreorder(store, product.id, id);
+    if (entry?.given || entry?.revoked) return null;
+    const coming = await soonOne(store, product.id).catch(() => ({ soon: true, day: null }));
+    return { customer: null, purchase: {
+      reference: id,
+      kind: "sale",
+      title: product.title,
+      option: null,
+      paidAt: typeof session.created === "number" ? session.created : 0,
+      member: false,
+      ended: false,
+      productId: product.id,
+      courseProduct: null,
+      main: null,
+      items: null,
+      added: [],
+      preorder: { day: coming.day, given: false },
+    } };
+  }
+  // A package of calls: its sessions left, and the way to book them (lib/call-packages.ts).
+  if (meta.kind === "package") {
+    await meter?.take(1);
+    const bought = await readBought(id);
+    const product = bought ? await find(meta.product) : null;
+    if (!bought || !product) return null;
+    meter?.alive();
+    if (await purchaseRefunded(account, session)) return null;
+    await meter?.take(bought.holds.length);
+    const state = await packageState(bought);
+    return { customer: null, purchase: {
+      reference: id,
+      kind: "sale",
+      title: ordersWords(store.language).packageTitle(product.title, bought.total),
+      option: null,
+      paidAt: typeof session.created === "number" ? session.created : 0,
+      member: false,
+      ended: false,
+      productId: product.id,
+      courseProduct: null,
+      main: null,
+      items: null,
+      added: [],
+      packageBook: state.left > 0 ? `/@${store.handle}/book/${product.id}?pkg=${bought.token}` : null,
+      packageLeft: state.left,
+      packageExpired: state.expired,
+    } };
+  }
+  const product = await find(meta.product);
+  if (!product || product.call) return null;
+  meter?.alive();
+  if (await purchaseRefunded(account, session)) return null;
+
+  // A membership hands its thing over while it is being paid for.
+  const member = soldAMembership(product, { mode: session.mode, metadata: meta });
+  if (member) {
+    const sub = session.subscription as { status?: unknown } | null;
+    if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
+      return { customer: null, purchase: {
+        reference: id,
+        kind: "sale",
+        title: product.title,
+        option: null,
+        paidAt: typeof session.created === "number" ? session.created : 0,
+        member: false,
+        ended: true,
+        productId: product.id,
+        courseProduct: null,
+        main: null,
+        items: null,
+        added: [],
+      } };
+    }
+  }
+
+  const { delivery, option } = deliveryOf(product, meta.option);
+  const courseProduct = product.course ? product.id : null;
+  const podcastProduct = product.podcast ? product.id : null;
+  // A bundle, bought or ticked: its products, from the list on the order.
+  const items = await linesOf(find, bundleFromMeta(meta, "bundle"));
+  const added: AddedPurchase[] = [];
+  for (const { key, id: addedId } of bumpsFromMeta(meta)) {
+    const listing = await find(addedId);
+    if (!listing) continue;
+    const delivery = listing.file || listing.link ? { title: listing.title, file: listing.file, link: listing.link } : null;
+    const inside = await linesOf(find, bundleFromMeta(meta, `${key}_bundle`));
+    const course = listing.course ? listing.id : null;
+    if (delivery || inside || course) added.push({ key, id: listing.id, title: listing.title, delivery, items: inside, courseProduct: course });
+  }
+  if (!delivery && !added.length && !courseProduct && !podcastProduct && !items) return null;
+
+  const customer = typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer) ? session.customer : null;
+  return { customer, purchase: {
+    reference: id,
+    kind: "sale",
+    title: product.title,
+    option,
+    paidAt: typeof session.created === "number" ? session.created : 0,
+    member,
+    ended: false,
+    productId: product.id,
+    courseProduct,
+    podcastProduct,
+    // A course is its own way in. Bought at one of several prices, the
+    // price chosen may include a file or a link of its own: handed over
+    // here too, for as long as the course is (it used to be on the page
+    // after paying only, which closes after three days).
+    main: courseProduct && product.options.length === 0 ? null : delivery,
+    items,
+    added,
+  } };
+}
+
+/** What one payment taken in one click after a checkout hands over again, or null: the list's reading and one download's. */
+async function purchaseFromIntent(store: Store, intent: Row, find: Finder, account: string, meter?: OrdersMeter): Promise<Purchase | null> {
+  const id = typeof intent.id === "string" ? intent.id : "";
+  if (!INTENT_ID_PATTERN.test(id)) return null;
+  const meta = (intent.metadata ?? {}) as Record<string, string>;
+  if (meta.kind !== "upsell" || !saleHandles(store).has(meta.store ?? "")) return null;
+  if (intent.status !== "succeeded" || refunded(intent)) return null;
+  // Lost to a dispute is given back too (lib/refunds.ts); asked only of a
+  // charge Stripe marks disputed, and a failed read keeps it on the list.
+  // Past the opening's time or its meter refused, Stripe is not asked.
+  meter?.alive();
+  if (await keptUnlessLost(account, intent)) return null;
+  const product = await find(meta.product);
+  const items = product ? await linesOf(find, bundleFromMeta(meta, "bundle")) : null;
+  if (!product || !(product.file || product.link || items)) return null;
+  return {
+    reference: id,
+    kind: "upsell",
+    title: product.title,
+    option: null,
+    paidAt: typeof intent.created === "number" ? intent.created : 0,
+    member: false,
+    ended: false,
+    productId: product.id,
+    courseProduct: null,
+    main: product.file || product.link ? { title: product.title, file: product.file, link: product.link } : null,
+    items,
+    added: [],
+  };
+}
+
+/** What one purchase brought over or given hands over again, or null: the list's reading and one download's. */
+async function purchaseFromImported(store: Store, statsId: string, email: string, given: ImportedPurchase, find: Finder, meter?: OrdersMeter): Promise<Purchase | null> {
+  const product = await find(given.productId);
+  if (!product) return null;
+  const reference = importedReference(statsId, email, product.id);
+  // Given at one of the product's prices: that option is what is theirs.
+  const { delivery, option } = deliveryOf(product, given.option ?? undefined);
+  const items = given.items?.length ? await linesOf(find, given.items) : null;
+  const courseProduct = product.course ? product.id : null;
+  const podcastProduct = product.podcast ? product.id : null;
+  if (!delivery && !courseProduct && !podcastProduct && !items) return null;
+  // Who gave it is one read more.
+  if (given.job.startsWith("gift:")) await meter?.take(1);
+  return {
+    reference,
+    kind: "imported",
+    giftFrom: await giftFrom(given.job),
+    ...(isGroupJob(given.job) ? { place: true } : {}),
+    ...(given.job.startsWith("paypal:") ? { paidWith: "paypal" as const } : {}),
+    ...(given.job.startsWith("api:") ? { givenByStore: true } : {}),
+    ...(given.job.startsWith("pre:") ? { preorder: { day: null, given: true } } : {}),
+    podcastProduct,
+    title: product.title,
+    option,
+    paidAt: given.at,
+    member: false,
+    ended: false,
+    productId: product.id,
+    courseProduct,
+    main: courseProduct && product.options.length === 0 ? null : delivery,
+    items,
+    added: [],
+  };
+}
+
 /**
  * Everything this address paid this store for that can be handed over again,
  * newest first, read from the creator's own Stripe account.
@@ -423,18 +656,9 @@ const refunded = refundedInFull;
 export async function purchasesFor(store: Store, email: string, meter?: OrdersMeter): Promise<Purchase[]> {
   const account = store.stripeAccountId;
   if (!account && !store.pastBuyers) return [];
-  const handles = saleHandles(store);
   // With a meter (the orders page), each read that grows with what the buyer has is taken before it is made:
   // every listing the first time it is asked for, and each pre-order's, package's and import's records.
-  const listing = listingFinder(store);
-  const asked = new Set<string>();
-  const find = async (id: string | undefined): Promise<Listing | null> => {
-    if (meter && id && !asked.has(id)) {
-      asked.add(id);
-      await meter.take(ORDERS_LISTING_COMMANDS);
-    }
-    return listing(id);
-  };
+  const find = finderFor(store, meter);
   const found = new Map<string, Purchase>();
   const customers = new Set<string>();
 
@@ -448,137 +672,11 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
     const listed = (await onAccount("GET", account as string, `/checkout/sessions?${query}`)) as Listed;
     for (const session of rows(listed)) {
       const id = typeof session.id === "string" ? session.id : "";
-      if (!SESSION_ID_PATTERN.test(id) || found.has(id)) continue;
-      // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
-      const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
-      if (!handles.has(meta.store ?? "")) continue;
-      if (!isSettled(session)) continue;
-      if (meta.kind === "call") continue;
-      // A gift is on its recipient's list, not its buyer's (lib/gifts.ts).
-      if (meta.gift) continue;
-      // Bought for several: each place is on the list of whoever took it (lib/group-buy.ts).
-      if (meta.group) continue;
-      // A pre-order: on the list as one until it is handed over; from then on
-      // it is on the list under the buyer's address, as a gift is (lib/preorders.ts).
-      if (meta.preorder) {
-        const product = await find(meta.product);
-        if (!product) continue;
-        meter?.alive();
-        if (await purchaseRefunded(account, session)) continue;
-        await meter?.take(ORDERS_PREORDER_COMMANDS);
-        const entry = await readPreorder(store, product.id, id);
-        if (entry?.given || entry?.revoked) continue;
-        const coming = await soonOne(store, product.id).catch(() => ({ soon: true, day: null }));
-        found.set(id, {
-          reference: id,
-          kind: "sale",
-          title: product.title,
-          option: null,
-          paidAt: typeof session.created === "number" ? session.created : 0,
-          member: false,
-          ended: false,
-          productId: product.id,
-          courseProduct: null,
-          main: null,
-          items: null,
-          added: [],
-          preorder: { day: coming.day, given: false },
-        });
-        continue;
-      }
-      // A package of calls: its sessions left, and the way to book them (lib/call-packages.ts).
-      if (meta.kind === "package") {
-        await meter?.take(1);
-        const bought = await readBought(id);
-        const product = bought ? await find(meta.product) : null;
-        if (!bought || !product) continue;
-        meter?.alive();
-        if (await purchaseRefunded(account, session)) continue;
-        await meter?.take(bought.holds.length);
-        const state = await packageState(bought);
-        found.set(id, {
-          reference: id,
-          kind: "sale",
-          title: ordersWords(store.language).packageTitle(product.title, bought.total),
-          option: null,
-          paidAt: typeof session.created === "number" ? session.created : 0,
-          member: false,
-          ended: false,
-          productId: product.id,
-          courseProduct: null,
-          main: null,
-          items: null,
-          added: [],
-          packageBook: state.left > 0 ? `/@${store.handle}/book/${product.id}?pkg=${bought.token}` : null,
-          packageLeft: state.left,
-          packageExpired: state.expired,
-        });
-        continue;
-      }
-      const product = await find(meta.product);
-      if (!product || product.call) continue;
-      meter?.alive();
-      if (await purchaseRefunded(account, session)) continue;
-
-      // A membership hands its thing over while it is being paid for.
-      const member = soldAMembership(product, { mode: session.mode, metadata: meta });
-      if (member) {
-        const sub = session.subscription as { status?: unknown } | null;
-        if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
-          found.set(id, {
-            reference: id,
-            kind: "sale",
-            title: product.title,
-            option: null,
-            paidAt: typeof session.created === "number" ? session.created : 0,
-            member: false,
-            ended: true,
-            productId: product.id,
-            courseProduct: null,
-            main: null,
-            items: null,
-            added: [],
-          });
-          continue;
-        }
-      }
-
-      const { delivery, option } = deliveryOf(product, meta.option);
-      const courseProduct = product.course ? product.id : null;
-      const podcastProduct = product.podcast ? product.id : null;
-      // A bundle, bought or ticked: its products, from the list on the order.
-      const items = await linesOf(find, bundleFromMeta(meta, "bundle"));
-      const added: AddedPurchase[] = [];
-      for (const { key, id: addedId } of bumpsFromMeta(meta)) {
-        const listing = await find(addedId);
-        if (!listing) continue;
-        const delivery = listing.file || listing.link ? { title: listing.title, file: listing.file, link: listing.link } : null;
-        const inside = await linesOf(find, bundleFromMeta(meta, `${key}_bundle`));
-        const course = listing.course ? listing.id : null;
-        if (delivery || inside || course) added.push({ key, id: listing.id, title: listing.title, delivery, items: inside, courseProduct: course });
-      }
-      if (!delivery && !added.length && !courseProduct && !podcastProduct && !items) continue;
-
-      if (typeof session.customer === "string" && CUSTOMER_PATTERN.test(session.customer)) customers.add(session.customer);
-      found.set(id, {
-        reference: id,
-        kind: "sale",
-        title: product.title,
-        option,
-        paidAt: typeof session.created === "number" ? session.created : 0,
-        member,
-        ended: false,
-        productId: product.id,
-        courseProduct,
-        podcastProduct,
-        // A course is its own way in. Bought at one of several prices, the
-        // price chosen may include a file or a link of its own: handed over
-        // here too, for as long as the course is (it used to be on the page
-        // after paying only, which closes after three days).
-        main: courseProduct && product.options.length === 0 ? null : delivery,
-        items,
-        added,
-      });
+      if (found.has(id)) continue;
+      const got = await purchaseFromSession(store, session, find, meter);
+      if (!got) continue;
+      found.set(got.purchase.reference, got.purchase);
+      if (got.customer) customers.add(got.customer);
     }
   }
 
@@ -591,30 +689,9 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
     const listed = (await onAccount("GET", account as string, `/payment_intents?${query}`)) as Listed;
     for (const intent of rows(listed)) {
       const id = typeof intent.id === "string" ? intent.id : "";
-      if (!INTENT_ID_PATTERN.test(id) || found.has(id)) continue;
-      const meta = (intent.metadata ?? {}) as Record<string, string>;
-      if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) continue;
-      if (intent.status !== "succeeded" || refunded(intent)) continue;
-      // Lost to a dispute is given back too (lib/refunds.ts); asked only of a
-      // charge Stripe marks disputed, and a failed read keeps it on the list.
-      if (await keptUnlessLost(account as string, intent)) continue;
-      const product = await find(meta.product);
-      const items = product ? await linesOf(find, bundleFromMeta(meta, "bundle")) : null;
-      if (!product || !(product.file || product.link || items)) continue;
-      found.set(id, {
-        reference: id,
-        kind: "upsell",
-        title: product.title,
-        option: null,
-        paidAt: typeof intent.created === "number" ? intent.created : 0,
-        member: false,
-        ended: false,
-        productId: product.id,
-        courseProduct: null,
-        main: product.file || product.link ? { title: product.title, file: product.file, link: product.link } : null,
-        items,
-        added: [],
-      });
+      if (found.has(id)) continue;
+      const purchase = await purchaseFromIntent(store, intent, find, account as string, meter);
+      if (purchase) found.set(purchase.reference, purchase);
     }
   }
 
@@ -629,37 +706,8 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
       await meter.take((Number(entries) || 0) * ORDERS_IMPORTED_ENTRY_COMMANDS);
     }
     for (const given of await importedFor(store, email)) {
-      const product = await find(given.productId);
-      if (!product) continue;
-      const reference = importedReference(store.statsId, email, product.id);
-      // Given at one of the product's prices: that option is what is theirs.
-      const { delivery, option } = deliveryOf(product, given.option ?? undefined);
-      const items = given.items?.length ? await linesOf(find, given.items) : null;
-      const courseProduct = product.course ? product.id : null;
-      const podcastProduct = product.podcast ? product.id : null;
-      if (!delivery && !courseProduct && !podcastProduct && !items) continue;
-      // Who gave it is one read more.
-      if (given.job.startsWith("gift:")) await meter?.take(1);
-      found.set(reference, {
-        reference,
-        kind: "imported",
-        giftFrom: await giftFrom(given.job),
-        ...(isGroupJob(given.job) ? { place: true } : {}),
-        ...(given.job.startsWith("paypal:") ? { paidWith: "paypal" as const } : {}),
-        ...(given.job.startsWith("api:") ? { givenByStore: true } : {}),
-        ...(given.job.startsWith("pre:") ? { preorder: { day: null, given: true } } : {}),
-        podcastProduct,
-        title: product.title,
-        option,
-        paidAt: given.at,
-        member: false,
-        ended: false,
-        productId: product.id,
-        courseProduct,
-        main: courseProduct && product.options.length === 0 ? null : delivery,
-        items,
-        added: [],
-      });
+      const purchase = await purchaseFromImported(store, store.statsId, email, given, find, meter);
+      if (purchase) found.set(purchase.reference, purchase);
     }
   }
 
@@ -702,7 +750,7 @@ type Grant = {
   e: string;
 };
 
-export type OrdersRequest = "sent" | "email" | "limited" | "unavailable" | "error";
+export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable";
 
 /**
  * Emails a way back to what the address bought here.
@@ -710,6 +758,26 @@ export type OrdersRequest = "sent" | "email" | "limited" | "unavailable" | "erro
  * "sent" is the answer whether or not anything was found, and nothing is sent
  * to an address that bought nothing, so this cannot be used to learn who is a
  * customer of whom, or to fill a stranger's inbox.
+ *
+ * What is read for the address is paid for before it is read, as an opening
+ * of the list is (openOrders): past the per-address and per-IP limits,
+ * ORDERS_OPEN_UNITS of the store's buyer requests, then every read that grows
+ * with what the address has through an OrdersMeter, waited on
+ * ORDERS_LINK_READ_MS at the most so the link's grant and its email still fit
+ * in the route's maxDuration. "busy" when the store had no room for those
+ * units: nothing was read, whatever the address. Once they are taken, the
+ * answer is always "sent", and at once, for an address that bought and one
+ * that did not: what the address has is read, and its link made and emailed,
+ * only after the answer is sent (afterAnswer), so neither its words nor its
+ * time tell them apart;
+ * a refusal from the meter, a reading that failed or ran out of time, and an
+ * email that could not be sent (its figure used, its provider down) go only
+ * to the server's log, since anything else would tell who bought here. The
+ * page's words hold for both (lib/buyer-words/orders.ts, sentBody and
+ * nothingArrived: a link normally arrives; if not, the spam folder, another
+ * address, or later). They promise no way to reach the creator: not every
+ * email a buyer gets about a purchase answers to the creator (a gift's, a
+ * place's), and a store's contact form is the creator's choice.
  */
 export async function requestOrdersLink(input: {
   store: Store;
@@ -726,8 +794,37 @@ export async function requestOrdersLink(input: {
   if (!(await within(ipKey(ip, store.handle), IP_LIMIT))) return "limited";
   if (!(await within(addressKey(email), ADDRESS_LIMIT))) return "limited";
 
-  const [purchases, calls] = await Promise.all([purchasesFor(store, raw), callsFor(store, raw)]);
-  if (purchases.length === 0 && calls.length === 0) return "sent";
+  if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS))) return "busy";
+  // From here the answer is "sent" whatever happens, and at once: the reading, the grant and the email run after it,
+  // so how long the answer takes does not tell an address that bought from one that did not. What failed is said only in the server's log.
+  afterAnswer(() => sendLink(store, raw, email, origin));
+  return "sent";
+}
+
+/**
+ * Runs a link's reading, grant and email after the answer is sent, inside the
+ * route's maxDuration (ORDERS_OPEN_SECONDS; ORDERS_LINK_READ_MS bounds the
+ * reading); at once, unwaited, when there is no request to wait for.
+ */
+function afterAnswer(task: () => Promise<void>): void {
+  const run = () =>
+    task().catch((error) => {
+      if (!(error instanceof OrdersBusy)) console.error("sending a purchases link failed", error);
+    });
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
+}
+
+/** Reads what the address has and, when it has anything, emails it the link; throws or logs what failed, never says it. */
+async function sendLink(store: Store, raw: string, email: string, origin: string): Promise<void> {
+  const meter = new OrdersMeter(store);
+  const read = await withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS);
+  if (read === "late") return;
+  const [purchases, calls] = read;
+  if (purchases.length === 0 && calls.length === 0) return;
 
   const token = randomBytes(32).toString("hex");
   // Kept as typed: Stripe matches the address as it was written at checkout.
@@ -754,7 +851,7 @@ export async function requestOrdersLink(input: {
       `${words.ordersSentBy(name)} ${chargedLine(name, purchases, store.language)}`,
     ].join("\n"),
   });
-  return sent ? "sent" : "error";
+  if (!sent) console.error("a purchases link could not be emailed");
 }
 
 /**
@@ -799,14 +896,139 @@ export async function ordersGrant(store: Store, token: string): Promise<string |
   }
 }
 
+/** What a download asks for besides its purchase: a product of a bundle by its id (`pid`), and a product ticked at checkout by its key (`item`). */
+export type DownloadWant = { pid?: string; item?: string };
+
 /**
- * The one purchase a download asks for, when the link's address paid for it.
- * Read again from Stripe, so a refund made a minute ago is already honoured.
+ * The one purchase a download asks for, with the link's address, when that
+ * address paid for it. Read again from Stripe, so a refund made a minute ago
+ * is already honoured.
+ *
+ * Only that purchase is read, by its own reference, never the whole list:
+ * the link's grant first (one read, inside the download's own request), then
+ * DOWNLOAD_LOOKUP_UNITS of the store's buyer requests before anything else,
+ * and the listings it reads through the meter, all
+ * waited on DOWNLOAD_LOOKUP_MS at the most. A checkout is read alone and must
+ * have been paid with the link's address; a payment taken in one click after
+ * one, with the checkout it followed, which must, and which the list would
+ * hand over; one brought over, its one entry. Of its listings only what the
+ * download asks for is read: the product bought, the one ticked (`item`) and
+ * the one of a bundle (`pid`), which must be on the order's own list; the
+ * other products of a bundle are never read. `listing` hands back what was
+ * read, so the route reads nothing again. Throws OrdersBusy when the store
+ * has no room (before Stripe is asked anything, or anything more), and
+ * OrdersLate past that time.
  */
-export async function findPurchase(store: Store, token: string, reference: string): Promise<Purchase | null> {
-  if (reference.startsWith("imp_") && !IMPORTED_REFERENCE.test(reference)) return null;
+export async function findPurchase(
+  store: Store,
+  token: string,
+  reference: string,
+  want: DownloadWant = {},
+): Promise<{ purchase: Purchase; email: string; listing: (id: string) => Promise<Listing | null> } | null> {
+  const kind = SESSION_ID_PATTERN.test(reference) ? "session" : INTENT_ID_PATTERN.test(reference) ? "intent" : IMPORTED_REFERENCE.test(reference) ? "imported" : null;
+  if (!kind || !ORDERS_TOKEN_PATTERN.test(token)) return null;
+  // The grant is one read, paid by the download's own request: a link that opens nothing takes nothing more.
   const email = await ordersGrant(store, token);
   if (!email) return null;
-  const purchases = await purchasesFor(store, email);
-  return purchases.find((p) => p.reference === reference) ?? null;
+  if (!(await takePublicRequest(store, "buyer", Date.now(), DOWNLOAD_LOOKUP_UNITS))) throw new OrdersBusy();
+  const meter = new OrdersMeter(store);
+  const found = await withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS);
+  if (found === "late") throw new OrdersLate();
+  return found;
+}
+
+/** One checkout or payment on the creator's account, null when Stripe has none by that id. */
+async function readOne(store: Store, path: string, meter: OrdersMeter): Promise<Row | null> {
+  meter.alive();
+  try {
+    return (await onAccount("GET", store.stripeAccountId as string, path, undefined, undefined, undefined, DOWNLOAD_LOOKUP_MS)) as Row;
+  } catch (error) {
+    if (error instanceof StripeError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+/** A checkout paid with this address, read alone with what the list reads it with. */
+async function sessionOf(store: Store, email: string, id: string, meter: OrdersMeter): Promise<Row | null> {
+  const query = new URLSearchParams();
+  query.append("expand[]", "subscription");
+  query.append("expand[]", "payment_intent.latest_charge");
+  const session = await readOne(store, `/checkout/sessions/${encodeURIComponent(id)}?${query}`, meter);
+  if (!session || session.status !== "complete") return null;
+  const details = session.customer_details as { email?: unknown } | null | undefined;
+  const paidWith = typeof details?.email === "string" ? details.email : "";
+  return paidWith && normaliseEmail(paidWith) === normaliseEmail(email) ? session : null;
+}
+
+/**
+ * A finder that reads only the products a download asks for, each once and
+ * taken from the meter first, and answers null for every other without
+ * reading it.
+ */
+function onlyFinder(store: Store, meter: OrdersMeter): { find: Finder; allow: (...ids: (string | undefined)[]) => void } {
+  const base = finderFor(store, meter);
+  const allowed = new Set<string>();
+  return {
+    find: (id) => (id && allowed.has(id) ? base(id) : Promise.resolve(null)),
+    allow: (...ids) => ids.forEach((id) => id && allowed.add(id)),
+  };
+}
+
+/** A product of a bundle asked for: only one on the order's own list (its metadata), read with nothing else of it. */
+const inList = (ids: string[], pid: string | undefined) => !pid || ids.includes(pid);
+
+async function lookUp(
+  store: Store,
+  email: string,
+  kind: "session" | "intent" | "imported",
+  reference: string,
+  meter: OrdersMeter,
+  want: DownloadWant,
+): Promise<{ purchase: Purchase; email: string; listing: (id: string) => Promise<Listing | null> } | null> {
+  const { find, allow } = onlyFinder(store, meter);
+  const done = (purchase: Purchase | null) => (purchase ? { purchase, email, listing: (id: string) => find(id) } : null);
+  if (kind === "imported") {
+    if (!store.pastBuyers || !store.statsId) return null;
+    const key = importedKey(store.statsId, email);
+    // Its ids are read to know which one the reference names (each id a command at the most), then that entry alone.
+    const [count] = await redisPipeline([["HLEN", key]]);
+    await meter.take(Number(count) || 0);
+    const [keys] = await redisPipeline([["HKEYS", key]]);
+    const statsId = store.statsId;
+    const productId = (Array.isArray(keys) ? keys.map(String) : []).find((id) => importedReference(statsId, email, id) === reference);
+    if (!productId) return null;
+    const [raw] = await redisPipeline([["HGET", key, productId]]);
+    const [given] = importedFrom([productId, raw]);
+    if (!given || !inList(given.items ?? [], want.pid)) return null;
+    allow(given.productId, want.pid);
+    return done(await purchaseFromImported(store, statsId, email, given, find, meter));
+  }
+  if (!store.stripeAccountId) return null;
+  if (kind === "session") {
+    const session = await sessionOf(store, email, reference, meter);
+    if (!session) return null;
+    const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
+    const bump = want.item ? bumpsFromMeta(meta).find((b) => b.key === want.item) : undefined;
+    if (want.item && !bump) return null;
+    if (!inList(bundleFromMeta(meta, bump ? `${bump.key}_bundle` : "bundle"), want.pid)) return null;
+    allow(meta.product, bump?.id, want.pid);
+    return done((await purchaseFromSession(store, session, find, meter))?.purchase ?? null);
+  }
+  // A payment taken in one click: shown on the list when it was made for the customer of one of the address's checkouts
+  // that the list hands over (purchasesFor: that checkout's own reading names the customer). Read here with the checkout
+  // it followed (lib/upsell.ts, metadata[parent]), which must have been paid with this address and be read by that same
+  // rule: its product and the products checked with it, and nothing of a bundle.
+  const intent = await readOne(store, `/payment_intents/${encodeURIComponent(reference)}?expand[]=latest_charge`, meter);
+  const intentMeta = (intent?.metadata ?? {}) as Record<string, string>;
+  const parent = intentMeta.parent ?? "";
+  if (!intent || !SESSION_ID_PATTERN.test(parent) || want.item) return null;
+  if (!inList(bundleFromMeta(intentMeta, "bundle"), want.pid)) return null;
+  const session = await sessionOf(store, email, parent, meter);
+  if (!session) return null;
+  const parentMeta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
+  allow(parentMeta.product, ...bumpsFromMeta(parentMeta).map((bump) => bump.id));
+  const customer = (await purchaseFromSession(store, session, find, meter))?.customer ?? null;
+  if (!customer || customer !== intent.customer) return null;
+  allow(intentMeta.product, want.pid);
+  return done(await purchaseFromIntent(store, intent, find, store.stripeAccountId, meter));
 }

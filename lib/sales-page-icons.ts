@@ -30,4 +30,5 @@ export const KIND_ICONS: Record<BlockKind, IconName> = {
   quotes: "quote",
   form: "list",
   row: "layout",
+  booking: "calendar",
 };

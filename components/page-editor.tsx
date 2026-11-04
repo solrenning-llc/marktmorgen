@@ -2748,7 +2748,7 @@ function RowEditor({
               <span className="text-sm font-semibold text-ink">This picture is only decoration</span>
             </label>
             <p id={`${id}-dh`} className="-mt-2 text-xs text-ink-soft">
-              Tick it only when the picture adds nothing the words around it do not already say. Screen readers then skip it, and it needs no description.
+              Check it only when the picture adds nothing the words around it do not already say. Screen readers then skip it, and it needs no description.
             </p>
           </div>
         );

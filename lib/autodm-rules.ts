@@ -9,7 +9,15 @@
  *     "cafe"), but never matches inside a longer word ("guide" is not in
  *     "guidebook", "art" is not in "party") and never forgives a digit
  *     ("code10" is not "code11"). The creator's own words are only normalized
- *     to compare them; what they typed is kept and shown as they typed it;
+ *     to compare them; what they typed is kept and shown as they typed it.
+ *     What that forgiveness costs, said plainly: a typo allowance also lets
+ *     a real neighbouring word through ("guided" for "guide", "curse" for
+ *     "course"), and the plural rule makes "news" match "new"; the creator
+ *     sees which comments matched in test mode before turning a rule live.
+ *     Words are split at spaces and punctuation, so in a language written
+ *     without spaces between words (Chinese, Japanese, Thai) a keyword
+ *     matches only a comment, or a part of it between spaces, that is the
+ *     keyword alone;
  *   - which keywords one post may have: a few, short, with letters or digits,
  *     and none that another one on the same post already covers;
  *   - how often one person may get the reply again, chosen by the creator
@@ -55,17 +63,23 @@ export const MAX_KEYWORDS_PER_POST = 10;
 export const COMMENT_MAX_CHARS = 2_200;
 
 /**
- * The text as it is compared, never as it is shown: lowercase, accents and
- * other combining marks removed (so "Café" compares as "cafe"), every run of
- * characters that are neither letters nor digits turned into one space, and
- * the spaces at both ends removed.
+ * The text as it is compared, never as it is shown: compatibility forms
+ * folded first (so the styled letters people paste into comments, "𝐆𝐔𝐈𝐃𝐄",
+ * and ligatures compare as plain ones), then only the Latin-style accents
+ * removed (U+0300 to U+036F, so "Café" compares as "cafe"), recomposed (so a
+ * Korean syllable or a Japanese voiced kana stays one letter), lowercase,
+ * every run of characters that are not letters, digits or the marks that
+ * belong to a letter (a Hindi vowel sign, a Japanese voicing mark) turned
+ * into one space, and the spaces at both ends removed. Removing every mark
+ * would make different words equal ("ガイド" and "カイト").
  */
 export function normalizeForMatch(text: string): string {
   return text
-    .toLowerCase()
     .normalize("NFKD")
-    .replace(/\p{M}+/gu, "")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/[\u0300-\u036f]+/g, "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\p{M}]+/gu, " ")
     .trim();
 }
 

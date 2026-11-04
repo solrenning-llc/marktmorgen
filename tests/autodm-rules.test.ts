@@ -51,6 +51,14 @@ is("case, accents and punctuation", normalizeForMatch("  Café — GUIDE!!  "), 
 is("runs of symbols become one space", normalizeForMatch("free,,,   guide...now"), "free guide now");
 is("emoji and punctuation only become nothing", normalizeForMatch("🔥🔥 !!! ✨"), "");
 is("compatibility forms (ligature, full-width)", normalizeForMatch("ﬁle ＧＵＩＤＥ"), "file guide");
+is("styled capitals people paste into comments match", matchesKeyword("𝐆𝐔𝐈𝐃𝐄 please", "guide"), true);
+is("bold-italic styled words match too", matchesKeyword("send the 𝑭𝑹𝑬𝑬 𝑮𝑼𝑰𝑫𝑬", "free guide"), true);
+is("a Japanese voicing mark keeps words apart (ガイド is not カイト)", matchesKeyword("カイト", "ガイド"), false);
+is("ガイド still matches itself", matchesKeyword("ガイド", "ガイド"), true);
+is("a Hindi vowel sign is kept (कि is not क)", matchesKeyword("क", "कि"), false);
+is("a Hindi word stays one word", normalizeForMatch("किताब"), "किताब");
+is("a Korean syllable stays one letter", Array.from(normalizeForMatch("가이드")).length, 3);
+is("Turkish dotted capital I folds to i", normalizeForMatch("İ"), "i");
 is("digits are kept", normalizeForMatch("Code-10"), "code 10");
 
 part("Case and accents");

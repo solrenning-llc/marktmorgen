@@ -140,6 +140,7 @@ import {
   rowElementCount,
   rowElementProblem,
   releaseHeld,
+  shiftHeld,
   rowProblem,
   setColumnCount,
 } from "@/lib/row-edit-rules";
@@ -501,7 +502,15 @@ export function PageEditor({
   // kept here, not in the row's editor, so closing and reopening the row while it is sent never frees them.
   const rowHeld = useRef(new Map<string, number[]>());
   // Drawn again whenever a held place changes, so a row reopened while its picture is sent shows it ending.
-  const [, heldChanged] = useState(0);
+  // A copy to draw from, made whenever a held place changes, so a row reopened while its picture is sent shows it ending.
+  const [heldShown, setHeldShown] = useState<ReadonlyMap<string, number[]>>(() => new Map());
+  // Both versions as last drawn, for a picture that arrives: is its row still on the page?
+  const pagesNow = useRef({ drafts, other });
+  useEffect(() => {
+    pagesNow.current = { drafts, other };
+  }, [drafts, other]);
+  const heldElsewhere = (row: string) =>
+    [...heldShown].reduce((n, [id, counts]) => (id === row ? n : n + counts.reduce((a, b) => a + b, 0)), 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -1743,19 +1752,33 @@ export function PageEditor({
             onColumns={(columns) => setDrafts((all) => all.map((d) => (d.block.id === block.id && d.block.kind === "row" ? { ...d, block: { ...d.block, columns } } : d)))}
             // A picture that arrives is added to the row as it is then, in either version, never over the columns this
             // editor drew when it was sent: it may have been closed and reopened, or another picture landed first.
+            // False when the row is in neither version any more (deleted, or its version dropped), so nothing is added.
             onColumnsNow={(update) => {
-              const change = (list: Draft[]) =>
-                list.map((d) => {
+              const { drafts: nowDrafts, other: nowOther } = pagesNow.current;
+              if (![...nowDrafts, ...(nowOther ?? [])].some((d) => d.block.id === block.id && d.block.kind === "row")) return false;
+              // The same list when nothing changed, so a refused picture never leaves an empty Undo step.
+              const change = (list: Draft[]) => {
+                let changed = false;
+                const out = list.map((d) => {
                   if (d.block.id !== block.id || d.block.kind !== "row") return d;
                   const next = update(d.block.columns);
-                  return next ? { ...d, block: { ...d.block, columns: next as RowElement[][] } } : d;
+                  if (!next) return d;
+                  changed = true;
+                  return { ...d, block: { ...d.block, columns: next as RowElement[][] } };
                 });
+                return changed ? out : list;
+              };
               setDrafts(change);
               setOther((all) => (all ? change(all) : all));
+              return true;
             }}
+            // Said here when the row's own editor is no longer drawn (closed, or its version switched away).
+            sayAside={setSaid}
             held={rowHeld}
-            onHeld={() => heldChanged((n) => n + 1)}
-            pictureRoom={MAX_PAGE_PICTURES - shown - onlyInOther}
+            onHeld={() => setHeldShown(new Map(rowHeld.current))}
+            sendingNow={heldShown.get(block.id) ?? NONE_HELD}
+            // Pictures being sent to other rows count too, so two rows sending at once never pass the page's room.
+            pictureRoom={MAX_PAGE_PICTURES - shown - onlyInOther - heldElsewhere(block.id)}
             productId={product.id}
             pageId={site?.id}
             folder={folder}
@@ -2704,13 +2727,17 @@ export function PageEditor({
  * column, or on the part that took the removed one's place (else the
  * column's Add control); what happened is said in a polite status line.
  */
+const NONE_HELD: readonly number[] = [0, 0, 0];
+
 function RowEditor({
   base,
   block,
   onColumns,
   onColumnsNow,
+  sayAside,
   held: heldByRow,
   onHeld,
+  sendingNow,
   pictureRoom,
   productId,
   pageId,
@@ -2722,11 +2749,15 @@ function RowEditor({
   block: RowBlock;
   onColumns: (columns: RowElement[][]) => void;
   /** Changes the row as it is now in the page editor's state; the update returns null to leave it as it is. */
-  onColumnsNow: (update: (now: RowColumns) => RowColumns | null) => void;
+  onColumnsNow: (update: (now: RowColumns) => RowColumns | null) => boolean;
+  /** The page editor's own status line, for what happens once this editor is no longer drawn. */
+  sayAside: (text: string) => void;
   /** The places held for pictures still being sent, by row id, kept by the page editor. */
   held: React.MutableRefObject<Map<string, number[]>>;
   /** Told when a held place changes, so the page editor draws the row again. */
   onHeld: () => void;
+  /** The places held in this row as last drawn, for drawing; `held` is read when acting. */
+  sendingNow: readonly number[];
   /** How many more pictures the page may show. */
   pictureRoom: number;
   productId: string;
@@ -2754,9 +2785,24 @@ function RowEditor({
   // Read from the page editor on every drawing, never copied into this editor's own state: a send that began before
   // the row was closed and reopened ends in the editor drawn now (inbox C4-31).
   const heldNow = () => heldByRow.current.get(block.id) ?? [0, 0, 0];
-  const sending = heldNow();
+  const sending = sendingNow;
+  // What this drawing's own picture fields said they are sending: the change is added to what is held, so a send
+  // begun in an earlier drawing of the row keeps its place (lib/row-edit-rules.ts, shiftHeld).
+  const mine = useRef([0, 0, 0]);
+  const [mineShown, setMineShown] = useState(mine.current);
+  // Whether this drawing is still on screen, so what happens after it closed is said by the page editor instead.
+  const drawn = useRef(true);
+  useEffect(() => {
+    drawn.current = true;
+    return () => {
+      drawn.current = false;
+    };
+  }, []);
   const hold = (column: number, count: number) => {
-    const next = heldNow().map((n, i) => (i === column ? count : n));
+    const by = count - mine.current[column];
+    mine.current = mine.current.map((n, i) => (i === column ? count : n));
+    setMineShown(mine.current);
+    const next = shiftHeld(heldNow(), column, by);
     if (next.every((n) => n === 0)) heldByRow.current.delete(block.id);
     else heldByRow.current.set(block.id, next);
     onHeld();
@@ -3113,7 +3159,7 @@ function RowEditor({
             />
           </div>
         ) : null}
-        {(kind === "image" && !reason) || sending[column] > 0 ? (
+        {(kind === "image" && !reason && sending[column] - mineShown[column] === 0) || mineShown[column] > 0 ? (
           <PicturesEditor
             base={`${id}-p`}
             productId={productId}
@@ -3129,24 +3175,36 @@ function RowEditor({
               // held place given back to it: never over the columns drawn when it was sent (inbox C4-31).
               const element: RowElement = { kind: "image", picture: items[0], decorative: false };
               const places = releaseHeld(heldNow(), column);
-              // Told once, after the update, and only what happened: an update may be run twice by React.
+              // Told once, after the update, and only what happened: an update may be run twice by React. Said by this
+              // editor while it is drawn, else by the page editor's own status line.
               let told = false;
-              onColumnsNow((now) => {
+              const say = (text: string) => (drawn.current ? setSaid(text) : sayAside(text));
+              const there = onColumnsNow((now) => {
                 const edit = arrivePicture(now, column, element, places);
                 queueMicrotask(() => {
                   if (told) return;
                   told = true;
-                  noteFor(column, edit.ok ? null : `The picture you sent was not added: ${ROW_EDIT_WHY[edit.why]}`);
-                  setSaid(edit.ok ? `Added picture to column ${column + 1}.` : `The picture you sent was not added to column ${column + 1}.`);
+                  if (!edit.ok) {
+                    noteFor(column, `The picture you sent was not added: ${ROW_EDIT_WHY[edit.why]}`);
+                    say(`The picture you sent was not added to column ${column + 1}: ${ROW_EDIT_WHY[edit.why]}`);
+                    return;
+                  }
+                  noteFor(column, null);
+                  const part = edit.columns[column].indexOf(element) + 1;
+                  say(`Added picture as part ${part} of column ${column + 1}. Describe it there.`);
                 });
                 return edit.ok ? edit.columns : null;
               });
+              if (!there) say(`The picture you sent was not added: its row is no longer on the page.`);
             }}
           />
         ) : null}
         <p id={reasonId} className={`text-xs ${uploadNote[column] || why || (kind === "image" && reason) ? "font-semibold text-danger" : "text-ink-soft"}`}>
           {uploadNote[column] ||
             reason ||
+            (kind === "image" && sending[column] - mineShown[column] > 0
+              ? `A picture is still being sent to column ${column + 1}. It is added when it arrives.`
+              : null) ||
             (video
               ? `${PROVIDER_NAMES[video.provider]} video recognized. Press Add to put it in column ${column + 1}.`
               : `${columns[column].length} of ${MAX_COLUMN_ELEMENTS} parts in this column, ${total} of ${MAX_ROW_ELEMENTS} in the row.`)}

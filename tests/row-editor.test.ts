@@ -53,6 +53,7 @@ import {
   rowElementCount,
   rowElementProblem,
   releaseHeld,
+  shiftHeld,
   rowProblem,
   setColumnCount,
 } from "@/lib/row-edit-rules";
@@ -229,6 +230,27 @@ part("A picture that arrives is added to the row as it is then, never over what 
   is("two pictures arriving together: both kept", second.ok ? second.columns : null, [[h("Old title"), picture(1)], [h("B1"), picture(2)]]);
   const full7: RowElement[][] = [full(MAX_COLUMN_ELEMENTS, "A"), []];
   is("one that no longer fits, the row having filled meanwhile, is refused with its reason, nothing changed", arrivePicture(full7, 0, picture(3), [0, 0]), { ok: false, why: "column_full" });
+  // Review of #2202 (M1): a send begun before the row was closed, and another begun in the reopened row, to one
+  // column. Each drawing's field says its own count; the change is added to what is held, never written over it.
+  const field = () => {
+    let said = 0;
+    return (held: number[], count: number) => {
+      const by = count - said;
+      said = count;
+      return shiftHeld(held, 0, by);
+    };
+  };
+  const before = field();
+  const reopened = field();
+  let nowHeld = before([0, 0, 0], 1);
+  nowHeld = reopened(nowHeld, 1);
+  is("two sends to one column hold two places", nowHeld, [2, 0, 0]);
+  const atFirstArrival = releaseHeld(nowHeld, 0);
+  nowHeld = before(nowHeld, 0);
+  is("the first to arrive gives back only its own; the other is still held", [atFirstArrival, nowHeld], [[1, 0, 0], [1, 0, 0]]);
+  nowHeld = reopened(nowHeld, 0);
+  is("and the second gives back its own", nowHeld, [0, 0, 0]);
+  is("never below zero", shiftHeld([0, 1], 0, -1), [0, 1]);
 }
 
 part("Offered on a product's page only");
@@ -260,9 +282,15 @@ part("The editor uses the rules, with buttons");
   // Inbox C4-31: a picture that arrives after the row was closed and reopened, or after other changes.
   is("an arriving picture goes into the row as it is in the page editor's state, through the rules", rowEditor.includes("onColumnsNow((now) => {") && rowEditor.includes("arrivePicture(now, column, element, places)") && !rowEditor.includes("addRefusal(latest.current"), true);
   is("in either version of a page under test, by the block's id", editor.includes("setDrafts(change);\n              setOther((all) => (all ? change(all) : all));") && editor.includes("if (d.block.id !== block.id || d.block.kind !== \"row\") return d;"), true);
-  is("the held places are kept by the page editor, by row, so closing the row never frees them", editor.includes("const rowHeld = useRef(new Map<string, number[]>());") && editor.includes("held={rowHeld}") && !/useRef\(\[0, 0, 0\]\)/.test(rowEditor), true);
-  is("read on every drawing, so a reopened row sees its send end", rowEditor.includes("const sending = heldNow();") && !rowEditor.includes("useState(heldNow)") && editor.includes("onHeld={() => heldChanged((n) => n + 1)}"), true);
-  is("what happened is said once, and only what happened", rowEditor.includes("if (told) return;") && rowEditor.indexOf("setSaid(edit.ok ? `Added picture") > rowEditor.indexOf("queueMicrotask(() => {"), true);
+  is("the held places are kept by the page editor, by row, so closing the row never frees them", editor.includes("const rowHeld = useRef(new Map<string, number[]>());") && editor.includes("held={rowHeld}") && !rowEditor.includes("const held = useRef([0, 0, 0]);"), true);
+  is("drawn from the page editor's copy, made on every change, so a reopened row sees its send end", rowEditor.includes("const sending = sendingNow;") && !rowEditor.includes("useState(heldNow)") && editor.includes("onHeld={() => setHeldShown(new Map(rowHeld.current))}") && editor.includes("sendingNow={heldShown.get(block.id) ?? NONE_HELD}"), true);
+  is("a field adds its change to what is held, never writes over it", rowEditor.includes("const next = shiftHeld(heldNow(), column, by);") && rowEditor.includes("const by = count - mine.current[column];"), true);
+  is("a reopened row offers no second picture field while one sent before is on its way, and says so", rowEditor.includes('(kind === "image" && !reason && sending[column] - mineShown[column] === 0) || mineShown[column] > 0') && rowEditor.includes("A picture is still being sent to column ${column + 1}. It is added when it arrives."), true);
+  is("pictures sent to other rows count against the page's room", editor.includes("pictureRoom={MAX_PAGE_PICTURES - shown - onlyInOther - heldElsewhere(block.id)}"), true);
+  is("what happened is said once, and only what happened, with the part to describe", rowEditor.includes("if (told) return;") && rowEditor.indexOf("say(`Added picture as part ${part} of column ${column + 1}. Describe it there.`)") > rowEditor.indexOf("queueMicrotask(() => {"), true);
+  is("said by the page editor once the row's editor is closed", rowEditor.includes("const say = (text: string) => (drawn.current ? setSaid(text) : sayAside(text));") && editor.includes("sayAside={setSaid}"), true);
+  is("a row no longer on the page takes nothing, and that is said", editor.includes("if (![...nowDrafts, ...(nowOther ?? [])].some((d) => d.block.id === block.id && d.block.kind === \"row\")) return false;") && rowEditor.includes("if (!there) say(`The picture you sent was not added: its row is no longer on the page.`);"), true);
+  is("a refused picture leaves no empty Undo step: the same list when nothing changed", editor.includes("return changed ? out : list;"), true);
   is("the same words said twice are said again", rowEditor.includes('setSaidNow(text ? `${text}${again.current ? "\\u00a0" : ""}` : "");'), true);
   is("pictures being sent count against the page's picture room", rowEditor.includes("pictureRoom - sending.reduce((n, count) => n + count, 0) <= 0"), true);
   is("a dragged block carries a type of its own, never text a field would take", [editor.includes('setData("application/x-mm-block", block.id)'), editor.includes('setData("text/plain", block.id)'), readFileSync("components/block-picker.tsx", "utf8").includes('setData("application/x-mm-block", about.label)')], [true, false, true]);

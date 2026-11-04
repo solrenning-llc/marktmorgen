@@ -49,8 +49,7 @@ import { updatesWords } from "@/lib/buyer-words/updates";
 import { type Listing, type Store, saleHandles, storeForHandle } from "@/lib/store";
 import { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuyers } from "@/lib/product-updates-rules";
 import { noteForErasure } from "@/lib/erasure-index";
-import { countStudio } from "@/lib/studio-route";
-import { UPDATE_READ_UNITS } from "@/lib/read-ceilings";
+import { takeStoreReading } from "@/lib/store-readings";
 import { orderWrite } from "@/lib/order-data";
 import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
 
@@ -150,11 +149,13 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   if (next > nowSeconds) return { ok: false, reason: "soon", until: next };
   // Finding the buyers reads every paid sale the store has (both Stripe lists,
   // ALL_TIME_PAGES pages each, and its PayPal sales), and a press that finds
-  // none claims nothing, so it can be pressed again: each reading takes
-  // UPDATE_READ_UNITS of the store's studio requests before it starts
-  // (owner's rule MR; lib/read-ceilings.ts, UPDATE_READ_SHAPE).
-  const counted = await countStudio(store, null, UPDATE_READ_UNITS).catch(() => null);
-  if (!counted?.ok) return { ok: false, reason: "used", message: counted?.message ?? "This can't be counted just now. Try again in a minute." };
+  // none claims nothing, so it can be pressed again: each reading is one of
+  // the store's own readings of the day, taken before it starts
+  // (lib/store-readings.ts; owner's rule MR and decision of 4 November 2026,
+  // inbox C4-18). The studio's requests count only the press itself.
+  if (!(await takeStoreReading(store))) {
+    return { ok: false, reason: "used", message: "Your store has read its sales from Stripe as many times as it can today. Try again tomorrow." };
+  }
   let rows: Record<string, unknown>[];
   try {
     rows = (await readPaidSales(store, 0, ALL_TIME_PAGES)).sales.filter((s) => !s.upsell).map((s) => s.row);

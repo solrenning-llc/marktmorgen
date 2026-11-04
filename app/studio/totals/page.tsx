@@ -3,12 +3,11 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { countStudio, studioPath, studioView } from "@/lib/studio-route";
-import { TOTALS_STORE_UNITS } from "@/lib/read-ceilings";
+import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { can } from "@/lib/team-roles";
-import { readNumbers } from "@/lib/stats-report";
-import { membershipNumbers } from "@/lib/membership-numbers";
+import { keptMembers, keptNumbers } from "@/lib/store-readings";
 import { formatMoney } from "@/lib/money";
 import { LEFT_WORDS, type Money, type StoreFigures, type StoreRead, TOTAL_WINDOWS, sumStores } from "@/lib/account-totals";
 import type { Store } from "@/lib/store";
@@ -26,19 +25,22 @@ const moneyLines = (lines: Money[]) => (lines.length ? lines.map((m) => formatMo
 
 /**
  * One store's figures, read the way its own studio reads them, inside its own
- * allowance: its sales, renewals, refunds, disputes and memberships are read
- * from Stripe, so each store's reading takes TOTALS_STORE_UNITS of its studio
- * requests before it starts (owner's rule MR; lib/read-ceilings.ts,
- * TOTALS_STORE_SHAPE), the store this page is drawn for too, whose page
- * itself was counted by studioView.
+ * allowance: a page of each other store's studio (STUDIO_PAGE_UNITS, as the
+ * Terms say; this page's own store was counted by studioView). Its visits,
+ * sales, renewals, refunds, disputes and memberships come from its kept
+ * readings, read again from its counts and its Stripe account only from the
+ * store's own daily budget (lib/store-readings.ts; owner's decision of 4
+ * November 2026, inbox C4-18), never more of the studio's requests.
  */
-async function readStore(store: Store, mayRead: boolean): Promise<StoreRead> {
+async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean): Promise<StoreRead> {
   if (!mayRead) return { state: "no_access" };
-  const counted = await countStudio(store, null, TOTALS_STORE_UNITS).catch(() => null);
-  if (!counted) return { state: "error" };
-  if (!counted.ok) return { state: "paused" };
+  if (!alreadyCounted) {
+    const counted = await countStudio(store, null, STUDIO_PAGE_UNITS).catch(() => null);
+    if (!counted) return { state: "error" };
+    if (!counted.ok) return { state: "paused" };
+  }
   try {
-    const [data, club] = await Promise.all([readNumbers(store), membershipNumbers(store).catch(() => null)]);
+    const [data, club] = await Promise.all([keptNumbers(store), keptMembers(store).catch(() => null)]);
     return { state: "ok", data, members: club ? { currency: club.currency, paying: club.paying, trialing: club.trialing, mrr: club.mrr } : null };
   } catch (error) {
     console.error("reading one store's numbers for the totals failed", error);
@@ -67,7 +69,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
           sid: entry.store.sid,
           name: entry.store.name,
           handle: entry.store.handle,
-          read: await readStore(entry.store, can(entry.role, "stats")),
+          read: await readStore(entry.store, can(entry.role, "stats"), entry.store.sid === store.sid),
         })),
       )
     : [];

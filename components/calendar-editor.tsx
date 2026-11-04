@@ -8,6 +8,7 @@ import { useHydrated } from "@/components/use-hydrated";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { CalendarView } from "@/lib/calendar-sync";
+import { CALENDAR_CREDITS_PER_DAY } from "@/lib/calendar-limits";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { LOOKAHEAD_DAYS, MAX_FEEDS } from "@/lib/calendar-limits";
 
@@ -233,8 +234,9 @@ export function CalendarEditor({ view: initial, weekly }: { view: CalendarView; 
         <p className="mt-1 text-sm text-ink-soft">
           Subscribe to this private address from Google Calendar (&ldquo;From URL&rdquo;), Outlook (&ldquo;Subscribe from
           web&rdquo;) or Apple Calendar (&ldquo;New Calendar Subscription&rdquo;), and every booked call and dated session
-          shows up with who booked it. Calendar apps refresh it on their own schedule, from every few minutes to a few
-          hours.
+          shows up with who booked it. Calendar apps check it on their own schedule, from every half hour to about a
+          day. A booking made or moved shows at your app&apos;s next check, for up to {CALENDAR_CREDITS_PER_DAY} changes a
+          day; a refund, a cancellation or anything past that shows within a day.
         </p>
         {view.subscribeUrl ? (
           <>

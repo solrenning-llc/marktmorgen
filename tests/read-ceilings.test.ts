@@ -23,23 +23,23 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CALENDAR_BUILDS_PER_DAY, CALENDAR_FILE_MAX_BYTES, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS,
+  CALENDAR_BUILDS_PER_DAY, CALENDAR_CREDITS_PER_DAY, CALENDAR_FILE_MAX_BYTES, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS,
   FeedGone, bookedCalendar, bookedCalendarFeed, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
-  CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, TOTALS_STORE_SHAPE, TOTALS_STORE_UNITS,
-  UPDATE_READ_SHAPE, UPDATE_READ_UNITS,
+  CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
+  STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
+import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { STORE_READINGS_PER_DAY, keptNumbers } from "@/lib/store-readings";
 import { claimHandle, createStore, ensureStatsId, renameHandle, setStripeAccount, setSubscription, storeForEmail, storeForHandle, storeForId, type Store } from "@/lib/store";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { takeAllowance } from "@/lib/store-allowance";
-import { readNumbers } from "@/lib/stats-report";
-import { COST_LINES, PER_PAYMENT_LINES, UNIT_COST, readShapeCost } from "./plan-cost-registry";
-import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { COST_LINES, PER_PAYMENT_LINES, nonPayingWorst, readShapeCost } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -49,10 +49,13 @@ const OWNER = "feed@example.com";
 
 let stripeReads = 0;
 let stripeDown = false;
-globalThis.fetch = (async () => {
+/** Booked calls the stand-in for Stripe lists, for a measured making. */
+let callSessions: unknown[] = [];
+globalThis.fetch = (async (input: string | URL | Request) => {
   stripeReads += 1;
   if (stripeDown) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
-  return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  const data = String(input).includes("/checkout/sessions") ? callSessions : [];
+  return new Response(JSON.stringify({ object: "list", data, has_more: false }));
 }) as typeof fetch;
 
 /** Commands the database is sent while `work` runs. */
@@ -79,8 +82,8 @@ async function main(): Promise<void> {
   await setSubscription(OWNER, { customerId: "cus_Feeder00001", subscriptionId: "sub_Feeder00001", active: true, tier: "pro", period: paidPeriod() });
   const load = async () => (await storeForEmail(OWNER))!;
   const store = await load();
-  const url = (await newFeedToken(store)).subscribeUrl ?? "";
-  const token = url.slice(url.lastIndexOf("/") + 1);
+  let url = (await newFeedToken(store)).subscribeUrl ?? "";
+  let token = url.slice(url.lastIndexOf("/") + 1);
   const ask = () => feedRoute(new Request(url), { params: Promise.resolve({ token }) });
   const studioLeft = async () => {
     const taken = await takeAllowance(await load(), "studio", 1);
@@ -99,16 +102,24 @@ async function main(): Promise<void> {
   const readsBeforePaced = stripeReads;
   const paced = await ask();
   is(`past ${CALENDAR_POLLS_PER_HOUR} answers in an hour the app is asked to come back, and nothing is read`, [paced.status, paced.headers.get("Retry-After"), stripeReads - readsBeforePaced], [429, "900", 0]);
-  const owner = { statsId: store.statsId as string, handle: store.handle };
-  await planReminders(store.callsId ?? "calls1", store.handle, "cs_test_feed000001", Date.now() + 3 * 86_400_000);
-  const readsBeforeChange = stripeReads;
-  const remade = await bookedCalendarFeed(owner, async () => {
-    stripeReads += 1;
-    return "BEGIN:VCALENDAR\r\nX-REMADE:1\r\nEND:VCALENDAR";
-  }, Date.now() + 3_600_000);
-  is("a booking made since: the next hour's answer makes the file again", [remade.state, stripeReads > readsBeforeChange], ["made", true]);
+  const CALLS = "c".repeat(32);
+  const owner = { statsId: store.statsId as string, handle: store.handle, callsId: CALLS };
 
-  part("Made again a few times a day at most, and the copy stands when it cannot be");
+  part("A sliding hour: an app asking late in an hour is not refused for the next one (light c)");
+  {
+    const slide = { ...owner, statsId: "slidestore" };
+    redis.run(["SET", `nl:store:handle:${slide.handle}`, OWNER]);
+    const t = Date.UTC(2031, 0, 5, 10, 50);
+    const quick = async () => "BEGIN:VCALENDAR\r\nEND:VCALENDAR";
+    const states: string[] = [];
+    for (let i = 0; i < CALENDAR_POLLS_PER_HOUR + 1; i += 1) states.push((await bookedCalendarFeed(slide, quick, t + i * 60_000)).state);
+    is(`within sixty minutes, the ${CALENDAR_POLLS_PER_HOUR + 1}th is refused`, states[CALENDAR_POLLS_PER_HOUR], "paced");
+    is("just past the hour, at 11:10 (not 12:00), answered again", (await bookedCalendarFeed(slide, quick, t + 61 * 60_000)).state === "paced", false);
+    const refusedSet = Number(redis.run(["ZCARD", "nl:cal:pace:slidestore"]));
+    is("a refusal is taken back from the count", refusedSet <= CALENDAR_POLLS_PER_HOUR, true);
+  }
+
+  part("Made again a few times a day at most, each booking that day with its own credit (M3), and the copy stands when it cannot be");
   const day = Date.UTC(2031, 0, 6, 0, 30);
   let makings = 0;
   const make = async () => {
@@ -116,42 +127,58 @@ async function main(): Promise<void> {
     if (stripeDown) throw new Error("Stripe did not answer");
     return `BEGIN:VCALENDAR\r\nX-MADE:${makings}\r\nEND:VCALENDAR`;
   };
+  // The day's own makings, spent on two refreshes with nothing booked.
+  redis.run(["DEL", `nl:cal:out:${owner.statsId}`]);
+  await bookedCalendarFeed(owner, make, day);
+  await bookedCalendarFeed(owner, make, day + (CALENDAR_REFRESH_SECONDS + 60) * 1000);
+  const ownMade = makings;
   const answers: string[] = [];
-  for (let hour = 0; hour < CALENDAR_BUILDS_PER_DAY + 3; hour += 1) {
-    const now = day + hour * 3_600_000;
-    await planReminders("calls1", store.handle, `cs_test_feed00000${hour}`, now + 3 * 86_400_000, now);
+  for (let n = 0; n < CALENDAR_CREDITS_PER_DAY + 2; n += 1) {
+    const now = day + (CALENDAR_REFRESH_SECONDS + 120) * 1000 + n * 20 * 60_000;
+    await planReminders(CALLS, store.handle, `cs_test_feed00000${n}`, now + 3 * 86_400_000, now);
     answers.push((await bookedCalendarFeed(owner, make, now + 1_000)).state);
   }
-  is(`a booking changed every hour: made ${CALENDAR_BUILDS_PER_DAY} times that day, then the copy`, [makings, answers.filter((a) => a === "made").length, answers.slice(-3)], [CALENDAR_BUILDS_PER_DAY, CALENDAR_BUILDS_PER_DAY, ["copy", "copy", "copy"]]);
+  is(`the day's own ${CALENDAR_BUILDS_PER_DAY} makings spent, then a booking each: made for the first ${CALENDAR_CREDITS_PER_DAY} (the fifth among them), then the copy`, [ownMade, answers.slice(0, CALENDAR_CREDITS_PER_DAY).every((a) => a === "made"), answers[4], answers.slice(CALENDAR_CREDITS_PER_DAY)], [CALENDAR_BUILDS_PER_DAY, true, "made", ["copy", "copy"]]);
   const nextDay = day + 86_400_000 + 7 * 3_600_000;
-  is("the next day the copy has grown old: made again", [(await bookedCalendarFeed(owner, make, nextDay)).state, makings], ["made", CALENDAR_BUILDS_PER_DAY + 1]);
-  is("an hour on, nothing changed and the copy young: the copy, nothing made", [(await bookedCalendarFeed(owner, make, nextDay + 3_600_000)).state, makings], ["copy", CALENDAR_BUILDS_PER_DAY + 1]);
+  is("the next day the copy has grown old: made again", [(await bookedCalendarFeed(owner, make, nextDay)).state], ["made"]);
+  const madeBefore = makings;
+  is("an hour on, nothing changed and the copy young: the copy, nothing made", [(await bookedCalendarFeed(owner, make, nextDay + 3_600_000)).state, makings], ["copy", madeBefore]);
   stripeDown = true;
   const old = nextDay + (CALENDAR_REFRESH_SECONDS + 3_600) * 1000;
   const failed = await bookedCalendarFeed(owner, make, old);
   is("the copy grown old and Stripe down: the copy is answered, not an error", [failed.state, "ics" in failed && failed.ics.includes("X-MADE:")], ["copy", true]);
-  redis.run(["DEL", `nl:cal:out:${owner.statsId}`]);
-  const none = await bookedCalendarFeed(owner, make, old + 3_600_000).then((a) => a.state, () => "failed");
-  is("no copy at all and Stripe down: the route answers 503, asking the app to come back", [none, read("app/api/store/calendar/[token]/route.ts").includes("return later(503, 300);")], ["failed", true]);
+  // No copy at all and Stripe down: the route itself answers 503, asking the app to come back.
+  redis.run(["DEL", `nl:cal:out:${owner.statsId}`, `nl:cal:pace:${owner.statsId}`]);
+  const unavailable = await ask();
+  is("no copy at all and Stripe down: the route answers 503", [unavailable.status, unavailable.headers.get("Retry-After")], [503, "300"]);
   stripeDown = false;
 
-  part("A deleted store's copy is never answered again (M2)");
-  const later = old + 5 * 3_600_000;
-  is("before: the copy is answered", (await bookedCalendarFeed(owner, make, later)).state, "made");
+  part("A deleted store's copy is never answered again (M2), by the route itself");
+  redis.run(["DEL", `nl:cal:pace:${owner.statsId}`, `nl:cal:builds:${owner.statsId}:${new Date().toISOString().slice(0, 10)}`]);
+  is("before: the route answers the file", (await ask()).status, 200);
   redis.run(["SET", `nl:store:handle:${owner.handle}`, `released:${new Date().toISOString()}`]);
-  is("the store deleted (its handle let go): gone at once, the copy kept or not", (await bookedCalendarFeed(owner, make, later + 60_000)).state, "gone");
-  is("the route answers 404 for it", read("app/api/store/calendar/[token]/route.ts").includes('if (answer.state === "gone") return missing();'), true);
+  const routeGone = await ask();
+  is("the store deleted (its handle let go): the route answers 404, and the copy is gone", [routeGone.status, redis.run(["GET", `nl:cal:out:${owner.statsId}`])], [404, null]);
   redis.run(["SET", `nl:store:handle:${owner.handle}`, OWNER]);
+  const later = old + 5 * 3_600_000;
 
   part("Each count keeps its expiry, and the copy has a size (L3, L4)");
-  const paceKey = `nl:cal:pace:${owner.statsId}:${Math.floor((later + 7_200_000) / 3_600_000)}`;
-  redis.run(["SET", paceKey, "0"]);
+  const buildsKey = `nl:cal:builds:${owner.statsId}:${new Date(later + 7_200_000).toISOString().slice(0, 10)}`;
+  redis.run(["SET", buildsKey, "0"]);
+  redis.run(["DEL", `nl:cal:out:${owner.statsId}`]);
   await bookedCalendarFeed(owner, make, later + 7_200_000);
-  is("a count found without an expiry gets one back", Number(redis.run(["TTL", paceKey])) > 0, true);
+  is("a count found without an expiry gets one back", Number(redis.run(["TTL", buildsKey])) > 0, true);
   const huge = async () => `BEGIN:VCALENDAR\r\n${"X".repeat(CALENDAR_FILE_MAX_BYTES)}\r\nEND:VCALENDAR`;
   redis.run(["DEL", `nl:cal:out:${owner.statsId}`]);
-  const oversized = await bookedCalendarFeed(owner, huge, later + 3 * 3_600_000);
+  const oversized = await bookedCalendarFeed(owner, huge, later + 30 * 3_600_000);
   is("a file past its ceiling is neither kept nor sent", [oversized.state, redis.run(["GET", `nl:cal:out:${owner.statsId}`])], ["none", null]);
+
+  part("A new address keeps the last copy (light a)");
+  await bookedCalendarFeed(owner, make, later + 60 * 3_600_000);
+  const keptBefore = redis.run(["GET", `nl:cal:out:${owner.statsId}`]);
+  url = (await newFeedToken(await load())).subscribeUrl ?? "";
+  token = url.slice(url.lastIndexOf("/") + 1);
+  is("the copy is still there for the new address", [keptBefore !== null, redis.run(["GET", `nl:cal:out:${owner.statsId}`]) === keptBefore], [true, true]);
 
   part("The file keeps what is still to come first");
   const now = Date.now();
@@ -168,31 +195,67 @@ async function main(): Promise<void> {
   const ics = bookedCalendar({ name: "Feeder", handle: "feeder", catalog: { items: [], head: [], inline: [] } } as unknown as Store, many as never, now, []);
   is("the file holds at most CALENDAR_MAX_EVENTS events, the soonest", [ics.split("BEGIN:VEVENT").length - 1, ics.includes("b0@example.com"), ics.includes(`b${CALENDAR_MAX_EVENTS}@example.com`)], [CALENDAR_MAX_EVENTS, true, false]);
   is("the build's Stripe pages are lib/calls.ts's own", read("lib/calls.ts").includes(`const MAX_PAGES = ${CALENDAR_STRIPE_PAGES};`), true);
-  is("each booking's moves, room reads and room making are counted in the build (M1)", CALENDAR_BUILD_SHAPE.commands >= 2 + (1 + 4 + 2) * CALENDAR_STRIPE_PAGES * 100, true);
+
+  part("A real making, measured, within its count (M1, light d)");
+  {
+    // The route's own making, through Stripe pages of booked calls: what it sends the database, for 10 and 40 bookings.
+    const sessionsOf = (n: number) => Array.from({ length: n }, (_, i) => ({
+      id: `cs_test_measure${String(i).padStart(6, "0")}`, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment",
+      created: Math.floor(Date.now() / 1000) - 3_600, amount_total: 5000, currency: "usd", customer_details: { email: `m${i}@example.com`, name: `M ${i}` },
+      metadata: { store: store.handle, kind: "call", product: "nolisting", start: String(Date.now() + (i + 1) * 86_400_000), end: String(Date.now() + (i + 1) * 86_400_000 + 1_800_000) },
+      payment_intent: { id: `pi_${i}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
+    }));
+    const measure = async (n: number) => {
+      callSessions = sessionsOf(n);
+      redis.run(["DEL", `nl:cal:out:${owner.statsId}`, `nl:cal:pace:${owner.statsId}`]);
+      redis.run(["DEL", `nl:cal:builds:${owner.statsId}:${new Date().toISOString().slice(0, 10)}`]);
+      const m = await counted(() => ask());
+      return m.commands;
+    };
+    const ten = await measure(10);
+    const forty = await measure(40);
+    callSessions = [];
+    const perBooking = (forty - ten) / 30;
+    is(`each booking adds what the count gives it (${perBooking.toFixed(2)} <= ${CALENDAR_BUILD_PER_BOOKING})`, perBooking <= CALENDAR_BUILD_PER_BOOKING, true);
+    is(`forty bookings, measured (${forty}), within the count for forty (${calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands})`, forty <= calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands, true);
+    is("and the count at its worst is the shape's", calendarBuildCommands(MAX_PRODUCTS, CALENDAR_STRIPE_PAGES * 100), CALENDAR_BUILD_SHAPE.commands);
+  }
 
   part("Every figure costs at least the worst it stands for");
-  const held: [string, number, number, number][] = [
-    ["a product update's reading of every sale", UPDATE_READ_UNITS, UNIT_COST.studio, readShapeCost(UPDATE_READ_SHAPE)],
-    ["one store's numbers on the totals page", TOTALS_STORE_UNITS, UNIT_COST.studio, readShapeCost(TOTALS_STORE_SHAPE)],
-  ];
-  for (const [what, units, each, worst] of held) {
-    is(`${what}: ${units} units at $${each.toFixed(6)} cover $${worst.toFixed(6)}`, units * each >= worst, true);
-  }
-  is("a totals reading costs more than a page, so it is no longer the page's units", TOTALS_STORE_UNITS >= STUDIO_PAGE_UNITS, true);
   const fill = PER_PAYMENT_LINES.find((l) => l.id === "stats-life-fill");
   is("a store's one-time all-time filling has its own line, once for each store (M4)", (fill?.monthlyUsd("creator") ?? 0) >= readShapeCost(LIFE_FILL_SHAPE), true);
   const line = COST_LINES.find((l) => l.id === "calendar-feed");
   const feedMonth = line ? line.monthlyUsd("creator") : 0;
-  is("the feed is a cost line of its own, every making and answer of the month at its worst", feedMonth >= 32 * CALENDAR_BUILDS_PER_DAY * readShapeCost(CALENDAR_BUILD_SHAPE) + 31 * 24 * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE), true);
+  is("the feed is a cost line of its own, every making (its own and its credits) and answer of the month at its worst", feedMonth >= 32 * (CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY) * readShapeCost(CALENDAR_BUILD_SHAPE) + 31 * 24 * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE), true);
+  const readings = COST_LINES.find((l) => l.id === "store-readings");
+  const readingsMonth = readings ? readings.monthlyUsd("creator") : 0;
+  is("the store's readings are a line of their own, every reading of every day at the dearest kind", readingsMonth >= 32 * STORE_READINGS_PER_DAY * Math.max(...STORE_READING_SHAPES.map(readShapeCost)), true);
+  is("a store in its trial or past its plan keeps both, priced for it (M2)", nonPayingWorst() >= feedMonth + readingsMonth, true);
   console.log(`  calendar feed: a making $${readShapeCost(CALENDAR_BUILD_SHAPE).toFixed(6)}, an answer $${readShapeCost(CALENDAR_POLL_SHAPE).toFixed(6)}, the month $${feedMonth.toFixed(4)}`);
+  console.log(`  store readings: a reading at most $${Math.max(...STORE_READING_SHAPES.map(readShapeCost)).toFixed(6)}, the month $${readingsMonth.toFixed(4)}`);
   console.log(`  its own once-a-store line (stats-life-fill): a store's first all-time filling $${readShapeCost(LIFE_FILL_SHAPE).toFixed(4)} once (${LIFE_FILL_SHAPE.commands} commands)`);
 
-  part("The totals page: one store's numbers, read within their count");
+  part("The totals: a page of each store's studio, as the Terms say; its numbers from its own readings (M1)");
   redis.run(["HSET", `nl:stats:${owner.statsId}:life`, "filled", "2031-01-01", "since", "2031-01-01", "vgap", "0"]);
-  const reading = await counted(() => readNumbers(store));
-  is(`one store's numbers make no more commands than TOTALS_STORE_SHAPE counts (${reading.commands} <= ${TOTALS_STORE_SHAPE.commands})`, reading.commands <= TOTALS_STORE_SHAPE.commands, true);
+  // At its worst: TOTALS_PAYPAL_REFUNDS refunded PayPal orders to read one by one.
+  for (let i = 0; i < 500; i += 1) {
+    const order = `ORDER${String(i).padStart(8, "0")}`;
+    redis.run(["ZADD", `nl:ppsell:refunded:${owner.statsId}`, Math.floor(Date.now() / 1000) - 60, order]);
+    redis.run(["SET", `nl:ppsell:paid:${order}`, JSON.stringify({ store: owner.statsId, order, capture: `CAP${i}`, email: "", product: "p", cents: 100, currency: "usd", at: 1 })]);
+  }
+  const loaded = await load();
+  const full = await counted(() => keptNumbers(loaded));
+  const fullBound = STATS_READ_SHAPE.commands + SALES_READ_SHAPE.commands;
+  is(`one store's visits and sales at the worst refunds, measured (${full.commands}), within their readings' count (${fullBound})`, [full.commands > 500, full.commands <= fullBound], [true, true]);
+  const again = await counted(() => keptNumbers(loaded));
+  is("looked at again within the fresh time: read from what was kept, a few commands", again.commands <= 3 + 1, true);
+  const studioBefore = await studioLeft();
+  redis.run(["SET", `nl:reading:day:${owner.statsId}:${new Date().toISOString().slice(0, 10)}`, String(STORE_READINGS_PER_DAY), "EX", 86_400]);
+  redis.run(["DEL", `nl:reading:stats:${owner.statsId}`, `nl:reading:sales:${owner.statsId}`]);
+  const spent = await keptNumbers(await load());
+  is("the day's readings used and nothing kept: nothing read, and no studio request taken for it", [spent, studioBefore - (await studioLeft())], [null, 1]);
   const totals = read("app/studio/totals/page.tsx");
-  is("each store's numbers, this page's store's too, take their units before they are read", [totals.indexOf("countStudio(store, null, TOTALS_STORE_UNITS)") >= 0 && totals.indexOf("countStudio(store, null, TOTALS_STORE_UNITS)") < totals.indexOf("readNumbers(store)"), totals.includes("alreadyCounted")], [true, false]);
+  is("the page takes a page of each other store's studio and nothing more", [totals.includes("countStudio(store, null, STUDIO_PAGE_UNITS)"), totals.includes("keptNumbers(store)"), totals.includes("TOTALS_STORE_UNITS")], [true, true, false]);
 
   part("A handle taken by another store never brings the old copy back (M2-bis)");
   {
@@ -227,7 +290,8 @@ async function main(): Promise<void> {
     const states: string[] = [];
     for (let n = 0; n < 6; n += 1) states.push((await bookedCalendarFeed(feedOwner, asRoute, t0 + 86_400_000 + n * 3_600_000)).state);
     is("the handle taken by another store: every answer is 404, the fifth too, and never the old copy", [states[4], states.every((s) => s === "gone")], ["gone", true]);
-    is("and nothing of the old copy is kept", String(redis.run(["GET", `nl:cal:out:${feedOwner.statsId}`]) ?? "").includes("X-WHO"), false);
+    const tomb = String(redis.run(["GET", `nl:cal:out:${feedOwner.statsId}`]) ?? "");
+    is("and nothing of the old copy is kept, nor anyone's address in its place (light e)", [tomb.includes("X-WHO"), tomb.includes("@"), tomb], [false, false, JSON.stringify({ gone: true })]);
     // The day's makings already spent when the handle is taken: still never the copy.
     redis.run(["SET", `nl:cal:out:${feedOwner.statsId}`, JSON.stringify({ at: t0, ics: "BEGIN:VCALENDAR\r\nX-WHO:first\r\nEND:VCALENDAR", ref: ONE })]);
     const day3 = t0 + 2 * 86_400_000;
@@ -249,6 +313,11 @@ async function main(): Promise<void> {
     const renamed = await renameHandle("third@example.com", "renamedto");
     is("renamed", renamed.ok, true);
     is("its feed, still under the old handle in its settings, answers: no 404 by mistake", (await bookedCalendarFeed(thirdOwner, thirdMake, t0)).state, "made");
+    // Light b: its bookings' changes are kept by the store's calls id, which the rename did not change.
+    const withCalls = { ...thirdOwner, callsId: "d".repeat(32) };
+    is("the copy, young and unchanged", (await bookedCalendarFeed(withCalls, thirdMake, t0 + 60_000)).state, "copy");
+    await planReminders(withCalls.callsId, "renamedto", "cs_test_renamed0001", t0 + 5 * 86_400_000, t0 + 120_000);
+    is("a booking marked under the new handle is read by the calls id: made again at once", (await bookedCalendarFeed(withCalls, thirdMake, t0 + 180_000)).state, "made");
 
     part("A copy is kept only by the store that made it (light 3)");
     const third0 = Date.UTC(2032, 3, 1, 0, 30);

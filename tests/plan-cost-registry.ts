@@ -44,7 +44,7 @@
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
-import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
+import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
@@ -105,8 +105,9 @@ import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY } f
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
-import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, LIFE_FILL_SHAPE } from "@/lib/read-ceilings";
-import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
+import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, STORE_READING_SHAPES } from "@/lib/read-ceilings";
+import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
+import { READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -668,31 +669,44 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/path-reminder.ts", names: ["sendPathReminder", "PATH_REMINDER_UNITS"] },
       { file: "lib/path-facts.ts", names: ["PATH_SALE_PAGES", "PATH_REFUND_PAGES", "PATH_MONEY_SECONDS"] },
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
-      // Two reads take their worst first (C4-4, 4 November 2026; lib/read-ceilings.ts, held in tests/read-ceilings.test.ts):
-      // a product update's reading of every paid sale, and each store's numbers on the totals page.
-      { file: "lib/product-updates.ts", names: ["countStudio(store, null, UPDATE_READ_UNITS)"] },
-      { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, TOTALS_STORE_UNITS)"] },
-      { file: "lib/read-ceilings.ts", names: ["UPDATE_READ_UNITS", "TOTALS_STORE_UNITS"] },
+      // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
+      { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
     ],
-    basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. A product update's reading of every sale and each store's numbers on the totals page take as many studio requests as their worst read costs, before reading (lib/read-ceilings.ts; held in tests/read-ceilings.test.ts).",
+    basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
+  },
+  {
+    id: "store-readings",
+    feature: "A store's readings of its own numbers (visits, sales, memberships) and a product update's search for its buyers, from its counts and its Stripe account, kept for the pages that show them (C4-4; owner's decision of 4 November 2026, inbox C4-18)",
+    monthlyUsd: (tier) =>
+      DAY_WINDOWS * STORE_READINGS_PER_DAY * Math.max(...STORE_READING_SHAPES.map(readShapeCost))
+      + (STORE_ALLOWANCES[tier].studio / STUDIO_PAGE_UNITS) * readShapeCost(KEPT_READINGS_SHAPE)
+      + READING_KINDS.length * READING_COPY_MAX_BYTES * DB_BYTE_MONTH * (READING_KEEP_SECONDS / (30 * 86_400)),
+    sources: [
+      { file: "lib/store-readings.ts", names: ["STORE_READINGS_PER_DAY", "READING_FRESH_SECONDS", "READING_KEEP_SECONDS", "READING_COPY_MAX_BYTES", "takeStoreReading", "keptReading", "READING_KINDS"] },
+      { file: "app/studio/page.tsx", names: ["keptStats(current)", "keptSales(current)"] },
+      { file: "app/studio/totals/page.tsx", names: ["keptNumbers(store)", "keptMembers(store)"] },
+      { file: "lib/product-updates.ts", names: ["takeStoreReading(store)"] },
+      { file: "lib/read-ceilings.ts", names: ["STATS_READ_SHAPE", "SALES_READ_SHAPE", "MEMBERS_READ_SHAPE", "STORE_READING_SHAPES", "KEPT_READINGS_SHAPE", "UPDATE_READ_SHAPE"] },
+    ],
+    basis: "Every reading of every UTC day of the window at the dearest kind (a store's visits, its sales from Stripe, its memberships, or a product update's search of every paid sale: STORE_READING_SHAPES), STORE_READINGS_PER_DAY a day, each counted before it is read; what a studio page reads of the kept readings (up to three, READING_COPY_MAX_BYTES each) for every page the studio figure allows; and the readings kept a day. The page itself is the studio's STUDIO_PAGE_UNITS, as the Terms say.",
   },
   {
     id: "calendar-feed",
     feature: "The private booking calendar a creator subscribes to (/api/store/calendar/<token>.ics): every answer from the last good copy, and the copy made again (C4-4, 4 November 2026)",
     monthlyUsd: () =>
-      DAY_WINDOWS * CALENDAR_BUILDS_PER_DAY * readShapeCost(CALENDAR_BUILD_SHAPE)
+      DAY_WINDOWS * (CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY) * readShapeCost(CALENDAR_BUILD_SHAPE)
       + (UTC_DAYS * 24 + 1) * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE)
       + (UTC_DAYS * 24 + 1) * CALENDAR_REFUSED_PRICED_PER_HOUR * readShapeCost(CALENDAR_REFUSED_SHAPE)
       + CALENDAR_FILE_BYTES * DB_BYTE_MONTH * (CALENDAR_COPY_SECONDS / (30 * 86_400)),
     sources: [
-      { file: "lib/calendar-sync.ts", names: ["bookedCalendarFeed", "CALENDAR_BUILDS_PER_DAY", "CALENDAR_POLLS_PER_HOUR", "CALENDAR_REFRESH_SECONDS", "CALENDAR_COPY_SECONDS", "CALENDAR_MAX_EVENTS", "keptSlots", "takeCounted("] },
-      { file: "lib/call-records.ts", names: ["bookingsChangedKey", "changedCommand(handle"] },
+      { file: "lib/calendar-sync.ts", names: ["bookedCalendarFeed", "CALENDAR_BUILDS_PER_DAY", "CALENDAR_CREDITS_PER_DAY", "CALENDAR_POLLS_PER_HOUR", "CALENDAR_REFRESH_SECONDS", "CALENDAR_COPY_SECONDS", "CALENDAR_MAX_EVENTS", "keptSlots", "takeCounted(", "withinPace("] },
+      { file: "lib/call-records.ts", names: ["bookingsChangedKey", "bookingCreditsKey", "changedCommands(callsId"] },
       { file: "app/api/store/calendar/[token]/route.ts", names: ["bookedCalendarFeed(owner"] },
       { file: "lib/read-ceilings.ts", names: ["CALENDAR_POLL_SHAPE", "CALENDAR_BUILD_SHAPE", "CALENDAR_FILE_BYTES", "CALENDAR_REFUSED_SHAPE", "CALENDAR_REFUSED_PRICED_PER_HOUR"] },
       { file: "lib/store.ts", names: ["handleLeadsToStore", "storeHandleKey"] },
       { file: "app/api/store/stores/route.ts", names: ["forgetStoreCalendar(result.store.statsId)"] },
     ],
-    basis: "A store's feed answers its calendar app from the last good copy of the file, at most CALENDAR_POLLS_PER_HOUR times an hour, counted before the copy is read (each a CALENDAR_POLL_SHAPE: the token, its settings, the pace and the copy, the copy sent); the file is made again only after a booking was made, moved or let go, or once the copy is CALENDAR_REFRESH_SECONDS old, at most CALENDAR_BUILDS_PER_DAY times a UTC day, counted before it is made (each a CALENDAR_BUILD_SHAPE: the store, five Stripe pages, every call listing, each booking's moves and room, the copy kept); the copy itself kept CALENDAR_COPY_SECONDS at its largest. One feed a store (a new address replaces the old). Refused answers past the pace read only the token, its settings and the pace (CALENDAR_REFUSED_SHAPE); as many again as the answers are priced (CALENDAR_REFUSED_PRICED_PER_HOUR). Past that the refusal is a guard bounded only by who holds the secret address (the creator's own apps): no figure caps how many it answers, each a few millionths of a dollar, and replacing the address in the studio stops them. A store deleted or closed is refused with the copy's own read (its handle let go, or leading to another store: a tombstone in the copy's place), and a deleted store's feed is forgotten at its deletion (forgetStoreCalendar). None of it is the studio's requests: an app asking on its own must never spend a figure the creator sees.",
+    basis: "A store's feed answers its calendar app from the last good copy of the file, at most CALENDAR_POLLS_PER_HOUR times in any sixty minutes (a sliding hour), counted before the copy is read (each a CALENDAR_POLL_SHAPE: the token, its settings, the pace and the copy, the copy sent); the file is made again only after a booking was made, moved or let go, or once the copy is CALENDAR_REFRESH_SECONDS old, at most CALENDAR_BUILDS_PER_DAY times a UTC day and once more for each booking made, moved or let go that day up to CALENDAR_CREDITS_PER_DAY (its credits, given where the change is marked), counted before it is made (each a CALENDAR_BUILD_SHAPE: the store, five Stripe pages, every call listing, each booking's moves and room, the copy kept); the copy itself kept CALENDAR_COPY_SECONDS at its largest. One feed a store (a new address replaces the old). Refused answers past the pace read only the token, its settings and the pace (CALENDAR_REFUSED_SHAPE); as many again as the answers are priced (CALENDAR_REFUSED_PRICED_PER_HOUR). Past that the refusal is a guard bounded only by who holds the secret address (the creator's own apps): no figure caps how many it answers, each a few millionths of a dollar, and replacing the address in the studio stops them. A store deleted or closed is refused with the copy's own read (its handle let go, or leading to another store: a tombstone in the copy's place), and a deleted store's feed is forgotten at its deletion (forgetStoreCalendar). None of it is the studio's requests: an app asking on its own must never spend a figure the creator sees.",
   },
   {
     id: "rest-api",
@@ -949,6 +963,9 @@ export function nonPayingWorst(): number {
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
+    // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
+    // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
+    + ["calendar-feed", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
     // Its students' work and its community's pictures, kept for the trial and then to its closing day (lib/plan-closing.ts).
     + ((TRIAL_TASK_ROOM_BYTES + TRIAL_COMMUNITY_PICTURES * PICTURE_BYTES) / GB) * STORAGE_PER_GB * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30)
     // Its data room, and what it keeps outside it at Store's figures, which are more than a trial's, for the trial and to its closing day

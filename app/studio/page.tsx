@@ -62,7 +62,8 @@ import { SocialsEditor } from "@/components/socials-editor";
 import { IntroEditor } from "@/components/intro-editor";
 import { LookEditor } from "@/components/look-editor";
 import { type PaidCall, catchUpBookings, paidCallsRead } from "@/lib/calls";
-import { productsInStats, reachProducts, readAllTimeSales, readSales, readStats, studioStats } from "@/lib/stats";
+import { productsInStats, reachProducts, readAllTimeSales, studioStats } from "@/lib/stats";
+import { keptSales, keptStats } from "@/lib/store-readings";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
 import { readSpends } from "@/lib/ad-spend";
@@ -1045,9 +1046,10 @@ export default async function StudioPage({
   // with the creator's own notes on the chart and what they spent on ads.
   const [visits, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = current && may("stats")
     ? await Promise.all([
-        readStats(current).catch(() => null),
+        // Kept for every page that shows them, and read again only from the store's own daily budget (lib/store-readings.ts).
+        keptStats(current).then((kept) => kept?.value ?? null, () => null),
         readsSales(current)
-          ? readSales(current).then(
+          ? keptSales(current).then(
               (value) => ({ state: "ok" as const, value }),
               () => ({ state: "error" as const, value: null }),
             )

@@ -1,6 +1,6 @@
 import { storeForHandle } from "@/lib/store";
 import { paidCalls } from "@/lib/calls";
-import { FeedGone, bookedCalendar, bookedCalendarFeed, slotRooms, storeIdForToken } from "@/lib/calendar-sync";
+import { FeedGone, bookedCalendar, bookedCalendarFeed, ensureFeedToken, slotRooms, storeIdForToken } from "@/lib/calendar-sync";
 import { readKind } from "@/lib/catalog";
 
 /**
@@ -35,6 +35,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
     const answer = await bookedCalendarFeed(owner, async () => {
       const store = await storeForHandle(owner.handle);
       if (!store || store.statsId !== owner.statsId) throw new FeedGone();
+      // Renamed, or settings from before they named the store's calls: written again, so its changes are read from now on.
+      await ensureFeedToken(store).catch(() => {});
       const calls = store.stripeAccountId ? await paidCalls(store) : [];
       const listings = await readKind(store, "call");
       return bookedCalendar(store, calls, Date.now(), listings, await slotRooms(store, calls, listings));

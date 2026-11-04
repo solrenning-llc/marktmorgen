@@ -2,8 +2,10 @@
  * Telling a product's buyers it was updated reads every paid sale the store
  * has (lib/product-updates.ts, startUpdate), and a press that finds nobody
  * claims nothing, so it can be pressed again. C4-4 (4 November 2026; owner's
- * rule MR): each reading takes UPDATE_READ_UNITS of the store's studio
- * requests before it starts, and none is read past them.
+ * rule MR and decision C4-18): each reading is one of the store's own readings
+ * of the day (lib/store-readings.ts), taken before it starts, none read past
+ * them; the studio's requests are never taken for it (only the press, by its
+ * route, as before).
  *
  * Kept apart from tests/product-updates.test.ts, with its own fixtures.
  */
@@ -11,7 +13,7 @@ import { startUpdate } from "@/lib/product-updates";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { takeAllowance } from "@/lib/store-allowance";
-import { UPDATE_READ_UNITS } from "@/lib/read-ceilings";
+import { STORE_READINGS_PER_DAY } from "@/lib/store-readings";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -41,22 +43,23 @@ async function main(): Promise<void> {
   const load = async () => (await storeForEmail(OWNER))!;
   const nobody = (await readListing(await load(), made.product.id))!;
 
-  part("Every reading of the sales is paid for before it starts");
+  part("Every reading of the sales is paid for before it starts, from the store's own readings");
   const left = async () => {
     const taken = await takeAllowance(await load(), "studio", 1);
     return taken.ok ? taken.left : -1;
   };
+  const dayKey = `nl:reading:day:${(await load()).statsId}:${new Date().toISOString().slice(0, 10)}`;
   const start = await left();
   const readsBefore = stripeReads;
-  is("a reading that finds nobody takes its units", [await startUpdate(await load(), nobody, "").then((r) => (r.ok ? "started" : r.reason)), start - (await left())], ["none", UPDATE_READ_UNITS + 1]);
+  is("a reading that finds nobody takes one of the day's readings, and no studio request", [await startUpdate(await load(), nobody, "").then((r) => (r.ok ? "started" : r.reason)), Number(redis.run(["GET", dayKey])), start - (await left())], ["none", 1, 1]);
   is("and reads Stripe", stripeReads > readsBefore, true);
-  // Spend what is left of the window.
-  const rest = await left();
-  if (rest > 0) await takeAllowance(await load(), "studio", rest);
+  // The day's readings used.
+  redis.run(["SET", dayKey, String(STORE_READINGS_PER_DAY), "EX", 86_400]);
   const readsSpent = stripeReads;
+  const studioSpent = await left();
   const refused = await startUpdate(await load(), nobody, "");
-  is("past the window it is refused, with the window's own words", [refused.ok ? "started" : refused.reason, !refused.ok && refused.reason === "used" && refused.message.length > 10], ["used", true]);
-  is("and reads nothing", stripeReads - readsSpent, 0);
+  is("past the day's readings it is refused, in the store's words", [refused.ok ? "started" : refused.reason, !refused.ok && refused.reason === "used" && refused.message.includes("today")], ["used", true]);
+  is("and reads nothing, and takes no studio request", [stripeReads - readsSpent, studioSpent - (await left())], [0, 1]);
 
   done();
 }

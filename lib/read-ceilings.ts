@@ -15,11 +15,16 @@
  *                      calendar-feed), never the studio's requests, which an
  *                      app asking on its own must not spend.
  *   product update     lib/product-updates.ts, startUpdate: reading the
- *                      store's paid sales to find a product's buyers takes
- *                      UPDATE_READ_UNITS studio requests first.
- *   studio totals      app/studio/totals/page.tsx: each store's numbers
- *                      (its sales and memberships, read from Stripe) take
- *                      TOTALS_STORE_UNITS of that store's studio requests.
+ *                      store's paid sales to find a product's buyers is one
+ *                      of the store's own readings of the day
+ *                      (lib/store-readings.ts); the press itself is one
+ *                      studio request, as before.
+ *   studio totals      app/studio/totals/page.tsx and the studio's home: a
+ *                      page still costs STUDIO_PAGE_UNITS of the studio's
+ *                      requests, as the Terms say; each store's visits, sales
+ *                      and memberships come from its kept readings, read
+ *                      again only from its own daily budget
+ *                      (lib/store-readings.ts; owner, 4 November 2026, C4-18).
  *
  * Each worst case is a ReadShape: wall seconds held at 2 GB, CPU seconds,
  * database commands, bytes moved through the database, bytes sent on, and
@@ -35,6 +40,7 @@ import { MAX_STORE_BYTES } from "@/lib/store";
 import { MAX_UPDATE_RECIPIENTS } from "@/lib/product-updates-rules";
 import { ALL_TIME_PAGES, DAY_FIELDS_MAX, KEPT_DAYS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { CALENDAR_FILE_MAX_BYTES } from "@/lib/calendar-sync";
+import { READING_COPY_MAX_BYTES } from "@/lib/store-readings";
 
 export type ReadShape = {
   /** Wall seconds, held at 2 GB. */
@@ -68,41 +74,50 @@ export const CALENDAR_CALLS = CALENDAR_STRIPE_PAGES * 100;
 export const CALENDAR_FILE_BYTES = CALENDAR_FILE_MAX_BYTES;
 
 /**
- * Every answer: the token and its settings (2 GET), the hour's pace (SET NX,
- * INCRBY, EXPIRE NX and, when refused, DECRBY: 4), the copy, the changed mark
- * and the store's handle (one MGET), and, for a store whose handle was let
- * go, its copy deleted (DEL): 8; the copy sent. An answer refused for the
- * pace stops after the pace: 6 commands and no copy (CALENDAR_REFUSED_SHAPE).
+ * Every answer: the token and its settings (2 GET), the sliding hour's pace
+ * (ZADD, ZREMRANGEBYSCORE, ZCARD, EXPIRE and, when refused, ZREM: 5), the
+ * copy, the store's handle, the changed mark and the day's credits (one
+ * MGET), and, for a store whose handle was let go, its copy deleted (DEL): 9;
+ * the copy sent. An answer refused for the pace stops after the pace: 7
+ * commands and no copy (CALENDAR_REFUSED_SHAPE).
  */
 export const CALENDAR_POLL_SHAPE: ReadShape = {
   seconds: 1,
   cpu: 0.1,
-  commands: 2 + 4 + 1 + 1,
+  commands: 2 + 5 + 1 + 1,
   dbBytes: 2 * 4_096 + CALENDAR_FILE_BYTES + 2 * 256,
   outBytes: CALENDAR_FILE_BYTES,
   stripePages: 0,
 };
 /**
- * The file made again, besides its poll: the day's budget (SET NX, INCRBY,
- * EXPIRE NX and, when refused, DECRBY: 4); the store (its handle and its
- * record: 2 GET); its Stripe pages; every call listing (one GET each, up to
+ * The file made again, besides its poll: the day's credits used and the
+ * day's own makings (SET NX, INCRBY, EXPIRE NX and, when refused, DECRBY: 4
+ * each, 8); the store (its handle and its record: 2 GET) and its settings
+ * written again when it was renamed (lib/calendar-sync.ts, ensureFeedToken:
+ * GET and SET, 2); its Stripe pages; every call listing (one GET each, up to
  * MAX_PRODUCTS, the catalog's head aside); each booking's moves
  * (lib/call-records.ts, readMoves: one GET a booking); four reads of each
  * booking's room and, for a video room not made yet, its making (SET NX and
  * GET: lib/call-rooms.ts, roomsFor); the copy kept (lib/calendar-sync.ts,
  * KEEP_COPY: the EVAL and the EXISTS and SET it runs, billed one by one: 3).
  */
+/** Commands one booking adds to a making: its moves (GET), its room's four reads and its room's making (SET NX and GET). */
+export const CALENDAR_BUILD_PER_BOOKING = 1 + 4 + 2;
+/** Commands of a making for a store of `listings` call listings and `calls` bookings (tests/read-ceilings.test.ts measures it). */
+export function calendarBuildCommands(listings: number, calls: number): number {
+  return 8 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 3;
+}
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,
   cpu: 1,
-  commands: 4 + 2 + MAX_PRODUCTS + CALENDAR_CALLS + 4 * CALENDAR_CALLS + 2 * CALENDAR_CALLS + 3,
+  commands: calendarBuildCommands(MAX_PRODUCTS, CALENDAR_CALLS),
   dbBytes: MAX_STORE_BYTES + MAX_PRODUCTS * LISTING_READ_BYTES + CALENDAR_CALLS * 1_024 + 4 * CALENDAR_CALLS * 1_024 + 2 * CALENDAR_CALLS * 512 + CALENDAR_FILE_BYTES,
   outBytes: 0,
   stripePages: CALENDAR_STRIPE_PAGES,
 };
 
-/** An answer refused for the hour's pace: the token, its settings and the pace (6 commands), nothing read or sent besides. */
-export const CALENDAR_REFUSED_SHAPE: ReadShape = { seconds: 0.2, cpu: 0.01, commands: 2 + 4, dbBytes: 2 * 4_096, outBytes: 64, stripePages: 0 };
+/** An answer refused for the sliding hour's pace: the token, its settings and the pace (7 commands), nothing read or sent besides. */
+export const CALENDAR_REFUSED_SHAPE: ReadShape = { seconds: 0.2, cpu: 0.01, commands: 2 + 5, dbBytes: 2 * 4_096, outBytes: 64, stripePages: 0 };
 /**
  * Refused answers priced in the feed's line, an hour: as many again as it
  * answers. Their number is set by whoever holds the feed's secret address
@@ -132,7 +147,6 @@ export const UPDATE_READ_SHAPE: ReadShape = {
   outBytes: 0,
   stripePages: 2 * ALL_TIME_PAGES,
 };
-export const UPDATE_READ_UNITS = 16;
 
 // ---- The studio's totals of every store -------------------------------------
 
@@ -173,7 +187,31 @@ export const TOTALS_STORE_SHAPE: ReadShape = {
   outBytes: 0,
   stripePages: 2 * 20 + 10 + 5 + 3 + 2 * 20,
 };
-export const TOTALS_STORE_UNITS = 46;
+
+/**
+ * One of a store's readings of the day (lib/store-readings.ts), the dearest
+ * kind: its visits (readStats and readLife), its sales (readSales) or its
+ * memberships, as TOTALS_STORE_SHAPE counts each, or a product update's
+ * search for its buyers (UPDATE_READ_SHAPE); with the day's count (SET NX,
+ * INCRBY, EXPIRE NX and, when refused, DECRBY: 4) and the reading kept (SET:
+ * at most READING_COPY_MAX_BYTES). Priced, every reading of every day, in
+ * the store-readings line (tests/plan-cost-registry.ts).
+ */
+export const STATS_READ_SHAPE: ReadShape = {
+  seconds: 1, cpu: 0.5, commands: (3 * STATS_DAYS + 6) + 4 + 4 + 1, outBytes: 0, stripePages: 0,
+  dbBytes: STATS_DAYS * DAY_FIELDS_MAX * STATS_FIELD_BYTES + STATS_DAYS * 64 + STATS_DAYS * 2 * 32 + LIFE_WRITE_MAX * STATS_FIELD_BYTES + READING_COPY_MAX_BYTES,
+};
+export const SALES_READ_SHAPE: ReadShape = {
+  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + 4 + 1, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
+  dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES,
+};
+export const MEMBERS_READ_SHAPE: ReadShape = {
+  seconds: 2, cpu: 0.5, commands: 2 + 4 + 1, outBytes: 0, stripePages: 2 * 20,
+  dbBytes: 2 * 65_536 + READING_COPY_MAX_BYTES,
+};
+export const STORE_READING_SHAPES: readonly ReadShape[] = [STATS_READ_SHAPE, SALES_READ_SHAPE, MEMBERS_READ_SHAPE, { ...UPDATE_READ_SHAPE, commands: UPDATE_READ_SHAPE.commands + 4 }];
+/** What a studio page that shows the numbers reads of the kept readings, besides its own: up to three (GET each). */
+export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands: 3, dbBytes: 3 * READING_COPY_MAX_BYTES, outBytes: 0, stripePages: 0 };
 
 /**
  * Not one of these four reads, said so it is not taken for zero: the first

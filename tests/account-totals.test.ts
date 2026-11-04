@@ -47,8 +47,7 @@ function main(): void {
   part("The page");
   const page = readFileSync("app/studio/totals/page.tsx", "utf8");
   const header = readFileSync("components/studio-header.tsx", "utf8");
-  // Since 4 November 2026 (C4-4), every store's reading, this page's own store's too, takes its worst first (lib/read-ceilings.ts).
-  is("each store is read inside its own studio allowance, its Stripe reading paid for first", [page.includes("countStudio(store, null, TOTALS_STORE_UNITS)"), page.includes("alreadyCounted")], [true, false]);
+  is("each other store is read inside its own studio allowance", page.includes("countStudio(store, null, STUDIO_PAGE_UNITS)"), true);
   is("only where the role includes the numbers", page.includes('can(entry.role, "stats")'), true);
   is("a table with a caption and headers, and one h1", [page.includes("<caption"), page.includes('scope="col"'), page.split("<h1").length - 1], [true, true, 1]);
   is("reached from the store menu when there are two or more", header.includes("stores.length > 1") && header.includes("/studio/totals?store="), true);

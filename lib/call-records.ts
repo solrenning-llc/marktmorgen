@@ -103,19 +103,27 @@ export async function planReminders(callsId: string, handle: string, session: st
     commands.push(["ZADD", REMINDER_QUEUE, at, reminderMember(callsId, handle, session, mark, start)]);
   }
   // A booking made or moved: the store's calendar feed makes its file again (lib/calendar-sync.ts, bookedCalendarFeed).
-  commands.push(changedCommand(handle, now));
+  commands.push(...changedCommands(callsId, now));
   await redisPipeline(commands);
 }
 
 /**
  * When a store's bookings last changed (made, moved, or a time let go), in
- * milliseconds, by the store's handle: the private calendar feed makes its
- * file again only after it (lib/calendar-sync.ts, bookedCalendarFeed). Kept as
- * long as the feed's copy, CALENDAR_COPY_SECONDS.
+ * milliseconds, by the store's calls id, which a rename does not change: the
+ * private calendar feed makes its file again only after it
+ * (lib/calendar-sync.ts, bookedCalendarFeed). Kept as long as the feed's
+ * copy, CALENDAR_COPY_SECONDS. And each change gives the feed one more making
+ * that UTC day (its credits, at most CALENDAR_CREDITS_PER_DAY used a day),
+ * so a day's bookings show at the app's next check. Its cost is the feed's
+ * own line (tests/plan-cost-registry.ts, calendar-feed).
  */
-export const bookingsChangedKey = (handle: string) => `nl:cal:chg:${handle}`;
+export const bookingsChangedKey = (callsId: string) => `nl:cal:chg:${callsId}`;
+export const bookingCreditsKey = (callsId: string, day: string) => `nl:cal:chg:${callsId}:${day}`;
 const CHANGED_SECONDS = 40 * 86_400;
-const changedCommand = (handle: string, now = Date.now()): (string | number)[] => ["SET", bookingsChangedKey(handle), String(now), "EX", CHANGED_SECONDS];
+const changedCommands = (callsId: string, now = Date.now()): (string | number)[][] => {
+  const credits = bookingCreditsKey(callsId, new Date(now).toISOString().slice(0, 10));
+  return [["SET", bookingsChangedKey(callsId), String(now), "EX", CHANGED_SECONDS], ["INCRBY", credits, 1], ["EXPIRE", credits, 2 * 86_400]];
+};
 
 /**
  * Asks the mail job to look at a checkout once it can no longer be open: if
@@ -136,6 +144,6 @@ export async function unplanReminders(callsId: string, handle: string, session: 
       reminderMember(callsId, handle, session, "24", start),
       reminderMember(callsId, handle, session, "1", start),
     ],
-    changedCommand(handle),
+    ...changedCommands(callsId),
   ]);
 }

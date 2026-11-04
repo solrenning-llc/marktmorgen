@@ -50,8 +50,9 @@ import { idsOfKind, readListing, recordListings } from "@/lib/catalog";
 import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
 import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";
+import { CALENDAR_CREDITS_PER_DAY } from "@/lib/calendar-limits";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
-import { bookingsChangedKey } from "@/lib/call-records";
+import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
 
 /** Calendars one store may read, and how far ahead (lib/calendar-limits.ts, which the studio and the feature page read too). */
 export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
@@ -79,7 +80,9 @@ export const CALENDAR_COPY_SECONDS = 40 * 86_400;
  */
 export const CALENDAR_REFRESH_SECONDS = 12 * 3_600;
 /** Times a store's file may be made again in a UTC day, every reason together. */
-export const CALENDAR_BUILDS_PER_DAY = 4;
+export const CALENDAR_BUILDS_PER_DAY = 2;
+/** More makings a UTC day, one for each booking made, moved or let go (lib/calendar-limits.ts, CALENDAR_CREDITS_PER_DAY). */
+export { CALENDAR_CREDITS_PER_DAY };
 /**
  * Answers one store's feed gets in an hour: four, two calendar apps (a phone
  * and a computer) each asking every thirty minutes, the file's own
@@ -99,7 +102,8 @@ const TOKEN_PATTERN = /^[0-9a-f]{48}$/;
 const FEED_ID_PATTERN = /^[0-9a-f]{16}$/;
 
 type Feed = { id: string; url: string; addedAt: string };
-type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string };
+/** `callsId`: the store's id for its calls (lib/store.ts), which its bookings' changed mark is kept by; written with the handle. */
+type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string; callsId?: string | null };
 export type Reading = { at: number; busy: [number, number][]; events: number; unsupported: number; truncated: boolean };
 
 const cfgKey = (statsId: string) => `nl:cal:cfg:${statsId}`;
@@ -115,9 +119,14 @@ export function calendarKeys(raw: unknown): string[] {
   return [...(typeof value.token === "string" && value.token ? [tokenKey(value.token)] : []), ...feeds.flatMap((id) => [busyKey(id), goodKey(id), errKey(id), lockKey(id)])];
 }
 const outKey = (statsId: string) => `nl:cal:out:${statsId}`;
-/** The feed's answers in one hour, and the file's makings in one UTC day, each a count of the store's. */
-const paceKey = (statsId: string, hour: number) => `nl:cal:pace:${statsId}:${hour}`;
+/**
+ * The feed's answers of the last hour (a sorted set of their times: a sliding
+ * hour), the file's makings in one UTC day, and the makings used from its
+ * bookings' credits that day, each the store's.
+ */
+const paceKey = (statsId: string) => `nl:cal:pace:${statsId}`;
 const buildsKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}`;
+const creditsUsedKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}:c`;
 
 function parseConfig(raw: unknown): Config | null {
   if (typeof raw !== "string" || !raw) return null;
@@ -133,6 +142,7 @@ function parseConfig(raw: unknown): Config | null {
       feeds: feeds.slice(0, MAX_FEEDS),
       token: typeof value.token === "string" && TOKEN_PATTERN.test(value.token) ? value.token : null,
       tokenAt: typeof value.tokenAt === "string" ? value.tokenAt : "",
+      callsId: typeof value.callsId === "string" && /^[0-9a-f]{8,40}$/.test(value.callsId) ? value.callsId : null,
     };
   } catch {
     return null;
@@ -158,7 +168,7 @@ async function readConfig(store: Store): Promise<Config | null> {
 
 async function writeConfig(store: Store, config: Config): Promise<void> {
   if (!store.statsId) return;
-  await redisPipeline([["SET", cfgKey(store.statsId), JSON.stringify({ ...config, handle: store.handle })]]);
+  await redisPipeline([["SET", cfgKey(store.statsId), JSON.stringify({ ...config, handle: store.handle, callsId: store.callsId ?? null })]]);
 }
 
 /** The zone for all-day and floating times, when a calendar names none. */
@@ -386,8 +396,13 @@ export async function newFeedToken(store: Store): Promise<CalendarView> {
   const token = randomBytes(24).toString("hex");
   const commands: (string | number)[][] = [["SET", tokenKey(token), store.statsId as string]];
   if (config.token) commands.push(["DEL", tokenKey(config.token)]);
-  if (store.statsId) commands.push(["DEL", outKey(store.statsId)]);
   await redisPipeline(commands);
+  // The last copy stays, so the new address answers at once even when the day's makings are spent; only a
+  // tombstone (the store's handle once led elsewhere) goes, since this store is plainly its handle's own.
+  if (store.statsId) {
+    const [kept] = await redisPipeline([["GET", outKey(store.statsId)]]);
+    if (parseKept(kept).gone) await redisPipeline([["DEL", outKey(store.statsId)]]);
+  }
   await writeConfig(store, { ...config, token, tokenAt: new Date().toISOString() });
   return calendarView(store);
 }
@@ -397,14 +412,15 @@ export async function ensureFeedToken(store: Store): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
   const config = await readConfig(store);
   if (config?.token) {
-    if (config.handle !== store.handle) await writeConfig(store, config);
+    // Renamed, or written before the settings named the store's calls: written again, so the feed reads its marks.
+    if (config.handle !== store.handle || (config.callsId ?? null) !== (store.callsId ?? null)) await writeConfig(store, config);
     return;
   }
   await newFeedToken(store);
 }
 
 /** The store a subscription address belongs to, or null. */
-export async function storeIdForToken(token: string): Promise<{ statsId: string; handle: string } | null> {
+export async function storeIdForToken(token: string): Promise<{ statsId: string; handle: string; callsId: string | null } | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
   const [statsId] = await redisPipeline([["GET", tokenKey(token)]]);
   if (typeof statsId !== "string" || !statsId) return null;
@@ -413,7 +429,7 @@ export async function storeIdForToken(token: string): Promise<{ statsId: string;
   // A replaced token is deleted, and this second check covers a lookup that
   // raced the replacement.
   if (!config || config.token !== token) return null;
-  return { statsId, handle: config.handle };
+  return { statsId, handle: config.handle, callsId: config.callsId ?? null };
 }
 
 // ---- Clashes the studio points out -----------------------------------------
@@ -562,22 +578,22 @@ export function keptSlots<T extends { start: number; end: number }>(slots: T[], 
  * the store's handle led to when it was made (`ref`, the handle's key as read),
  * so a copy is answered only while the handle still leads to the store that
  * made it. Or, once the handle was found to lead to another store, a
- * tombstone (`gone`: what it leads to now), so the feed answers 404 at once
- * without making anything again.
+ * tombstone (`gone: true`, nothing of either store in it), so the feed
+ * answers 404 at once without making anything again.
  */
 type Copy = { at: number; ics: string; ref: string; sid: string };
-type Kept = { copy: Copy | null; gone: string | null };
+type Kept = { copy: Copy | null; gone: boolean };
 function parseKept(raw: unknown): Kept {
-  if (typeof raw !== "string" || !raw) return { copy: null, gone: null };
+  if (typeof raw !== "string" || !raw) return { copy: null, gone: false };
   try {
     const value = JSON.parse(raw) as Partial<Copy> & { gone?: unknown };
-    if (typeof value.gone === "string") return { copy: null, gone: value.gone };
+    if (value.gone === true || typeof value.gone === "string") return { copy: null, gone: true };
     const copy = typeof value.at === "number" && typeof value.ics === "string" && value.ics
       ? { at: value.at, ics: value.ics, ref: typeof value.ref === "string" ? value.ref : "", sid: typeof value.sid === "string" ? value.sid : "" }
       : null;
-    return { copy, gone: null };
+    return { copy, gone: false };
   } catch {
-    return { copy: null, gone: null };
+    return { copy: null, gone: false };
   }
 }
 
@@ -610,6 +626,33 @@ return 1`;
 
 /** Thrown by a feed's `make` when the store behind its token is not the one that kept it. */
 export class FeedGone extends Error {}
+
+/**
+ * One more answer within the last sixty minutes, a sliding hour: its time
+ * added to the store's set (ZADD), the older ones let go (ZREMRANGEBYSCORE),
+ * the rest counted (ZCARD) and the set's expiry (EXPIRE); taken back (ZREM)
+ * when past CALENDAR_POLLS_PER_HOUR. Never more than the pace, however late in
+ * an hour an app asks. A count that cannot be made is a refusal.
+ */
+async function withinPace(statsId: string, now: number): Promise<boolean> {
+  const key = paceKey(statsId);
+  const member = `${now}:${randomBytes(4).toString("hex")}`;
+  try {
+    const [, , n] = await redisPipeline([
+      ["ZADD", key, now, member],
+      ["ZREMRANGEBYSCORE", key, "-inf", now - 3_600_000],
+      ["ZCARD", key],
+      ["EXPIRE", key, 3_600],
+    ]);
+    const count = Number(n);
+    if (!Number.isSafeInteger(count)) return false;
+    if (count <= CALENDAR_POLLS_PER_HOUR) return true;
+    await redisPipeline([["ZREM", key, member]]).catch(() => {});
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "paced" | "none" | "gone" };
 
@@ -651,15 +694,20 @@ export async function forgetStoreCalendar(statsId: string | null | undefined): P
   await redisPipeline([["DEL", cfgKey(statsId), outKey(statsId), ...calendarKeys(parsed)]]);
 }
 
-export async function bookedCalendarFeed(owner: { statsId: string; handle: string }, make: () => Promise<string>, now = Date.now()): Promise<FeedAnswer> {
-  if (!(await takeCounted(paceKey(owner.statsId, Math.floor(now / 3_600_000)), CALENDAR_POLLS_PER_HOUR, 3_600))) return { state: "paced" };
+export async function bookedCalendarFeed(owner: { statsId: string; handle: string; callsId?: string | null }, make: () => Promise<string>, now = Date.now()): Promise<FeedAnswer> {
+  if (!(await withinPace(owner.statsId, now))) return { state: "paced" };
+  const day = new Date(now).toISOString().slice(0, 10);
   let raw: unknown[];
   try {
-    raw = await redisPipeline([["MGET", outKey(owner.statsId), bookingsChangedKey(owner.handle), storeHandleKey(owner.handle)]]);
+    // The changed mark and the day's credits are kept by the store's calls id (lib/call-records.ts), which a
+    // rename does not change; settings written before they named it have neither, and the refresh stands.
+    const marks = owner.callsId ? [bookingsChangedKey(owner.callsId), bookingCreditsKey(owner.callsId, day)] : ["", ""];
+    raw = await redisPipeline([["MGET", outKey(owner.statsId), storeHandleKey(owner.handle), ...marks.filter(Boolean)]]);
   } catch {
     return { state: "none" };
   }
-  const [copyRaw, changedRaw, handleRaw] = Array.isArray(raw[0]) ? (raw[0] as unknown[]) : [null, null, null];
+  const values = Array.isArray(raw[0]) ? (raw[0] as unknown[]) : [];
+  const [copyRaw, handleRaw, changedRaw, creditsRaw] = [values[0] ?? null, values[1] ?? null, values[2] ?? null, values[3] ?? null];
   // The store was deleted or closed (its handle let go): what it kept, which names its buyers, goes now.
   if (!handleLeadsToStore(handleRaw)) {
     await redisPipeline([["DEL", outKey(owner.statsId)]]).catch(() => {});
@@ -668,7 +716,7 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   const ref = handleRaw as string;
   const kept = parseKept(copyRaw);
   // Already found to lead to another store: 404 at once, nothing made, nothing of the old store's shown.
-  if (kept.gone === ref) return { state: "gone" };
+  if (kept.gone) return { state: "gone" };
   // A copy is answered only while the handle leads to the store that made it; otherwise the file is made again,
   // and `make` reads the store behind the handle and compares its id with the feed's (FeedGone when it is another store).
   // Both what the handle led to and the feed's own store id must match. A copy without them (none was ever kept
@@ -676,19 +724,23 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // moveAccount: the handle then leads to the new address) is set aside once and made again.
   const copy = kept.copy && kept.copy.ref === ref && kept.copy.sid === owner.statsId ? kept.copy : null;
   const changed = Number(changedRaw) || 0;
-  const fresh = copy !== null && changed <= copy.at && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
+  const changedSince = copy !== null && changed > copy.at;
+  const fresh = copy !== null && !changedSince && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
   if (fresh) return { state: "copy", ics: copy.ics };
-  const day = new Date(now).toISOString().slice(0, 10);
-  if (!(await takeCounted(buildsKey(owner.statsId, day), CALENDAR_BUILDS_PER_DAY, 2 * 86_400))) {
-    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
-  }
+  // A booking made, moved or let go since the copy: one of the day's credits, which bookings give, up to
+  // CALENDAR_CREDITS_PER_DAY. Otherwise (or with none left) one of the day's own CALENDAR_BUILDS_PER_DAY.
+  const credits = Math.min(Number(creditsRaw) || 0, CALENDAR_CREDITS_PER_DAY);
+  const paid =
+    (changedSince && credits > 0 && (await takeCounted(creditsUsedKey(owner.statsId, day), credits, 2 * 86_400)))
+    || (await takeCounted(buildsKey(owner.statsId, day), CALENDAR_BUILDS_PER_DAY, 2 * 86_400));
+  if (!paid) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
   let ics: string;
   try {
     ics = await make();
   } catch (error) {
     // The handle leads to another store now: the old copy goes, a tombstone answers 404 from now on.
     if (error instanceof FeedGone) {
-      await redisPipeline([["SET", outKey(owner.statsId), JSON.stringify({ gone: ref }), "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
+      await redisPipeline([["SET", outKey(owner.statsId), JSON.stringify({ gone: true }), "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
       return { state: "gone" };
     }
     // Stripe did not answer: the copy stands.

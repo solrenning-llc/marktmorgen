@@ -87,7 +87,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:ref:c:", "nl:ref:code:", "nl:ref:cursor", "nl:ref:list:", "nl:ref:mine:", "nl:ref:mycode:",
   "nl:ref:owed", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:",
   "nl:rev:ask:due", "nl:rev:ask:sent:", "nl:rev:link:", "nl:rev:lock:", "nl:rev:refunds:seen:",
-  "nl:rev:refunds:since:", "nl:rev:stores", "nl:rl:", "nl:rl:address:", "nl:rl:aff:addr:",
+  "nl:reading:", "nl:reading:day:", "nl:rev:refunds:since:", "nl:rev:stores", "nl:rl:", "nl:rl:address:", "nl:rl:aff:addr:",
   "nl:rl:aff:click:", "nl:rl:aff:ip:", "nl:rl:cm:addr:", "nl:rl:cm:ev:", "nl:rl:cm:ip:", "nl:rl:creators:",
   "nl:rl:export:", "nl:rl:free:addr:", "nl:rl:free:ip:", "nl:rl:hooks:test:", "nl:rl:licence:",
   "nl:rl:manage:addr:", "nl:rl:manage:ip:", "nl:rl:orders:addr:", "nl:rl:orders:ip:", "nl:rl:phone:quiet:",
@@ -205,6 +205,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:cal:lock:": T("nl:cal:cfg:", 1), "nl:cal:out:": E, "nl:cal:tok:": T("nl:cal:cfg:"),
   // The private feed's counts (C4-4), by the store's id, go with it, as its copy does; the changed mark, by its handle, expires.
   "nl:cal:builds:": E, "nl:cal:pace:": E, "nl:cal:chg:": X(40),
+  // A store's readings of its numbers (lib/store-readings.ts, C4-4): by its id, gone with it.
+  "nl:reading:": E, "nl:reading:day:": E,
   "nl:call:busy:": E, "nl:call:confirmed:": X(430), "nl:call:creator-reminded:": E, "nl:call:lock:": E,
   "nl:call:moved:": X(200), "nl:call:reminded:": X(430), "nl:call:remindq": I, "nl:call:room:": E,
   "nl:callteam:": E, "nl:callteam:rr:": E,

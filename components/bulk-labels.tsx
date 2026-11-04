@@ -5,7 +5,9 @@ import { BULK_REFUSALS, MAX_BULK_ADDRESSES, MAX_BULK_TEXT_BYTES, type BulkChange
 import { MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 
 /** `words`: what it changed and, when any address was left out, how many and why. */
-type Done = { label: string; change: BulkChange; changed: string[]; removed: (Removed & { email: string; forms?: number })[]; words: string };
+type Taken = Removed & { email: string; forms?: number; cleaned?: true };
+/** `taken`: the form each contact lost (a removal) or had replaced (an add), sent back by the undo. */
+type Done = { label: string; change: BulkChange; changed: string[]; taken: Taken[]; words: string };
 /** The field a refusal is about, read from the route's error code (BULK_REFUSALS). */
 type Field = "text" | "label" | "change";
 /** Where focus goes once the screen has changed, so it is never left on something that went away. */
@@ -111,8 +113,9 @@ export function BulkLabels() {
     const answer = await send({ action: "apply", label, change, text });
     if (!answer) return;
     const changed = Array.isArray(answer.changed) ? (answer.changed as string[]) : [];
-    const summary = applySummary(counted(answer.asked), { changed: changed.length, already: counted(answer.already), full: counted(answer.full), notOnList: counted(answer.notOnList), noRoom: counted(answer.noRoom) }, change);
-    setDone({ label: String(answer.label), change, changed, removed: Array.isArray(answer.removed) ? (answer.removed as Done["removed"]) : [], words: summary.words });
+    const taken = (Array.isArray(change === "remove" ? answer.removed : answer.replaced) ? (change === "remove" ? answer.removed : answer.replaced) : []) as Taken[];
+    const summary = applySummary(counted(answer.asked), { changed: changed.length, already: counted(answer.already), full: counted(answer.full), notOnList: counted(answer.notOnList), noRoom: counted(answer.noRoom), failed: counted(answer.failed), replaced: change === "add" ? taken.length : 0 }, change, String(answer.label));
+    setDone({ label: String(answer.label), change, changed, taken, words: summary.words });
     setNote("");
     setReview(null);
     setLive(summary.short);
@@ -122,12 +125,14 @@ export function BulkLabels() {
   async function undo() {
     if (busy || !done) return;
     const undoing = opposite(done.change);
-    // An undo of a removal sends only what each contact lost (its address is in it); of an add, only the addresses.
-    const answer = await send(done.change === "remove" ? { action: "apply", label: done.label, change: undoing, restore: done.removed } : { action: "apply", label: done.label, change: undoing, emails: done.changed });
+    // Each contact sent once: with the form it had when there is one (its address is in it), otherwise by its address alone.
+    const withForm = new Set(done.taken.map((entry) => entry.email));
+    const answer = await send({ action: "apply", label: done.label, change: undoing, emails: done.changed.filter((email) => !withForm.has(email)), restore: done.taken });
     if (!answer) return;
     const back = new Set(Array.isArray(answer.changed) ? (answer.changed as string[]) : []);
-    const merged = done.removed.filter((entry) => (entry.forms ?? 1) > 1 && back.has(entry.email)).length;
-    const summary = undoSummary(done.changed.length, { changed: back.size, already: counted(answer.already), full: counted(answer.full), notOnList: counted(answer.notOnList), noRoom: counted(answer.noRoom) }, undoing, merged);
+    const merged = done.taken.filter((entry) => (entry.forms ?? 1) > 1 && back.has(entry.email)).length;
+    const cleaned = done.taken.filter((entry) => entry.cleaned && back.has(entry.email)).length;
+    const summary = undoSummary(done.changed.length, { changed: back.size, already: counted(answer.already), full: counted(answer.full), notOnList: counted(answer.notOnList), noRoom: counted(answer.noRoom), failed: counted(answer.failed) }, undoing, { merged, cleaned });
     // Every reason kept on the screen; one short sentence said, in the live line.
     setNote(summary.words);
     setLive(summary.short);
@@ -163,7 +168,7 @@ export function BulkLabels() {
           </label>
           <input id="bulk-label" className="field mt-1" value={label} onChange={(event) => edit(setLabel, "label")(event.target.value)} aria-describedby={describedBy("bulk-label-hint", "label")} aria-invalid={errorField === "label" || undefined} />
           <span id="bulk-label-hint" className="mt-1 block text-xs text-ink-soft">
-            {`Up to ${MAX_TAG_LENGTH} characters; an emoji counts as 2. Example: Workshop May`}
+            {`Up to ${MAX_TAG_LENGTH} characters; some emoji count as 2 or more. Used: ${cleanLabel(label).length} of ${MAX_TAG_LENGTH}. Example: Workshop May`}
           </span>
           <span id="bulk-label-error" className="field-error mt-1 block" role="alert">
             {fieldError("label")}
@@ -202,6 +207,7 @@ export function BulkLabels() {
             </h2>
             <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink">
               <li>{`${count(review.changes, "contact", "contacts")} will ${change === "add" ? "get" : "lose"} the label “${cleanLabel(label)}”.`}</li>
+              {change === "add" && review.replaced ? <li>{`Of those, ${count(review.replaced, "contact has", "contacts have")} the label written another way, with hidden characters or wide letters: it will be written as “${cleanLabel(label)}” so sending and automations find it.`}</li> : null}
               {review.already ? <li>{`${count(review.already, "contact", "contacts")} ${change === "add" ? "already have it" : "don't have it"}: left as they are.`}</li> : null}
               {review.full ? <li>{`${count(review.full, "contact has", "contacts have")} ${MAX_CONTACT_TAGS} labels already, the most a contact can have: left as they are.`}</li> : null}
               {review.notOnList ? <li>{`${count(review.notOnList, "address is", "addresses are")} not on your list: nothing is added for them.`}</li> : null}

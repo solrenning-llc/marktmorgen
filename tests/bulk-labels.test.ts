@@ -20,12 +20,13 @@ import { StoreFullError } from "@/lib/store-full";
 import { leadsKey, parseContact, upsertContact } from "@/lib/contacts";
 import { redisPipeline } from "@/lib/redis";
 import { enroll, saveFlow } from "@/lib/flows";
+import { sameLabel } from "@/lib/flow-rules";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setMailSettings, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
-type Reply = { ok?: boolean; error?: string; message?: string; review?: Record<string, number>; changed?: string[]; label?: string; change?: string; already?: number; full?: number; notOnList?: number; removed?: { email: string; label: string; at: number; forms?: number }[]; asked?: number; noRoom?: number };
+type Reply = { ok?: boolean; error?: string; message?: string; review?: Record<string, number>; changed?: string[]; label?: string; change?: string; already?: number; full?: number; notOnList?: number; removed?: { email: string; label: string; at: number; forms?: number }[]; asked?: number; noRoom?: number; failed?: number; replaced?: { email: string; label: string; at: number; forms?: number; cleaned?: true }[] };
 
 async function main(): Promise<void> {
   part("The rules");
@@ -78,7 +79,7 @@ async function main(): Promise<void> {
   const pasted = "ana@example.com\nben@example.com\ncy@example.com\nnobody@example.com\nnope@";
 
   const review = await post({ action: "review", label: "Workshop May", change: "add", text: pasted });
-  is("the review says what it would do", review.body.review, { changes: 2, already: 1, notOnList: 1, full: 0, skipped: 1 });
+  is("the review says what it would do", review.body.review, { changes: 2, already: 1, notOnList: 1, full: 0, skipped: 1, replaced: 0 });
   is("and writes nothing", JSON.stringify(await redisPipeline([["HGETALL", leadsKey(list)]])), before);
 
   // Every workflow record (lib/flows.ts keeps runs, steps and held sends under nl:wf:): a run started would write one.
@@ -141,8 +142,17 @@ async function main(): Promise<void> {
   const casArgs: number[] = [];
   let beforeWrite: (() => Promise<unknown>) | null = null;
   let roomAnswers: number[] | null = null;
+  // From the `failFromEval`-th write on, every call to the list fails, as when the database goes away.
+  let failFromEval = 0;
+  let broken = false;
+  let casSeen = 0;
   redis.pipeline = async (commands: (string | number)[][]) => {
     const [first] = commands;
+    if (commands.length === 1 && first[0] === "EVAL" && String(first[1]).includes("redis.sha1hex")) {
+      casSeen += 1;
+      if (failFromEval && !broken && casSeen >= failFromEval) broken = true;
+    }
+    if (broken && commands.some((command) => command.includes(leadsKey(list)))) throw new Error("injected: the database went away");
     if (commands.length === 1 && first[0] === "EVAL" && String(first[1]).includes("redis.sha1hex")) {
       casArgs.push(first.length - 4);
       if (beforeWrite) {
@@ -166,24 +176,37 @@ async function main(): Promise<void> {
   const thousand = Array.from({ length: MAX_BULK_ADDRESSES }, (_, i) => `${String(i).padStart(4, "0")}${"a".repeat(254 - 4 - "@example.com".length)}@example.com`);
   is("1,000 of the longest addresses fit in the text", jsonBytes(thousand.join("\n")) <= MAX_BULK_TEXT_BYTES && thousand.every((email) => email.length === 254), true);
 
-  // 2 and 8. Undoing a removal of 1,000 of the longest addresses, each label at its longest.
+  // 2 and 8. Undoing a removal of 1,000 of the longest addresses of any script, each label of the longest kind.
+  // The stand-in (lib/redis-memory.ts, reserved by Codex, #1502) does not model the CAS_HSET script yet, so every
+  // write here runs casWrite's fallback (HMGET, then HSET); one atomic EVAL per batch is held by the EVALs sent.
+  const wide = Array.from({ length: MAX_BULK_ADDRESSES }, (_, i) => `${String(i).padStart(4, "0")}${"日".repeat(254 - 4 - "@example.com".length)}@example.com`);
+  is("1,000 of the longest addresses of any script fit in the text", [wide.every((email) => email.length === 254), jsonBytes(wide.join("\n")) <= MAX_BULK_TEXT_BYTES, readBulk({ change: "add", label: "a", text: wide.join("\n") }).ok], [true, true, true]);
+  is("an address JSON would write as \\u (a control character) is skipped, never sent", readBulk({ change: "add", label: "a", text: "a\u0001b@example.com ann@example.com" }), { ok: true, ask: { label: "a", change: "add", emails: ["ann@example.com"], skipped: 1 } });
+  const cjkLabel = "日本".repeat(20);
   const emojiLabel = "😀".repeat(20);
-  const controlLabel = "\u0001".repeat(39) + "V";
-  await redisPipeline([["HSET", leadsKey(list), ...thousand.flatMap((email) => [email, contact(["a", emojiLabel, controlLabel])])]]);
-  for (const [name, asked] of [["an emoji label (4 bytes each)", emojiLabel], ["a label written with control characters (6 bytes each as sent)", "V"]] as const) {
+  await redisPipeline([["HSET", leadsKey(list), ...wide.flatMap((email) => [email, contact(["a", cjkLabel, emojiLabel])])]]);
+  const undoSizes: number[] = [];
+  for (const [name, asked] of [["40 characters of 3 bytes", cjkLabel], ["20 emoji", emojiLabel]] as const) {
     casArgs.length = 0;
-    const off = await post({ action: "apply", label: asked, change: "remove", text: thousand.join("\n") });
-    is(`removed from all 1,000: ${name}, written ${BULK_WRITE_BATCH} at a time`, [off.status, off.body.changed?.length, casArgs.length, casArgs.every((n) => n <= BULK_WRITE_BATCH * 3)], [200, 1000, MAX_BULK_ADDRESSES / BULK_WRITE_BATCH, true]);
-    const undoBody = { action: "apply", label: off.body.label, change: "add", restore: off.body.removed };
-    is(`its undo sends only what each lost, and fits (${jsonBytes(undoBody).toLocaleString("en-US")} bytes)`, [jsonBytes(undoBody) <= MAX_BULK_BODY_BYTES, "emails" in undoBody], [true, false]);
+    const off = await post({ action: "apply", label: asked, change: "remove", text: wide.join("\n") });
+    is(`removed from all 1,000 (a label of ${name}), written ${BULK_WRITE_BATCH} at a time`, [off.status, off.body.changed?.length, casArgs.length, casArgs.every((n) => n <= BULK_WRITE_BATCH * 3)], [200, 1000, MAX_BULK_ADDRESSES / BULK_WRITE_BATCH, true]);
+    const withForm = new Set(off.body.removed!.map((entry) => entry.email));
+    const undoBody = { action: "apply", label: off.body.label, change: "add", emails: off.body.changed!.filter((email) => !withForm.has(email)), restore: off.body.removed };
+    undoSizes.push(jsonBytes(undoBody));
+    is(`its undo sends each contact once, with what it lost, and fits (${jsonBytes(undoBody).toLocaleString("en-US")} bytes)`, [undoBody.emails.length, jsonBytes(undoBody) <= MAX_BULK_BODY_BYTES], [0, true]);
     const back = await post(undoBody);
-    is(`and every one gets its own label back: ${name}`, [back.status, back.body.changed?.length, back.body.asked], [200, 1000, 1000]);
+    is(`and every one gets its own label back (${name})`, [back.status, back.body.changed?.length, back.body.asked], [200, 1000, 1000]);
   }
-  is("each kept exactly as it was written, in its place", [await tagsOf(thousand[0]), await tagsOf(thousand[999])], [["a", emojiLabel, controlLabel], ["a", emojiLabel, controlLabel]]);
-  // The worst any undo can be: 1,000 entries of the longest address and label, each character taking the most JSON bytes.
-  const worstUndo = { action: "apply", label: "\u0001".repeat(40), change: "add", restore: Array.from({ length: MAX_BULK_ADDRESSES }, () => ({ email: "\u0001".repeat(254), label: "\u0001".repeat(40), at: 9, forms: 10 })) };
-  const worstAddUndo = { action: "apply", label: "\u0001".repeat(40), change: "remove", emails: Array.from({ length: MAX_BULK_ADDRESSES }, () => "\u0001".repeat(254)) };
-  is("the route's cap is worked out from the limits: the worst undo of either kind fits", [jsonBytes(worstUndo) <= MAX_BULK_BODY_BYTES, jsonBytes(worstAddUndo) <= MAX_BULK_BODY_BYTES, readFileSync("app/api/store/contact-labels/route.ts", "utf8").includes('guardStoreWrite(request, "send", MAX_BULK_BODY_BYTES)')], [true, true, true]);
+  is("each label back as it was written, in its place", [await tagsOf(wide[0]), await tagsOf(wide[999])], [["a", cjkLabel, emojiLabel], ["a", cjkLabel, emojiLabel]]);
+  is("(the first undo is larger than the 450,000 bytes the route used to read)", undoSizes[0] > 450_000, true);
+  // The worst any undo can be: 1,000 entries of the longest address and label, every character 3 bytes.
+  const worstUndo = { action: "apply", label: "日".repeat(40), change: "add", emails: [], restore: Array.from({ length: MAX_BULK_ADDRESSES }, () => ({ email: "日".repeat(254), label: "日".repeat(40), at: 9, forms: 10, cleaned: true })) };
+  const worstAddUndo = { action: "apply", label: "日".repeat(40), change: "remove", emails: Array.from({ length: MAX_BULK_ADDRESSES }, () => "日".repeat(254)), restore: [] };
+  is(
+    "the route's cap is worked out from the limits: the worst undo and the longest text fit, and no more than that",
+    [jsonBytes(worstUndo) <= MAX_BULK_BODY_BYTES, jsonBytes(worstAddUndo) <= MAX_BULK_BODY_BYTES, MAX_BULK_BODY_BYTES - jsonBytes(worstUndo) < 1_000, readFileSync("app/api/store/contact-labels/route.ts", "utf8").includes('guardStoreWrite(request, "send", MAX_BULK_BODY_BYTES)')],
+    [true, true, true, true],
+  );
 
   // 3. A contact deleted between the read and the write is said to be no longer on the list.
   await put("m1@example.com", []);
@@ -197,31 +220,61 @@ async function main(): Promise<void> {
   const racedUndo = await post({ action: "apply", label: "Race", change: "remove", emails: ["m1@example.com", "m2@example.com"] });
   is("the same in an undo", undoSummary(2, { changed: racedUndo.body.changed!.length, already: racedUndo.body.already!, full: racedUndo.body.full!, notOnList: racedUndo.body.notOnList! }, "remove").words, "Undone for 1 of 2 contacts. 1 contact did not go back: 1 contact is no longer on your list.");
 
-  // 4. Labels that show nothing, and look-alikes, are one label.
+  // 4. Labels that show nothing, and look-alikes, are one label, and the rest of the studio finds them.
   const labelOf = (typed: string) => {
     const read = readBulk({ change: "add", label: typed, text: "ana@example.com" });
     return read.ok ? read.ask.label : read.error;
   };
-  is("a label of nothing that shows is refused", ["​", "‮", "⁠​", "⁦⁩", "ㅤ", " ­ "].map(labelOf), ["label", "label", "label", "label", "label", "label"]);
-  is("what shows nothing is taken out; letters are composed", ["VIP​", "⁦VIP⁩", "V⁠IP", "Café"].map(labelOf), ["VIP", "VIP", "VIP", "Café"]);
-  is("joiners that make one emoji or one word are kept", ["👨‍👩‍👧", "می‌خواهم"].map(labelOf), ["👨‍👩‍👧", "می‌خواهم"]);
-  is("compared whatever the case, width, composition or hidden characters", [same("VIP", "ＶＩＰ"), same("VIP", "vip​"), same("⁦VIP⁩", "Vip"), same("Café", "CAFÉ"), same("VIP", "VIPS"), labelKey("​")], [true, true, true, true, false, ""]);
+  is("a label of nothing that shows is refused", ["\u200B", "\u202E", "\u2060\u200B", "\u2066\u2069", "\u3164", " \u00AD ", "\u180E", "\u2800"].map(labelOf), Array(8).fill("label"));
+  is("what shows nothing is taken out; letters are composed; fullwidth Latin is made plain", ["VIP\u200B", "\u2066VIP\u2069", "V\u2060IP", "Cafe\u0301", "ＶＩＰ", "VIP\u{E0041}"].map(labelOf), ["VIP", "VIP", "VIP", "Café", "VIP", "VIP"]);
+  const england = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+  const scotland = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
+  is("joiners and flag tags that make one emoji or one word are kept", ["👨\u200D👩\u200D👧", "می\u200Cخواهم", "അവന\u0D4D\u200D", england, scotland].map(labelOf), ["👨\u200D👩\u200D👧", "می\u200Cخواهم", "അവന\u0D4D\u200D", england, scotland]);
+  is("England and Scotland stay two flags, not one black flag", [same(england, scotland), same(england, "\u{1F3F4}"), labelKey(england) === labelKey(england)], [false, false, true]);
+  is("format characters that show or shape text are kept, and compatibility ideographs as typed", ["\u0600١٢", "ᠨ\u180Eᠠ", "\uF900"].map(labelOf), ["\u0600١٢", "ᠨ\u180Eᠠ", "\uF900"]);
+  is("compared whatever the case, width, composition or hidden characters", [same("VIP", "ＶＩＰ"), same("VIP", "vip\u200B"), same("\u2066VIP\u2069", "Vip"), same("Cafe\u0301", "CAFÉ"), same("ｶﾌｪ", "カフェ"), same("VIP", "VIPS"), labelKey("\u200B")], [true, true, true, true, true, false, ""]);
+  is("only width is folded: superscripts, circled and Roman numerals, subscripts stay apart", [same("x²", "x2"), same("①", "1"), same("Ⅳ", "IV"), same("H₂O", "H2O")], [false, false, false, false]);
   await put("look@example.com", ["VIP"]);
   const lookAlikes = await post({ action: "apply", label: "ＶＩＰ", change: "add", text: "look@example.com" });
-  const hidden = await post({ action: "apply", label: "VIP​", change: "add", text: "look@example.com" });
+  const hidden = await post({ action: "apply", label: "VIP\u200B", change: "add", text: "look@example.com" });
   is("a look-alike is not added beside the label", [lookAlikes.body.already, hidden.body.already, await tagsOf("look@example.com")], [1, 1, ["VIP"]]);
-  await put("forms@example.com", ["VIP", "b", "VIP​", "ＶＩＰ"]);
+  // A contact that holds the label only in a look-alike form (an import wrote it): sending and automations compare by case only.
+  await put("kana@example.com", ["ｶﾌｪ", "x"]);
+  await put("hide@example.com", ["b", "VIP\u200B"]);
+  const kanaReview = await post({ action: "review", label: "カフェ", change: "add", text: "kana@example.com" });
+  is("the review says the look-alike will be written as the label", [kanaReview.body.review?.changes, kanaReview.body.review?.replaced, readFileSync("components/bulk-labels.tsx", "utf8").includes("it will be written as")], [1, 1, true]);
+  const kana = await post({ action: "apply", label: "カフェ", change: "add", text: "kana@example.com" });
+  is("adding replaces the look-alike with the label, where it stood, and answers what it replaced", [await tagsOf("kana@example.com"), kana.body.replaced, (await tagsOf("kana@example.com"))!.some((tag) => sameLabel(tag, "カフェ"))], [["カフェ", "x"], [{ email: "kana@example.com", label: "ｶﾌｪ", at: 0 }], true]);
+  is("and says so", applySummary(1, { changed: 1, already: 0, full: 0, notOnList: 0, replaced: 1 }, "add", "カフェ").words, "Done: 1 contact changed. 1 contact had this label written another way, now written as “カフェ” so sending and automations find it.");
+  const kanaBack = await post({ action: "apply", label: kana.body.label, change: "remove", emails: [], restore: kana.body.replaced });
+  is("its undo puts the look-alike back exactly", [kanaBack.body.changed, await tagsOf("kana@example.com")], [["kana@example.com"], ["ｶﾌｪ", "x"]]);
+  const hide = await post({ action: "apply", label: "VIP", change: "add", text: "hide@example.com" });
+  is("a form with a hidden character is replaced too, and found by the send filter's comparison", [await tagsOf("hide@example.com"), hide.body.replaced, (await tagsOf("hide@example.com"))!.some((tag) => sameLabel(tag, "VIP"))], [["b", "VIP"], [{ email: "hide@example.com", label: "VIP", at: 1, cleaned: true }], true]);
+  await put("forms@example.com", ["VIP", "b", "VIP\u200B", "ＶＩＰ"]);
   const allForms = await post({ action: "apply", label: "vip", change: "remove", text: "forms@example.com" });
   is("taking it off takes every form of it, and says how many it held", [await tagsOf("forms@example.com"), allForms.body.removed], [["b"], [{ email: "forms@example.com", label: "VIP", at: 0, forms: 3 }]]);
-  const formsBack = await post({ action: "apply", label: allForms.body.label, change: "add", restore: allForms.body.removed });
+  const formsBack = await post({ action: "apply", label: allForms.body.label, change: "add", emails: [], restore: allForms.body.removed });
   is("its undo puts the first form back, where it stood", [formsBack.body.changed, await tagsOf("forms@example.com")], [["forms@example.com"], ["VIP", "b"]]);
-  is("and says so, not that every contact is as it was", undoSummary(1, { changed: 1, already: 0, full: 0, notOnList: 0 }, "add", 1), { allBack: false, short: "Undone. Every contact has the label back.", words: "Undone. Every contact has the label back. 1 contact had this label written in more than one way; it went back on once, as first written." });
+  is(
+    "and says so, not that every contact is as it was",
+    undoSummary(1, { changed: 1, already: 0, full: 0, notOnList: 0 }, "add", { merged: 1 }),
+    { allBack: false, short: "Undone. Every contact has the label back as it was shown.", words: "Undone. Every contact has the label back as it was shown. 1 contact had this label in more than one form. It got the label back once, in the first form." },
+  );
+  await post({ action: "apply", label: "VIP", change: "remove", text: "forms@example.com" });
+  await post({ action: "apply", label: "VIP", change: "add", emails: [], restore: [{ email: "forms@example.com", label: "VIP\u200B\u202E", at: 0 }] });
+  is("what an undo sends back is cleaned before it is written", await tagsOf("forms@example.com"), ["VIP", "b"]);
+  await put("ctl@example.com", ["a", "\u0001".repeat(39) + "V"]);
+  const ctl = await post({ action: "apply", label: "V", change: "remove", text: "ctl@example.com" });
+  is("a form with control characters is answered cleaned, and marked so", ctl.body.removed, [{ email: "ctl@example.com", label: "V", at: 1, cleaned: true }]);
+  const ctlBack = await post({ action: "apply", label: "V", change: "add", emails: [], restore: ctl.body.removed });
+  is("its undo puts back the form as it was shown, and says so", [await tagsOf("ctl@example.com"), undoSummary(1, { changed: ctlBack.body.changed!.length, already: 0, full: 0, notOnList: 0 }, "add", { cleaned: 1 }).words], [["a", "V"], "Undone. Every contact has the label back as it was shown. 1 contact got the label back as it looks, without the hidden differences it had."]);
 
-  // 5. The 40 the screen says is counted after spaces are collapsed and what shows nothing is taken out.
-  is("counted after collapsing spaces", [labelOf("a  " + "b".repeat(38)), labelOf("x".repeat(40) + "​"), labelOf("x".repeat(41))], ["a " + "b".repeat(38), "x".repeat(40), "label"]);
-  is("an emoji counts as 2, as the screen says", [labelOf("😀".repeat(20)), labelOf("😀".repeat(21)), BULK_REFUSALS.label.includes("An emoji counts as 2."), readFileSync("components/bulk-labels.tsx", "utf8").includes("an emoji counts as 2")], ["😀".repeat(20), "label", true, true]);
+  // 5. The 40 the screen says is counted after spaces are collapsed and what shows nothing is taken out, as the screen counts.
+  is("counted after collapsing spaces", [labelOf("a  " + "b".repeat(38)), labelOf("x".repeat(40) + "\u200B"), labelOf("x".repeat(41))], ["a " + "b".repeat(38), "x".repeat(40), "label"]);
+  is("some emoji count as 2 or more, as the screen says", [labelOf("😀".repeat(20)), labelOf("😀".repeat(21)), labelOf("👍\u{1F3FD}".repeat(10)), labelOf("👍\u{1F3FD}".repeat(11)), BULK_REFUSALS.label.includes("Some emoji count as 2 or more."), readFileSync("components/bulk-labels.tsx", "utf8").includes("some emoji count as 2 or more")], ["😀".repeat(20), "label", "👍\u{1F3FD}".repeat(10), "label", true, true]);
+  is("the screen shows how much of the 40 is used, counted the same way", readFileSync("components/bulk-labels.tsx", "utf8").includes("Used: ${cleanLabel(label).length} of ${MAX_TAG_LENGTH}."), true);
   is("the field no longer cuts what is pasted into it", /id="bulk-label"[^\n]*maxLength/.test(readFileSync("components/bulk-labels.tsx", "utf8")), false);
-  is("the screen shows the label as it will be written", [cleanLabel("  Workshop ​ May "), readFileSync("components/bulk-labels.tsx", "utf8").includes("the label “${cleanLabel(label)}”")], ["Workshop May", true]);
+  is("the screen shows the label as it will be written", [cleanLabel("  Workshop \u200B May "), readFileSync("components/bulk-labels.tsx", "utf8").includes("the label “${cleanLabel(label)}”")], ["Workshop May", true]);
 
   // 7. After applying, the screen says how many were left out and why.
   is(
@@ -240,6 +293,29 @@ async function main(): Promise<void> {
     ],
   );
   is("the screen shows it, and says only the short sentence", ["<span id=\"bulk-done-line\">{done.words}</span>", "setLive(summary.short);", "words: summary.words"].map((piece) => readFileSync("components/bulk-labels.tsx", "utf8").includes(piece)), [true, true, true]);
+
+  // H1. Something going wrong after some batches were written: those are answered, the rest counted, the undo kept.
+  const failEmails = Array.from({ length: MAX_BULK_ADDRESSES }, (_, i) => `fail${i}@example.com`);
+  await redisPipeline([["HSET", leadsKey(list), ...failEmails.flatMap((email) => [email, contact([])])]]);
+  casSeen = 0;
+  failFromEval = 3;
+  const broke = await post({ action: "apply", label: "Broke", change: "add", text: failEmails.join("\n") });
+  failFromEval = 0;
+  broken = false;
+  is("an error on the third write answers the two batches written, with the rest counted as failed", [broke.status, broke.body.changed?.length, broke.body.failed, broke.body.asked, await tagsOf(failEmails[0]), await tagsOf(failEmails[999])], [200, 2 * BULK_WRITE_BATCH, MAX_BULK_ADDRESSES - 2 * BULK_WRITE_BATCH, MAX_BULK_ADDRESSES, ["Broke"], []]);
+  is(
+    "and says so honestly",
+    applySummary(broke.body.asked!, { changed: broke.body.changed!.length, already: broke.body.already!, full: broke.body.full!, notOnList: broke.body.notOnList!, failed: broke.body.failed }, "add").words,
+    "Done: 400 contacts changed. 600 were left out: something went wrong with 600 contacts, so they may not have changed; review again to see.",
+  );
+  const brokeBack = await post({ action: "apply", label: "Broke", change: "remove", emails: broke.body.changed, restore: [] });
+  is("its undo takes back what was written", [brokeBack.body.changed?.length, await tagsOf(failEmails[0])], [2 * BULK_WRITE_BATCH, []]);
+  casSeen = 0;
+  failFromEval = 1;
+  const brokeAll = await post({ action: "apply", label: "Broke", change: "add", text: failEmails.join("\n") });
+  failFromEval = 0;
+  broken = false;
+  is("an error before anything was written is refused, as before", [brokeAll.status, brokeAll.body.error, await tagsOf(failEmails[0])], [500, "server_error", []]);
 
   // 8. A data room that fills part way: what was written is answered, so it can be undone.
   const batchEmails = Array.from({ length: BULK_WRITE_BATCH + 50 }, (_, i) => `room${i}@example.com`);
@@ -284,7 +360,7 @@ async function main(): Promise<void> {
   is("a full store is said in plain words (3.1.5)", [screen.includes("data room"), screen.includes("Your store has no room left for more records. Delete some you no longer need first.")], [false, true]);
   is("the review lists how many, and that nothing is sent", screen.includes("will ${change === \"add\" ? \"get\" : \"lose\"} the label") && screen.includes("No automation starts and no email is sent. You can undo this right after."), true);
   is("anything typed after a review asks for a new one", screen.includes("setReview(null);"), true);
-  is("the undo sends back exactly what changed, with each label as it was", screen.includes("change: undoing, emails: done.changed") && screen.includes("restore: done.removed") && screen.includes("const undoing = opposite(done.change);"), true);
+  is("the undo sends back exactly what changed, with each label as it was", screen.includes("change: undoing, emails: done.changed.filter((email) => !withForm.has(email)), restore: done.taken") && screen.includes("const withForm = new Set(done.taken.map((entry) => entry.email));") && screen.includes("const undoing = opposite(done.change);"), true);
   is("and says what the route answered, kept on the screen", screen.includes("undoSummary(done.changed.length,") && screen.includes("setNote(summary.words);") && !screen.includes('toast("Undone. Every contact is as it was.")'), true);
   is("the server code never reaches the browser", !screen.includes('from "@/lib/bulk-labels"') && !readFileSync("lib/bulk-label-rules.ts", "utf8").includes('from "@/lib/contacts"'), true);
   is("nothing here starts a workflow", !readFileSync("lib/bulk-labels.ts", "utf8").includes('from "@/lib/flows"') && !readFileSync("app/api/store/contact-labels/route.ts", "utf8").includes("enroll"), true);

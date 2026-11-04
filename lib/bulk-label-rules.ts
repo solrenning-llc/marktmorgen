@@ -8,14 +8,6 @@ import { MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 /** The most addresses one change takes. */
 export const MAX_BULK_ADDRESSES = 1_000;
 
-/**
- * The most pasted text one change takes, in bytes as it is sent (JSON, UTF-8):
- * 1,000 addresses of the longest kind fit with room. More is refused with a
- * sentence, never cut, since a cut can fall inside an address and make it
- * another one.
- */
-export const MAX_BULK_TEXT_BYTES = 400_000;
-
 /** How many contacts one atomic write takes: a change of 1,000 is written 200 at a time. */
 export const BULK_WRITE_BATCH = 200;
 
@@ -24,66 +16,123 @@ export const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.strin
 
 // The longest an address can be (lib/auth.ts MAX_EMAIL_LENGTH; kept here so the browser need not load auth).
 const MAX_ADDRESS_LENGTH = 254;
-// The most JSON bytes one UTF-16 unit of text can take: a control character or a lone surrogate, written \u0001.
-const JSON_BYTES_PER_UNIT = 6;
+// The most JSON bytes one UTF-16 unit takes in an address or a label this change sends: 3 (a character of
+// another script); control characters and lone surrogates, which JSON writes as 6 (\u0001), are never in
+// one (readBulk skips such an address, cleanLabel takes them out of a label).
+const JSON_BYTES_PER_UNIT = 3;
 const ADDRESS_JSON = MAX_ADDRESS_LENGTH * JSON_BYTES_PER_UNIT + 2;
+
+/**
+ * The most pasted text one change takes, in bytes as it is sent (JSON,
+ * UTF-8): 1,000 of the longest addresses of any script, one per line, fit.
+ * More is refused with a sentence, never cut, since a cut can fall inside an
+ * address and make it another one.
+ */
+export const MAX_BULK_TEXT_BYTES = MAX_BULK_ADDRESSES * ADDRESS_JSON + 2;
 const LABEL_JSON = MAX_TAG_LENGTH * JSON_BYTES_PER_UNIT + 2;
-// One entry an undo of a removal sends back: {"email":…,"label":…,"at":9,"forms":10}, and its comma.
-const RESTORE_ENTRY_JSON = ADDRESS_JSON + LABEL_JSON + '{"email":,"label":,"at":9,"forms":10},'.length;
-// Everything around the list: the action, the change and the label named.
+// One entry an undo sends back: {"email":…,"label":…,"at":9,"forms":10,"cleaned":true}, and its comma.
+const RESTORE_ENTRY_JSON = ADDRESS_JSON + LABEL_JSON + '{"email":,"label":,"at":9,"forms":10,"cleaned":true},'.length;
+// Everything around the lists: the action, the change and the label named.
 const ENVELOPE_JSON = LABEL_JSON + '{"action":"review","label":,"change":"remove","emails":[],"restore":[],"text":""}'.length;
 
 /**
  * The most bytes the route reads, worked out from the limits above: the
- * largest of the pasted text, an undo of an add (the addresses it changed) and
- * an undo of a removal (each address with the label it lost), all at their
- * longest. So an undo the screen was handed always fits.
+ * larger of the pasted text and an undo, whose 1,000 contacts at most are
+ * each either an address or an entry with the label it had (the screen never
+ * sends one twice), all at their longest. So an undo the screen was handed
+ * always fits.
  */
-export const MAX_BULK_BODY_BYTES = ENVELOPE_JSON + Math.max(MAX_BULK_TEXT_BYTES, MAX_BULK_ADDRESSES * (ADDRESS_JSON + 1), MAX_BULK_ADDRESSES * RESTORE_ENTRY_JSON);
+export const MAX_BULK_BODY_BYTES = ENVELOPE_JSON + Math.max(MAX_BULK_TEXT_BYTES, MAX_BULK_ADDRESSES * Math.max(ADDRESS_JSON + 1, RESTORE_ENTRY_JSON));
+
+/** An address this change can name: none with a character JSON has to escape as \u (a control character, a lone surrogate). */
+export const sendableAddress = (email: string) => !/[\p{Cc}\p{Cs}]/u.test(email);
 
 export type BulkChange = "add" | "remove";
 export type BulkRefusal = "label" | "none" | "many" | "long" | "change";
 
 /** What each refusal tells the creator, in plain words, with what to do. */
 export const BULK_REFUSALS: Record<BulkRefusal, string> = {
-  label: `Type the label, up to ${MAX_TAG_LENGTH} characters, with at least one letter, number or symbol. An emoji counts as 2.`,
+  label: `Type the label, up to ${MAX_TAG_LENGTH} characters, with at least one letter, number or symbol. Some emoji count as 2 or more.`,
   none: "Paste at least one email address.",
   many: `Paste up to ${MAX_BULK_ADDRESSES.toLocaleString("en-US")} addresses at a time.`,
   long: `Paste less text at a time, up to ${MAX_BULK_ADDRESSES.toLocaleString("en-US")} addresses. Nothing was cut or changed.`,
   change: "Choose whether to add the label or take it off.",
 };
 
-// Characters that show nothing: format characters (zero-width space, direction marks, word joiner), control characters and blank letters.
-const INVISIBLE = /[\p{Cf}\p{Cc}\u115F\u1160\u3164\uFFA0]/u;
-// Joiners that do show something between two visible characters of other scripts or emoji (an emoji family, a Persian word).
+/**
+ * Characters that show nothing and are taken out of a label: control
+ * characters, lone surrogates, the soft hyphen, the Arabic letter mark, blank
+ * letters (Hangul fillers), Khmer inherent vowels, zero-width space, joiners
+ * and direction marks, embeddings and isolates, invisible operators, the
+ * byte-order mark, interlinear annotation, musical format controls, the
+ * blank braille pattern and tag characters. Format characters that do show
+ * or shape text (the Arabic number signs, the Mongolian vowel separator) are
+ * not on it.
+ */
+const TAKEN_OUT = /[\p{Cc}\p{Cs}\u00AD\u061C\u115F\u1160\u17B4\u17B5\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\u2800\u3164\uFEFF\uFFA0\uFFF9-\uFFFB\u{1D173}-\u{1D17A}\u{E0001}\u{E0020}-\u{E007F}]/u;
 const JOINERS = new Set(["\u200C", "\u200D"]);
-const shown = (char: string | undefined) => !!char && char > "\u007F" && !/\s/u.test(char) && !INVISIBLE.test(char);
+const BLACK_FLAG = "\u{1F3F4}";
+const isTag = (char: string) => char >= "\u{E0020}" && char <= "\u{E007F}";
+// A character that shows, other than plain ASCII: what a joiner may follow (an emoji, a Malayalam chillu, a Persian word).
+const shownAfter = (char: string | undefined) => !!char && char > "\u007F" && !/\s/u.test(char) && !TAKEN_OUT.test(char);
+// CJK compatibility ideographs: NFC would turn each into its unified form, which is not how the creator wrote it.
+const COMPATIBILITY_IDEOGRAPHS = /([\uF900-\uFAFF\u{2F800}-\u{2FA1F}])/u;
+const composed = (text: string) =>
+  text
+    .split(COMPATIBILITY_IDEOGRAPHS)
+    .map((piece) => (COMPATIBILITY_IDEOGRAPHS.test(piece) ? piece : piece.normalize("NFC")))
+    .join("");
+
+// Fullwidth Latin letters, digits and punctuation, as an input method types them, written as the plain ones.
+const narrowLatin = (char: string) => (char >= "\uFF01" && char <= "\uFF5E" ? char.normalize("NFKC") : char);
 
 /**
- * A label as it is written: composed (NFC), spaces collapsed, with no
- * character that shows nothing, except a joiner between two that show. So
- * "VIP" with a zero-width space, or wrapped in direction marks, is "VIP".
+ * A label as it is written: composed (NFC, compatibility ideographs left as
+ * typed), fullwidth Latin made plain ("ＶＩＰ" is "VIP"), spaces collapsed, with no character that shows nothing (TAKEN_OUT),
+ * except a joiner after a character that shows (an emoji sequence, a
+ * Malayalam chillu) and the tag characters of a subdivision flag (England,
+ * Scotland, Wales). So "VIP" with a zero-width space, or wrapped in
+ * direction marks, is "VIP".
  */
 export function cleanLabel(typed: string): string {
-  const chars = Array.from(typed.normalize("NFC").replace(/\s+/gu, " "));
-  const kept = chars.filter((char, i) => !INVISIBLE.test(char) || (JOINERS.has(char) && shown(chars[i - 1]) && shown(chars[i + 1])));
+  const kept: string[] = [];
+  for (const char of Array.from(composed(typed.replace(/\s+/gu, " "))).map(narrowLatin)) {
+    const before = kept[kept.length - 1];
+    const keep =
+      !TAKEN_OUT.test(char) ||
+      (JOINERS.has(char) && shownAfter(before)) ||
+      (isTag(char) && !!before && (before === BLACK_FLAG || isTag(before)));
+    if (keep) kept.push(char);
+  }
   return kept.join("").replace(/\s+/gu, " ").trim();
 }
 
+/** Whether a label shows anything: a letter, a number, a mark of punctuation or a symbol. */
+export const showsSomething = (label: string) => /[\p{L}\p{N}\p{P}\p{S}]/u.test(cleanLabel(label));
+
 /**
- * What two labels are compared by: the same letters, whatever their case,
- * width or composition (NFKC, so "ＶＩＰ" is "VIP" and a decomposed "Café" is
- * "Café"), and nothing that shows nothing. Empty when nothing would show.
+ * What two labels are compared by here: the same letters, whatever their
+ * case, their width (fullwidth "ＶＩＰ" is "VIP") or their composition (a
+ * decomposed "Café" is "Café"), with nothing that shows nothing. Only width
+ * is folded: "x²" and "x2", "Ⅳ" and "IV", "H₂O" and "H2O" stay different.
  */
 export function labelKey(label: string): string {
-  return Array.from(cleanLabel(label).normalize("NFKC").toLowerCase())
-    .filter((char) => !INVISIBLE.test(char))
-    .join("")
-    .replace(/\s+/gu, " ")
-    .trim();
+  const narrow = Array.from(cleanLabel(label))
+    .map((char) => (char >= "\uFF00" && char <= "\uFFEF" ? char.normalize("NFKC") : char))
+    .join("");
+  return composed(narrow).toLowerCase().replace(/\s+/gu, " ").trim();
 }
 
 export const same = (a: string, b: string) => labelKey(a) === labelKey(b);
+
+/**
+ * How the rest of the studio compares labels (lib/flow-rules.ts sameTag, the
+ * send filter in lib/contacts.ts, the API): only case and the spaces around.
+ * A contact whose label matches here but not there holds a look-alike form,
+ * which an add replaces with the clean one so that sending and automations
+ * find it too.
+ */
+const plainKey = (label: string) => label.trim().toLocaleLowerCase();
 
 /** A number of things in plain words: "1 contact", "1,200 contacts". */
 export const count = (n: number, one: string, many: string) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
@@ -92,10 +141,10 @@ export const count = (n: number, one: string, many: string) => `${n.toLocaleStri
 export type Removed = { label: string; at: number };
 
 /**
- * What a removal took from one contact: kept so an undo puts back the very
- * same label in the same place. `forms`, only when the contact held the label
- * written more than one way (an older look-alike, "VIP" and "ＶＩＰ"): all of
- * them are taken off, and an undo puts back the first one.
+ * The form of the label one contact had where it stood: kept so an undo puts
+ * it back in the same place. `forms`, only when the contact held it written
+ * more than one way (an older look-alike, "VIP" and "ＶＩＰ"): all of them are
+ * taken off, and an undo puts back the first one.
  */
 export function removedFrom(tags: readonly string[], label: string): (Removed & { forms?: number }) | null {
   const at = tags.findIndex((tag) => same(tag, label));
@@ -104,21 +153,31 @@ export function removedFrom(tags: readonly string[], label: string): (Removed & 
   return forms > 1 ? { label: tags[at], at, forms } : { label: tags[at], at };
 }
 
+/** What an add replaces on one contact: its look-alike forms, when it holds the label only in a form the rest of the studio does not match. */
+export function replacedFrom(tags: readonly string[], label: string): (Removed & { forms?: number }) | null {
+  return tags.some((tag) => plainKey(tag) === plainKey(label)) ? null : removedFrom(tags, label);
+}
+
 /**
  * One contact's labels after the change: a new list, "same" when already as
- * asked, or "skip" when it holds the most labels already. Adding back what a
- * removal took (`back`) puts that contact's own label, as it was written, where
- * it stood, or at the end when the list is shorter now.
+ * asked, or "skip" when it holds the most labels already. Adding to a contact
+ * that holds only a look-alike form replaces it with the label, where the
+ * first form stood. `back` is what an undo puts back, that contact's own form
+ * where it stood (or at the end when the list is shorter now): on an add,
+ * what a removal took; on a removal, the look-alike an add replaced.
  */
 export function labelsAfter(tags: readonly string[], label: string, change: BulkChange, back?: Removed): string[] | "same" | "skip" {
-  const has = tags.some((tag) => same(tag, label));
-  if (change === "remove") return has ? tags.filter((tag) => !same(tag, label)) : "same";
-  if (has) return "same";
+  const at = tags.findIndex((tag) => same(tag, label));
+  const putBack = (out: string[], form: Removed | undefined) => {
+    if (form && same(form.label, label)) out.splice(Math.min(Math.max(0, form.at), out.length), 0, form.label);
+    else if (change === "add") out.push(label);
+    return out;
+  };
+  if (change === "remove") return at < 0 ? "same" : putBack(tags.filter((tag) => !same(tag, label)), back);
+  if (tags.some((tag) => plainKey(tag) === plainKey(label))) return "same";
+  if (at >= 0) return putBack(tags.filter((tag) => !same(tag, label)), { label, at });
   if (tags.length >= MAX_CONTACT_TAGS) return "skip";
-  if (!back || !same(back.label, label)) return [...tags, label];
-  const out = [...tags];
-  out.splice(Math.min(Math.max(0, back.at), out.length), 0, back.label);
-  return out;
+  return putBack([...tags], back);
 }
 
 export type BulkReview = {
@@ -132,13 +191,23 @@ export type BulkReview = {
   full: number;
   /** Pieces of the pasted text that looked like an address but were not one. */
   skipped: number;
+  /** Of `changes`, contacts holding the label only in a look-alike form, which is replaced with it (adding only). */
+  replaced?: number;
 };
 
 /** The change that takes one back. */
 export const opposite = (change: BulkChange): BulkChange => (change === "add" ? "remove" : "add");
 
-/** What a change did to the addresses it was sent (the route's answer). `noRoom`: not written, the store's data room being full. */
-export type BulkOutcome = { changed: number; already: number; full: number; notOnList: number; noRoom?: number };
+/**
+ * What a change did to the addresses it was sent (the route's answer).
+ * `noRoom`: not written, the store's data room being full; `failed`: left
+ * when something went wrong part way, which may or may not have been
+ * written; `replaced`: of those changed, contacts whose look-alike form was
+ * replaced with the label.
+ */
+export type BulkOutcome = { changed: number; already: number; full: number; notOnList: number; noRoom?: number; failed?: number; replaced?: number };
+
+const busyWords = (busy: number) => `${count(busy, "contact was", "contacts were")} being changed somewhere else at the same moment, so ${busy === 1 ? "it was" : "they were"} left as ${busy === 1 ? "it is" : "they are"}`;
 
 /**
  * What a change applied tells the creator: how many it changed and, when any
@@ -146,25 +215,29 @@ export type BulkOutcome = { changed: number; already: number; full: number; notO
  * different addresses were sent; what no other reason explains was being
  * changed somewhere else at that moment.
  */
-export function applySummary(asked: number, answer: BulkOutcome, change: BulkChange): { short: string; words: string } {
+export function applySummary(asked: number, answer: BulkOutcome, change: BulkChange, label = ""): { short: string; words: string } {
   const changed = Math.min(asked, answer.changed);
   const done = `Done: ${count(changed, "contact", "contacts")} changed.`;
+  const replaced = change === "add" ? Math.min(changed, answer.replaced ?? 0) : 0;
+  const swap = replaced ? ` ${count(replaced, "contact", "contacts")} had this label written another way, now written as “${label}” so sending and automations find it.` : "";
   const left = asked - changed;
-  if (left <= 0) return { short: done, words: done };
+  if (left <= 0) return { short: done, words: `${done}${swap}` };
   const already = Math.min(left, answer.already);
   const full = change === "add" ? Math.min(left - already, answer.full) : 0;
   const gone = Math.min(left - already - full, answer.notOnList);
   const noRoom = Math.min(left - already - full - gone, answer.noRoom ?? 0);
-  const busy = left - already - full - gone - noRoom;
+  const failed = Math.min(left - already - full - gone - noRoom, answer.failed ?? 0);
+  const busy = left - already - full - gone - noRoom - failed;
   const why = [
     already ? (change === "add" ? `${count(already, "contact already has", "contacts already have")} the label` : `${count(already, "contact doesn't", "contacts don't")} have it`) : "",
     full ? `${count(full, "contact has", "contacts have")} ${MAX_CONTACT_TAGS} labels already, the most a contact can have` : "",
     gone ? `${count(gone, "address is", "addresses are")} not on your list` : "",
     noRoom ? `${count(noRoom, "contact was", "contacts were")} not changed because your store has no room left for more records` : "",
-    busy ? `${count(busy, "contact was", "contacts were")} being changed somewhere else at the same moment, so ${busy === 1 ? "it was" : "they were"} left as ${busy === 1 ? "it is" : "they are"}` : "",
+    failed ? `something went wrong with ${count(failed, "contact", "contacts")}, so ${failed === 1 ? "it" : "they"} may not have changed; review again to see` : "",
+    busy ? busyWords(busy) : "",
   ].filter(Boolean);
   const out = `${left.toLocaleString("en-US")} ${left === 1 ? "was" : "were"} left out`;
-  return { short: `${done} ${out}.`, words: `${done} ${out}: ${why.join("; ")}.` };
+  return { short: `${done} ${out}.`, words: `${done} ${out}: ${why.join("; ")}.${swap}` };
 }
 
 /**
@@ -172,27 +245,38 @@ export function applySummary(asked: number, answer: BulkOutcome, change: BulkCha
  * as it was only when every one sent back went back; otherwise how many did
  * not, and why, in plain words. A contact already as it was before (the label
  * taken off, or put back, some other way since) counts as back. `merged`:
- * contacts put back that had held the label written more than one way, which
- * got it back once, as first written.
+ * contacts put back that had held the label in more than one form, which got
+ * it back once, in the first form; `cleaned`: contacts whose label went back
+ * without the characters in it that show nothing.
  */
-export function undoSummary(asked: number, answer: BulkOutcome, undo: BulkChange, merged = 0): { allBack: boolean; short: string; words: string } {
+export function undoSummary(asked: number, answer: BulkOutcome, undo: BulkChange, notes: { merged?: number; cleaned?: number } = {}): { allBack: boolean; short: string; words: string } {
   const back = Math.min(asked, answer.changed + answer.already);
   const notBack = asked - back;
-  const once = merged > 0 ? ` ${count(merged, "contact", "contacts")} had this label written in more than one way; it went back on once, as first written.` : "";
+  const merged = notes.merged ?? 0;
+  const cleaned = notes.cleaned ?? 0;
+  const extra = [
+    merged > 0 ? `${count(merged, "contact", "contacts")} had this label in more than one form. ${merged === 1 ? "It" : "They"} got the label back once, in the first form.` : "",
+    cleaned > 0 ? `${count(cleaned, "contact", "contacts")} got the label back as it looks, without the hidden differences it had.` : "",
+  ]
+    .filter(Boolean)
+    .map((words) => ` ${words}`)
+    .join("");
   if (notBack <= 0) {
-    if (once) return { allBack: false, short: "Undone. Every contact has the label back.", words: `Undone. Every contact has the label back.${once}` };
+    if (extra) return { allBack: false, short: "Undone. Every contact has the label back as it was shown.", words: `Undone. Every contact has the label back as it was shown.${extra}` };
     return { allBack: true, short: "Undone. Every contact is as it was.", words: "Undone. Every contact is as it was." };
   }
   const gone = Math.min(notBack, answer.notOnList);
   const full = undo === "add" ? Math.min(notBack - gone, answer.full) : 0;
   const noRoom = Math.min(notBack - gone - full, answer.noRoom ?? 0);
-  const busy = notBack - gone - full - noRoom;
+  const failed = Math.min(notBack - gone - full - noRoom, answer.failed ?? 0);
+  const busy = notBack - gone - full - noRoom - failed;
   const why = [
     gone ? `${count(gone, "contact is", "contacts are")} no longer on your list` : "",
     full ? `${count(full, "contact has", "contacts have")} ${MAX_CONTACT_TAGS} labels now, the most a contact can have, so the label could not go back on` : "",
     noRoom ? `${count(noRoom, "contact", "contacts")} could not get the label back because your store has no room left for more records` : "",
-    busy ? `${count(busy, "contact was", "contacts were")} being changed somewhere else at the same moment, so ${busy === 1 ? "it was" : "they were"} left as ${busy === 1 ? "it is" : "they are"}` : "",
+    failed ? `something went wrong with ${count(failed, "contact", "contacts")}, so ${failed === 1 ? "it" : "they"} may not be back; review again to see` : "",
+    busy ? busyWords(busy) : "",
   ].filter(Boolean);
   const head = `Undone for ${back.toLocaleString("en-US")} of ${count(asked, "contact", "contacts")}.`;
-  return { allBack: false, short: `${head} ${count(notBack, "contact", "contacts")} did not go back.`, words: `${head} ${count(notBack, "contact", "contacts")} did not go back: ${why.join("; ")}.${once}` };
+  return { allBack: false, short: `${head} ${count(notBack, "contact", "contacts")} did not go back.`, words: `${head} ${count(notBack, "contact", "contacts")} did not go back: ${why.join("; ")}.${extra}` };
 }

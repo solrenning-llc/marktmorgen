@@ -599,10 +599,11 @@ async function casWrite(key: string, writes: { email: string; value: string; was
  * only if the contact still holds what was read (casWrite), so an
  * unsubscribe or a purchase noted in the same moment is never written over;
  * one that changed is read again and decided again, three times at most.
- * `gone` lists those no longer on the list when read. With `stopWhenFull`, a
- * round whose new labels do not fit in the data room is not written and its
- * contacts come back in `noRoom`, so what the earlier rounds wrote is still
- * answered; without it the DataRoomError is thrown.
+ * `gone` lists those no longer on the list when read. With `keepWritten`, a
+ * round that fails stops there and what the earlier rounds wrote is still
+ * answered: its contacts come back in `noRoom` when their new labels do not
+ * fit in the data room, or in `failed` on any other error (a write that may
+ * or may not have been made), with the `error`; without it the error is thrown.
  */
 export async function changeLabels(
   listId: string,
@@ -611,47 +612,61 @@ export async function changeLabels(
   change: (tags: string[], email: string) => string[] | "same" | "skip",
   /** The store whose data room new labels take from (DataRoomError when they do not fit). */
   room: DataStore,
-  options: { stopWhenFull?: boolean } = {},
-): Promise<{ changed: string[]; same: string[]; gone: string[]; noRoom: string[] }> {
+  options: { keepWritten?: boolean } = {},
+): Promise<{ changed: string[]; same: string[]; gone: string[]; noRoom: string[]; failed: string[]; error?: unknown }> {
   const key = leadsKey(listId);
   const changed: string[] = [];
   const same: string[] = [];
   const gone: string[] = [];
   let noRoom: string[] = [];
+  let failed: string[] = [];
+  let failure: unknown;
   let pending = [...new Set(emails)];
   for (let round = 0; round < 3 && pending.length; round += 1) {
-    const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
     const writes: { email: string; value: string; was: string }[] = [];
-    const sizes: { before: Contact | null; next: Contact }[] = [];
-    pending.forEach((email, i) => {
-      const raw = Array.isArray(rows) ? rows[i] : null;
-      const contact = parseContact(raw);
-      if (!contact || typeof raw !== "string") {
-        gone.push(email);
-        return;
-      }
-      const next = change(contact.tags, email);
-      if (next === "same") same.push(email);
-      else if (next !== "skip") {
-        writes.push({ email, value: JSON.stringify({ ...contact, tags: next }), was: sha1(raw) });
-        sizes.push({ before: contact, next: { ...contact, tags: next } });
-      }
-    });
-    if (!writes.length) break;
     try {
+      const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
+      const sizes: { before: Contact | null; next: Contact }[] = [];
+      pending.forEach((email, i) => {
+        const raw = Array.isArray(rows) ? rows[i] : null;
+        const contact = parseContact(raw);
+        if (!contact || typeof raw !== "string") {
+          gone.push(email);
+          return;
+        }
+        const next = change(contact.tags, email);
+        if (next === "same") same.push(email);
+        else if (next !== "skip") {
+          writes.push({ email, value: JSON.stringify({ ...contact, tags: next }), was: sha1(raw) });
+          sizes.push({ before: contact, next: { ...contact, tags: next } });
+        }
+      });
+      if (!writes.length) break;
       await needContacts(room, sizes);
     } catch (error) {
-      if (!options.stopWhenFull || !(error instanceof DataRoomError)) throw error;
-      noRoom = writes.map((w) => w.email);
+      if (!options.keepWritten) throw error;
+      // Nothing of this round was written: what it would have written is left, by why.
+      const left = writes.length ? writes.map((w) => w.email) : pending;
+      if (error instanceof DataRoomError) noRoom = left;
+      else failed = left;
+      failure = error;
       break;
     }
-    const written = await casWrite(key, writes);
+    let written: boolean[];
+    try {
+      written = await casWrite(key, writes);
+    } catch (error) {
+      if (!options.keepWritten) throw error;
+      failed = writes.map((w) => w.email);
+      failure = error;
+      break;
+    }
     pending = writes.filter((_, i) => !written[i]).map((w) => w.email);
     writes.forEach((w, i) => {
       if (written[i]) changed.push(w.email);
     });
   }
-  return { changed, same, gone, noRoom };
+  return { changed, same, gone, noRoom, failed, ...(failure === undefined ? {} : { error: failure }) };
 }
 
 /**

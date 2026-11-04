@@ -5,7 +5,7 @@
  * person, a thousand a store; grouped by date as deals' next actions are.
  */
 import { MAX_PERSON_TASKS, MAX_TASK_TEXT, TASKS_BUSY, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
-import { CrmValueWriteUnconfirmed, changePersonTasks, forgetCrmPerson, readAllTasks, readPersonTasks } from "@/lib/crm";
+import { CrmValueWriteUnconfirmed, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks } from "@/lib/crm";
 import { LockBusyError } from "@/lib/redis-lock";
 import { dataUsed } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -145,8 +145,57 @@ async function main(): Promise<void> {
   is("still taken: the deletion fails and says so", notDeleted instanceof LockBusyError, true);
   is("nothing was skipped quietly: still there to delete again", (await readPersonTasks(SAME, ANA)).length, 1);
   await redis.pipeline([["DEL", lockKey]]);
-  await forgetCrmPerson(SAME, ANA, "ana@example.com");
+  const roomWithAna = await used();
+  const anaWeighs = weighs(ANA, await stored(ANA));
+  await forgetCrmPerson(SAME, ANA, "ana@example.com", ROOM);
   is("deleted on the next try", await readPersonTasks(SAME, ANA), []);
+  is("their tasks' room given back", [anaWeighs > 0, roomWithAna - (await used())], [true, anaWeighs]);
+  is("given back once: nothing more on a second deletion", [await forgetCrmPerson(SAME, ANA, "ana@example.com", ROOM), roomWithAna - (await used())], [0, anaWeighs]);
+
+  part("A busy tasks lock never holds back a person's deals and values");
+  await at(ANA, (t) => addTask(t, input({ text: "Kept again" }), id(18), NOW));
+  await redis.pipeline([["HSET", `nl:crm:deals:${SAME}`, "deal000001", JSON.stringify({ email: "ana@example.com" })]]);
+  await redis.pipeline([["SET", lockKey, "someone-else", "NX", "EX", 10]]);
+  const stillBusy = await forgetCrmPerson(SAME, ANA, "ana@example.com", ROOM).then(() => null, (error: unknown) => error);
+  is("the deletion fails and says so", stillBusy instanceof LockBusyError, true);
+  is("their deal is gone already", (await redis.pipeline([["HEXISTS", `nl:crm:deals:${SAME}`, "deal000001"]]))[0], 0);
+  is("their tasks wait for the next try", (await readPersonTasks(SAME, ANA)).length, 1);
+  await redis.pipeline([["DEL", lockKey]]);
+  await forgetCrmPerson(SAME, ANA, "ana@example.com", ROOM);
+  is("then gone", await readPersonTasks(SAME, ANA), []);
+
+  part("A removal that may not have landed keeps its room");
+  await at(BEN, (t) => addTask(t, input({ text: "Seventh" }), id(19), NOW));
+  const roomBeforeRemoval = await used();
+  const benBefore = weighs(BEN, await stored(BEN));
+  const keep = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => (c[0] === "HSET" || c[0] === "HDEL") && c[1] === `nl:crm:tasks:${SAME}`)) throw new Error("the write failed");
+    return keep(commands);
+  }) as typeof redis.pipeline;
+  try {
+    const failedRemoval = await at(BEN, (t) => ({ ok: true, tasks: dropTask(t, id(19)) })).then(() => null, (error: unknown) => error);
+    is("the failed removal says so", failedRemoval instanceof CrmValueWriteUnconfirmed, true);
+  } finally {
+    redis.pipeline = keep;
+  }
+  is("no room given back for it", await used(), roomBeforeRemoval);
+  await at(BEN, (t) => ({ ok: true, tasks: dropTask(t, id(19)) }));
+  is("given back, once, after the removal is confirmed", roomBeforeRemoval - (await used()), benBefore - weighs(BEN, await stored(BEN)));
+  is("by what the task weighed", roomBeforeRemoval > (await used()), true);
+
+  part("A deleted store takes its tasks with it");
+  await at(ANA, (t) => addTask(t, input({ text: "Before the store goes" }), id(20), NOW));
+  await redis.pipeline([["HSET", `nl:crm:deals:${SAME}`, "deal000002", JSON.stringify({ email: "x@example.com" })]]);
+  await redis.pipeline([["SET", lockKey, "someone-else", "NX", "EX", 10]]);
+  const storeBusy = await forgetCrm(SAME).then(() => null, (error: unknown) => error);
+  is("a busy tasks lock: the deletion fails and says so", storeBusy instanceof LockBusyError, true);
+  is("the rest already gone", (await redis.pipeline([["EXISTS", `nl:crm:deals:${SAME}`]]))[0], 0);
+  is("and the tasks too, without waiting for the lock", (await readAllTasks(SAME)).length, 0);
+  await redis.pipeline([["DEL", lockKey]]);
+  await forgetCrm(SAME);
+  is("every task of the store deleted", (await redis.pipeline([["EXISTS", `nl:crm:tasks:${SAME}`]]))[0], 0);
+  is("none left for the agenda", await readAllTasks(SAME), []);
 
   part("Through the studio's route");
   const owner = "tasks@example.com";
@@ -180,6 +229,21 @@ async function main(): Promise<void> {
   is("another change still being saved: 409, saying what to do", [busy.status, busy.body.error, busy.body.message], [409, "busy", TASKS_BUSY]);
   await redis.pipeline([["DEL", `nl:crm:tasklock:${statsId}`]]);
   is("nothing written while refused", (await readPersonTasks(statsId, ANA)).length, 1);
+  // A teammate made responsible who has since left the team.
+  await changePersonTasks(statsId, BEN, ROOM, (t) => addTask(t, { text: "Follow up", due: "", assignee: "gone@example.com" }, id(30), NOW));
+  is("not given to someone who left", (await post({ action: "add", person: BEN, text: "Call", assignee: "gone@example.com" })).body.error, "assignee");
+  const reworded = await post({ action: "edit", person: BEN, id: id(30), text: "Follow up by phone", assignee: "gone@example.com" });
+  is("an edit keeps the one the task already names", [reworded.status, reworded.body.tasks?.find((t) => t.id === id(30))?.text], [200, "Follow up by phone"]);
+  is("but an edit cannot name someone else not on the team", (await post({ action: "edit", person: BEN, id: id(30), text: "Follow up", assignee: "stranger@example.com" })).body.error, "assignee");
+  is("a day that is not one is not taken as the creator's", (await get("?today=2026-13-45")).day === "2026-13-45", false);
+
+  part("A change that waited while its store was deleted writes nothing back");
+  const kept = await readPersonTasks(statsId, ANA);
+  const late = await changePersonTasks(statsId, ANA, { ...ROOM, sid: "f".repeat(32) }, (t) => addTask(t, input({ text: "Too late" }), id(40), NOW));
+  is("no store under that id any more: refused", late, { ok: false, error: "unknown" });
+  is("and nothing written for it", await readPersonTasks(statsId, ANA), kept);
+  const other = await changePersonTasks(statsId, ANA, { ...ROOM, sid: (await storeForEmail(owner))!.sid }, (t) => addTask(t, input({ text: "Still here" }), id(41), NOW));
+  is("the store still there: the change is kept", other.ok, true);
 
   part("As kept: whatever is stored is checked again");
   is("broken entries and repeated ids dropped", parseTasks([{ id: id(1), text: "Fine", due: "", assignee: "", done: false, createdAt: NOW }, { id: id(1), text: "Repeated" }, { id: "BAD", text: "x" }, { id: id(2), text: "Bad date", due: "soon", assignee: "" }, null]).map((t) => t.text), ["Fine"]);

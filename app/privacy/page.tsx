@@ -1196,10 +1196,12 @@ export default function PrivacyPage() {
           deleted when the creator disconnects the server.
         </p>
         <p id="stamping">
-          <strong className="text-black">Stamped PDFs.</strong> When a creator
-          switches on stamping for a product, every page of the PDF a buyer
-          downloads carries the buyer&apos;s email address, the date and the
-          end of the order number. The stamped copy is made by our own code, is
+          <strong className="text-black">Stamped PDFs and EPUBs.</strong> When a
+          creator switches on stamping for a product, every page of the PDF a
+          buyer downloads carries the buyer&apos;s email address, the date and
+          the end of the order number, and an EPUB carries the same line
+          hidden inside the book&apos;s files, where reading apps do not show
+          it but a copy keeps it. The stamped copy is made by our own code, is
           kept privately beside the creator&apos;s file so a later download
           gets the same copy, and is deleted with that file; a note of which
           copy belongs to which sale is kept for about 400 days. Anyone the
@@ -1360,6 +1362,12 @@ export default function PrivacyPage() {
           asked works for 400 days, and pressing it keeps a
           one-way hash of the address for that store for good, so that store
           never asks again.
+          When the creator asks for an AI summary of a product&apos;s reviews,
+          the words of up to 60 of its newest reviews shown on its page are
+          sent to Anthropic, with any email address, phone number or web
+          address taken out and without the name or address of whoever wrote
+          them, at most once a week for each product; the summary it returns
+          (the themes and how many reviews say each) is kept for 8 days.
         </p>
         <p id="video-rooms">
           <strong className="text-black">Video rooms.</strong> When a creator
@@ -1783,7 +1791,12 @@ export default function PrivacyPage() {
             reviews and the words searched for on the store that found
             nothing, from the last 90 days, never with a name, and with any
             email address, phone number or web address in them taken out
-            first;
+            first. When a creator asks for the summary of one product&apos;s
+            reviews, it receives the words of up to 60 of that product&apos;s
+            newest reviews shown on its page, with any email address, phone
+            number or web address taken out and without the name or address
+            of whoever wrote them, at most once a week for each product; the
+            summary is kept for 8 days;
           </li>
           <li>
             <strong className="text-black">Unsplash</strong>, which serves the
@@ -1989,6 +2002,12 @@ export default function PrivacyPage() {
           names your address into a stage they chose; it starts only while you
           are on their list and agreed to hear from them, and nothing new is
           kept about you for it beyond the deal and the workflow&apos;s record.
+          An automatic email sequence may start when you sign a creator&apos;s
+          proposal or agreement, or pay a payment request they sent you, for the address it was sent to.
+          It starts only while you are on their list and agreed to hear from
+          them. Signing or paying never adds you to the list. The only new things kept for
+          it are the sequence&apos;s own record, described above, and its
+          emails waiting to be sent.
         </p>
         <p>
           A community&apos;s posts, comments, pictures and member records are

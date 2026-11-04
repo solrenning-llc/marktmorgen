@@ -1,4 +1,10 @@
-# Original selected digital-option body comparison — November 4, 2026
+# Selected digital-option construction — November 4, 2026
+
+Current state: the candidate contains original-body comparison, private same-process admission preparation, and explicit retention-only source reservation/readback in the existing pool. No production caller invokes the new retention entry points. Returned capabilities remain false; the real storage policy is null and the lifecycle remains never_activated. Trusted original catalog authentication, provider submission, paid access/revocation and quantified lifetime funding remain unfinished; general P1 is partial.
+
+The initial comparison and subsequent dated preparation checkpoints below are preserved history. The latest retention construction and its proof are recorded in the final section.
+
+## Initial comparison and preparation checkpoints (history)
 
 This is a pure comparison candidate after stacked PR #2020. It is not imported by a checkout, worker or access route. It compares one separately projected, paid digital choice and its supplied original folder with a canonical bounded URL-encoded payment body and six supplied original identity strings (including the summary, which may be empty). It requires the exact selected option, original title/label, amount, currency, quantity and the same original consent bytes on checkout and payment-intent metadata. Additional line-item fields (including adjustable quantities or alternate prices), extra lines, duplicate keys, shipping, discounts and coupled entitlements refuse.
 

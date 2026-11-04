@@ -254,6 +254,8 @@ export function goalClash(trigger: FlowTrigger, productId: string | null, goal: 
 export type FlowAction =
   | { do: "tag" | "untag"; tag: string }
   | { do: "start"; flowId: string }
+  /** Takes the person out of another of the store's sequences, where they are now (635 [GL3], added 2 November 2026). */
+  | { do: "stop"; flowId: string }
   | { do: "webhook" }
   | { do: "field"; field: string; value: string }
   | { do: "deal"; stage: string; title: string }
@@ -264,7 +266,9 @@ export type FlowAction =
   /** Makes a teammate responsible for the person's open deal (lib/crm.ts). Added 17 October 2026. */
   | { do: "assign"; assignee: string }
   /** Sets the person's open deal's next action and its due date, `days` after the step (635 [GL3], added 2 November 2026). */
-  | { do: "next"; text: string; days: number };
+  | { do: "next"; text: string; days: number }
+  /** Gives the person's open deal to whoever on the team has the fewest open deals (635 [GL3], added 2 November 2026). */
+  | { do: "rotate" };
 
 /** The longest next action a step writes (the deals board's own, lib/crm-rules.ts readFollowUp), and the furthest due date. */
 export const MAX_STEP_NEXT_ACTION = 200;
@@ -285,9 +289,9 @@ export function readAction(raw: unknown, isFlow: (flowId: string) => boolean, ct
     const tag = cleanTag(value.tag);
     return tag ? { do: value.do, tag } : "bad";
   }
-  if (value.do === "start") {
+  if (value.do === "start" || value.do === "stop") {
     const flowId = typeof value.flowId === "string" ? value.flowId : "";
-    return flowId && isFlow(flowId) ? { do: "start", flowId } : "bad";
+    return flowId && isFlow(flowId) ? { do: value.do, flowId } : "bad";
   }
   // Tells the store's own server, through its webhooks (lib/webhooks.ts, "sequence.step"), who reached this step.
   if (value.do === "webhook") return { do: "webhook" };
@@ -312,6 +316,7 @@ export function readAction(raw: unknown, isFlow: (flowId: string) => boolean, ct
     const assignee = typeof value.assignee === "string" ? value.assignee.trim().toLowerCase() : "";
     return assignee && assignee.length <= 254 && ctx.isAssignee?.(assignee) ? { do: "assign", assignee } : "bad";
   }
+  if (value.do === "rotate") return { do: "rotate" };
   if (value.do === "next") {
     if (typeof value.text !== "string" || value.text.length > MAX_STEP_NEXT_ACTION) return "bad";
     // Cleaned as the deals board cleans it (lib/crm-rules.ts), so a deal that already has it is seen to.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { AllTimeSales, Ranked, RangeKey, StatsData, Today } from "@/lib/stats";
 import { StoreField } from "@/components/studio-store-pin";
@@ -49,7 +49,7 @@ import type { AutoMark, MarkKind } from "@/lib/auto-marks";
 import { useStudioStore } from "@/components/studio-store-pin";
 import { WeeklyAiToggle } from "@/components/weekly-ai-toggle";
 import { AttributionTable } from "@/components/attribution-table";
-import { hasRested, todayFailedWords, willReadAgain } from "@/lib/live-box-rules";
+import { footnoteWords, formatReadTime, newLiveBox, readingAnswered, readingFailed, startReading, todayFailedWords, waitingWords, type LiveBox } from "@/lib/live-box-rules";
 
 /**
  * The store's funnel for the range: people, then the ones who started a
@@ -291,31 +291,29 @@ type LiveNow = { visitors: number; sources: { source: string; visitors: number }
  * next reading comes from the same count of readings made that decides whether there is one.
  */
 export function RightNow({ currency }: { currency: string }) {
-  const [live, setLive] = useState<LiveNow | null>(null);
-  // A first answer that did not come is said in words, never left as "Checking".
-  const [failed, setFailed] = useState(false);
-  // How many readings were made: the one count behind both the next reading and what the box says about it.
-  const [asked, setAsked] = useState(0);
-  const rested = hasRested(asked);
+  const [box, setBox] = useState<LiveBox<LiveNow>>(() => newLiveBox<LiveNow>());
+  // The machine in lib/live-box-rules.ts holds the count, the last good reading and what to say; the ref lets each
+  // event see the newest state without waiting for a render.
+  const boxRef = useRef(box);
+  const apply = (next: LiveBox<LiveNow>) => {
+    boxRef.current = next;
+    setBox(next);
+  };
   useEffect(() => {
     let stopped = false;
-    let made = 0;
     const ask = async () => {
-      if (document.visibilityState !== "visible") return;
-      if (!willReadAgain(made)) return;
-      made += 1;
-      setAsked(made);
+      const started = startReading(boxRef.current, document.visibilityState === "visible");
+      if (!started) return;
+      apply(started.box);
       try {
         const response = await fetch("/api/store/live", { cache: "no-store" });
         const body = (await response.json().catch(() => ({}))) as { ok?: boolean } & Partial<LiveNow>;
         if (stopped) return;
-        if (body.ok) {
-          setLive({ visitors: body.visitors ?? 0, sources: body.sources ?? [], today: body.today ?? null });
-          setFailed(false);
-        } else setFailed(true);
+        if (body.ok) apply(readingAnswered(boxRef.current, started.seq, { visitors: body.visitors ?? 0, sources: body.sources ?? [], today: body.today ?? null }, Date.now()));
+        else apply(readingFailed(boxRef.current, started.seq));
       } catch {
         // A missed reading is simply the next one's to make; until one comes, the box says so.
-        if (!stopped) setFailed(true);
+        if (!stopped) apply(readingFailed(boxRef.current, started.seq));
       }
     };
     void ask();
@@ -328,6 +326,8 @@ export function RightNow({ currency }: { currency: string }) {
       document.removeEventListener("visibilitychange", seen);
     };
   }, []);
+  const live = box.last?.data ?? null;
+  const failed = box.failed;
   // Drawn from the first paint with the shape it keeps (inbox C4-28): the answer fills it in rather than pushing the
   // rest of the studio down under a finger or a pointer already on its way (WCAG 2.4.3, 3.2.5). Only the list of where
   // people came from, there when someone is on the store, adds lines.
@@ -344,14 +344,12 @@ export function RightNow({ currency }: { currency: string }) {
       <p className="flex items-center gap-2 text-sm font-bold text-ink">
         <span className={`inline-block h-2 w-2 rounded-full ${live?.visitors ? "bg-emerald-500" : "bg-line"}`} aria-hidden="true" />
         {live === null
-          ? failed
-            ? rested
-              ? "Who is on your store could not be read; reload the page to try again"
-              : "Who is on your store could not be read just now; it is asked again in half a minute"
-            : "Checking who has opened your store in the last 5 minutes"
-          : live.visitors === 0
-            ? "Nobody has opened your store in the last 5 minutes"
-            : `${count(live.visitors)} ${live.visitors === 1 ? "person has" : "people have"} opened your store in the last 5 minutes`}
+          ? waitingWords(box)
+          : (live.visitors === 0
+              ? "Nobody has opened your store in the last 5 minutes"
+              : `${count(live.visitors)} ${live.visitors === 1 ? "person has" : "people have"} opened your store in the last 5 minutes`) +
+            // A failed try after a good one: the numbers are the last good reading's, said with its time.
+            (failed && box.last ? `, as of ${formatReadTime(box.last.at)}` : "")}
       </p>
       {live && live.visitors > 0 && live.sources.length > 0 ? (
         <ul className="mt-2 space-y-1 text-sm">
@@ -365,9 +363,7 @@ export function RightNow({ currency }: { currency: string }) {
       ) : null}
       {/* One line either way, so the pause never adds one above the rest of the studio. */}
       <p className="mt-2 text-xs text-ink-soft">
-        {rested
-          ? "Paused after ten minutes, to save your plan's studio requests. Reload the page to see it live again."
-          : "Your store page, each person once, updated every half minute. Nothing about who."}
+        {footnoteWords(box)}
       </p>
       <div className="mt-4 border-t border-line pt-3">
         <p className="text-sm font-bold text-ink">Today so far</p>
@@ -392,7 +388,7 @@ export function RightNow({ currency }: { currency: string }) {
               : live
                 ? // Only a reading that failed leaves today out (app/api/store/live/route.ts): said as one, with when it
                   // is read again, never as numbers that do not exist (inbox C4-34).
-                  todayFailedWords(asked)
+                  todayFailedWords(box)
                 : "Reading today's numbers."}
         </p>
         <p className="mt-1 text-xs text-ink-soft">The day in UTC, like every day here. Sales are paid ones, read from Stripe every two minutes.</p>

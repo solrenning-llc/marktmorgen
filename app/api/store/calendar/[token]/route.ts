@@ -1,6 +1,6 @@
 import { storeForHandle } from "@/lib/store";
 import { paidCalls } from "@/lib/calls";
-import { FeedGone, bookedCalendar, bookedCalendarFeed, ensureFeedToken, slotRooms, storeIdForToken } from "@/lib/calendar-sync";
+import { FeedGone, bookedCalendar, bookedCalendarFeed, ensureFeedToken, slotRooms, storeIdForToken, withoutErasedBookers } from "@/lib/calendar-sync";
 import { readKind } from "@/lib/catalog";
 
 /**
@@ -37,7 +37,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
       if (!store || store.statsId !== owner.statsId) throw new FeedGone();
       // Renamed, or settings from before they named the store's calls: written again, so its changes are read from now on.
       await ensureFeedToken(store).catch(() => {});
-      const calls = store.stripeAccountId ? await paidCalls(store) : [];
+      // Who deleted their details from the store is not named, though Stripe keeps the booking (review of #2111).
+      const calls = store.stripeAccountId ? await withoutErasedBookers(store, await paidCalls(store)) : [];
       const listings = await readKind(store, "call");
       return bookedCalendar(store, calls, Date.now(), listings, await slotRooms(store, calls, listings));
     });

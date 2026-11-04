@@ -42,6 +42,7 @@ import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { suppressedAmong } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
 import { type Interval, looksLikeCalendar, parseIcs } from "@/lib/ics-parse";
@@ -460,7 +461,22 @@ export type BookedCall = {
   email: string | null;
   name: string | null;
   moves: number;
+  /** The buyer deleted their details from the store (lib/suppression.ts): the time stays, the person is not named. */
+  erased?: boolean;
 };
+
+/**
+ * The booked calls with every buyer who deleted their details from the store
+ * (their print in nl:erased, lib/suppression.ts) left unnamed: Stripe keeps
+ * the booking, so the feed would name them again (review of #2111). One
+ * HMGET; when it cannot be read, nothing is made (the caller's reading fails).
+ */
+export async function withoutErasedBookers(store: Pick<Store, "listId">, calls: BookedCall[]): Promise<BookedCall[]> {
+  const emails = [...new Set(calls.map((c) => c.email).filter((e): e is string => Boolean(e)))];
+  if (!emails.length) return calls;
+  const gone = await suppressedAmong(store.listId, emails);
+  return gone.size ? calls.map((c) => (c.email && gone.has(c.email) ? { ...c, email: null, name: null, erased: true } : c)) : calls;
+}
 
 /**
  * Every booked call and dated session still to come (and those of the last
@@ -495,7 +511,8 @@ export function bookedCalendar(
       if (end > since && !slots.has(key)) slots.set(key, { product: product.id, start: session.start, end, people: [] });
     }
   }
-  const who = (c: BookedCall) => (c.name && c.email ? `${c.name} <${c.email}>` : c.name ?? c.email ?? "A buyer who gave no address");
+  const who = (c: BookedCall) =>
+    c.erased ? "A buyer whose details were deleted" : c.name && c.email ? `${c.name} <${c.email}>` : c.name ?? c.email ?? "A buyer who gave no address";
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",

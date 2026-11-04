@@ -107,13 +107,14 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
 export const CALENDAR_BUILD_PER_BOOKING = 1 + 4 + 2;
 /** Commands of a making for a store of `listings` call listings and `calls` bookings (tests/read-ceilings.test.ts measures it). */
 export function calendarBuildCommands(listings: number, calls: number): number {
-  return 4 + 8 + 4 + 3 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 3 + 2;
+  // + 1: the bookers looked up among the store's deleted people (withoutErasedBookers, one HMGET).
+  return 4 + 8 + 4 + 3 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 3 + 2 + 1;
 }
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,
   cpu: 1,
   commands: calendarBuildCommands(MAX_PRODUCTS, CALENDAR_CALLS),
-  dbBytes: MAX_STORE_BYTES + MAX_PRODUCTS * LISTING_READ_BYTES + CALENDAR_CALLS * 1_024 + 4 * CALENDAR_CALLS * 1_024 + 2 * CALENDAR_CALLS * 512 + CALENDAR_FILE_BYTES,
+  dbBytes: MAX_STORE_BYTES + MAX_PRODUCTS * LISTING_READ_BYTES + CALENDAR_CALLS * 1_024 + 4 * CALENDAR_CALLS * 1_024 + 2 * CALENDAR_CALLS * 512 + CALENDAR_FILE_BYTES + CALENDAR_CALLS * (64 + 64),
   outBytes: 0,
   stripePages: CALENDAR_STRIPE_PAGES,
 };
@@ -195,9 +196,11 @@ export const STATS_READ_SHAPE: ReadShape = {
   seconds: 1, cpu: 0.5, commands: (3 * STATS_DAYS + 6) + 4 + READING_COUNT_COMMANDS.light, outBytes: 0, stripePages: 0,
   dbBytes: STATS_DAYS * DAY_FIELDS_MAX * STATS_FIELD_BYTES + STATS_DAYS * 64 + STATS_DAYS * 2 * 32 + LIFE_WRITE_MAX * STATS_FIELD_BYTES + READING_COPY_MAX_BYTES,
 };
+/** The prints of the biggest buyers looked up among the store's deleted people before the reading is kept (one HMGET; withoutErasedBuyers). */
+export const ERASED_LOOKUP_BYTES = 10 * (64 + 64);
 export const SALES_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
-  dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES,
+  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy + 1, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
+  dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES + ERASED_LOOKUP_BYTES,
 };
 export const MEMBERS_READ_SHAPE: ReadShape = {
   seconds: 2, cpu: 0.5, commands: 2 + READING_COUNT_COMMANDS.light, outBytes: 0, stripePages: 2 * 20,

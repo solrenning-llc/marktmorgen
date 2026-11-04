@@ -31,6 +31,7 @@ import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { keyFor } from "@/lib/stripe-account";
+import { suppressedAmong } from "@/lib/suppression";
 import type { Store } from "@/lib/store";
 import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { type Numbers, membershipNumbers } from "@/lib/membership-numbers";
@@ -223,10 +224,25 @@ export async function keptSales(store: Store, now = Date.now(), fresh = false): 
   const kept = await keptReading(store, "sales", async () => {
     // Selling not configured on our side: nothing is called, so the reading's unit is given back (inbox C4-53).
     if (store.stripeAccountId && !keyFor(store.stripeAccountId)) throw new NotRead("selling is not configured");
-    return readSales(store, now);
+    return withoutErasedBuyers(store, await readSales(store, now));
   }, now, fresh);
   if (!kept) throw new ReadingsUsed();
   return kept;
+}
+
+/**
+ * The sales with every biggest buyer who deleted their details from the store
+ * (their print in nl:erased, lib/suppression.ts) left out: Stripe keeps the
+ * purchase, so the next reading would name them again and keep it a day
+ * (review of #2111). One HMGET; when it cannot be read, the reading fails and
+ * nothing is kept.
+ */
+export async function withoutErasedBuyers<T extends { buyers?: { top: { email: string }[] } } | null>(store: Pick<Store, "listId">, sales: T): Promise<T> {
+  const top = sales?.buyers?.top;
+  if (!sales || !top?.length) return sales;
+  const gone = await suppressedAmong(store.listId, top.map((b) => b.email));
+  if (!gone.size) return sales;
+  return { ...sales, buyers: { ...sales.buyers, top: top.filter((b) => !gone.has(b.email)) } };
 }
 
 /** The store's memberships, kept (lib/membership-numbers.ts). */

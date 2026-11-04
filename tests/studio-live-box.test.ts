@@ -10,6 +10,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RightNow } from "@/components/stats-panel";
 import { readFileSync } from "node:fs";
+import { LIVE_ASKS, hasRested, todayFailedWords, willReadAgain } from "@/lib/live-box-rules";
 import { done, is, part } from "./check";
 
 part("Before its first answer, the box is already there, in the shape it keeps");
@@ -21,10 +22,27 @@ is("and the lines under them, so the answer fills them in rather than adding the
 part("Today left out of an answer is a reading that failed, said with when it is read again (inbox C4-34)");
 {
   const source = readFileSync("components/stats-panel.tsx", "utf8");
+  const rules = readFileSync("lib/live-box-rules.ts", "utf8");
   const route = readFileSync("app/api/store/live/route.ts", "utf8");
   is("the route leaves today out only when its reading fails", route.includes("readToday(access.store).catch(() => null)"), true);
-  is("the box says it failed on the last try, and when it is read again, or to reload once it rests", [source.includes("Today's numbers could not be read on the last try; they are read again in half a minute."), source.includes("Today's numbers could not be read on the last try; reload the page to read them again.")], [true, true]);
+  is("the box says it failed on the last try, and when it is read again, or to reload once it rests", [rules.includes("Today's numbers could not be read on the last try; they are read again in half a minute."), rules.includes("Today's numbers could not be read on the last try; reload the page to read them again.")], [true, true]);
   is("never \"just now\" with nothing after it", source.includes("Today's numbers could not be read just now."), false);
+}
+
+part("After the last reading, the box never promises another (Codex D)");
+{
+  const promises = (made: number) => todayFailedWords(made).includes("read again in half a minute");
+  let wrong = 0;
+  for (let made = 1; made <= LIVE_ASKS; made++) {
+    // The words and the decision to read again come from the same count.
+    if (promises(made) !== willReadAgain(made) || hasRested(made) === willReadAgain(made)) wrong += 1;
+  }
+  is("every count from the first reading to the last says what the box will do", wrong, 0);
+  is("after the 19th reading one more is promised", [promises(LIVE_ASKS - 1), hasRested(LIVE_ASKS - 1)], [true, false]);
+  is("after the 20th, the last, none is promised and the box rests", [promises(LIVE_ASKS), hasRested(LIVE_ASKS), todayFailedWords(LIVE_ASKS).includes("reload the page")], [false, true, true]);
+  is("and past it too", [promises(LIVE_ASKS + 5), hasRested(LIVE_ASKS + 5)], [false, true]);
+  const source = readFileSync("components/stats-panel.tsx", "utf8");
+  is("the component draws both the words and the rest from that count", [source.includes("todayFailedWords(asked)"), source.includes("hasRested(asked)")], [true, true]);
 }
 
 done();

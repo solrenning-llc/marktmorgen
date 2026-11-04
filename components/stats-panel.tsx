@@ -49,6 +49,7 @@ import type { AutoMark, MarkKind } from "@/lib/auto-marks";
 import { useStudioStore } from "@/components/studio-store-pin";
 import { WeeklyAiToggle } from "@/components/weekly-ai-toggle";
 import { AttributionTable } from "@/components/attribution-table";
+import { hasRested, todayFailedWords, willReadAgain } from "@/lib/live-box-rules";
 
 /**
  * The store's funnel for the range: people, then the ones who started a
@@ -286,24 +287,24 @@ type LiveNow = { visitors: number; sources: { source: string; visitors: number }
  * Who is on the store right now: asked every half minute while the page is
  * open and in view, and not at all from a tab in the background. Each ask is
  * one of the store's studio requests (lib/store-allowance-rules.ts), so it
- * stops after LIVE_ASKS of them, ten minutes, until the page is opened again.
+ * stops after LIVE_ASKS of them (lib/live-box-rules.ts), ten minutes, until the page is opened again. What it says about a
+ * next reading comes from the same count of readings made that decides whether there is one.
  */
-const LIVE_ASKS = 20;
 export function RightNow({ currency }: { currency: string }) {
   const [live, setLive] = useState<LiveNow | null>(null);
   // A first answer that did not come is said in words, never left as "Checking".
   const [failed, setFailed] = useState(false);
-  const [rested, setRested] = useState(false);
+  // How many readings were made: the one count behind both the next reading and what the box says about it.
+  const [asked, setAsked] = useState(0);
+  const rested = hasRested(asked);
   useEffect(() => {
     let stopped = false;
-    let asked = 0;
+    let made = 0;
     const ask = async () => {
       if (document.visibilityState !== "visible") return;
-      if (asked >= LIVE_ASKS) {
-        setRested(true);
-        return;
-      }
-      asked += 1;
+      if (!willReadAgain(made)) return;
+      made += 1;
+      setAsked(made);
       try {
         const response = await fetch("/api/store/live", { cache: "no-store" });
         const body = (await response.json().catch(() => ({}))) as { ok?: boolean } & Partial<LiveNow>;
@@ -391,9 +392,7 @@ export function RightNow({ currency }: { currency: string }) {
               : live
                 ? // Only a reading that failed leaves today out (app/api/store/live/route.ts): said as one, with when it
                   // is read again, never as numbers that do not exist (inbox C4-34).
-                  rested
-                  ? "Today's numbers could not be read on the last try; reload the page to read them again."
-                  : "Today's numbers could not be read on the last try; they are read again in half a minute."
+                  todayFailedWords(asked)
                 : "Reading today's numbers."}
         </p>
         <p className="mt-1 text-xs text-ink-soft">The day in UTC, like every day here. Sales are paid ones, read from Stripe every two minutes.</p>

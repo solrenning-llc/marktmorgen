@@ -68,3 +68,16 @@ test("protocol evidence is plain own enumerable data while frozen and null-proto
  assert.deepEqual(protocolInfrastructureMicroUsd(Object.freeze({...bound})), expected);
  assert.deepEqual(protocolInfrastructureMicroUsd(Object.assign(Object.create(null), bound)), expected);
 });
+
+test("a readable proxy cannot hide an unpriced category behind plain descriptors", () => {
+ const target = {...zero, unreviewedSupplier: 100_000};
+ const hidden = new Proxy(target, {ownKeys: () => Object.keys(zero)});
+ assert.equal(protocolInfrastructureMicroUsd(hidden), null);
+ assert.equal(protocolInfrastructureMicroUsd(new Proxy({...zero}, {})), null);
+ let getters = 0;
+ const computed = Object.defineProperty({...zero}, "functionCalls", {
+  enumerable: true, get(){ getters++; return 0; },
+ });
+ assert.equal(protocolInfrastructureMicroUsd(computed), null);
+ assert.equal(getters, 0);
+});

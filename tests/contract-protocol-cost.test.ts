@@ -61,3 +61,27 @@ test("an unpriced category in any monthly or annual profile refuses the whole co
  }
  assert.ok(contractProtocolInfrastructureCosts(profiles()));
 });
+
+test("the original matrix and every original profile reject proxies before any projection", () => {
+ for (const key of CONTRACT_KEYS) {
+  const input = profiles();
+  const target = {...input[key], unreviewedSupplier: 100_000};
+  const hidden = new Proxy(target, {ownKeys: () => Object.keys(input[key])});
+  assert.equal(contractProtocolInfrastructureCosts({...input, [key]: hidden}), null, key);
+  assert.equal(contractProtocolInfrastructureCosts({...input, [key]: new Proxy(input[key], {})}), null, key);
+ }
+ const input = profiles();
+ const hiddenMatrix = new Proxy({...input, unpricedPlan: input.creator_month}, {
+  ownKeys: () => [...CONTRACT_KEYS],
+ });
+ assert.equal(contractProtocolInfrastructureCosts(hiddenMatrix), null);
+ assert.equal(contractProtocolInfrastructureCosts(new Proxy(input, {})), null);
+ let getters = 0;
+ const computed = Object.defineProperty({...input}, "creator_month", {
+  enumerable: true, get(){ getters++; return input.creator_month; },
+ });
+ assert.equal(contractProtocolInfrastructureCosts(computed), null);
+ assert.equal(getters, 0);
+ assert.deepEqual(contractProtocolInfrastructureCosts(Object.freeze({...input})), contractProtocolInfrastructureCosts(input));
+ assert.deepEqual(contractProtocolInfrastructureCosts(Object.assign(Object.create(null), input)), contractProtocolInfrastructureCosts(input));
+});

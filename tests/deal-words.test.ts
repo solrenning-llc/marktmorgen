@@ -43,4 +43,6 @@ is("a decomposed accent or a hidden mark inside the word is still the word", [he
 is("a word the store wrote only inside a longer one does not allow it alone", [heldToFacts("A discount today.", "A discounted item."), heldToFacts("Rabatt heute.", "Frühlingsrabatt im Mai.")], [false, false]);
 is("but the same word as the store wrote it is allowed", heldToFacts("A discount for members.", "Members get a discount."), true);
 is("dépêchez vous with a space too", caught(["dépêchez vous"]), []);
+is("a discount the store wrote as a figure and '% off' may be repeated", heldToFacts("It is 20% off today.", "Members get 20% off."), true);
+is("an invisible operator inside a word is removed too", heldToFacts("dis\u2063count", "nothing"), false);
 done();

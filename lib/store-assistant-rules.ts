@@ -258,17 +258,17 @@ function numberForms(n: string): string[] {
 }
 const LINK = /\b(?:https?:\/\/|www\.)\S+/i;
 
+/** Text as one form with the characters that hide inside words removed (soft hyphen, combining grapheme joiner, zero-width space and joiners, word joiner and the invisible operators, BOM, Mongolian variation selectors), so no word slips past a rule. */
+export function readableText(text: string): string {
+  return text.normalize("NFC").replace(/[\u00AD\u034F\u200B-\u200D\u2060-\u2064\uFEFF\u180B-\u180F]/gu, "");
+}
+
 /**
  * Whether a reply says only what the store published: every number in it
  * (prices, percentages, days, counts) appears in the facts, every deal or
  * pressure word too, and it carries no link. A reply that fails is never
  * shown, whatever the model was told or tricked into.
  */
-/** Text as one form with the characters that hide inside words removed (soft hyphen, zero-width space and joiners, word joiner, BOM), so no word slips past a rule. */
-export function readableText(text: string): string {
-  return text.normalize("NFC").replace(/[\u00AD\u200B-\u200D\u2060\uFEFF]/gu, "");
-}
-
 export function heldToFacts(raw: string, facts: string): boolean {
   const reply = readableText(raw);
   if (!reply.trim() || LINK.test(reply)) return false;
@@ -281,8 +281,11 @@ export function heldToFacts(raw: string, facts: string): boolean {
   const lowerFacts = plain(facts);
   for (const m of reply.matchAll(new RegExp(DEAL_WORDS.source, "giu"))) {
     // The same word as the store wrote it, as a whole word: "discount" is not allowed by "discounted", nor "Rabatt" by "Frühlingsrabatt".
-    const word = plain(m[0]).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (!new RegExp(`(?<![\\p{L}\\p{N}])${word}(?![\\p{L}\\p{N}])`, "u").test(lowerFacts)) return false;
+    const said = plain(m[0]);
+    const word = said.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // A term that starts with a sign ("% off") follows a figure ("20% off"): only a letter before it makes it another word.
+    const before = /^[\p{L}\p{N}]/u.test(said) ? "(?<![\\p{L}\\p{N}])" : "(?<![\\p{L}])";
+    if (!new RegExp(`${before}${word}(?![\\p{L}\\p{N}])`, "u").test(lowerFacts)) return false;
   }
   return true;
 }

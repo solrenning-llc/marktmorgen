@@ -385,7 +385,7 @@ try {
   const forcedMove = await drawn(forcedPage, "deal-move-dealaaaaa1");
   is("in forced colors, a focused off Move is not faded, keeps a dashed border and its focus ring", [forcedMove.focused, forcedMove.opacity, forcedMove.border, forcedMove.ringStyle !== "none", forcedErrors], [true, 1, "dashed", true, []]);
   const grayText = await forcedPage.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "GrayText"; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
-  is("in forced colors, its words take the system's colour for an unavailable control (GrayText)", forcedMove.color, grayText);
+  is("in forced colors, its words take the system's color for an unavailable control (GrayText)", forcedMove.color, grayText);
   await forced.close();
 } finally {
   await browser.close();

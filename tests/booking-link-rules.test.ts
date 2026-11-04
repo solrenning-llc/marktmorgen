@@ -2,37 +2,42 @@
  * A one-time booking link for one person (637 [GL5], unit 4a; added
  * 3 November 2026): the rules, on synthetic links only.
  */
-import { BOOKING_LINK_DAYS, type BookingLink, DEFAULT_LINK_DAYS, LINK_PROBLEMS, LINK_TOKEN, linkState, linkStateWords, mayBook, readLinkRequest, resumable } from "@/lib/booking-link-rules";
+import { BOOKING_LINK_DAYS, type BookingLink, DEFAULT_LINK_DAYS, LINK_PROBLEMS, LINK_TOKEN, linkState, linkStateWords, mayBook, mayConfirm, opensFor, readLinkRequest, resumable } from "@/lib/booking-link-rules";
 import { done, is, part } from "./check";
 
 const DAY = 86_400_000;
 const MADE = Date.UTC(2026, 10, 3, 15, 0);
-const link: BookingLink = { product: "p1", email: "ana@example.com", madeAt: MADE, expiresAt: MADE + 7 * DAY };
+const link: BookingLink = { store: "s1", product: "p1", email: "ana@example.com", madeAt: MADE, expiresAt: MADE + 7 * DAY };
 
 part("Made from the studio");
-is("for one call, a week by default", readLinkRequest({ product: "p1" }, MADE), { ok: true, link: { product: "p1", madeAt: MADE, expiresAt: MADE + DEFAULT_LINK_DAYS * DAY } });
-is("for one person, their address as typed, made lower case", readLinkRequest({ product: "p1", days: "30", email: "  Ana@Example.com " }, MADE), { ok: true, link: { product: "p1", email: "ana@example.com", madeAt: MADE, expiresAt: MADE + 30 * DAY } });
-is("only the days on the list", [1, 3, 7, 14, 30].every((d) => readLinkRequest({ product: "p1", days: d }, MADE).ok), true);
-is("refused: no call, another number of days, an address that is not one", [readLinkRequest({ days: 7 }, MADE), readLinkRequest({ product: "../x", days: 7 }, MADE), readLinkRequest({ product: "p1", days: 2 }, MADE), readLinkRequest({ product: "p1", days: 365 }, MADE), readLinkRequest({ product: "p1", email: "ana" }, MADE), readLinkRequest({ product: "p1", email: `${"a".repeat(250)}@b.co` }, MADE)], [{ ok: false, why: "product" }, { ok: false, why: "product" }, { ok: false, why: "days" }, { ok: false, why: "days" }, { ok: false, why: "email" }, { ok: false, why: "email" }]);
-is("days only as a whole number, never true, a list or a decimal", [true, [7], "7.0", " 7", 7.5].map((days) => readLinkRequest({ product: "p1", days }, MADE).ok), [false, false, false, false, false]);
+is("for one call, a week by default", readLinkRequest({ product: "p1" }, "s1", MADE), { ok: true, link: { store: "s1", product: "p1", madeAt: MADE, expiresAt: MADE + DEFAULT_LINK_DAYS * DAY } });
+is("for one person, their address as typed, made lower case", readLinkRequest({ product: "p1", days: "30", email: "  Ana@Example.com " }, "s1", MADE), { ok: true, link: { store: "s1", product: "p1", email: "ana@example.com", madeAt: MADE, expiresAt: MADE + 30 * DAY } });
+is("only the days on the list", [1, 3, 7, 14, 30].every((d) => readLinkRequest({ product: "p1", days: d }, "s1", MADE).ok), true);
+is("refused: no call, another number of days, an address that is not one", [readLinkRequest({ days: 7 }, "s1", MADE), readLinkRequest({ product: "../x", days: 7 }, "s1", MADE), readLinkRequest({ product: "p1", days: 2 }, "s1", MADE), readLinkRequest({ product: "p1", days: 365 }, "s1", MADE), readLinkRequest({ product: "p1", email: "ana" }, "s1", MADE), readLinkRequest({ product: "p1", email: `${"a".repeat(250)}@b.co` }, "s1", MADE)], [{ ok: false, why: "product" }, { ok: false, why: "product" }, { ok: false, why: "days" }, { ok: false, why: "days" }, { ok: false, why: "email" }, { ok: false, why: "email" }]);
+is("days only as a whole number, never true, a list or a decimal", [true, [7], "7.0", " 7", 7.5].map((days) => readLinkRequest({ product: "p1", days }, "s1", MADE).ok), [false, false, false, false, false]);
 is("each problem says how to fix it", LINK_PROBLEMS.days, `Pick how long the link works: ${BOOKING_LINK_DAYS.slice(0, -1).join(", ")} or 30 days.`);
 is("its token is 48 hex characters", [LINK_TOKEN.test("a".repeat(48)), LINK_TOKEN.test("a".repeat(47)), LINK_TOKEN.test("A".repeat(48))], [true, false, false]);
 
 part("Used once, then never again");
 is("open until its day", [linkState(link, MADE), linkState(link, MADE + 7 * DAY - 1)], ["open", "open"]);
 is("expired from its day", linkState(link, MADE + 7 * DAY), "expired");
-const held = { ...link, heldBy: "cs_test_a", heldUntil: MADE + 1800_000 };
-is("held while a checkout opened from it can be paid: no new checkout from another tab", [linkState(held, MADE + 60_000), mayBook(held, MADE + 60_000)], ["held", false]);
+const held: BookingLink = { ...link, heldBy: "cs_test_a" };
+is("held while a checkout opened from it is open: no new checkout from another tab", [linkState(held, MADE + 60_000), mayBook(held, MADE + 60_000)], ["held", false]);
 is("a buyer coming back is sent to that same checkout, never a second one", [resumable(held, MADE + 60_000, "cs_test_a"), resumable(held, MADE + 60_000, "cs_test_b"), resumable(link, MADE, "cs_test_a")], [true, false, false]);
-is("a hold with no closing time holds nothing", linkState({ ...link, heldBy: "cs_test_a" }, MADE), "open");
-is("past its day, a held link is expired: no checkout opens", [linkState({ ...held, heldUntil: MADE + 8 * DAY }, MADE + 7 * DAY), mayBook({ ...held, heldUntil: MADE + 8 * DAY }, MADE + 7 * DAY)], ["expired", false]);
-is("a checkout closed unpaid lets it go again", [linkState(held, MADE + 1800_000), mayBook(held, MADE + 1800_000)], ["open", true]);
-const used = { ...held, usedAt: MADE + 600_000 };
-is("used: it never opens again, not even before its day or from the checkout that used it", [linkState(used, MADE + 600_001), mayBook(used, MADE + 600_001), resumable(used, MADE + 600_001, "cs_test_a"), linkState(used, MADE + 30 * DAY), linkState({ ...link, usedAt: 0 }, MADE)], ["used", false, false, "used", "used"]);
+is("held until Stripe reports that checkout expired, never let go by a clock of ours: still held hours later", linkState(held, MADE + 5 * 3_600_000), "held");
+is("let go when Stripe reports it expired unpaid: open again before its day, expired after it", [linkState({ ...held, heldBy: undefined }, MADE + DAY), mayBook({ ...held, heldBy: undefined }, MADE + DAY), linkState({ ...held, heldBy: undefined }, MADE + 7 * DAY)], ["open", true, "expired"]);
+is("past its day, a checkout opened before it is still held and may be paid, but no new checkout opens", [linkState(held, MADE + 7 * DAY + 60_000), mayBook(held, MADE + 7 * DAY + 60_000), mayConfirm(held, "cs_test_a")], ["held", false, true]);
+is("only the checkout that holds it may book from it: another paid one is refunded, never the one the buyer was sent to", [mayConfirm(held, "cs_test_a"), mayConfirm(held, "cs_test_b"), mayConfirm(link, "cs_test_a")], [true, false, false]);
+const used: BookingLink = { ...held, usedAt: MADE + 600_000 };
+is("used: it never opens again, not even before its day or from the checkout that used it", [linkState(used, MADE + 600_001), mayBook(used, MADE + 600_001), resumable(used, MADE + 600_001, "cs_test_a"), mayConfirm(used, "cs_test_a"), linkState(used, MADE + 30 * DAY), linkState({ ...link, usedAt: 0 }, MADE)], ["used", false, false, false, "used", "used"]);
+
+part("The store's own link, for its own call");
+is("opens only under its store and for its product", [opensFor(link, "s1", "p1"), opensFor(link, "s2", "p1"), opensFor(link, "s1", "p2")], [true, false, false]);
 
 part("Said in the studio");
-is("open, for one person, with the time zone said", linkStateWords(link, MADE, "America/New_York"), "Works for one booking by ana@example.com, until November 10, 2026 at 10:00 AM EST.");
-is("for whoever has it", linkStateWords({ ...link, email: undefined }, MADE, "America/New_York").includes("by whoever has it"), true);
+is("open, made out to one person, never claimed to be only theirs, with the time zone said", linkStateWords(link, MADE, "America/New_York"), "Made out to ana@example.com; anyone with the link can use it once, until November 10, 2026 at 10:00 AM EST.");
+is("held: a checkout is open on it", linkStateWords(held, MADE, "America/New_York").startsWith("A checkout is open on it now. Made out to ana@example.com"), true);
+is("with no address, anyone with the link", linkStateWords({ ...link, email: undefined }, MADE, "America/New_York").startsWith("Anyone with the link can use it once, until"), true);
 is("used and expired say it no longer opens", [linkStateWords(used, MADE + DAY, "America/New_York"), linkStateWords(link, MADE + 8 * DAY, "America/New_York")], ["Used: booked on November 3, 2026 at 10:10 AM EST. It no longer opens.", "Expired on November 10, 2026 at 10:00 AM EST. It no longer opens."]);
 is("in UTC when the time zone kept is not one", linkStateWords(link, MADE, "Not/AZone").endsWith("UTC."), true);
 

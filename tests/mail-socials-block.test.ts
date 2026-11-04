@@ -3,6 +3,7 @@
  * 2026), on synthetic profiles only.
  */
 import { SOCIALS_LINE, hasSocials, isSocialsLine, socialsHtml, socialsProblem, socialsText } from "@/lib/mail-socials-block";
+import { BLOCK_WORDS, blockWords } from "@/lib/buyer-words/blocks";
 import { parseSocials, type Social } from "@/lib/store-socials";
 import { done, is, part } from "./check";
 
@@ -24,12 +25,22 @@ is("a malformed line is refused even with no profiles", socialsProblem("@Socials
 is("the sentences stay short", [NONE, MALFORMED].flatMap((t) => t.split(/(?<=\.) /)).every((sentence) => sentence.split(/\s+/).length < 21), true);
 
 part("The row");
-const html = socialsHtml(kept, (href) => `${href}?ref=mail`);
-is("the profiles as the store keeps them, in its order", [...html.matchAll(/>([A-Za-z]+)<\/a>/g)].map((m) => m[1]), ["Instagram", "Email", "Website"]);
-is("each name, never a logo", [html.includes(">Instagram</a>"), html.includes(">Email</a>"), html.includes(">Website</a>"), html.includes("<img")], [true, true, true, false]);
+const voice = { name: "Ana", words: blockWords("en") };
+const html = socialsHtml(kept, voice, (href) => `${href}?ref=mail`);
+is("the profiles as the store keeps them, in its order", [...html.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ["Ana on Instagram", "Email", "Website"]);
+is("each link says where it goes by its own text, never a logo", [html.includes(">Ana on Instagram</a>"), html.includes(">Email</a>"), html.includes(">Website</a>"), html.includes("<img")], [true, true, true, false]);
 is("links carry the email's tag; an email address does not", [html.includes('href="https://www.instagram.com/ana?ref=mail"'), html.includes('href="mailto:ana@example.com"')], [true, true]);
-is("only addresses the store page would link", socialsHtml([{ network: "website", url: "javascript:alert(1)" } as Social, { network: "x", url: "http://x.com/a" } as Social]), "");
-is("none: nothing drawn", socialsHtml([]), "");
-is("in plain text: each name and where it goes", socialsText(kept), "Instagram: https://www.instagram.com/ana\nEmail: ana@example.com\nWebsite: https://ana.example/");
+is("only addresses the store page would link", socialsHtml([{ network: "website", url: "javascript:alert(1)" } as Social, { network: "x", url: "http://x.com/a" } as Social], voice), "");
+is("none: nothing drawn", socialsHtml([], voice), "");
+is("in plain text: each profile's words and where it goes", socialsText(kept, voice), "Ana on Instagram: https://www.instagram.com/ana\nEmail: ana@example.com\nWebsite: https://ana.example/");
+
+part("In the store's language, with the store page's own words");
+for (const [language, words] of Object.entries(BLOCK_WORDS)) {
+  const own = { name: "Ana", words };
+  const text = socialsText(kept, own);
+  is(`${language}: the same words as the store page, in the HTML and the plain text`, [text, socialsHtml(kept, own).includes(`>${words.socialOn("Ana", "Instagram").replace(/&/g, "&amp;")}</a>`)], [`${words.socialOn("Ana", "Instagram")}: https://www.instagram.com/ana\n${words.socialEmail}: ana@example.com\n${words.socialWebsite}: https://ana.example/`, true]);
+}
+is("a German store's email never says the English words", [socialsText(kept, { name: "Ana", words: blockWords("de") }).includes("Ana on "), socialsText(kept, { name: "Ana", words: blockWords("de") }).includes("Ana auf Instagram")], [false, true]);
+is("the store's name is escaped in the HTML", socialsHtml(kept, { name: "<b>Ana</b>", words: blockWords("en") }).includes("&lt;b&gt;Ana&lt;/b&gt; on Instagram"), true);
 
 done();

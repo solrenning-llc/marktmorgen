@@ -99,6 +99,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
+import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -130,6 +131,7 @@ export const DB_BYTE_MONTH = micro(UPSTASH_MICRO_USD_PER_GB_MONTH) / 1e9;
 const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1_000_000;
 const CPU_SECOND = micro(VERCEL_CPU_MICRO_USD_PER_HOUR) / 3600;
 const MEMORY_SECOND = (micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) * VERCEL_FUNCTION_GB) / 3600;
+
 
 /**
  * What an order leaves that outlives its store, for its whole life (18
@@ -299,6 +301,27 @@ export const TEAM_COMMANDS_PER_VIEW = 2;
 
 /** Windows of a counter that a 31-day month can touch. */
 export const DAY_WINDOWS = 32;
+
+/** CX-55 diagnosis, not an approved funding policy. Every handle needs at
+ * least three ASCII characters and two JSON quotes. Ignoring all field names,
+ * commas and other store data is a conservative upper bound, not a claim that
+ * this many distinct handles can actually fit. Rates reuse the existing IAD1
+ * model; a deployment region and any endpoint-specific Stripe tariff remain
+ * unverified. This is only the function-memory component, never a total of zero.
+ */
+const searchHandleFloorBytes = 5;
+export const PLATFORM_SUBSCRIPTION_SEARCH = {
+  serializedHandleFloorBytes: searchHandleFloorBytes,
+  maxHandles: Math.floor(MAX_STORE_BYTES / searchHandleFloorBytes),
+  maxGets: Math.ceil(Math.floor(MAX_STORE_BYTES / searchHandleFloorBytes) / 10),
+  waitSeconds: STRIPE_TIMEOUT_MS / 1000,
+  memoryUsdPerGet: STRIPE_TIMEOUT_MS / 1000 * MEMORY_SECOND,
+  essentialEventsPerWindow: ESSENTIAL_PER_DAY * DAY_WINDOWS,
+  closingEventsPerWindow: DAY_WINDOWS,
+  stripeGetFeeUsd: null,
+  deploymentRegionVerified: false,
+} as const;
+export const PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD = PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet;
 export const UTC_DAYS = 31;
 
 /** Historical operating model only: encoded-size assumptions and fetched-ahead factor.
@@ -324,6 +347,23 @@ export type CostLine = {
 const ALL_TIERS_SAME = (usd: number) => () => usd;
 
 export const COST_LINES: CostLine[] = [
+  {
+    id: "platform-subscription-search",
+    feature: "Platform subscription search during checkout, store deletion and scheduled closing (CX-55 diagnosis)",
+    monthlyUsd: () => PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD * (PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow + PLATFORM_SUBSCRIPTION_SEARCH.closingEventsPerWindow),
+    sources: [
+      { file: "lib/store.ts", names: ["MAX_STORE_BYTES"] },
+      { file: "lib/store-handle-pattern.ts", names: ["HANDLE_PATTERN"] },
+      { file: "lib/fetch-timeout.ts", names: ["STRIPE_TIMEOUT_MS"] },
+      { file: "lib/billing.ts", names: ["findStoreSubscriptions", "offset += 10"] },
+      { file: "lib/studio-allowance-rules.ts", names: ["ESSENTIAL_NEEDS", "ESSENTIAL_PER_DAY"] },
+      { file: "app/api/billing/checkout/route.ts", names: ["creatorFrom(request, \"billing\")", "findStoreSubscriptions(store)"] },
+      { file: "app/api/store/stores/route.ts", names: ["creatorFrom(request, \"delete\")", "findStoreSubscriptions(store)"] },
+      { file: "lib/plan-closing.ts", names: ["findStoreSubscriptions(store)", "refuseLatePlans"] },
+      { file: "vercel.json", names: ["/api/cron/closing", "30 9 * * *"] },
+    ],
+    basis: "CX-55 requested per-GET timeout ceiling: ceil(floor(MAX_STORE_BYTES / 5) / 10) GETs, each waited on for STRIPE_TIMEOUT_MS at the existing Vercel function-memory rate. Billing and deletion share the ten daily essential requests (not ten each); closing runs daily, conservatively counted at DAY_WINDOWS. Only those events are charged, never visits. This is a diagnostic memory-only component: Stripe endpoint tariff and deployment region are not verified, CPU and other existing costs are not erased, no finite post-cancellation retry exposure or margin is certified, and no sale or policy is activated.",
+  },
   {
     id: "storage",
     feature: "Files and lesson files kept",

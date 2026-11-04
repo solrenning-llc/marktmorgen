@@ -46,7 +46,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_letter_members_only";
-process.env.RESEND_API_KEY = "re_test_letter_members_stand_in";
+process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only"; // one of the synthetic credentials the Resend fallback fixture knows (tests/resend-fixture-credentials.ts)
 
 const OWNER = "letters-members@example.com";
 const HANDLE = "maraclub";

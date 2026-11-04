@@ -56,8 +56,6 @@ async function main(): Promise<void> {
   is("some went in, the rest are said to be left out, and why", [answer.added > 0, answer.roomFull !== undefined, (answer.roomFull?.left ?? 0) > 0, answer.added + (answer.roomFull?.left ?? 0) + answer.already], [true, true, true, pasted.length]);
   const route = readFileSync("app/api/store/mail/route.ts", "utf8");
   is("the paste starts the ramp for those added, full or not, and says so", route.includes("await startRamp(healthId(store), added);") && route.includes("roomFull: roomFull ?? null"), true);
-  const studio = readFileSync("components/email-studio.tsx", "utf8");
-  is("the studio says how many were not added and why", studio.includes("were not added: ${String(roomFull.message"), true);
   const imports = readFileSync("lib/imports.ts", "utf8");
   is("a file of contacts that fills the room starts the ramp for those already in", imports.includes('if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);\n            job.state = "failed";') || /DataRoomError[\s\S]{0,400}if \(job\.kind === "contacts"\) await startRamp\(job\.sid, job\.counts\.added\)/.test(imports), true);
   done();

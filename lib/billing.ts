@@ -852,7 +852,7 @@ export async function restartPlan(input: {
     if (!fundedRestartSourceMatches(intent, currentSource) || !restartSubmissionOpenNow(armed)) {
       throw new Error("The current Store no longer matches the funded restart source");
     }
-    const subscription = await onPlatform("POST", "/subscriptions", body, {idempotencyKey:armed.idempotencyKey});
+    const subscription = await onPlatform("POST", "/subscriptions", body, {idempotencyKey:armed.idempotencyKey, version: "2025-09-30.clover"});
     // Persist an identified outcome BEFORE validating it for adoption. Even a
     // mismatched customer/price is evidence for read-only reconciliation.
     const resultId = subscription?.id;
@@ -871,6 +871,7 @@ export async function restartPlan(input: {
   const priceId = await ensurePrice(input.tier, "month");
   const body = new URLSearchParams({
     customer: input.customerId,
+    "billing_mode[type]": "classic",
     "items[0][price]": priceId,
     "items[0][quantity]": "1",
     default_payment_method: input.paymentMethod,
@@ -880,7 +881,7 @@ export async function restartPlan(input: {
     "metadata[tier]": input.tier,
     "metadata[restarted]": "break",
   });
-  const subscription = await onPlatform("POST", "/subscriptions", body, { idempotencyKey: input.idempotencyKey });
+  const subscription = await onPlatform("POST", "/subscriptions", body, { idempotencyKey: input.idempotencyKey, version: "2025-09-30.clover" });
   return observeRestartedPlan({ customerId: input.customerId, tier: input.tier, priceId }, subscription);
 }
 
@@ -907,6 +908,7 @@ export function fundedRestartRequestBody(intent:OwnedRestartIntent,priceId:strin
     !/^ctr_[A-Za-z0-9_-]{1,80}$/.test(intent.grant.id)||!/^claim_[A-Za-z0-9_-]{1,80}$/.test(intent.claim))
   throw Error("The restart request does not match its immutable owned source");
  return new URLSearchParams({
+  "billing_mode[type]":"classic",
   customer:pause.customer,"items[0][price]":priceId,"items[0][quantity]":"1",
   default_payment_method:pause.paymentMethod,off_session:"true",payment_behavior:"error_if_incomplete",
   "metadata[store]":intent.handle,"metadata[tier]":tier,"metadata[restarted]":"break",

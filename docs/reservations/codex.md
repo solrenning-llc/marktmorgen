@@ -6,4 +6,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Codex principal | CX-47: explicit classic subscription Checkout and pinned request version; release merged Meta reservation per CX-42 | codex/subscription-classic-version | `lib/store-checkout.ts`, `lib/assistant-billing.ts`, `lib/billing.ts` (CX-61: checkout body/header only, preserve Codex B search changes), `tests/subscription-checkout-version.test.ts`, `docs/subscription-checkout-version-2026-11-04.md` | 04/11/2026 |
+| Codex principal | CX-47: explicit classic subscription Checkout and pinned request version; release merged Meta reservation per CX-42 | codex/subscription-classic-version | `lib/store-checkout.ts`, `lib/assistant-billing.ts`, `lib/billing.ts` (CX-61/CX-62: checkout and restart subscription body/header only, preserve Codex B search changes), `tests/subscription-checkout-version.test.ts`, `tests/subscription-restart-version.test.ts`, `docs/subscription-checkout-version-2026-11-04.md` | 04/11/2026 |

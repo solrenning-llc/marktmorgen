@@ -10,11 +10,13 @@ Lanes (who owns which subjects):
 | Claude 1 | claude/ | Coordination, the queue, research, design of the site and the studio with the owner (571 [VS1]), review of the others' work, accounts (232 [CA1]) and refunds (305 [SY1], 306 [SY2]) |
 | Claude 2 | claude2/ | Group A product items it has in progress (520 [LB1], 513 [PF1], 22 [E5], 270 [GR1], 397 [SL1], FQ1 and the next Group A items in order) |
 | Claude 3 | claude3/ | 631 [AA1] (the whole store run by an AI agent) and then 632 [AA2] (ads launched from inside Marktmorgen) |
+| Claude 4 | claude4/ | Group A items not started, taken from the END of the Group A order upward (Claude 2 takes them from the top), skipping money, billing, Amazon SES email, taxes and costs (Codex) and 631 [AA1], 632 [AA2], 639 [GL7] (Claude 3); owner decision 04/11/2026 (inbox C4-1) |
 
 ## Open pull requests and their files (snapshot 02/11/2026, 12h55 Fortaleza)
 
 Generated from the GitHub API; refresh before relying on it. Every file below is reserved by that PR until it is merged or closed, except `docs/codex-queue.md`, which every agent edits only through its own small docs PRs merged at once, never rewriting another agent's lines.
 
+- #2061 `claude2/thanks-order-room` (claude2): `app/[handle]/thanks/page.tsx`, `lib/contacts.ts`, `tests/contacts-room.test.ts`
 - #1736 `claude2/lb1-place-words` (claude2): `components/call-editor.tsx`, `docs/codex-queue.md`, `lib/buyer-words/booking.ts`, `lib/buyer-words/orders.ts`, `lib/call-faq.ts`, `lib/call-packages.ts`, `lib/calls.ts`, `tests/call-place-pages.test.ts`, `tests/call-place-setup.test.ts`
 - #1735 `claude2/lb1-place-pages` (claude2): `app/[handle]/book/[product]/page.tsx`, `app/[handle]/orders/page.tsx`, `app/[handle]/thanks/page.tsx`, `app/api/store/call/route.ts`, `app/studio/page.tsx`, `components/call-editor.tsx`, `components/store-product.tsx`, `docs/codex-queue.md`, `lib/answers.ts`, `lib/buyer-orders.ts`, `lib/buyer-words/booking.ts`, `lib/buyer-words/de.ts`, `lib/buyer-words/en.ts`, `lib/buyer-words/es.ts`, `lib/buyer-words/fr.ts`, `lib/buyer-words/it.ts`, `lib/buyer-words/nl.ts`, `lib/buyer-words/pt.ts`, `lib/call-rooms.ts`, `lib/calls.ts`, `tests/call-place-pages.test.ts`, `tests/call-place-setup.test.ts`
 - #1734 `claude2/lb1-place-setup` (claude2): `app/api/store/call/route.ts`, `app/api/store/ics/route.ts`, `docs/codex-queue.md`, `lib/buyer-words/booking.ts`, `lib/calendar-sync.ts`, `lib/call-meetings.ts`, `lib/call-reminders.ts`, `lib/call-setup.ts`, `lib/calls.ts`, `lib/meet-links.ts`, `tests/call-place-setup.test.ts`

@@ -83,6 +83,8 @@ import {
   MAX_QUOTE,
   MAX_QUOTE_NAME,
   MAX_QUOTE_URL,
+  MAX_ROW_COLUMNS,
+  MAX_ROW_ELEMENTS,
   type Quote,
   quoteUrl,
   PAGE_TEMPLATES,
@@ -119,6 +121,7 @@ const MESSAGES: Record<string, string> = {
   quote_length: `A quotation exceeds the ${MAX_QUOTE}-character limit. Use a shorter, complete quotation from the source or remove it. Nothing was saved.`,
   quote_link: "Each thing said elsewhere needs the full https address of where it was said, so visitors can check it. Add it, or remove that one.",
   shape: "Something in the page could not be read. Reload the studio and try again.",
+  row: `A row holds 1 to ${MAX_ROW_COLUMNS} columns and up to ${MAX_ROW_ELEMENTS} parts, each in plain words. Each picture needs words that describe it, or a mark that it is decoration, and each button with a link needs words and a full https address. Nothing was saved.`,
   same_version: "Version B shows just what version A does, or one of them has no blocks. Change something in version B, or end the test.",
   too_big: "The page is too long to save. Shorten some of the text.",
   placeholder: "This page still has parts marked ⟦like this⟧ for you to write. Replace each one with your own words, or keep the page hidden, before saving. Nothing was saved.",
@@ -148,7 +151,8 @@ function fromLocalField(value: string): number {
 /** Below this many visitors a share would say more about chance than about the page. */
 const MIN_DEPTH_VISITORS = 30;
 
-const kindLabel = (kind: BlockKind) => BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind;
+// A row of columns (375 [TB1]) is not in the gallery yet, so its name is given here.
+const kindLabel = (kind: BlockKind) => (kind === "row" ? "Columns" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
 
 export type EditorProduct = {
   id: string;
@@ -1499,6 +1503,12 @@ export function PageEditor({
           </div>
         );
       }
+      case "row":
+        return (
+          <p className="text-sm text-ink-soft">
+            This row is shown on your page as it is. You can move it, hide it on some screens or remove it here; its columns cannot be changed in this editor.
+          </p>
+        );
       case "facts": {
         const chosen = new Set(block.show);
         return (
@@ -1635,6 +1645,10 @@ export function PageEditor({
       case "form": {
         const chosen = site?.forms?.find((f) => f.id === block.form);
         return `${block.heading ? `${block.heading} · ` : ""}${chosen ? chosen.name : "No form chosen yet"}`;
+      }
+      case "row": {
+        const parts = block.columns.reduce((n, column) => n + column.length, 0);
+        return `${block.columns.length} ${block.columns.length === 1 ? "column" : "columns"} · ${parts} ${parts === 1 ? "part" : "parts"}`;
       }
       case "facts": {
         const live = block.show.filter((key) => facts[key]).length;

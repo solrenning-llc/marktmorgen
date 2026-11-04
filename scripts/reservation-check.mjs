@@ -18,7 +18,9 @@ import { execFileSync } from "node:child_process";
  */
 // app/privacy/page.tsx (inbox C3-37): each agent adds or changes only its own unit's sentences, never rewrites another's, and keeps both in a conflict.
 // tests/plan-cost-registry.ts and tests/test-config.mjs (inbox CX-29): registries where each unit adds its own rows; each agent adds or changes only its own rows and keeps both in a conflict.
-export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts", "app/privacy/page.tsx", "tests/plan-cost-registry.ts", "tests/test-config.mjs"]);
+// lib/data-families.ts, tests/store-data-registry.ts and lib/redis-memory.ts (inbox CX-46, C2 04/11 08h25): registries of key families and the
+// tests' Redis emulator, where each unit adds its own families or scripts; each agent adds or changes only its own entries and keeps both in a conflict.
+export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts", "app/privacy/page.tsx", "tests/plan-cost-registry.ts", "tests/test-config.mjs", "lib/data-families.ts", "tests/store-data-registry.ts", "lib/redis-memory.ts"]);
 
 /** The folder of each agent's own reservations file. */
 export const RESERVATIONS_DIR = "docs/reservations/";
@@ -132,12 +134,16 @@ export function agentFilesAt(git, rev) {
 
 /** In a pull_request checkout (the merge commit), the PR's changed files and the base's reservations. */
 export function pullRequestInputs(git) {
-  // The merge commit's first parent is the base; fetch it when the checkout is shallow.
-  try { git(["rev-parse", "--verify", "--quiet", "HEAD^1"]); }
-  catch { git(["fetch", "--no-tags", "--quiet", "--deepen=1", "origin"]); }
-  const text = git(["show", "HEAD^1:docs/reservations.md"]);
-  const changed = git(["diff", "--name-only", "HEAD^1", "HEAD"]).split("\n").filter(Boolean);
-  return { text, changed, agentFiles: agentFilesAt(git, "HEAD^1") };
+  // The merge commit's first parent is the base. A shallow checkout has the merge commit but not its
+  // parent, and "fetch --deepen" only deepens the remote's branches, which miss the base as soon as main
+  // moves on: read the parent's id from the commit itself and fetch exactly that commit when it is missing.
+  const base = git(["cat-file", "-p", "HEAD"]).split("\n").find((line) => line.startsWith("parent "))?.slice(7).trim();
+  if (!base) throw new Error("HEAD has no parent: not a pull request merge commit");
+  try { git(["cat-file", "-e", `${base}^{commit}`]); }
+  catch { git(["fetch", "--no-tags", "--quiet", "--depth=1", "origin", base]); }
+  const text = git(["show", `${base}:docs/reservations.md`]);
+  const changed = git(["diff", "--name-only", base, "HEAD"]).split("\n").filter(Boolean);
+  return { text, changed, agentFiles: agentFilesAt(git, base) };
 }
 
 export function report({ me, found }, branch, changedCount) {

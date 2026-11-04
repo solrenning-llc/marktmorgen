@@ -61,29 +61,65 @@ export function breadcrumbData(store: { name: string; url: string }, product: { 
 /** The fewest courses a course list may mark up (Google's course list rules). */
 export const MIN_COURSE_LIST = 3;
 
-/** A course name Google would not take: a price, a discount or a call to buy in it. */
-const PROMOTIONAL_NAME = /[$€£¥₹]\s?\d|\d\s?%|\b\d+\s?off\b|\b(?:on sale|discount|buy now|order now|enroll now)\b/i;
+/**
+ * A course name Google would not take: a price, a discount or a call to buy
+ * in it. Read after plainText, so fullwidth digits, hidden characters and
+ * doubled spaces cannot slip a price past it. "Free" alone is a plain word.
+ */
+const PROMOTIONAL_NAME = /\p{Sc}\s?\p{Nd}|\p{Nd}\s?\p{Sc}|\p{Nd}\s?(?:%|percent\b)|\b\p{Nd}+\s?off\b|\b(?:on sale|discount(?:ed)?|buy now|order now|enroll? now|half price|limited time|save \p{Nd}+|only \p{Nd}+|\p{Nd}+ (?:dollars?|euros?|pounds?|reais|yen))\b/iu;
+/** A price in a currency's code, written in capitals as codes are ("30 USD", "EUR 30"). */
+const CURRENCY_CODE_PRICE = /\b(?:USD|EUR|GBP|JPY|CAD|AUD|NZD|CHF|BRL|MXN|INR|CNY|SEK|NOK|DKK|ZAR|KRW|PLN|CZK|HUF|SGD|HKD)\s?\p{Nd}|\p{Nd}\s?(?:USD|EUR|GBP|JPY|CAD|AUD|NZD|CHF|BRL|MXN|INR|CNY|SEK|NOK|DKK|ZAR|KRW|PLN|CZK|HUF|SGD|HKD)\b/u;
+/** The longest description sent: Google shows 60 characters of it. */
+const MAX_COURSE_DESCRIPTION = 5_000;
 
 export type CourseFacts = { name: string; description: string; url: string };
 
-/** One course, as its own page describes it; null when its name or description cannot be marked up. */
+/** Text as a reader sees it: compatibility forms folded, hidden format characters gone, spaces single. */
+function plainText(text: string): string {
+  return text.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/gu, " ").trim();
+}
+
+/** A course's own page, on the store's own site, as one address: no fragment, no trailing slash. Null otherwise. */
+function courseUrl(url: string, site: string): string | null {
+  try {
+    const at = new URL(url);
+    const home = new URL(site);
+    if (at.protocol !== "https:" || at.host !== home.host) return null;
+    at.hash = "";
+    return at.href.replace(/\/+$/, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+/** One course, as its own page describes it; null when its name, description or address cannot be marked up. */
 export function courseData(course: CourseFacts, provider: { name: string; url: string }): object | null {
-  const name = course.name.trim();
-  const description = course.description.trim();
-  if (!name || !description || PROMOTIONAL_NAME.test(name)) return null;
+  const name = plainText(course.name);
+  const description = Array.from(plainText(course.description)).slice(0, MAX_COURSE_DESCRIPTION).join("");
+  const url = courseUrl(course.url, provider.url);
+  if (!name || !description || !url || PROMOTIONAL_NAME.test(name) || CURRENCY_CODE_PRICE.test(name)) return null;
+  const by = plainText(provider.name);
   return {
     "@context": "https://schema.org",
     "@type": "Course",
     name,
     description,
-    url: course.url,
-    provider: { "@type": "Organization", name: provider.name, sameAs: provider.url },
+    url,
+    // Recommended, not required: left out rather than sent empty.
+    ...(by ? { provider: { "@type": "Organization", name: by, sameAs: provider.url } } : {}),
   };
 }
 
-/** The store's courses as a list, for the page that lists them; null below MIN_COURSE_LIST markable courses. */
+/**
+ * The store's courses as a list, for the page that lists them: every course
+ * the page lists, or none, so the list never says less than the page shows;
+ * null below MIN_COURSE_LIST courses, or when any of them cannot be marked
+ * up. The same course under two spellings of its address counts once.
+ */
 export function courseListData(courses: readonly CourseFacts[], provider: { name: string; url: string }): object | null {
-  const urls = [...new Set(courses.filter((c) => courseData(c, provider) !== null).map((c) => c.url))];
+  const marked = courses.map((c) => courseData(c, provider) as { url: string } | null);
+  if (marked.some((c) => c === null)) return null;
+  const urls = [...new Set(marked.map((c) => c!.url))];
   if (urls.length < MIN_COURSE_LIST) return null;
   return {
     "@context": "https://schema.org",

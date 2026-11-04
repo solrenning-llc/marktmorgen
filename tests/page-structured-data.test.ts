@@ -35,7 +35,19 @@ async function main(): Promise<void> {
   is("but a plain name with ordinary words keeps it", [courseData({ ...knife, name: "Gluten-free Baking" }, provider) !== null, courseData({ ...knife, name: "Off-grid Living" }, provider) !== null, courseData({ ...knife, name: "The Only Sourdough Guide" }, provider) !== null], [true, true, true]);
   is("a list only from three courses", [MIN_COURSE_LIST, courseListData(more(2), provider), (courseListData(more(3), provider) as { itemListElement: unknown[] }).itemListElement.length], [3, null, 3]);
   is("each listed once, in order, by its own page", courseListData([...more(3), more(1)[0]], provider), { "@context": "https://schema.org", "@type": "ItemList", itemListElement: more(3).map((c, i) => ({ "@type": "ListItem", position: i + 1, url: c.url })) });
-  is("a course that cannot be marked up does not count toward the three", courseListData([...more(2), { ...knife, name: "Bread course on sale", url: "x" }], provider), null);
+  is("a course that cannot be marked up makes no list", courseListData([...more(2), { ...knife, name: "Bread course on sale", url: "x" }], provider), null);
+
+  part("Courses: what a name, an address or a provider cannot slip past");
+  const priced = ["Ukulele 30 USD", "Ukulele USD 30", "Ukulele 30€", "Ukulele 30,00 €", "Ukulele CHF 30", "Ukulele 30 reais", "Ukulele ₩30000", "Ukulele １２＄", "Ukulele ＄３０", "Ukulele $\u200b30", "Ukulele 50\u200f% off", "Ukulele 50 percent off", "Ukulele: enroll\u00a0now", "Ukulele: enroll  now", "Ukulele: enrol now", "Ukulele, half price", "Ukulele, limited time", "Ukulele for only 30 dollars", "Ukulele: save 20"];
+  is("a price or an offer, however written, keeps it out", priced.filter((name) => courseData({ ...knife, name }, provider) !== null), []);
+  is("ordinary names with digits or capitals keep it", [courseData({ ...knife, name: "Yoga 30 Days" }, provider) !== null, courseData({ ...knife, name: "DVD Editing 101" }, provider) !== null, courseData({ ...knife, name: "Free Ukulele Basics" }, provider) !== null], [true, true, true]);
+  is("a name or a description of hidden characters only is none", [courseData({ ...knife, name: "\u200b" }, provider), courseData({ ...knife, description: "\u200b  " }, provider)], [null, null]);
+  is("an address that is not the course's own page on the store's site is none", [courseData({ ...knife, url: "" }, provider), courseData({ ...knife, url: "/@harbor/p/knife" }, provider), courseData({ ...knife, url: "https://evil.example/3" }, provider), courseData({ ...knife, url: "http://marktmorgen.com/@harbor/p/knife" }, provider)], [null, null, null, null]);
+  const spellings = ["https://marktmorgen.com/@harbor/p/a", "https://marktmorgen.com/@harbor/p/a/", "https://marktmorgen.com/@harbor/p/a#lessons"].map((url, i) => ({ ...knife, name: `Course ${i}`, url }));
+  is("the same page under three spellings is one course, so no list", courseListData(spellings, provider), null);
+  is("a list says all the page lists or nothing: one course that cannot be marked up, no list", courseListData([...more(3), { ...knife, name: "Bread 50% off", url: `${knife.url}-x` }], provider), null);
+  is("no provider is sent without its name", "provider" in (courseData(knife, { ...provider, name: " " }) as object), false);
+  is("a very long description is cut, by characters, never inside one", Array.from((courseData({ ...knife, description: "😀".repeat(6000) }, provider) as { description: string }).description).length, 5000);
 
   part("On the page");
   const source = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");

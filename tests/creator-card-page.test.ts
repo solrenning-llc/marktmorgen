@@ -3,19 +3,21 @@
  * address (app/[handle]/contact/page.tsx) and its "Save contact" file
  * (app/[handle]/contact/vcard/route.ts), through the real page, route and
  * store, the card itself drawn from components/creator-card-view.tsx. Shown and given only while the card is on; each way to reach the
- * creator a link that says what it is; the file a vCard to save; the words
+ * creator a link that says what it is; the file a vCard to save; neither
+ * while the store is switched off after a report; the words
  * in every language the store can speak.
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import ContactPage from "@/app/[handle]/contact/page";
+import ContactPage, { generateMetadata } from "@/app/[handle]/contact/page";
 import { CreatorCardView } from "@/components/creator-card-view";
+import { StoreResting } from "@/components/store-resting";
 import { GET } from "@/app/[handle]/contact/vcard/route";
 import { CONTACT_WORDS } from "@/lib/buyer-words/contact";
 import { type CreatorCard, saveCreatorCard } from "@/lib/creator-card";
-import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -76,6 +78,16 @@ async function main(): Promise<void> {
   is("a vCard, saved as a file named for the card, never kept in a cache", [response.status, response.headers.get("content-type"), response.headers.get("content-disposition"), response.headers.get("cache-control")], [200, "text/vcard; charset=utf-8", 'attachment; filename="ana-souza.vcf"', "no-store"]);
   is("with the card and the store's page", text.startsWith("BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Ana Souza\r\n") && text.includes("URL:https://marktmorgen.com/@anapottery\r\n") && text.endsWith("END:VCARD\r\n"), true);
   is("not for a store that does not exist", (await GET(new NextRequest("https://marktmorgen.com/@nobody/contact/vcard"), { params: Promise.resolve({ handle: "@nobody" }) })).status, 404);
+
+  part("A store switched off after a report (lib/takedown.ts)");
+  await saveCreatorCard(store.statsId!, card, store);
+  await noteTakedown(owner, null, true);
+  is("the file is not given", [(await file()).status, (await file()).headers.get("cache-control")], [404, "no-store"]);
+  const resting = (await ContactPage({ params: Promise.resolve({ handle: "@anapottery" }), searchParams: Promise.resolve({}) })) as { type?: unknown; props?: { suspended?: boolean } } | undefined;
+  is("the page says the store is not available, as the store page does, and shows no card", [resting?.type === StoreResting, resting?.props?.suspended], [true, true]);
+  is("its title does not name the creator", String((await generateMetadata({ params: Promise.resolve({ handle: "@anapottery" }), searchParams: Promise.resolve({}) })).title).includes("Ana Souza"), false);
+  await noteTakedown(owner, null, false);
+  is("switched back on, the file is given again", (await file()).status, 200);
 
   part("In every language the store can speak");
   const keys = Object.keys(CONTACT_WORDS.en.card).sort();

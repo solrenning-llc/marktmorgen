@@ -10,6 +10,7 @@ import { readCreatorCard } from "@/lib/creator-card";
 import { CreatorCardView } from "@/components/creator-card-view";
 import { StoreContactBox } from "@/components/store-contact-box";
 import { contactOpen } from "@/lib/store-contact";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -21,7 +22,7 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
   const query = await searchParams;
-  const card = store && !query.status ? await readCreatorCard(store.statsId).catch(() => null) : null;
+  const card = store && !store.suspended && !query.status ? await readCreatorCard(store.statsId).catch(() => null) : null;
   const w = contactWords(store?.language);
   return { title: `${card?.on ? `${card.name} · ${w.card.pageTitle}` : w.pageTitle} — Marktmorgen`, robots: { index: false, follow: false } };
 }
@@ -37,6 +38,8 @@ export default async function ContactPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Switched off after notices about its content (lib/takedown.ts): no card and no notice, as on the store page.
+  if (store.suspended) return <StoreResting store={store} suspended />;
   const query = await searchParams;
   const status = typeof query.status === "string" ? query.status : "";
   const said = speech(store);

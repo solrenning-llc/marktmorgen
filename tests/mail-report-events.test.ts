@@ -8,7 +8,7 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/mail/inbound/route";
 import { recordSesEvent } from "@/lib/mail-report";
 import { healthTags } from "@/lib/mail-health";
-import { MAIL_REPORT_TAG, mailReportDay } from "@/lib/mail-report";
+import { MAIL_REPORT_TAG, mailReportDay, noteMailReportEvent } from "@/lib/mail-report";
 import { readSesEvent } from "@/lib/sns";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -17,12 +17,13 @@ const SECRET = Buffer.from("mail-report-events-test-secret");
 const STORE = "0123456789abcdef0123456789abcdef";
 const LIST = "fedcba9876543210fedcba9876543210";
 const CAMPAIGN = "b-0123456789abcdef01234567";
+const EVENT_AT = new Date().toISOString();
 let id = 0;
 
 function announce(type: string, data: Record<string, unknown>, sameId?: string): NextRequest {
   const eventId = sameId ?? `report_${++id}`;
   const at = String(Math.floor(Date.now() / 1000));
-  const body = JSON.stringify({ type, created_at: "2026-11-04T00:00:00.000Z", data });
+  const body = JSON.stringify({ type, created_at: EVENT_AT, data });
   const signature = createHmac("sha256", SECRET).update(`${eventId}.${at}.${body}`).digest("base64");
   return new NextRequest("https://marktmorgen.com/api/mail/inbound", {
     method: "POST",
@@ -75,8 +76,8 @@ async function main() {
   );
   const sesCampaign = "b-abcdef0123456789abcdef01";
   const sesTags = { nl_store: STORE, nl_list: LIST, [MAIL_REPORT_TAG]: sesCampaign };
-  is("the authenticated SES route action records delivery", await recordSesEvent({ kind: "delivered", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delivery_2" }), "delivered");
-  is("and records a temporary outcome without treating it as permanent", await recordSesEvent({ kind: "delayed", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delay_2" }), "temporary");
+  is("the authenticated SES route action records delivery", await recordSesEvent({ kind: "delivered", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delivery_2", occurredAt: Date.now() }), "delivered");
+  is("and records a temporary outcome without treating it as permanent", await recordSesEvent({ kind: "delayed", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delay_2", occurredAt: Date.now() }), "temporary");
   is("the SES outcomes remain separate", await mailReportDay(STORE, sesCampaign), { delivered: 1, permanentBounces: 0, temporaryBounces: 1, complained: 0 });
 
   part("Signed outcomes are counted for the email, without recipient data");
@@ -104,14 +105,22 @@ async function main() {
   ], [false, false]);
 
   const originalNow = Date.now;
+  const reportKey = `nl:mail:health:${STORE}:${new Date().toISOString().slice(0, 10)}`;
+  const expiryBefore = Number(redis.run(["TTL", reportKey]));
   try {
     const nextDay = originalNow() + 86_400_000;
     Date.now = () => nextDay;
     await POST(announce("email.delivery_delayed", { email_id: "em_1", to: ["full@example.test"], tags, bounce: { type: "Transient" } }));
     is("a replay after midnight stays in the provider event's original UTC day", await mailReportDay(STORE, CAMPAIGN, nextDay), null);
+    is("a replay cannot renew the original hash's lifetime", Number(redis.run(["TTL", reportKey])) <= expiryBefore - 86_400, true);
   } finally {
     Date.now = originalNow;
   }
+  const keysBefore = redis.keys();
+  for (const occurredAt of [undefined, NaN, Infinity, -1, Date.now() + 1000, Date.now() - 11 * 86_400_000]) {
+    is("an unconfirmed, future or expired event time authorizes no report write: " + String(occurredAt), await noteMailReportEvent(STORE, CAMPAIGN, "delivered", 1, "ses:time-invalid", occurredAt), false);
+  }
+  is("refused timestamps leave every key intact", redis.keys(), keysBefore);
 
   done();
 }

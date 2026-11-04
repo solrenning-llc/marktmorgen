@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false }, { status: 401 });
   }
 
-  let notice: { type?: unknown; data?: { email_id?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
+  let notice: { type?: unknown; created_at?: unknown; data?: { email_id?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
   try {
     notice = JSON.parse(body) as typeof notice;
   } catch {
@@ -105,7 +105,8 @@ export async function POST(request: NextRequest) {
           ? "complained"
           : permanent ? "permanent-bounce" : "temporary-bounce";
       const emailId = typeof notice.data?.email_id === "string" && notice.data.email_id.length <= 200 ? notice.data.email_id : "";
-      const reported = await noteMailReportEvent(store, tagOf(notice.data?.tags, MAIL_REPORT_TAG), event, recipients.length, emailId ? `resend:${emailId}` : "");
+      const occurredAt = typeof notice.created_at === "string" ? Date.parse(notice.created_at) : undefined;
+      const reported = await noteMailReportEvent(store, tagOf(notice.data?.tags, MAIL_REPORT_TAG), event, recipients.length, emailId ? `resend:${emailId}` : "", occurredAt);
       if (!reported && !bad) return Response.json({ ok: true });
       const reportResult = event === "delivered" ? "delivered" : event === "temporary-bounce" ? "temporary" : "counted";
       return Response.json({ ok: true, result: result !== "ignored" ? result : reported ? reportResult : "ignored" });

@@ -41,18 +41,23 @@ export async function noteMailReportEvent(
   event: MailReportEvent,
   count: number,
   providerIdentity: string,
+  occurredAt: number | undefined,
   now = Date.now(),
 ): Promise<boolean> {
   const report = mailReportCampaign(campaign);
   if (!HEALTH_ID.test(store) || !report || !Number.isSafeInteger(count) || count <= 0 || count > 50 ||
-      typeof providerIdentity !== "string" || providerIdentity.length < 3 || providerIdentity.length > 240 || !isRedisConfigured()) return false;
-  const key = mailHealthDayKey(store, now);
+      typeof providerIdentity !== "string" || providerIdentity.length < 3 || providerIdentity.length > 240 ||
+      typeof occurredAt !== "number" || !Number.isSafeInteger(occurredAt) || occurredAt < 0 || occurredAt > now ||
+      now - occurredAt >= MAIL_HEALTH_DAY_SECONDS * 1000 || !isRedisConfigured()) return false;
+  const key = mailHealthDayKey(store, occurredAt);
+  const expiresAt = Math.floor(occurredAt / 86_400_000) * 86_400 + MAIL_HEALTH_DAY_SECONDS;
+  if (expiresAt * 1000 <= now) return false;
   const identity = createHash("sha256").update(providerIdentity).digest("hex").slice(0, 32);
   await redisPipeline([
     // One field per provider email/outcome: a replay overwrites the same
     // value, even when its webhook delivery carries a new id.
     ["HSET", key, `${prefixes(report)[event]}${identity}`, count],
-    ["EXPIRE", key, MAIL_HEALTH_DAY_SECONDS],
+    ["EXPIREAT", key, expiresAt],
   ]);
   return true;
 }
@@ -100,7 +105,7 @@ export async function recordSesEvent(event: SesEvent): Promise<"paused" | "count
     : event.kind === "complained"
       ? "complained"
       : event.permanent ? "permanent-bounce" : "temporary-bounce";
-  const reported = await noteMailReportEvent(event.tags[STORE_TAG] ?? "", event.tags[MAIL_REPORT_TAG] ?? "", reportEvent, event.recipients.length, event.messageId ? `ses:${event.messageId}` : "");
+  const reported = await noteMailReportEvent(event.tags[STORE_TAG] ?? "", event.tags[MAIL_REPORT_TAG] ?? "", reportEvent, event.recipients.length, event.messageId ? `ses:${event.messageId}` : "", event.occurredAt);
   if (!reported && (event.kind === "delivered" || event.kind === "delayed")) return null;
   const reportResult = reportEvent === "delivered" ? "delivered" : reportEvent === "temporary-bounce" ? "temporary" : "counted";
   return results.includes("paused") ? "paused" : results.includes("counted") ? "counted" : reported ? reportResult : "ignored";

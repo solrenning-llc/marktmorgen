@@ -55,6 +55,7 @@ export function BundleDelivery({
   missing,
   storeName,
   heading = "What is inside",
+  showHeading = true,
   words: given,
 }: {
   lines: BundleLine[];
@@ -62,13 +63,15 @@ export function BundleDelivery({
   missing: number;
   storeName: string;
   heading?: string;
+  /** False when the heading is already drawn above, as on the list of purchases (components/orders-bundle.tsx): it stays the list's name. */
+  showHeading?: boolean;
   /** Said in the store's language; English when not given. */
   words?: BundleWords;
 }) {
   const words = given ?? englishWords(storeName, missing);
   return (
     <section className="mt-6" aria-label={heading}>
-      <p className="st-label">{heading}</p>
+      {showHeading ? <p className="st-label">{heading}</p> : null}
       <ul className="mt-3 space-y-3">
         {lines.map((line) => {
           const { product } = line;

@@ -84,3 +84,70 @@ export const DOWNLOAD_LOOKUP_COMMANDS = 4;
  * not use pays the same opening's next reads.
  */
 export const ORDERS_CALL_MOVES = 5 * 100;
+
+/**
+ * The most calls one opening of the orders page, or one request for its link,
+ * makes to the creator's Stripe account (C3-80, 4 November 2026). Without it a
+ * buyer with a hundred purchases paid in installments made 1,216 calls in one
+ * opening, enough to have Stripe refuse the creator's own checkouts for a
+ * while. ORDERS_STRIPE_LISTS of them are the lists every opening may read,
+ * bounded by the code itself; the rest pay for the refund checks of payment
+ * plans, PLAN_REFUND_CALLS each, taken before each check is made. A purchase
+ * whose check has no room left is not shown, and the page says some
+ * purchases could not be checked: never that they were not bought.
+ */
+export const ORDERS_STRIPE_CALLS = 200;
+/**
+ * The lists every opening may read from Stripe, whatever the buyer has: the
+ * buyer's checkouts under both spellings of the address (two), the payments
+ * taken in one click for at most ten of their customers (ten), and the store's
+ * bookings, five pages at the most (lib/calls.ts, MAX_PAGES).
+ */
+export const ORDERS_STRIPE_LISTS = 2 + 10 + 5;
+/**
+ * Calls lib/refunds.ts makes at the most to read whether a purchase paid in
+ * installments was refunded: its first invoice, that invoice's payments (ten
+ * at the most, its list's limit) and each of those payments
+ * (tests/orders-open.test.ts holds the ten to that file).
+ */
+export const PLAN_REFUND_CALLS = 1 + 1 + 10;
+
+/**
+ * What one opening of the orders page sends to the browser at the most, in
+ * bytes (C3-80, 4 November 2026). A bundle's products are not drawn on the
+ * page: each bundle is a button that reads them when the buyer asks
+ * (app/api/store/orders/bundle/route.ts), so forty purchases of four
+ * twenty-product bundles no longer draw 3,200 links. What the page still
+ * draws is bounded by the store's own limits: forty purchases, each with its
+ * own delivery and three ticked at checkout (each link at most 2,000
+ * characters in its address, every character escaped at six bytes at the
+ * most, and shown as text cut to LINK_SHOWN characters), forty booked calls
+ * and what waits on the buyer. tests/orders-page-bounds.test.ts holds a page
+ * drawn at those limits under it, and tests/plan-cost-registry.ts prices it
+ * in ORDERS_OPEN_READ.
+ */
+export const ORDERS_PAGE_BYTES = 3_000_000;
+/** The most characters of a delivery's address the list shows as text; the whole address is the button's own, one click away. */
+export const LINK_SHOWN = 100;
+
+/**
+ * What showing a bundle's products takes (app/api/store/orders/bundle/route.ts;
+ * C3-80, 4 November 2026), besides the request's own call: ORDERS_BUNDLE_UNITS
+ * of the store's buyer requests, taken before the link's grant is read, in
+ * place of a download's DOWNLOAD_LOOKUP_UNITS. They pay for the same lookup of
+ * one purchase by its reference, and for the answer sent back, every product
+ * of the bundle with its address and its key, ORDERS_BUNDLE_BYTES at the most.
+ * The bundle's listings and keys are taken through the meter before they are
+ * read. tests/plan-cost-registry.ts prices it (ORDERS_BUNDLE_READ) and
+ * tests/plan-cost-registry.test.ts holds the units above it.
+ */
+export const ORDERS_BUNDLE_UNITS = 2;
+/**
+ * The most bytes the answer with a bundle's products holds: twenty products,
+ * each with its title, its address (2,000 characters, escaped at two bytes at
+ * the most in JSON), its download and course addresses and its key with its
+ * label (tests/orders-page-bounds.test.ts holds a full bundle under it).
+ */
+export const ORDERS_BUNDLE_BYTES = 150_000;
+/** How often one link may show a bundle's products in an hour, as a download's link is limited. */
+export const ORDERS_BUNDLE_PER_HOUR = 240;

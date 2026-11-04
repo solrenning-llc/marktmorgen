@@ -308,7 +308,8 @@ test("purchases take their listings, pre-orders and what was brought over before
     payment_intent: { id: `pi_test${id.padEnd(10, "0")}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
   });
   sessions = [
-    // A guide with a bundle of two inside and a box ticked at checkout: four listings.
+    // A guide with a bundle of two inside and a box ticked at checkout: two listings, the guide and the one ticked. The bundle's
+    // two are read only when the buyer asks to see them (lib/buyer-orders.ts, bundleFor; C3-80).
     paid("a", { product: ids.Guide, bundle: `${ids.Templates},${ids.Checklist}`, bump: ids.Workbook }),
     // A pre-order: its listing, and its entry and when it ships.
     paid("b", { product: ids.Planner, preorder: "1" }),
@@ -317,8 +318,8 @@ test("purchases take their listings, pre-orders and what was brought over before
   const meter = new OrdersMeter(store);
   const purchases = await purchasesFor(store, BUYER, meter);
   assert.ok(purchases.length >= 3, String(purchases.length));
-  // Six listings (the Guide once, though bought and brought over), the pre-order's reads, and the two entries brought over.
-  const commands = 6 * ORDERS_LISTING_COMMANDS + ORDERS_PREORDER_COMMANDS + ORDERS_IMPORTED_COMMANDS + 2 * ORDERS_IMPORTED_ENTRY_COMMANDS;
+  // Four listings (the Guide once, though bought and brought over), the pre-order's reads, and the two entries brought over.
+  const commands = 4 * ORDERS_LISTING_COMMANDS + ORDERS_PREORDER_COMMANDS + ORDERS_IMPORTED_COMMANDS + 2 * ORDERS_IMPORTED_ENTRY_COMMANDS;
   assert.equal(meter.taken, Math.ceil(commands / ORDERS_UNIT_COMMANDS));
   // The store with no room reads none of them.
   const refused = { ...store, period: null };
@@ -535,7 +536,7 @@ test("a product of a bundle costs its lookup and two listings, whatever the bund
   assert.deepEqual(sent.filter((command) => command.includes(":l:")), []);
 });
 
-test("a product ticked at checkout is read with the one bought and no other; a key the order does not hold is refused", async () => {
+test("a product checked at checkout is read with the one bought and no other; a key the order does not hold is refused", async () => {
   const { store, ids, refs, token, folder, window } = await linkStore(["Course", "Workbook", "Extra"]);
   sessions[0] = { ...sessions[0], metadata: { store: "moss", product: ids[0], bump: ids[1], bump2: ids[2] } };
   const before = await requestsIn(folder, window);

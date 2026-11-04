@@ -142,6 +142,13 @@ const en = {
     `This one has nothing attached right now. Reply to your order confirmation email to ask ${store} for it.`,
   bundleMissing: (count: number, store: string) =>
     `${count === 1 ? "One product" : `${count} products`} of this bundle ${count === 1 ? "is" : "are"} no longer in ${store}'s store, so there is nothing here to open for ${count === 1 ? "it" : "them"}. Reply to your order confirmation email and it reaches ${store}.`,
+  /** The button that shows a bundle's products, read only when asked for (components/orders-bundle.tsx), and the one that hides them. */
+  showInside: (title: string, count: number) => (count === 1 ? `Show the product in ${title}` : `Show the ${count} products in ${title}`),
+  hideInside: (title: string) => `Hide the products in ${title}`,
+  loadingInside: "Getting the products…",
+  insideFailed: "These products could not be shown just now. Try again in a moment.",
+  /** Purchases whose refund could not be checked inside the opening's calls to Stripe (lib/buyer-orders.ts, ORDERS_STRIPE_CALLS). */
+  notChecked: "Some of your purchases could not be checked this time, so they are not on this list. That does not mean you did not buy them.",
 
   // ---- A license key (components/licence-key-box.tsx) ------------------------------------
   yourKey: "Your license key",
@@ -375,6 +382,11 @@ const es: OrdersWords = {
     count === 1
       ? `Un producto de este paquete ya no está en la tienda de ${store}, así que aquí no hay nada que abrir de él. Responde al email de confirmación de tu pedido y le llegará a ${store}.`
       : `${count} productos de este paquete ya no están en la tienda de ${store}, así que aquí no hay nada que abrir de ellos. Responde al email de confirmación de tu pedido y le llegará a ${store}.`,
+  showInside: (title, count) => (count === 1 ? `Mostrar el producto de ${title}` : `Mostrar los ${count} productos de ${title}`),
+  hideInside: (title) => `Ocultar los productos de ${title}`,
+  loadingInside: "Cargando los productos…",
+  insideFailed: "No se han podido mostrar estos productos ahora. Inténtalo de nuevo en un momento.",
+  notChecked: "Algunas de tus compras no se han podido comprobar esta vez, así que no están en esta lista. Eso no significa que no las hayas comprado.",
 
   yourKey: "Tu clave de licencia",
   yourKeyFor: (title) => `Tu clave de licencia de ${title}`,
@@ -593,6 +605,11 @@ const fr: OrdersWords = {
     count < 2
       ? `Un produit de ce lot n'est plus dans la boutique de ${store}, il n'y a donc rien à ouvrir ici pour lui. Répondez à l'e-mail de confirmation de votre commande et votre message parviendra à ${store}.`
       : `${count}${S}produits de ce lot ne sont plus dans la boutique de ${store}, il n'y a donc rien à ouvrir ici pour eux. Répondez à l'e-mail de confirmation de votre commande et votre message parviendra à ${store}.`,
+  showInside: (title, count) => (count < 2 ? `Afficher le produit de ${title}` : `Afficher les ${count}${S}produits de ${title}`),
+  hideInside: (title) => `Masquer les produits de ${title}`,
+  loadingInside: "Chargement des produits…",
+  insideFailed: "Ces produits ne peuvent pas être affichés pour le moment. Réessayez dans un instant.",
+  notChecked: "Certains de vos achats n'ont pas pu être vérifiés cette fois-ci, ils ne figurent donc pas dans cette liste. Cela ne veut pas dire que vous ne les avez pas achetés.",
 
   yourKey: "Votre clé de licence",
   yourKeyFor: (title) => `Votre clé de licence pour ${title}`,
@@ -811,6 +828,11 @@ const de: OrdersWords = {
     count === 1
       ? `Ein Produkt dieses Pakets ist nicht mehr im Shop von ${store}, daher gibt es hier dafür nichts zu öffnen. Antworten Sie auf Ihre Bestellbestätigung, dann erreicht Ihre Nachricht ${store}.`
       : `${count} Produkte dieses Pakets sind nicht mehr im Shop von ${store}, daher gibt es hier dafür nichts zu öffnen. Antworten Sie auf Ihre Bestellbestätigung, dann erreicht Ihre Nachricht ${store}.`,
+  showInside: (title, count) => (count === 1 ? `Das Produkt in ${title} anzeigen` : `Die ${count} Produkte in ${title} anzeigen`),
+  hideInside: (title) => `Die Produkte in ${title} ausblenden`,
+  loadingInside: "Die Produkte werden geladen…",
+  insideFailed: "Diese Produkte können gerade nicht angezeigt werden. Versuchen Sie es gleich noch einmal.",
+  notChecked: "Einige Ihrer Käufe konnten diesmal nicht geprüft werden und stehen deshalb nicht in dieser Liste. Das heißt nicht, dass Sie sie nicht gekauft haben.",
 
   yourKey: "Ihr Lizenzschlüssel",
   yourKeyFor: (title) => `Ihr Lizenzschlüssel für ${title}`,
@@ -1033,6 +1055,11 @@ const it: OrdersWords = {
     count === 1
       ? `Un prodotto di questo pacchetto non è più nel negozio di ${store}, quindi qui non c'è nulla da aprire per esso. Rispondi all'email di conferma dell'ordine e il messaggio arriverà a ${store}.`
       : `${count} prodotti di questo pacchetto non sono più nel negozio di ${store}, quindi qui non c'è nulla da aprire per essi. Rispondi all'email di conferma dell'ordine e il messaggio arriverà a ${store}.`,
+  showInside: (title, count) => (count === 1 ? `Mostra il prodotto in ${title}` : `Mostra i ${count} prodotti in ${title}`),
+  hideInside: (title) => `Nascondi i prodotti in ${title}`,
+  loadingInside: "Caricamento dei prodotti…",
+  insideFailed: "Non è stato possibile mostrare questi prodotti ora. Riprova tra un momento.",
+  notChecked: "Non è stato possibile verificare alcuni dei tuoi acquisti questa volta, quindi non sono in questo elenco. Questo non vuol dire che tu non li abbia acquistati.",
 
   yourKey: "La tua chiave di licenza",
   yourKeyFor: (title) => `La tua chiave di licenza per ${title}`,
@@ -1250,6 +1277,11 @@ const nl: OrdersWords = {
     count === 1
       ? `Eén product van deze bundel staat niet meer in de winkel van ${store}, dus hier valt daarvoor niets te openen. Beantwoord je orderbevestiging, dan komt je bericht bij ${store} aan.`
       : `${count} producten van deze bundel staan niet meer in de winkel van ${store}, dus hier valt daarvoor niets te openen. Beantwoord je orderbevestiging, dan komt je bericht bij ${store} aan.`,
+  showInside: (title, count) => (count === 1 ? `Toon het product in ${title}` : `Toon de ${count} producten in ${title}`),
+  hideInside: (title) => `Verberg de producten in ${title}`,
+  loadingInside: "De producten worden geladen…",
+  insideFailed: "Deze producten kunnen nu niet worden getoond. Probeer het zo opnieuw.",
+  notChecked: "Sommige van je aankopen konden deze keer niet worden gecontroleerd, dus staan ze niet in deze lijst. Dat betekent niet dat je ze niet hebt gekocht.",
 
   yourKey: "Je licentiesleutel",
   yourKeyFor: (title) => `Je licentiesleutel voor ${title}`,
@@ -1468,6 +1500,11 @@ const pt: OrdersWords = {
     count === 1
       ? `Um produto deste pacote já não está na loja de ${store}, por isso não há nada aqui para o abrir. Responda ao email de confirmação da sua encomenda e a mensagem chega a ${store}.`
       : `${count} produtos deste pacote já não estão na loja de ${store}, por isso não há nada aqui para os abrir. Responda ao email de confirmação da sua encomenda e a mensagem chega a ${store}.`,
+  showInside: (title, count) => (count === 1 ? `Mostrar o produto de ${title}` : `Mostrar os ${count} produtos de ${title}`),
+  hideInside: (title) => `Ocultar os produtos de ${title}`,
+  loadingInside: "A carregar os produtos…",
+  insideFailed: "Não foi possível mostrar estes produtos agora. Tente novamente daqui a pouco.",
+  notChecked: "Não foi possível verificar algumas das suas compras desta vez, por isso não estão nesta lista. Isso não significa que não as tenha comprado.",
 
   yourKey: "A sua chave de licença",
   yourKeyFor: (title) => `A sua chave de licença de ${title}`,

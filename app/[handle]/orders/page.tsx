@@ -16,7 +16,7 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { linkHost } from "@/lib/product-link";
-import { type AddedPurchase, type BookedCall, type Delivery, type Purchase, ORDERS_FEED_COMMANDS, ORDERS_KEY_COMMANDS, ORDERS_LISTING_COMMANDS, OrdersBusy, callsFor, canRecover, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
+import { type AddedPurchase, type BookedCall, type Delivery, type Purchase, LINK_SHOWN, ORDERS_FEED_COMMANDS, ORDERS_KEY_COMMANDS, ORDERS_LISTING_COMMANDS, OrdersBusy, callsFor, canRecover, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
 import type { BumpKey } from "@/lib/bundle-rules";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
@@ -27,7 +27,7 @@ import { readListings } from "@/lib/catalog";
 import { reviewable } from "@/lib/review-proof";
 import { takesReviews } from "@/lib/house-store";
 import { type PurchaseItems } from "@/lib/buyer-orders";
-import { BundleDelivery } from "@/components/bundle-delivery";
+import { OrdersBundle } from "@/components/orders-bundle";
 import { speech, speechFor } from "@/lib/buyer-words";
 import { type OrdersWords, ordersWords } from "@/lib/buyer-words/orders";
 import { NewTab } from "@/components/new-tab";
@@ -100,7 +100,10 @@ function DeliveryButton({
         <a href={delivery.link} rel="noopener noreferrer" target="_blank" className="btn st-btn btn-block">
           {item !== "main" ? words.openTitle(delivery.title) : words.openIt}
         <NewTab language={language} /></a>
-        <span className="st-muted mt-2 block break-all text-xs">{words.keptOn(linkHost(delivery.link), delivery.link)}</span>
+        {/* The address as text, cut to LINK_SHOWN characters: the whole of it is the button's, one click away (C3-80). */}
+        <span className="st-muted mt-2 block break-all text-xs">
+          {words.keptOn(linkHost(delivery.link), delivery.link.length > LINK_SHOWN ? `${delivery.link.slice(0, LINK_SHOWN)}…` : delivery.link)}
+        </span>
       </span>
     );
   }
@@ -191,19 +194,21 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   let calls: BookedCall[] = [];
   let waiting: Waiting = { requests: [], agreements: [], requestsTotal: 0, agreementsTotal: 0, unread: false };
   let failed = false;
+  // Purchases whose refund could not be checked inside the opening's calls to Stripe (ORDERS_STRIPE_CALLS): said, never as not bought.
+  let unchecked = 0;
   let discordProducts: Set<string> | null = null;
   // A private podcast opens as this address's own feed (lib/podcast-access.ts).
   const feeds = new Map<string, string>();
   // The license key of each purchase that has one, read — or given, if the
   // thanks page and the confirmation email never got the chance — per sale.
   const keys = new Map<string, SaleKey | "error">();
-  // Which of them can be reviewed: what was bought, what was ticked with it and what a bundle held.
+  // Which of them can be reviewed: what was bought, what was ticked with it and what a bundle held (its ids, from the order).
   // Not what was brought over from another platform: no payment here proves it.
   const inOrder = (purchase: Purchase) => [
     purchase.productId,
     ...purchase.added.map((added) => added.id),
-    ...(purchase.items?.lines ?? []).map((line) => line.productId),
-    ...purchase.added.flatMap((added) => (added.items?.lines ?? []).map((line) => line.productId)),
+    ...(purchase.items?.ids ?? []),
+    ...purchase.added.flatMap((added) => added.items?.ids ?? []),
   ];
   let canReview = new Set<string>();
   if (email && meter) {
@@ -233,10 +238,8 @@ export default async function OrdersPage({ params, searchParams }: Params) {
           if (purchase.ended || purchase.kind === "imported") continue;
           wanted.push({ slot: `${purchase.reference}|main`, productId: purchase.productId, reference: purchase.reference });
           for (const added of purchase.added) wanted.push({ slot: `${purchase.reference}|${added.key}`, productId: added.id, reference: purchase.reference });
-          // Each product of a bundle has its own key, under the same order.
-          for (const line of [...(purchase.items?.lines ?? []), ...purchase.added.flatMap((added) => added.items?.lines ?? [])]) {
-            wanted.push({ slot: `${purchase.reference}|item|${line.productId}`, productId: line.productId, reference: purchase.reference });
-          }
+          // Each product of a bundle has its own key, under the same order, shown with that product when the buyer asks to see
+          // the bundle's products (components/orders-bundle.tsx): read then, not here.
         }
         // Every product these name, read once for the keys and the reviews together (lib/catalog.ts).
         const reviewed = takesReviews(store) ? listed.filter((p) => p.kind !== "imported").flatMap(inOrder) : [];
@@ -260,12 +263,12 @@ export default async function OrdersPage({ params, searchParams }: Params) {
           }),
         );
         const reviewing = new Set(reviewed.flatMap((id) => (products.has(id) && reviewable(products.get(id)!) ? [id] : [])));
-        return { listed, booked, waits, discord, feedsRead, keysRead, reviewing };
+        return { listed, booked, waits, discord, feedsRead, keysRead, reviewing, unchecked: meter.unchecked };
       })();
       const outcome = await withinOpening(reading, meter);
       if (outcome === "late") failed = true;
       else {
-        ({ listed: purchases, booked: calls, waits: waiting, discord: discordProducts, reviewing: canReview } = outcome);
+        ({ listed: purchases, booked: calls, waits: waiting, discord: discordProducts, reviewing: canReview, unchecked } = outcome);
         outcome.feedsRead.forEach((feed, pid) => feeds.set(pid, feed));
         outcome.keysRead.forEach((key, slot) => keys.set(slot, key));
       }
@@ -288,36 +291,45 @@ export default async function OrdersPage({ params, searchParams }: Params) {
       purchases?.some(
         (p) =>
           !p.ended &&
-          [p.productId, ...p.added.map((a) => a.id), ...(p.items?.lines ?? []).map((line) => line.productId)].some((id) => discordProducts!.has(id)),
+          [p.productId, ...p.added.map((a) => a.id), ...(p.items?.ids ?? [])].some((id) => discordProducts!.has(id)),
       ),
   );
   const dw = discordWords(store.language);
 
   const reviewableIn = (purchase: Purchase) => purchase.kind !== "imported" && inOrder(purchase).some((id) => canReview.has(id));
-  /** A bundle's products: the one bought (`added` null), or one ticked at checkout. */
+  /**
+   * A bundle's products: the one bought (`added` null), or one ticked at checkout. Not drawn here: a button shows them when
+   * the buyer asks, read then by a request that pays for itself (components/orders-bundle.tsx,
+   * app/api/store/orders/bundle/route.ts), so an opening never draws every product of every bundle (C3-80, ORDERS_PAGE_BYTES).
+   */
   const contents = (purchase: Purchase, items: PurchaseItems | null, added: AddedPurchase | null) =>
     items ? (
-      <BundleDelivery
+      <OrdersBundle
+        address={`/api/store/orders/bundle?${new URLSearchParams({ handle: store.handle, token, ref: purchase.reference, item: added ? added.key : "main" })}`}
         storeName={store.name}
-        missing={items.missing}
-        heading={added ? words.insideTitle(added.title) : words.whatIsInside}
         words={{
-          openCourse: words.openCourse,
-          startCourse: words.startCourse,
-          openIt: words.openIt,
-          keptOn: words.keptOn("{host}", "{link}"),
-          downloadIt: words.downloadIt,
-          nothingAttached: words.nothingAttached(store.name),
-          missing: items.missing > 0 ? words.bundleMissing(items.missing, store.name) : null,
+          heading: added ? words.insideTitle(added.title) : words.whatIsInside,
+          show: words.showInside(added ? added.title : purchase.title, items.ids.length),
+          hide: words.hideInside(added ? added.title : purchase.title),
+          loading: words.loadingInside,
+          failed: words.insideFailed,
+          bundle: {
+            openCourse: words.openCourse,
+            startCourse: words.startCourse,
+            openIt: words.openIt,
+            keptOn: words.keptOn("{host}", "{link}"),
+            downloadIt: words.downloadIt,
+            nothingAttached: words.nothingAttached(store.name),
+          },
+          key: {
+            copy: words.copy,
+            copied: words.copied,
+            revoked: words.keyRevoked(store.name),
+            yours: words.keyYours,
+            waiting: words.keyWaiting(store.name),
+            failed: words.keyNotShown,
+          },
         }}
-        lines={items.lines.map((line) => ({
-          product: { id: line.productId, title: line.title, link: line.delivery?.link ?? null },
-          download: line.delivery?.file
-            ? `/api/store/download?${new URLSearchParams({ handle: store.handle, ref: purchase.reference, token, pid: line.productId, ...(added ? { item: added.key } : {}) })}`
-            : null,
-          course: line.courseProduct ? { href: `/@${store.handle}/course/${line.courseProduct}` } : null,
-          keyBox: keyBox(`${purchase.reference}|item|${line.productId}`, line.title),
-        }))}
       />
     ) : null;
   const keyBox = (slot: string, title?: string) => {
@@ -406,7 +418,12 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                   </ul>
                 </section>
               ) : null}
-              {purchases.length === 0 && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread) ? null : purchases.length === 0 ? (
+              {unchecked > 0 ? (
+                <p role="status" className="st-note mt-6 text-sm">
+                  {words.notChecked}
+                </p>
+              ) : null}
+              {purchases.length === 0 && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || unchecked > 0 || waiting.unread) ? null : purchases.length === 0 ? (
                 <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
               ) : (
                 <>

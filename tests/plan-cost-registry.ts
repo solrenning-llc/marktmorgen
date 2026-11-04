@@ -98,7 +98,7 @@ import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS } from "@/lib/buyer-orders-rules";
+import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY } from "@/lib/agreement-rules";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
@@ -244,7 +244,10 @@ export const ASSIST_REMIND_READ = request("wait", ASSIST_REMIND_COMMANDS + TAKE_
  * ORDERS_OPEN_COMMANDS; what waits on the buyer through the database (every
  * agreement and payment request kept for the address at 16 KB, and the text
  * of each agreement shown at four bytes a character); and the page sent on at
- * 2 MB, forty times a store page as it travels (tests/traffic-cost.ts). Counted
+ * ORDERS_PAGE_BYTES, the most a page drawn at every limit of the store sends
+ * now that a bundle's products are read only when asked for
+ * (tests/orders-page-bounds.test.ts; 2 MB until C3-80, when forty purchases of
+ * four full bundles drew 14.19 MB). Counted
  * as ORDERS_OPEN_UNITS public requests taken before anything is read; every
  * read past it is a command of the meter, priced at ORDERS_METERED_COMMAND
  * (tests/plan-cost-registry.test.ts holds both).
@@ -255,7 +258,7 @@ export const ORDERS_OPEN_READ =
   + (ORDERS_OPEN_SECONDS / 4) * CPU_SECOND
   + ORDERS_OPEN_COMMANDS * COMMAND
   + ((AGREEMENTS_PER_PERSON + REQUESTS_PER_PERSON) * 16_384 + WAITING_SHOWN * 4 * AGREEMENT_BODY) * DB_BYTE
-  + 2_000_000 * ORIGIN_PER_BYTE;
+  + ORDERS_PAGE_BYTES * ORIGIN_PER_BYTE;
 /**
  * What one download's lookup of its purchase costs besides its metered reads
  * and the download's own request, which pays its call (lib/buyer-orders.ts,
@@ -272,6 +275,15 @@ export const DOWNLOAD_LOOKUP_READ =
   + (DOWNLOAD_LOOKUP_MS / 1000) * (SHAPES.wait.cpu / SHAPES.wait.seconds) * CPU_SECOND
   + DOWNLOAD_LOOKUP_COMMANDS * COMMAND
   + 2_048 * DB_BYTE;
+/**
+ * What showing a bundle's products on the list of purchases costs besides its
+ * metered reads and the request's own call (lib/buyer-orders.ts, bundleFor;
+ * app/api/store/orders/bundle/route.ts; C3-80), at the most: a download's
+ * lookup of one purchase, and its answer sent on, ORDERS_BUNDLE_BYTES.
+ * Counted as ORDERS_BUNDLE_UNITS public requests taken before the grant is
+ * read (tests/plan-cost-registry.test.ts holds them above it).
+ */
+export const ORDERS_BUNDLE_READ = DOWNLOAD_LOOKUP_READ + ORDERS_BUNDLE_BYTES * ORIGIN_PER_BYTE;
 /** One command the orders page's meter takes (lib/buyer-orders.ts, OrdersMeter), at the most: the command and a kilobyte through the database. */
 export const ORDERS_METERED_COMMAND = COMMAND + 1_024 * DB_BYTE;
 /** One listing it reads, at the most: the command and a product's whole record (lib/catalog.ts, MAX_PRODUCT_BYTES). */
@@ -619,7 +631,14 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/buyer-orders-rules.ts", names: ["DOWNLOAD_LOOKUP_UNITS", "DOWNLOAD_LOOKUP_MS", "DOWNLOAD_LOOKUP_COMMANDS", "ORDERS_LINK_READ_MS"] },
       { file: "app/api/store/orders/route.ts", names: ["export const maxDuration = 30", "requestOrdersLink", "if (result === \"busy\") return tooMany();"] },
       { file: "app/api/store/download/route.ts", names: ["findPurchase(store, token", "if (error instanceof OrdersBusy) return tooOften();", "const item = await listing(line.productId);", "const owner = await listing(bumped ? bumped.id : purchase.productId);"] },
-      { file: "app/[handle]/orders/page.tsx", names: ["export const maxDuration = 30", "openOrders(store, token)", "withinOpening(reading, meter)", "purchasesFor(store, email, meter)", "callsFor(store, email, meter)", "meter.take(keyed.length * ORDERS_KEY_COMMANDS)", "meter.take(podcasts.length * ORDERS_FEED_COMMANDS)", "meter.take(ids.length * ORDERS_LISTING_COMMANDS)"] },
+      { file: "app/[handle]/orders/page.tsx", names: ["export const maxDuration = 30", "openOrders(store, token)", "withinOpening(reading, meter)", "purchasesFor(store, email, meter)", "callsFor(store, email, meter)", "meter.take(keyed.length * ORDERS_KEY_COMMANDS)", "meter.take(podcasts.length * ORDERS_FEED_COMMANDS)", "meter.take(ids.length * ORDERS_LISTING_COMMANDS)", "<OrdersBundle"] },
+      // An opening asks the creator's Stripe account ORDERS_STRIPE_CALLS times at the most, a payment plan's refund check taken
+      // before it is made; a bundle's products are read only when the buyer asks, by their own request: ORDERS_BUNDLE_UNITS
+      // before the grant, the listings and keys through the meter (C3-80, 4 November 2026; ORDERS_BUNDLE_READ in
+      // tests/plan-cost-registry.test.ts, the page's bytes and the calls in tests/orders-page-bounds.test.ts).
+      { file: "lib/buyer-orders.ts", names: ["if (meter && calls > 0 && !meter.stripe(calls))", "if (shown >= MAX_LISTED) break;", "export async function bundleFor", "takePublicRequest(store, \"buyer\", Date.now(), ORDERS_BUNDLE_UNITS)", "await meter.take(keyed.length * ORDERS_KEY_COMMANDS)", "await linesOf(find, bundleFromMeta(meta, \"bundle\"), lines)"] },
+      { file: "lib/buyer-orders-rules.ts", names: ["ORDERS_STRIPE_CALLS", "ORDERS_STRIPE_LISTS", "PLAN_REFUND_CALLS", "ORDERS_PAGE_BYTES", "LINK_SHOWN", "ORDERS_BUNDLE_UNITS", "ORDERS_BUNDLE_BYTES", "ORDERS_BUNDLE_PER_HOUR"] },
+      { file: "app/api/store/orders/bundle/route.ts", names: ["export const maxDuration = 30", "withinStore(\"orders-bundle\"", "bundleFor(store, token", "if (error instanceof OrdersBusy) return answer(429"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
     ],
@@ -1032,7 +1051,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "metaads-deauth": guard("Meta's own notices: a company cost."), "outreach-stop": guard("A recipient's stop link: a company cost."),
   // Public requests: counted in the store's window as well (lib/metered-limits.ts, withinStore).
   "ads-event": PUBLIC, "aff-join": PUBLIC, "aff-open": PUBLIC, "book-move": PUBLIC, "cart-read": PUBLIC, "come-back": PUBLIC, "course-start": PUBLIC,
-  "discord-join": PUBLIC, download: PUBLIC, "form-ip": PUBLIC, heard: PUBLIC, "join-ip": PUBLIC, "manage-card": PUBLIC, "manage-card-back": PUBLIC,
+  "discord-join": PUBLIC, download: PUBLIC, "orders-bundle": PUBLIC, "form-ip": PUBLIC, heard: PUBLIC, "join-ip": PUBLIC, "manage-card": PUBLIC, "manage-card-back": PUBLIC,
   "manage-leave": PUBLIC, "manage-open": PUBLIC, "move-open": PUBLIC, "podcast-link-ip": PUBLIC, review: PUBLIC, "review-view": PUBLIC,
   "store-search": PUBLIC, "thanks-view": PUBLIC, "tier-switch": PUBLIC, tip: PUBLIC, "pay-request": PUBLIC, "pay-request-view": PUBLIC, "agreement-sign": PUBLIC, "agreement-view": PUBLIC, "waitlist-ip": PUBLIC, "welcome-open": PUBLIC,
   "course-start-order": BURST("public-requests"), "review-order": BURST("public-requests"), "join-address": BURST("public-requests"),

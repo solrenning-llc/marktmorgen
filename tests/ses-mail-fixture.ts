@@ -21,6 +21,7 @@ type FetchFallback = (input: FetchInput, init?: RequestInit) => Response | Promi
 
 export type SesMailFixtureOptions = {
   fallback?: FetchFallback;
+  onSes?: (message: CapturedMail, input: FetchInput, init?: RequestInit) => Response | Promise<Response> | undefined;
   onResend?: (
     messages: CapturedMail[],
     input: FetchInput,
@@ -228,6 +229,11 @@ export function installSesMailFixture(options: SesMailFixtureOptions = {}) {
       }
       const message = normalizeSes(parseBody(init));
       attempts.push(message); sesAttempts.push(message);
+      const controlled = await options.onSes?.(message, input, init);
+      if (controlled) {
+        if (controlled.ok) { sent.push(message); ses.push(message); }
+        return controlled;
+      }
       const outcome = queuedOutcomes.shift() ?? defaultOutcome;
       if (outcome === "ok") {
         sent.push(message); ses.push(message);

@@ -51,6 +51,7 @@ export function flowConfigurationIssues(flow: Flow, context: FlowReviewContext):
       if (!target) issues.push(prefix + "The sequence to start is unavailable. Choose another sequence.");
       else if (!target.active || !target.steps.length) issues.push(prefix + "The sequence “" + target.name + "” is paused or has no steps. Review it before expecting this action to start it.");
     }
+    if (action?.do === "stop" && !context.flows.some(target => target.id === action.flowId && target.id !== flow.id)) issues.push(prefix + "The sequence to take them out of is unavailable. Choose another sequence.");
     if (action?.do === "field") {
       const field = context.fields.find(field => field.id === action.field);
       if (!field) issues.push(prefix + "The contact field is unavailable. Choose a current field.");
@@ -59,6 +60,7 @@ export function flowConfigurationIssues(flow: Flow, context: FlowReviewContext):
     }
     if (action?.do === "deal" && !context.stages.some(stage => stage.id === action.stage)) issues.push(prefix + "The deal stage is unavailable. Choose a current stage.");
     if (action?.do === "assign" && context.assignees && !context.assignees.includes(action.assignee)) issues.push(prefix + "This teammate can no longer be responsible for deals. Choose someone on your team who can see orders.");
+    if (action?.do === "rotate" && context.assignees && context.assignees.length < 2) issues.push(prefix + "No one besides you can be responsible for deals, so every deal goes to you. Add a teammate who can see orders.");
     if (step.next && step.next !== END && !flow.steps.some(target => target.id === step.next)) issues.push(prefix + "The step it goes to next was removed. Choose a later step, or the end.");
   });
   return issues;

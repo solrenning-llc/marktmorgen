@@ -133,11 +133,12 @@ async function main(): Promise<void> {
     ["left", null],
     ["paused", null],
     ["refused", null],
+    ["taken_out", null],
     ["waits", null],
     ["held", null],
   ]);
   is("the bounds are the code's numbers", [rules.find((r) => r.kind === "waits")!.text.includes(`${MAX_WAITS_PER_RUN} times`), rules.find((r) => r.kind === "held")!.text.includes(`up to ${MAX_RETRIES_BY_YOU} times`)], [true, true]);
-  is("a workflow with no goal and no conditions still lists the engine's stops", stopRules({ steps: [{ id: "a" }] }, { condition: () => "", product: () => "" }).map((r) => r.kind), ["last", "left", "paused", "refused", "waits", "held"]);
+  is("a workflow with no goal and no conditions still lists the engine's stops", stopRules({ steps: [{ id: "a" }] }, { condition: () => "", product: () => "" }).map((r) => r.kind), ["last", "left", "paused", "refused", "taken_out", "waits", "held"]);
 
   part("The preview writes nothing");
   const before = commands;

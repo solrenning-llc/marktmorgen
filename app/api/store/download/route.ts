@@ -13,9 +13,11 @@ import { originFrom } from "@/lib/request-origin";
 import type { ProductFile } from "@/lib/product-file";
 import { BUMP_KEYS } from "@/lib/bundle-rules";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { downloadRenewalWords } from "@/lib/buyer-words/download-renewal";
+import { parseLanguage } from "@/lib/store-language";
 import { createHash, randomBytes } from "node:crypto";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
-import { readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity } from "@/lib/single-digital-access";
+import { checkSingleDigitalRenewal, readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity } from "@/lib/single-digital-access";
 import { confirmationOutboxPolicy, enqueueSingleDigitalRenewal } from "@/lib/order-confirmation-outbox";
 import type { ShipmentMailRuntime } from "@/lib/shipment-mail-outbox";
 
@@ -93,8 +95,8 @@ function htmlValue(value: string): string {
   return value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
 }
 
-function privatePage(title: string, body: string): Response {
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${htmlValue(title)}</title></head><body><main><h1>${htmlValue(title)}</h1>${body}</main></body></html>`, {
+function privatePage(language: unknown, title: string, body: string): Response {
+  return new Response(`<!doctype html><html lang="${parseLanguage(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${htmlValue(title)}</title></head><body><main><h1>${htmlValue(title)}</h1>${body}</main></body></html>`, {
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex", "Content-Security-Policy": "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'", "Referrer-Policy": "no-referrer" },
   });
 }
@@ -131,8 +133,12 @@ export async function paidDownloadGet(request: NextRequest, runtime: ShipmentMai
       if (access?.product.file) return deliver(store, access.product, access.product.file, access);
       const policy = confirmationOutboxPolicy(runtime, false);
       if (singleDigitalRenewalCovered(policy) && singleDigitalRenewalIdentity(store, capsule)) {
+        const renewal = await checkSingleDigitalRenewal(store, capsule);
+        const words = downloadRenewalWords(store.language);
+        if (renewal.status === "not_paid") return plain(410, words.notPaid);
+        if (renewal.status === "unknown") return plain(503, say.purchaseCheckFailed);
         const fields = { handle: store.handle, origin: capsule, request: randomBytes(32).toString("hex") };
-        return privatePage("Request a new download link", `<p>A new link can be emailed to the inbox used for this purchase.</p><form method="post" action="/api/store/download">${Object.entries(fields).map(([name, value]) => `<input type="hidden" name="${name}" value="${htmlValue(value)}">`).join("")}<button type="submit">Email a new link</button></form>`);
+        return privatePage(store.language, words.title, `<p>${htmlValue(words.intro)}</p><form method="post" action="/api/store/download?language=${parseLanguage(store.language)}">${Object.entries(fields).map(([name, value]) => `<input type="hidden" name="${name}" value="${htmlValue(value)}">`).join("")}<button type="submit">${htmlValue(words.button)}</button></form>`);
       }
       return plain(410, say.linkExpired);
     } catch {
@@ -268,24 +274,29 @@ export async function GET(request: NextRequest) {
 /** Only an explicitly funded renewal intent is saved. No grant, payment,
  * provider send or fresh token is issued by this request. */
 export async function paidDownloadRenewalPost(request: NextRequest, runtime: ShipmentMailRuntime = {}): Promise<Response> {
-  if (fromAnotherSite(request)) return plain(403, "This request must come from this site.");
-  if (!singleDigitalRenewalCovered(confirmationOutboxPolicy(runtime))) return plain(503, "A new link cannot be requested right now. Please try again later.");
-  if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/x-www-form-urlencoded") return plain(415, "Please use the download link's form.");
+  // This hint controls only early error presentation; the loaded store owns
+  // all later wording and the existing capsule remains the authorization.
+  const earlyWords = downloadRenewalWords(request.nextUrl.searchParams.get("language"));
+  if (fromAnotherSite(request)) return plain(403, earlyWords.sameSite);
+  if (!singleDigitalRenewalCovered(confirmationOutboxPolicy(runtime))) return plain(503, earlyWords.unavailable);
+  if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/x-www-form-urlencoded") return plain(415, earlyWords.badForm);
   let fields: URLSearchParams;
   try { fields = new URLSearchParams(await (await limited(request, 16_384)).text()); }
-  catch { return plain(400, "This request could not be read."); }
+  catch { return plain(400, earlyWords.unreadable); }
   const names = [...fields.keys()];
-  if (names.length !== 3 || new Set(names).size !== 3 || names.some(name => !["handle", "origin", "request"].includes(name))) return plain(400, "This request is incomplete.");
+  if (names.length !== 3 || new Set(names).size !== 3 || names.some(name => !["handle", "origin", "request"].includes(name))) return plain(400, earlyWords.incomplete);
   const handle = normaliseHandle(fields.get("handle") ?? ""), capsule = fields.get("origin") ?? "", nonce = fields.get("request") ?? "";
-  if (!handle || !/^[a-f0-9]{64}$/.test(nonce)) return plain(400, "This request is incomplete.");
+  if (!handle || !/^[a-f0-9]{64}$/.test(nonce)) return plain(400, earlyWords.incomplete);
   const store = await storeForHandle(handle);
-  if (!store) return plain(404, "We could not find this store.");
+  if (!store) return plain(404, earlyWords.missingStore);
+  const words = downloadRenewalWords(store.language);
   const identity = singleDigitalRenewalIdentity(store, capsule);
-  if (!identity) return plain(404, "This download link could not be checked.");
+  if (!identity) return plain(404, words.invalid);
   const person = createHash("sha256").update(`${store.sid}\n${identity.email}`).digest("hex");
-  if (!(await withinStore("download", `${store.handle}:renew:${person}`, 5, 3600, store, "buyer"))) return plain(429, "Please wait before requesting another link.");
-  if (!(await enqueueSingleDigitalRenewal(store, capsule, nonce, runtime)).ok) return plain(503, "A new link cannot be requested right now. Please try again later.");
-  return privatePage("Your request is saved", "<p>A new link will be emailed to the inbox used for this purchase when sending is available.</p>");
+  if (!(await withinStore("download", `${store.handle}:renew:${person}`, 5, 3600, store, "buyer"))) return plain(429, words.tooOften);
+  const result = await enqueueSingleDigitalRenewal(store, capsule, nonce, runtime);
+  if (!result.ok) return plain(result.reason === "not_paid" ? 410 : 503, result.reason === "not_paid" ? words.notPaid : result.reason === "capacity" ? words.capacity : result.reason === "acceptance_unknown" ? words.acceptanceUnknown : result.reason === "on_hold" ? words.onHold : result.reason === "refused" ? words.refused : words.unavailable);
+  return privatePage(store.language, words.savedTitle, `<p>${htmlValue(words.savedBody)}</p>`);
 }
 
 export async function POST(request: NextRequest) {

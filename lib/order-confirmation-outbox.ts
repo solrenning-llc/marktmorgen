@@ -2,7 +2,7 @@
  * Confirmation and shipment are separate intentions with separate sources.
  * This module shares the existing bounded pool/Lua, never a provider quota.
  */
-import { singleDigitalAccessCovered, singleDigitalMessage, readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity, verifySingleDigitalRenewal, singleDigitalRenewalDraft, activateSingleDigitalRenewal, type SingleDigitalRenewalDraft } from "@/lib/single-digital-access";
+import { singleDigitalAccessCovered, checkSingleDigitalRenewal, singleDigitalRenewalCopy, singleDigitalMessage, readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity, verifySingleDigitalRenewal, singleDigitalRenewalDraft, activateSingleDigitalRenewal, type SingleDigitalRenewalDraft } from "@/lib/single-digital-access";
 import { storeForEmail, storeRef } from "@/lib/store";
 import { physicalOptionCovered } from "@/lib/physical-option-confirmation";
 import { createHash, randomBytes } from "node:crypto";
@@ -153,11 +153,15 @@ function parse(raw: unknown): ConfirmationOrigin | null {
     return row as unknown as ConfirmationOrigin;
   } catch { return null; }
 }
-function keys(row: Pick<ConfirmationOrigin, "id" | "statsId" | "person">): string[] {
-  return [confirmationOriginRowKey(row.id), sourceKey(row.id), CONFIRMATION_ORIGIN_DUE,
+type CustodyIdentity = Pick<ConfirmationOrigin, "id" | "statsId" | "person"> & { originKind?: string; capsuleDigest?: string };
+function keys(row: CustodyIdentity): string[] {
+  const base = [confirmationOriginRowKey(row.id), sourceKey(row.id), CONFIRMATION_ORIGIN_DUE,
     `nl:order-confirmation:store:${row.statsId}`, `nl:order-confirmation:person:${row.statsId}:${row.person}`,
     "nl:ship:mail:pool", `nl:ship:mail:pool:${row.statsId}`, "nl:ship:mail:all",
     `nl:order-confirmation:closed:${row.statsId}`, `nl:order-confirmation:erased:${row.statsId}:${row.person}`];
+  return row.originKind === "single_digital_renewal" ? [...base,
+    `nl:order-confirmation:renewal:capsule:${row.statsId}:${row.capsuleDigest}`,
+    `nl:order-confirmation:renewal:store:${row.statsId}`] : base;
 }
 export function confirmationOutboxPolicy(runtime: ShipmentMailRuntime = {}, admission = true): ShipmentMailPolicy | null {
   const lifecycle = runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE;
@@ -698,9 +702,9 @@ function preparedMessage(found: FoundOrigin): ConfirmationOriginPayload["message
       !found.row.session || !found.payload.settlementToken) return null;
   return message as ConfirmationOriginPayload["message"];
 }
-async function confirmationMutation(op: string, found: { row: Pick<ConfirmationOrigin, "id" | "statsId" | "person">; raw: string }, p: ShipmentMailPolicy | null, runtime: ShipmentMailRuntime, owner = ""): Promise<unknown[] | null> {
+async function confirmationMutation(op: string, found: { row: CustodyIdentity; raw: string }, p: ShipmentMailPolicy | null, runtime: ShipmentMailRuntime, owner = ""): Promise<unknown[] | null> {
   try {
-    const reply = array(await (runtime.pipeline ?? redisPipeline)([["EVAL", SHIPMENT_MAIL_SCRIPT, 10, ...keys(found.row), op, found.raw, "",
+    const reply = array(await (runtime.pipeline ?? redisPipeline)([["EVAL", SHIPMENT_MAIL_SCRIPT, keys(found.row).length, ...keys(found.row), op, found.raw, "",
       (runtime.now ?? Date.now)(), SHIPMENT_MAIL_MAX_ROW_BYTES, JSON.stringify(p), owner]]));
     return reply?.length === 1 ? array(reply[0]) : null;
   } catch { return null; }
@@ -1006,29 +1010,44 @@ export async function readSingleDigitalRenewalOrigin(id: string, runtime: Shipme
   const capture: { found?: RenewalFound } = {};
   await readOrigin(id, runtime, capture); return capture.found ?? null;
 }
-export async function enqueueSingleDigitalRenewal(store: Store, capsule: string, requestNonce: string, runtime: ConfirmationOriginRuntime = {}): Promise<{ ok:true; id:string } | { ok:false }> {
+function renewalRequestStatus(row: RenewalRow): { ok:true; id:string } | { ok:false; reason:"acceptance_unknown"|"on_hold"|"refused" } {
+  if (row.state === "dispatching") return { ok:false,reason:"acceptance_unknown" };
+  if (row.state === "refused") return { ok:false,reason:"refused" };
+  if (row.state === "queued" && row.next === 0) return { ok:false,reason:"on_hold" };
+  return { ok:true,id:row.id };
+}
+export async function enqueueSingleDigitalRenewal(store: Store, capsule: string, requestNonce: string, runtime: ConfirmationOriginRuntime = {}): Promise<{ ok:true; id:string } | { ok:false; reason:"not_paid"|"unknown"|"capacity"|"acceptance_unknown"|"on_hold"|"refused" }> {
   const p = confirmationOutboxPolicy(runtime);
-  if (!p || !singleDigitalRenewalCovered(p) || !canSeal() || !HASH.test(requestNonce)) return { ok:false };
+  if (!p || !singleDigitalRenewalCovered(p) || !canSeal() || !HASH.test(requestNonce)) return { ok:false,reason:"unknown" };
   const identity = singleDigitalRenewalIdentity(store, capsule);
-  if (!identity || !store.statsId) return { ok:false };
-  try { if (!(await verifySingleDigitalRenewal(store, capsule))) return { ok:false }; } catch { return {ok:false}; }
+  if (!identity || !store.statsId) return { ok:false,reason:"unknown" };
+  const paid=await checkSingleDigitalRenewal(store,capsule);
+  if(paid.status!=="paid")return {ok:false,reason:paid.status==="not_paid"?"not_paid":"unknown"};
   const pipeline = runtime.pipeline ?? redisPipeline, now = await serverNow(pipeline);
-  if (now === null || Math.abs(now-(runtime.now??Date.now)()) > 60_000) return { ok:false };
+  if (now === null || Math.abs(now-(runtime.now??Date.now)()) > 60_000) return { ok:false,reason:"unknown" };
   const id = hash(`single-digital-renewal\n${store.statsId}\n${requestNonce}`), person = hash(identity.email), capsuleDigest = hash(capsule);
   const payload: RenewalPayload = { capsule, storeRef:storeRef(store) }, plain = JSON.stringify(payload);
-  if (Buffer.byteLength(plain) > p.maxPayloadBytes) return { ok:false };
+  if (Buffer.byteLength(plain) > p.maxPayloadBytes) return { ok:false,reason:"unknown" };
   const row: RenewalRow = { kind:"confirmation", originKind:"single_digital_renewal", purpose:"single-digital-access-renewal", id, statsId:store.statsId, nonce:requestNonce,
     person, accountId:identity.accountId, capsuleDigest, sourceValue:JSON.stringify({kind:"confirmation",originKind:"single_digital_renewal",purpose:"single-digital-access-renewal",nonce:requestNonce,accountId:identity.accountId,capsuleDigest}),
     sealed:seal(plain,context(id)), fingerprint:hash(plain), bytes:0, created:now, authorizedAt:now, next:now, state:"queued",phase:"renewal_queued",owner:"",leaseUntil:0,checks:0,reviewId:p.reviewId };
   row.bytes = SHIPMENT_MAIL_MAX_ROW_BYTES + keys(row).reduce((n,k)=>n+Buffer.byteLength(k),0)*2+16_384;
   const raw = JSON.stringify(row);
   try {
-    const response = array(await pipeline([["EVAL", SHIPMENT_MAIL_SCRIPT,10,...keys(row),"enqueue","",raw,now,SHIPMENT_MAIL_MAX_ROW_BYTES,JSON.stringify(p),""]]));
+    const response = array(await pipeline([["EVAL", SHIPMENT_MAIL_SCRIPT,keys(row).length,...keys(row),"enqueue","",raw,now,SHIPMENT_MAIL_MAX_ROW_BYTES,JSON.stringify(p),""]]));
     const receipt = response?.length === 1 ? array(response[0]) : null;
-    if (!receipt || !["queued","existing"].includes(String(receipt[0]))) return { ok:false };
+    if (receipt?.[0] === "full") return {ok:false,reason:"capacity"};
+    if (receipt?.[0] === "duplicate") {
+      // Lua reads the bounded capsule pointer inside admission's atomic check.
+      // Re-read its authenticated row; a pointer alone is never proof of custody.
+      if (receipt.length !== 2 || typeof receipt[1] !== "string" || !HASH.test(receipt[1])) return {ok:false,reason:"unknown"};
+      const pending = await readSingleDigitalRenewalOrigin(receipt[1],runtime);
+      return pending && pending.row.statsId===store.statsId && pending.row.accountId===identity.accountId && pending.row.person===person && pending.row.capsuleDigest===capsuleDigest ? renewalRequestStatus(pending.row) : {ok:false,reason:"unknown"};
+    }
+    if (!receipt || !["queued","existing"].includes(String(receipt[0]))) return { ok:false,reason:"unknown" };
     const found = await readSingleDigitalRenewalOrigin(id,runtime);
-    return found && found.row.capsuleDigest === capsuleDigest && found.row.person === person && found.row.sourceValue === row.sourceValue ? {ok:true,id} : {ok:false};
-  } catch { return {ok:false}; }
+    return found && found.row.capsuleDigest === capsuleDigest && found.row.person === person && found.row.sourceValue === row.sourceValue ? renewalRequestStatus(found.row) : {ok:false,reason:"unknown"};
+  } catch { return {ok:false,reason:"unknown"}; }
 }
 async function processRenewal(initial: RenewalFound, p: ShipmentMailPolicy, runtime: ConfirmationOriginRuntime, dispatch: ShipmentMailDispatch,
  expired: ()=>boolean, counts: {accepted:number;waiting:number;unknown:number}): Promise<void> {
@@ -1046,7 +1065,7 @@ async function processRenewal(initial: RenewalFound, p: ShipmentMailPolicy, runt
   const plain = JSON.stringify({...found.payload,draft});
   if (Buffer.byteLength(plain)>p.maxPayloadBytes) {await confirmationMutation("defer",found,p,runtime,owner);counts.waiting++;return;}
   const next = {...found.row,sealed:seal(plain,context(found.row.id)),fingerprint:hash(plain)}, raw=JSON.stringify(next);
-  const reply = array(await (runtime.pipeline??redisPipeline)([["EVAL",SHIPMENT_MAIL_SCRIPT,10,...keys(next),"renewal-prepare",found.raw,raw,(runtime.now??Date.now)(),SHIPMENT_MAIL_MAX_ROW_BYTES,JSON.stringify(p),owner]]));
+  const reply = array(await (runtime.pipeline??redisPipeline)([["EVAL",SHIPMENT_MAIL_SCRIPT,keys(next).length,...keys(next),"renewal-prepare",found.raw,raw,(runtime.now??Date.now)(),SHIPMENT_MAIL_MAX_ROW_BYTES,JSON.stringify(p),owner]]));
   if (reply?.length!==1 || array(reply[0])?.[0]!=="prepared") {counts.unknown++;return;}
   found=await readSingleDigitalRenewalOrigin(next.id,runtime);
   if (!found || found.raw!==raw || expired()) {counts.unknown++;return;}
@@ -1092,8 +1111,10 @@ export async function orderConfirmationMailOf(statsId: string, email: string, ru
       if (!renewal || renewal.row.statsId !== statsId || renewal.row.person !== person) throw Error("Confirmation copy source is unknown");
       const message = renewal.payload.draft?.message;
       if (message && hash(message.to.trim().toLowerCase()) !== person) throw Error("Confirmation copy recipient is unknown");
-      out.push({ purpose: renewal.row.purpose, phase: renewal.row.phase, created: renewal.row.created,
-        ...(message ? { subject: message.subject, text: message.text } : {}) });
+      const original = singleDigitalRenewalCopy(renewal.payload.capsule, statsId, renewal.row.accountId, email);
+      if (!original) throw Error("Confirmation copy original identity is unknown");
+      out.push({ ...original, purpose: renewal.row.purpose, phase: renewal.row.phase, state: renewal.row.state, created: renewal.row.created,
+        ...(message ? { subject: message.subject } : {}) });
       continue;
     }
     if (found.row.statsId !== statsId || found.row.person !== person) throw Error("Confirmation copy source is unknown");
@@ -1101,7 +1122,48 @@ export async function orderConfirmationMailOf(statsId: string, email: string, ru
     if (message && hash(message.to.trim().toLowerCase()) !== person) throw Error("Confirmation copy recipient is unknown");
     out.push({ checkout: found.row.session, phase: found.row.phase, created: found.row.created,
       ...(found.payload.paidCents === undefined ? {} : { paidCents: found.payload.paidCents }),
-      ...(message ? { subject: message.subject, text: message.text } : {}) });
+      ...(message ? { subject: message.subject, ...(found.row.originKind === "single_digital" ? {} : { text: message.text }) } : {}) });
   }
   return out;
+}
+
+
+/** Owner aggregate reader for the existing isolated renewal custody families. */
+export const RENEWAL_NOTICE_ROWS = 8;
+/** One atomic index read: bounded before SMEMBERS, then at most eight rows.
+ * Internal JSON reads are bounded too; no capsule, recipient or row is returned. */
+export const RENEWAL_NOTICE_SCRIPT = `
+local kind=redis.call('TYPE',KEYS[1]).ok
+if kind=='none' then return {'ok',0,0,0} end
+if kind~='set' then return {'unknown'} end
+local count=redis.call('SCARD',KEYS[1])
+if count>8 then return {'unknown'} end
+local ids=redis.call('SMEMBERS',KEYS[1])
+local uncertain,held=0,0
+for _,id in ipairs(ids) do
+ if #id~=64 or string.find(id,'[^a-f0-9]') then return {'unknown'} end
+ local raw=redis.call('GETRANGE','nl:order-confirmation:row:'..id,0,tonumber(ARGV[3]))
+ if #raw==0 or #raw>tonumber(ARGV[3]) then return {'unknown'} end
+ local ok,row=pcall(cjson.decode,raw)
+ if not ok or type(row)~='table' or row.id~=id or row.originKind~='single_digital_renewal' or row.statsId~=ARGV[1] or row.accountId~=ARGV[2] then return {'unknown'} end
+ if type(row.next)~='number' or row.next<0 or row.next%1~=0 then return {'unknown'} end
+ if row.state=='dispatching' then uncertain=uncertain+1
+ elseif row.state=='refused' or row.state=='queued' and row.next==0 then held=held+1
+ elseif row.state~='queued' and row.state~='preparing' then return {'unknown'} end
+end
+return {'ok',#ids,uncertain,held}
+`;
+export type RenewalMailSummary = { pending: number; unconfirmed: number; held: number } | { unavailable: true };
+export async function renewalMailSummary(store: Pick<Store,"statsId"|"stripeAccountId">, runtime: ShipmentMailRuntime = {}): Promise<RenewalMailSummary | null> {
+  if ((runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) === "never_activated") return null;
+  // No unpriced read from a missing policy, including after retirement.
+  if (!shipmentMailPolicy(runtime.policy === undefined ? CURRENT_SHIPMENT_MAIL_POLICY : runtime.policy, (runtime.now ?? Date.now)(), false) ||
+      !store.statsId || !/^[A-Za-z0-9_-]{1,128}$/.test(store.statsId) || !store.stripeAccountId || !/^acct_[A-Za-z0-9]+$/.test(store.stripeAccountId)) return { unavailable:true };
+  try {
+    const reply: unknown = await (runtime.pipeline ?? redisPipeline)([["EVAL",RENEWAL_NOTICE_SCRIPT,1,`nl:order-confirmation:renewal:store:${store.statsId}`,store.statsId,store.stripeAccountId,SHIPMENT_MAIL_MAX_ROW_BYTES]]);
+    if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) return { unavailable:true };
+    const row = reply[0];
+    if (row.length !== 4 || row[0] !== "ok" || !row.slice(1).every(n => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= RENEWAL_NOTICE_ROWS) || row[2]+row[3] > row[1]) return { unavailable:true };
+    return { pending:row[1],unconfirmed:row[2],held:row[3] };
+  } catch { return { unavailable:true }; }
 }

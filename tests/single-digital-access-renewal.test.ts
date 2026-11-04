@@ -163,13 +163,69 @@ test("a renewal copied under another source identity is unknown and leaves the a
 
 
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
+import { singleDigitalRenewalCopy } from "@/lib/single-digital-access";
 test("personal copy includes the existing renewal request without exposing a capsule or creating a token",async()=>{
  const f=await queued(),before=f.calls.length;
  const commands:(string|number)[][]=[];
  const rows=await orderConfirmationMailOf(f.store.statsId!,f.email,{...f.runtime,lifecycle:"retired",pipeline:async batch=>{commands.push(...batch);return f.runtime.pipeline!(batch);}});
  assert.equal(rows.length,1);assert.equal(tokenKeys().length,0);assert.equal(f.calls.length,before);
+ const saved=await readSingleDigitalRenewalOrigin(f.id,f.runtime);assert.ok(saved);
+ const expected={checkout:f.capsule.sessionId,product:f.capsule.productId,unitCents:f.capsule.unitCents,paidCents:f.capsule.paidCents,currency:f.capsule.currency,paidAt:f.capsule.created};
+ assert.deepEqual(rows[0],{...expected,purpose:"single-digital-access-renewal",phase:"renewal_queued",state:"queued",created:saved.row.created});
+ assert.deepEqual(singleDigitalRenewalCopy(saved.payload.capsule,f.store.statsId!,saved.row.accountId,f.email),expected);
+ for(const [sealed,stats,account,email] of [[saved.payload.capsule+"corrupt",f.store.statsId!,saved.row.accountId,f.email],[saved.payload.capsule,"other_store",saved.row.accountId,f.email],[saved.payload.capsule,f.store.statsId!,"acct_Other",f.email],[saved.payload.capsule,f.store.statsId!,saved.row.accountId,"other@example.test"]])
+  assert.equal(singleDigitalRenewalCopy(sealed,stats,account,email),null);
  assert.ok(commands.every(c=>["TYPE","SCARD","SMEMBERS","GETRANGE","GET"].includes(String(c[0]))));
  const text=JSON.stringify(rows);assert.ok(text.includes("single-digital-access-renewal"));
  assert.equal(/capsule|sealed|token|storeRef|fingerprint/i.test(text),false);
  assert.deepEqual(await orderConfirmationMailOf(f.store.statsId!,"other@example.test",f.runtime),[]);
+ await runOrderConfirmationMail(f.runtime.now!()+30000,async(_m,barrier)=>{assert.equal(await barrier(),true);return "unknown";},f.runtime);
+ assert.equal((await readSingleDigitalRenewalOrigin(f.id,f.runtime))?.row.state,"dispatching");
+ const grants=tokenKeys().length,gets=f.gets.length;
+ const after=await orderConfirmationMailOf(f.store.statsId!,f.email,{...f.runtime,lifecycle:"retired"});
+ assert.equal((after[0] as {state:string}).state,"dispatching");
+ for(const [key,value] of Object.entries(expected))assert.equal((after[0] as Record<string,unknown>)[key],value);
+ assert.equal(tokenKeys().length,grants);assert.equal(f.gets.length,gets);
+ assert.equal(/token(?:=|%3D)|origin(?:=|%3D)/i.test(JSON.stringify(after)),false,"personal copy must not carry live bearer URLs during dispatch");
+});
+
+
+import { readConfirmationOrigin } from "@/lib/order-confirmation-outbox";
+test("dispatching single_digital confirmation never exports its live file capability in a personal copy",async()=>{
+ const f=await renewalFixture();
+ const checkout=await createCheckout(f.store,f.product,"https://example.test",undefined,{digitalConsent:{version:EU_WITHDRAWAL_CONSENT_VERSION,at:Math.floor(f.created/1000)}},f.runtime);
+ const session=f.sessions.get(checkout.id)!;Object.assign(session,{...f.session,id:session.id,created:session.created,metadata:session.metadata});f.advance(61000);
+ await runOrderConfirmationMail(f.runtime.now!()+30000,async(_message,barrier)=>{assert.equal(await barrier(),true);return "unknown";},f.runtime);
+ const key=[...redis.keys()].find(k=>k.startsWith("nl:order-confirmation:row:"))!;assert.ok(key);
+ const found=await readConfirmationOrigin(key.slice("nl:order-confirmation:row:".length),f.runtime);assert.ok(found);assert.equal(found.row.originKind,"single_digital");assert.equal(found.row.state,"dispatching");
+ assert.ok(found.payload.accessUrl);
+ const response=await paidDownloadGet({nextUrl:new URL(found.payload.accessUrl),headers:new Headers()} as NextRequest,f.runtime);assert.equal(response.status,200,"the saved URL is a working capability, not harmless copy text");
+ const rows=await orderConfirmationMailOf(f.store.statsId!,f.email,{...f.runtime,lifecycle:"retired"});assert.equal(rows.length,1);
+ assert.equal(/token(?:=|%3D)|origin(?:=|%3D)/i.test(JSON.stringify(rows)),false);
+ assert.equal(Object.hasOwn(rows[0] as object,"text"),false);
+});
+
+test("five POSTs with new nonces keep a single pending renewal for the capsule",async()=>{
+ const f=await renewalFixture();const ids=new Set<string>();
+ for(let i=1;i<=5;i++){
+  const fields=new URLSearchParams({handle:f.store.handle,origin:f.url.searchParams.get("origin")!,request:String(i).padStart(64,"0")});
+  assert.equal((await paidDownloadRenewalPost(request(f.url,fields),f.runtime)).status,200);
+  [...redis.keys()].filter(k=>k.startsWith("nl:order-confirmation:row:")).forEach(k=>ids.add(k));
+ }
+ assert.equal(ids.size,1);assert.equal(tokenKeys().length,0);
+});
+
+test("duplicate fallback never transfers an index enlarged between separate size/member reads",async()=>{
+ const f=await queued(),base=f.runtime.pipeline!,index=`nl:order-confirmation:store:${f.store.statsId}`;let broadRead=0;
+ f.runtime.pipeline=async commands=>{
+  const replies:unknown[]=[];
+  for(const c of commands){
+   if(c[0]==="SMEMBERS" && c[1]===index && Number(redis.run(["SCARD",index]))>1)broadRead=Number(redis.run(["SCARD",index]));
+   const got=await base([c]);replies.push(...got);
+   if(c[0]==="SCARD" && c[1]===index)for(let i=100;i<1100;i++)redis.run(["SADD",index,String(i).padStart(64,"0")]);
+  }return replies;
+ };
+ const fields=new URLSearchParams(f.fields);fields.set("request","f".repeat(64));
+ await paidDownloadRenewalPost(request(f.url,fields),f.runtime);
+ assert.equal(broadRead,0,"a concurrent index growth must be checked inside the same bounded read");
 });

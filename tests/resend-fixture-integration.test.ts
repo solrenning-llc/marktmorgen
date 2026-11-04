@@ -5,7 +5,7 @@ import {syntheticResendCredential} from './resend-fixture-credentials';
 import {prepareResendFallbackFixture} from './resend-fallback-fixture';
 import {currentResendFallbackProofIsMissing} from '../lib/resend-fallback-transport';
 
-const keys=['re_test_affiliate_idle_only','re_test_call_cancel_only','re_test_call_place_only','re_test_deposit_rest_only','re_test_inbox_affiliate_only'];
+const keys=['re_test_call_lengths_said','re_test_stop_only_a_stand_in','re_test_auto_approve_stand_in','re_test_affiliate_idle_only','re_test_call_cancel_only','re_test_call_place_only','re_test_deposit_rest_only','re_test_inbox_affiliate_only'];
 test('new inherited application journeys use only their exact declared synthetic credentials',async()=>{
  for(const key of keys){
   assert.equal(syntheticResendCredential(key),key);

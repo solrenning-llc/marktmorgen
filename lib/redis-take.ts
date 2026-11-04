@@ -22,6 +22,17 @@ local value = redis.call("HGET", KEYS[1], ARGV[1])
 if value then redis.call("HDEL", KEYS[1], ARGV[1]) end
 return value`;
 
+/** KEYS[1] a hash, ARGV[1] a field, ARGV[2] the value it was read with, ARGV[3] its next value: written only when it still holds that value; 1 when written. */
+export const HASH_SWAP_IF = `-- marktmorgen:hash-swap-if:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])
+return 1`;
+
+/** KEYS[1] a hash, ARGV[1] a field, ARGV[2] the value it was read with: deleted only when it still holds that value; 1 when deleted. */
+export const HASH_DEL_IF = `-- marktmorgen:hash-del-if:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+return redis.call("HDEL", KEYS[1], ARGV[1])`;
+
 /** KEYS[1] a set: how many members it held, and the set deleted. */
 export const SET_TAKE_COUNT = `-- marktmorgen:set-take-count:v1
 local n = redis.call("SCARD", KEYS[1])

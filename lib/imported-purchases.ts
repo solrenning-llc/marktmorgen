@@ -36,7 +36,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
-import { HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { HASH_DEL_IF, HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -198,14 +198,22 @@ export async function grantImported(
  * `prefix`'s kind of grant ("api:" for the creator's own tools): never an
  * import, a gift, a place or a PayPal purchase. Says whether it took it.
  */
-export async function takeGiven(statsId: string, email: string, productId: string, prefix: string): Promise<boolean> {
+export async function takeGiven(statsId: string, email: string, productId: string, prefix: string, room?: DataStore): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const key = importedKey(statsId, email);
   const [raw] = await redisPipeline([["HGET", key, productId]]);
   const given = parse(productId, raw);
-  if (!given || !given.job.startsWith(prefix)) return false;
-  const [gone] = await redisPipeline([["HDEL", key, productId]]);
-  return Number(gone) === 1;
+  if (!given || !given.job.startsWith(prefix) || typeof raw !== "string") return false;
+  // Deleted only as it was read, so two takes at once (or a take beside a
+  // deletion of the person) give its room back once.
+  const [gone] = await redisPipeline([["EVAL", HASH_DEL_IF, 1, key, productId, raw]]);
+  if (Number(gone) !== 1) return false;
+  if (room) {
+    const value = json(raw);
+    if (value && typeof value.job === "string" && fromRoom(value.job)) await giveData(room, [{ slot: IMPORTED_SLOT, bytes: grantBytes(productId, value, normaliseEmail(email)) }]);
+    else await releaseOrderData(room, fieldReleaseBytes(productId, raw));
+  }
+  return true;
 }
 
 /**

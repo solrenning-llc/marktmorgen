@@ -537,6 +537,15 @@ export class MemoryRedis {
           if (typeof value === "string") this.run(["HDEL", args[1], args[2]]);
           return value ?? null;
         }
+        if (key.startsWith("-- marktmorgen:hash-swap-if:v1\n") && args[0] === "1" && args.length === 5) {
+          if (this.run(["HGET", args[1], args[2]]) !== args[3]) return 0;
+          this.run(["HSET", args[1], args[2], args[4]]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:hash-del-if:v1\n") && args[0] === "1" && args.length === 4) {
+          if (this.run(["HGET", args[1], args[2]]) !== args[3]) return 0;
+          return this.run(["HDEL", args[1], args[2]]);
+        }
         if (key.startsWith("-- marktmorgen:set-take-count:v1\n") && args[0] === "1" && args.length === 2) {
           const n = Number(this.run(["SCARD", args[1]])) || 0;
           this.run(["DEL", args[1]]);

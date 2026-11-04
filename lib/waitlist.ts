@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, noteData, takeData } from "@/lib/store-data";
-import { HASH_TAKE_FIELD } from "@/lib/redis-take";
+import { HASH_SWAP_IF, HASH_TAKE_ALL, HASH_TAKE_FIELD, takenPairs } from "@/lib/redis-take";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
@@ -121,17 +121,31 @@ export async function joinWaitlist(input: {
   const entry: WaitEntry = { at: before?.at ?? now(), ok: before?.ok ?? 0, c: asked, ...(asked && (before?.k || (consent && input.clicks)) ? { k: true } : {}), t: leave };
   const confirm = newToken();
   const grant = (k: TokenGrant["k"]): string => JSON.stringify({ s: sid, h: store.handle, p: product.id, e: email, k } satisfies TokenGrant);
-  // A new address takes room in the store's data room, with its link to leave
-  // (kept as long as the list); with no room the list is full for it.
-  if (!before && !(await takeData(store, [{ slot: waitSlot(product.id), bytes: dataBytes([email, JSON.stringify(entry)], 1) + dataBytes([tokenKey(leave), grant("leave")], 1) }])).ok) return "full";
+  const value = JSON.stringify(entry);
+  if (before) {
+    // Rewritten only over the place as it was read: a place deleted or changed
+    // in between is never written back, and its room is counted once.
+    const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(sid, product.id), email, existing as string, value]]);
+    if (Number(swapped) !== 1) return "error";
+    await settleEntry(store, product.id, email, existing as string, value);
+  } else {
+    // A new address takes room in the store's data room, with its link to leave
+    // (kept as long as the list); with no room the list is full for it.
+    const taken = dataBytes([email, value], 1) + leaveBytes(sid, product.id, email, leave);
+    if (!(await takeData(store, [{ slot: waitSlot(product.id), bytes: taken }])).ok) return "full";
+    const [added] = await redisPipeline([["HSETNX", listKey(sid, product.id), email, value]]);
+    if (Number(added) !== 1) {
+      // The same address joined at the same moment: its room goes back, and this one is tried again.
+      await giveData(store, [{ slot: waitSlot(product.id), bytes: taken }]);
+      return "error";
+    }
+  }
   await redisPipeline([
-    ["HSET", listKey(sid, product.id), email, JSON.stringify(entry)],
     ["SET", tokenKey(confirm), grant("confirm"), "EX", CONFIRM_SECONDS],
     ["SET", tokenKey(leave), grant("leave"), "EX", WAIT_SECONDS],
     ...noteForErasure(sid, email, tokenKey(confirm)),
     ...noteForErasure(sid, email, tokenKey(leave)),
   ]);
-  if (before && typeof existing === "string") await settleEntry(store, product.id, email, existing, JSON.stringify(entry));
 
   const link = `${origin}/@${store.handle}/waitlist?token=${confirm}`;
   const g = givingWords(store.language);
@@ -168,14 +182,24 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
 export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
-  const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
-  const entry = parseEntry(raw);
-  if (!entry) return { ok: false };
-  if (!entry.ok) {
-    const next = JSON.stringify({ ...entry, ok: now() });
-    await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, next]]);
+  // Written only over the place as it was read, so a place deleted in between
+  // is not made again and two presses at once count its growth once.
+  let entry: WaitEntry | null = null;
+  for (let tries = 0; tries < 3 && !entry; tries += 1) {
+    const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
+    const read = parseEntry(raw);
+    if (!read) return { ok: false };
+    if (read.ok) {
+      entry = read;
+      break;
+    }
+    const next = JSON.stringify({ ...read, ok: now() });
+    const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(grant.s, grant.p), grant.e, raw as string, next]]);
+    if (Number(swapped) !== 1) continue;
     await settleEntry(store, grant.p, grant.e, raw as string, next);
+    entry = read;
   }
+  if (!entry) return { ok: false };
   if (entry.c && store.listId) {
     await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
       console.error("could not add a waitlist address to a list", error),
@@ -186,6 +210,30 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
 
 /** Where one product's waitlist is counted in the store's data room (lib/store-data.ts). */
 const waitSlot = (productId: string) => `wl:${productId}`;
+
+/** The longest handle a store may have (HANDLE_PATTERN, lib/store-handle-pattern.ts). */
+export const LONGEST_HANDLE = 24;
+
+/**
+ * What a place's link to leave is counted at, the same when it is taken and
+ * whenever it is given back: as if the store had the longest handle, so a
+ * store renamed afterwards never has more given back than was taken.
+ */
+const leaveBytes = (sid: string, productId: string, email: string, token: string) =>
+  dataBytes([tokenKey(token), JSON.stringify({ s: sid, h: "x".repeat(LONGEST_HANDLE), p: productId, e: email, k: "leave" } satisfies TokenGrant)], 1);
+
+/** What one place, as it is kept, gives back when it goes: itself and its link to leave. */
+function placeBytes(sid: string, productId: string, email: string, raw: string): number {
+  const entry = parseEntry(raw);
+  return dataBytes([email, raw], 1) + (entry ? leaveBytes(sid, productId, email, entry.t) : 0);
+}
+
+/** Every place of one product's waitlist, read and deleted in one step, given back to `room`. */
+async function takeList(room: DataStore, sid: string, productId: string): Promise<void> {
+  const [taken] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, listKey(sid, productId)]]);
+  const freed = takenPairs(taken).reduce((sum, [email, raw]) => sum + placeBytes(sid, productId, email, raw), 0);
+  if (freed > 0) await giveData(room, [{ slot: waitSlot(productId), bytes: freed }]);
+}
 
 /**
  * Counts what rewriting a place changed (confirmed, or asked again with the
@@ -198,14 +246,18 @@ async function settleEntry(store: DataStore, productId: string, email: string, b
   else if (grown < 0) await giveData(store, [{ slot: waitSlot(productId), bytes: -grown }]);
 }
 
-/** Takes an address off a waitlist. */
-export async function leaveWaitlist(token: string): Promise<boolean> {
+/**
+ * Takes an address off a waitlist. Its place is read and deleted in one step
+ * and gives back to `room` (the store, when it is found) what it took, once.
+ */
+export async function leaveWaitlist(token: string, room?: DataStore | null): Promise<boolean> {
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "leave") return false;
-  await redisPipeline([
-    ["HDEL", listKey(grant.s, grant.p), grant.e],
+  const [taken] = await redisPipeline([
+    ["EVAL", HASH_TAKE_FIELD, 1, listKey(grant.s, grant.p), grant.e],
     ["DEL", tokenKey(token)],
   ]);
+  if (room && typeof taken === "string") await giveData(room, [{ slot: waitSlot(grant.p), bytes: placeBytes(grant.s, grant.p, grant.e, taken) }]);
   return true;
 }
 
@@ -269,10 +321,10 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
     ["SREM", soonKey(sid), product.id],
     ["SET", jobKey(sid, product.id), JSON.stringify(job), "EX", 120 * 86_400],
     ["DEL", sendKey(sid, product.id)],
-    ...(total
-      ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), 30 * 86_400], ["SADD", JOBS, `${sid}|${product.id}`]]
-      : [["DEL", listKey(sid, product.id)]]),
+    ...(total ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), 30 * 86_400], ["SADD", JOBS, `${sid}|${product.id}`]] : []),
   ]);
+  // Nobody to email: the waitlist goes now, and its room comes back.
+  if (!total) await takeList(store, sid, product.id);
   return { ok: true, total };
 }
 
@@ -353,10 +405,10 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       // hear more is on the creator's list already (confirmSpot).
       await redisPipeline([
         ["SET", jobKey(sid, pid), JSON.stringify(job), "EX", 90 * 86_400],
-        ["DEL", listKey(sid, pid)],
         ["DEL", sendKey(sid, pid)],
         ["SREM", JOBS, member],
       ]);
+      await takeList(store, sid, pid);
     }
   }
   return sent;
@@ -375,10 +427,7 @@ export async function forgetWaitlistPerson(sid: string | null, productIds: strin
   const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, p), address])) : [];
   const freed = productIds.flatMap((p, i) => {
     const raw = replies[i];
-    if (typeof raw !== "string") return [];
-    const entry = parseEntry(raw);
-    const leave = entry ? dataBytes([tokenKey(entry.t), JSON.stringify({ s: sid, h: room?.handle ?? "", p, e: address, k: "leave" } satisfies TokenGrant)], 1) : 0;
-    return [{ slot: waitSlot(p), bytes: dataBytes([address, raw], 1) + leave }];
+    return typeof raw === "string" ? [{ slot: waitSlot(p), bytes: placeBytes(sid, p, address, raw) }] : [];
   });
   if (room && freed.length) await giveData(room, freed);
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);

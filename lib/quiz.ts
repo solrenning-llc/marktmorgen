@@ -481,6 +481,10 @@ export async function submitQuiz(
   // What the try leaves takes room first, at the most it can weigh: its
   // answers and marks rewritten over the last, its count the first time, and
   // its pass. Nothing is counted against the store's quizzes without it.
+  // What it really left is all that resetTries or a deletion gives back: the
+  // rest of this reservation (the draft's worst case, a pass not made) stays
+  // counted, the room erring fuller. Settling it here would need the try's
+  // write and its room in one script, and is not done.
   const last = await redisPipeline([["GET", resultKey(courseId, lessonId, who)]]);
   const draft = JSON.stringify({ used: 9_999, last: { answers: mine, grade: gradeQuiz(asked, mine), at: Math.floor(Date.now() / 1000) }, best: 100, passed: true });
   const grown = dataBytes([draft], 1) - kept(last[0]) + (before.used ? 0 : dataBytes(["9999"], 1)) + dataBytes([lessonId], 1);
@@ -543,16 +547,11 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
   const passed = await passedQuizzes(course.id, who);
   const lessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz && !passed.has(lesson.id));
   if (lessons.length === 0) return;
-  // What the tries weighed comes back to the store's data room.
-  const held = await redisPipeline(lessons.flatMap(({ lesson }) => [["GET", resultKey(course.id, lesson.id, who)], ["GET", triesKey(course.id, lesson.id, who)]]));
+  // Each read and deleted in one step (GETDEL), so what the tries weighed comes
+  // back to the store's data room once, even beside a deletion of the student.
+  const held = await redisPipeline(lessons.flatMap(({ lesson }) => [["GETDEL", resultKey(course.id, lesson.id, who)], ["GETDEL", triesKey(course.id, lesson.id, who)]]));
   const freed = held.reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
   if (freed) await giveData(room, [{ slot: TRIES_SLOT(course.id), bytes: freed }]);
-  await redisPipeline(
-    lessons.flatMap(({ lesson }) => [
-      ["DEL", triesKey(course.id, lesson.id, who)],
-      ["DEL", resultKey(course.id, lesson.id, who)],
-    ]),
-  );
 }
 
 /**

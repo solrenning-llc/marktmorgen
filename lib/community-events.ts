@@ -657,8 +657,9 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
     return "already";
   }
   if (event.cap > 0 && Number(length) > event.cap) {
-    await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
-    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    const [removed] = await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
+    // Given back only when this took the place away: a deletion of the member in between gave it back already.
+    if (Number(removed) === 1) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "full";
   }
   return "added";

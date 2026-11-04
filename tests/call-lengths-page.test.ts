@@ -64,7 +64,20 @@ async function main(): Promise<void> {
   const moving = renderToStaticMarkup(createElement(SlotPicker, { starts: [Date.now() + 3 * 86_400_000], creatorTz: NY, handle: "lena", productId: "p1", minutes: 60, move: "cs_test_x", words }));
   is("and nothing when there is no choice, or when a booking moves at its own length", [plain.includes('name="minutes"'), moving.includes('name="minutes"')], [false, false]);
   const page = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");
-  is("each length is a link to its own times in a named group, the one shown marked as current and said", [page.includes('role="group" aria-labelledby={`length-${product.id}`}'), page.includes('href={`?length=${l.minutes}`}'), page.includes('aria-current={l.minutes === chosen.minutes ? "true" : undefined}'), page.includes('role="status">{b.lengthChosen(')], [true, true, true, true]);
+  is("each length is a link to its own times in a named group, the one shown marked as current and said", [page.includes('role="group" aria-labelledby={`length-${product.id}`}'), page.includes('href={lengthHref(l.minutes)}'), page.includes('aria-current={l.minutes === chosen.minutes ? "true" : undefined}'), page.includes('<p className="mt-2 text-sm">{b.lengthChosen(')], [true, true, true, true]);
+  is(
+    "each length's link keeps the rest of the address (a campaign's tags, a chosen host), drops an old notice, and lands on the times",
+    [page.includes('if (key === "length" || key === "status" || typeof value !== "string") continue;'), page.includes('return `?${next.toString()}#times`;'), page.includes('<span id="times" />')],
+    [true, true, true],
+  );
+  is("the times are read at the length asked for only where lengths are offered at all", page.includes("const askedLength = offerable ? bookingLength(product.call, product.priceCents, asked) : null;"), true);
+  is("no live region on words the server drew: a reader is not told them twice", page.includes('role="status">{b.lengthChosen('), false);
+  const route = readFileSync("app/api/store/book/route.ts", "utf8");
+  is(
+    "back on the booking page after any refusal, the length chosen is still chosen: only a whole number, read against the list again",
+    [route.includes("const keptLength = /^\\d{1,4}$/.test(minutes) && Number(minutes) !== product.call.minutes ? `&length=${minutes}` : \"\";"), route.includes("${keptLength}`, \"Cache-Control\": \"no-store\""), page.includes("bookingLength(product.call, product.priceCents, asked)")],
+    [true, true, true],
+  );
   is("offered from the same rule the booking keeps, with the team the times were read for", page.includes("offeredLengths(product.call, product.priceCents, { pkg: Boolean(pkgToken), team: read.team })"), true);
   is("the price said and the line under the title are the length chosen's", [page.includes("money(chosen ? chosen.cents : product.priceCents)"), page.includes("callLine(chosen ? { ...setup, minutes: chosen.minutes } : setup, b)")], [true, true]);
 

@@ -128,6 +128,11 @@ async function main(): Promise<void> {
   is("refused before anything is opened: an unknown length, a price changed since, another length from a package, with a deposit or with a code", [tries.map((t) => t), bodies.length - opened], [tries.map(() => ({ ok: false, reason: "invalid" })), 0]);
   const plain = callCheckoutBody({ store, product: { ...full, call: readSetup(weekly) as CallSetup }, start: at, end: at + 1_800_000, buyerTz: NY, origin: "https://marktmorgen.com", via: null, fromPackage: null, length: { minutes: 60, cents: 8000 } });
   is("a call with one length is charged its own price, whatever is passed", [plain.get("line_items[0][price_data][unit_amount]"), plain.has("metadata[minutes]")], ["4500", false]);
+  is(
+    "back from Stripe's page, the length chosen is still chosen; the call's own length needs nothing said",
+    [paid.get("cancel_url")?.endsWith(`/book/${listing.id}?length=60`), bodies.at(-1)!.get("cancel_url")?.endsWith(`/book/${listing.id}`)],
+    [true, true],
+  );
 
   part("A paid booking moves at its own length");
   const later = at + 6 * 3_600_000;

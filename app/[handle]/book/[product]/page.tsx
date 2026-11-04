@@ -73,11 +73,24 @@ export default async function BookPage({ params, searchParams }: Params) {
   // One of a call's lengths, each with its price (lib/call-lengths.ts): asked for by its link; the times are read at it,
   // except on a team, which reads its hosts' times at the call's own length and says so (read.team).
   const asked = typeof query.length === "string" ? query.length : undefined;
-  const askedLength = !pkgToken && product.call.kind === "weekly" ? bookingLength(product.call, product.priceCents, asked) : null;
+  // The times are read at the length asked for only where lengths are offered at all (offeredLengths): with a deposit,
+  // for one, the page books the call's own length, so it shows that length's times.
+  const offerable = !pkgToken && product.call.kind === "weekly" && offeredLengths(product.call, product.priceCents, { pkg: false, team: false }).length > 0;
+  const askedLength = offerable ? bookingLength(product.call, product.priceCents, asked) : null;
   const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null, askedLength?.minutes ?? null) : null;
   const hostChoices = (read && "hosts" in read ? read.hosts : null) ?? [];
   // Offered only where each can be booked and charged (holdAndCheckout): never from a package, with a deposit or on a team.
   const choices = read ? offeredLengths(product.call, product.priceCents, { pkg: Boolean(pkgToken), team: read.team }) : [];
+  // Each length's link keeps the rest of the address (a campaign's tags, a chosen host) and goes straight to the times.
+  const lengthHref = (minutes: number) => {
+    const next = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (key === "length" || key === "status" || typeof value !== "string") continue;
+      next.set(key, value);
+    }
+    next.set("length", String(minutes));
+    return `?${next.toString()}#times`;
+  };
   const chosen = choices.length ? askedLength ?? choices[0] : null;
   const pickedHost = (read && "picked" in read ? read.picked : null) ?? null;
   const days = read ? read.days : null;
@@ -181,7 +194,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                       {choices.map((l) => (
                         <li key={l.minutes}>
                           <a
-                            href={`?length=${l.minutes}`}
+                            href={lengthHref(l.minutes)}
                             aria-current={l.minutes === chosen.minutes ? "true" : undefined}
                             className={`btn ${l.minutes === chosen.minutes ? "btn-primary" : "btn-secondary"} w-full justify-start`}
                           >
@@ -190,7 +203,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                         </li>
                       ))}
                     </ul>
-                    <p className="mt-2 text-sm" role="status">{b.lengthChosen(b.lengthOption(chosen.minutes, money(chosen.cents)))}</p>
+                    <p className="mt-2 text-sm">{b.lengthChosen(b.lengthOption(chosen.minutes, money(chosen.cents)))}</p>
                   </div>
                 ) : null}
                 {hostChoices.length ? (
@@ -210,6 +223,8 @@ export default async function BookPage({ params, searchParams }: Params) {
                     {pickedHost ? <p className="mt-2 text-sm" role="status">{b.withHost(pickedHost.label)}</p> : null}
                   </form>
                 ) : null}
+                {/* Where a length's link lands, so the page scrolls and focus starts at the times it changed (2.4.3). */}
+                <span id="times" />
                 <SlotPicker
                   starts={starts}
                   creatorTz={setup.tz}

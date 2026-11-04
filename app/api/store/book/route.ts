@@ -80,11 +80,14 @@ export async function POST(request: NextRequest) {
     return new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}` } });
   }
 
+  // The length the buyer chose stays chosen when they come back too, so a retry never books the call's own length
+  // unnoticed (3.3.7): only a whole number of minutes is carried, and the page reads it against the creator's list again.
+  const keptLength = /^\d{1,4}$/.test(minutes) && Number(minutes) !== product.call.minutes ? `&length=${minutes}` : "";
   const back = (status: string) =>
     new Response(null, {
       status: 303,
       // The host the buyer chose stays chosen when they come back, so their next try is never booked with anyone else.
-      headers: { Location: `${origin}/@${store.handle}/book/${product.id}?status=${status}${pkg ? `&pkg=${encodeURIComponent(pkg)}` : ""}${hostKey && status !== "host-changed" ? `&with=${hostKey}` : ""}`, "Cache-Control": "no-store" },
+      headers: { Location: `${origin}/@${store.handle}/book/${product.id}?status=${status}${pkg ? `&pkg=${encodeURIComponent(pkg)}` : ""}${hostKey && status !== "host-changed" ? `&with=${hostKey}` : ""}${keptLength}`, "Cache-Control": "no-store" },
     });
 
   if (!canSellProduct(store, product)) return back("unavailable");

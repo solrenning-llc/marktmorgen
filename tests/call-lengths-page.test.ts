@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { readSetup, type CallSetup } from "@/lib/call-setup";
 import { offeredLengths } from "@/lib/call-lengths";
 import { slotsForProduct, type CallListing } from "@/lib/calls";
-import { BOOKING_WORDS } from "@/lib/buyer-words/booking";
+import { BOOKING_WORDS, bookingNotice } from "@/lib/buyer-words/booking";
 import { SlotPicker, type SlotWords } from "@/components/slot-picker";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
@@ -100,6 +100,25 @@ async function main(): Promise<void> {
     "a paid booking of a length no call may have is said to be unmovable here, never as times that could not be read",
     [page.includes('const lengthStuck = ownLength(setup, booking.end - booking.start) === "unknown";'), page.includes("const movable = blocked === null && !lengthStuck;"), page.includes("? b.lengthNotMovable"), langs.every(([, w]) => w.lengthNotMovable.length > 20)],
     [true, true, true, true],
+  );
+  is(
+    "a length taken off: a choice of length is asked for only while the page offers several; with none, the call's own is named",
+    [bookingNotice(BOOKING_WORDS.en, "length-gone", LENGTHS, 30), bookingNotice(BOOKING_WORDS.en, "length-gone", [], 30), bookingNotice(BOOKING_WORDS.en, "taken", [], 30), bookingNotice(BOOKING_WORDS.en, "nothing", [], 30)],
+    [BOOKING_WORDS.en.notices["length-gone"], { title: "This length is no longer offered", body: "Only the 30-minute length is offered now; pick a time below. Nothing was charged." }, BOOKING_WORDS.en.notices.taken, null],
+  );
+  is(
+    "in every language, the call's own length said and nothing charged, never a length to pick",
+    langs.map(([code, w]) => {
+      const said = bookingNotice(w, "length-gone", [], 45);
+      return [code, said?.title === w.notices["length-gone"].title, Boolean(said?.body.includes("45")), said?.body !== w.notices["length-gone"].body];
+    }),
+    langs.map(([code]) => [code, true, true, true]),
+  );
+  is("the booking page says it from the lengths it offers", page.includes("const notice = bookingNotice(b, status, choices, product.call.minutes);"), true);
+  is(
+    "a booking that cannot move says the booking keeps its time, not that only its length does",
+    [BOOKING_WORDS.en.lengthNotMovable, langs.every(([, w]) => !/length|duración|durée|Länge|durata|lengte|duração/i.test(w.lengthNotMovable))],
+    ["This booking can't be moved to another time here", true],
   );
   is("a question, each length with its price, and what is shown", langs.map(([, w]) => [Boolean(w.lengthPick), w.lengthOption(60, "$80").includes("60") && w.lengthOption(60, "$80").includes("$80"), w.lengthChosen("X").includes("X")]), langs.map(() => [true, true, true]));
   is("in US English", [BOOKING_WORDS.en.lengthPick, BOOKING_WORDS.en.lengthOption(60, "$80.00"), BOOKING_WORDS.en.lengthChosen("60 minutes, $80.00")], ["How long would you like?", "60 minutes, $80.00", "Showing times for 60 minutes, $80.00."]);

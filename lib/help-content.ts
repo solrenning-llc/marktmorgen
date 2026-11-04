@@ -1,4 +1,6 @@
 import { PLANS_ON_SALE } from "@/lib/opening";
+import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
+import { STARTER_GALLERY_TITLE } from "@/lib/funnel-niche-feature";
 import { PAGE_TEST_WORDS } from "@/lib/headline-test-words";
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import { ASSIST_REMINDER_WORDS } from "@/lib/buyer-words/assistant-reminder";
@@ -31,7 +33,7 @@ import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MIN_CENTS, dollars } from "@/lib/auto-
 import { isDomainsConfigured } from "@/lib/domains";
 import { TEAM_LIMITS, teamLimitWords } from "@/lib/team-scheduling-rules";
 import { PLAN_TITLES, PRO_MONTHLY_EMAILS, REFUND_DAYS, TRIAL_MONTHLY_EMAILS, SCALE_MONTHLY_EMAILS } from "@/lib/plan";
-import { workflowLimitWords } from "@/lib/flow-limits";
+import { MAX_STEPS, workflowLimitWords } from "@/lib/flow-limits";
 import { pipelineLimitWords } from "@/lib/crm-rules";
 import { PLAN_BREAKS_ENABLED, PAID_MONTHS_BEFORE_PAUSE, PAUSE_MONTHS } from "@/lib/plan-pause-rules";
 import { healthRuleWords, rampRuleWords } from "@/lib/mail-health-rules";
@@ -46,6 +48,7 @@ import { ERASE_STUDIO_UNITS } from "@/lib/erasure-rules";
 import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib/agreement-rules";
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
+import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
 
 /**
  * The help center's questions a feature page asks too, word for word, so
@@ -695,6 +698,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        // 544 [SQ9]: the studio's "Bring in a sequence" (components/sequence-import-box.tsx, lib/sequence-import.ts), as it works.
+        q: "Can I bring my email sequences from another service?",
+        a: [
+          `Yes, on Studio and Scale. Under Sequences and workflows, choose “Download the template (CSV)”. Copy each email from your old service into it, one email per row. Each row has its subject, its words and days_after: how many days after the email before it goes out. Its columns are ${SEQUENCE_TEMPLATE.join(", ")}; leave preview empty. Then pick the file under “Bring in a sequence” and choose “Read the file”. A file can be up to ${MAX_SEQUENCE_FILE_BYTES / 1000} KB. A sequence holds up to ${MAX_STEPS} emails; any after that are left out and listed.`,
+          "The emails open in the sequence editor as a new sequence. You read each one, pick what starts it and save it. It is saved paused: nothing is sent until you preview it and switch it on from its card.",
+          "Emails written in HTML come in as text. Paragraphs, lists and links are kept, each link as its words and its address. Pictures and links through a known click-tracking address are taken out. So are merge fields like *|FNAME|* or {{ name }}. Each one taken out is listed by its line in the file, above the emails, so you can check it. So is each email left out, and each preview text, which an email in a sequence does not have yet.",
+        ],
+      },
+      {
         q: "Can I email the people on my list?",
         a: [
           "Yes, on Studio. From your studio you write one-off emails to everyone who agreed to hear from you, or only to those who got one product, and send them now or at a time you choose. Sequences go out by themselves: a welcome when someone joins, a few emails in the days after someone buys. Each person goes through a sequence once. A sequence can end for anyone who buys, or gets one product, so it stops selling to people who already have it; and any of its emails can go only to those who have a product or do not, who have bought or not yet, or who carry a label, the others skipping it or leaving there. A step can also act instead of writing: give someone a label, take one off, start them on another sequence, set one of your fields, put their deal in a stage of your deals board (a new deal when they have no open one), write a note on their page, or email you who reached it. A sequence can start when another gives someone a label, so one sequence hands people to the next, or when someone on your list sends one of your forms that asks for an email address. An email can also go only to those who used a link to your store in the email before, or did not: that is counted only for readers who allowed it, with a box of its own when they joined, and they can stop it from any email. There is no open tracking. AI can write a sequence's emails for you on " + AI_PLANS_WORDS + ", 3 to 7 of them, from your products' names, prices and links, with only your store's own links kept; you read them and save. And when a product gets a new version, “Tell buyers about an update” under it emails everyone who bought it, once a week at most, with your words and the link to their orders.",
@@ -819,7 +831,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Yes, on every plan. Under Funnels in your studio, choose a funnel and make a copy here, make a share link, or download it as a file. A copy keeps your words, videos and products, makes pages of its own and leaves the pictures on the original pages. It arrives off, with its pages kept from visitors.",
           `A share link opens the funnel for another Marktmorgen creator: they see its steps, pages and forms, choose their own products for its steps (or leave one out), and bring it in as a draft. Only the words and the shape go. Your pictures, files, buyers, contacts, form answers, reviews, prices, numbers and products never do, and neither do your about text, guarantee, videos, deadlines or what others said about you: they are told what to fill in. The link is shown once; only its fingerprint is kept. Revoke it at any time, and it stops working at once; otherwise it works for the days you chose, ${MAX_SHARE_DAYS} at most.`,
           `It is a snapshot: what you change afterward is not in it. Share links at once: ${SHARE_LIMITS.creator.shares} on Store, ${SHARE_LIMITS.pro.shares} on Studio and ${SHARE_LIMITS.scale.shares} on Scale. Each calendar month (UTC), on Store, Studio and Scale: funnels brought in, copies and starters included, ${SHARE_LIMITS.creator.importsPerMonth}, ${SHARE_LIMITS.pro.importsPerMonth} and ${SHARE_LIMITS.scale.importsPerMonth}; previews before bringing one in, ${SHARE_LIMITS.creator.previewsPerMonth}, ${SHARE_LIMITS.pro.previewsPerMonth} and ${SHARE_LIMITS.scale.previewsPerMonth}; share links made, ${SHARE_LIMITS.creator.sharesPerMonth}, ${SHARE_LIMITS.pro.sharesPerMonth} and ${SHARE_LIMITS.scale.sharesPerMonth}; files downloaded, ${SHARE_LIMITS.creator.exportsPerMonth}, ${SHARE_LIMITS.pro.exportsPerMonth} and ${SHARE_LIMITS.scale.exportsPerMonth}; updates of your pages from a saved section, ${SHARE_LIMITS.creator.appliesPerMonth}, ${SHARE_LIMITS.pro.appliesPerMonth} and ${SHARE_LIMITS.scale.appliesPerMonth}. One share link can be previewed ${PREVIEWS_PER_SHARE_MONTH} times and brought in ${IMPORTS_PER_SHARE_MONTH} times a month, by everyone together. A funnel's file can be up to ${bytesWords(SHARE_LIMITS.creator.bundleBytes)}, ${bytesWords(SHARE_LIMITS.pro.bundleBytes)} and ${bytesWords(SHARE_LIMITS.scale.bundleBytes)}. A file is checked before anything is made: anything that is not part of a Marktmorgen funnel, or looks like code, is refused.`,
-          "There are also six starters with first words written: a free guide then your first offer, a recorded workshop, a coaching application with its form, a membership with the page that sells it, a free lesson then the full course, and a paid call. Every sentence in them is one you can say as it stands, or a part in [brackets] for you to fill in.",
+          `There are also ${FUNNEL_STARTERS.length} campaigns with first words written, for what you sell online and for what you ship. Under Funnels in your studio, they are in “${STARTER_GALLERY_TITLE}”. Every sentence in them is one you can say as it stands, or a part in [brackets] for you to fill in.`,
         ],
       },
       {

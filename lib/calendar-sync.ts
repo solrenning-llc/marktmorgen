@@ -136,11 +136,13 @@ export function providerOf(url: string): string {
   } catch {
     return "Calendar";
   }
+  // The domain itself or a name under it: "evilicloud.com" is not iCloud.
+  const on = (domain: string) => host === domain || host.endsWith(`.${domain}`);
   if (host === "calendar.google.com" || host.endsWith(".google.com")) return "Google Calendar";
-  if (host.endsWith("outlook.office365.com") || host.endsWith("outlook.live.com") || host.endsWith("outlook.office.com")) return "Outlook";
-  if (host.endsWith("icloud.com")) return "iCloud";
-  if (host.endsWith("fastmail.com")) return "Fastmail";
-  if (host.endsWith("calendly.com")) return "Calendly";
+  if (on("outlook.office365.com") || on("outlook.live.com") || on("outlook.office.com")) return "Outlook";
+  if (on("icloud.com")) return "iCloud";
+  if (on("fastmail.com")) return "Fastmail";
+  if (on("calendly.com")) return "Calendly";
   return host.replace(/^www\./, "");
 }
 

@@ -28,7 +28,8 @@
  *   - notes, tasks, deals, pitches, segments and drafts deleted, a buyer's
  *     review photo taken off;
  *   - no passkey request from a locked session, not even a list, spends the
- *     owner's hourly changes.
+ *     owner's hourly changes; a removal only waits (lib/passkeys.ts
+ *     scheduleRemoval), on a count of its own.
  *
  * Where a route deletes a file, the check also reads the file back after the
  * refusal, and the inventory holds every such route to one of those reads.
@@ -385,7 +386,7 @@ async function main(): Promise<void> {
     new NextRequest(`${ORIGIN}/api/auth/passkey`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "remove", id: "a-passkey" }) });
   // More than the hour's 30 changes (CHANGES_PER_HOUR in the route).
   for (let i = 0; i < 31; i += 1) await passkey(passkeyRequest(locked));
-  is("the locked session is told locked, every time", await answer(await passkey(passkeyRequest(locked))), LOCKED);
+  is("the locked session removes nothing at once: it may only ask for a wait, on a count of its own", await answer(await passkey(passkeyRequest(locked))), [429, "rate_limited"]);
   is("and the owner's own change is not refused for the hour", (await answer(await passkey(passkeyRequest(full))))[1] !== "rate_limited", true);
   const listRequest = (session: string) =>
     new NextRequest(`${ORIGIN}/api/auth/passkey`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "list" }) });

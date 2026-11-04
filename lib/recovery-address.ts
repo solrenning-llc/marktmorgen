@@ -106,6 +106,7 @@ export async function confirmRecoveryAddress(email: string, session: string, cod
   }
   if (pending.e !== normaliseEmail(email) || typeof pending.a !== "string" || typeof pending.c !== "string") return "expired";
   if (sha(`nimbus-rec-code:${code.replace(/\D/g, "")}`) !== pending.c) return "wrong";
+  const before = await recoveryAddress(email);
   await redisPipeline([
     ["SET", addressKey(email), pending.a],
     ["DEL", setKey(session)],
@@ -117,12 +118,27 @@ export async function confirmRecoveryAddress(email: string, session: string, cod
     "",
     "If this was not you, log in, change it under Account in your studio, choose “Log out of all devices”, and reply to this email.",
   ]);
+  // The address it replaces is told too: it was where notices went that the sign-in inbox may not be trusted with (MM-SA-19).
+  if (before && normaliseEmail(before) !== normaliseEmail(pending.a)) await toldOldAddress(before, email, `It was replaced by ${hideAddress(pending.a)}.`);
   return { address: pending.a };
 }
 
 /** Forgets the recovery address; the sign-in address is told. */
+/** The recovery address an account stops using is told, with what to do if its owner did not ask. */
+async function toldOldAddress(old: string, email: string, what: string): Promise<void> {
+  await mail(normaliseEmail(old), "This is no longer the recovery address of a Marktmorgen account", [
+    `This address was the recovery address of the Marktmorgen account ${normaliseEmail(email)}. ${what}`,
+    "",
+    `When: ${when()} UTC`,
+    "",
+    "If its owner did not ask for this, somebody may be able to read their email: tell them, and reply to this email so we can help.",
+  ]);
+}
+
 export async function removeRecoveryAddress(email: string): Promise<void> {
+  const before = await recoveryAddress(email);
   await redisPipeline([["DEL", addressKey(email)]]);
+  if (before) await toldOldAddress(before, email, "The account has no recovery address now.");
   await mail(normaliseEmail(email), "Your Marktmorgen account has no recovery address now", [
     "The recovery address of your Marktmorgen account was removed. If you can no longer open this inbox, a passkey is the way back in.",
     "",

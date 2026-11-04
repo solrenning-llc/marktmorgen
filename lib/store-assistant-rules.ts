@@ -244,13 +244,23 @@ export const HANDOFF_WORDS =
  * the word followed by access ("garantizar el acceso", "garantir o acesso",
  * "garantit l'accès", "garantire l'accesso", "garantieren den Zugang") or
  * after it ("den Zugang zu garantieren"); "l'" may be joined, as the
- * deal-word check reads a split word joined. In doubt it is refused; a store
- * that wrote the same word allows it, as with any term (C3-107).
+ * deal-word check reads a split word joined. The access, with at most one
+ * complement of access (ACCESS_COMPLEMENT: "de por vida", "al curso", "zum
+ * Kurs"), must end the clause (CLAUSE_END): a conjunction and another
+ * object ("el acceso y resultados", "l'accès et des résultats") is a promise
+ * and is refused (C3-109). In doubt it is refused; a store that wrote the
+ * same word allows it, as with any term (C3-107).
  */
+const ACCESS_COMPLEMENT =
+  "(?: (?:de por vida|al curso|a los cursos|al contenido|ao curso|aos cursos|ao conte[uú]do|vital[ií]cio|para sempre|au cours|aux cours|au contenu|[aà] vie|zum kurs|zu den kursen|zum inhalt|al corso|ai corsi|al contenuto|a vita|tot de cursus(?:sen)?|tot de inhoud))?";
+/** The end of a clause: a full stop, a semicolon, an exclamation or question mark, the end of the text, or a comma not followed by a conjunction. */
+const CLAUSE_END =
+  "(?:\\s*[.;!?]|\\s*$|\\s*,(?!\\s*(?:y|e|et|und|en|and|o|ou|oder|of|ni|sowie|ma|mas|pero|mais|aber|maar|plus)(?!\\p{L})))";
 const GUARANTEE_WORDS =
-  "(?<!zugang (?:zu )?)garant\\p{L}*(?! (?:el |o |l'?|den )?(?:acceso|acesso|acc[eè]s|accesso|zugang)(?!\\p{L}))";
-/** The Dutch verb ("Wij garanderen resultaten"), but for access ("garanderen de toegang", "de toegang te garanderen"). */
-const GUARANTEE_WORDS_NL = "(?<!toegang (?:te )?)garande\\p{L}*(?! (?:de |het )?toegang(?!\\p{L}))";
+  `(?:(?<!zugang (?:zu )?)garant\\p{L}*|garant\\p{L}*(?!${CLAUSE_END}))(?! (?:el |o |l'?|den )?(?:acceso|acesso|acc[eè]s|accesso|zugang)${ACCESS_COMPLEMENT}${CLAUSE_END})`;
+/** The Dutch verb ("Wij garanderen resultaten"), read the same way for access ("garanderen de toegang tot de cursus.", "de toegang te garanderen."). */
+const GUARANTEE_WORDS_NL =
+  `(?:(?<!toegang (?:te )?)garande\\p{L}*|garande\\p{L}*(?!${CLAUSE_END}))(?! (?:de |het )?toegang${ACCESS_COMPLEMENT}${CLAUSE_END})`;
 /**
  * The French "remise" is a discount ("la remise exclusive", "une remise de
  * 20 %"), but for the phrases of handing over, which pass: "remise en"

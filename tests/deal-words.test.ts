@@ -198,6 +198,14 @@ is("a verb to guarantee that only says how access works", [
 is("but a verb that promises is refused, in every language (C3-107)", [
   "Garantizamos que vas a duplicar tus ventas.", "Garantimos resultados.", "Nous garantissons des résultats.", "Wir garantieren Ergebnisse.", "Garantiamo risultati.", "Wij garanderen resultaten.",
 ].filter((reply) => heldToFacts(reply, course)), []);
+is("access joined by a conjunction to another object is a promise and is refused (C3-109)", [
+  "Garantizamos el acceso y que vas a duplicar tus ventas.", "Nous garantissons l'accès et des résultats.", "Wir garantieren den Zugang und Ergebnisse.", "Garantimos o acesso e o seu sucesso.",
+  "Garantizamos el acceso al curso y resultados.", "Garantimos o acesso, e o seu sucesso.", "Wij garanderen de toegang en resultaten.", "Garantiamo l'accesso e risultati.", "Um den Zugang und Ergebnisse zu garantieren.", "Um den Zugang zu garantieren und Ergebnisse.",
+].filter((reply) => heldToFacts(reply, course)), []);
+is("while access at the end of the clause or with an access complement passes", [
+  "Garantizamos el acceso de por vida.", "Garantimos o acesso vitalício.", "Nous garantissons l'accès à vie.", "Wir garantieren den Zugang zum Kurs.", "Garantiamo l'accesso al corso, poi scegli tu.",
+  "Garantizamos el acceso", "Wij garanderen de toegang tot de cursussen; meer niet.",
+].filter((reply) => !heldToFacts(reply, course)), []);
 is("unless the store wrote the same word", heldToFacts("Garantizamos resultados.", "Curso de cerámica. Garantizamos resultados o te devolvemos el dinero."), true);
 is("Dutch words for an abbreviation or a shortening", ["Een afkorting staat in de lijst.", "De afkortingen worden uitgelegd.", "Een verkorting van de les.", "De inkorting van het programma."].filter((reply) => !heldToFacts(reply, course)), []);
 is("French remise as handing over", ["La remise en main propre est possible.", "La remise du certificat a lieu en juin.", "La date de remise est sur la page.", "La remise des diplômes est en juin.", "La remise de votre certificat se fait en ligne.", "Un cours de remise en forme."].filter((reply) => !heldToFacts(reply, course)), []);

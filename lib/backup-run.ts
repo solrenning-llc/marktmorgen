@@ -17,8 +17,9 @@
  * read-backs included. Nothing schedules it: vercel.json is untouched (owner
  * prerequisite 6 of docs/backup.md), and no route calls it.
  */
-import { BACKUP_MAX_BYTES, BACKUP_MAX_ROWS, exportSnapshot } from "@/lib/backup-export";
-import { verifyBackupRoundtrip, type BackupObjectStore } from "@/lib/backup-roundtrip";
+import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
+import type { BackupObjectStore } from "@/lib/backup-roundtrip";
+import { MAX_PARTS, copyInParts, runStoredBound } from "@/lib/backup-parts";
 import { backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
 import { redisPipeline } from "@/lib/redis";
 
@@ -32,6 +33,13 @@ export type BackupCostReview = {
   retentionDays: number;
   /** The most the kept copies may weigh in all. */
   maxStoredBytes: number;
+  /**
+   * The most parts one run writes (lib/backup-parts.ts), and the most it copies
+   * as sealed JSON, every part together. Left out: one part of at most
+   * maxBytes, as before the format in parts.
+   */
+  maxParts?: number;
+  maxRunBytes?: number;
   /** YYYY-MM-DD. */
   reviewedAt: string;
   source: string;
@@ -44,8 +52,6 @@ export const BACKUP_COST_REVIEW: BackupCostReview | null = null;
 const BATCH = 100;
 /** Commands a run sends besides the export: the day mark and one outcome. */
 const RUN_COMMANDS = 2;
-/** What a stored object may weigh beyond the export's cap: the sealed header and the compressor's worst growth. */
-const SEAL_ROOM = 65_536;
 const OUTCOME_SECONDS = 8 * 86_400;
 const STALE_MS = 48 * 3_600_000;
 const LAST_OK = "nl:backup:last-ok";
@@ -54,28 +60,36 @@ const LAST_FAIL = "nl:backup:last-fail";
 /** The UTC day of a moment. */
 const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const whole = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
-const objectBound = (review: BackupCostReview) => Math.min(review.maxBytes, BACKUP_MAX_BYTES) + SEAL_ROOM;
+/** One run's caps in parts: the review's, or one part of at most maxBytes when it names none. */
+const runLimits = (review: BackupCostReview) => ({
+  maxParts: review.maxParts ?? 1,
+  maxRunBytes: review.maxRunBytes ?? Math.min(review.maxBytes, BACKUP_MAX_BYTES),
+});
+/** What one run's stored objects weigh at the most: every part sealed, and its manifest. */
+const objectBound = (review: BackupCostReview) => runStoredBound(runLimits(review));
 
 /** True only for a review with every cap a count, a real date, a source, a retention, and a storage ceiling above every copy kept at once. */
 export function validReview(review: BackupCostReview | null | undefined): review is BackupCostReview {
   if (!review) return false;
   const { maxRows, maxCommands, maxBytes, retentionDays, maxStoredBytes, reviewedAt, source } = review;
   if (![maxRows, maxCommands, maxBytes, retentionDays, maxStoredBytes].every(whole)) return false;
+  const { maxParts, maxRunBytes } = runLimits(review);
+  if (!whole(maxParts) || maxParts > MAX_PARTS || !whole(maxRunBytes)) return false;
   if (maxCommands <= RUN_COMMANDS + 1) return false;
   const day = typeof reviewedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(reviewedAt) ? Date.parse(`${reviewedAt}T00:00:00Z`) : NaN;
   if (!Number.isFinite(day) || dayOf(day) !== reviewedAt) return false;
   if (typeof source !== "string" || source.trim().length < 10) return false;
-  // One object a day, kept retentionDays, plus the day being written.
+  // One set a day (its parts and manifest), kept retentionDays, plus the day being written.
   return (retentionDays + 1) * objectBound(review) <= maxStoredBytes;
 }
 
 export type BackupRunResult =
-  | { ok: true; id: string; keys: number; bytes: number }
+  | { ok: true; id: string; keys: number; bytes: number; parts: number }
   | {
       ok: false;
       reason:
         | "off_review" | "off_store" | "off_key" | "already_ran" | "mark_error"
-        | "export_limits" | "export_budget" | "export_too_many" | "export_too_big" | "export_unreadable" | "export_error"
+        | "export_limits" | "export_budget" | "export_too_many" | "export_too_big" | "export_too_many_parts" | "export_unreadable" | "export_error"
         | "verify";
     };
 
@@ -126,29 +140,19 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
 }
 
 async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uint8Array, now: number): Promise<BackupRunResult> {
-  let exported: Awaited<ReturnType<typeof exportSnapshot>>;
+  // The copy in parts (lib/backup-parts.ts): every part verified as written, the set verified by its manifest last.
+  let done: Awaited<ReturnType<typeof copyInParts>>;
   try {
-    exported = await exportSnapshot({
-      maxRows: Math.min(review.maxRows, BACKUP_MAX_ROWS),
-      maxCommands: review.maxCommands - RUN_COMMANDS,
-      batch: BATCH,
-      maxBytes: Math.min(review.maxBytes, BACKUP_MAX_BYTES),
-      now,
-    });
+    done = await copyInParts({ maxRows: review.maxRows, maxCommands: review.maxCommands - RUN_COMMANDS, ...runLimits(review), batch: BATCH, now }, key, store);
   } catch {
     return { ok: false, reason: "export_error" };
   }
-  if (!exported.ok) return { ok: false, reason: `export_${exported.reason}` };
-  try {
-    const done = await verifyBackupRoundtrip(exported.snapshot, key, store, objectBound(review));
-    return { ok: true, id: done.id, keys: done.keys, bytes: done.bytes };
-  } catch {
-    // Sealing, the write or the read-back failed; every earlier copy is left as it was.
-    return { ok: false, reason: "verify" };
-  }
+  if (done.ok) return { ok: true, id: done.id, keys: done.keys, bytes: done.bytes, parts: done.parts };
+  // Sealing, a write or a read-back failed: every earlier set is left as it was.
+  if (done.reason === "verify") return { ok: false, reason: "verify" };
+  return { ok: false, reason: `export_${done.reason}` };
 }
 
-/** True when no copy has been verified in the last 48 hours (none kept counts as none). */
 export async function backupStale(now: number = Date.now()): Promise<boolean> {
   const [last] = await redisPipeline([["GET", LAST_OK]]);
   const at = Number(last);

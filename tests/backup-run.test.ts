@@ -83,6 +83,8 @@ async function main(): Promise<void> {
     ["a storage ceiling the kept copies could pass", { ...review, maxStoredBytes: 30 * 1_000_000 }],
     ["no room for the run's own commands", { ...review, maxCommands: 3 }],
     ["a cap that is not a count", { ...review, maxRows: 1.5 }],
+    ["more parts than a set may have", { ...review, maxParts: 10_001 }],
+    ["parts whose stored weight the ceiling cannot hold", { ...review, maxParts: 40, maxRunBytes: 40_000_000 }],
   ] as [string, BackupCostReview][]) {
     const at = sent;
     is(`${name}: refused, off, nothing sent`, [validReview(bad), await runBackup({ now: T0, review: bad, store, key }), sent - at], [false, { ok: false, reason: "off_review" }, 0]);
@@ -90,8 +92,9 @@ async function main(): Promise<void> {
 
   part("With all three, a copy is made, written once and read back the same");
   const ran = await runBackup({ now: T0, review, store, key });
-  is("done, with the keys copied (its own day mark among them), one object", [ran.ok, ran.ok && ran.keys, objects.size], [true, 3, 1]);
-  is("a second run the same day is refused before anything is written", [await runBackup({ now: T0 + HOUR, review, store: broken, key }), objects.size], [{ ok: false, reason: "already_ran" }, 1]);
+  // In parts (lib/backup-parts.ts): here one part and the manifest that names it.
+  is("done, with the keys copied (its own day mark among them), one part and its manifest", [ran.ok, ran.ok && ran.keys, ran.ok && ran.parts, objects.size], [true, 3, 1, 2]);
+  is("a second run the same day is refused before anything is written", [await runBackup({ now: T0 + HOUR, review, store: broken, key }), objects.size], [{ ok: false, reason: "already_ran" }, 2]);
   is("the good copy's time is kept, and survives that refusal", [await backupStale(T0 + 2 * HOUR), redis.run(["GET", "nl:backup:last-ok"])], [false, String(T0)]);
   is("the outcome expires by itself", Number(redis.run(["TTL", "nl:backup:last-ok"])) > 0, true);
 
@@ -111,7 +114,9 @@ async function main(): Promise<void> {
   clock = T0 + 4 * DAY;
   failNext = "SET";
   const noteLost = await runBackup({ now: clock, review, store, key });
-  is("a refused day mark: the run stops before copying, as a result", [noteLost, objects.size], [{ ok: false, reason: "mark_error" }, 2]);
+  // Three objects so far: the good set's part and manifest, and the part of the day whose read-back differed, left
+  // unreferenced (no manifest names it); the refused runs wrote nothing.
+  is("a refused day mark: the run stops before copying, as a result", [noteLost, objects.size], [{ ok: false, reason: "mark_error" }, 3]);
   clock = T0 + 5 * DAY;
   let calls = 0;
   const realRun = redis.pipeline;

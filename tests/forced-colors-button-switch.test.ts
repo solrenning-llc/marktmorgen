@@ -24,6 +24,7 @@ part("The pixel summary is never drawn off and then on");
   is("no click held back by script either: it opens as a <details> does", /preventDefault/.test(summary), false);
   is("until ready, what it opens is held: its fieldset is disabled", editor.includes("<fieldset disabled={!ready || busy}"), true);
   is("and a save before then does nothing", editor.includes("if (!ready || busy) return;"), true);
+  is("the browser check waits for its fields to be ready, not for a mark the summary no longer has", readFileSync("tests/e2e/pixel-attribution-center.mjs", "utf8").includes(`document.querySelector('section[aria-labelledby="pixels-title"] fieldset')?.disabled===false`) && !readFileSync("tests/e2e/pixel-attribution-center.mjs", "utf8").includes('getAttribute("aria-disabled")==="false"'), true);
 }
 
 part("Forced colors: no button color is animated");

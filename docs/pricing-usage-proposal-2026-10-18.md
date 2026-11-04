@@ -19,7 +19,7 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $31.90 | $196.65 | $69 / $690 |
+| Store | $31.90 | $196.75 | $69 / $690 |
 | Studio | $84.88 | $813.60 | $449 / $4,490 |
 | Scale | $175.30 | $1,869.75 | $999 / $9,990 |
 
@@ -34,8 +34,8 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | Monthly / yearly price | Share of #553's per-use figures included | Net, monthly | Net, yearly | Net a customer, a month | To equal one #553 customer |
 | --- | --- | --- | --- | --- | --- |
 | $29 / $290 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $35 / $350 | 5.3% | 60.51% | 61.45% | $21.18 | 1.97 |
-| $39 / $390 **(recommended)** | 19.0% | 60.46% | 61.22% | $23.58 | 1.77 |
+| $35 / $350 | 5.0% | 60.51% | 61.47% | $21.18 | 1.97 |
+| $39 / $390 **(recommended)** | 18.8% | 60.46% | 61.22% | $23.58 | 1.77 |
 | $49 / $490 | 47.1% | 60.36% | 60.93% | $29.58 | 1.41 |
 | $59 / $590 | 76.5% | 60.32% | 60.70% | $35.59 | 1.17 |
 | $69 / $690 | 100.0% | 60.31% | 60.58% | $41.62 | 1.00 |
@@ -47,7 +47,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $99 / $990 | 1.4% | 60.18% | 60.11% | $59.58 | 4.55 |
 | $129 / $1,290 **(recommended)** | 11.0% | 60.20% | 60.05% | $77.67 | 3.49 |
 | $149 / $1,490 | 17.1% | 60.24% | 60.06% | $89.76 | 3.02 |
-| $199 / $1,990 | 31.4% | 60.27% | 60.04% | $119.95 | 2.26 |
+| $199 / $1,990 | 31.4% | 60.27% | 60.04% | $119.94 | 2.26 |
 | $249 / $2,490 | 45.7% | 60.29% | 60.03% | $150.13 | 1.81 |
 | $299 / $2,990 | 60.0% | 60.33% | 60.04% | $180.41 | 1.50 |
 | $449 / $4,490 | 100.0% | 60.38% | 60.06% | $271.12 | 1.00 |
@@ -66,7 +66,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).
 
-At the competitor's own price instead (Store $35, the lowest that keeps 60% at all, Stan being $29; Studio $99, Stan Creator Pro's; Scale $249, Kajabi Growth's), each plan would include Store 5.3%, Studio 1.4%, Scale 5.4% of #553's per-use figures: nearly everything would be bought in packs, which is HighLevel's own shape (its plans include no email at all).
+At the competitor's own price instead (Store $35, the lowest that keeps 60% at all, Stan being $29; Studio $99, Stan Creator Pro's; Scale $249, Kajabi Growth's), each plan would include Store 5.0%, Studio 1.4%, Scale 5.4% of #553's per-use figures: nearly everything would be bought in packs, which is HighLevel's own shape (its plans include no email at all).
 
 ## The proposed plans
 
@@ -75,7 +75,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Price, monthly / yearly | **$39 / $390** | **$129 / $1,290** | **$299 / $2,990** |
 | Today (#553) | $69 / $690 | $449 / $4,490 | $999 / $9,990 |
 | Before #553 | $29 / $300 | $99 / $948 | $249 / $2,388 |
-| Visits a month: included · #553 · before #553 | **640** · 3,400 · 3,000 | **1,000** · 10,000 · 10,000 | **4,700** · 40,000 · 40,000 |
+| Visits a month: included · #553 · before #553 | **630** · 3,400 · 3,000 | **1,000** · 10,000 · 10,000 | **4,700** · 40,000 · 40,000 |
 | Orders a month: included · #553 · before #553 | **37** · 200 · 200 | **49** · 450 · 450 | **170** · 1,500 · 1,500 |
 | List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **760** · 7,000 · 5,000 | **1,100** · 10,000 · 8,000 |
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **4 + 27** · 40 + 250 · 40 + 250 | **9 + 47** · 80 + 400 · 80 + 400 |

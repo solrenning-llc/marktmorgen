@@ -21,3 +21,10 @@ The inspected path does not establish that those repetitions consume the public-
 Fetch main and check reservations again. Instrument the actual whole page, including forty bookings, purchases/bundles, partial/malformed versions, request-open/request-closed states and the new fourteen-command maximum. Measure commands, transferred bytes and provider calls. Establish a financed budget before that work while preserving the paid buyer's access; do not add `isResting` indiscriminately or simply raise a table value. Only then update cost units and tests of actual cost <= ceiling, regenerate the repository's margin/limits/decomposition/optimization reports, and check every plan monthly and annually under current MR/TX with unknowns still rejected. Price, visible limits, commission and all opening flags stay unchanged.
 
 This document changes no runtime, coefficient, cost ceiling or activation gate. The coordinator was notified before any proposed financial adjustment. It neither approves #1966 financially nor claims a new product feature is available.
+
+
+## Dependency follow-up — 4 November 2026
+
+PR #1966 is now merged as c41763c2ce4ffdb89677dd79922e7f800118bb45. The original head above remains the frozen input to the preparatory review, not an assertion that the PR is still open. A fresh inspection of main47fbbc51 confirms the waiting block is present, but app/[handle]/orders/page.tsx still has no takePublicRequest call: store/token/purchase/call/waiting reads occur without the public window in this entry point. CX-44 assigned that guard to Claude3; its absence has been reported to the coordinator for the follow-up. No missing guard is silently priced as zero or fixed by weakening paid access here.
+
+The whole-page measurement can proceed as an unapproved baseline while the guard is coordinated. Cost-table adoption and regenerated MR reports still require the actual bounded entry and verified units. The report, its structural160-command room substep and the new14-command waiting block are not a certification of the final page or of the unchanged allowance.

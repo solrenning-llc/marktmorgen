@@ -1,5 +1,7 @@
 "use client";
 
+import { optionPriceReview, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
+import { isBundle } from "@/lib/bundle-rules";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
@@ -39,7 +41,7 @@ import {
   isFree,
   type Product,
 } from "@/lib/store-field-rules";
-import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, priceBounds, rangeWords, readMoney } from "@/lib/money";
+import { type Currency, fieldPrefix, formatMoney, moneyField, priceExample, priceBounds, priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { StoreCurrency, useStoreCurrency } from "@/components/store-currency";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import {
@@ -55,7 +57,10 @@ import {
   MAX_OPTION_DETAIL_LENGTH,
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
+  optionDelivers,
 } from "@/lib/product-option";
+import { activePlan } from "@/lib/product-extras";
+import type { Listing } from "@/lib/store";
 import { LINK_PROBLEMS, type LinkProblem, linkHost } from "@/lib/product-link";
 import {
   INTERVALS,
@@ -69,7 +74,8 @@ import {
   intervalName,
   membershipPrice,
 } from "@/lib/product-recurring";
-import { MAX_INTRO_COUNT, introLineEnglish } from "@/lib/intro-price";
+import { MAX_INTRO_COUNT, activeIntro, introLineEnglish } from "@/lib/intro-price";
+import { activeYearly } from "@/lib/yearly-price";
 import { MAX_ABOUT_LENGTH, aboutBlocks } from "@/lib/product-about";
 import { ProductAbout } from "@/components/product-about-view";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
@@ -857,8 +863,11 @@ function OptionsBlock({
   onDetach,
   onLink,
   onUnlink,
+  taxOnTop,
 }: {
   product: Product;
+  /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
+  taxOnTop: boolean;
   fileBusyId: string | null;
   percent: number;
   fileError: { id: string; message: string } | null;
@@ -878,6 +887,8 @@ function OptionsBlock({
   const [sku, setSku] = useState("");
   const [best, setBest] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The option whose new price is being checked before saving (487 [IT4], item 8; lib/price-review.ts).
+  const [optionReview, setOptionReview] = useState<string | null>(null);
   const inFlight = useRef(false);
   // A course or private podcast is its own delivery: every price opens it,
   // and a file or link on one is something extra that price includes.
@@ -971,7 +982,10 @@ function OptionsBlock({
             inputMode={currency === "jpy" ? "numeric" : "decimal"}
             required
             value={price}
-            onChange={(event) => setPrice(event.target.value)}
+            onChange={(event) => {
+              setPrice(event.target.value);
+              setOptionReview(null);
+            }}
             placeholder={currency === "jpy" ? "3900" : "39"}
             className="field mt-1"
           />
@@ -1080,21 +1094,77 @@ function OptionsBlock({
       <ul className="mt-3 space-y-2">
         {product.options.map((option, index) => (
           <li key={option.id} className="rounded-2xl bg-sand p-3">
-            {editingId === option.id ? (
-              form(
-                "Save",
-                () =>
-                  run(
-                    { action: "edit", id: option.id, label, price, details, best, ...(shipped ? { sku } : {}) },
-                    () => setEditingId(null),
-                    "Price saved.",
-                  ),
-                () => {
-                  setEditingId(null);
-                  setError(null);
+            {editingId === option.id ? (() => {
+              // The payment plan and this price's own payment in it, and whether buyers are offered it now and with the new price (lib/product-extras.ts, activePlan).
+              const ownPayment = product.plan?.options?.[option.id];
+              const review = optionPriceReview(
+                { label, priceCents: option.priceCents, details, sku: shipped ? sku : undefined },
+                price,
+                {
+                  hidden: product.hidden,
+                  interval: product.recurring?.interval ?? null,
+                  shown: optionDelivers(option, opens),
+                  taxOnTop,
+                  plan: product.plan && ownPayment ? { payments: product.plan.payments, cents: ownPayment } : null,
+                  planBefore: activePlan(product as Listing) !== null,
+                  planAfter: (cents) => activePlan({ ...product, options: product.options.map((o) => (o.id === option.id ? { ...o, priceCents: cents } : o)) } as Listing) !== null,
                 },
-              )
-            ) : (
+                // Only a price the save can take is reviewed; anything else the save itself explains.
+                (typed) => {
+                  const cents = readMoney(typed, currency);
+                  return cents !== null && priceInRange(cents, currency) ? cents : null;
+                },
+                (cents) => formatMoney(cents, currency),
+              );
+              const save = () =>
+                run(
+                  { action: "edit", id: option.id, label, price: price.trim(), details, best, ...(shipped ? { sku } : {}) },
+                  () => {
+                    setEditingId(null);
+                    setOptionReview(null);
+                  },
+                  "Price saved.",
+                );
+              return (
+                <>
+                  {form(
+                    "Save",
+                    () => {
+                      // A new price buyers meet at once is checked first (487 [IT4], item 8).
+                      if (review && optionReview !== option.id) {
+                        setOptionReview(option.id);
+                        requestAnimationFrame(() => document.getElementById(`option-${option.id}-price-review-title`)?.focus());
+                        return;
+                      }
+                      save();
+                    },
+                    () => {
+                      setEditingId(null);
+                      setOptionReview(null);
+                      setError(null);
+                    },
+                  )}
+                  {optionReview === option.id && review ? (
+                    <div className="mt-3 rounded-[var(--r-md)] bg-white p-4 text-sm text-ink">
+                      <h3 id={`option-${option.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check what buyers pay</h3>
+                      <dl className="mt-2 divide-y divide-line">
+                        {review.rows.map((row) => (
+                          <div key={row.key} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                            <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">{row.label}</dt>
+                            <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1"><span className="block">{`Now: ${row.now}`}</span><span className="block font-semibold">{`Once you save: ${row.then}`}</span></dd>
+                            <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => { setOptionReview(null); requestAnimationFrame(() => document.getElementById(`option-price-${product.id}`)?.focus()); }}>Change<span className="sr-only">{` the price of ${row.label}`}</span></button></dd>
+                          </div>
+                        ))}
+                      </dl>
+                      <p className="mt-2">{review.note}</p>
+                      <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={save}>
+                        Yes, save what buyers pay
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              );
+            })() : (
               <>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="font-bold text-ink">
@@ -1676,6 +1746,8 @@ export function ProductEditor({
   look = null,
   pairChoices = [],
   ownHosts = [],
+  tiers = [],
+  taxOnTop,
 }: {
   /** The products shown: every one, or one page of a long list. */
   products: Product[];
@@ -1727,6 +1799,10 @@ export function ProductEditor({
   pairChoices?: { id: string; title: string }[];
   /** The store's own domain, if it has one: not warned as "another site" in what the creator writes (493 [DE2]). */
   ownHosts?: string[];
+  /** The plans members switch between (lib/tier-switch.ts): none takes an introductory or yearly price. */
+  tiers?: readonly string[];
+  /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
+  taxOnTop: boolean;
 }) {
   const router = useRouter();
   const sid = useStudioStore();
@@ -1742,9 +1818,10 @@ export function ProductEditor({
   useLeaveGuard((adding || editingId !== null) && JSON.stringify(draft) !== JSON.stringify(opened) && !busy);
   // A new price on a product buyers can see is shown, old and new, before it is saved (487 [IT4], pattern 8): the id under review.
   const [priceReview, setPriceReview] = useState<string | null>(null);
-  function changePrice(productId: string) {
+  /** "Change" on a row of the price review: back to the field it names, or to the price when that field is not shown. */
+  function changePrice(productId: string, field: PriceField = "price") {
     setPriceReview(null);
-    requestAnimationFrame(() => document.getElementById(`product-price-${productId}`)?.focus());
+    requestAnimationFrame(() => (document.getElementById(`product-${field}-${productId}`) ?? document.getElementById(`product-price-${productId}`))?.focus());
   }
   const [fileBusyId, setFileBusyId] = useState<string | null>(null);
   const [percent, setPercent] = useState(0);
@@ -2068,9 +2145,40 @@ export function ProductEditor({
             className="rounded-2xl border border-line bg-paper p-4"
           >
             {editingId === product.id ? (() => {
-              // Only a product bought once, at one price, with no lowest price chosen by the buyer: there the field is what buyers pay.
-              const newPrice = readMoney(draft.price, currency);
-              const priceChanged = !product.hidden && !product.options.length && !draft.every && !draft.pwyw && newPrice !== null && newPrice !== product.priceCents;
+              // What this save changes in what buyers pay, if anything (lib/price-review.ts): a price, a membership's, a price they choose.
+              const review = reviewPrice(
+                {
+                  hidden: product.hidden,
+                  options: product.options.length,
+                  priceCents: product.priceCents,
+                  interval: product.recurring?.interval ?? null,
+                  suggestedCents: product.pwyw?.suggestedCents ?? null,
+                  // "Now" is what the checkout offers, never only what is stored (lib/store-checkout.ts).
+                  intro: activeIntro(product, tiers),
+                  yearlyCents: activeYearly(product, tiers)?.cents ?? null,
+                  trialDays: product.recurring?.trialDays ?? 0,
+                  payments: product.recurring?.payments ?? 0,
+                  id: product.id,
+                  tiers,
+                  bounds: priceBounds(currency),
+                  // What the save refuses for this kind of product (lib/store.ts, editProduct; lib/pay-what-you-want.ts, pwywProblem).
+                  refuses: {
+                    free: Boolean(product.call || product.course || product.podcast || product.shipping) || isBundle(product),
+                    membership: Boolean(product.call || product.shipping) || isBundle(product),
+                    choose: Boolean(product.call || product.plan || product.bumps.length || product.shipping) || isBundle(product),
+                  },
+                  taxOnTop,
+                  // The payment plan, offered now and once saved at the new price and schedule (lib/product-extras.ts).
+                  plan: product.plan && product.options.length === 0 ? { payments: product.plan.payments, cents: product.plan.amountCents } : null,
+                  planBefore: activePlan(product as Listing) !== null,
+                  planAfter: (next) => activePlan({ ...product, priceCents: next.priceCents, recurring: next.interval ? { ...(product.recurring ?? { trialDays: 0, payments: 0 }), interval: next.interval } : null, pwyw: null } as Listing) !== null,
+                },
+                // The words the save checks, the description as it will be sent (unread and untouched: not sent).
+                { ...draft, about: aboutUnread && !draft.about ? "" : draft.about },
+                (typed) => readMoney(typed, currency),
+                (cents) => formatMoney(cents, currency),
+              );
+              const priceChanged = review !== null;
               const save = () => {
                 const payload = payloadOf(draft);
                 if (aboutUnread && !draft.about) delete payload.about;
@@ -2091,7 +2199,7 @@ export function ProductEditor({
                 draft={draft}
                 setDraft={(next) => {
                   setDraft(next);
-                  if (next.price !== draft.price) setPriceReview(null);
+                  if (next.price !== draft.price || next.every !== draft.every || next.pwyw !== draft.pwyw || next.suggested !== draft.suggested || next.introPrice !== draft.introPrice || next.introCount !== draft.introCount || next.yearlyPrice !== draft.yearlyPrice || next.trial !== draft.trial || next.payments !== draft.payments) setPriceReview(null);
                 }}
                 busy={busy}
                 error={error}
@@ -2113,21 +2221,23 @@ export function ProductEditor({
                   setError(null);
                 }}
               />
-              {priceReview === product.id && priceChanged && newPrice !== null ? (
+              {priceReview === product.id && review ? (
                 <div className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
-                  <h3 id={`product-${product.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check the new price</h3>
-                  {/* A summary list (GOV.UK "Check answers"): the price buyers see changes as soon as it is saved. */}
+                  <h3 id={`product-${product.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check what buyers pay</h3>
+                  {/* A summary list (GOV.UK "Check answers"): what buyers pay changes as soon as it is saved. */}
                   <dl className="mt-2 divide-y divide-line">
-                    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
-                      <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Price</dt>
-                      <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">{`${formatMoney(product.priceCents, currency)} now, ${formatMoney(newPrice, currency)} once you save.`}</dd>
-                      <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changePrice(product.id)}>Change<span className="sr-only"> price</span></button></dd>
-                    </div>
+                    {review.rows.map((row) => (
+                      <div key={row.key} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                        <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">{row.label}</dt>
+                        <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1"><span className="block">{`Now: ${row.now}`}</span><span className="block font-semibold">{`Once you save: ${row.then}`}</span></dd>
+                        <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changePrice(product.id, row.field)}>Change<span className="sr-only">{` ${row.label.toLowerCase()}`}</span></button></dd>
+                      </div>
+                    ))}
                   </dl>
-                  <p className="mt-2">Your store shows the new price as soon as you save.</p>
+                  <p className="mt-2">{review.note}</p>
                   {/* The confirmation is here, after what it confirms, so the reading and the focus order end on it. */}
                   <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={save}>
-                    Yes, save the new price
+                    Yes, save what buyers pay
                   </button>
                 </div>
               ) : null}
@@ -2356,6 +2466,7 @@ export function ProductEditor({
                 {product.shipping ? (
                   <OptionsBlock
                     product={product}
+                    taxOnTop={taxOnTop}
                     fileBusyId={fileBusyId}
                     percent={percent}
                     fileError={fileError}
@@ -2390,6 +2501,7 @@ export function ProductEditor({
                 {(isFree(product) || product.pwyw) && product.options.length === 0 ? null : (
                 <OptionsBlock
                   product={product}
+                  taxOnTop={taxOnTop}
                   fileBusyId={fileBusyId}
                   percent={percent}
                   fileError={fileError}
@@ -2413,6 +2525,7 @@ export function ProductEditor({
                 {(product.course || product.podcast) && !product.recurring && !isFree(product) && !product.pwyw ? (
                   <OptionsBlock
                     product={product}
+                    taxOnTop={taxOnTop}
                     fileBusyId={fileBusyId}
                     percent={percent}
                     fileError={fileError}

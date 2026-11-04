@@ -28,6 +28,7 @@ import {
   disconnectMeta,
   finishMeta,
   forgetMetaUser,
+  graphVersion,
   linesKey,
   metaView,
   readMetaDue,
@@ -68,7 +69,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname !== "graph.facebook.com") return json({ object: "list", data: [], has_more: false });
-  const path = url.pathname.replace(/^\/v26\.0/, "");
+  is("provider requests use the supported Marketing API version", url.pathname.startsWith("/v25.0/"), true);
+  const path = url.pathname.replace(/^\/v25\.0/, "");
   const method = init?.method ?? "GET";
   asked.push(`${method} ${path}`);
   const token = url.searchParams.get("access_token");
@@ -96,7 +98,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
         { campaign_id: "1", campaign_name: "October Reel!", spend: "10.50", date_start: daysAgo(1), publisher_platform: "instagram" },
         { campaign_id: "1", campaign_name: "October Reel!", spend: "0.00", date_start: daysAgo(2), publisher_platform: "threads" },
       ],
-      paging: { next: `https://graph.facebook.com/v26.0/act_111/insights?after=page2&access_token=x` },
+      paging: { next: `https://graph.facebook.com/v25.0/act_111/insights?after=page2&access_token=x` },
     });
   }
   return json({ error: { code: 803, message: "unknown" } }, 404);
@@ -104,6 +106,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 async function main(): Promise<void> {
   redis.clear();
+
+  part("Marketing API version");
+  is("without a setting, use the supported Marketing API default", graphVersion(), "v25.0");
+  for (const version of ["", " ", "26.0", "v25", "v25.0/path", "https://example.com"]) {
+    process.env.META_GRAPH_VERSION = version;
+    is("an invalid version setting uses the supported default: " + JSON.stringify(version), graphVersion(), "v25.0");
+  }
+  process.env.META_GRAPH_VERSION = " v25.1 ";
+  is("a version explicitly configured for a deployment is still honored", graphVersion(), "v25.1");
+  delete process.env.META_GRAPH_VERSION;
 
   part("Meta's rows as lines");
   is("each platform on the channel the numbers count it under", ["instagram", "threads", "facebook", "messenger", "audience_network", undefined].map(platformChannel), ["instagram", "threads", "facebook", "facebook", "facebook", "facebook"]);
@@ -148,7 +160,7 @@ async function main(): Promise<void> {
   is("before, the studio offers it and nothing is read", [(await metaView(statsId, store.currency))?.connected, (await readSpends(statsId)).length], [false, 0]);
   const redirect = "https://marktmorgen.com/api/integrations/meta/callback";
   const start = new URL(await beginMeta({ statsId, sid: store.sid, sessionCookie: "session-a", email: "Owner@example.com", redirect }));
-  is("Meta's page, asked for ads_read and nothing else", [start.hostname, start.pathname, start.searchParams.get("scope"), start.searchParams.get("client_id"), start.searchParams.get("redirect_uri")], ["www.facebook.com", "/v26.0/dialog/oauth", "ads_read", "123456789012345", redirect]);
+  is("Meta's page, asked for ads_read and nothing else", [start.hostname, start.pathname, start.searchParams.get("scope"), start.searchParams.get("client_id"), start.searchParams.get("redirect_uri")], ["www.facebook.com", "/v25.0/dialog/oauth", "ads_read", "123456789012345", redirect]);
   const state = start.searchParams.get("state") ?? "";
   is("another session cannot take it", await takeMeta(state, { sessionCookie: "session-b", email: "owner@example.com" }), null);
   const other = new URL(await beginMeta({ statsId, sid: store.sid, sessionCookie: "session-a", email: "owner@example.com", redirect })).searchParams.get("state") ?? "";

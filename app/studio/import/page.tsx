@@ -291,6 +291,14 @@ export default async function StudioImportPage({ searchParams }: Params) {
                 {tab.title}
               </h2>
               {facts[kind] ? <p className="mt-1 text-sm text-ink-soft">{facts[kind]}</p> : null}
+              {kind === "contacts" && can(access.role, "send") ? (
+                <p className="mt-1 text-sm text-ink-soft">
+                  {"Already on your list and want to group them? "}
+                  <Link href={studioPath(store, "", "labels")} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                    Label several contacts at once
+                  </Link>
+                </p>
+              ) : null}
               <div className="mt-5">
                 <ImportTool
                   key={kind}

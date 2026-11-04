@@ -160,3 +160,16 @@ test("a renewal copied under another source identity is unknown and leaves the a
   assert.equal(redis.run(["GET", confirmationOriginRowKey(f.id)]), raw);
   assert.equal(tokenKeys().length, 0);
 });
+
+
+import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
+test("personal copy includes the existing renewal request without exposing a capsule or creating a token",async()=>{
+ const f=await queued(),before=f.calls.length;
+ const commands:(string|number)[][]=[];
+ const rows=await orderConfirmationMailOf(f.store.statsId!,f.email,{...f.runtime,lifecycle:"retired",pipeline:async batch=>{commands.push(...batch);return f.runtime.pipeline!(batch);}});
+ assert.equal(rows.length,1);assert.equal(tokenKeys().length,0);assert.equal(f.calls.length,before);
+ assert.ok(commands.every(c=>["TYPE","SCARD","SMEMBERS","GETRANGE","GET"].includes(String(c[0]))));
+ const text=JSON.stringify(rows);assert.ok(text.includes("single-digital-access-renewal"));
+ assert.equal(/capsule|sealed|token|storeRef|fingerprint/i.test(text),false);
+ assert.deepEqual(await orderConfirmationMailOf(f.store.statsId!,"other@example.test",f.runtime),[]);
+});

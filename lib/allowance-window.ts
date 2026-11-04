@@ -151,6 +151,35 @@ export function allowanceWindow(store: WindowFields, now = Date.now()): Allowanc
   return { id: day(start), start, end: addMonthsMs(start, 1), billing: true };
 }
 
+/**
+ * The window a store's allowances will be counted in at `atMs`, as its plan
+ * stands now: allowanceWindow when that already tells it (the window running
+ * then, a trial, the calendar month), and past a renewing period's end the
+ * periods that follow it (a monthly plan's next months, a yearly plan's next
+ * year cut into months on its own day). Null when, as the plan stands, nothing
+ * pays for that moment: the plan set to end before it, or its period unknown.
+ * What a use written down now and made then holds in (lib/broadcasts.ts, a
+ * scheduled email's reading of its buyers). Only a projection: whoever holds in
+ * it checks, when the moment comes, that the window running then is this one.
+ */
+export function windowAt(store: WindowFields, atMs: number): AllowanceWindow | null {
+  if (!Number.isFinite(atMs)) return null;
+  const known = allowanceWindow(store, atMs);
+  if (known) return known;
+  if (standingOf(store, atMs / 1000) !== "paid" || !store.subscriptionId) return null;
+  const period = store.period;
+  if (!isPeriod(period) || !period.renews || atMs < period.end * 1000) return null;
+  const yearly = store.cycle === "year";
+  let start = period.end * 1000;
+  // At most a year and a day ahead is ever asked (lib/broadcasts.ts, MAX_SCHEDULE_DAYS); bounded all the same.
+  for (let i = 0; i < 40; i += 1) {
+    const end = addMonthsMs(start, yearly ? 12 : 1);
+    if (atMs < end) return yearly ? monthOfPeriod({ start: start / 1000, end: end / 1000, renews: true }, "year", atMs) : { id: day(start), start, end, billing: true };
+    start = end;
+  }
+  return null;
+}
+
 /** The window's name, or null: what a counter's key carries. */
 export function windowId(store: WindowFields, now = Date.now()): string | null {
   return allowanceWindow(store, now)?.id ?? null;

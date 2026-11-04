@@ -241,8 +241,8 @@ export async function POST(request: NextRequest) {
 
     if (action === "broadcast") {
       // A narrowed email reads the store's buyers again when their copy ran out: counted first, nothing written when not.
-      // One the scheduled job starts also holds, here, what its readings then cost at the most, so that job never
-      // refuses it (C3-80 (d)): without that room it is refused now, with the same sentence, and nothing is written.
+      // It also holds, in the month it goes out, what the scheduled job's readings then cost at the most: without
+      // room for them in that month it is refused now, with the sentence saying why, and nothing is written.
       const counting = countLedger(store);
       const created = await createBroadcast(store, {
         subject: text(body.subject, 400),
@@ -261,17 +261,17 @@ export async function POST(request: NextRequest) {
         throw error;
       });
       if (created instanceof LedgerNotCounted) return notCounted(counting.said.message);
-      if (!created.ok) return fail(created.reason);
+      if (!created.ok) return created.reason === "studio_used" ? notCounted(created.message) : fail(created.reason);
       const id = created.broadcast.id;
       // A draft that has now been sent or scheduled is done with.
       const fromDraft = text(body.draftId, 40);
       const draftCleanupConfirmed = await finishBroadcastDraft(store, fromDraft, body.draftSavedAt);
       if (!draftCleanupConfirmed) console.error("A confirmed campaign draft cleanup could not be confirmed");
-      if (created.broadcast.sendAt <= Math.floor(Date.now() / 1000) + 60) {
-        // Starts as soon as the studio has its answer; the scheduled job
-        // finishes anything this run does not.
+      if (created.startsNow) {
+        // Due now (exactly as advanceBroadcast takes it): starts as soon as the studio has its answer; the scheduled
+        // job finishes anything this run does not. One set for later, even a minute, is the scheduled job's.
         // With the narrowing read and counted just now: not read or counted again. When the scheduled job takes the
-        // lock first, it reads the copy that reading kept, never refused (lib/broadcasts.ts, advanceBroadcast).
+        // lock first, its reading draws from what the email held for it (lib/broadcasts.ts, advanceBroadcast).
         const keep = created.keep;
         after(() => advanceBroadcast(id, storeForHandle, Date.now() + 50_000, { keep }).then(() => undefined));
       }

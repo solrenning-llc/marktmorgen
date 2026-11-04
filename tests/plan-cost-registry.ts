@@ -399,6 +399,18 @@ export const PAYPAL_LEDGER_BYTES = (ALL_TIME_PAGES * 100 + PAYPAL_REFUNDS_READ) 
 export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**
+ * A narrowed email's reading of the store's buyers made by the scheduled job
+ * (lib/broadcasts.ts, readNarrowing; the "scheduled-reads" line): one
+ * BUYER_LEDGER at the most, at most READS_HELD of them an email, each paid in
+ * studio requests before it is read, exactly as buyerLedger counts them: from
+ * what the email held in the month it goes out when it was accepted
+ * (createBroadcast, lib/store-allowance.ts holdAllowanceAt; all held for one
+ * month never passes that month's studio figure), and beyond that from the
+ * month it is read in; with none left there it waits, never read unpaid. A
+ * plan not paid and running when it is due reads nothing.
+ */
+export const SCHEDULED_READS = { id: "scheduled-reads", each: BUYER_LEDGER, units: "studio" } as const;
+/**
  * The tasks agenda on the buyers page at the most (app/studio/people/page.tsx,
  * TasksAgenda; 639 [GL7](6)): every task of the store read and its rows sent
  * on. Counted as AGENDA_UNITS studio requests besides the page's own, taken

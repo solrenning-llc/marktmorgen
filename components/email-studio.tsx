@@ -109,6 +109,7 @@ const MESSAGES: Record<string, string> = {
   keep_full: `That sequence already holds ${MAX_STEPS} steps. Remove one under Sequences first.`,
   too_many_flows: `A store keeps ${MAX_FLOWS} sequences at most. Remove one under Sequences first.`,
   server_error: "Something went wrong on our side. Try again in a moment.",
+  store_full: "Your store's data room is full, so this email was not saved and nothing was sent. Nothing was set aside for it. Delete something you no longer need, such as old drafts or contacts, then try again.",
 };
 
 type Answer = MailAnswer;
@@ -1267,9 +1268,11 @@ function Compose(props: {
             <SubjectTestReview preview={testPreview} />
             <p id="mail-send-note" className="mt-2">
               Eligibility is checked again when sending starts.
-              {/* A narrowed email scheduled holds its later reading of the buyers now (lib/broadcasts.ts, createBroadcast; C3-80 (d)). */}
-              {later && (minSpent || channel || quietDays || buyerGroup || activeDays)
-                ? " Scheduling it sets aside, now, the studio requests needed to find these buyers when it goes out, and to find them once more if it has to wait. If too few are left, it is not scheduled, and you see how many it needs. Canceling does not give them back."
+              {/* A narrowed email holds its later readings of the buyers in the month it goes out (lib/broadcasts.ts, createBroadcast). */}
+              {minSpent || channel || quietDays || buyerGroup || activeDays
+                ? later
+                  ? " Scheduling it sets aside, from the month it goes out, the studio requests needed to find these buyers then, and to find them once more if it has to wait. If that month has too few left, it is not scheduled, and you see how many it needs. What it does not use, or all of it if you cancel, is given back."
+                  : " Sending it sets aside the studio requests needed to find these buyers once more if it has to wait. What it does not use is given back."
                 : null}
             </p>
           </div>

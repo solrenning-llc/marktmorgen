@@ -6,9 +6,11 @@
  *   - the email composer's count and a narrowed email written down (the
  *     buyers, lib/segments.ts buyerLedger, through createBroadcast's count);
  *     its send started in the same request takes that narrowing as read and
- *     counted, and a scheduled one holds its later readings' worst case when
- *     it is accepted (refused at once, nothing written, without room), so the
- *     scheduled job draws from that hold and never refuses it (C3-80 (d));
+ *     counted; whatever the scheduled job reads for it is paid first, from
+ *     what it held in the month it goes out when it was accepted (refused at
+ *     once, nothing written, without room in that month) or from the month
+ *     it is read in, and it waits for a month with room, never read unpaid;
+ *     a plan not paid and running when it is due cancels it, nothing read;
  *   - telling a product's buyers of an update (every paid sale,
  *     lib/product-updates.ts updateReadUnits);
  *   - asking the store's numbers (read as the studio's home page reads them,
@@ -18,7 +20,9 @@
  * says how many this needs and how many are left.
  */
 import { readFileSync } from "node:fs";
-import { EXTRA_READS, NOTE_ROOM, READS_HELD, advanceBroadcast, cancelBroadcast, createBroadcast, readsSpentNote } from "@/lib/broadcasts";
+import { EXTRA_READS, NOTE_ROOM, PLAN_OFF_NOTE, READS_HELD, READ_FAILED_NOTE, READ_RETRY_SECONDS, advanceBroadcast, cancelBroadcast, createBroadcast, readsSpentNote, studioWaitNote } from "@/lib/broadcasts";
+import { allowanceWindow, opensAgainWords, windowAt, windowId } from "@/lib/allowance-window";
+import { StoreFullError } from "@/lib/store-full";
 import { dataKey } from "@/lib/store-data";
 import { upsertContact } from "@/lib/contacts";
 import { ROOM } from "./data-room";
@@ -36,9 +40,12 @@ import { done, is, part } from "./check";
 
 const OWNER = "ledger-owner@example.com";
 let stripeCalls = 0;
+// Stripe not answering, for a reading that fails there.
+let stripeDown = false;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.hostname === "api.stripe.com") stripeCalls += 1;
+  if (url.hostname === "api.stripe.com" && stripeDown) throw new TypeError("fetch failed");
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
 }) as typeof fetch;
 
@@ -91,151 +98,262 @@ async function main(): Promise<void> {
   is("with room, it counts them and then reads Stripe", [read.ok ? "started" : read.reason, Number((await redisPipeline([["GET", studioKey()!]]))[0]), stripeCalls > 0], ["none", updateReadUnits(product0, 0), true]);
 
   part("A narrowed email's send reads the buyers once, counted (review M1)");
-  await redisPipeline([["SET", studioKey()!, "0"]]);
   const shop = await load();
   await upsertContact(shop.listId as string, "ann@example.com", { agreed: true, explicit: true, source: "import" }, ROOM);
   const ledgerKey = `nl:stats:${shop.statsId}:ledger`;
   const copy = () => redisPipeline([["SET", ledgerKey, JSON.stringify({ c: shop.currency, p: false, r: [["ann@example.com", 9000, Date.now(), "direct", 2]], v: 6 })]]);
-  const used = async () => Number((await redisPipeline([["GET", studioKey()!]]))[0]);
+  // The studio's counter of the month running now (a scheduled email may hold in later months' counters too).
+  const nowKey = () => redis.keys().find((key) => key.startsWith("nl:allow:studio:") && key.endsWith(`:${windowId(shop)}`))!;
+  const keyAt = (ms: number) => nowKey().replace(/:[^:]+$/, `:${windowAt(shop, ms)!.id}`);
+  const used = async (key = nowKey()) => Number((await redisPipeline([["GET", key]]))[0] ?? 0);
+  const setUsed = (n: number) => redisPipeline([["SET", nowKey(), String(n)]]);
+  const figure = allowanceFor(shop, "studio");
   const narrowed = { subject: "Hello", body: "News for our best buyers.", productId: "", notProductId: "", who: "all", narrow: { minSpent: 5000 } };
+  const recordOf = async (id: string) => JSON.parse(String((await redisPipeline([["GET", `nl:mail:bc:${id}`]]))[0]));
+  const setRecord = async (id: string, change: Record<string, unknown>) => redisPipeline([["SET", `nl:mail:bc:${id}`, JSON.stringify({ ...(await recordOf(id)), ...change })]]);
+  const dueNow = (id: string) => setRecord(id, { sendAt: Math.floor(Date.now() / 1000) - 5 });
+  const run = (id: string) => advanceBroadcast(id, storeForHandle, Date.now() + 5_000);
+  const write = async (input: Record<string, unknown>, counted = true) => {
+    const r = await createBroadcast(shop, { ...narrowed, ...input } as Parameters<typeof createBroadcast>[1], counted ? countLedger(shop).count : undefined);
+    if (!r.ok) throw new Error(`not written: ${r.reason}`);
+    return r;
+  };
   await copy();
-  const now = await createBroadcast(shop, { ...narrowed, sendAt: undefined }, countLedger(shop).count);
-  if (!now.ok) throw new Error(`not written: ${now.reason}`);
+  const worst = await ledgerReadingUnits(shop);
+  is("a reading's worst case, as kept now: the copy by size, and Stripe's pages should the copy be gone", worst, ledgerUnits(Buffer.byteLength(String((await redisPipeline([["GET", ledgerKey]]))[0]))) + BUYER_LEDGER_UNITS);
+  await setUsed(0);
+  const now = await write({ sendAt: undefined });
+  is("sent now: due now, it holds EXTRA_READS readings in this month, should another run make its list", [now.startsNow, now.broadcast.hold?.units, await used()], [true, EXTRA_READS * worst, EXTRA_READS * worst]);
   // Its copy gone: a reading now would go to Stripe and count BUYER_LEDGER_UNITS.
   await redisPipeline([["DEL", ledgerKey]]);
   stripeCalls = 0;
-  const before = await used();
   const listed = await advanceBroadcast(now.broadcast.id, storeForHandle, Date.now() - 1, { keep: now.keep });
-  is("sent now, it lists from the narrowing just read and counted: Stripe not read, nothing counted again", [listed?.listed, listed?.total, stripeCalls, (await used()) - before], [true, 1, 0, 0]);
+  is("it lists from the narrowing just read and counted: Stripe not read, nothing counted again, the hold given back", [listed?.listed, listed?.total, stripeCalls, await used(), (await recordOf(now.broadcast.id)).hold?.units], [true, 1, 0, 0, 0]);
 
-  part("A narrowed email scheduled holds its later reading when it is accepted, and the scheduled job never refuses it (C3-80 (d))");
-  const later = { ...narrowed, sendAt: Date.now() + 3_600_000 };
-  const recordOf = async (id: string) => JSON.parse(String((await redisPipeline([["GET", `nl:mail:bc:${id}`]]))[0]));
-  const dueNow = async (id: string) => redisPipeline([["SET", `nl:mail:bc:${id}`, JSON.stringify({ ...(await recordOf(id)), sendAt: Math.floor(Date.now() / 1000) - 5 })]]);
+  part("ALTO: every way the scheduled job makes a narrowed email's list is paid before it reads: one set for the next minute, one due now that it takes first");
   await copy();
-  const worst = await ledgerReadingUnits(shop);
-  const hold = READS_HELD * worst;
-  is("its reading's worst case, as kept now: the copy by size, and Stripe's pages should the copy be gone", worst, ledgerUnits(Buffer.byteLength(String((await redisPipeline([["GET", ledgerKey]]))[0]))) + BUYER_LEDGER_UNITS);
-  await redisPipeline([["SET", studioKey()!, String(allowanceFor(shop, "studio") - 3)]]);
-  const beforeRefused = written();
-  const tooFew = countLedger(shop);
+  await setUsed(0);
+  const soon = await write({ sendAt: Date.now() + 30_000 });
+  is("set for the next minute, it is the scheduled job's to start: scheduled, holding READS_HELD readings in this month", [soon.startsNow, soon.broadcast.status, soon.broadcast.hold?.units, soon.broadcast.hold?.window, await used()], [false, "scheduled", READS_HELD * worst, windowId(shop), READS_HELD * worst]);
+  const early = await advanceBroadcast(soon.broadcast.id, storeForHandle, Date.now() + 5_000, { keep: soon.keep });
+  is("a run before it is due does nothing with it", [early?.status, early?.listed], ["scheduled", false]);
+  await dueNow(soon.broadcast.id);
+  await redisPipeline([["DEL", ledgerKey]]);
+  await setUsed(figure);
   stripeCalls = 0;
-  const notHeld = await createBroadcast(shop, later, tooFew.count).then(
-    (r) => (r.ok ? "written" : r.reason),
-    (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)),
-  );
-  is("without room for it, scheduling is refused at once: nothing written, nothing taken", [notHeld, written(), await used()], ["not counted", beforeRefused, allowanceFor(shop, "studio") - 3]);
-  is("with the sentence of how many it needs and how many are left", tooFew.said.message.startsWith(`This needs ${hold} of your studio requests, and only 3 are left.`), true);
-  await redisPipeline([["SET", studioKey()!, "0"]]);
-  const held = await createBroadcast(shop, later, countLedger(shop).count);
-  if (!held.ok) throw new Error(`not written: ${held.reason}`);
-  is("with room, it holds exactly that worst case for its first reading and its one reading again (READS_HELD), on the record too", [await used(), held.broadcast.reserve, (await recordOf(held.broadcast.id)).reserve], [hold, hold, hold]);
-  const startsNow = await createBroadcast(shop, { ...narrowed, sendAt: undefined }, countLedger(shop).count);
-  if (!startsNow.ok) throw new Error(`not written: ${startsNow.reason}`);
-  is("one that starts in the same request holds nothing: it lists from the narrowing just read", [startsNow.broadcast.reserve, await used()], [undefined, hold]);
-  await dueNow(held.broadcast.id);
-  // Its copy gone and no request left: the reading goes to Stripe, drawing what was held.
-  await redisPipeline([["DEL", ledgerKey], ["SET", studioKey()!, String(allowanceFor(shop, "studio"))]]);
+  const went = await run(soon.broadcast.id);
+  is("due, its copy gone and this month's requests used up by the rest, the scheduled job reads drawing from its hold, and lists it", [went?.listed, stripeCalls > 0, went?.reads], [true, true, 1]);
+  is("what the reading drew stays taken; the rest of the hold is given back once its list is made", [await used(), (await recordOf(soon.broadcast.id)).hold], [figure - (READS_HELD * worst - BUYER_LEDGER_UNITS), { window: windowId(shop), units: 0 }]);
+  await copy();
+  await setUsed(0);
+  const first = await write({ sendAt: undefined });
+  await redisPipeline([["DEL", ledgerKey]]);
+  await setUsed(figure);
   stripeCalls = 0;
-  const went = await advanceBroadcast(held.broadcast.id, storeForHandle, Date.now() + 5_000);
-  is("due, its copy gone and no studio request left, the scheduled job still reads and lists it: never waiting", [went?.status !== "waiting", went?.listed, stripeCalls > 0], [true, true, true]);
-  is("drawing what was held, never counting again", [await used(), went?.reserve, (await recordOf(held.broadcast.id)).reserve], [allowanceFor(shop, "studio"), hold - BUYER_LEDGER_UNITS, hold - BUYER_LEDGER_UNITS]);
+  // The scheduled job took the lock before the request's own run: no narrowing handed over.
+  const taken = await run(first.broadcast.id);
+  is("due now and taken first by the scheduled job, it reads drawing from the EXTRA_READS it held: Stripe read, nothing taken over the month", [taken?.listed, stripeCalls > 0, await used(), (await recordOf(first.broadcast.id)).hold?.units], [true, true, figure, 0]);
 
+  part("Decision (1): what a reading needs beyond the hold is taken from the month it is read in; with none left there, it waits for the next month, saying when, never read unpaid");
   await copy();
-  await redisPipeline([["SET", studioKey()!, "0"]]);
-  const less = await createBroadcast(shop, later, countLedger(shop).count);
-  if (!less.ok) throw new Error(`not written: ${less.reason}`);
-  await dueNow(less.broadcast.id);
-  const usedBefore = await used();
+  await setUsed(0);
+  const grew = await write({ sendAt: Date.now() + 3_600_000 });
+  await dueNow(grew.broadcast.id);
+  // Held 3 only (the kept buyers grew since): the rest of the reading comes from this month.
+  await setRecord(grew.broadcast.id, { hold: { window: windowId(shop), units: 3 } });
+  await redisPipeline([["DEL", ledgerKey]]);
+  await setUsed(0);
   stripeCalls = 0;
-  const fromCopy = await advanceBroadcast(less.broadcast.id, storeForHandle, Date.now() + 5_000);
-  is("reading less than held (its copy still kept): Stripe not read, nothing counted, the rest stays on the record, not given back", [fromCopy?.listed, stripeCalls, (await used()) - usedBefore, (await recordOf(less.broadcast.id)).reserve], [true, 0, 0, hold - ledgerUnits(Buffer.byteLength(String((await redisPipeline([["GET", ledgerKey]]))[0])))]);
-
-  // An email written down before anything was held (or with nothing to count it): its reading needs more than it holds.
+  const grown = await run(grew.broadcast.id);
+  is("the excess taken from this month, the hold drawn to nothing, then read and listed", [grown?.listed, stripeCalls > 0, await used(), (await recordOf(grew.broadcast.id)).hold?.units], [true, true, BUYER_LEDGER_UNITS - 3, 0]);
   await copy();
-  const older = await createBroadcast(shop, later);
-  if (!older.ok) throw new Error(`not written: ${older.reason}`);
+  const older = await write({ sendAt: Date.now() + 3_600_000 }, false);
+  is("an email written down with nothing to count it holds nothing", older.broadcast.hold, undefined);
   await dueNow(older.broadcast.id);
-  await redisPipeline([["DEL", ledgerKey], ["SET", studioKey()!, String(allowanceFor(shop, "studio"))]]);
+  await redisPipeline([["DEL", ledgerKey]]);
+  await setUsed(figure);
   stripeCalls = 0;
-  const unheld = await advanceBroadcast(older.broadcast.id, storeForHandle, Date.now() + 5_000);
-  is("needing more than it holds with no request left, it is still read and listed, never waiting, and nothing more is counted", [older.broadcast.reserve, unheld?.status !== "waiting", unheld?.listed, stripeCalls > 0, await used()], [undefined, true, true, true, allowanceFor(shop, "studio")]);
+  const waits = await run(older.broadcast.id);
+  const month = allowanceWindow(shop)!;
+  is("with no studio request left this month it is not read: it waits, saying why and when they open again, until then", [waits?.status, waits?.note, waits?.retryAt, stripeCalls, await used(), waits?.listed], ["waiting", studioWaitNote(opensAgainWords(month)), Math.ceil(month.end / 1000), 0, figure, false]);
+  is("a note that fits the room it was given", (waits?.note.length ?? 999) <= NOTE_ROOM, true);
+  await setUsed(0);
+  const before = await run(older.broadcast.id);
+  is("before that day nothing is tried, even with room again", [before?.status, before?.listed, stripeCalls, await used()], ["waiting", false, 0, 0]);
+  await setRecord(older.broadcast.id, { retryAt: Math.floor(Date.now() / 1000) - 1 });
+  const opened = await run(older.broadcast.id);
+  is("that day, it is read, paid from that month, and goes on", [opened?.listed, stripeCalls > 0, await used(), opened?.retryAt], [true, true, BUYER_LEDGER_UNITS, undefined]);
+  await copy();
+  await setUsed(0);
+  const moved = await write({ sendAt: Date.now() + 3_600_000 });
+  await dueNow(moved.broadcast.id);
+  await setRecord(moved.broadcast.id, { hold: { window: "2026-01-05", units: 40 } });
+  await redisPipeline([["DEL", ledgerKey]]);
+  await setUsed(0);
+  const elsewhere = await run(moved.broadcast.id);
+  is("held for another month than the one it goes out in: that hold is let go, and the month it is read in pays for the reading", [elsewhere?.listed, await used(), (await recordOf(moved.broadcast.id)).hold, redis.keys().some((key) => key.endsWith(":2026-01-05"))], [true, BUYER_LEDGER_UNITS, { window: windowId(shop), units: 0 }, false]);
 
-  part("A list that cannot be made for another reason is read again at most EXTRA_READS times, held when it was accepted, then the email stops, failed, saying why");
+  part("Decision (2): a scheduled email holds in the month it goes out; scheduling past that month's figure, or past the plan's end, is refused at once");
+  await copy();
+  await setUsed(0);
+  const ahead = Date.now() + 60 * 86_400_000;
+  const held = await write({ sendAt: ahead });
+  is("two months ahead: held in that month's own figure, nothing in this one's but the count just read", [held.broadcast.hold, await used(keyAt(ahead)), await used()], [{ window: windowAt(shop, ahead)!.id, units: READS_HELD * worst }, READS_HELD * worst, 0]);
+  await redisPipeline([["SET", keyAt(ahead), String(figure - 5)]]);
+  const beforeRefused = written();
+  const over = await createBroadcast(shop, { ...narrowed, sendAt: ahead }, countLedger(shop).count);
+  is("all held for a month never passes that month's figure: refused, with how many it needs and how many that month has left, nothing written or held", [over.ok ? "written" : over.reason, !over.ok && "message" in over ? over.message : "", written(), await used(keyAt(ahead))], ["studio_used", `This needs ${READS_HELD * worst} of your studio requests in the month it is set for (from ${opensAgainWords({ ...windowAt(shop, ahead)!, end: windowAt(shop, ahead)!.start })}, UTC), and only 5 are left for that month after what is already set aside in it. Choose another day.`, beforeRefused, figure - 5]);
+  is("the composer is told that sentence", broadcastAnswer(false, { ok: false, error: "studio_used", message: "x" }, {}), { ok: false, error: "studio_used", message: "x" });
+  const ending = paidPeriod(Date.now(), { behind: 10, ahead: 20 });
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", period: { ...ending, renews: false } });
+  const endingShop = await load();
+  const pastEnd = await createBroadcast(endingShop, { ...narrowed, sendAt: Date.now() + 40 * 86_400_000 }, countLedger(endingShop).count);
+  is("set to end in 20 days, an email for day 40 is refused, saying the plan's end", [pastEnd.ok ? "written" : pastEnd.reason, !pastEnd.ok && "message" in pastEnd && pastEnd.message.startsWith("Your plan ends on "), written()], ["studio_used", true, beforeRefused]);
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", period: paidPeriod() });
+
+  const threeMonths = Date.now() + 90 * 86_400_000;
+  await setUsed(0);
+  const far = await write({ sendAt: threeMonths });
+  const farKey = keyAt(threeMonths);
+  is("three months ahead: held in that month only", [await used(farKey), await used()], [READS_HELD * worst, 0]);
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: false, tier: "pro", period: null });
+  await dueNow(far.broadcast.id);
+  await redisPipeline([["DEL", ledgerKey]]);
+  stripeCalls = 0;
+  const off = await run(far.broadcast.id);
+  is("the plan ended before it was due: canceled, saying so; nothing read, sent or taken; its hold given back; out of the queue", [off?.status, off?.note, off?.sent, off?.listed, stripeCalls, await used(), await used(farKey), (await redisPipeline([["SISMEMBER", "nl:mail:queue", far.broadcast.id]]))[0]], ["cancelled", PLAN_OFF_NOTE, 0, false, 0, 0, 0, 0]);
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", period: paidPeriod() });
+
+  part("The month a moment ahead falls in, as the plan stands now (windowAt)");
+  const base = { subscriptionActive: true, subscriptionId: "sub_x", trialEnds: 0, planEndedAt: "" };
+  const start = Date.UTC(2026, 0, 31) / 1000;
+  const monthly = { ...base, cycle: "month" as const, period: { start, end: Date.UTC(2026, 1, 28) / 1000, renews: true } };
+  is("a monthly plan: the period running, then the months that follow its end", [windowAt(monthly, Date.UTC(2026, 1, 10))?.id, windowAt(monthly, Date.UTC(2026, 2, 5))?.id, windowAt(monthly, Date.UTC(2026, 3, 1))?.id], ["2026-01-31", "2026-02-28", "2026-03-28"]);
+  const yearly = { ...base, cycle: "year" as const, period: { start: Date.UTC(2026, 0, 15) / 1000, end: Date.UTC(2027, 0, 15) / 1000, renews: true } };
+  is("a yearly plan: its months on its own day, into the next year", [windowAt(yearly, Date.UTC(2026, 5, 20))?.id, windowAt(yearly, Date.UTC(2027, 1, 20))?.id], ["2026-06-15", "2027-02-15"]);
+  is("a plan set to end has no month after its end; an ended one counts the calendar month, where holdAllowanceAt holds nothing; an unknown moment has none", [windowAt({ ...monthly, period: { ...monthly.period, renews: false } }, Date.UTC(2026, 2, 5)), windowAt({ ...monthly, subscriptionActive: false }, Date.UTC(2026, 2, 5))?.billing, windowAt(monthly, Number.NaN)], [null, false, null]);
+
+  part("MÉDIO 3: a reading that fails at Stripe spends nothing and never fails the email: it waits, saying so, and is tried again later");
+  await copy();
+  await setUsed(0);
+  const flaky = await write({ sendAt: Date.now() + 3_600_000 });
+  await dueNow(flaky.broadcast.id);
+  await redisPipeline([["DEL", ledgerKey]]);
+  stripeDown = true;
+  const usedFlaky = await used();
+  const missed = await run(flaky.broadcast.id);
+  const missedAt = Math.floor(Date.now() / 1000);
+  is("waiting with the note, its hold whole, no reading counted, this month's requests untouched", [missed?.status, missed?.note, (await recordOf(flaky.broadcast.id)).hold?.units, missed?.reads, missed?.misses, await used()], ["waiting", READ_FAILED_NOTE, READS_HELD * worst, undefined, 1, usedFlaky]);
+  is("tried again after an hour", Math.abs((missed?.retryAt ?? 0) - (missedAt + READ_RETRY_SECONDS)) <= 2, true);
+  for (let i = 0; i < 3; i += 1) {
+    await setRecord(flaky.broadcast.id, { retryAt: 0 });
+    await run(flaky.broadcast.id);
+  }
+  const still = await recordOf(flaky.broadcast.id);
+  is("failing again and again: still waiting, never failed, each wait longer, nothing spent", [still.status, still.misses, still.retryAt - Math.floor(Date.now() / 1000) >= 8 * READ_RETRY_SECONDS - 2, still.hold?.units, await used()], ["waiting", 4, true, READS_HELD * worst, usedFlaky]);
+  stripeDown = false;
+  await setRecord(flaky.broadcast.id, { retryAt: 0 });
+  const back = await run(flaky.broadcast.id);
+  is("Stripe answering again, it is read and listed, with no wait left on it", [back?.listed, back?.reads, back?.misses, back?.retryAt], [true, 1, undefined, undefined]);
+
+  part("MÉDIO 4 and the record's room: a full data room refuses the email and gives back what it held");
+  await copy();
+  await setUsed(0);
+  const roomKey = dataKey(shop)!;
+  const [roomUsed] = await redisPipeline([["HGET", roomKey, "#"]]);
+  await redisPipeline([["HSET", roomKey, "#", 10 ** 12]]);
+  const beforeFull = written();
+  const full = await createBroadcast(shop, { ...narrowed, sendAt: Date.now() + 3_600_000 }, countLedger(shop).count).then((r) => (r.ok ? "written" : r.reason), (error: unknown) => (error instanceof StoreFullError ? "store_full" : String(error)));
+  await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
+  is("store_full, nothing written, and nothing held left taken", [full, written(), await used()], ["store_full", beforeFull, 0]);
+  is("the studio says so, as a refusal, not as a write it cannot confirm", [broadcastAnswer(false, { ok: false, error: "store_full" }, {}), flat("components/email-studio.tsx").includes("so this email was not saved and nothing was sent. Nothing was set aside for it.")], [{ ok: false, error: "store_full" }, true]);
+  is("its room is sized at the record's widest, its readings, waits and hold too", ["reads: widest", "misses: widest", "retryAt: widest", 'hold: { window: "0000-00-00", units: widest }'].every((part) => flat("lib/broadcasts.ts").includes(part)), true);
+
+  part("LEVE 8: a draw that cannot be written down takes nothing from the hold");
+  await copy();
+  await setUsed(0);
+  const unsaved = await write({ sendAt: Date.now() + 3_600_000 });
+  await dueNow(unsaved.broadcast.id);
+  await redisPipeline([["DEL", ledgerKey]]);
   const realPipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const command of commands) {
+      if (command[0] === "SET" && command[1] === `nl:mail:bc:${unsaved.broadcast.id}` && JSON.parse(String(command[2])).hold?.units < READS_HELD * worst) throw new Error("write lost");
+    }
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  stripeCalls = 0;
+  const kept = await run(unsaved.broadcast.id);
+  redis.pipeline = realPipeline;
+  is("not read, waiting, its hold whole on the record", [kept?.status, stripeCalls, (await recordOf(unsaved.broadcast.id)).hold?.units, await used()], ["waiting", 0, READS_HELD * worst, READS_HELD * worst]);
+
+  part("A list that cannot be made for another reason is read again at most EXTRA_READS times, each paid, then the email stops, failed, saying why");
   let ledgerReads = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     for (const command of commands) if (command[0] === "STRLEN" && command[1] === ledgerKey) ledgerReads += 1;
     return realPipeline(commands);
   }) as typeof redis.pipeline;
-  const roomKey = dataKey(shop)!;
-  const [roomUsed] = await redisPipeline([["HGET", roomKey, "#"]]);
   const rounds = async (id: string, n: number) => {
     const seen: string[] = [];
-    for (let i = 0; i < n; i += 1) seen.push((await advanceBroadcast(id, storeForHandle, Date.now() + 5_000))?.status ?? "none");
+    for (let i = 0; i < n; i += 1) seen.push((await run(id))?.status ?? "none");
     return seen;
   };
   const dataFull = "Your store's data room is full, so the list of who it goes to could not be made. Nothing was sent.";
-  for (const [kind, holds] of [["holding its readings", true], ["written down before anything was held", false]] as const) {
+  for (const [kind, holds] of [["holding its readings", true], ["written down with nothing held", false]] as const) {
     await copy();
-    await redisPipeline([["SET", studioKey()!, "0"]]);
-    const full = await createBroadcast(shop, later, holds ? countLedger(shop).count : undefined);
-    if (!full.ok) throw new Error(`not written: ${full.reason}`);
-    await dueNow(full.broadcast.id);
+    await setUsed(0);
+    const fullList = await write({ sendAt: Date.now() + 3_600_000 }, holds);
+    await dueNow(fullList.broadcast.id);
     await redisPipeline([["HSET", roomKey, "#", 10 ** 12]]);
     ledgerReads = 0;
-    const before = await used();
-    const statuses = await rounds(full.broadcast.id, 3);
-    const end = await recordOf(full.broadcast.id);
-    const allowed = holds ? READS_HELD : EXTRA_READS;
-    is(`an email ${kind}, its data room full for 3 rounds: read ${allowed} times at the most, waiting with the data room's note until then, then failed`, [ledgerReads, end.reads, statuses.slice(0, allowed), statuses.slice(allowed)], [allowed, allowed, Array(allowed).fill("waiting"), Array(3 - allowed).fill("failed")]);
-    is("every reading drawn from what was held, nothing counted in the studio's requests", [(await used()) - before, holds ? end.reserve >= 0 : end.reserve === undefined], [0, true]);
-    is("then it stops, failed, with why it waited, out of the queue: never dropped without a word", [end.status, end.note, end.note.length <= NOTE_ROOM, (await redisPipeline([["SISMEMBER", "nl:mail:queue", full.broadcast.id]]))[0]], ["failed", `${dataFull} It was tried as many times as it can be, so it stopped. To send it, write it again.`, true, 0]);
+    const usedBefore = await used();
+    const statuses = await rounds(fullList.broadcast.id, 3);
+    const end = await recordOf(fullList.broadcast.id);
+    is(`an email ${kind}, its data room full for 3 rounds: read ${READS_HELD} times at the most, waiting with the data room's note until then, then failed`, [ledgerReads, end.reads, statuses], [READS_HELD, READS_HELD, [...Array(READS_HELD).fill("waiting"), ...Array(3 - READS_HELD).fill("failed")]]);
+    is("what it held and did not draw given back when it stops", [(await used()) - usedBefore, holds ? end.hold?.units : end.hold], [holds ? -(READS_HELD * worst) : 0, holds ? 0 : undefined]);
+    is("then it stops, failed, with why it waited, out of the queue: never dropped without a word", [end.status, end.note, end.note.length <= NOTE_ROOM, (await redisPipeline([["SISMEMBER", "nl:mail:queue", fullList.broadcast.id]]))[0]], ["failed", `${dataFull} It was tried as many times as it can be, so it stopped. To send it, write it again.`, true, 0]);
     await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
   }
   await copy();
-  await redisPipeline([["SET", studioKey()!, "0"]]);
-  const freed = await createBroadcast(shop, later, countLedger(shop).count);
-  if (!freed.ok) throw new Error(`not written: ${freed.reason}`);
+  const freed = await write({ sendAt: Date.now() + 3_600_000 });
   await dueNow(freed.broadcast.id);
   await redisPipeline([["HSET", roomKey, "#", 10 ** 12]]);
   ledgerReads = 0;
   const whileFull = await rounds(freed.broadcast.id, 1);
   await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
-  const once = await advanceBroadcast(freed.broadcast.id, storeForHandle, Date.now() + 5_000);
-  is("made room within its readings, its list is made at the next round and it goes on (here to the sender's own wait)", [whileFull, once?.listed, once?.total, once?.status !== "failed" && !once?.note.startsWith(dataFull), ledgerReads], [["waiting"], true, 1, true, READS_HELD]);
+  const once = await run(freed.broadcast.id);
+  is("made room within its readings, its list is made at the next round and it goes on", [whileFull, once?.listed, once?.total, once?.status !== "failed" && !once?.note.startsWith(dataFull), ledgerReads], [["waiting"], true, 1, true, READS_HELD]);
   redis.pipeline = realPipeline;
   is("the note without a retry sentence of its own keeps its words; an empty one says the list could not be made", [readsSpentNote("The recipient list could not be prepared. Nothing was sent. It will be checked again automatically."), readsSpentNote("")], ["The recipient list could not be prepared. Nothing was sent. It was tried as many times as it can be, so it stopped. To send it, write it again.", "The list of who it goes to could not be made. Nothing was sent. It was tried as many times as it can be, so it stopped. To send it, write it again."]);
 
-  part("A scheduled or waiting email with no list made, nothing sent, can be canceled; what it holds is not given back");
+  part("A scheduled or waiting email with no list made, nothing sent, can be canceled; what it held and did not draw is given back");
   await copy();
-  await redisPipeline([["SET", studioKey()!, "0"]]);
-  const callOff = await createBroadcast(shop, later, countLedger(shop).count);
-  if (!callOff.ok) throw new Error(`not written: ${callOff.reason}`);
-  const heldOff = await used();
-  is("canceled while scheduled: canceled, out of the queue, its hold kept on the record, nothing given back", [await cancelBroadcast(shop, callOff.broadcast.id), (await recordOf(callOff.broadcast.id)).status, (await recordOf(callOff.broadcast.id)).reserve, (await redisPipeline([["SISMEMBER", "nl:mail:queue", callOff.broadcast.id]]))[0], await used()], [true, "cancelled", hold, 0, heldOff]);
-  const waitOff = await createBroadcast(shop, later, countLedger(shop).count);
-  if (!waitOff.ok) throw new Error(`not written: ${waitOff.reason}`);
+  await setUsed(0);
+  const callOff = await write({ sendAt: Date.now() + 3_600_000 });
+  is("canceled while scheduled: canceled, out of the queue, its hold given back and marked so", [await cancelBroadcast(shop, callOff.broadcast.id), (await recordOf(callOff.broadcast.id)).status, (await recordOf(callOff.broadcast.id)).hold?.units, (await redisPipeline([["SISMEMBER", "nl:mail:queue", callOff.broadcast.id]]))[0], await used()], [true, "cancelled", 0, 0, 0]);
+  const waitOff = await write({ sendAt: Date.now() + 3_600_000 });
   const offKey = `nl:mail:bc:${waitOff.broadcast.id}`;
   const offRecord = await recordOf(waitOff.broadcast.id);
-  // Waiting before its list was made, for another reason (here the data room full).
-  await redisPipeline([["SET", offKey, JSON.stringify({ ...offRecord, status: "waiting", note: "Your store's data room is full, so the list of who it goes to could not be made. Nothing was sent. Make room, and it is tried again automatically." })]]);
+  // Waiting before its list was made, for another reason (here the data room full), with a list half written by a run cut short.
+  await redisPipeline([["SET", offKey, JSON.stringify({ ...offRecord, status: "waiting", note: "Your store's data room is full, so the list of who it goes to could not be made. Nothing was sent. Make room, and it is tried again automatically." })], ["RPUSH", `${offKey}:to`, "ann@example.com"]]);
   // While a run holds it (making its list), it cannot be canceled: no race with that run.
   await redisPipeline([["SET", `${offKey}:lock`, "1"]]);
   is("not while a run holds it", await cancelBroadcast(shop, waitOff.broadcast.id), false);
   await redisPipeline([["DEL", `${offKey}:lock`]]);
-  is("then it cancels, and leaves the queue", [await cancelBroadcast(shop, waitOff.broadcast.id), (await recordOf(waitOff.broadcast.id)).status, (await redisPipeline([["SISMEMBER", "nl:mail:queue", waitOff.broadcast.id]]))[0]], [true, "cancelled", 0]);
+  is("then it cancels, leaves the queue, and its half-written list, kept with no expiry, goes with it (LEVE 6)", [await cancelBroadcast(shop, waitOff.broadcast.id), (await recordOf(waitOff.broadcast.id)).status, (await redisPipeline([["SISMEMBER", "nl:mail:queue", waitOff.broadcast.id]]))[0], (await redisPipeline([["EXISTS", `${offKey}:to`]]))[0]], [true, "cancelled", 0, 0]);
   stripeCalls = 0;
-  const afterOff = await advanceBroadcast(waitOff.broadcast.id, storeForHandle, Date.now() + 5_000);
+  const afterOff = await run(waitOff.broadcast.id);
   is("a run after that reads and sends nothing", [afterOff?.status, afterOff?.listed, afterOff?.sent, stripeCalls], ["cancelled", false, 0, 0]);
   for (const changed of [{ listed: true }, { sent: 1, total: 1 }]) {
     await redisPipeline([["SET", offKey, JSON.stringify({ ...offRecord, status: "waiting", ...changed })]]);
     is(`a waiting email ${changed.listed ? "whose list was made" : "with some sent"} still cannot be canceled`, [await cancelBroadcast(shop, waitOff.broadcast.id), (await recordOf(waitOff.broadcast.id)).status], [false, "waiting"]);
   }
-  await redisPipeline([["SET", offKey, JSON.stringify({ ...offRecord, reserve: -1 })]]);
-  is("a record whose hold is not a whole number of requests is refused as malformed, never run", await advanceBroadcast(waitOff.broadcast.id, storeForHandle, Date.now() + 5_000).then(() => "ran", () => "refused"), "refused");
+  for (const bad of [{ hold: { window: windowId(shop), units: -1 } }, { hold: { window: "soon", units: 1 } }, { reads: 1.5 }, { retryAt: -1 }]) {
+    await redisPipeline([["SET", offKey, JSON.stringify({ ...offRecord, ...bad })]]);
+    is(`a record with ${JSON.stringify(bad)} is refused as malformed, never run`, await run(waitOff.broadcast.id).then(() => "ran", () => "refused"), "refused");
+  }
   await redisPipeline([["DEL", offKey]]);
-  is("no code path writes the old wait for the studio's requests, and the scheduled job counts nothing in them", [flat("lib/broadcasts.ts").includes("notCountedNote"), flat("lib/broadcasts.ts").includes("countUnits("), flat("lib/broadcasts.ts").includes("countLedger(")], [false, false, false]);
+  is("no code path reads the buyers over its hold without taking from the month", [flat("lib/broadcasts.ts").includes("over += units"), flat("lib/broadcasts.ts").includes("needed more studio requests than it held")], [false, false]);
 
   part("The routes and the studio");
   const history = flat("components/email-studio.tsx");
@@ -243,7 +361,8 @@ async function main(): Promise<void> {
   const mail = flat("app/api/store/mail/route.ts");
   is("the composer's count counts its reading of the buyers, and says the refusal's sentence", [mail.includes("const ledger = await buyerLedger(store, counting.count)"), mail.includes("if (ledger instanceof LedgerNotCounted) return notCounted(counting.said.message);"), mail.includes('Response.json({ ok: false, error: "studio_used", message: message || NOT_COUNTED }, { status: 429 })')], [true, true, true]);
   is("a narrowed email written down counts it too", [mail.includes("}, counting.count).catch((error) => {"), mail.includes("if (created instanceof LedgerNotCounted) return notCounted(counting.said.message);")], [true, true]);
-  is("the mail route reads the buyers only counted: never without a count, and its send started now takes the narrowing just counted", [mail.includes("buyerLedger(store)"), mail.includes("advanceBroadcast(id, storeForHandle, Date.now() + 50_000, { keep })")], [false, true]);
+  is("the mail route reads the buyers only counted: never without a count, and its send started now takes the narrowing just counted", [mail.includes("buyerLedger(store)"), mail.includes("advanceBroadcast(id, storeForHandle, Date.now() + 50_000, { keep })"), mail.includes("if (created.startsNow) {"), mail.includes("+ 60) {")], [false, true, true, false]);
+  is("a hold refused says its own sentence", mail.includes('if (!created.ok) return created.reason === "studio_used" ? notCounted(created.message) : fail(created.reason);'), true);
   const update = flat("app/api/store/product-update/route.ts");
   is("the update's refusal carries its sentence, or the shared one", update.includes('error: "studio_used", message: started.message ? `${started.message} Nothing was sent.` : NOT_COUNTED }'), true);
   const ask = flat("app/api/store/numbers/ask/route.ts");
@@ -251,7 +370,7 @@ async function main(): Promise<void> {
   is("asking the numbers checks the month's AI jobs, then counts their reading as their page does, then reads them", [at("aiLeft(store)") > 0, at("aiLeft(store)") < at("countUnits(store, STUDIO_PAGE_UNITS - 1)"), at("countUnits(store, STUDIO_PAGE_UNITS - 1)") < at("readNumbers(store)")], [true, true, true]);
   is("with the shared sentence when the count gave none", ask.includes("message: (counted && !counted.ok && counted.message) || NOT_COUNTED }"), true);
   const composer = flat("components/email-studio.tsx");
-  is("scheduling a narrowed email says, before it is confirmed, that it sets aside studio requests now and that canceling does not give them back; a refusal is shown as an alert", [composer.includes('" Scheduling it sets aside, now, the studio requests needed to find these buyers when it goes out, and to find them once more if it has to wait. If too few are left, it is not scheduled, and you see how many it needs. Canceling does not give them back."'), composer.includes('<p className="notice notice-error mt-3" role="alert">{error}</p>')], [true, true]);
+  is("a narrowed email says, before it is confirmed, what it sets aside and from which month, and that what it does not use comes back; a refusal is shown as an alert", [composer.includes('" Scheduling it sets aside, from the month it goes out, the studio requests needed to find these buyers then, and to find them once more if it has to wait. If that month has too few left, it is not scheduled, and you see how many it needs. What it does not use, or all of it if you cancel, is given back."') && composer.includes('" Sending it sets aside the studio requests needed to find these buyers once more if it has to wait. What it does not use is given back."'), composer.includes('<p className="notice notice-error mt-3" role="alert">{error}</p>')], [true, true]);
   is("the composer shows the sentence, on the count as on a send, and takes the count's away when the next count goes through", [composer.includes('a.error === "studio_used" && typeof a.message === "string" && a.message ? a.message'), composer.includes('} else if (a.error === "stripe" || a.error === "studio_used") {'), composer.includes("if (shown !== null) setError((current) => (current === shown ? null : current));")], [true, true, true]);
   is("so do the update box and the numbers question", [flat("components/product-update-box.tsx").includes('data.error === "studio_used" && typeof data.message === "string" && data.message ? data.message'), flat("components/numbers-ask.tsx").includes('else if (data.error === "studio_used" && typeof data.message === "string" && data.message) setError(data.message);')], [true, true]);
 

@@ -22,7 +22,10 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
 import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
 import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonth } from "@/lib/mail";
-import { windowId } from "@/lib/allowance-window";
+import { WINDOW_ID, allowanceWindow, opensAgainWords, windowId } from "@/lib/allowance-window";
+import { refreshPeriod } from "@/lib/billing-sync";
+import { costStandingOf } from "@/lib/plan-standing";
+import { giveAllowance, giveAllowanceIn, holdAllowanceAt, takeAllowance } from "@/lib/store-allowance";
 import type { Store } from "@/lib/store";
 import { hasProduct, idsOfKind } from "@/lib/catalog";
 import { broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links";
@@ -91,25 +94,28 @@ export type Broadcast = {
    */
   test: SubjectTest | null;
   /**
-   * Studio requests held, when it was written down, for the readings of the
-   * store's buyers its list needs when the scheduled job starts it (a
-   * narrowed email: the first, and EXTRA_READS more should it wait for
-   * another reason, each at its worst, lib/segments.ts ledgerReadingUnits),
-   * not drawn yet: those readings draw from it and are never refused
-   * (C3-80 (d)). Studio requests are never given back (lib/store-allowance.ts
-   * gives back only a take it refused), so what is left after the readings,
-   * or when it is canceled, stays here as the record of it. Absent on every
-   * email made before 4 November 2026 and on one that starts in the request
-   * that wrote it down.
+   * Studio requests held for the readings of the store's buyers its list
+   * needs when the scheduled job makes it (a narrowed email: READS_HELD
+   * readings for one scheduled, EXTRA_READS for one that starts at once, each
+   * at its worst, lib/segments.ts ledgerReadingUnits), in the window of the
+   * month it goes out (`window`, lib/store-allowance.ts holdAllowanceAt), and
+   * not drawn yet (`units`). Those readings draw from it; what they need
+   * beyond it, or all of it when it was held for another month than the one
+   * it goes out in, is taken from that month, and without it the email waits
+   * for the month that has them. What is not drawn is given back once its
+   * list is made, or when it is canceled. Absent on an email that holds none.
    */
-  reserve?: number;
+  hold?: { window: string; units: number };
   /**
-   * Readings of the store's buyers the scheduled job made for it, written
-   * down before each one: at most 1 + EXTRA_READS for an email that holds
-   * them (`reserve`), and EXTRA_READS for one written down before holds
-   * existed (C3-80 (d)). Absent before the first.
+   * Readings of the store's buyers the scheduled job made for it, each paid
+   * before it was read: at most READS_HELD, then it stops, failed, saying
+   * why. A reading that failed at Stripe or PayPal is not one (`misses`).
    */
   reads?: number;
+  /** Readings that failed at Stripe or PayPal in a row: none of them spent, each waited out longer (READ_RETRY_SECONDS). */
+  misses?: number;
+  /** A waiting email is not tried before this moment (seconds): the month whose studio requests it waits for, or a failed reading's wait. */
+  retryAt?: number;
 };
 
 /** Creation may have been partially written even when its acknowledgement is lost. */
@@ -129,16 +135,24 @@ const RECIPIENT_DAYS = 60;
  * Readings of the buyers the scheduled job may make for one email beyond its
  * first (C3-80 (d)): a list that could not be made for another reason (the
  * data room full, which is rare) is read again at most this many times, then
- * the email stops, failed, saying why. Held with the first when the email is
- * written down (createBroadcast, READS_HELD), so the scheduled job never
- * reads one that is not paid for. An email written down before holds existed
- * (only before 4 November 2026, with no sales open) is read at most
- * EXTRA_READS times in all, each one of the scheduled readings the plan
- * already prices (tests/plan-cost-registry.ts, scheduled-reads).
+ * the email stops, failed, saying why. Each one is paid in studio requests
+ * before it is read: from what the email holds, or from the month it is
+ * read in (advanceBroadcast).
  */
 export const EXTRA_READS = 1;
-/** Readings of the buyers a narrowed email the scheduled job starts holds when it is written down: its first, and EXTRA_READS. */
+/** Readings of the buyers a narrowed email scheduled for later holds when it is written down: its first, and EXTRA_READS. */
 export const READS_HELD = 1 + EXTRA_READS;
+/** The first wait after a reading failed at Stripe or PayPal; each failure in a row doubles it, up to a day. */
+export const READ_RETRY_SECONDS = 3_600;
+const readRetry = (misses: number) => Math.min(86_400, READ_RETRY_SECONDS * 2 ** Math.min(Math.max(misses - 1, 0), 5));
+/** Said on a narrowed email canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
+export const PLAN_OFF_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent and none of your studio requests were used for it. To send it, write it again while your plan is on.";
+/** Said on a narrowed email whose reading of its buyers failed at Stripe or PayPal: nothing spent, tried again later. */
+export const READ_FAILED_NOTE = "Your sales could not be read just now, so the list of who it goes to could not be made. Nothing was sent and no studio requests were used. It is tried again automatically.";
+/** Said on a narrowed email waiting for the month whose studio requests will pay for its reading of the buyers. */
+export function studioWaitNote(opens: string): string {
+  return `Your studio requests for this month are used up, so the list of who it goes to could not be made. Nothing was sent. It goes out by itself when they open again, on ${opens} (UTC).`;
+}
 
 /** The note of an email stopped because its readings of the buyers ran out: why it waited, without "tried again". */
 export function readsSpentNote(waiting: string): string {
@@ -230,8 +244,8 @@ function parseStoredBroadcast(raw: unknown, id: string, listId?: string): Broadc
   // These fields were absent in older campaigns; explicit malformed values are not legacy defaults.
   if (value.who !== undefined && !WHO.includes(value.who as Who) || value.notProductId !== undefined && !association(value.notProductId) || value.tagged !== undefined && typeof value.tagged !== "boolean" || value.test !== undefined && value.test !== null && b.test === null) throw new Error("Invalid campaign options");
   if (value.label !== undefined && value.label !== null && (typeof value.label !== "string" || readTags([value.label])[0] !== value.label)) throw new Error("Invalid campaign label");
-  if (value.reserve !== undefined && !nonnegative(value.reserve)) throw new Error("Invalid campaign reserve");
-  if (value.reads !== undefined && !nonnegative(value.reads)) throw new Error("Invalid campaign reads");
+  if (value.hold !== undefined && (!value.hold || typeof value.hold !== "object" || Array.isArray(value.hold) || typeof (value.hold as { window?: unknown }).window !== "string" || !WINDOW_ID.test((value.hold as { window: string }).window) || !nonnegative((value.hold as { units?: unknown }).units))) throw new Error("Invalid campaign hold");
+  for (const field of ["reads", "misses", "retryAt"] as const) if (value[field] !== undefined && !nonnegative(value[field])) throw new Error(`Invalid campaign ${field}`);
   if (value.narrow !== undefined && value.narrow !== null) {
     if (typeof value.narrow !== "object" || Array.isArray(value.narrow)) throw new Error("Invalid campaign audience");
     const narrow = value.narrow as Record<string, unknown>;
@@ -275,8 +289,11 @@ export function whoOf(store: Store, kind: Who): { kind: Who; paid: ReadonlySet<s
 
 export type CreateResult =
   // `keep`: the narrowing read and counted here, for a send that starts in the same request (advanceBroadcast's `given`).
-  | { ok: true; broadcast: Broadcast; keep: ((email: string) => boolean) | undefined }
-  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" };
+  // `startsNow`: it is due already, so the request that wrote it starts it (the scheduled job takes up the rest).
+  | { ok: true; broadcast: Broadcast; keep: ((email: string) => boolean) | undefined; startsNow: boolean }
+  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" }
+  // Its readings of the buyers could not be held (lib/store-allowance.ts holdAllowanceAt): the sentence says why.
+  | { ok: false; reason: "studio_used"; message: string };
 
 const LINK = /https:\/\/[^\s<>"')\]]+/g;
 
@@ -299,11 +316,13 @@ export function linksToStore(body: string, store: Pick<Store, "handle" | "domain
 /**
  * Writes a broadcast down to go now or later. What it may contain is checked
  * here. `count` counts the reading of the store's buyers a narrowed email
- * needs before it is read (lib/segments.ts, buyerLedger), and, for one the
- * scheduled job starts, holds what its own reading then will cost at the most
- * (ledgerReadingUnits; the broadcast's `reserve`), so the scheduled job never
- * refuses it (C3-80 (d)); when either is not counted, LedgerNotCounted is
- * thrown and nothing is written, and the studio says the refusal's sentence.
+ * needs before it is read (lib/segments.ts, buyerLedger; LedgerNotCounted
+ * when it is not, nothing written). Then, since the scheduled job may make its
+ * list (always for one scheduled; for one due now, when another run takes it
+ * first or its list has to wait), it holds what those readings cost at the
+ * most in the month it goes out (the broadcast's `hold`): refused with the
+ * sentence when that month has too few left after what is already held in
+ * it, or when the plan does not pay for that month as it stands.
  */
 export async function createBroadcast(
   store: Store,
@@ -336,6 +355,9 @@ export async function createBroadcast(
     if (!Number.isFinite(at) || at < now - 60 || at > now + MAX_SCHEDULE_DAYS * 86_400) return { ok: false, reason: "when" };
     sendAt = Math.max(at, now);
   }
+  // Due now exactly when advanceBroadcast takes it as due (sendAt <= now): any later, even by a minute, it is the
+  // scheduled job's to start, so it is written down as scheduled.
+  const startsNow = sendAt <= now;
   // Checked now for a send that starts now; a scheduled one is checked again when it starts.
   const keep = await keepFor(store, narrow, count);
   const reach = (await audience(store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), keep, label ?? undefined)).length;
@@ -348,17 +370,7 @@ export async function createBroadcast(
   const test = asked === "none" ? null : asked;
   if (test && reach < MIN_TEST_REACH) return { ok: false, reason: "test_small" };
   if (test && !linksToStore(body, store)) return { ok: false, reason: "test_links" };
-  // A narrowed email the scheduled job starts reads the buyers again then: READS_HELD readings at the most each costs
-  // (its first, and one more should it wait for another reason) are held now, counted before anything is written,
-  // and drawn by those readings (advanceBroadcast). One that starts in this request lists from the narrowing just
-  // read (the route's `keep`) and holds nothing. Held before the data room is taken, so a refusal takes nothing;
-  // studio requests are never given back, so a data room found full after this keeps them taken.
-  let reserve: number | undefined;
-  if (narrow && count && sendAt > now + 60) {
-    reserve = READS_HELD * (await ledgerReadingUnits(store));
-    if (reserve > 0 && !(await count(reserve).catch(() => false))) throw new LedgerNotCounted();
-  }
-  if (sendAt <= now + 60) {
+  if (startsNow) {
     // The month as the plan counts it (lib/allowance-window.ts), the same window
     // reserve takes from and the studio shows; a window that cannot be told
     // leaves nothing, as reserve would refuse every batch of it.
@@ -388,16 +400,34 @@ export async function createBroadcast(
     listed: false,
     tagged: true,
     test,
-    ...(reserve !== undefined ? { reserve } : {}),
   };
+  // What the scheduled job's readings of the buyers will cost at the most, held in the month it goes out, before
+  // anything is written. Given back if its room in the data room is not there (below), so a refusal holds nothing.
+  if (narrow && count) {
+    const units = (startsNow ? EXTRA_READS : READS_HELD) * (await ledgerReadingUnits(store));
+    if (units > 0) {
+      const held = await holdAllowanceAt(await refreshPeriod(store), "studio", units, sendAt * 1000).catch(() => null);
+      if (!held?.ok) return { ok: false, reason: "studio_used", message: held?.message ?? "" };
+      broadcast.hold = { window: held.window, units };
+    }
+  }
   // Its room in the store's data room first (DataRoomError when it does not
   // fit): its record, until it expires by itself (400 days after the last
   // change, which comes at the latest when it goes out), and its place in
   // the store's list of broadcasts.
-  await needData(store, [
-    { until: (now + (MAX_SCHEDULE_DAYS + RECORD_DAYS + 1) * 86_400) * 1000, bytes: dataBytes([JSON.stringify({ ...broadcast, note: "x".repeat(NOTE_ROOM) })], 1) },
-    { slot: "bc", bytes: dataBytes([broadcast.id], 1) },
-  ]);
+  // Sized at the most the record can grow to: its longest note and status, and every count it keeps at its widest.
+  const widest = Number.MAX_SAFE_INTEGER;
+  const grown = { ...broadcast, status: "cancelled", note: "x".repeat(NOTE_ROOM), finishedAt: widest, total: widest, sent: widest, failures: widest, hold: { window: "0000-00-00", units: widest }, reads: widest, misses: widest, retryAt: widest };
+  try {
+    await needData(store, [
+      { until: (now + (MAX_SCHEDULE_DAYS + RECORD_DAYS + 1) * 86_400) * 1000, bytes: dataBytes([JSON.stringify(grown)], 1) },
+      { slot: "bc", bytes: dataBytes([broadcast.id], 1) },
+    ]);
+  } catch (error) {
+    // Not written: what was held for it is given back, so the refusal costs nothing but the count just read.
+    if (broadcast.hold) await giveAllowanceIn(store, "studio", broadcast.hold.units, broadcast.hold.window);
+    throw error;
+  }
   try {
     const saved = await redisPipeline([["SET", bcKey(broadcast.id), JSON.stringify(broadcast), "EX", RECORD_DAYS * 86_400]]);
     if (!Array.isArray(saved) || saved.length !== 1 || saved[0] !== "OK") throw new BroadcastWriteUnconfirmed();
@@ -410,7 +440,7 @@ export async function createBroadcast(
     // Do not retry or roll back: any of these writes may already have happened.
     throw new BroadcastWriteUnconfirmed();
   }
-  return { ok: true, broadcast, keep };
+  return { ok: true, broadcast, keep, startsNow };
 }
 
 /** Stops a broadcast that has not started. One under way is not stopped halfway. */
@@ -423,14 +453,17 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
     // Read only after acquiring the same lock used by the sender.
     const b = await readBroadcast(id);
     // Scheduled, or waiting before its list of who it goes to was made (the plan without email, the data room full):
-    // nothing was sent, so it can still be called off. What it holds for its reading of the buyers (`reserve`) is
-    // not given back (studio requests have no giving back): it stays on the canceled record as the record of it.
+    // nothing was sent, so it can still be called off. What it holds for its reading of the buyers and did not draw
+    // is given back once the canceled record is written.
     if (!b || b.id !== id || b.listId !== store.listId || (b.status !== "scheduled" && b.status !== "waiting") || b.sent !== 0 || b.listed !== false) return false;
-    const cancelled = { ...b, status: "cancelled", finishedAt: Math.floor(Date.now() / 1000) };
+    const cancelled: Broadcast = { ...b, status: "cancelled", finishedAt: Math.floor(Date.now() / 1000), ...(b.hold ? { hold: { ...b.hold, units: 0 } } : {}) };
     const saved = await redisPipeline([["SET", bcKey(id), JSON.stringify(cancelled), "EX", RECORD_DAYS * 86_400]]);
     if (!Array.isArray(saved) || saved.length !== 1 || saved[0] !== "OK") throw new BroadcastCancellationUnconfirmed();
     const removed = await redisPipeline([["SREM", QUEUE, id]]);
     if (!Array.isArray(removed) || removed.length !== 1 || (removed[0] !== 0 && removed[0] !== 1)) throw new BroadcastCancellationUnconfirmed();
+    // A list half written by a run cut short (written without its expiry) goes with it: best effort, the email is canceled either way.
+    await redisPipeline([["DEL", toKey(id)]]).catch(() => {});
+    if (b.hold?.units) await giveAllowanceIn(store, "studio", b.hold.units, b.hold.window);
     return true;
   } catch {
     // Either write may have happened: do not retry or restore a scheduled state.
@@ -456,10 +489,12 @@ async function takeBroadcastLock(id: string): Promise<boolean> {
  * Its list of who it goes to reads the store's buyers when it is narrowed:
  * `given` is that narrowing, already read and counted when the broadcast was
  * written down in the same request (createBroadcast's `keep`), so it is
- * neither read nor counted twice. Otherwise the reading draws from what was
- * held for it when it was written down (`reserve`, createBroadcast) and is
- * never refused for the studio's requests: an email accepted is never stopped
- * here for them (C3-80 (d)).
+ * neither read nor counted twice. Otherwise every reading is paid in studio
+ * requests before it is read: from what was held for it in the month it goes
+ * out (`hold`, createBroadcast), and beyond that from the month it is read
+ * in; when that month has none left, it waits for the next one that has,
+ * saying so and when. Never read unpaid. A narrowed email due while the plan
+ * is not paid and running is canceled, saying so, with nothing read or used.
  */
 export async function advanceBroadcast(
   id: string,
@@ -481,12 +516,28 @@ export async function advanceBroadcast(
     }
     const now = Math.floor(Date.now() / 1000);
     if (b.status === "scheduled" && b.sendAt > now) return b;
+    // Waiting for a month's studio requests, or out a failed reading's wait: not tried, nothing read, before then.
+    if (b.status === "waiting" && b.retryAt !== undefined && b.retryAt > now) return b;
     const store = await load(b.handle);
     if (!store || store.listId !== b.listId) {
       b = { ...b, status: "failed", note: "The store is not here anymore.", finishedAt: now };
       await save(b);
       await redisPipeline([["SREM", QUEUE, id]]);
       return b;
+    }
+    // A narrowed email due while the plan is not paid and running (ended, never started, its renewal unpaid or
+    // disputed) is canceled, saying so: its buyers are never read, nothing is taken or sent, and what it held for
+    // that month is given back. A trial running is its plan's own month.
+    if (!b.listed && !given && isNarrowed(b.narrow) && b.sent === 0) {
+      const standing = costStandingOf(store, now);
+      if (standing !== "paid" && standing !== "trial") {
+        const held = b.hold;
+        b = { ...b, status: "cancelled", note: PLAN_OFF_NOTE, finishedAt: now, ...(held ? { hold: { ...held, units: 0 } } : {}) };
+        await save(b);
+        await redisPipeline([["SREM", QUEUE, id], ["DEL", toKey(id)]]);
+        if (held?.units) await giveAllowanceIn(store, "studio", held.units, held.window);
+        return b;
+      }
     }
     if (monthlyAllowance(store) === 0) {
       b = { ...b, status: "waiting", note: "Your plan does not include email right now. It goes out once Pro is on again." };
@@ -500,51 +551,12 @@ export async function advanceBroadcast(
         await save(b);
         return b;
       }
-      // Any other run (the scheduled job, or one that took the lock first) reads the buyers drawing from what was held
-      // for that reading when the email was written down, never counting it again. Each draw is written down before
-      // that part is read, so a run cut short never draws the same requests twice. What is held and not drawn stays
-      // on the record: studio requests are never given back. What a reading needs beyond what is held (the kept
-      // buyers grew since, an earlier run drew it and then waited for another reason, or an email written down before
-      // anything was held) is read too, as every scheduled reading is, without counting it in the studio's requests,
-      // and logged, without who. Never a wait for the studio's requests (C3-80 (d)).
       let keep = given?.keep;
       if (!given && isNarrowed(b.narrow) && readsBuyers(store)) {
-        // At most READS_HELD readings for an email that holds them, and EXTRA_READS for one written down before holds
-        // existed (one of the scheduled readings the plan prices), each written down before it is read; past them, it
-        // stops, failed, with why it waited, never dropped without a word (C3-80 (d)).
-        const reads = b.reads ?? 0;
-        if (reads - (b.reserve !== undefined ? 1 : 0) >= EXTRA_READS) {
-          b = { ...b, status: "failed", note: readsSpentNote(b.note), finishedAt: now };
-          await save(b);
-          await redisPipeline([["SREM", QUEUE, id]]);
-          console.warn("A scheduled email stopped: its readings of the buyers ran out", { id, reads });
-          return b;
-        }
-        b = { ...b, reads: reads + 1 };
-        await save(b);
-        const before = b;
-        let held = before.reserve ?? 0;
-        let over = 0;
-        const draw = async (units: number): Promise<boolean> => {
-          const drawn = Math.min(units, held);
-          if (drawn > 0) {
-            held -= drawn;
-            await save({ ...before, reserve: held });
-          }
-          over += units - drawn;
-          return true;
-        };
-        try {
-          keep = await keepFor(store, b.narrow, draw);
-        } catch (error) {
-          if (!(error instanceof LedgerNotCounted)) throw error;
-          // Only when a draw could not be written down: nothing more was read.
-          b = { ...b, ...(b.reserve !== undefined ? { reserve: held } : {}), status: "waiting", note: "The list of who it goes to could not be prepared. Nothing was sent. It will be checked again automatically." };
-          await save(b);
-          return b;
-        }
-        if (b.reserve !== undefined) b = { ...b, reserve: held };
-        if (over > 0) console.warn("A scheduled email's reading of the buyers needed more studio requests than it held", { id, over });
+        const read = await readNarrowing(b, store, now);
+        if (read.stop) return read.stop;
+        b = read.b;
+        keep = read.keep;
       }
       const to = await audience(b.listId, b.productId ?? undefined, b.notProductId ?? undefined, whoOf(store, b.who), keep, b.label ?? undefined);
       let test = b.test;
@@ -583,8 +595,11 @@ export async function advanceBroadcast(
         await save(b);
         return b;
       }
-      b = { ...b, status: "sending", total: to.length, note: "", listed: true, test };
+      const left = b.hold?.units ? b.hold : null;
+      b = { ...b, status: "sending", total: to.length, note: "", listed: true, test, ...(left ? { hold: { ...left, units: 0 } } : {}) };
       await save(b);
+      // Its list is made: what it held for its readings and did not draw is given back, once that is written down.
+      if (left) await giveAllowanceIn(store, "studio", left.units, left.window);
     }
     if (b.status === "waiting") b = { ...b, status: "sending", note: "" };
 
@@ -697,6 +712,99 @@ export async function advanceBroadcast(
   } finally {
     await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
   }
+}
+
+/**
+ * Reads the buyers for a narrowed email's list in the scheduled job, paid
+ * before it is read (advanceBroadcast): `stop` is the record, already saved,
+ * when it must not go on now. Every part buyerLedger counts is drawn from the
+ * email's hold when it is held in the month running now, and the rest taken
+ * from that month (a hold made for another month is given back and the whole
+ * taken from this one); each draw from the hold is written down before that
+ * part is read, and lowers the hold in memory only once written. With no
+ * studio requests left this month, it waits for the next month, saying when;
+ * a reading that fails at Stripe or PayPal spends nothing (what its last part
+ * drew is held again, or given back) and is tried again later, saying so.
+ * At most READS_HELD readings are made, then it stops, failed, saying why.
+ */
+async function readNarrowing(start: Broadcast, store: Store, now: number): Promise<{ stop: Broadcast; b?: undefined; keep?: undefined } | { stop?: undefined; b: Broadcast; keep: ((email: string) => boolean) | undefined }> {
+  let b = start;
+  const reads = b.reads ?? 0;
+  if (reads >= READS_HELD) {
+    const left = b.hold?.units ? b.hold : null;
+    b = { ...b, status: "failed", note: readsSpentNote(b.note), finishedAt: now, ...(left ? { hold: { ...left, units: 0 } } : {}) };
+    await save(b);
+    await redisPipeline([["SREM", QUEUE, b.id]]);
+    if (left) await giveAllowanceIn(store, "studio", left.units, left.window);
+    return { stop: b };
+  }
+  const current = await refreshPeriod(store);
+  const window = allowanceWindow(current, now * 1000);
+  if (!window) {
+    b = { ...b, status: "waiting", note: "The list of who it goes to could not be prepared. Nothing was sent. It will be checked again automatically." };
+    await save(b);
+    return { stop: b };
+  }
+  // Held for another month than the one it is read in: given back there once that is written down, and this month pays.
+  if (b.hold && b.hold.window !== window.id) {
+    const stale = b.hold;
+    b = { ...b, hold: { window: window.id, units: 0 } };
+    await save(b);
+    if (stale.units) await giveAllowanceIn(store, "studio", stale.units, stale.window);
+  }
+  let held = b.hold?.units ?? 0;
+  let last = { fromHold: 0, taken: 0 };
+  let refused = false;
+  const draw = async (units: number): Promise<boolean> => {
+    const fromHold = Math.min(units, held);
+    const rest = units - fromHold;
+    if (rest > 0) {
+      const taken = await takeAllowance(current, "studio", rest, now * 1000).catch(() => null);
+      if (!taken?.ok) {
+        refused = taken?.reason === "used";
+        return false;
+      }
+    }
+    if (fromHold > 0) {
+      try {
+        await save({ ...b, hold: { window: window.id, units: held - fromHold } });
+      } catch {
+        // Not written down: nothing drawn, the hold whole, and what this month gave taken back.
+        if (rest > 0) await giveAllowance(current, "studio", rest, now * 1000);
+        return false;
+      }
+      held -= fromHold;
+    }
+    last = { fromHold, taken: rest };
+    return true;
+  };
+  const withHold = (units: number): Broadcast => (b.hold || units ? { ...b, hold: { window: window.id, units } } : b);
+  let keep: ((email: string) => boolean) | undefined;
+  try {
+    keep = await keepFor(store, b.narrow, draw);
+  } catch (error) {
+    if (error instanceof LedgerNotCounted) {
+      // Nothing more was read: this month has no studio requests left for it, or a draw could not be written down.
+      b = refused
+        ? { ...withHold(held), status: "waiting", note: studioWaitNote(opensAgainWords(window, now * 1000)), retryAt: Math.ceil(window.end / 1000) }
+        : { ...withHold(held), status: "waiting", note: "The list of who it goes to could not be prepared. Nothing was sent. It will be checked again automatically." };
+      await save(b);
+      return { stop: b };
+    }
+    // Stripe or PayPal did not answer: that reading is not spent. What its last part drew is held again (or given
+    // back to this month), and it is tried again after a wait that grows, never failed for it.
+    if (last.taken > 0) await giveAllowance(current, "studio", last.taken, now * 1000);
+    const misses = (b.misses ?? 0) + 1;
+    b = { ...withHold(held + last.fromHold), status: "waiting", note: READ_FAILED_NOTE, misses, retryAt: now + readRetry(misses) };
+    await save(b);
+    console.error("reading a scheduled email's buyers failed", b.id, error);
+    return { stop: b };
+  }
+  // Read and paid: one reading more, and no wait or failed reading left on it.
+  const done: Broadcast = { ...withHold(held), reads: reads + 1 };
+  delete done.retryAt;
+  delete done.misses;
+  return { b: done, keep };
 }
 
 /** A random order, in place: every order as likely as any other. */

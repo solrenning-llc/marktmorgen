@@ -8,6 +8,7 @@
  */
 import { addComment, deleteComment, dropLessonComments, forgetLessonCommentsPerson, lessonComments, readComment, setHidden } from "@/lib/lesson-comments";
 import { emailKey } from "@/lib/learn";
+import { redisPipeline } from "@/lib/redis";
 import { dataUsed } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { store as redis } from "./redis-stub";
@@ -126,6 +127,28 @@ async function main(): Promise<void> {
   race3.undo();
   is("the erasure did run in between", race3.ran(), true);
   is("and it stays gone", await readComment(COURSE, gone.id), null);
+
+  part("An answer written while its comment's author is erased: nothing of it is kept");
+  const adds = (commands: (string | number)[][]) => commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:lesson-comments-add:");
+  for (const [who, replier] of [["Ana herself", ana], ["Ben", ben]] as const) {
+    redis.clear();
+    const bens = await say(ben, "Where are the slides?", "Ben");
+    const onlyBen = await used();
+    const top = await say(ana, "How warm should the kitchen be?", "Ana");
+    const race = between(adds, () => forgetLessonCommentsPerson(COURSE, [L1], ana, ROOM));
+    const made = await addComment({ room: ROOM, courseId: COURSE, lessonId: L1, by: replier, text: "Around 24 degrees.", parent: top.id });
+    race.undo();
+    is(`${who}: the erasure did run in between`, race.ran(), true);
+    is(`${who}: the answer is refused, its comment is gone`, made.ok ? "written" : made.reason, "parent");
+    is(`${who}: only Ben's comment is kept or listed`, (await lessonComments(COURSE, L1)).map((c) => c.id), [bens.id]);
+    const [kept, newest, count] = await redisPipeline([
+      ["HLEN", `nl:lc:${COURSE}:c`],
+      ["ZCARD", `nl:lc:${COURSE}:all`],
+      ["HGET", `nl:lc:${COURSE}:r`, top.id],
+    ]);
+    is(`${who}: nothing orphaned, no count for the gone comment`, [kept, newest, count], [1, 1, null]);
+    is(`${who}: the room is Ben's alone, the answer's charge given back`, await used(), onlyBen);
+  }
   done();
 }
 

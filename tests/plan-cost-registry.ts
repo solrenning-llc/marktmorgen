@@ -1,4 +1,5 @@
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
+import { PLATFORM_PLAN_CLOSING_GETS, PLATFORM_PLAN_MAX_PAGES, PLATFORM_PLAN_RECOVERY_GETS, PLATFORM_PLAN_MEMORY_GB, PLATFORM_PLAN_MEMORY_USD_PER_GB_HOUR, platformPlanReadMemoryUsd } from "@/lib/platform-plan-rules";
 /**
  * Every metered feature's per-store worst month, in one registry (added 17
  * October 2026). tests/plan-cost-model.ts sums COST_LINES into worstCost,
@@ -470,17 +471,20 @@ export const DAY_WINDOWS = 32;
  * The Stripe endpoint tariff stays explicitly unknown, never certified zero.
  */
 export const PLATFORM_SUBSCRIPTION_SEARCH = {
-  maxGets: 2,
+  maxPages: PLATFORM_PLAN_MAX_PAGES,
+  maxGets: PLATFORM_PLAN_RECOVERY_GETS,
+  closingGets: PLATFORM_PLAN_CLOSING_GETS,
   waitSeconds: STRIPE_TIMEOUT_MS / 1000,
-  memoryGb: 2,
-  memoryUsdPerGbHour: 0.0183,
-  memoryUsdPerGet: STRIPE_TIMEOUT_MS / 1000 * 2 * 0.0183 / 3600,
+  memoryGb: PLATFORM_PLAN_MEMORY_GB,
+  memoryUsdPerGbHour: PLATFORM_PLAN_MEMORY_USD_PER_GB_HOUR,
+  memoryUsdPerGet: platformPlanReadMemoryUsd(1),
   essentialEventsPerWindow: ESSENTIAL_PER_DAY * DAY_WINDOWS,
   closingEventsPerWindow: DAY_WINDOWS,
   stripeGetFeeUsd: null,
   deploymentRegionVerified: false,
 } as const;
-export const PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD = PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet;
+export const PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD = platformPlanReadMemoryUsd(PLATFORM_SUBSCRIPTION_SEARCH.maxGets);
+export const PLATFORM_SUBSCRIPTION_CLOSING_EVENT_USD = platformPlanReadMemoryUsd(PLATFORM_SUBSCRIPTION_SEARCH.closingGets);
 export const UTC_DAYS = 31;
 
 /** CX-67 company exposure, deliberately outside paid-unit COST_LINES. These
@@ -542,11 +546,12 @@ const ALL_TIERS_SAME = (usd: number) => () => usd;
 export const COST_LINES: CostLine[] = [
   {
     id: "platform-subscription-search",
-    feature: "Platform subscription recovery during checkout, store deletion and scheduled closing (CX-61)",
-    monthlyUsd: () => PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD * (PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow + PLATFORM_SUBSCRIPTION_SEARCH.closingEventsPerWindow),
+    feature: "Bounded paginated platform recovery and the additional closing subscription read (CX-86)",
+    monthlyUsd: () => PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD * PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow + PLATFORM_SUBSCRIPTION_CLOSING_EVENT_USD * PLATFORM_SUBSCRIPTION_SEARCH.closingEventsPerWindow,
     sources: [
       { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
       { file: "lib/fetch-timeout.ts", names: ["STRIPE_TIMEOUT_MS"] },
+      { file: "lib/platform-plan-rules.ts", names: ["PLATFORM_PLAN_MAX_PAGES", "PLATFORM_PLAN_RECOVERY_GETS", "PLATFORM_PLAN_CLOSING_GETS"] },
       { file: "lib/billing.ts", names: ["findStoreSubscriptions", "completeSubscriptionPage"] },
       { file: "lib/studio-allowance-rules.ts", names: ["ESSENTIAL_NEEDS", "ESSENTIAL_PER_DAY"] },
       { file: "app/api/billing/checkout/route.ts", names: ["creatorFrom(request, \"billing\")", "findStoreSubscriptions(store)"] },

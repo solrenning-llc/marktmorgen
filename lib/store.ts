@@ -32,6 +32,7 @@
  * it `email` for the first kind and works the same for the second.
  */
 import { type PlanDispute, parsePlanDispute, parsePlanDisputes, withPlanDispute } from "@/lib/plan-dispute-rules";
+import { ownReleasedHandleTimes, releasedHandleTimes } from "@/lib/platform-plan-identity";
 import { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
 export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
 import { MAX_LINKS, type NumbersLink, parseLinks } from "@/lib/numbers-links";
@@ -374,6 +375,8 @@ export type Store = {
    * reads them too (saleHandles). Never pruned.
    */
   releasedHandles: string[];
+  /** Explicit release instants in epoch seconds; absent for undated legacy history. */
+  releasedHandleAt?: Record<string, number>;
   renamedAt: string;
   /**
    * The creator's own Stripe account, once they have connected it.
@@ -938,6 +941,9 @@ function parseStore(raw: unknown): Store | null {
       releasedHandles: Array.isArray(value.releasedHandles)
         ? value.releasedHandles.filter((h) => typeof h === "string")
         : [],
+      ...(Object.hasOwn(value, "releasedHandleAt") ? {
+        releasedHandleAt: ownReleasedHandleTimes(value) ?? Object.create(null),
+      } : {}),
       renamedAt: value.renamedAt ?? "",
       stripeAccountId:
         typeof value.stripeAccountId === "string" &&
@@ -2259,11 +2265,12 @@ export async function releaseHandle(
       return { ok: false, reason: "unknown" };
     }
 
+    const releasedAtMs = Date.now(), releasedAt = Math.floor(releasedAtMs / 1000);
     await redisPipeline([
       [
         "SET",
         handleKey(handle),
-        `${RELEASED_PREFIX}${new Date().toISOString()}`,
+        `${RELEASED_PREFIX}${new Date(releasedAtMs).toISOString()}`,
         "EX",
         RELEASE_QUARANTINE_DAYS * 24 * 60 * 60,
       ],
@@ -2273,6 +2280,7 @@ export async function releaseHandle(
       ...store,
       previousHandles: store.previousHandles.filter((old) => old !== handle),
       releasedHandles: [...store.releasedHandles.filter((old) => old !== handle), handle],
+      releasedHandleAt: { ...(releasedHandleTimes(store.releasedHandleAt) ?? {}), [handle]: releasedAt },
     });
     return { ok: true, store: next };
   });

@@ -890,27 +890,15 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
  */
 async function refuseLatePlans(store: Store): Promise<boolean> {
   if (!isBillingConfigured()) return false;
-  let complete = true;
-  const ids = new Map<string, string>();
   const observation = await observeStoreSubscriptions(store);
-  try {
-    const found = await observation.find();
-    if (found.live) ids.set(found.live.subscriptionId, found.live.customerId);
-    for (const id of found.lapsed) ids.set(id, found.customerId ?? "");
-  } catch (error) {
-    complete = false;
-    console.error("searching for a plan paid for a closing store failed", error);
-  }
-  // This observation is independent: a rejected address search must never
-  // prevent us from finding and stopping a late charge by customer.
-  try {
-    for (const row of observation.customerPlans()) {
-      if (row.status === "canceled" || row.status === "incomplete_expired") continue;
-      if (!ids.has(row.id)) ids.set(row.id, row.customerId);
-    }
-  } catch (error) {
-    complete = false;
-    console.error("listing plans paid for a closing store failed", error);
+  const found = observation.closingPlans();
+  let complete = found.complete;
+  const ids = new Map<string, string>();
+  // Neither independent source may hide a positively owned late charge from
+  // the other. Unknown coverage still prevents removal and never adopts rights.
+  for (const row of found.plans) {
+    if (row.status === "canceled" || row.status === "incomplete_expired") continue;
+    ids.set(row.id, row.customerId);
   }
   for (const [id, customerId] of ids) {
     try {

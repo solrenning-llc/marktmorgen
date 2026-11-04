@@ -36,13 +36,14 @@
  *                             (hashed), expiring by itself after SHUT_DAYS
  */
 import { createHash } from "node:crypto";
-import { BillingError, type StartedSubscription, isBillingConfigured, onPlatform, ownedBy, startedFromObservedSubscription } from "@/lib/billing";
+import { BillingError, type StartedSubscription, isBillingConfigured, listStoreSubscriptionRows, onPlatform, ownedBy, startedFromObservedSubscription } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
 import { FINAL_INDEX } from "@/lib/closing-holds";
+import { ownReleasedHandleTimes, platformStoreId } from "@/lib/platform-plan-identity";
 import { formatMoney } from "@/lib/money";
 
 export const UNDO_KEY = "nl:closing:undo";
@@ -116,33 +117,7 @@ export type ClosingTimes = { since: number; ended: number };
  * those that name one of the store's addresses and are its own.
  */
 export async function plansByCustomer(store: Store): Promise<Record<string, unknown>[]> {
-  const customer = store.stripeCustomerId;
-  if (!customer || !CUSTOMER_PATTERN.test(customer) || !isBillingConfigured()) return [];
-  const observedStore = { ...store, previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], stripeCustomerId: customer };
-  const query = new URLSearchParams({ customer, status: "all", limit: "100" });
-  query.append("expand[]", "data.customer");
-  const page = await onPlatform("GET", `/subscriptions?${query}`);
-  // The independent fallback may save a store and activate a funded plan.
-  // It needs the same full-page proof as the two-read recovery path.
-  const data = Object.getOwnPropertyDescriptor(page, "data");
-  const more = Object.getOwnPropertyDescriptor(page, "has_more");
-  const cursor = Object.getOwnPropertyDescriptor(page, "next_page");
-  if (!data || !Object.hasOwn(data, "value") || !Array.isArray(data.value) || data.value.length > 100 ||
-      !more || !Object.hasOwn(more, "value") || more.value !== false ||
-      cursor && (!Object.hasOwn(cursor, "value") || cursor.value !== null && cursor.value !== undefined)) throw new Error("Subscription customer page is incomplete");
-  const rows: Record<string, unknown>[] = [];
-  for (let index = 0; index < data.value.length; index++) {
-    const entry = Object.getOwnPropertyDescriptor(data.value, String(index));
-    if (!entry || !Object.hasOwn(entry, "value")) throw new Error("Subscription customer page is incomplete");
-    rows.push(entry.value);
-  }
-  const handles = saleHandles(observedStore);
-  return rows
-    .filter((row) => {
-      const meta = row.metadata as Record<string, string> | null | undefined;
-      return typeof row.id === "string" && SUBSCRIPTION_PATTERN.test(row.id) && typeof meta?.store === "string" && handles.has(meta.store) && ownedBy(observedStore, row);
-    })
-    .sort((a, b) => (Number(b.created) || 0) - (Number(a.created) || 0));
+  return listStoreSubscriptionRows(store);
 }
 
 /** A plan of the store in good standing that Stripe's list shows: what keeps a closing store when its search has not caught up yet. */
@@ -158,20 +133,22 @@ export async function liveByCustomer(store: Store): Promise<StartedSubscription 
  * Marks every address a closing store sells under, from its closing day's
  * start, with the end of its last plan; renewed on each closing run.
  */
-export async function markShut(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles"> & { planEndedAt?: string }, since: number, ended = Date.parse(store.planEndedAt ?? "")): Promise<void> {
+export async function markShut(store: Pick<Store, "handle" | "previousHandles" | "releasedHandles"> & { planEndedAt?: string; statsId?: string }, since: number, ended = Date.parse(store.planEndedAt ?? "")): Promise<void> {
   if (!isRedisConfigured()) return;
   const handles = [...saleHandles(store)].filter(Boolean);
   if (!handles.length) return;
-  const value = `${Math.floor(since)}|${Number.isFinite(ended) && ended > 0 ? Math.floor(ended) : 0}`;
+  const value = `${Math.floor(since)}|${Number.isFinite(ended) && ended > 0 ? Math.floor(ended) : 0}${platformStoreId(store.statsId) ? "|" + store.statsId : ""}`;
   await redisPipeline(handles.map((handle) => ["SET", shutKey(handle), value, "EX", SHUT_DAYS * 86_400]));
 }
 
 /** When the closing day of the store that sold under this address began, and its last plan ended, while that is still known. */
-export async function shutOf(handle: string): Promise<ClosingTimes | null> {
+export async function shutOf(handle: string, expectedStoreId?: string): Promise<ClosingTimes | null> {
   if (!handle || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", shutKey(handle)]]);
   if (raw === null || raw === undefined) return null;
-  const [since, ended] = String(raw).split("|").map(Number);
+  const [sinceText, endedText, markedStoreId] = String(raw).split("|");
+  if (expectedStoreId !== undefined && markedStoreId !== expectedStoreId) return null;
+  const since = Number(sinceText), ended = Number(endedText);
   return Number.isFinite(since) && since > 0 ? { since, ended: Number.isFinite(ended) && ended > 0 ? ended : 0 } : null;
 }
 
@@ -191,7 +168,7 @@ export async function closingSince(store: Store): Promise<ClosingTimes | null> {
   if (score === null || score === undefined || !Number.isFinite(Number(score))) return null;
   // The line's score is the end of the plan (lib/plan-closing.ts, closingDay).
   const ended = Number(score);
-  const marked = await shutOf(store.handle);
+  const marked = await shutOf(store.handle, store.statsId);
   return { since: marked?.since ?? ended, ended };
 }
 
@@ -205,9 +182,12 @@ export type Refused = "no" | "returned" | "returned-early" | "returning";
  * when everything is done, "returning" when a step is left for a later run.
  * The caller must never write it down as the store's plan unless "no".
  */
-export async function refusePlanIfClosing(input: { store: Store | null; handle: string; subscriptionId: string; customerId: string; onStopped?: () => void }): Promise<Refused> {
+export async function refusePlanIfClosing(input: { store: Store | null; handle: string; subscriptionId: string; customerId: string; storeId?: unknown; onStopped?: () => void }): Promise<Refused> {
   if (!SUBSCRIPTION_PATTERN.test(input.subscriptionId)) return "no";
-  const times = input.store ? await closingSince(input.store) : await shutOf(input.handle);
+  const identity = Object.getOwnPropertyDescriptor(input, "storeId");
+  if (identity && (!Object.hasOwn(identity, "value") || !platformStoreId(identity.value))) return "returning";
+  if (identity && input.store && identity.value !== input.store.statsId) return "no";
+  const times = input.store ? await closingSince(input.store) : await shutOf(input.handle, identity?.value);
   if (times === null) return "no";
   const entry: Undo = {
     h: input.handle,
@@ -235,9 +215,10 @@ export async function refusePlanIfClosing(input: { store: Store | null; handle: 
  */
 export async function refuseSession(store: Store, sessionId: string | undefined): Promise<Refused> {
   if (!sessionId || !SESSION.test(sessionId)) return "no";
+  store = capturePlanStore(store);
   const session = await onPlatform("GET", `/checkout/sessions/${encodeURIComponent(sessionId)}`, undefined, { version: AT });
   const meta = session.metadata as Record<string, string> | null | undefined;
-  if (session.mode !== "subscription" || typeof meta?.store !== "string" || !saleHandles(store).has(meta.store)) return "no";
+  if (session.mode !== "subscription" || typeof meta?.store !== "string" || !saleHandles(store).has(meta.store) || !ownedBy(store, session)) return "no";
   if (session.status === "open") {
     await expireSession(sessionId);
     return "no";
@@ -267,6 +248,7 @@ async function expireSession(id: string): Promise<boolean> {
  */
 export async function expirePlanCheckouts(store: Store, customerIds: string[]): Promise<number> {
   if (!isBillingConfigured()) return 0;
+  store = capturePlanStore(store);
   const handles = saleHandles(store);
   let expired = 0;
   for (const customer of [...new Set(customerIds)].filter((id) => CUSTOMER_PATTERN.test(id))) {
@@ -286,7 +268,7 @@ export async function expirePlanCheckouts(store: Store, customerIds: string[]): 
       for (const row of rows) {
         const meta = row.metadata as Record<string, string> | null | undefined;
         const id = typeof row.id === "string" ? row.id : "";
-        if (row.mode !== "subscription" || !SESSION.test(id) || typeof meta?.store !== "string" || !handles.has(meta.store)) continue;
+        if (row.mode !== "subscription" || !SESSION.test(id) || typeof meta?.store !== "string" || !handles.has(meta.store) || !ownedBy(store, row)) continue;
         if (await expireSession(id)) expired += 1;
       }
       const last = rows[rows.length - 1]?.id;
@@ -295,6 +277,13 @@ export async function expirePlanCheckouts(store: Store, customerIds: string[]): 
     }
   }
   return expired;
+}
+
+/** Account identity and release evidence cannot change while a provider page is awaited. */
+function capturePlanStore(store: Store): Store {
+  const dates = ownReleasedHandleTimes(store);
+  if (!dates) throw new Error("The closing store release evidence is unknown");
+  return { ...store, previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], releasedHandleAt: dates };
 }
 
 function readUndo(raw: unknown): Undo | null {

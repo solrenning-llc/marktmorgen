@@ -14,18 +14,18 @@ test("returning from a legacy pause posts explicit classic with pinned version a
   if(url.pathname==="/v1/prices")return Response.json({object:"list",data:[price],has_more:false});
   assert.equal(url.pathname,"/v1/subscriptions");assert.equal(init?.method,"POST");posts++;
   const body=new URLSearchParams(String(init?.body)),headers=new Headers(init?.headers);
-  assert.equal(body.get("billing_mode[type]"),"classic");assert.equal(headers.get("Stripe-Version"),VERSION);
+  assert.equal(body.get("billing_mode[type]"),"classic");assert.equal(body.get("metadata[store_id]"),"a".repeat(32));assert.equal(headers.get("Stripe-Version"),VERSION);
   assert.equal(headers.get("Idempotency-Key"),"restart-synthetic-classic");assert.equal(headers.has("Stripe-Account"),false);
   assert.equal(body.get("customer"),"cus_RestartClassic01");assert.equal(body.get("default_payment_method"),"pm_RestartClassic01");assert.equal(body.get("items[0][price]"),price.id);
   return Response.json({id:"sub_RestartClassic01",status:"active",customer:"cus_RestartClassic01",trial_end:null,metadata:{tier:"creator"},items:{data:[{quantity:1,current_period_start:now-10,current_period_end:now+30*86400,price}]}});
  };
- try {await restartPlan({store:{handle:"restart-classic"},customerId:"cus_RestartClassic01",paymentMethod:"pm_RestartClassic01",tier:"creator",idempotencyKey:"restart-synthetic-classic"});assert.equal(posts,1);}finally{globalThis.fetch=original;}
+ try {await restartPlan({store:{handle:"restart-classic",statsId:"a".repeat(32)},customerId:"cus_RestartClassic01",paymentMethod:"pm_RestartClassic01",tier:"creator",idempotencyKey:"restart-synthetic-classic"});assert.equal(posts,1);}finally{globalThis.fetch=original;}
 });
 test("funded restart freezes classic into the body before its hash and permanent submission barrier",()=>{
  const source="ctr_SourceClassic01",subscription="sub_SourceClassic01";
- const intent={handle:"restart-classic",claim:"claim_RestartClassic01",grant:{id:"ctr_NewClassic01",reviewId:"review_classic",key:"creator_month",action:"restart",sourceSubscriptionId:subscription},source:{binding:source+"|"+subscription},paused:JSON.stringify({customer:"cus_RestartClassic01",paymentMethod:"pm_RestartClassic01",tier:"creator",subscription,funding:{version:1,grantId:source}})} as OwnedRestartIntent;
+ const intent={handle:"restart-classic",claim:"claim_RestartClassic01",grant:{id:"ctr_NewClassic01",statsId:"a".repeat(32),reviewId:"review_classic",key:"creator_month",action:"restart",sourceSubscriptionId:subscription},source:{binding:source+"|"+subscription},paused:JSON.stringify({customer:"cus_RestartClassic01",paymentMethod:"pm_RestartClassic01",tier:"creator",subscription,funding:{version:1,grantId:source}})} as OwnedRestartIntent;
  const before=JSON.stringify(intent),body=fundedRestartRequestBody(intent,"price_RestartClassic01");
- assert.equal(body.get("billing_mode[type]"),"classic");assert.equal(body.get("metadata[restart_source]"),subscription);assert.equal(JSON.stringify(intent),before);
+ assert.equal(body.get("billing_mode[type]"),"classic");assert.equal(body.get("metadata[store_id]"),"a".repeat(32));assert.equal(body.get("metadata[restart_source]"),subscription);assert.equal(JSON.stringify(intent),before);
  const code=readFileSync("lib/billing.ts","utf8");
  assert.match(code,/onPlatform\("POST", "\/subscriptions", body, \{idempotencyKey:armed.idempotencyKey, version: "2025-09-30.clover"\}\)/);
  assert.ok(code.indexOf("const body = fundedRestartRequestBody(intent,priceId)")<code.indexOf("const armed = await armRestartSubmission"));

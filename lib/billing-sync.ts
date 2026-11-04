@@ -142,7 +142,9 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
   if (subscription.status !== "canceled" && subscription.status !== "incomplete_expired" && (!store || (store.planEndedAt && ownedBy(store, subscription)))) {
     const customer = subscription.customer;
     const customerId = typeof customer === "string" ? customer : typeof (customer as { id?: unknown } | null)?.id === "string" ? String((customer as { id: string }).id) : "";
-    if ((await refusePlanIfClosing({ store, handle, subscriptionId: id, customerId })) !== "no") return;
+    if ((await refusePlanIfClosing({ store, handle, subscriptionId: id, customerId,
+      ...(meta && Object.hasOwn(meta, "store_id") ? { storeId: meta.store_id } : {}),
+    })) !== "no") return;
   }
   if (!store) return;
 

@@ -187,6 +187,28 @@ test("an opening at a store that sells calls takes the moves up front, and nothi
   assert.equal(meter.taken, upFront + 1);
 });
 
+test("the opening's other reads wait for the bookings' count and use what the moves left, never asking the store meanwhile", async () => {
+  const { store, product } = await callStore(true);
+  sessions = bookings(product, 2);
+  const meter = new OrdersMeter(store);
+  const upFront = Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS);
+  // Started together, as the page does: purchases' reads asked for while the bookings are still being read.
+  const left = upFront * ORDERS_UNIT_COMMANDS - (2 + ORDERS_LISTING_COMMANDS + 2 * ORDERS_ROOM_COMMANDS);
+  const [calls] = await Promise.all([callsFor(store, BUYER, meter), meter.take(left - 100), meter.take(100)]);
+  assert.equal(calls.length, 2);
+  assert.equal(meter.taken, upFront, "paid from what the moves left, not from new requests");
+});
+
+test("a read that uses more than the most taken before it pays the rest before anything after it", async () => {
+  const { store } = await callStore();
+  const meter = new OrdersMeter(store);
+  const read = await meter.takeFor(ORDERS_UNIT_COMMANDS, async () => 3 * ORDERS_UNIT_COMMANDS, (n) => n);
+  assert.equal(read, 3 * ORDERS_UNIT_COMMANDS);
+  assert.equal(meter.taken, 3);
+  await meter.take(1);
+  assert.equal(meter.taken, 4);
+});
+
 test("a meter the store has no room for reads none of the bookings, not even their moves", async () => {
   const { store, product } = await callStore();
   sessions = bookings(product, MAX_LISTED);

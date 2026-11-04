@@ -132,11 +132,23 @@ export class OrdersMeter {
   stop(): void {
     this.ended ??= "late";
   }
-  /** Commands taken for reads that turned out fewer: kept for this opening's next reads, never handed back to the store. */
-  giveBack(commands: number): void {
-    if (commands > 0) this.queue = this.queue.then(() => {
-      this.left += commands;
+  /**
+   * Takes the most a read can use before it is made, and holds every later
+   * take until it says how many it used: what it did not use pays for those,
+   * so none asks the store for more while the rest is still unknown. More than
+   * the most is taken before it is used; less is kept for this opening only.
+   */
+  takeFor<T>(most: number, read: () => Promise<T>, used: (value: T) => number): Promise<T> {
+    const done = this.queue.then(async () => {
+      await this.takeNow(most);
+      const value = await read();
+      const n = used(value);
+      if (n > most) await this.takeNow(n - most);
+      else this.left += most - n;
+      return value;
     });
+    this.queue = done.then(() => {}, () => {});
+    return done;
   }
   private async takeNow(commands: number): Promise<void> {
     this.alive();
@@ -348,10 +360,8 @@ export async function callsFor(store: Store, email: string, meter?: OrdersMeter)
   // hold is read inside lib/calls.ts with the pages, before their number can be known here, so the most it can be,
   // ORDERS_CALL_MOVES, is taken first; what those moves did not use is given back to the same opening's meter, which pays
   // this buyer's listings, rooms, feeds and keys from it. (Until lib/calls.ts says how many it is about to read.)
-  await meter?.take(ORDERS_CALL_MOVES);
-  const paid = await paidCalls(store);
-  if (paid.length > ORDERS_CALL_MOVES) await meter?.take(paid.length - ORDERS_CALL_MOVES);
-  else meter?.giveBack(ORDERS_CALL_MOVES - paid.length);
+  // The other reads of the same opening wait for that number and use what is left, so they never ask the store meanwhile.
+  const paid = meter ? await meter.takeFor(ORDERS_CALL_MOVES, () => paidCalls(store), (calls) => calls.length) : await paidCalls(store);
   const mine = paid
     .filter((call) => call.email !== null && normaliseEmail(call.email) === who && call.end > now)
     .sort((a, b) => a.start - b.start)

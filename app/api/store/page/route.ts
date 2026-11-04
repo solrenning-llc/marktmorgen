@@ -5,7 +5,8 @@ import { StoreFullError, imageFolder, isFree, setProductPage } from "@/lib/store
 import { productIdFor, readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { EMPTY_PAGE, MAX_BLOCKS, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { claimPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
@@ -76,6 +77,8 @@ export async function POST(request: NextRequest) {
     const stored = store.statsId && product.page ? await readPage(store.statsId, id) : null;
     const before = stored ? picturePaths(stored) : [];
     const shown = picturePaths(page);
+    // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
+    if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
     const fresh = shown.filter((path) => !before.includes(path));
     if (fresh.length > 0) {
       if (!store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });

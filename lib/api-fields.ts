@@ -39,11 +39,23 @@ export function pickFields(body: unknown, fields: string[] | null): { ok: true; 
   return { ok: true, body: { ...body, data: Array.isArray(body.data) ? body.data.map(keep) : keep(body.data) } };
 }
 
+/**
+ * The 400 for a `?fields=` that cannot be read, or null when it can (or none
+ * was sent). A reading that takes more than its request checks this before it
+ * takes or reads anything, so a mistyped field costs only the request.
+ */
+export function badFields(request: Request): Response | null {
+  const asked = fieldsAsked(request.url);
+  if (asked.ok) return null;
+  return apiError(400, "fields", asked.bad ? `“${asked.bad}” cannot be a field name. Use letters, digits and underscores, at most ${MAX_FIELDS_ASKED} fields.` : "Name at least one field, separated by commas.");
+}
+
 /** apiOk with `?fields=` applied, or the 400 that names the field. */
 export function apiOkFields(request: Request, body: unknown): Response {
+  const bad = badFields(request);
+  if (bad) return bad;
   const asked = fieldsAsked(request.url);
-  if (!asked.ok) return apiError(400, "fields", asked.bad ? `“${asked.bad}” cannot be a field name. Use letters, digits and underscores, at most ${MAX_FIELDS_ASKED} fields.` : "Name at least one field, separated by commas.");
-  const picked = pickFields(body, asked.fields);
+  const picked = pickFields(body, asked.ok ? asked.fields : null);
   if (!picked.ok) return apiError(400, "unknown_field", `No item in this answer has a field named “${picked.unknown}”.`);
   return apiOk(picked.body);
 }

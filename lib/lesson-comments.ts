@@ -253,23 +253,21 @@ export async function dropLessonComments(courseId: string, lessonIds: string[], 
  * then each lesson's comments; ARGV: the student's key, then each lesson's
  * id in the same order. Answers how many comments went.
  */
-export const FORGET_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-forget:v2
+export const FORGET_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-forget:v1
 local who = ARGV[1]
 local lessons = {}
 for i = 5, #KEYS do lessons[ARGV[i - 3]] = KEYS[i] end
 local flat = redis.call("HGETALL", KEYS[1])
 local all = {}
-local flat_raw = {}
 local tops = {}
 for i = 1, #flat, 2 do
   local ok, c = pcall(cjson.decode, flat[i + 1])
   if ok and type(c) == "table" then
     all[flat[i]] = c
-    flat_raw[flat[i]] = flat[i + 1]
     if c.b == who and (c.r == nil or c.r == cjson.null) then tops[flat[i]] = true end
   end
 end
-local gone = {}
+local gone = 0
 for id, c in pairs(all) do
   local parent = c.r
   if parent == cjson.null then parent = nil end
@@ -279,31 +277,17 @@ for id, c in pairs(all) do
     redis.call("HDEL", KEYS[3], id)
     if lessons[c.l] then redis.call("ZREM", lessons[c.l], id) end
     if parent ~= nil and not tops[parent] and all[parent] then redis.call("HINCRBY", KEYS[3], parent, -1) end
-    table.insert(gone, flat_raw[id])
+    gone = gone + 1
   end
 end
-local name = redis.call("HGET", KEYS[4], who)
 redis.call("HDEL", KEYS[4], who)
-return {name or "", gone}`;
+return gone`;
 
-/**
- * Deletes one student's comments in a course (and the answers under their
- * own comments) and the name they chose (lib/person-erasure.ts). `who` is
- * lib/learn.ts emailKey. What they took goes back to `room` as the other
- * deletions here give it back: each comment at commentBytes, and the name
- * kept once (a name typed again was charged again; that part is not known,
- * so it stays counted, never less than kept).
- */
-export async function forgetLessonCommentsPerson(courseId: string, lessonIds: string[], who: string, room?: DataStore): Promise<number> {
+/** Deletes one student's comments in a course and the name they chose (lib/person-erasure.ts). `who` is lib/learn.ts emailKey. */
+export async function forgetLessonCommentsPerson(courseId: string, lessonIds: string[], who: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [reply] = await redisPipeline([
+  const [gone] = await redisPipeline([
     ["EVAL", FORGET_LESSON_COMMENTS, 4 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), namesKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), who, ...lessonIds],
   ]);
-  const [name, raws] = Array.isArray(reply) ? reply : ["", []];
-  const gone = Array.isArray(raws) ? raws : [];
-  if (room) {
-    const freed = commentsFrom(gone).reduce((sum, c) => sum + commentBytes(c), 0) + (typeof name === "string" && name ? dataBytes([who, name], 1) : 0);
-    if (freed > 0) await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);
-  }
-  return gone.length;
+  return Number(gone) || 0;
 }

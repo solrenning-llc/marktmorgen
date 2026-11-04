@@ -144,7 +144,7 @@ export const ERASERS: Eraser[] = [
     module: "lib/lesson-comments.ts",
     run: async (s) => {
       let records = 0;
-      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner, s.store);
+      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner);
       return records;
     },
   },

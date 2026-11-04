@@ -49,7 +49,9 @@ export default async function StudioDealsPage({ searchParams }: Params) {
   const viewOnly = seen.filter((p) => p.access === "view").map((p) => p.id);
   const hidden = inventory.pipelines.length - seen.length;
   const fields = loadedFields ?? [];
-  const available = inventory.available && loadedFields !== null && team !== null && shown.pipelines.length > 0;
+  // Someone who sees none of the pipelines still gets the board, which then offers only what the server lets them
+  // do (add a pipeline of their own, change the fields) and says "You have no pipelines to see in this store.".
+  const available = inventory.available && loadedFields !== null && team !== null && (shown.pipelines.length > 0 || restricted);
   const assignees = [store.email, ...(team?.members ?? []).filter(m => can(m.role, "orders")).map(m => m.email)];
   const today = new Date().toISOString().slice(0, 10);
 
@@ -74,7 +76,7 @@ export default async function StudioDealsPage({ searchParams }: Params) {
             .
           </p>
           <div className="mt-8">
-            {restricted && access === null ? <p className="notice notice-warn">Your access to this store&apos;s pipelines could not be read just now, so none is shown. Reload the page in a moment, or ask the store&apos;s owner.</p> : inventory.available && access !== null && shown.pipelines.length === 0 ? <p className="notice notice-info">You have no pipelines to see in this store. Ask the store&apos;s owner if you should.</p> : available ? <DealsBoard key={(store.sid || store.handle) + ":" + dealActionFilter(query.followup)} deals={shown.deals} stages={shown.stages} pipelines={shown.pipelines} pipelineMax={Math.max(0, pipelineLimit(store) - hidden)} viewOnly={viewOnly} someHidden={restricted} fields={fields} currency={store.currency} assignees={assignees} today={today} initialFilter={dealActionFilter(query.followup)} requestHref={can(view.role, "send") ? studioPath(store, "", "requests") : undefined} /> : <DealsUnavailable storeId={store.sid} buyersHref={studioPath(store, "", "people")} fields={fields} followup={dealActionFilter(query.followup)} />}
+            {restricted && access === null ? <p className="notice notice-warn">Your access to this store&apos;s pipelines could not be read just now, so none is shown. Reload the page in a moment, or ask the store&apos;s owner.</p> : available ? <DealsBoard key={(store.sid || store.handle) + ":" + dealActionFilter(query.followup)} deals={shown.deals} stages={shown.stages} pipelines={shown.pipelines} pipelineMax={Math.max(0, pipelineLimit(store) - hidden)} viewOnly={viewOnly} someHidden={restricted} fields={fields} currency={store.currency} assignees={assignees} today={today} initialFilter={dealActionFilter(query.followup)} requestHref={can(view.role, "send") ? studioPath(store, "", "requests") : undefined} /> : <DealsUnavailable storeId={store.sid} buyersHref={studioPath(store, "", "people")} fields={fields} followup={dealActionFilter(query.followup)} />}
           </div>
         </main>
       </StudioStorePin>

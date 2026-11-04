@@ -8,7 +8,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CrmDealConflict, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dropDeal, readDeal, readDealRecord, readFields, readPipelines, readStages, setValue, writeDeal, writeFields, writeStages } from "@/lib/crm";
+import { CrmDealConflict, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dropDeal, readDealRecord, readFields, readPipelines, readStages, setValue, writeDeal, writeFields, writeStages } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -38,7 +38,9 @@ export async function POST(request: NextRequest) {
     const statsId = store.statsId;
     // Which pipelines this person may change (639 [GL7](7)): the owner and Admins every one, a teammate as the store set.
     const restricted = guarded.role !== "owner" && guarded.role !== "admin";
-    const access = restricted ? await readPipelineAccess(statsId, guarded.email) : {};
+    // A record that could not be read is a known refusal (crm_schema_read_unavailable): nothing was written, so
+    // the board is never told a change may already have happened.
+    const access = restricted ? await readPipelineAccess(statsId, guarded.email).catch(() => { throw new CrmSchemaReadUnavailable(); }) : {};
     const mayEdit = (pipelineId: string | null) => pipelineId !== null && accessOf(guarded.role, access, pipelineId) === "edit";
     const noAccess = () => Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
 
@@ -130,12 +132,15 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "undeal") {
       const id = typeof body.id === "string" ? body.id : "";
+      let expected: string | undefined;
       if (restricted) {
-        const existing = DEAL_ID.test(id) ? await readDeal(statsId, id, stages) : null;
-        // A deal that cannot be read (or is not there) is never removed by someone whose access is limited.
-        if (!existing || !mayEdit(pipelineOfStage(await readPipelines(statsId), existing.stage))) return noAccess();
+        const read = DEAL_ID.test(id) ? await readDealRecord(statsId, id, stages) : null;
+        // A deal that cannot be read (or is not there) is never removed by someone whose access is limited, and
+        // one changed since this check (moved where they may not change it) is not removed either (deal_conflict).
+        if (!read || !mayEdit(pipelineOfStage(await readPipelines(statsId), read.deal.stage))) return noAccess();
+        expected = read.raw;
       }
-      return (await dropDeal(statsId, id, store)) ? Response.json({ ok: true }) : refuse("unknown", 404);
+      return (await dropDeal(statsId, id, store, expected)) ? Response.json({ ok: true }) : restricted ? noAccess() : refuse("unknown", 404);
     }
     return refuse("invalid");
   } catch (error) {

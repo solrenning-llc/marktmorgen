@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { CrmSchemaReadUnavailable, readPipelinesExact } from "@/lib/crm";
 import { normaliseEmail } from "@/lib/auth";
-import { CRM_ID } from "@/lib/crm-rules";
+import { CRM_ID, pipelineNames } from "@/lib/crm-rules";
 import { PipelineAccessBusyError, PipelineAccessChangedError, setPipelineChoices } from "@/lib/pipeline-access";
 import { type AccessMap, type PipelineAccess, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { StoreFullError } from "@/lib/store";
@@ -71,7 +71,9 @@ export async function POST(request: NextRequest) {
       const named = [...asked.keys()].map((id) => pipelines.find((p) => p.id === id));
       if (named.some((p) => !p)) return { ok: false as const, refused: refusal("unknown", "That pipeline is no longer there. Reload the page.", 404) };
       const choices: Record<string, PipelineAccess> = Object.fromEntries(asked);
-      return { ok: true as const, named: named as { id: string; name: string }[], ...(await setPipelineChoices(statsId, email, pipelines.map((p) => p.id), choices, store, was)) };
+      // Each named as the team page shows it, so two pipelines that share a name are told apart in the log too.
+      const names = pipelineNames(pipelines);
+      return { ok: true as const, named: (named as { id: string; name: string }[]).map((p) => ({ id: p.id, name: names.get(p.id) ?? p.name })), ...(await setPipelineChoices(statsId, email, pipelines.map((p) => p.id), choices, store, was)) };
     });
     if (!done.ok) return done.refused;
     const { named, before, saved } = done;

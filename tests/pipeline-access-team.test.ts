@@ -75,7 +75,8 @@ async function main(): Promise<void> {
   const both = await Promise.all([post(owner, { email: "sam@example.com", pipeline: "sales0", access: "view" }), post(owner, { email: "sam@example.com", pipeline: "wkshp1", access: "none" })]);
   const kept = await readPipelineAccess(store.statsId, "sam@example.com");
   const applied = both.filter((r) => r.status === 200).map((r) => r.body.access);
-  is("never write over each other: what is kept is exactly what the last save that went through said", JSON.stringify(kept), JSON.stringify(applied[applied.length - 1]));
+  // Whichever went through last kept the other's choice: both, when both went through (in whatever order they ran).
+  is("never write over each other: what is kept is exactly what the last save that went through said", applied.length === 2 ? JSON.stringify(kept) === JSON.stringify({ sales0: "view", wkshp1: "none" }) : JSON.stringify(kept) === JSON.stringify(applied[0]), true);
   is("one that cannot go through says so and writes nothing", both.filter((r) => r.status !== 200).every((r) => r.status === 409 && r.body.error === "busy" && r.body.message === "Someone else is changing this person's access right now. Try again in a moment."), true);
   await redis.pipeline([["SET", `nl:crm:pacc:lock:${store.statsId}:sam@example.com`, "someone", "EX", 10]]);
   const held = await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "none" });

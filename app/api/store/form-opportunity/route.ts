@@ -22,15 +22,18 @@ export async function POST(request: NextRequest) {
   if (typeof body.form !== "string" || !FORM_ID.test(body.form) || typeof body.responseRef !== "string" || !/^[a-f0-9]{64}$/.test(body.responseRef)) return refuse("invalid");
   try {
     const stages = await readStages(store.statsId);
+    const restricted = guarded.role !== "owner" && guarded.role !== "admin";
+    // A deal already made from this response is shown only to someone who may see its pipeline (639 [GL7](7)),
+    // whether it was there before (read here) or made by someone else a moment ago (createFormOpportunity).
+    const hidden = async (stage: string) => {
+      if (!restricted) return false;
+      const pipeline = pipelineOfStage(await readPipelines(store.statsId), stage);
+      return pipeline === null || accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) === "none";
+    };
+    const noAccess = () => Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
     const existing = await readFormOpportunity(store.statsId, body.responseRef, stages);
     if (existing) {
-      // A deal already made from this response is shown only to someone who may see its pipeline (639 [GL7](7)).
-      if (guarded.role !== "owner" && guarded.role !== "admin") {
-        const pipeline = pipelineOfStage(await readPipelines(store.statsId), existing.stage);
-        if (pipeline === null || accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) === "none") {
-          return Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
-        }
-      }
+      if (await hidden(existing.stage)) return noAccess();
       return Response.json({ ok: true, state: "existing", deal: existing });
     }
     const form = await readForm(store.statsId, body.form);
@@ -61,6 +64,7 @@ export async function POST(request: NextRequest) {
     if (!deal) return refuse("invalid");
     const result = await createFormOpportunity(store.statsId, body.responseRef, deal, stages, store);
     if (result.state === "full") return refuse("full");
+    if (result.state === "existing" && (await hidden(result.deal.stage))) return noAccess();
     return Response.json({ ok: true, state: result.state, deal: result.deal });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full", message: error.message }, { status: 409 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { pipelineNames } from "@/lib/crm-rules";
 import type { AccessMap, PipelineAccess } from "@/lib/pipeline-access-rules";
 
 type Member = { email: string; role: "editor" | "support" };
@@ -29,6 +30,9 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
   const [draft, setDraft] = useState<Record<string, Record<string, PipelineAccess>>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [said, setSaid] = useState<Record<string, { kind: "status" | "error"; text: string }>>({});
+  // Two pipelines may share a name: each choice reads as the board shows it, "Sales" and "Sales (2)".
+  const names = pipelineNames(pipelines);
+  const nameOf = (p: { id: string; name: string }) => names.get(p.id) ?? p.name;
 
   const chosen = (email: string, pipelineId: string): PipelineAccess => draft[email]?.[pipelineId] ?? currentOf(access[email], pipelineId);
   const changed = (email: string) => pipelines.some((p) => chosen(email, p.id) !== currentOf(access[email], p.id));
@@ -55,7 +59,7 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
         setAccess((all) => ({ ...all, [email]: kept }));
         setDraft((all) => ({ ...all, [email]: {} }));
         // Said from what was kept, never from what was asked.
-        setSaid((all) => ({ ...all, [email]: { kind: "status", text: `Saved. ${pipelines.map((p) => `${p.name}: ${WORDS[currentOf(kept, p.id)].toLowerCase()}`).join("; ")}.` } }));
+        setSaid((all) => ({ ...all, [email]: { kind: "status", text: `Saved. ${pipelines.map((p) => `${nameOf(p)}: ${WORDS[currentOf(kept, p.id)].toLowerCase()}`).join("; ")}.` } }));
       } else {
         setSaid((all) => ({ ...all, [email]: { kind: "error", text: answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need, then save again." : "That did not save. Try again in a moment.") } }));
       }
@@ -83,7 +87,7 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
                   <div className="mt-2 grid gap-3 sm:grid-cols-2">
                     {pipelines.map((pipeline) => (
                       <label key={pipeline.id} className="block min-w-0 text-sm">
-                        <span className="field-label [overflow-wrap:anywhere]">{pipeline.name}</span>
+                        <span className="field-label [overflow-wrap:anywhere]">{nameOf(pipeline)}</span>
                         <select
                           className="field mt-1"
                           value={chosen(member.email, pipeline.id)}

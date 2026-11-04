@@ -203,6 +203,82 @@ async function main(): Promise<void> {
   redis.pipeline = real;
   is("a room that cannot be counted refuses the copy, and nothing is written uncounted", [refused, (await redisPipeline([["HGET", `nl:crm:pacc:${statsId}`, "uli@example.com"]]))[0]], [true, null]);
 
+  part("Round 5: two pipelines with one name");
+  // From above: Coaching (coach1, the owner's) and Sam's "coaching" (sams01) share a name.
+  const kept = (await readPipelines(statsId)).find((p) => p.id === "coach1")!;
+  const stagesKept = await crm(owner, { action: "pipeline", pipeline: { ...kept, stages: [...kept.stages, { id: "cmid01", name: "Talking", kind: "open" }] }, moves: {} });
+  is("the owner still changes either one's stages, its name kept", stagesKept.status, 200);
+  await pacc({ email: "sam@example.com", choices: { coach1: "view", sams01: "edit" } });
+  is("the team's log tells them apart", (await readLog(store.sid))[0]?.what, "Set sam@example.com's pipeline access. Coaching: can only see (was no access)");
+  await pacc({ email: "sam@example.com", choices: { coach1: "view", sams01: "none" } });
+  is("and names the later one with its number", (await readLog(store.sid))[0]?.what, "Set sam@example.com's pipeline access. coaching (2): no access (was can change)");
+
+  part("Round 5: an access record that cannot be read is a known refusal");
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:crm:pacc:"))) throw new Error("down");
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const unreadAccess = await crm("sam@example.com", { action: "deal", deal: { title: "T", email: "", cents: 1, stage: "wnew01", note: "" } });
+  redis.pipeline = real;
+  is("nothing was written, and the board is told so, never that it may have happened", [unreadAccess.status, unreadAccess.body.error], [503, "crm_schema_read_unavailable"]);
+
+  part("Round 5: a removal checked against one deal never removes a changed one");
+  await writePipelineAccess(statsId, "sam@example.com", { coach1: "none" }, store);
+  const doomed = (await crm(owner, { action: "deal", deal: { title: "Doomed", email: "", cents: 1, stage: "wnew01", note: "" } })).body.deal!.id;
+  const hiddenNow = JSON.stringify({ ...JSON.parse(String((await redisPipeline([["HGET", dealsKey, doomed]]))[0])), stage: "cnew01" });
+  let movedFirst = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The owner moves it into Coaching, which Sam may not see, between Sam's check and the removal.
+    if (!movedFirst && commands.some((c) => (c[0] === "HDEL" && c[1] === dealsKey) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-deal-drop:")))) {
+      movedFirst = true;
+      await real([["HSET", dealsKey, doomed, hiddenNow]]);
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const removal = await crm("sam@example.com", { action: "undeal", id: doomed });
+  redis.pipeline = real;
+  is("refused as changed meanwhile, and the deal is still there", [removal.status, removal.body.error, (await redisPipeline([["HGET", dealsKey, doomed]]))[0] === hiddenNow], [409, "deal_conflict", true]);
+  is("a removal of a deal they may change, with nothing in between, still works", [(await crm("sam@example.com", { action: "undeal", id: (await crm(owner, { action: "deal", deal: { title: "Gone", email: "", cents: 1, stage: "wnew01", note: "" } })).body.deal!.id })).status], [200]);
+
+  part("Round 5: a refused save keeps the room it took when what is saved cannot be read");
+  const slotOf = async (id: string) => (await redisPipeline([["HGET", dataKey(store)!, `dl:${id}`]]))[0];
+  const contested = (await crm(owner, { action: "deal", deal: { title: "Contested", email: "", cents: 1, stage: "wnew01", note: "" } })).body.deal!.id;
+  const changedBy = JSON.stringify({ ...JSON.parse(String((await redisPipeline([["HGET", dealsKey, contested]]))[0])), title: "Changed by someone else" });
+  let phase = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (phase === 0 && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-deal-") && c[4] === contested)) {
+      phase = 1;
+      await real([["HSET", dealsKey, contested, changedBy]]);
+      return real(commands);
+    }
+    if (phase === 1 && commands.some((c) => c[0] === "HGET" && c[1] === dealsKey && c[2] === contested)) throw new Error("down");
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const lost = await crm("sam@example.com", { action: "deal", deal: { id: contested, title: "A much longer title written by Sam", email: "", cents: 1, stage: "wnew01", note: "" } });
+  redis.pipeline = real;
+  is("refused as changed meanwhile, and the room is never set to nothing", [lost.status, Number(await slotOf(contested)) > 0], [409, true]);
+
+  part("Round 5: a full room's count that cannot be made refuses the copy");
+  await redisPipeline([["HSET", `nl:crm:pacc:${statsId}`, "una@example.com", JSON.stringify({ coach1: "none" })], ["HDEL", `nl:crm:pacc:${statsId}`, "uli@example.com"]]);
+  let counts = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:"))) {
+      counts += 1;
+      // The room is full at first; the forced count then cannot be made.
+      if (counts === 1) return [[0, 999_999_999]];
+      throw new Error("data room unavailable");
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  let forcedRefused = false;
+  await copyPipelineAccess(store, "una@example.com", "uli@example.com").catch(() => { forcedRefused = true; });
+  redis.pipeline = real;
+  is("nothing is written uncounted", [forcedRefused, (await redisPipeline([["HGET", `nl:crm:pacc:${statsId}`, "uli@example.com"]]))[0]], [true, null]);
+
+  part("Round 5: a form response made into a deal a moment ago by someone else");
+  const formRoute = readFileSync("app/api/store/form-opportunity/route.ts", "utf8");
+  is("is shown only to someone who may see its pipeline, as one made before", formRoute.includes('if (result.state === "existing" && (await hidden(result.deal.stage))) return noAccess();'), true);
+
   done();
 }
 

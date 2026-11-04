@@ -68,6 +68,10 @@ def main():
     if not move_match or "${" in move_match.group(1):
         raise RuntimeError("Expected one static CRM migration script")
     move_script = move_match.group(1)
+    drop_match = re.search(r"export const DROP_CRM_DEAL = `([^`]+)`;", crm_source)
+    if not drop_match or "${" in drop_match.group(1):
+        raise RuntimeError("Expected one static CRM removal script")
+    drop_script = drop_match.group(1)
     form_source = (root / "lib/form-store.ts").read_text(encoding="utf-8")
     form_match = re.search(r"export const SAVE_FORM = `([^`]+)`;", form_source)
     if not form_match or "${" in form_match.group(1):
@@ -163,6 +167,13 @@ def main():
         assert redis.command("HGET", keys[4], "edited") == "latest-moved"
         assert redis.command("HLEN", keys[4]) == 1
         print("PASS: stale stage migration preserves edits and a fresh retry moves them")
+        redis.command("HSET", keys[4], "dropped", "checked")
+        assert redis.command("EVAL", drop_script, 1, keys[4], "absent", "checked") == 0
+        assert redis.command("EVAL", drop_script, 1, keys[4], "dropped", "stale") == -1
+        assert redis.command("HGET", keys[4], "dropped") == "checked"
+        assert redis.command("EVAL", drop_script, 1, keys[4], "dropped", "checked") == 1
+        assert redis.command("HEXISTS", keys[4], "dropped") == 0
+        print("PASS: a removal checked against one record never removes a changed one")
         near_form_cap = []
         for index in range(form_cap - 1):
             near_form_cap.extend(["existing-" + str(index), "existing"])

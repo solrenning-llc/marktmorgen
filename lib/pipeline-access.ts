@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { type AccessMap, type PipelineAccess, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { DataRoomError, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, forceData, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const accessKey = (statsId: string) => `nl:crm:pacc:${statsId}`;
@@ -123,7 +123,7 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
   }
   // A record moved, not a new one. Its room is taken BEFORE it is written, so a write that lands is never left
   // uncounted; a full data room still never leaves a teammate off the store when they change their sign-in (it
-  // is then counted as it is, noteData never refusing), but a room that cannot be counted refuses the copy, and
+  // is then counted as it is, forceData never refusing), but a room that cannot be counted refuses the copy, and
   // the caller keeps the membership on the old address. A field the new address already had (read under the
   // team's lock, as every write to it is) is written over, so only the difference is counted. A write that
   // cannot be confirmed keeps the room taken (too much counted, never too little) and throws; room is given
@@ -134,7 +134,8 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
       await needData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
     } catch (error) {
       if (!(error instanceof DataRoomError)) throw error;
-      await noteData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
+      // Full: counted all the same, and a count that cannot be made refuses the copy (forceData throws).
+      await forceData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
     }
   }
   const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]);

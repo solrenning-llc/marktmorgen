@@ -422,11 +422,41 @@ export const allStages = (pipelines: readonly Pipeline[]): Stage[] => pipelines.
 /** The pipeline a stage is in. */
 export const pipelineOf = (pipelines: readonly Pipeline[], stageId: string): Pipeline | undefined => pipelines.find((p) => p.stages.some((s) => s.id === stageId));
 
-/** A stage's name as a list of every stage shows it: with its pipeline's name once a store has more than one. */
+/**
+ * Each pipeline's name as the owner's screens show it (639 [GL7](7)): as
+ * saved, except that pipelines sharing a name (a teammate who could not see
+ * one may give theirs the same name) are told apart in the order they were
+ * made, "Sales", "Sales (2)", never two choices that read the same. Only
+ * the pipelines given are counted, so a teammate's screens, given only the
+ * ones they see, never hint at a hidden one.
+ */
+export function pipelineNames(pipelines: readonly Pick<Pipeline, "id" | "name">[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const taken = new Set(pipelines.map((p) => p.name.toLowerCase()));
+  const seen = new Set<string>();
+  for (const p of pipelines) {
+    const key = p.name.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.set(p.id, p.name);
+      continue;
+    }
+    let n = 2;
+    while (taken.has(`${key} (${n})`)) n += 1;
+    taken.add(`${key} (${n})`);
+    out.set(p.id, `${p.name} (${n})`);
+  }
+  return out;
+}
+
+/** True when two of these pipelines share a name, so the board can say why one reads "Sales (2)". */
+export const pipelinesShareName = (pipelines: readonly Pick<Pipeline, "name">[]): boolean => new Set(pipelines.map((p) => p.name.toLowerCase())).size < pipelines.length;
+
+/** A stage's name as a list of every stage shows it: with its pipeline's name (told apart, pipelineNames) once a store has more than one. */
 export function stageLabel(pipelines: readonly Pipeline[], stage: Pick<Stage, "id" | "name">): string {
   if (pipelines.length < 2) return stage.name;
   const pipeline = pipelineOf(pipelines, stage.id);
-  return pipeline ? `${pipeline.name}: ${stage.name}` : stage.name;
+  return pipeline ? `${pipelineNames(pipelines).get(pipeline.id) ?? pipeline.name}: ${stage.name}` : stage.name;
 }
 
 /** Every stage, named with its pipeline when there is more than one (for a form's or a workflow's choice of stage). */
@@ -488,7 +518,10 @@ export function changePipeline(
   const checked = parsePipelines(next, true);
   if (!checked) return { ok: false, error: "pipelines" };
   const named = saved;
-  if (named && checked.some((p) => p.id !== named.id && sees(p.id) && p.name.toLowerCase() === named.name.toLowerCase())) return { ok: false, error: "pipelines" };
+  // A name kept as it was (two pipelines may already share one) never refuses the rest of the change.
+  const before = named ? current.find((p) => p.id === named.id) : undefined;
+  const renamed = !before || before.name.toLowerCase() !== named!.name.toLowerCase();
+  if (named && renamed && checked.some((p) => p.id !== named.id && sees(p.id) && p.name.toLowerCase() === named.name.toLowerCase())) return { ok: false, error: "pipelines" };
   const kept = new Set(allStages(checked).map((s) => s.id));
   // One stage for every deal that has to move (a pipeline removed), or a stage for each stage removed.
   const asked = moves && typeof moves === "object" && !Array.isArray(moves) ? (moves as Record<string, unknown>) : {};

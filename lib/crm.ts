@@ -406,8 +406,14 @@ async function replaceDeal(statsId: string, deal: Deal, room: DataStore, expecte
   } catch { throw new CrmDealWriteUnconfirmed(); }
   if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 1 && saved[0] !== 0 && saved[0] !== -1)) throw new CrmDealWriteUnconfirmed();
   if (saved[0] === 1) return true;
-  // Nothing was written: the room is what the record now saved weighs.
-  const [now] = await redisPipeline([["HGET", dealsKey(statsId), deal.id]]).catch(() => [null]);
+  // Nothing was written: the room is what the record now saved weighs. When that cannot be read, the room taken
+  // is kept (too much counted, never too little).
+  let now: unknown;
+  try {
+    const reply = await redisPipeline([["HGET", dealsKey(statsId), deal.id]]);
+    if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) throw new Error("unreadable");
+    now = reply[0];
+  } catch { throw new CrmDealConflict(); }
   await giveData(room, [{ slot: dealSlot(deal.id), bytes: typeof now === "string" ? dataBytes([deal.id, now], 1) : 0, set: true }]);
   throw new CrmDealConflict();
 }
@@ -424,12 +430,26 @@ export async function readDealRecord(statsId: string, id: string, stages: readon
   return deal && typeof raw === "string" ? { deal, raw } : null;
 }
 
-export async function dropDeal(statsId: string, id: string, room: DataStore): Promise<boolean> {
+/** Removes a deal only while it is the exact record read when the removal was checked: 1 removed, 0 already gone, -1 changed meanwhile. */
+export const DROP_CRM_DEAL = `-- marktmorgen:crm-deal-drop:v1
+local current = redis.call("HGET", KEYS[1], ARGV[1])
+if not current then return 0 end
+if current ~= ARGV[2] then return -1 end
+redis.call("HDEL", KEYS[1], ARGV[1])
+return 1`;
+
+/**
+ * Removes a deal. With `expected` (the record read when the removal was
+ * checked, 639 [GL7](7)), one changed since, moved into a pipeline the
+ * person may not change for instance, is never removed: CrmDealConflict.
+ */
+export async function dropDeal(statsId: string, id: string, room: DataStore, expected?: string): Promise<boolean> {
   if (!DEAL_ID.test(id)) return false;
   let removed: unknown;
   try {
-    removed = await redisPipeline([["HDEL", dealsKey(statsId), id]]);
+    removed = await redisPipeline([expected === undefined ? ["HDEL", dealsKey(statsId), id] : ["EVAL", DROP_CRM_DEAL, 1, dealsKey(statsId), id, expected]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
+  if (Array.isArray(removed) && removed.length === 1 && removed[0] === -1 && expected !== undefined) throw new CrmDealConflict();
   if (!Array.isArray(removed) || removed.length !== 1 || (removed[0] !== 0 && removed[0] !== 1)) throw new CrmDealWriteUnconfirmed();
   if (removed[0] === 1) await giveData(room, [{ slot: dealSlot(id), bytes: 0, set: true }]);
   return removed[0] === 1;

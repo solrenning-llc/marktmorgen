@@ -8,7 +8,7 @@
  * only; the endpoint's name resolves to a private address, so nothing leaves
  * this machine.
  */
-import { DISPUTE_LOOKUPS_PER_STORE, STRIPE_LOOKUPS_PER_STORE, addEndpoint, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
+import { DISPUTE_LOOKUPS_PER_STORE, STRIPE_LOOKUPS_PER_STORE, STRIPE_WAIT_RUNS, addEndpoint, recentMessages, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -25,8 +25,11 @@ const intents: Record<string, Record<string, string>> = {};
 /** Payment intent to the invoice it paid, as GET /v1/invoice_payments answers. */
 const paidBy: Record<string, string> = {};
 const invoices: Record<string, Record<string, unknown>> = {};
-/** How many more times each path answers 500, or fails without an answer. */
-const failing: Record<string, { left: number; how: "500" | "network" }> = {};
+/** How many more times each path answers 500, fails without an answer, or is refused with another Stripe error. */
+type Failure = "500" | "network" | "403" | "400";
+const failing: Record<string, { left: number; how: Failure }> = {};
+/** A canceled member's customer record, as GET /v1/customers answers. */
+const customers: Record<string, string> = {};
 const asked: { path: string; version: string | null }[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -39,7 +42,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (fail && fail.left > 0) {
     fail.left -= 1;
     if (fail.how === "network") throw new TypeError("fetch failed");
-    return Response.json({ error: { message: "Something went wrong on Stripe's end." } }, { status: 500 });
+    if (fail.how === "403") return Response.json({ error: { type: "invalid_request_error", code: "account_invalid", message: "The account cannot be read." } }, { status: 403 });
+    if (fail.how === "400") return Response.json({ error: { type: "invalid_request_error", code: "parameter_unknown", message: "Received unknown parameter." } }, { status: 400 });
+    return Response.json({ error: { type: "api_error", message: "Something went wrong on Stripe's end." } }, { status: 500 });
   }
   if (url.pathname === "/v1/events") {
     const before = url.searchParams.get("ending_before");
@@ -58,7 +63,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const invoice = url.pathname.match(/^\/v1\/invoices\/(in_\w+)$/)?.[1];
   if (invoice && invoices[invoice]) return Response.json({ id: invoice, object: "invoice", ...invoices[invoice] });
-  return Response.json({ error: { message: "No such object" } }, { status: 404 });
+  const customer = url.pathname.match(/^\/v1\/customers\/(cus_\w+)$/)?.[1];
+  if (customer && customers[customer]) return Response.json({ id: customer, object: "customer", email: customers[customer] });
+  return Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such object" } }, { status: 404 });
 }) as typeof fetch;
 // The endpoint's name resolves to a private address: every try is refused before any socket opens.
 setSendHooksForTests({ fetch: { resolve: async () => [{ address: "127.0.0.1", family: 4 }] } });
@@ -80,6 +87,13 @@ const sentIds = async (store: Awaited<ReturnType<typeof setup>>, type: "dispute.
 const lookups = () => asked.filter((a) => a.path !== "/v1/events");
 let statsId = "";
 const anchor = async () => (await redis.pipeline([["GET", `nl:hooks:anchor:${statsId}`]]))[0];
+const waitRecord = async () => (await redis.pipeline([["GET", `nl:hooks:wait:${statsId}`]]))[0];
+const anchorTtl = async () => Number((await redis.pipeline([["TTL", `nl:hooks:anchor:${statsId}`]]))[0]);
+const cancel = (n: number) => evt(`evt_Cancel${n}`, "customer.subscription.updated", 1_790_070_000 + n, {
+  id: `sub_Cancel${n}`, object: "subscription", customer: `cus_Cancel${n}`, cancel_at_period_end: true, current_period_end: 1_792_000_000,
+  metadata: { store: HANDLE, product: "p_member" },
+});
+const cancelPrevious = { cancel_at_period_end: false };
 
 async function setup(listen: string[]) {
   redis.clear();
@@ -196,6 +210,76 @@ async function main() {
   ];
   await watchStripe(Date.now() + 10_000);
   is("a 404 is passed over, said in the log; the next one is sent", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), said.some((line) => line.includes("does not know"))], [["dp_next"], "evt_Next", true]);
+
+  part("Another 400 is not taken for a missing payment: it waits");
+  store = await setup(["dispute.opened"]);
+  timeline = [evt("evt_Bad400", "charge.dispute.created", 1_790_080_000, dispute("dp_bad400", "pi_Member"))];
+  failing["/v1/invoices/in_Member01"] = { left: 1, how: "400" };
+  await watchStripe(Date.now() + 10_000);
+  is("a 400 that is not resource_missing sends nothing and keeps no anchor past it", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [[], null, "evt_Bad400|1"]);
+  await watchStripe(Date.now() + 10_000);
+  is("and is sent once Stripe answers; the wait is let go", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_bad400"], "evt_Bad400", null]);
+
+  part("A lookup Stripe keeps refusing waits a bounded number of runs, then is passed over loudly");
+  store = await setup(["dispute.opened"]);
+  timeline = [
+    evt("evt_KBefore", "charge.dispute.created", 1_790_090_000, dispute("dp_kbefore", "pi_Once")),
+    evt("evt_Refused", "charge.dispute.created", 1_790_090_100, dispute("dp_refused", "pi_Member")),
+    evt("evt_KAfter", "charge.dispute.created", 1_790_090_200, dispute("dp_kafter", "pi_Once")),
+  ];
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "403" };
+  await watchStripe(Date.now() + 10_000);
+  is("the first run sends what came before and counts one run of waiting", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_kbefore"], "evt_KBefore", "evt_Refused|1"]);
+  // Two days go by: the anchor's expiry is renewed while it does not move (without it, 28 days would be left).
+  redis.advance(2 * 86400 * 1000);
+  await watchStripe(Date.now() + 10_000);
+  is("each run it waits is counted", await waitRecord(), "evt_Refused|2");
+  is("the anchor, not moving, is kept as long as Stripe keeps events", [await anchor(), (await anchorTtl()) > 29 * 86400], ["evt_KBefore", true]);
+  // Jump to the last run before the cap.
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Refused|${STRIPE_WAIT_RUNS - 1}`, "EX", 30 * 86400]]);
+  await watchStripe(Date.now() + 10_000);
+  is("still waiting at the last run before the cap", [await waitRecord(), await sentIds(store, "dispute.opened", "dispute")], [`evt_Refused|${STRIPE_WAIT_RUNS}`, ["dp_kbefore"]]);
+  said.length = 0;
+  asked.length = 0;
+  await watchStripe(Date.now() + 10_000);
+  is("past the cap it is passed over, asking Stripe nothing for it", lookups().map((a) => a.path), ["/v1/payment_intents/pi_Once"]);
+  is("said loudly in the log", said.some((line) => line.startsWith("WEBHOOK EVENT GIVEN UP") && line.includes("evt_Refused")), true);
+  is("what came after is sent, the anchor moves on and the wait is let go", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_kafter", "dp_kbefore"], "evt_KAfter", null]);
+  is("about a day of five-minute runs", STRIPE_WAIT_RUNS * 5 / 60, 24);
+
+  part("membership.canceled waits for the member's address instead of going out without it");
+  store = await setup(["membership.canceled"]);
+  timeline = Array.from({ length: STRIPE_LOOKUPS_PER_STORE + 1 }, (_, i) => {
+    customers[`cus_Cancel${i}`] = `member${i}@example.net`;
+    const e = cancel(i);
+    (e.data as Record<string, unknown>).previous_attributes = cancelPrevious;
+    return e;
+  });
+  const cancels = async () => (await recentMessages(store, "membership.canceled", 20)).map((m) => (m.data as { buyer: { email: string | null } }).buyer.email);
+  await watchStripe(Date.now() + 10_000);
+  is("past the budget the last one waits; none is sent without its address", [(await cancels()).length, (await cancels()).includes(null), await anchor()], [STRIPE_LOOKUPS_PER_STORE, false, `evt_Cancel${STRIPE_LOOKUPS_PER_STORE - 1}`]);
+  is("said in the log", said.some((line) => line.includes("cancellations to look up")), true);
+  await watchStripe(Date.now() + 10_000);
+  is("the next run sends it with the address and moves the anchor on", [(await cancels()).includes(`member${STRIPE_LOOKUPS_PER_STORE}@example.net`), await anchor()], [true, `evt_Cancel${STRIPE_LOOKUPS_PER_STORE}`]);
+  store = await setup(["membership.canceled"]);
+  timeline = [cancel(0)];
+  (timeline[0].data as Record<string, unknown>).previous_attributes = cancelPrevious;
+  failing["/v1/customers/cus_Cancel0"] = { left: 1, how: "500" };
+  await watchStripe(Date.now() + 10_000);
+  is("an address that failed to load waits too", [(await cancels()).length, await waitRecord()], [0, "evt_Cancel0|1"]);
+  await watchStripe(Date.now() + 10_000);
+  is("and goes out with it next run", await cancels(), ["member0@example.net"]);
+  store = await setup(["membership.canceled"]);
+  timeline = [cancel(99)];
+  (timeline[0].data as Record<string, unknown>).previous_attributes = cancelPrevious;
+  await watchStripe(Date.now() + 10_000);
+  is("a customer Stripe no longer has goes out without an address, not held", await cancels(), [null]);
+
+  part("Forgetting a store's webhooks forgets its wait too");
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, "evt_Any|3", "EX", 60]]);
+  const { forgetStoreWebhooks } = await import("@/lib/webhooks");
+  await forgetStoreWebhooks(statsId);
+  is("no wait record left", await waitRecord(), null);
 
   part("The call budget per run is the same as before");
   is("ten calls for refunds and addresses, ten for disputes", [STRIPE_LOOKUPS_PER_STORE, DISPUTE_LOOKUPS_PER_STORE], [10, 10]);

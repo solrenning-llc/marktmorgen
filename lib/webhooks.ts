@@ -62,6 +62,7 @@
  *   nl:hooks:log:<statsId>      the store's last deliveries, newest first
  *   nl:hooks:q                  deliveries waiting for a try, by when
  *   nl:hooks:anchor:<statsId>   the last Stripe event read for this store
+ *   nl:hooks:wait:<statsId>     the event its reading waits on, and for how many runs
  */
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
@@ -69,6 +70,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 // The repository's compare-and-set script (GET equals what was read, then SET), also modelled by lib/redis-memory.ts.
 import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
 import { StripeError, onAccount } from "@/lib/stripe-account";
+import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
 import { type Store, storeForHandle, saleHandles } from "@/lib/store";
@@ -114,6 +116,14 @@ const MAX_EVENT_PAGES = 3;
 const FIRST_RUN_PAGES = 10;
 /** Deliveries retried in one run of the job, at most. */
 const MAX_RETRIES_PER_RUN = 100;
+/**
+ * Runs of the five-minute job one Stripe event may wait on a lookup that
+ * fails, about a day, before it is passed over with a loud log, so one event
+ * Stripe keeps refusing never holds a store's later events past the thirty
+ * days Stripe keeps them.
+ */
+export const STRIPE_WAIT_RUNS = 288;
+const ANCHOR_SECONDS = 30 * 86400;
 
 const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
@@ -161,6 +171,8 @@ const deliveryKey = (id: string) => `nl:hooks:d:${id}`;
 const logKey = (statsId: string) => `nl:hooks:log:${statsId}`;
 export const QUEUE_KEY = "nl:hooks:q";
 const anchorKey = (statsId: string) => `nl:hooks:anchor:${statsId}`;
+/** The event a store's Stripe reading is waiting on, and for how many runs: "<evt>|<runs>". */
+const waitKey = (statsId: string) => `nl:hooks:wait:${statsId}`;
 const testsKey = (statsId: string) => `nl:rl:hooks:test:${statsId}`;
 const POSITION_KEY = "nl:hooks:pos";
 
@@ -640,7 +652,7 @@ export async function addEndpoint(store: Store, rawUrl: string, events: unknown,
   if (!written) return refused ?? { ok: false, reason: "unavailable", message: "The endpoint could not be added just now. Try again in a moment." };
   await redisPipeline([
     ["SADD", STORES_KEY, store.statsId],
-    ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)]]),
+    ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)], ["DEL", waitKey(store.statsId)]]),
   ]);
   return { ok: true, secret, view: await webhooksView(store) };
 }
@@ -869,13 +881,12 @@ export const DISPUTE_LOOKUPS_PER_STORE = 10;
 type Lookups = { left: number; disputes: number };
 
 /**
- * The API version the lookups below are read in, whatever the creator's
- * account defaults to: in it a payment names no invoice (Stripe moved that
- * to the invoice payments in 2025) and an invoice keeps its subscription's
- * metadata under `parent.subscription_details`. The same version
- * lib/affiliates.ts reads invoices in.
+ * The lookups below are read in one pinned API version (STRIPE_VERSION of
+ * lib/stripe-connect.ts), whatever the creator's account defaults to: in it
+ * a payment names no invoice (Stripe moved that to the invoice payments in
+ * 2025) and an invoice keeps its subscription's metadata under
+ * `parent.subscription_details`.
  */
-const LOOKUP_STRIPE_VERSION = "2026-08-26.dahlia";
 
 /** The metadata of the subscription an invoice is for, where either of Stripe's API versions keeps it (as lib/stats.ts reads it). */
 function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
@@ -888,15 +899,26 @@ function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
 
 class OutOfLookups extends Error {}
 
+/** Said once a run's budget is spent: the event waits for the next run, never silently. */
+function saySpent(store: Store, budget: keyof Lookups): void {
+  console.error(budget === "disputes"
+    ? "a store had more disputes in one run than are read; the rest wait for the next run"
+    : "a store had more refunds and cancellations to look up in one run than are read; the rest wait for the next run", store.handle);
+}
+
+/** Stripe's answer that the object asked for does not exist: asking again would not change it. */
+const isMissing = (error: unknown) => error instanceof StripeError && error.code === "resource_missing";
+
 /**
  * The metadata that tells whose a payment is: the payment's own, which a
  * one-off checkout writes (payment_intent_data); or, when it carries no
  * store, its subscription's, which a membership's or a payment plan's
  * checkout writes only there (subscription_data, lib/store-checkout.ts), read
  * off the invoice the payment paid. At most three calls, each taken from
- * the run's `budget`. {} when Stripe says there is no such payment (nothing
- * to send); null when it could not be told now: the budget is used up or a
- * call failed. The caller then leaves the event for the next run.
+ * the run's `budget`. {} when Stripe says there is no such payment or
+ * invoice (resource_missing: nothing to send); null when it could not be
+ * told now: the budget is used up or a call failed in any other way. The
+ * caller then leaves the event for the next run.
  */
 async function paymentMeta(store: Store, intent: string, lookups: Lookups, budget: keyof Lookups): Promise<Record<string, string> | null> {
   const account = store.stripeAccountId;
@@ -904,7 +926,7 @@ async function paymentMeta(store: Store, intent: string, lookups: Lookups, budge
   const get = async (path: string) => {
     if (lookups[budget] <= 0) throw new OutOfLookups();
     lookups[budget] -= 1;
-    return onAccount("GET", account, path, undefined, LOOKUP_STRIPE_VERSION);
+    return onAccount("GET", account, path, undefined, STRIPE_VERSION);
   };
   try {
     const payment = await get(`/payment_intents/${encodeURIComponent(intent)}`);
@@ -918,16 +940,16 @@ async function paymentMeta(store: Store, intent: string, lookups: Lookups, budge
     return invoiceMeta(await get(`/invoices/${encodeURIComponent(invoice)}`));
   } catch (error) {
     if (error instanceof OutOfLookups) {
-      console.error(budget === "disputes"
-        ? "a store had more disputes in one run than are read; the rest wait for the next run"
-        : "a store had more refunds to look up in one run than are read; the rest wait for the next run", store.handle);
+      saySpent(store, budget);
       return null;
     }
     // Stripe has no such payment or invoice: asking again would not change it.
-    if (error instanceof StripeError && (error.status === 400 || error.status === 404)) {
+    if (isMissing(error)) {
       console.error("a payment Stripe does not know could not be told whose it is; nothing is sent for it", store.handle, intent);
       return {};
     }
+    // Anything else (a refusal, a limit, a timeout, an answer in a shape not
+    // known) is tried again next run, a bounded number of runs (STRIPE_WAIT_RUNS).
     console.error("telling whose a payment is failed; it is read again next run", store.handle, intent, error);
     return null;
   }
@@ -1064,11 +1086,23 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups): P
     const details = (object.cancellation_details ?? {}) as { reason?: unknown };
     let email: string | null = null;
     const customer = str(object.customer);
-    if (customer && lookups.left > 0 && store.stripeAccountId) {
+    // The member's address, from the run's lookups: with none left, or a
+    // call that failed, the cancellation waits for the next run rather than
+    // going out without it (a membership.changed of the same update, already
+    // sent, is not sent twice). A customer Stripe no longer has has none.
+    if (customer && store.stripeAccountId) {
+      if (lookups.left <= 0) {
+        saySpent(store, "left");
+        return false;
+      }
       lookups.left -= 1;
       try {
         email = str((await onAccount("GET", store.stripeAccountId, `/customers/${encodeURIComponent(customer)}`)).email);
-      } catch {
+      } catch (error) {
+        if (!isMissing(error)) {
+          console.error("reading a canceled member's address failed; it is read again next run", store.handle, error);
+          return false;
+        }
         email = null;
       }
     }
@@ -1182,22 +1216,46 @@ function stripeEventPage(value: unknown): StripeEvent[] {
 async function watchStore(store: Store, statsId: string, config: Config): Promise<number> {
   const account = store.stripeAccountId as string;
   const types = STRIPE_TYPES.map((t, i) => `types[${i}]=${encodeURIComponent(t)}`).join("&");
-  const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
+  const [anchorRaw, waitRaw] = await redisPipeline([["GET", anchorKey(statsId)], ["GET", waitKey(statsId)]]);
   const anchor = typeof anchorRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(anchorRaw) ? anchorRaw : "";
+  const waitMatch = typeof waitRaw === "string" ? /^(evt_[A-Za-z0-9]+)\|(\d{1,6})$/.exec(waitRaw) : null;
+  const waiting = waitMatch ? { event: waitMatch[1], runs: Number(waitMatch[2]) } : null;
   const lookups: Lookups = { left: STRIPE_LOOKUPS_PER_STORE, disputes: DISPUTE_LOOKUPS_PER_STORE };
   let handled = 0;
   // The newest event done with: the anchor is moved only up to it, never
   // past an event that waits (fromStripe), so a lookup that failed or ran
   // out is read again next run and nothing is lost.
   let last = "";
+  // The event this run stopped at, if any.
+  let stuck = "";
   const send = async (rows: StripeEvent[]): Promise<boolean> => {
     // Stripe lists newest first; they are sent in the order they happened.
     for (const event of [...rows].reverse()) {
-      if (!(await fromStripe(store, event, lookups))) return false;
+      const id = str(event.id) ?? "";
+      if (waiting && id === waiting.event && waiting.runs >= STRIPE_WAIT_RUNS) {
+        console.error(`WEBHOOK EVENT GIVEN UP: a Stripe event waited ${waiting.runs} runs on a lookup that kept failing; it is passed over and not sent`, store.handle, id, event.type);
+      } else if (!(await fromStripe(store, event, lookups))) {
+        stuck = id;
+        return false;
+      }
       handled += 1;
-      last = str(event.id) ?? last;
+      last = id || last;
     }
     return true;
+  };
+  // What the run leaves for the next: a waiting event's count of runs, and
+  // the anchor kept as long as Stripe keeps events while it does not move
+  // (a moved one was just set with that expiry); a wait that is over is let go.
+  const settle = async () => {
+    if (stuck) {
+      const runs = waiting?.event === stuck ? waiting.runs + 1 : 1;
+      await redisPipeline([
+        ["SET", waitKey(statsId), `${stuck}|${runs}`, "EX", ANCHOR_SECONDS],
+        ...(anchor && !last ? [["EXPIRE", anchorKey(statsId), ANCHOR_SECONDS]] : []),
+      ]);
+    } else if (waiting) {
+      await redisPipeline([["DEL", waitKey(statsId)]]);
+    }
   };
 
   if (!anchor) {
@@ -1222,7 +1280,8 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
     }
     if (!pages.length) return 0;
     for (const rows of [...pages].reverse()) if (!(await send(rows))) break;
-    if (last) await redisPipeline([["SET", anchorKey(statsId), last, "EX", 30 * 86400]]);
+    if (last) await redisPipeline([["SET", anchorKey(statsId), last, "EX", ANCHOR_SECONDS]]);
+    await settle();
     return handled;
   }
 
@@ -1249,10 +1308,11 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
     const whole = await send(rows);
     if (last && last !== after) {
       after = last;
-      await redisPipeline([["SET", anchorKey(statsId), after, "EX", 30 * 86400]]);
+      await redisPipeline([["SET", anchorKey(statsId), after, "EX", ANCHOR_SECONDS]]);
     }
     if (!whole || list.has_more !== true) break;
   }
+  await settle();
   return handled;
 }
 
@@ -1315,6 +1375,7 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
     ["DEL", cfgKey(statsId)],
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],
+    ["DEL", waitKey(statsId)],
     ["DEL", logKey(statsId)],
     ...ids.flatMap((id) => [
       ["DEL", deliveryKey(id)],

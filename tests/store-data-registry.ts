@@ -878,6 +878,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hooks:pos@lib/webhooks.ts": company("Where the webhook job stopped", "One key, the company's job."),
   "nl:hooks:q@lib/webhooks.ts": company("Deliveries waiting for a try", "One sorted set, members gone within a week: each a webhook's."),
   "nl:hooks:stores@lib/webhooks.ts": company("Stores with any endpoint", "One set for every store."),
+  "nl:hooks:wait:@lib/webhooks.ts": { what: "The Stripe event the store's reading waits on, and for how many runs", parts: [capped(KEY, "One a store, for thirty days at most.")] },
   "nl:rl:hooks:test:@lib/webhooks.ts": short("Tests counted", "studio", 1, 128),
   "nl:wo:due@lib/welcome-offer-send.ts": company("Welcome offers due", "One sorted set for every store, each a sign-up's."),
   "nl:wo:n:@lib/welcome-offer-send.ts": short("Welcome offers counted", "day", 62, 128),

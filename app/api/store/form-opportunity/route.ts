@@ -3,7 +3,9 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { can } from "@/lib/team-roles";
 import { readForm, readResponses } from "@/lib/form-store";
 import { FORM_ID } from "@/lib/forms";
-import { readStages } from "@/lib/crm";
+import { readPipelines, readStages } from "@/lib/crm";
+import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage } from "@/lib/pipeline-access-rules";
+import { readPipelineAccess } from "@/lib/pipeline-access";
 import { MAX_DEAL_CENTS, MAX_DEAL_NOTE, MAX_DEAL_TITLE, parseDeal, readFollowUp } from "@/lib/crm-rules";
 import { readTeam } from "@/lib/team";
 import { StoreFullError } from "@/lib/store-full";
@@ -34,6 +36,13 @@ export async function POST(request: NextRequest) {
     const follow = readFollowUp(raw);
     if (!follow.ok) return refuse(follow.error);
     if (!stages.some(stage => stage.id === raw.stage && stage.kind === "open")) return refuse("stage");
+    // The pipeline the deal goes into must be theirs to change (639 [GL7](7)).
+    if (guarded.role !== "owner" && guarded.role !== "admin") {
+      const pipeline = pipelineOfStage(await readPipelines(store.statsId), String(raw.stage));
+      if (pipeline === null || accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) !== "edit") {
+        return Response.json({ ok: false, error: "pipeline_access", message: PIPELINE_ACCESS_REFUSAL }, { status: 403 });
+      }
+    }
     if (follow.value.assignee) {
       const team = await readTeam(store.sid);
       if (follow.value.assignee !== store.email && !team.members.some(member => member.email === follow.value.assignee && can(member.role, "orders"))) return refuse("assignee");

@@ -1,3 +1,5 @@
+import { BlobNotFoundError } from "@vercel/blob";
+
 /**
  * A file store in memory for tests/failure-cleanup-paths.test.ts: lib/blob (which lib/file-store reads) and the upload door's
  * SDK, so the real routes read, check and delete real (synthetic) files and the test reads what is left.
@@ -7,7 +9,8 @@ export const files = new Map<string, { bytes: Uint8Array; contentType: string; a
 export const deleted: string[] = [];
 
 function missing(pathname: string): Error {
-  return Object.assign(new Error(`not found: ${pathname}`), { name: "BlobNotFoundError" });
+  void pathname;
+  return new BlobNotFoundError();
 }
 
 // ---------------------------------------------------------------- lib/blob

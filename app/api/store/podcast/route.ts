@@ -66,10 +66,13 @@ export async function POST(request: NextRequest) {
       }
       const result = editPodcast(podcast, edit);
       if (!result.ok) {
-        // Nothing is deleted for a refusal: the browser names the file, and the product's folder also holds its
-        // episodes and its own file, so the name may be one of those. No door writes down which upload is new
-        // (the name gets a random ending only once it is stored), so a file left behind here stays, counted in
-        // the store's storage and the month's upload room it was signed under, never deleted from under a record.
+        // Nothing is deleted for a refusal, nor for an error thrown after the file was read (a full store, a file
+        // store that did not answer, a lock lost): the browser names the file, and the product's folder also holds
+        // its episodes and its own file, so the name may be one of those. No door can write down which upload is
+        // new, because the name gets its random ending only once it is stored (app/api/store/file, the vault), so
+        // "this request's own upload" cannot be proved here. A file left behind stays, never deleted from under a
+        // record; its cost is bounded where it was let in: the door reserved its full size from the store's monthly
+        // upload room (reserveStoreUpload, never refunded) and the store's storage brake counts it (storageUsed).
         return fail(result.reason);
       }
       await savePodcast(result.podcast);

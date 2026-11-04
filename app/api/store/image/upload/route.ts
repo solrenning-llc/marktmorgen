@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { hasProduct } from "@/lib/catalog";
-import { issueSignedToken } from "@/lib/blob";
+import { head, issueSignedToken } from "@/lib/blob";
+import { BlobNotFoundError } from "@vercel/blob";
 import { handleUploadPresigned, type HandleUploadPresignedBody } from "@vercel/blob/client";
 import { studioAccess } from "@/lib/studio-route";
 import { isHeader } from "@/lib/store-link";
@@ -74,9 +75,15 @@ export async function POST(request: NextRequest) {
         // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
         { const paused = costPauseCode(store); if (paused) throw new Error(paused); }
 
-        // Written down so that a request putting it on that then fails may delete it, and only it
-        // (lib/picture-door.ts). Not written down, it is never deleted by a failure: kept, not lost.
-        await notePictureDoor(pathname).catch((error: unknown) => console.error("could not note a picture upload", error));
+        // A name that is already a file is refused: the upload could never write over it, and noting it would let a
+        // failed request later take somebody's picture for a fresh upload (lib/picture-door.ts). Only a name the file
+        // store says is not there is written down; when it cannot say, the door still opens, unnoted, so a failure
+        // then deletes nothing: kept, not lost.
+        const there = await head(pathname).then(() => true, (error: unknown) => (error instanceof BlobNotFoundError ? false : null));
+        if (there === true) throw new Error("invalid");
+        if (there === false) {
+          await notePictureDoor(pathname).catch((error: unknown) => console.error("could not note a picture upload", error));
+        }
 
         const rules = {
           allowedContentTypes: [...IMAGE_CONTENT_TYPES],

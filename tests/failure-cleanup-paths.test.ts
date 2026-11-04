@@ -12,11 +12,14 @@
  *   - a smaller copy refused (as wide as the picture) that is another product's smaller copy: it stays;
  *   - an episode refused (no title) naming another episode's audio: the audio stays;
  *   - and what is still cleaned: a picture let in through the door for this request, then refused, is deleted;
- *     once put on something it is never taken as fresh again, and a door asked for a picture already stored
- *     never makes it fresh.
+ *     once put on something it is never taken as fresh again, and a door asked for a picture already stored is
+ *     refused, even in the same second the picture was stored;
+ *   - each store's list: a stale note is never taken, one store's doors never push out another's, and the list
+ *     expires a window after its last note.
  *
- * The inventory at the end reads every deletion in app/api/store and holds each to a reason it cannot reach a
- * file the browser named that belongs to another record, so a new one fails here until somebody says which.
+ * The inventory at the end reads every deletion in app/api/store, and in the lib files those routes delete through,
+ * and holds each to a reason it cannot reach a file the browser named that belongs to another record, so a new
+ * one fails here until somebody says which; and each route taking from the door takes before it deletes.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -27,6 +30,7 @@ import { readListing } from "@/lib/catalog";
 import { fileFolder } from "@/lib/product-file";
 import { store as redis } from "./redis-stub";
 import { files } from "./failure-cleanup-world";
+import { PICTURE_DOOR_MAX, PICTURE_DOOR_SECONDS, notePictureDoor, takePictureDoor } from "@/lib/picture-door";
 import { done, is, part } from "./check";
 import { POST as linkImage } from "@/app/api/store/link-image/route";
 import { POST as productImage } from "@/app/api/store/image/route";
@@ -92,23 +96,49 @@ async function main(): Promise<void> {
     door(post("/api/store/image/upload", session, { type: "blob.generate-presigned-url", payload: { pathname, clientPayload: JSON.stringify(payload), multipart: false } }));
   const fresh = picture("d");
   is("the door opened for the link's picture", (await ask(fresh, { linkId })).status, 200);
-  files.set(fresh, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() });
+  files.set(fresh, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
   is("refused for no size", await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: linkId, path: fresh, width: 0, height: 0 }))), [400, "invalid"]);
   is("and the upload nothing shows is deleted", files.has(fresh), false);
   const lost = picture("f");
   is("the door opened for product B's picture", (await ask(lost, { productId: b.product.id })).status, 200);
-  files.set(lost, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() });
+  files.set(lost, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
   is("put on a product that is not there: refused", await result(await productImage(post("/api/store/image", session, { action: "attach", id: "nope", path: lost, width: 1200, height: 800 }))), [404, "unknown"]);
   is("and the upload is deleted", files.has(lost), false);
   const kept = picture("1");
   await ask(kept, { productId: b.product.id });
-  files.set(kept, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() });
+  files.set(kept, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
   is("a fresh picture put on product B", await result(await productImage(post("/api/store/image", session, { action: "attach", id: b.product.id, path: kept, width: 1200, height: 800 }))), [200, "ok"]);
   is("then named on a refused link picture", await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: linkId, path: kept, width: 0, height: 0 }))), [400, "invalid"]);
   is("and product B's picture is still there: it was taken when put on", files.has(kept), true);
-  is("the door asked again for product A's picture, already stored (an upload could never write over it)", (await ask(big, { linkId })).status, 200);
+  is("the door asked again for product A's picture, already stored (an upload could never write over it): refused", (await ask(big, { linkId })).status, 400);
   is("then named on a refused link picture", await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: linkId, path: big, width: 0, height: 0 }))), [400, "invalid"]);
-  is("and product A's picture is still there: stored before the door noted it", files.has(big), true);
+  is("and product A's picture is still there", files.has(big), true);
+
+  part("A door asked again in the same second for a picture just stored never makes it fresh");
+  // Early in a second, so the picture stored and the door asked again share it (the review's case: 12:00:00.400 and .900).
+  while (Date.now() % 1000 > 300) await new Promise((resolve) => setTimeout(resolve, 5));
+  const same = picture("2");
+  await ask(same, { productId: b.product.id });
+  files.set(same, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
+  is("put on product B", await result(await productImage(post("/api/store/image", session, { action: "attach", id: b.product.id, path: same, width: 1200, height: 800 }))), [200, "ok"]);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await ask(same, { linkId });
+  is("then named on a refused link picture, the same second", await result(await linkImage(post("/api/store/link-image", session, { action: "attach", id: linkId, path: same, width: 0, height: 0 }))), [400, "invalid"]);
+  is("and product B's picture is still there", files.has(same), true);
+
+  part("Each store's own list: stale notes are never taken, and one store never pushes out another's");
+  const now = Date.now();
+  const other = (n: number) => `images/${"9".repeat(24)}/${n.toString(16).padStart(32, "0")}.jpg`;
+  const stale = picture("3");
+  await notePictureDoor(stale, now - (PICTURE_DOOR_SECONDS + 60) * 1000);
+  is("a note older than the window is not taken", [...(await takePictureDoor([stale], now)).keys()], []);
+  const mine = picture("4");
+  await notePictureDoor(mine, now);
+  for (let n = 0; n <= PICTURE_DOOR_MAX; n += 1) await notePictureDoor(other(n), now + 1 + n);
+  is("another store's doors, past its own limit, leave this store's note", [...(await takePictureDoor([mine], now + 2_000)).keys()], [mine]);
+  is("and that store keeps only its newest", [...(await takePictureDoor([other(0), other(PICTURE_DOOR_MAX)], now + 2_000)).keys()], [other(PICTURE_DOOR_MAX)]);
+  const [ttl] = (await redis.pipeline([["TTL", `nl:pictures:doors:${"9".repeat(24)}`]])) as number[];
+  is("each list expires a window after its last note", ttl > 0 && ttl <= PICTURE_DOOR_SECONDS, true);
 
   part("Inventory: every deletion under app/api/store, and why it cannot reach another record's file");
   const routes: string[] = [];
@@ -120,8 +150,11 @@ async function main(): Promise<void> {
     }
   };
   walk("app/api/store");
+  // And the deletions in lib that these routes call with a path (the takedown of a link, a review's photo; dropPage
+  // and dropReviews hand theirs back to the product route, where they are read below).
+  const LIB = ["lib/takedown.ts", "lib/review-photo.ts", "lib/sales-page-store.ts", "lib/reviews.ts"];
   const found: string[] = [];
-  for (const file of routes.sort()) {
+  for (const file of [...routes.sort(), ...LIB]) {
     const source = readFileSync(file, "utf8");
     const lines = source.split("\n");
     lines.forEach((line, i) => {
@@ -157,6 +190,8 @@ async function main(): Promise<void> {
     "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
     "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
+    "lib/takedown.ts del(done.removed.path)": "the picture of the link the takedown removed, read from the record it wrote",
+    "lib/review-photo.ts del(photo.path)": "a review's photo, read from the review record, or the one this request stored under a fresh name",
   };
   const unexplained = [...new Set(found)].filter((entry) => !Object.hasOwn(REASONS, entry));
   is("every deletion under app/api/store has a reason here", unexplained, []);
@@ -164,6 +199,17 @@ async function main(): Promise<void> {
   is("and every reason here still names a deletion", gone, []);
   const takers = routes.filter((file) => /ownsImagePath\(/.test(readFileSync(file, "utf8")) && !/\/ai\/|\/upload\//.test(file));
   is("every route that puts a picture from the door on a record takes it from the door", takers.filter((file) => !/takePictureDoor\(/.test(readFileSync(file, "utf8"))), []);
+  // In order: taken before any cleanup that deletes, and a page's taken before the page is written.
+  const order = takers.filter((file) => {
+    const source = readFileSync(file, "utf8");
+    const take = source.indexOf("takePictureDoor(");
+    const drops = [...source.matchAll(/\bdropFresh\(/g)].map((m) => m.index ?? 0).filter((at) => !/const dropFresh = $/.test(source.slice(Math.max(0, at - 20), at)));
+    // A page: the next write after the pictures are claimed comes after they are taken.
+    const claim = source.indexOf("claimPictures(");
+    const write = claim === -1 ? -1 : source.indexOf("writePage(", claim);
+    return drops.some((at) => at < take) || (claim !== -1 && (take < claim || write < take)) || (drops.length > 0 && !/const dropFresh = \([^)]*\) => dropTakenPictures\(fresh,/.test(source));
+  });
+  is("each takes before it deletes or writes, and deletes only through what it took", order, []);
   is("and the door writes each one down", /notePictureDoor\(pathname\)/.test(readFileSync("app/api/store/image/upload/route.ts", "utf8")), true);
   done();
 }

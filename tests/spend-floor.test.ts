@@ -16,24 +16,10 @@ import { AI_MONTHLY } from "@/lib/ai-rules";
 import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
 import { ANSWER_MICRO_USD, WRITING_JOB_MICRO_USD } from "@/lib/spend-cost-table";
 import { PLANS_ON_SALE } from "@/lib/opening";
-import { aiCeilingUsd, perPaymentCost, uploadOpsUsd, worstCost, worstLines } from "./plan-cost-model";
+import { worstCost, worstLines } from "./plan-cost-model";
+import { fullUseNet, months } from "./full-use-net";
 
-const months = (cycle: Cycle) => (cycle === "year" ? 12 : 1);
-function sum(tier: Tier, cycle: Cycle) {
-  const priceCents = PUBLISHED_PLAN_PRICES[tier][cycle];
-  const paid = priceCents / 100;
-  const monthly = worstCost(tier);
-  const ai = aiCeilingUsd(tier), uploads = uploadOpsUsd(tier);
-  const after = perPaymentCost(tier);
-  const usageCents = Math.ceil(Math.round((months(cycle) * monthly + after) * 1e7) / 1e5);
-  const input=reviewedReceivingTaxInput(priceCents,usageCents,syntheticTaxContext(tier+'_'+cycle+'_full',months(cycle) as 1|12));
-  const unit=reviewedUnitUnder(priceCents,usageCents,input,true);assert.ok(unit);
-  const allowed=maximumPretaxCostCents(unit.revenueCents,unit.taxCents)!/100;
-  const receiving = unit.totalCents / 100;
-  const total = receiving + usageCents / 100;
-  const other = monthly - ai - uploads;
-  return { paid, allowed, receiving, other, ai, uploads, after, total, room: allowed - total, unit };
-}
+const sum = fullUseNet;
 
 test("each plan's AI ceiling is its published writing jobs and answers at the priced units", () => {
   for (const tier of TIERS) assert.equal(AUTOMATIC_AI_STORE_MICRO_USD[tier], AI_MONTHLY[tier] * WRITING_JOB_MICRO_USD + ANSWERS_MONTHLY[tier] * ANSWER_MICRO_USD);

@@ -14,7 +14,7 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 
 | Line | Store monthly ($69) | Store yearly ($690) | Studio monthly ($449) | Studio yearly ($4490) | Scale monthly ($999) | Scale yearly ($9990) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Net today | 60.21% | 60.47% | 60.35% | 60.02% | 60.42% | 60.02% |
+| Net today | 60.18% | 60.44% | 60.34% | 60.01% | 60.40% | 60.00% |
 | AI drafts / answers a month | none today | none today | 40 / 250 | 40 / 250 | 80 / 400 | 80 / 400 |
 | Video hours watched a month | 4 | 4 | 32 | 32 | 64 | 64 |
 | Storage | 5 GiB | 5 GiB | 40 GiB | 40 GiB | 80 GiB | 80 GiB |
@@ -23,8 +23,8 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 | Access emails a month | 150 | 150 | 400 | 400 | 1,000 | 1,000 |
 | List emails a month | none today | none today | 7,000 | 7,000 | 10,000 | 10,000 |
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
-| Net with the cuts | **60.21%** | **60.47%** | **60.35%** | **60.02%** | **60.42%** | **60.02%** |
-| Every printed line at 10% / at zero | 62.04% / 62.23% | 62.51% / 62.73% | 62.76% / 63.03% | 62.74% / 63.04% | 62.79% / 63.06% | 62.71% / 63.00% |
+| Net with the cuts | **60.18%** | **60.44%** | **60.34%** | **60.01%** | **60.40%** | **60.00%** |
+| Every printed line at 10% / at zero | 62.04% / 62.23% | 62.50% / 62.73% | 62.76% / 63.03% | 62.73% / 63.04% | 62.79% / 63.06% | 62.70% / 63.00% |
 | Or every printed line cut alike to | 100.00% of today | 100.00% of today | 100.00% of today | 100.00% of today | 100.00% of today | 100.00% of today |
 
 ## How each line compares

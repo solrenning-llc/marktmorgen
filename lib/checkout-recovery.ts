@@ -188,7 +188,7 @@ export type RemindOutcome = "sent" | "skip" | "failed";
  * checkout), so Stripe is never asked: a hold that ran out and was not
  * settled counts as used (lib/stock.ts, shownOnly).
  */
-export async function cartItems(store: Store, raw: (string | undefined)[]): Promise<Listing[]> {
+export async function cartItems(store: Store, raw: (string | undefined)[], count = true): Promise<Listing[]> {
   const ids = readCartIds(raw.filter((id): id is string => typeof id === "string" && id !== ""));
   if (ids.length === 0) return [];
   const listed = await readListings(store, ids);
@@ -197,6 +197,7 @@ export async function cartItems(store: Store, raw: (string | undefined)[]): Prom
     return product && cartable(product) && canSellProduct(store, product) ? [product] : [];
   });
   // A limited one with none left is not reminded of, as for one product below (513 [PF1], unit 3).
+  if (!count) return kept;
   const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product, Date.now(), { checks: shownOnly() }).catch(() => null) : Promise.resolve(null))));
   return kept.filter((_, i) => left[i] !== 0);
 }

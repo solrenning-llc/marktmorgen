@@ -6,6 +6,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { readListing } from "@/lib/catalog";
 import { cartItems } from "@/lib/checkout-recovery";
+import { takePublicRequest } from "@/lib/traffic";
 import { readCartIds } from "@/lib/cart-rules";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { cartWords } from "@/lib/buyer-words/cart";
@@ -51,7 +52,8 @@ export default async function LeftPage({ params, searchParams }: Params) {
   const cartIds = readCartIds(read("cart").slice(0, 400).split(","));
   if (cartIds.length) {
     // As the cart's reminder lists them (lib/checkout-recovery.ts): none sold out, Stripe not asked.
-    const items = await cartItems(store, cartIds);
+    // Their reads are one more of the store's requests (not taken: none is left out; the cart refuses one sold out).
+    const items = await cartItems(store, cartIds, await takePublicRequest(store, "public", Date.now(), 1).catch(() => false));
     if (items.length === 0) redirect(`/@${store.handle}`);
     return leftCart(store, items, status);
   }

@@ -17,6 +17,9 @@ test("an expired hold is released only after an explicit expired checkout respon
   process.env.STRIPE_SECRET_KEY = "sk_test_local_only_synthetic";
   redis.pipeline = async commands => commands.map(command => {
     if (command[0] === "HGETALL") return ["cs_test_synthetic", '{"until":1}'];
+    if (command[0] === "GET") return null;
+    // A paid one is counted sold once (lib/stock.ts, STOCK_SOLD, since 4 November 2026); "asked" is kept beside an open one.
+    if (command[0] === "EVAL") return 1;
     // Only a hold let go counts; when Stripe was asked about one (its "a:" field, since 3 November 2026) is bookkeeping.
     if (command[0] === "HDEL") { if (!String(command[2]).startsWith("a:")) deletes += 1; return 1; }
     if (command[0] === "HSET") return 1;

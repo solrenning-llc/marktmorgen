@@ -37,7 +37,8 @@ import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { deliversDigitally } from "@/lib/digital-consent";
-import { HOLD_COOKIE_PATH, type ReleaseOutcome, type StripeChecks, heldCheckouts, holdCookieNames, holdCookieValue, releaseCartStockHolds, releaseStockHold, shownOnly, stockLeft, stockReading, withCartStockHolds } from "@/lib/stock";
+import { CART_READ_STOCK_UNITS, HOLD_COOKIE_PATH, type ReleaseOutcome, STOCK_ATTEMPT_UNITS, type StripeChecks, heldCheckouts, holdCookieNames, holdCookieValue, releaseCartStockHolds, releaseStockHold, shownOnly, stockLeft, stockReading, withCartStockHolds } from "@/lib/stock";
+import { takePublicRequest } from "@/lib/traffic";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 
 
@@ -69,7 +70,12 @@ export async function GET(request: NextRequest) {
   // out and is not settled yet is counted as used, and its product said not available right now, never sold out; the
   // store's and the product's pages settle it, and the checkout does under its locks.
   const checks: StripeChecks = shownOnly();
-  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockReading(store, p, Date.now(), { mine: hold, checks }).catch(() => undefined)] as const)));
+  // Its reads of limited products (lines, suggestions, bundle: at most 2 * MAX_SUGGEST + MAX_CART readings only shown) are
+  // CART_READ_STOCK_UNITS more of the store's requests, taken once before the first (tests/plan-cost-registry.ts). Not
+  // taken: nothing limited is read, its lines are not available right now and nothing limited is offered.
+  let stockUnits: Promise<boolean> | null = null;
+  const mayCount = () => (stockUnits ??= takePublicRequest(store, "public", Date.now(), CART_READ_STOCK_UNITS));
+  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, (await mayCount()) ? await stockReading(store, p, Date.now(), { mine: hold, checks }).catch(() => undefined) : undefined] as const)));
   const selling = canSell(store);
   const sw = shippingWords(store.language);
   const items = ids.flatMap((id) => {
@@ -143,8 +149,8 @@ export async function GET(request: NextRequest) {
     const listing = listings.find((p) => p.id === item.id);
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
-  const suggest = await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []);
-  const bundle = await bundleSwap(store, payable, ids, coming.soon, country, locale).catch(() => null);
+  const suggest = await suggestions(store, inCart, ids, coming.soon, country, locale, mayCount).catch(() => []);
+  const bundle = await bundleSwap(store, payable, ids, coming.soon, country, locale, mayCount).catch(() => null);
   return Response.json(
     {
       ok: true,
@@ -176,6 +182,7 @@ async function bundleSwap(
   soon: Set<string>,
   country: string,
   locale: string,
+  mayCount: () => Promise<boolean>,
 ) {
   if (payable.length === 0 || !canSell(store)) return null;
   const offers = store.catalog.head.filter(
@@ -193,7 +200,7 @@ async function bundleSwap(
     const found = swap.id;
     product = offers.find((p) => p.id === found)!;
     if (product.stock === null) break;
-    if (reads >= MAX_SUGGEST) return null;
+    if (reads >= MAX_SUGGEST || !(await mayCount())) return null;
     reads += 1;
     // Only shown, so Stripe is not asked (shownOnly). Unknown is offered, as the store page does; the cart's own read refuses it if it is added.
     if ((await stockLeft(store, product, Date.now(), { checks: shownOnly() }).catch(() => undefined)) !== 0) break;
@@ -228,6 +235,7 @@ async function suggestions(
   soon: Set<string>,
   country: string,
   locale: string,
+  mayCount: () => Promise<boolean>,
 ): Promise<Suggestion[]> {
   if (inCart.length === 0 || ids.length >= MAX_CART || !canSell(store)) return [];
   const words = cartWords(store.language);
@@ -259,7 +267,7 @@ async function suggestions(
     if (!product || !cartable(product) || !canSellProduct(store, product)) continue;
     if (product.keys && (await outOfKeys(store, product).catch(() => true))) continue;
     if (product.stock !== null) {
-      if (stockReads >= MAX_SUGGEST) continue;
+      if (stockReads >= MAX_SUGGEST || !(await mayCount())) continue;
       stockReads += 1;
       if ((await stockLeft(store, product, Date.now(), { checks: shownOnly() }).catch(() => undefined)) === 0) continue;
     }
@@ -326,6 +334,12 @@ export async function POST(request: NextRequest) {
   for (const product of products) {
     if (await outOfKeys(store, product).catch(() => false)) return away(`/@${store.handle}?cart=changed#cart`);
   }
+  // The stock work of paying for a cart with limited products (locks, counts, old checkouts handed back) is done
+  // whether it ends in a checkout, sold out, busy or a paused store: STOCK_ATTEMPT_UNITS of the store's requests,
+  // taken before any of it (tests/plan-cost-registry.ts). Not taken: nothing is done, try again later.
+  if (products.some((product) => product.stock !== null) && !(await takePublicRequest(store, "buyer", Date.now(), STOCK_ATTEMPT_UNITS))) {
+    return away(`/@${store.handle}?status=slow`);
+  }
 
   try {
     const via = await attributionFor(store, products[0].id, {
@@ -343,7 +357,8 @@ export async function POST(request: NextRequest) {
     // the cart's last checkout, and one of a product bought alone that is in this cart.
     const cookies = heldCheckouts(store, (name) => request.cookies.get(name)?.value);
     const previous = cookies.cart;
-    const released: ReleaseOutcome = previous ? await releaseCartStockHolds(store, products, previous).catch(() => "kept" as const) : "kept";
+    // Only when that checkout holds a unit of this cart: a new cart with nothing of it in common leaves it open.
+    const released: ReleaseOutcome = previous ? await releaseCartStockHolds(store, products, previous, { ifHolding: true }).catch(() => "kept" as const) : "kept";
     if (cookies.product) for (const product of products) await releaseStockHold(store, product, cookies.product).catch(() => {});
     // One unit of each limited product held for this checkout, or nothing opened (lib/stock.ts, withCartStockHolds).
     const holding = await withCartStockHolds(store, products, async (held) => createCartCheckout(store, products, linkOrigin(request, store), {

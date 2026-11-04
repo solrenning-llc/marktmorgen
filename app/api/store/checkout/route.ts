@@ -7,7 +7,8 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { countHit } from "@/lib/visit";
-import { HOLD_COOKIE_PATH, heldCheckouts, holdCookieNames, holdCookieValue, releaseCartStockHolds, releaseStockHold, withStockHold } from "@/lib/stock";
+import { HOLD_COOKIE_PATH, STOCK_ATTEMPT_UNITS, heldCheckouts, holdCookieNames, holdCookieValue, releaseCartStockHolds, releaseStockHold, withStockHold } from "@/lib/stock";
+import { takePublicRequest } from "@/lib/traffic";
 import { activePlan } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
@@ -217,6 +218,9 @@ export async function POST(request: NextRequest) {
     // before holding another.
     // Only checkouts named by the store's signed cookies (lib/stock.ts, heldCheckouts), so nobody can close another person's:
     // the last one for a product bought alone, and the cart's when it holds this product's unit.
+    // The stock work of a limited product (its lock, its count, old checkouts handed back) is done whatever it ends in:
+    // STOCK_ATTEMPT_UNITS of the store's requests, taken before any of it, as for a cart (app/api/store/cart/route.ts).
+    if (product.stock !== null && !(await takePublicRequest(store, "buyer", Date.now(), STOCK_ATTEMPT_UNITS))) return away(`/@${store.handle}?status=slow`);
     const cookies = heldCheckouts(store, (name) => request.cookies.get(name)?.value);
     if (cookies.product) await releaseStockHold(store, product, cookies.product).catch(() => {});
     if (cookies.cart) await releaseCartStockHolds(store, [product], cookies.cart, { ifHolding: true }).catch(() => {});

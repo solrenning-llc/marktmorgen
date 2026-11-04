@@ -99,7 +99,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
-import { STOCK_ORDER_COMMANDS, STOCK_ORDER_WAIT_MS } from "@/lib/stock";
+import { STOCK_ORDER_COMMANDS, STOCK_ORDER_READ_BYTES, STOCK_ORDER_WAIT_MS } from "@/lib/stock";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -184,10 +184,12 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * back when Stripe will not close it, and a product's bought alone) and closing one whose hold could not be written;
  * and the lock and hold commands of every limited product in a full cart (three for a lock's renewal or release where
  * the script is refused), the questions' answers and times, and the lapsed provisional holds each count lets go of
- * (MAX_LAPSED). About $0.00043. In ORDER_COST, on every order whatever it holds, by the owner's decisions of 3 November
- * 2026 (C2-63, C2-70: a known cost enters the account, the MR rule).
+ * (MAX_LAPSED); and since 4 November 2026 the bytes of every hash it reads (STOCK_ORDER_READ_BYTES: units sold leave the
+ * hash for a count, so a hash holds at most STOCK_ENTRIES_MAX holds). About $0.00056. In ORDER_COST, on every order
+ * whatever it holds, by the owner's decisions of 3 November 2026 (C2-63, C2-70: a known cost enters the account, the MR
+ * rule). Tries that end without an order take STOCK_ATTEMPT_UNITS of the store's requests first (public-requests).
  */
-export const ORDER_STOCK = (STOCK_ORDER_WAIT_MS / 1000) * MEMORY_SECOND + STOCK_ORDER_COMMANDS * COMMAND;
+export const ORDER_STOCK = (STOCK_ORDER_WAIT_MS / 1000) * MEMORY_SECOND + STOCK_ORDER_COMMANDS * COMMAND + STOCK_ORDER_READ_BYTES * DB_BYTE;
 /** What one order costs at the most: its confirmation, the email that says it shipped, its compute, its stock work, and what it leaves for its store's closing. */
 export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP + ORDER_STOCK;
 
@@ -393,7 +395,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/cart-rules.ts", names: ["MAX_CART = 4"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
     ],
-    basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE. A checkout of limited products (513 [PF1], 3 November 2026; lib/stock.ts) waits for each product's lock, and on Stripe for its counts, the old checkouts it closes (read back when Stripe will not) and a new one it closes, each question CHECK_MS at the most, STOCK_ORDER_WAIT_MS in all, and sends at most STOCK_ORDER_COMMANDS lock and hold commands: ORDER_STOCK, about $0.00043 an order, in ORDER_COST on every order whatever it holds (owner, 3 November 2026).",
+    basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE. A checkout of limited products (513 [PF1], 3 November 2026; lib/stock.ts) waits for each product's lock, and on Stripe for its counts, the old checkouts it closes (read back when Stripe will not) and a new one it closes, each question CHECK_MS at the most, STOCK_ORDER_WAIT_MS in all, and sends at most STOCK_ORDER_COMMANDS lock and hold commands: ORDER_STOCK, about $0.00056 an order (with the bytes it reads), in ORDER_COST on every order whatever it holds (owner, 3 November 2026).",
   },
   {
     id: "list-email",
@@ -576,11 +578,15 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockReading(store, p, Date.now(), { mine: hold, checks })", "const checks: StripeChecks = shownOnly();"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS", "shownOnly"] },
       // What the open cart offers leaves out a limited one with none left (513 [PF1], unit 3, 3 November 2026): at most MAX_SUGGEST reads for its suggestions and MAX_SUGGEST for its bundle.
-      { file: "app/api/store/cart/route.ts", names: ["if (stockReads >= MAX_SUGGEST) continue;", "if (reads >= MAX_SUGGEST) return null;", "const MAX_SUGGEST = 3;", "{ checks: shownOnly() }"] },
+      { file: "app/api/store/cart/route.ts", names: ["if (stockReads >= MAX_SUGGEST || !(await mayCount())) continue;", "if (reads >= MAX_SUGGEST || !(await mayCount())) return null;", "const MAX_SUGGEST = 3;", "{ checks: shownOnly() }", "takePublicRequest(store, \"public\", Date.now(), CART_READ_STOCK_UNITS)"] },
+      // Paying for a cart, or a product alone, with limited products takes STOCK_ATTEMPT_UNITS before its stock work, whatever it ends in (4 November 2026).
+      { file: "app/api/store/cart/route.ts", names: ["takePublicRequest(store, \"buyer\", Date.now(), STOCK_ATTEMPT_UNITS)"] },
+      { file: "app/api/store/checkout/route.ts", names: ["takePublicRequest(store, \"buyer\", Date.now(), STOCK_ATTEMPT_UNITS)"] },
+      { file: "lib/stock.ts", names: ["CART_READ_STOCK_UNITS = 1", "STOCK_ATTEMPT_UNITS = 11", "SHOWN_READ_COMMANDS = 3"] },
       // A product's page leaves out of "Goes well with" a limited pick with none left (513 [PF1], unit 3, 3 November 2026): one read each, at most MAX_PAIRS a page view.
-      { file: "app/[handle]/p/[product]/page.tsx", names: ["const pairedOut", "stockLeft(store, p, Date.now(), { checks: shownOnly() }).catch(() => null)"] },
+      { file: "app/[handle]/p/[product]/page.tsx", names: ["const pairedOut", "stockLeft(store, p, Date.now(), { checks: shownOnly() }).catch(() => null)", "takePublicRequest(store, \"public\", Date.now(), 1)"] },
       // The way back from a cart's checkout lists what is left of it as the cart's reminder does (3 November 2026): at most MAX_CART reads, Stripe never asked.
-      { file: "app/[handle]/left/page.tsx", names: ["await cartItems(store, cartIds)"] },
+      { file: "app/[handle]/left/page.tsx", names: ["await cartItems(store, cartIds, await takePublicRequest(store, \"public\", Date.now(), 1)"] },
       { file: "lib/checkout-recovery.ts", names: ["export async function cartItems(", "stockLeft(store, product, Date.now(), { checks: shownOnly() })"] },
       { file: "lib/store-collections.ts", names: ["export const MAX_PAIRS = 3;"] },
       // A signed proposal or agreement takes one more before the workflows that start on signing are checked (635 [GL3], 2 November 2026).
@@ -588,7 +594,7 @@ export const COST_LINES: CostLine[] = [
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
     ],
-    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count. The open cart's count of its limited products (513 [PF1], unit 3, 2 November 2026) adds at most MAX_CART reads, what it offers at most MAX_SUGGEST more for its suggestions and MAX_SUGGEST for its bundle, a product's page at most MAX_PAIRS for its \"Goes well with\" picks, and the way back from a cart's checkout and its reminder at most MAX_CART (each a single HGETALL, well inside a later page's). None of these asks the creator's Stripe account (3 November 2026, shownOnly): a hold that ran out and was not settled is counted as used, and the open cart calls such a product not available right now, never sold out; the holds are settled by the store's and the product's pages and under the checkout's locks.",
+    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count. The open cart's reads of its limited products, what it offers, a product's \"Goes well with\" picks and the way back from a cart's checkout (513 [PF1]) are readings only shown (lib/stock.ts, shownOnly, since 4 November 2026): each HLEN, GET and at most one HMGET of a few bytes, nothing written, Stripe never asked; the open cart's, at most 2 * MAX_SUGGEST + MAX_CART of them, are CART_READ_STOCK_UNITS more requests of the window, and the product page's and the way back's, at most MAX_PAIRS and MAX_CART, one more each, each priced here as a later page and taken before the reads (not taken: nothing is read and nothing limited is offered). Paying for limited products takes STOCK_ATTEMPT_UNITS before its stock work, whatever it ends in (sold out, busy, a paused store), so a try that makes no order is a priced request too; tests/cart-stock.test.ts holds both against what the reads and ORDER_STOCK cost.",
   },
   {
     id: "studio",

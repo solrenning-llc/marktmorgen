@@ -227,7 +227,7 @@ export function CartButton({
                       <button
                         type="button"
                         aria-label={c.remove(line.title)}
-                        className="grid h-9 w-9 place-items-center rounded-full"
+                        className="grid h-11 w-11 place-items-center rounded-full"
                         onClick={() => write(handle, read(handle).filter((id) => id !== line.id))}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">

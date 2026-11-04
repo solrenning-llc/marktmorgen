@@ -795,6 +795,8 @@ export const FAMILIES: Record<string, Family> = {
   },
   "nl:stock:@lib/stock.ts": { what: "Stock left, by product, and a sale's hold: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:stock:lock:@lib/stock.ts": short("One count at a time", "request", 1, 128, REQ("checkout")),
+  "nl:stock:sold:@lib/stock.ts": { what: "Units sold, by product (since 4 November 2026): counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
+  "nl:stock:paid:@lib/stock.ts": short("A checkout's unit counted sold, so it is never counted twice: one key for each limited product of an order, at most four", "order", 400, 4 * MARK),
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),

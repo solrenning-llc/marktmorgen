@@ -34,8 +34,12 @@ export const MAX_SECTION_BLOCKS = 8;
 export const MAX_SECTION_NAME = 60;
 export const MAX_SECTION_BYTES = 40_000;
 
-/** The kinds a section never holds. */
-export const NOT_IN_SECTIONS: readonly BlockKind[] = ["hero", "reviews"];
+/**
+ * The kinds a section never holds. A booking block is one of them: it names
+ * one of this store's calls, which another page or store may not sell, and it
+ * is not offered yet (552 [BB1]; inbox C4-19 (b)).
+ */
+export const NOT_IN_SECTIONS: readonly BlockKind[] = ["hero", "reviews", "booking"];
 
 export type SavedSection = {
   id: string;

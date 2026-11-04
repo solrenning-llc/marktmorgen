@@ -118,22 +118,27 @@ export function withWords(page: SalesPage, words: string[]): SalesPage {
  * whole in the old language beside a translated first one.
  */
 export function keepEveryBlock(original: SalesPage, translated: SalesPage): { page: SalesPage; untranslated: number } {
-  let untranslated = 0;
+  // The blocks put back as they were, by version: counted only once the page is read, so a second version dropped
+  // there for being the same as the first does not count its blocks (inbox C4-19 (a)).
+  const restored = { main: new Set<PageBlock>(), variant: new Set<PageBlock>() };
   const reads = (block: PageBlock) => parsePage({ blocks: [block] }).blocks.length === 1;
-  const fit = (from: PageBlock[], to: PageBlock[]): PageBlock[] =>
+  const fit = (from: PageBlock[], to: PageBlock[], kept: Set<PageBlock>): PageBlock[] =>
     to.map((block, at) => {
       if (reads(block)) return block;
       const before = from[at];
       if (before && before.id === block.id && reads(before)) {
-        untranslated += 1;
+        kept.add(before);
         return before;
       }
       return block;
     });
   const variant = translated.variant
-    ? { ...translated.variant, blocks: fit(original.variant?.blocks ?? [], translated.variant.blocks) }
+    ? { ...translated.variant, blocks: fit(original.variant?.blocks ?? [], translated.variant.blocks, restored.variant) }
     : translated.variant;
-  return { page: parsePage({ ...translated, blocks: fit(original.blocks, translated.blocks), variant }), untranslated };
+  const page = parsePage({ ...translated, blocks: fit(original.blocks, translated.blocks, restored.main), variant });
+  const ids = (kept: Set<PageBlock>) => new Set([...kept].map((block) => block.id));
+  const left = (blocks: PageBlock[] | undefined, kept: Set<PageBlock>) => (blocks ?? []).filter((block) => ids(kept).has(block.id)).length;
+  return { page, untranslated: left(page.blocks, restored.main) + left(page.variant?.blocks, restored.variant) };
 }
 
 /** The words split into parts of at most TRANSLATE_PART_CHARS characters (a longer single one is a part of its own). */

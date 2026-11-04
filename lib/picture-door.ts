@@ -66,25 +66,32 @@ export async function notePictureDoor(path: string, now = Date.now()): Promise<b
  * Takes each of these pictures off its store's list, and returns those this
  * call took, with when the door signed for each (ms): the ones let in through
  * the door within PICTURE_DOOR_SECONDS that nothing had tried to put on yet.
- * A stale note is taken off but not returned. A failed read takes none.
+ * A stale note is taken off but not returned.
+ *
+ * When the take cannot be confirmed (the read or the removal failed, or its
+ * answer was lost), this throws, and every caller refuses with server_error
+ * before it writes or deletes anything (4 November 2026, after a review
+ * proved that a swallowed failure here let a picture go on a product with
+ * its note still on the list, so a later refused request naming it took the
+ * note and deleted the product's picture). Nothing is written, so a note
+ * still there is on a picture nothing shows, and the creator's retry finds
+ * it; a removal that ran with its answer lost leaves a file nothing shows,
+ * kept (storage, never a picture deleted from under a record).
  */
 export async function takePictureDoor(paths: string[], now = Date.now()): Promise<Map<string, number>> {
   const unique = [...new Set(paths.filter((path) => typeof path === "string" && doorsKey(path) !== null))];
   const taken = new Map<string, number>();
   if (unique.length === 0 || !isRedisConfigured()) return taken;
-  try {
-    const answers = await redisPipeline(unique.flatMap((path) => {
-      const key = doorsKey(path) as string;
-      return [["ZSCORE", key, path], ["ZREM", key, path]];
-    }));
-    unique.forEach((path, i) => {
-      const at = Number(answers[2 * i]);
-      const fresh = Number.isFinite(at) && at > 0 && at >= now - PICTURE_DOOR_SECONDS * 1000;
-      if (Number(answers[2 * i + 1]) === 1 && fresh) taken.set(path, at);
-    });
-  } catch {
-    return new Map();
-  }
+  const answers = await redisPipeline(unique.flatMap((path) => {
+    const key = doorsKey(path) as string;
+    return [["ZSCORE", key, path], ["ZREM", key, path]];
+  }));
+  if (!Array.isArray(answers) || answers.length !== 2 * unique.length) throw new Error("could not confirm the pictures taken from the door");
+  unique.forEach((path, i) => {
+    const at = Number(answers[2 * i]);
+    const fresh = Number.isFinite(at) && at > 0 && at >= now - PICTURE_DOOR_SECONDS * 1000;
+    if (Number(answers[2 * i + 1]) === 1 && fresh) taken.set(path, at);
+  });
   return taken;
 }
 

@@ -208,6 +208,48 @@ async function main(): Promise<void> {
   const another = await upload({ productId: c });
   is("the same picture chosen again from the device (a new upload): put on", await attach(c, another), [200, "ok"]);
 
+  part("A take from the door that cannot be confirmed: refused before anything is written");
+  // The file store's Redis failing on the picture door's read and removal (ZSCORE + ZREM), once: before the removal
+  // ran, or after it ran with its answer lost. Before 4 November 2026 the failure was swallowed, so a picture could
+  // go on a record with its note still on the list, and a later refused request naming it deleted it.
+  const unfailed = redis.pipeline;
+  const takeFails = async <T>(removalRan: boolean, run: () => Promise<T>): Promise<T> => {
+    redis.pipeline = async (commands) => {
+      if (commands.some((command) => command[0] === "ZSCORE" && String(command[1]).startsWith("nl:pictures:doors:"))) {
+        if (removalRan) await unfailed(commands);
+        throw new Error("Redis request failed with status 503");
+      }
+      return unfailed(commands);
+    };
+    try {
+      return await run();
+    } finally {
+      redis.pipeline = unfailed;
+    }
+  };
+  const refusedLink = (path: string) => linkImage(post("/api/store/link-image", session, { action: "attach", id: linkTwo, path, width: 0, height: 0 })).then(result);
+  const cBefore = (await shownOn(c))?.path;
+  const blinked = await upload({ productId: c });
+  is("a new picture on product C while the door cannot be read: refused, server_error", await takeFails(false, () => attach(c, blinked)), [500, "server_error"]);
+  is("and C still shows what it showed", (await shownOn(c))?.path, cBefore);
+  is("tried again once the store answers: put on, the note was still there", await attach(c, blinked), [200, "ok"]);
+  is("a refused link request naming it later", await refusedLink(blinked), [400, "invalid"]);
+  is("and C's picture is still there", [files.has(blinked), (await shownOn(c))?.path], [true, blinked]);
+  is("C's own picture sent again while the door cannot be read: refused, server_error", await takeFails(false, () => attach(c, blinked)), [500, "server_error"]);
+  is("and still shown and there", [files.has(blinked), (await shownOn(c))?.path], [true, blinked]);
+  const lost = await upload({ productId: c });
+  is("the removal ran but its answer was lost: refused, server_error", await takeFails(true, () => attach(c, lost)), [500, "server_error"]);
+  is("tried again: refused, the door was spent", await attach(c, lost), [400, "in_use"]);
+  is("and the file is kept, C's picture is unchanged", [files.has(lost), (await shownOn(c))?.path], [true, blinked]);
+  const linkBlink = await upload({ linkId: linkTwo });
+  is("a new picture on a link while the door cannot be read: refused, server_error", await takeFails(false, () => linkAttach(linkTwo, linkBlink)), [500, "server_error"]);
+  is("and the link keeps its own", (await storeForEmail(OWNER))!.links.find((link) => link.id === linkTwo)?.image?.path, linkNext);
+  const pageBlink = await upload({ productId: c });
+  is("a new picture on a product's page while the door cannot be read: refused, server_error", await takeFails(false, async () => result(await pageRoute(post("/api/store/page", session, { id: c, page: pictures("pics0004", [pageBlink]) })))), [500, "server_error"]);
+  is("tried again once the store answers: saved", await result(await pageRoute(post("/api/store/page", session, { id: c, page: pictures("pics0004", [pageBlink]) }))), [200, "ok"]);
+  is("a refused link request naming the page's picture later", await refusedLink(pageBlink), [400, "invalid"]);
+  is("and the page's picture is still there", files.has(pageBlink), true);
+
   part("What the creator reads");
   const messageOf = (file: string, key: string) => readFileSync(file, "utf8").match(new RegExp(`\\n  ${key}: [\`"]([^\`"]*)[\`"]`))?.[1] ?? "";
   for (const file of ["components/product-image-editor.tsx", "components/link-picture.tsx"]) {

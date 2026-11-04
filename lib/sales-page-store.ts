@@ -102,6 +102,8 @@ export async function claimPictures(statsId: string, productId: string, paths: s
  *
  * Those taken from the door are claimed even when another is refused, so the
  * creator's save tried again still finds them; nothing is deleted here.
+ * A take from the door that cannot be confirmed throws (takePictureDoor), so
+ * the page is refused with server_error before it is written.
  */
 export async function claimNewPictures(statsId: string, pageId: string, paths: string[]): Promise<boolean> {
   const unique = [...new Set(paths)];

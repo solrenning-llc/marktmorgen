@@ -179,20 +179,24 @@ async function main(): Promise<void> {
     "image dropFresh([path, smallPath])": "only the paths this request took from the picture door",
     "image dropFresh([smallPath])": "only the paths this request took from the picture door",
     "image dropFresh(imagePaths(image))": "only the paths this request took from the picture door",
-    "image del(replaced)": "the picture and copy the record held that the new one does not use, after the record that replaced it was written",
+    // A record held the name the browser sent, so these are safe only because attach puts a name on a product or a
+    // link only when this request took it fresh from the door or the record shows it already (since 4 November 2026,
+    // tests/picture-owner-paths.test.ts): no second record can hold it. A name put on two records before that rule
+    // is not found here, and deleting it from one still takes it from the other.
+    "image del(replaced)": "the product's own picture and copy that the new one does not use, after the record that replaced it was written; attach admits only a fresh or own name",
     "product del(file.pathname)": "files of a removed product, read from its own records",
     "product del(linked.removed.pathname)": "the file the record held, after the link that replaced it was written",
     "option del(file.pathname)": "files of a removed option, read from its own record",
-    "links del(result.removed.path)": "the picture the removed link held, after it was written",
+    "links del(result.removed.path)": "the removed link's own picture, after it was written; link-image attach admits only a fresh or own name",
     "link-image dropFresh(path)": "only a path this request took from the picture door",
     "link-image dropFresh(image.path)": "only a path this request took from the picture door",
-    "link-image del(result.removed.path)": "the picture the record held, after the record that replaced it was written",
+    "link-image del(result.removed.path)": "the link's own picture the new one replaced, after the record that replaced it was written; attach admits only a fresh or own name",
     "course del(files)": "handed-in work of a removed assignment, read from its own records",
     "course del(file.pathname)": "lesson files the course no longer holds, after it was written",
     "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
     "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
-    "lib/takedown.ts del(done.removed.path)": "the picture of the link the takedown removed, read from the record it wrote",
+    "lib/takedown.ts del(done.removed.path)": "the own picture of the link the takedown removed, read from the record it wrote; link-image attach admits only a fresh or own name",
     "lib/review-photo.ts del(photo.path)": "a review's photo, read from the review record, or the one this request stored under a fresh name",
   };
   const unexplained = [...new Set(found)].filter((entry) => !Object.hasOwn(REASONS, entry));
@@ -213,6 +217,13 @@ async function main(): Promise<void> {
     return drops.some((at) => at < take) || (claim !== -1 && (write === -1 || source.indexOf("claimPictures(") !== -1)) || (drops.length > 0 && !/const dropFresh = \([^)]*\) => dropTakenPictures\(fresh,/.test(source));
   });
   is("each takes before it deletes or writes, and deletes only through what it took", order, []);
+  // A take that cannot be confirmed throws and the route refuses before writing (lib/picture-door.ts): never
+  // swallowed, or a picture goes on a record with its note left for a refused request to delete it by.
+  const doorSource = readFileSync("lib/picture-door.ts", "utf8");
+  const takeBody = doorSource.slice(doorSource.indexOf("export async function takePictureDoor("), doorSource.indexOf("export async function dropTakenPictures("));
+  is("a take from the door that cannot be confirmed is not swallowed there", /\bcatch\b/.test(takeBody), false);
+  const swallowed = [...takers, "lib/sales-page-store.ts"].filter((file) => /(takePictureDoor|claimNewPictures)\([^;]*?\)\s*\.catch\(/.test(readFileSync(file, "utf8")));
+  is("nor by a route or a page that takes from it", swallowed, []);
   is("and the door writes each one down", /notePictureDoor\(pathname\)/.test(readFileSync("app/api/store/image/upload/route.ts", "utf8")), true);
   done();
 }

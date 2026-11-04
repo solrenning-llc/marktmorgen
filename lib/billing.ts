@@ -1464,8 +1464,8 @@ function searchDataRecord(value: unknown, label: string): Record<string, unknown
 type SearchOwnership = { customerId: string | null; released: Set<string> };
 type SearchMember = { subscription: Record<string, unknown>; terminalOwn: boolean };
 /** Only plain dense own data can prove a released handle, without rereading accessors. */
-function releasedSearchEvidence(value: unknown): Set<string> {
-  const unknown = new Set<string>();
+function releasedSearchEvidence(value: unknown): Set<string> | null {
+  const unknown = null;
   if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return unknown;
   const descriptors = Object.getOwnPropertyDescriptors(value as object);
   const length = descriptors.length;
@@ -1610,11 +1610,13 @@ export async function findStoreSubscriptions(
   }
   const customerContext = Object.getOwnPropertyDescriptor(store, "stripeCustomerId");
   const releasedContext = Object.getOwnPropertyDescriptor(store, "releasedHandles");
+  const released = releasedContext && Object.hasOwn(releasedContext, "value") && releasedContext.value === releasedHandles
+    ? releasedSearchEvidence(releasedHandles) : null;
+  if (released === null) throw new Error("Subscription search handle coverage is unknown");
   const ownership: SearchOwnership = {
     customerId: customerContext && Object.hasOwn(customerContext, "value") &&
       typeof customerContext.value === "string" && CUSTOMER_PATTERN.test(customerContext.value) ? customerContext.value : null,
-    released: releasedContext && Object.hasOwn(releasedContext, "value") && releasedContext.value === releasedHandles
-      ? releasedSearchEvidence(releasedHandles) : new Set(),
+    released,
   };
   const observedStore = {
     handle: store.handle, previousHandles: [...store.previousHandles],

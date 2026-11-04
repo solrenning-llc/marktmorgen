@@ -736,3 +736,17 @@ test('CX-61 independent closing fallback cannot adopt a funded row from an incom
   assert.equal(activationObservations.calls.length,0);
  }finally{globalThis.fetch=old;activationObservations.accept=false;}
 });
+
+test('CX-61 malformed released-name evidence is unknown, never an empty history that can miss a paid plan',async()=>{
+ const old=globalThis.fetch;
+ const live=recoveryPlan('released-harbor');
+ try{
+  const extra=['released-harbor'];Object.defineProperty(extra,'extra',{value:'unknown'});
+  const iterator=['released-harbor'];Object.defineProperty(iterator,Symbol.iterator,{value:function*(){yield 'released-harbor';}});
+  for(const releasedHandles of [extra,iterator]){
+   const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles} as Store;
+   globalThis.fetch=async(input)=>Response.json({data:new URL(String(input)).pathname==='/v1/subscriptions/search'?[]:[live],has_more:false});
+   await assert.rejects(findStoreSubscriptions(owner),/Subscription search handle coverage is unknown/);
+  }
+ }finally{globalThis.fetch=old;}
+});

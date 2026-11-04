@@ -62,6 +62,14 @@ export const en = {
   callLive: (dates: number) => `Live session, online, ${dates} ${plural(dates, "date", "dates")} scheduled`,
   callGroup: (minutes: number, seats: number) => `Group call, ${minutes} minutes, up to ${seats} people, online`,
   callOne: (minutes: number) => `${minutes}-minute call, online`,
+  /** A call with several lengths (lib/call-lengths.ts): "30 or 60", as the store's language lists them. */
+  callLengths: (list: string) => `Call of ${list} minutes, online`,
+  /** An in-person booking (lib/call-place.ts): no call, at the creator's address. */
+  inPersonLive: (dates: number) => `Live session, in person, ${dates} ${plural(dates, "date", "dates")} scheduled`,
+  inPersonGroup: (minutes: number, seats: number) => `${minutes} minutes, up to ${seats} people, in person`,
+  inPersonOne: (minutes: number) => `${minutes} minutes, in person`,
+  inPersonLengths: (list: string) => `${list} minutes, in person`,
+  inPersonLiveNone: "Live session, in person, no dates scheduled",
   bundleOf: (count: number, worth: string | null) => `Bundle of ${count} products${worth ? ` · ${worth}` : ""}`,
   /** "$120 of products for $49". */
   worth: (worth: string, price: string) => `${worth} of products for ${price}`,
@@ -326,4 +334,9 @@ export const en = {
   cardTestMode: "Test mode: no real card is charged.",
   cardCheckout: "Secure checkout by Stripe, in a new tab.",
   cardOpens: (store: string) => `Opens on ${store}'s store, in a new tab.`,
+
+  // ---- Email cards (lib/mail-product-price.ts) -------------------------------------------
+  orMore: (price: string) => `${price} or more`,
+  plusTax: "+ tax where it applies",
+  salePriceUntil: (price: string, when: string) => `Sale price: ${price}, until ${when}`,
 };

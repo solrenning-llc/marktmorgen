@@ -21,6 +21,8 @@ const EVENTS: { key: WebhookEvent; label: string; hint: string }[] = [
   { key: "call.booked", label: "Call booked", hint: "A call or a seat in a session, paid" },
   { key: "call.moved", label: "Call moved", hint: "A buyer moved their booking" },
   { key: "refund.issued", label: "Refund issued", hint: "A refund on your Stripe account" },
+  { key: "membership.changed", label: "Membership changed", hint: "A membership moved to another price or quantity on your Stripe account" },
+  { key: "dispute.opened", label: "Dispute opened", hint: "A buyer disputed a payment made at your checkout" },
   { key: "sequence.step", label: "Sequence step", hint: "Somebody reached a step of a sequence that calls your webhooks" },
 ];
 const ALL = EVENTS.map((e) => e.key);
@@ -336,13 +338,13 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
                     {d.lastError && d.state !== "delivered" ? <span className="block text-xs text-ink-soft">{d.lastError}</span> : null}
                     {d.resentFrom ? <span className="block text-xs text-ink-soft">Sent again by hand</span> : null}
                   </span>
-                  {d.state === "failed" && d.type !== "test" && !d.resentFrom && (!d.resentAs || view.log.find((x) => x.id === d.resentAs)?.state === "failed") ? (
+                  {d.state === "failed" && d.type !== "test" && !d.givenUp && !d.resentFrom && (!d.resentAs || view.log.find((x) => x.id === d.resentAs)?.state === "failed") ? (
                     <button type="button" onClick={() => resend(d.id)} disabled={busy !== null} aria-busy={busy === `resend:${d.id}`} aria-label={`Send again: ${EVENTS.find((e) => e.key === d.type)?.label ?? d.type}, ${when(d.createdAt)}, to ${d.endpoint}`} className="btn btn-secondary btn-sm shrink-0">
                       {busy === `resend:${d.id}` ? "Sending…" : "Send again"}
                     </button>
                   ) : null}
                   <span
-                    className={`shrink-0 text-xs font-semibold ${result.tone === "ok" ? "text-mint-deep" : result.tone === "bad" ? "text-danger" : "text-ink-soft"}`}
+                    className={`shrink-0 text-xs font-semibold ${result.tone === "ok" ? "text-mint-deep" : result.tone === "bad" ? "text-danger-text" : "text-ink-soft"}`}
                   >
                     {result.text}
                   </span>

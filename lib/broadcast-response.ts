@@ -20,7 +20,7 @@ export function broadcastAnswer(responseOk: boolean, raw: unknown, input: Record
   if (!subject || !body || b.subject !== subject || b.body !== body || b.productId !== association(input.productId) || b.notProductId !== association(input.notProductId) || b.who !== input.who) return unknown;
   if (input.sendAt !== undefined && (typeof input.sendAt !== "number" || !Number.isFinite(input.sendAt) || b.sendAt !== Math.floor(input.sendAt / 1000))) return unknown;
   const narrow = readNarrow(input.narrow);
-  if (narrow.minSpent || narrow.channel || narrow.quietDays || narrow.group) {
+  if (narrow.minSpent || narrow.channel || narrow.quietDays || narrow.group || narrow.activeDays) {
     if (!b.narrow || typeof b.narrow !== "object" || Array.isArray(b.narrow)) return unknown;
     const actual = b.narrow as Record<string, unknown>;
     if (!sameNarrow(actual, narrow)) return unknown;

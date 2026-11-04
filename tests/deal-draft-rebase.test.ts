@@ -4,7 +4,7 @@
  * (lib/deal-draft.ts), so nothing typed is lost and nothing written by a
  * workflow step meanwhile is overwritten.
  */
-import { DEAL_HIDDEN, DEAL_SAVE_ID, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText, stageMoveStep, takeSaved, typedText } from "@/lib/deal-draft";
+import { DEAL_HIDDEN, DEAL_SAVE_ID, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText, stageMoveStep, stageChosenText, livePending, announce, focusWasLost, takeSaved, typedText } from "@/lib/deal-draft";
 import type { Deal } from "@/lib/crm-rules";
 import { done, is, part } from "./check";
 
@@ -83,11 +83,20 @@ is("the creator's other part is untouched", taken.draft.assignee, "sam@example.c
 is("what was typed, to copy: one line a part changed", typedText(base, { ...base, note: "Sent the proposal", nextAction: "Send the contract", dueDate: "2026-11-12" }), "The next action and its date: Send the contract, 2026-11-12\nThe note: Sent the proposal");
 is("a part emptied says so, and nothing changed is empty", [typedText(base, { ...base, email: "" }), typedText(base, base)], ["Their email: (empty)", ""]);
 
-part("A card's stage select moves the deal only on Enter or when it is left (3.2.5)");
+part("A card's stage select moves the deal only when Move is pressed (3.2.5; review, round 3)");
 let pending: string | undefined;
 const steps: (string | undefined)[] = [];
 for (const value of ["talk00", "won000", "lost00"]) { const step = stageMoveStep(pending, { kind: "change", value }, "lead00"); pending = step.pending; steps.push(step.commit); }
-is("arrowing through three stages sends none of them", [steps, pending], [[undefined, undefined, undefined], "lost00"]);
-is("Enter sends the last one chosen, once", [stageMoveStep(pending, { kind: "enter" }, "lead00"), stageMoveStep(undefined, { kind: "enter" }, "lead00")], [{ pending: undefined, commit: "lost00" }, { pending: undefined }]);
-is("leaving the select sends it too; back on its own stage, nothing is sent", [stageMoveStep("won000", { kind: "blur" }, "lead00"), stageMoveStep(undefined, { kind: "change", value: "lead00" }, "lead00"), stageMoveStep(undefined, { kind: "blur" }, "lead00")], [{ pending: undefined, commit: "won000" }, { pending: undefined }, { pending: undefined }]);
+is("arrowing through three stages, or picking with a mouse or a phone's picker, sends none of them", [steps, pending], [[undefined, undefined, undefined], "lost00"]);
+is("Move sends the last one chosen, once; with nothing chosen it sends nothing", [stageMoveStep(pending, { kind: "move" }, "lead00"), stageMoveStep(undefined, { kind: "move" }, "lead00")], [{ pending: undefined, commit: "lost00" }, { pending: undefined }]);
+is("back on its own stage, nothing is chosen", stageMoveStep("won000", { kind: "change", value: "lead00" }, "lead00"), { pending: undefined });
+const names = (id: string) => ({ won000: "Won", lead00: "New" } as Record<string, string>)[id] ?? id;
+is("what the card's status region says while a stage is chosen, and nothing otherwise", [stageChosenText("won000", names), stageChosenText(undefined, names)], ["Stage chosen: Won. Not moved yet.", ""]);
+is("a chosen stage is dropped when its deal is gone or already there", livePending({ d000000001: "won000", d000000002: "lead00", gone000000: "won000" }, [{ id: "d000000001", stage: "lead00" }, { id: "d000000002", stage: "lead00" }]), { d000000001: "won000" });
+
+part("Said again, focus only when lost, and stage names (review, round 3)");
+is("the same words twice are said again: they alternate a trailing no-break space", [announce("", "Using it."), announce("Using it.", "Using it."), announce("Using it.\u00a0", "Using it."), announce("x", "")], ["Using it.", "Using it.\u00a0", "Using it.", ""]);
+const body = {}, other = {};
+is("focus goes back only when it was lost on the page, never taken from where the person moved it", [focusWasLost(body, body), focusWasLost(null, body), focusWasLost(other, body)], [true, true, false]);
+is("what was typed names the stage, not its id", typedText(base, { ...base, stage: "won000" }, names), "The stage: Won");
 done();

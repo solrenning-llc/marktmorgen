@@ -6,7 +6,7 @@ import { dealActionFilter, filterDeals, type DealActionFilter } from "@/lib/crm-
 import { dealOrder, orderDeals, dealWorklistCsv, type DealOrder, type DealView } from "@/lib/crm-deal-worklist";
 import { DealAgenda } from "@/components/deal-agenda";
 import { crmAnswer, type CrmAnswer, type CrmCurrentDeal } from "@/lib/crm-response";
-import { DEAL_SAVE_ID, DRAFT_UNITS, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText, savedNowId, stageMoveStep, takeSaved, typedText, unitOf, DEAL_HIDDEN, DEAL_HIDDEN_ID, type DealDraft, type DraftField, type DraftConflict, type DraftUnit } from "@/lib/deal-draft";
+import { DEAL_SAVE_ID, DRAFT_UNITS, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText, savedNowId, stageMoveStep, stageChosenText, livePending, announce, focusWasLost, takeSaved, typedText, unitOf, DEAL_HIDDEN, DEAL_HIDDEN_ID, type DealDraft, type DraftField, type DraftConflict, type DraftUnit } from "@/lib/deal-draft";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -126,14 +126,15 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   // Decided at once, not at the next render: a second change (a keyboard moving a stage select a step at a time) is not sent.
   const gate = useRef(oneAtATime());
   // Where focus goes back once the board is usable again: a disabled control loses it while a change is saved.
-  const focusTo = useRef<string | null>(null);
+  // The first of `ids` on the page gets it, and only if focus was lost (never taken from where the person moved it).
+  const focusTo = useRef<string[]>([]);
   const [focusTick, setFocusTick] = useState(0);
-  const focusLater = (id: string | null) => { focusTo.current = id; setFocusTick(t => t + 1); };
+  const focusLater = (...ids: (string | null | undefined)[]) => { focusTo.current = ids.filter((id): id is string => !!id); setFocusTick(t => t + 1); };
   useEffect(() => {
-    if (locked || !focusTo.current) return;
-    const target = document.getElementById(focusTo.current);
-    focusTo.current = null;
-    target?.focus();
+    if (locked || !focusTo.current.length) return;
+    const target = focusTo.current.map(id => document.getElementById(id)).find(el => el !== null);
+    focusTo.current = [];
+    if (target && focusWasLost(document.activeElement, document.body)) target.focus();
   }, [locked, focusTick]);
   // What the editor says in its status region: "Use this" taking what is saved now (4.1.3).
   const [said, setSaid] = useState("");
@@ -173,7 +174,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
       return;
     }
     if (answer.error === "crm_write_unconfirmed") setWriteUnconfirmed(true);
-    focusLater(refocus ?? null);
+    focusLater(refocus);
     // The deal changed meanwhile: nothing was written; the board takes the deal as it is now and loads the rest.
     const kind = refusalKind(body.action, answer, stage => editable.some(p => p.stages.some(st => st.id === stage)));
     if (kind === "rebase" && answer.current && onConflict) {
@@ -183,7 +184,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     }
     // Changed and moved to a pipeline this person cannot see: nothing to put the changes back on, so the editor closes.
     if (kind === "hidden") {
-      const typed = draft?.id && body.action === "deal" ? typedText(draft.base, draft) : "";
+      const typed = draft?.id && body.action === "deal" ? typedText(draft.base, draft, stageName) : "";
       setLost(typed || null);
       focusLater(typed ? DEAL_HIDDEN_ID : "deal-board-alert");
       setDraft(null);
@@ -247,7 +248,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     return (
       <p className="sm:col-span-2 flex flex-wrap items-center gap-2 text-sm text-ink-soft [overflow-wrap:anywhere]">
         <span id={savedNowId(unit)}>{`Saved now: ${savedNowText(conflict, currency, stageName)}`}</span>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => { const taken = takeSaved(draft, unit); setDraft(taken.draft); setSaid(taken.said); focusLater(taken.focus); }}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => { const taken = takeSaved(draft, unit); setDraft(taken.draft); setSaid(previous => announce(previous, taken.said)); focusLater(taken.focus); }}>
           Use this<span className="sr-only">{` for ${label}`}</span>
         </button>
       </p>
@@ -256,16 +257,27 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   // A field in conflict points to the "Saved now" words beside it (aria-describedby).
   const describedBy = (field: DraftField) => (draft?.conflicts.some(c => c.unit === unitOf(field)) ? savedNowId(unitOf(field)) : undefined);
   function moveDeal(deal: Deal, stage: string) {
+    // The select is disabled while the move is saved: focus goes back to it after, moved or refused.
+    focusLater(`deal-stage-${deal.id}`);
     void run({ action: "deal", version: versions[deal.id] ?? "", deal: { id: deal.id, stage } }, here.has(stage) ? "Deal moved." : `Deal moved to ${pipelines.find(p => p.stages.some(st => st.id === stage))?.name ?? "another pipeline"}.`, undefined, () => setError(MOVE_CONFLICT), `deal-stage-${deal.id}`);
   }
   function stageEvent(deal: Deal, event: Parameters<typeof stageMoveStep>[1]) {
-    const step = stageMoveStep(moving[deal.id], event, deal.stage);
+    const step = stageMoveStep(pendingMoves[deal.id], event, deal.stage);
     setMoving(m => { const next = { ...m }; if (step.pending === undefined) delete next[deal.id]; else next[deal.id] = step.pending; return next; });
     if (step.commit) moveDeal(deal, step.commit);
   }
   const initialFields = fields.map(field => ({ ...field, optionsText: field.options.join(", ") }));
   const pipelineDirty = pipelineDraft !== null && (pipelineDraft.isNew || pipelineDraft.name !== pipeline.name || JSON.stringify(pipelineDraft.stages) !== JSON.stringify(pipeline.stages));
-  const dirty = (draft !== null && changedFields(draft.base, draft).length > 0) || Object.keys(moving).length > 0 || pipelineDirty || (fieldDraft !== null && JSON.stringify(fieldDraft) !== JSON.stringify(initialFields));
+  // Stages chosen and not sent, only while they still mean something: a deal still on the board, not where it is
+  // already, and nothing else under way (an editor open, a change being saved drops them).
+  const blocked = locked || draft !== null || pipelineDraft !== null || fieldDraft !== null;
+  const [wasBlocked, setWasBlocked] = useState(blocked);
+  if (blocked !== wasBlocked) {
+    setWasBlocked(blocked);
+    if (blocked) setMoving({});
+  }
+  const pendingMoves = blocked ? {} : livePending(moving, deals);
+  const dirty = (draft !== null && changedFields(draft.base, draft).length > 0) || Object.keys(pendingMoves).length > 0 || pipelineDirty || (fieldDraft !== null && JSON.stringify(fieldDraft) !== JSON.stringify(initialFields));
   useLeaveGuard(dirty);
   const editing = draft !== null || pipelineDraft !== null || fieldDraft !== null;
   // How many deals each saved stage holds now: a stage removed with deals in it asks where they go.
@@ -317,7 +329,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
             </p>
           </div>
           {draft === null && canChange ? (
-            <button type="button" className="btn btn-primary" disabled={locked || editing || writeUnconfirmed} onClick={() => { const base = emptyDraft(firstOpen); setError(null); setLost(null); setSaid(""); setDraft({ ...base, base, version: "", conflicts: [] }); }}>
+            <button type="button" id="deal-new" className="btn btn-primary" disabled={locked || editing || writeUnconfirmed} onClick={() => { const base = emptyDraft(firstOpen); setError(null); setLost(null); setSaid(""); setDraft({ ...base, base, version: "", conflicts: [] }); }}>
               <Icon name="plus" size={18} />
               New deal
             </button>
@@ -497,21 +509,24 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                         {canChange ? (
                           <>
                         <label className="min-w-0 flex-1">
-                          <span className="sr-only">{pipelines.length > 1 ? `Move ${deal.title} to a stage or another pipeline` : `Move ${deal.title}`}</span>
+                          <span className="sr-only">{pipelines.length > 1 ? `Stage of ${deal.title}, in any pipeline` : `Stage of ${deal.title}`}</span>
                           <select
                             id={`deal-stage-${deal.id}`}
                             className="field"
-                            value={moving[deal.id] ?? deal.stage}
+                            value={pendingMoves[deal.id] ?? deal.stage}
                             disabled={locked || editing || writeUnconfirmed}
-                            aria-describedby={moving[deal.id] ? `deal-stage-hint-${deal.id}` : undefined}
+                            aria-describedby={`deal-stage-hint-${deal.id}`}
                             onChange={(e) => stageEvent(deal, { kind: "change", value: e.target.value })}
-                            onKeyDown={(e) => { if (e.key === "Enter") stageEvent(deal, { kind: "enter" }); }}
-                            onBlur={() => stageEvent(deal, { kind: "blur" })}
                           >
                             <StageOptions pipelines={editable} />
                           </select>
-                          {moving[deal.id] ? <span id={`deal-stage-hint-${deal.id}`} className="mt-1 block text-xs text-ink-soft">Press Enter, or leave the list, to move it.</span> : null}
                         </label>
+                        {/* Choosing only marks the stage; "Move" sends it (3.2.5), so arrowing through stages never moves the deal. */}
+                        <button type="button" id={`deal-move-${deal.id}`} className="btn btn-primary btn-sm" disabled={locked || editing || writeUnconfirmed || pendingMoves[deal.id] === undefined} onClick={() => stageEvent(deal, { kind: "move" })}>
+                          Move<span className="sr-only">{` ${deal.title}`}</span>
+                        </button>
+                        {/* Always there, outside the label (so it is not part of the select's name), said when a stage is chosen (4.1.3). */}
+                        <p id={`deal-stage-hint-${deal.id}`} role="status" className={pendingMoves[deal.id] !== undefined ? "w-full text-xs text-ink-soft" : "sr-only"}>{stageChosenText(pendingMoves[deal.id], stageName)}</p>
                         <button
                           type="button"
                           className="btn btn-secondary btn-sm"
@@ -547,13 +562,13 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
         </p>
         {lost !== null && !draft ? (
           /* What the creator typed in a deal they can no longer change, to copy, never lost (3.3.7). */
-          <div id={DEAL_HIDDEN_ID} tabIndex={-1} className="notice mt-4" aria-labelledby={`${DEAL_HIDDEN_ID}-title`}>
-            <p id={`${DEAL_HIDDEN_ID}-title`} className="font-semibold">{`${DEAL_HIDDEN} Here is what you typed, so you can copy it.`}</p>
+          <div id={DEAL_HIDDEN_ID} role="group" tabIndex={-1} className="notice mt-4" aria-labelledby={`${DEAL_HIDDEN_ID}-title`}>
+            <p id={`${DEAL_HIDDEN_ID}-title`} className="font-semibold">Here is what you typed, so you can copy it.</p>
             <label className="mt-3 block">
               <span className="field-label">What you typed</span>
               <textarea className="field mt-2" readOnly rows={Math.min(8, lost.split("\n").length + 1)} value={lost} />
             </label>
-            <button type="button" className="btn btn-secondary btn-sm mt-3" onClick={() => { setLost(null); setError(null); }}>
+            <button type="button" className="btn btn-secondary btn-sm mt-3" onClick={() => { setLost(null); setError(null); focusLater("deal-new", "deal-board-alert"); }}>
               Done
             </button>
           </div>

@@ -157,10 +157,10 @@ export const DEAL_HIDDEN_ID = "deal-hidden";
  * to copy (3.3.7): one line a part they changed, with its label. Empty when
  * they changed nothing.
  */
-export function typedText(base: DealDraft, draft: DealDraft): string {
+export function typedText(base: DealDraft, draft: DealDraft, stageName: (id: string) => string = (id) => id): string {
   return DRAFT_UNITS.filter(({ fields }) => fields.some((field) => draft[field] !== base[field]))
     .map(({ unit, label }) => {
-      const words = unit === "followUp" ? [draft.nextAction, draft.dueDate].filter(Boolean).join(", ") : draft[unit as DraftField];
+      const words = unit === "followUp" ? [draft.nextAction, draft.dueDate].filter(Boolean).join(", ") : unit === "stage" ? stageName(draft.stage) : draft[unit as DraftField];
       return `${label[0].toUpperCase()}${label.slice(1)}: ${words || "(empty)"}`;
     })
     .join("\n");
@@ -197,13 +197,33 @@ export function refusalKind(action: unknown, answer: { error: string; current?: 
 }
 
 /**
- * A card's stage select (3.2.5): choosing a stage only marks it; the move
- * is sent on Enter or when the select is left, so a keyboard stepping
- * through the stages never moves the deal, or starts a stage's workflow, at
- * each one on the way.
+ * A card's stage select (3.2.5): choosing a stage only marks it, and the
+ * deal moves when the creator presses "Move" beside it, so arrowing through
+ * the stages never moves it, or starts a stage's workflow, at each one on the
+ * way; a mouse or a phone's own picker works the same way.
  */
-export function stageMoveStep(pending: string | undefined, event: { kind: "change"; value: string } | { kind: "enter" } | { kind: "blur" }, current: string): { pending: string | undefined; commit?: string } {
+export function stageMoveStep(pending: string | undefined, event: { kind: "change"; value: string } | { kind: "move" }, current: string): { pending: string | undefined; commit?: string } {
   if (event.kind === "change") return { pending: event.value === current ? undefined : event.value };
   if (pending === undefined || pending === current) return { pending: undefined };
   return { pending: undefined, commit: pending };
+}
+
+/** What a card says while a stage is chosen and not sent (an always-present status region): empty otherwise. */
+export function stageChosenText(pending: string | undefined, stageName: (id: string) => string): string {
+  return pending === undefined ? "" : `Stage chosen: ${stageName(pending)}. Not moved yet.`;
+}
+
+/** The stages chosen and not sent that still mean something: only for a deal on the board, and not where it already is. */
+export function livePending(moving: Readonly<Record<string, string>>, deals: readonly { id: string; stage: string }[]): Record<string, string> {
+  return Object.fromEntries(Object.entries(moving).filter(([id, stage]) => deals.some((d) => d.id === id && d.stage !== stage)));
+}
+
+/** Words for a status region that a screen reader says again when they repeat: the same words alternate a trailing no-break space. */
+export function announce(previous: string, next: string): string {
+  return next && previous === next ? `${next}\u00a0` : next;
+}
+
+/** Focus goes back to a control only when it was lost (on the page itself), never taken from where the person moved it. */
+export function focusWasLost(active: unknown, body: unknown): boolean {
+  return active === null || active === undefined || active === body;
 }

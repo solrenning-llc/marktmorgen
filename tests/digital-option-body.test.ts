@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { BUMP_KEYS } from "@/lib/bundle-rules";
 import { digitalOptionBodyMatches } from "@/lib/digital-option-body";
 const option = { id: "edition01", label: "Original PDF", priceCents: 6500, file: { pathname: "stores/synthetic/edition01/book.pdf", name: "Book.pdf", bytes: 1200, contentType: "application/pdf", addedAt: "2026-11-01T00:00:00.000Z" }, link: null, details: [], best: false };
 function fixture() {
@@ -37,4 +38,12 @@ test("canonical byte bounds and original file owner/selection are required", () 
   assert.equal(digitalOptionBodyMatches(body, f.product, option.id, "synthetic", f.identity, Buffer.byteLength(body)), true);
   for (const folder of ["other", undefined, "synthetic/edition01"]) assert.equal(digitalOptionBodyMatches(body, f.product, option.id, folder, f.identity, 60000), false);
   assert.equal(digitalOptionBodyMatches(body.replaceAll("+", "%20"), f.product, option.id, "synthetic", f.identity, 60000), false);
+});
+
+test("a digital option cannot silently inherit any of the three checkout bump slots", () => {
+  for (const slot of BUMP_KEYS) for (const suffix of ["", "_key", "_title", "_amount", "_currency", "_product"]) {
+    const f = fixture(), key = `metadata[${slot}${suffix}]`;
+    f.form.set(key, "coupled-extra-entitlement");
+    assert.equal(f.match(), false, key);
+  }
 });

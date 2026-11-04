@@ -35,6 +35,6 @@ export function digitalOptionBodyMatches(body: unknown, product: unknown, option
     "payment_intent_data[metadata][dc]": o.consent,
   };
   return Object.entries(expected).every(([k, v]) => form.get(k) === v) &&
-    !entries.some(([k]) => (k.startsWith("line_items[") && !Object.hasOwn(expected, k)) || /^line_items\[(?!0\])/.test(k) || /^(discounts|custom_fields|optional_items|subscription_data|shipping_options|shipping_address_collection)\[/.test(k)) &&
+    !entries.some(([k]) => /^metadata\[bump(?:2|3)?(?:_|\])/.test(k) || (k.startsWith("line_items[") && !Object.hasOwn(expected, k)) || /^line_items\[(?!0\])/.test(k) || /^(discounts|custom_fields|optional_items|subscription_data|shipping_options|shipping_address_collection)\[/.test(k)) &&
     !["gift", "group", "people", "preorder", "upsell_key", "bundle", "ship"].some(k => form.has(`metadata[${k}]`));
 }

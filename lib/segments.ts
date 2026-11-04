@@ -103,6 +103,9 @@ export function ledgerReadBytes(kept: { imported: number; paypalSales: number; p
   return kept.imported * IMPORTED_BUYER_BYTES + Math.min(kept.paypalSales, ALL_TIME_PAGES * 100) * MAX_PAID_BYTES + Math.min(kept.paypalRefunds, PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES;
 }
 
+/** Whether reading the store's buyers reads anything: its sales (Stripe or PayPal) or buyers it brought over. */
+export const readsBuyers = (store: Store): boolean => readsSales(store) || Boolean(store.pastBuyers);
+
 /**
  * The studio requests one reading of the buyers (buyerLedger, below) costs at
  * the most, as what is kept is measured now: its ten-minute copy by size, and,
@@ -114,7 +117,7 @@ export function ledgerReadBytes(kept: { imported: number; paypalSales: number; p
  * cannot be measured: unknown is never none.
  */
 export async function ledgerReadingUnits(store: Store): Promise<number> {
-  if (!readsSales(store) && !store.pastBuyers) return 0;
+  if (!readsBuyers(store)) return 0;
   let copy = 0;
   let imported = 0;
   if (store.statsId && isRedisConfigured()) {
@@ -139,7 +142,7 @@ export async function ledgerReadingUnits(store: Store): Promise<number> {
  * kept (ledgerReadBytes), before any is read.
  */
 export async function buyerLedger(store: Store, count?: (units: number) => Promise<boolean>): Promise<Ledger> {
-  if (!readsSales(store) && !store.pastBuyers) return { buyers: new Map(), partial: false };
+  if (!readsBuyers(store)) return { buyers: new Map(), partial: false };
   const counted = async (units: number) => !count || units <= 0 || (await count(units).catch(() => false));
   if (store.statsId && isRedisConfigured()) {
     const [size] = await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]);

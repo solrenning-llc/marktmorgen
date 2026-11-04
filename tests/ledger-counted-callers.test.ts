@@ -18,7 +18,8 @@
  * says how many this needs and how many are left.
  */
 import { readFileSync } from "node:fs";
-import { advanceBroadcast, cancelBroadcast, createBroadcast } from "@/lib/broadcasts";
+import { EXTRA_READS, NOTE_ROOM, advanceBroadcast, cancelBroadcast, createBroadcast, readsSpentNote } from "@/lib/broadcasts";
+import { dataKey } from "@/lib/store-data";
 import { upsertContact } from "@/lib/contacts";
 import { ROOM } from "./data-room";
 import { broadcastAnswer } from "@/lib/broadcast-response";
@@ -158,6 +159,50 @@ async function main(): Promise<void> {
   stripeCalls = 0;
   const unheld = await advanceBroadcast(older.broadcast.id, storeForHandle, Date.now() + 5_000);
   is("needing more than it holds with no request left, it is still read and listed, never waiting, and nothing more is counted", [older.broadcast.reserve, unheld?.status !== "waiting", unheld?.listed, stripeCalls > 0, await used()], [undefined, true, true, true, allowanceFor(shop, "studio")]);
+
+  part("A list that cannot be made for another reason is read again at most EXTRA_READS times, then the email stops, failed, saying why");
+  const realPipeline = redis.pipeline.bind(redis);
+  let ledgerReads = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const command of commands) if (command[0] === "STRLEN" && command[1] === ledgerKey) ledgerReads += 1;
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  const roomKey = dataKey(shop)!;
+  const [roomUsed] = await redisPipeline([["HGET", roomKey, "#"]]);
+  const rounds = async (id: string, n: number) => {
+    const seen: string[] = [];
+    for (let i = 0; i < n; i += 1) seen.push((await advanceBroadcast(id, storeForHandle, Date.now() + 5_000))?.status ?? "none");
+    return seen;
+  };
+  const dataFull = "Your store's data room is full, so the list of who it goes to could not be made. Nothing was sent.";
+  for (const [kind, hold] of [["holding its reading", true], ["written down before anything was held", false]] as const) {
+    await copy();
+    await redisPipeline([["SET", studioKey()!, "0"]]);
+    const full = await createBroadcast(shop, later, hold ? countLedger(shop).count : undefined);
+    if (!full.ok) throw new Error(`not written: ${full.reason}`);
+    await dueNow(full.broadcast.id);
+    await redisPipeline([["HSET", roomKey, "#", 10 ** 12]]);
+    ledgerReads = 0;
+    const statuses = await rounds(full.broadcast.id, 5);
+    const end = await recordOf(full.broadcast.id);
+    const allowed = (hold ? 1 : 0) + EXTRA_READS;
+    is(`an email ${kind}, its data room full for 5 rounds: read ${allowed} times at the most (${EXTRA_READS} again), waiting with the data room's note until then`, [ledgerReads, end.reads, statuses.slice(0, allowed), statuses.slice(allowed)], [allowed, allowed, Array(allowed).fill("waiting"), Array(5 - allowed).fill("failed")]);
+    is("then it stops, failed, with why it waited, out of the queue: never dropped without a word", [end.status, end.note, end.note.length <= NOTE_ROOM, (await redisPipeline([["SISMEMBER", "nl:mail:queue", full.broadcast.id]]))[0]], ["failed", `${dataFull} It was tried as many times as it can be, so it stopped. To send it, write it again.`, true, 0]);
+    await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
+  }
+  await copy();
+  await redisPipeline([["SET", studioKey()!, "0"]]);
+  const freed = await createBroadcast(shop, later, countLedger(shop).count);
+  if (!freed.ok) throw new Error(`not written: ${freed.reason}`);
+  await dueNow(freed.broadcast.id);
+  await redisPipeline([["HSET", roomKey, "#", 10 ** 12]]);
+  ledgerReads = 0;
+  const whileFull = await rounds(freed.broadcast.id, 2);
+  await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
+  const once = await advanceBroadcast(freed.broadcast.id, storeForHandle, Date.now() + 5_000);
+  is("made room within its readings, its list is made at the next round and it goes on (here to the sender's own wait)", [whileFull, once?.listed, once?.total, once?.status !== "failed" && !once?.note.startsWith(dataFull), ledgerReads], [["waiting", "waiting"], true, 1, true, 3]);
+  redis.pipeline = realPipeline;
+  is("the note without a retry sentence of its own keeps its words; an empty one says the list could not be made", [readsSpentNote("The recipient list could not be prepared. Nothing was sent. It will be checked again automatically."), readsSpentNote("")], ["The recipient list could not be prepared. Nothing was sent. It was tried as many times as it can be, so it stopped. To send it, write it again.", "The list of who it goes to could not be made. Nothing was sent. It was tried as many times as it can be, so it stopped. To send it, write it again."]);
 
   part("A scheduled or waiting email with no list made, nothing sent, can be canceled; what it holds is not given back");
   await copy();

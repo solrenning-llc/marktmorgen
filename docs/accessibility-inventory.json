@@ -1668,6 +1668,7 @@
     "app/api/store/community/route.ts",
     "app/api/store/community/rsvp/route.ts",
     "app/api/store/community/upload/route.ts",
+    "app/api/store/companies/route.ts",
     "app/api/store/contact-box/route.ts",
     "app/api/store/contact/route.ts",
     "app/api/store/course/certificate/route.ts",

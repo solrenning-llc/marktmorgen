@@ -16,6 +16,7 @@
  * however long the list is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { forgetCompanyPerson } from "@/lib/crm-companies";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type DueTask, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
@@ -422,7 +423,9 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   // Their tasks (639 [GL7](6)) go with them.
   commands.push(["HDEL", tasksKey(statsId), person]);
   const replies = await redisPipeline(commands);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  // And they are taken off any company they were linked to (639 [GL7](4)).
+  const companies = await forgetCompanyPerson(statsId, person);
+  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + companies;
 }
 
 function tasksOf(raw: unknown): PersonTask[] {

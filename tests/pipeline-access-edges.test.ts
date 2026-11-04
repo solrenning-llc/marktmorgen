@@ -17,6 +17,7 @@ import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscri
 import { dataKey } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { moveMemberships, putMember, readLog, readTeam } from "@/lib/team";
+import { accessLogNamer, accessLogWords } from "@/lib/pipeline-access-rules";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -211,7 +212,8 @@ async function main(): Promise<void> {
   await pacc({ email: "sam@example.com", choices: { coach1: "view", sams01: "edit" } });
   is("the team's log tells them apart", (await readLog(store.sid))[0]?.what, "Set sam@example.com's pipeline access. Coaching: can only see (was no access)");
   await pacc({ email: "sam@example.com", choices: { coach1: "view", sams01: "none" } });
-  is("and names the later one with its number", (await readLog(store.sid))[0]?.what, "Set sam@example.com's pipeline access. coaching (2): no access (was can change)");
+  const twinLine = (await readLog(store.sid))[0]!;
+  is("and, on the team page, names the later one with its number", accessLogWords(twinLine.access!, accessLogNamer(await readPipelines(statsId))), "Set sam@example.com's pipeline access. coaching (2): no access (was can change)");
 
   part("Round 5: an access record that cannot be read is a known refusal");
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -278,6 +280,31 @@ async function main(): Promise<void> {
   part("Round 5: a form response made into a deal a moment ago by someone else");
   const formRoute = readFileSync("app/api/store/form-opportunity/route.ts", "utf8");
   is("is shown only to someone who may see its pipeline, as one made before", formRoute.includes('if (result.state === "existing" && (await hidden(result.deal.stage))) return noAccess();'), true);
+
+  part("Round 6: the log names each pipeline as it is named when the log is read");
+  is("kept by pipeline id, with the name it had", [twinLine.what, twinLine.access], ["Set sam@example.com's pipeline access. coaching: no access (was can change)", { email: "sam@example.com", one: false, changes: [{ id: "sams01", name: "coaching", now: "none", was: "edit" }] }]);
+  const firstLine = (await readLog(store.sid)).find((l) => l.access?.changes.some((c) => c.id === "coach1"))!;
+  is("(the owner removes the first Coaching)", (await crm(owner, { action: "unpipeline", id: "coach1", moveTo: "wnew01" })).status, 200);
+  const namer = accessLogNamer(await readPipelines(statsId));
+  is("the one left is named as it is now, never by a number that pointed at it before; the one removed is said as removed", [accessLogWords(twinLine.access!, namer), accessLogWords(firstLine.access!, namer)], ["Set sam@example.com's pipeline access. coaching: no access (was can change)", "Set sam@example.com's pipeline access. Coaching (since removed): can only see (was no access)"]);
+  is("with the pipelines unreadable, by the name each had", accessLogWords(twinLine.access!, accessLogNamer(null)), "Set sam@example.com's pipeline access. coaching: no access (was can change)");
+  is("the team page words the line from it", readFileSync("app/studio/team/page.tsx", "utf8").includes("{line.access ? accessLogWords(line.access, nameOf) : line.what}"), true);
+
+  part("Round 6: a deal gone between the check and its removal");
+  await writePipelineAccess(statsId, "sam@example.com", {}, store);
+  const vanishing = (await crm(owner, { action: "deal", deal: { title: "Vanishing", email: "", cents: 1, stage: "wnew01", note: "" } })).body.deal!.id;
+  let goneFirst = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!goneFirst && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-deal-drop:"))) {
+      goneFirst = true;
+      await real([["HDEL", dealsKey, vanishing]]);
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const vanished = await crm("sam@example.com", { action: "undeal", id: vanishing });
+  redis.pipeline = real;
+  is("is said as gone, their access having been checked", [vanished.status, vanished.body.error], [404, "unknown"]);
+  is("and a removal refused as changed says nothing was removed", readFileSync("components/deals-board.tsx", "utf8").includes('answer.error === "deal_conflict" && body.action === "undeal" ? "Somebody else changed this deal a moment ago, so nothing was removed.'), true);
 
   done();
 }

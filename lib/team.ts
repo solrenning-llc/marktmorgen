@@ -32,6 +32,7 @@
  * just taken off could be back on it.
  */
 import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
+import { type AccessLog, parseAccessLog } from "@/lib/pipeline-access-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
@@ -114,6 +115,12 @@ export type LogLine = {
   role: Role;
   /** What they did, in a few words. */
   what: string;
+  /**
+   * A change of a teammate's pipeline access (639 [GL7](7)), by pipeline id:
+   * the team page words it with the pipelines' names as they are when shown
+   * (accessLogWords), `what` being the same words with the names then.
+   */
+  access?: AccessLog;
 };
 
 const EMPTY: Team = { members: [], invites: [] };
@@ -238,7 +245,7 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
 /** Writes one line into a store's activity log. Never throws. */
 export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<void> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return;
-  const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200) };
+  const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200), ...(line.access ? { access: line.access } : {}) };
   try {
     await redisPipeline([
       ["LPUSH", logKey(sid), JSON.stringify(entry)],
@@ -259,7 +266,8 @@ export async function readLog(sid: string): Promise<LogLine[]> {
       const value = JSON.parse(String(row)) as Partial<LogLine>;
       if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") continue;
       const role: Role = value.role === "owner" ? "owner" : parseTeamRole(value.role) ?? "support";
-      lines.push({ at: value.at, who: value.who, role, what: value.what });
+      const access = parseAccessLog(value.access);
+      lines.push({ at: value.at, who: value.who, role, what: value.what, ...(access ? { access } : {}) });
     } catch {
       // A line that cannot be read is skipped, not shown half.
     }

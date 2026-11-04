@@ -7,7 +7,7 @@
  * edit every pipeline: the people who run the store and its team are never
  * locked out of it. Browser-safe.
  */
-import { CRM_ID, FIRST_PIPELINE_ID, type Pipeline } from "@/lib/crm-rules";
+import { CRM_ID, FIRST_PIPELINE_ID, type Pipeline, pipelineNames } from "@/lib/crm-rules";
 import type { Role } from "@/lib/team-roles";
 
 export type PipelineAccess = "edit" | "view" | "none";
@@ -53,3 +53,49 @@ export function visiblePipelines(pipelines: readonly Pipeline[], role: Role, map
 
 /** What a refused change tells the person, in plain words. */
 export const PIPELINE_ACCESS_REFUSAL = "Your access does not let you change this pipeline. Ask the store's owner to change your access.";
+
+/** One pipeline's access as the team's activity log keeps it: by id, with its name as saved then. */
+export type AccessChange = { id: string; name: string; now: PipelineAccess; was: PipelineAccess };
+/** A change of one teammate's pipeline access, kept in the activity log so each pipeline is named when the log is shown. */
+export type AccessLog = { email: string; one: boolean; changes: AccessChange[] };
+
+const ACCESS_WORDS: Record<PipelineAccess, string> = { edit: "can change", view: "can only see", none: "no access" };
+const isAccess = (v: unknown): v is PipelineAccess => v === "edit" || v === "view" || v === "none";
+
+/**
+ * The log line's words. `nameOf` names each pipeline: on the team page, as
+ * the store's pipelines are named now (lib/crm-rules.ts, pipelineNames), so
+ * two that share a name are told apart however the pipelines change later;
+ * when written, by the name each had then.
+ */
+export function accessLogWords(log: AccessLog, nameOf: (change: AccessChange) => string): string {
+  const said = (c: AccessChange) => `${ACCESS_WORDS[c.now]} (was ${ACCESS_WORDS[c.was]})`;
+  if (!log.changes.length) return `Saved ${log.email}'s pipeline access with no change`;
+  if (log.one) return `Set ${log.email}'s access to the ${nameOf(log.changes[0])} pipeline: ${said(log.changes[0])}`;
+  return `Set ${log.email}'s pipeline access. ${log.changes.map((c) => `${nameOf(c)}: ${said(c)}`).join("; ")}`;
+}
+
+/** An activity log's access change as stored, or null when it is not one (the line's own words are then shown). */
+export function parseAccessLog(raw: unknown): AccessLog | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  if (typeof value.email !== "string" || value.email.length > 254 || typeof value.one !== "boolean" || !Array.isArray(value.changes) || value.changes.length > 50) return null;
+  const changes: AccessChange[] = [];
+  for (const entry of value.changes) {
+    const c = entry as Record<string, unknown> | null;
+    if (!c || typeof c.id !== "string" || !PIPELINE(c.id) || typeof c.name !== "string" || c.name.length > 200 || !isAccess(c.now) || !isAccess(c.was)) return null;
+    changes.push({ id: c.id, name: c.name, now: c.now, was: c.was });
+  }
+  return { email: value.email, one: value.one, changes };
+}
+
+/**
+ * How the team page names each pipeline of a logged access change: as the
+ * store's pipelines are named now (told apart when two share a name); one
+ * since removed by the name it had, said as removed; with the pipelines
+ * unreadable (null), by the name it had.
+ */
+export function accessLogNamer(pipelines: readonly Pick<Pipeline, "id" | "name">[] | null): (change: AccessChange) => string {
+  const names = pipelines ? pipelineNames(pipelines) : null;
+  return (change) => (names ? (names.get(change.id) ?? `${change.name} (since removed)`) : change.name);
+}

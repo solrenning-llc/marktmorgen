@@ -406,8 +406,9 @@ async function replaceDeal(statsId: string, deal: Deal, room: DataStore, expecte
   } catch { throw new CrmDealWriteUnconfirmed(); }
   if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 1 && saved[0] !== 0 && saved[0] !== -1)) throw new CrmDealWriteUnconfirmed();
   if (saved[0] === 1) return true;
-  // Nothing was written: the room is what the record now saved weighs. When that cannot be read, the room taken
-  // is kept (too much counted, never too little).
+  // Nothing was written: the room is set to what the record now saved weighs. When that cannot be read, the room
+  // taken for this change is left as it is, which may then differ (more or less) from what is saved until the
+  // next save of this deal sets it again; it is never set to nothing for a record that is there.
   let now: unknown;
   try {
     const reply = await redisPipeline([["HGET", dealsKey(statsId), deal.id]]);

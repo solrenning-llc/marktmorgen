@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
 import { CrmSchemaReadUnavailable, readPipelinesExact } from "@/lib/crm";
 import { normaliseEmail } from "@/lib/auth";
-import { CRM_ID, pipelineNames } from "@/lib/crm-rules";
+import { CRM_ID } from "@/lib/crm-rules";
 import { PipelineAccessBusyError, PipelineAccessChangedError, setPipelineChoices } from "@/lib/pipeline-access";
-import { type AccessMap, type PipelineAccess, parseAccessMap } from "@/lib/pipeline-access-rules";
+import { type AccessLog, type AccessMap, type PipelineAccess, accessLogWords, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { LockBusyError } from "@/lib/redis-lock";
@@ -71,23 +71,17 @@ export async function POST(request: NextRequest) {
       const named = [...asked.keys()].map((id) => pipelines.find((p) => p.id === id));
       if (named.some((p) => !p)) return { ok: false as const, refused: refusal("unknown", "That pipeline is no longer there. Reload the page.", 404) };
       const choices: Record<string, PipelineAccess> = Object.fromEntries(asked);
-      // Each named as the team page shows it, so two pipelines that share a name are told apart in the log too.
-      const names = pipelineNames(pipelines);
-      return { ok: true as const, named: (named as { id: string; name: string }[]).map((p) => ({ id: p.id, name: names.get(p.id) ?? p.name })), ...(await setPipelineChoices(statsId, email, pipelines.map((p) => p.id), choices, store, was)) };
+      return { ok: true as const, named: named as { id: string; name: string }[], ...(await setPipelineChoices(statsId, email, pipelines.map((p) => p.id), choices, store, was)) };
     });
     if (!done.ok) return done.refused;
     const { named, before, saved } = done;
-    const words = (a: PipelineAccess) => (a === "edit" ? "can change" : a === "view" ? "can only see" : "no access");
     // What each named pipeline was before (an unreadable record opened nothing) and what it is now; only what changed is said.
     const was0 = (id: string): PipelineAccess => (before === null ? "none" : (before[id] ?? "edit"));
     const now = (id: string): PipelineAccess => saved[id] ?? "edit";
-    const changed = named.filter((p) => was0(p.id) !== now(p.id));
-    const what = !changed.length
-      ? `Saved ${email}'s pipeline access with no change`
-      : named.length === 1
-        ? `Set ${email}'s access to the ${changed[0].name} pipeline: ${words(now(changed[0].id))} (was ${words(was0(changed[0].id))})`
-        : `Set ${email}'s pipeline access. ${changed.map((p) => `${p.name}: ${words(now(p.id))} (was ${words(was0(p.id))})`).join("; ")}`;
-    await logTeam(store.sid, { who: guarded.email, role: guarded.role, what }).catch(() => {});
+    // Kept by pipeline id, so the team page names each pipeline as it is when the log is read: two that share a
+    // name are told apart then, never by a number that may later point at another one. `what` has the names now.
+    const access: AccessLog = { email, one: named.length === 1, changes: named.filter((p) => was0(p.id) !== now(p.id)).map((p) => ({ id: p.id, name: p.name, now: now(p.id), was: was0(p.id) })) };
+    await logTeam(store.sid, { who: guarded.email, role: guarded.role, what: accessLogWords(access, (c) => c.name), access }).catch(() => {});
     return Response.json({ ok: true, email, access: saved }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full" }, { status: 409 });

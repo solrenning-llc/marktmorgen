@@ -10,6 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { DealsBoard } from "@/components/deals-board";
 import { PipelineAccessEditor } from "@/components/pipeline-access-editor";
+import { accessLogNamer, accessLogWords } from "@/lib/pipeline-access-rules";
 import { DEFAULT_STAGES, FIRST_PIPELINE_ID, type Deal, type Pipeline, changePipeline, labeledStages, pipelineNames, stageLabel } from "@/lib/crm-rules";
 import { done, is, part } from "./check";
 
@@ -30,14 +31,14 @@ is("so a form's or a workflow's choice of stage never offers two that read the s
 part("On the board");
 const board = draw();
 is("each pipeline's button and total says which", [board.includes(">sales (2)<"), (board.match(/>Sales</g) ?? []).length >= 1], [true, true]);
-is("and the board says why one has a number", board.includes("Two of these pipelines have the same name, so the one made later shows a number after it"), true);
+is("and the board says why one has a number, with the real name", board.includes("Some of these pipelines share a name, so each one made later shows a number after it, such as “sales (2)”."), true);
 is("the file of selected deals is named from it too", readFileSync("components/deals-board.tsx", "utf8").includes("(pipelines.length > 1 ? nameOf(pipeline).toLowerCase()"), true);
-is("nothing said when no names are shared", draw({ pipelines: [sales, { ...twin, name: "Coaching" }] }).includes("Two of these pipelines have the same name"), false);
+is("nothing said when no names are shared", draw({ pipelines: [sales, { ...twin, name: "Coaching" }] }).includes("Some of these pipelines share a name"), false);
 
 part("In the access editor and the team's log");
 const editor = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }], pipelines: [{ id: sales.id, name: sales.name }, { id: twin.id, name: twin.name }], initial: {} }));
 is("each choice named as the board names it", [editor.includes(">Sales</span>"), editor.includes(">sales (2)</span>")], [true, true]);
-is("the log names them the same way", readFileSync("app/api/store/pipeline-access/route.ts", "utf8").includes("const names = pipelineNames(pipelines);"), true);
+is("the log names them the same way when shown", accessLogWords({ email: "sam@example.com", one: false, changes: [{ id: twin.id, name: twin.name, now: "none", was: "edit" }] }, accessLogNamer(pipelines)), "Set sam@example.com's pipeline access. sales (2): no access (was can change)");
 
 part("Editing a pipeline that already shares its name");
 const counts = new Map<string, number>();
@@ -46,10 +47,11 @@ is("renaming it to another pipeline's name is still refused", changePipeline([sa
 
 part("A teammate who sees no pipeline");
 const empty = draw({ pipelines: [], deals: [], stages: [], someHidden: true });
-is("is told so, and offered what the server lets them do: a pipeline of their own and the fields", [empty.includes("You have no pipelines to see in this store."), empty.includes("New pipeline"), empty.includes("Add your first field")], [true, true, true]);
+is("is told so, and offered what the server lets them do: a pipeline of their own and the fields", [empty.includes("You have no pipelines to see in this store. Ask the store&#x27;s owner if you need to see one. You can still add a pipeline of your own and change the fields below."), empty.includes("New pipeline"), empty.includes("Add your first field")], [true, true, true]);
 is("and nothing of a pipeline that is not theirs", [empty.includes("New deal"), empty.includes("Change the pipeline and its stages"), empty.includes(">Sales<")], [false, false, false]);
 const boardCode = readFileSync("components/deals-board.tsx", "utf8");
-is("Remove is offered on the one pipeline they see when others are hidden (the server keeps the last one)", boardCode.includes("!pipelineDraft.isNew && (pipelines.length > 1 || someHidden)"), true);
+is("Remove is offered on the one pipeline they see only when the store has others (the server keeps the last one)", [boardCode.includes("!pipelineDraft.isNew && (pipelines.length > 1 || othersHidden)"), readFileSync("app/studio/deals/page.tsx", "utf8").includes("othersHidden={hidden > 0}")], [true, true]);
+is("and with deals and nowhere they may send them, it says what to do instead of an empty choice", boardCode.includes("Move its ${pipelineDeals.length === 1 ? \"deal\" : \"deals\"} to a pipeline you can change first."), true);
 is("and a full store never tells them to remove one they cannot see", boardCode.includes("Your store has all the pipelines it can keep now. Ask the store's owner if you need another."), true);
 const page = readFileSync("app/studio/deals/page.tsx", "utf8");
 is("the deals page draws the board for them", [page.includes("&& (shown.pipelines.length > 0 || restricted);"), page.includes("shown.pipelines.length === 0 ? <p")], [true, false]);

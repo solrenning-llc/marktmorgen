@@ -96,7 +96,7 @@ function StageOptions({ pipelines, except, names }: { pipelines: readonly Pipeli
   return <>{shown.map(p => <optgroup key={p.id} label={names.get(p.id) ?? p.name}>{p.stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</optgroup>)}</>;
 }
 
-export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipelines, pipelineMax = 1, fields, currency, assignees, today, initialFilter = "all", requestHref, viewOnly, someHidden = false }: { deals: Deal[]; stages: Stage[]; /** The store's pipelines (lib/crm-rules.ts); the first holds the board it always had. */ pipelines?: Pipeline[]; /** How many pipelines the store's plan may have. */ pipelineMax?: number; fields: CrmField[]; currency: string; assignees: string[]; today: string; initialFilter?: DealActionFilter; /** The payment requests page, for a role that may send them; a deal with a person links to it, filled in. */ requestHref?: string; /** Pipelines this person may see but not change (639 [GL7](7)): their deals are shown without the controls that change them. */ viewOnly?: string[]; /** Someone who may not see every pipeline (639 [GL7](7)): the store's pipeline count is never said, so it cannot tell how many are hidden. */ someHidden?: boolean }) {
+export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipelines, pipelineMax = 1, fields, currency, assignees, today, initialFilter = "all", requestHref, viewOnly, someHidden = false, othersHidden = false }: { deals: Deal[]; stages: Stage[]; /** The store's pipelines (lib/crm-rules.ts); the first holds the board it always had. */ pipelines?: Pipeline[]; /** How many pipelines the store's plan may have. */ pipelineMax?: number; fields: CrmField[]; currency: string; assignees: string[]; today: string; initialFilter?: DealActionFilter; /** The payment requests page, for a role that may send them; a deal with a person links to it, filled in. */ requestHref?: string; /** Pipelines this person may see but not change (639 [GL7](7)): their deals are shown without the controls that change them. */ viewOnly?: string[]; /** Someone who may not see every pipeline (639 [GL7](7)): the store's pipeline count is never said, so it cannot tell how many are hidden. */ someHidden?: boolean; /** The store has pipelines this person does not see, so the one they see is not its last and may be removed. */ othersHidden?: boolean }) {
   const router = useRouter();
   // Someone who may not see any of the store's pipelines (639 [GL7](7)) still adds one of their own and changes
   // the fields, as the server lets them: the board then shows only that.
@@ -108,6 +108,8 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
   const names = pipelineNames(pipelines);
   const nameOf = (p: Pick<Pipeline, "id" | "name">) => names.get(p.id) ?? p.name;
   const pipelineCount = noneSeen ? 0 : pipelines.length;
+  // The first name two pipelines share, as it is saved, for the sentence that says why one shows a number.
+  const shared = pipelinesShareName(pipelines) ? pipelines.find((p, i) => pipelines.findIndex(q => q.name.toLowerCase() === p.name.toLowerCase()) !== i)?.name ?? "" : "";
   // What this person may change (lib/pipeline-access-rules.ts): a pipeline marked view shows its deals and nothing that changes them.
   const readOnly = new Set(viewOnly ?? []);
   const canChange = !readOnly.has(pipeline.id);
@@ -159,7 +161,11 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
     }
     if (answer.error === "crm_write_unconfirmed") setWriteUnconfirmed(true);
     // Someone who cannot see every pipeline is never told to remove one they cannot see.
-    setError(answer.error === "pipeline_limit" && someHidden ? "Your store has all the pipelines it can keep now. Ask the store's owner if you need another." : (MESSAGES[answer.error] ?? MESSAGES.server_error));
+    setError(
+      answer.error === "pipeline_limit" && someHidden ? "Your store has all the pipelines it can keep now. Ask the store's owner if you need another."
+        : answer.error === "deal_conflict" && body.action === "undeal" ? "Somebody else changed this deal a moment ago, so nothing was removed. Reload the page and look at it again."
+        : (MESSAGES[answer.error] ?? MESSAGES.server_error),
+    );
   }
 
   function downloadWorklist() {
@@ -241,7 +247,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
             <h2 id="deals-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
               Deals
             </h2>
-            <p className="notice notice-info mt-3">You have no pipelines to see in this store. Ask the store&apos;s owner if you should. You can still add a pipeline of your own, and change the fields below.</p>
+            <p className="notice notice-info mt-3">You have no pipelines to see in this store. Ask the store&apos;s owner if you need to see one. You can still add a pipeline of your own and change the fields below.</p>
             {pipelineCount < pipelineMax && !pipelineDraft ? (
               <button type="button" className="btn btn-secondary btn-sm mt-4" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); setPipelineDraft({ id: newCrmId(), name: "", stages: starterStages(), isNew: true, moves: {}, removeTo: "" }); }}>
                 <Icon name="plus" size={16} />
@@ -294,7 +300,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               </button>
             ) : null}
           </div>
-          {pipelinesShareName(pipelines) ? <p className="mt-2 text-sm text-ink-soft">Two of these pipelines have the same name, so the one made later shows a number after it, such as “Sales (2)”. Rename one to tell them apart.</p> : null}
+          {shared ? <p className="mt-2 text-sm text-ink-soft">{`Some of these pipelines share a name, so each one made later shows a number after it, such as “${shared} (2)”. Rename one to tell them apart.`}</p> : null}
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[32rem] text-left text-sm">
               <caption className="sr-only">What each pipeline&apos;s deals add up to</caption>
@@ -554,12 +560,15 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                   Cancel
                 </button>
               </div>
-              {/* Someone who cannot see every pipeline is offered Remove on one they may change even when it is the only
-                  one they see; the server keeps the store's last pipeline ("pipeline_last"). */}
-              {!pipelineDraft.isNew && (pipelines.length > 1 || someHidden) ? (
+              {/* Remove is offered on the only pipeline someone sees when the store has others they do not see (it is
+                  then not the store's last one, which the server keeps: "pipeline_last"). */}
+              {!pipelineDraft.isNew && (pipelines.length > 1 || othersHidden) ? (
                 <div className="mt-6 space-y-3 border-t border-line pt-4">
                   <p className="text-sm font-semibold text-ink">{`Remove ${nameOf(pipeline)}`}</p>
-                  {pipelineDeals.length ? (
+                  {pipelineDeals.length && !editable.some(p => p.id !== pipeline.id) ? (
+                    // Its deals have nowhere to go that this person may change: said, never an empty choice.
+                    <p className="text-sm text-ink-soft">{`Move its ${pipelineDeals.length === 1 ? "deal" : "deals"} to a pipeline you can change first.`}</p>
+                  ) : pipelineDeals.length ? (
                     <label className="block">
                       <span className="field-label">{`Its ${pipelineDeals.length} ${pipelineDeals.length === 1 ? "deal goes" : "deals go"} to`}</span>
                       <select className="field mt-2" value={pipelineDraft.removeTo} onChange={e => setPipelineDraft({ ...pipelineDraft, removeTo: e.target.value })}>
@@ -568,9 +577,11 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                       </select>
                     </label>
                   ) : <p className="text-sm text-ink-soft">It holds no deals.</p>}
-                  <button type="button" className="btn btn-secondary" disabled={locked || writeUnconfirmed || (pipelineDeals.length > 0 && !pipelineDraft.removeTo)} onClick={removePipeline}>
-                    Remove this pipeline
-                  </button>
+                  {pipelineDeals.length && !editable.some(p => p.id !== pipeline.id) ? null : (
+                    <button type="button" className="btn btn-secondary" disabled={locked || writeUnconfirmed || (pipelineDeals.length > 0 && !pipelineDraft.removeTo)} onClick={removePipeline}>
+                      Remove this pipeline
+                    </button>
+                  )}
                 </div>
               ) : null}
               {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}

@@ -140,7 +140,8 @@ export async function POST(request: NextRequest) {
         if (!read || !mayEdit(pipelineOfStage(await readPipelines(statsId), read.deal.stage))) return noAccess();
         expected = read.raw;
       }
-      return (await dropDeal(statsId, id, store, expected)) ? Response.json({ ok: true }) : restricted ? noAccess() : refuse("unknown", 404);
+      // Gone between the check and the removal: their access was already checked, so it is said as gone.
+      return (await dropDeal(statsId, id, store, expected)) ? Response.json({ ok: true }) : refuse("unknown", 404);
     }
     return refuse("invalid");
   } catch (error) {

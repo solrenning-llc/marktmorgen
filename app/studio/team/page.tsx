@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PipelineAccessEditor } from "@/components/pipeline-access-editor";
 import { readPipelinesExact } from "@/lib/crm";
+import { type AccessChange, accessLogNamer, accessLogWords } from "@/lib/pipeline-access-rules";
 import { readAllPipelineAccess } from "@/lib/pipeline-access";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -49,6 +50,8 @@ export default async function StudioTeamPage({
     readAllPipelineAccess(store.statsId).catch(() => null),
   ]);
   // Only a role that opens Deals and is not Admin can be restricted (639 [GL7](7)): the owner and Admins always see and change every pipeline, and a role without Deals (Editor) sees none.
+  // A pipeline-access line in the log names each pipeline as it is named now (accessLogNamer).
+  const nameOf = accessLogNamer(pipelines);
   const restrictable = team.members.flatMap((m) => ((m.role === "editor" || m.role === "support") && can(m.role, "orders") ? [{ email: m.email, role: m.role }] : []));
 
   return (
@@ -103,13 +106,13 @@ export default async function StudioTeamPage({
               <p className="mt-4 rounded-[12px] bg-paper px-4 py-3 text-sm text-ink-soft ring-1 ring-line">Nothing yet.</p>
             ) : (
               <>
-                <LogList lines={log.slice(0, FIRST_LINES)} />
+                <LogList lines={log.slice(0, FIRST_LINES)} nameOf={nameOf} />
                 {log.length > FIRST_LINES ? (
                   <details className="mt-2">
                     <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                       {`Show ${log.length - FIRST_LINES} older`}
                     </summary>
-                    <LogList lines={log.slice(FIRST_LINES)} />
+                    <LogList lines={log.slice(FIRST_LINES)} nameOf={nameOf} />
                   </details>
                 ) : null}
               </>
@@ -121,7 +124,7 @@ export default async function StudioTeamPage({
   );
 }
 
-function LogList({ lines }: { lines: Awaited<ReturnType<typeof readLog>> }) {
+function LogList({ lines, nameOf }: { lines: Awaited<ReturnType<typeof readLog>>; nameOf: (change: AccessChange) => string }) {
   return (
     <ol className="mt-4 divide-y divide-line">
       {lines.map((line, i) => (
@@ -130,7 +133,7 @@ function LogList({ lines }: { lines: Awaited<ReturnType<typeof readLog>> }) {
           <span className="min-w-0">
             <span className="break-all font-semibold text-ink">{line.who}</span>
             <span className="text-ink-mute">{` · ${ROLE_NAMES[line.role]}`}</span>
-            <span className="block break-words text-ink-soft">{line.what}</span>
+            <span className="block break-words text-ink-soft">{line.access ? accessLogWords(line.access, nameOf) : line.what}</span>
           </span>
         </li>
       ))}

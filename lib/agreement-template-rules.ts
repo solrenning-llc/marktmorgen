@@ -188,8 +188,10 @@ export function templateProblemWords(p: TemplateProblem): string {
   }
 }
 
-// Words as the template keeps them before any check: full-width braces and spaces made plain, then as an agreement keeps them.
-const plainBraces = (text: string) => text.normalize("NFKC");
+// Words as the template keeps them before any check: only what sits in braces (full-width or small ones too) is made plain (NFKC), so a
+// full-width "｛ｃｌｉｅｎｔ＿ｎａｍｅ｝" is read as the placeholder while the creator's own words ("40 m²", "x²", "½") stay exactly as typed.
+const BRACED = /[{\uFF5B\uFE5B][^{}\uFF5B\uFF5D\uFE5B\uFE5C\n]{0,80}[}\uFF5D\uFE5C]/gu;
+const plainBraces = (text: string) => text.replace(BRACED, (part) => part.normalize("NFKC"));
 const oneLine = (text: string, max: number) => clean(plainBraces(text), max + 1);
 const block = (text: string, max: number) => plainText(plainBraces(text), max + 1);
 

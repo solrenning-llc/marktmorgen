@@ -113,7 +113,7 @@ import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
-import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE } from "@/lib/read-ceilings";
+import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
@@ -1193,6 +1193,17 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "lib/read-ceilings.ts", names: ["LIFE_FILL_SHAPE"] },
     ],
     basis: "Once for each store, under a lock and marked filled so it never happens twice: two reads of each of KEPT_DAYS days, an HINCRBY for every field found (DAY_FIELDS_MAX a day at the most), its marks and the record read again (LIFE_FILL_SHAPE). Whichever reader comes first pays it (the studio's home page, the totals, the API, the weekly email), so it is priced here, once, in the first payment's worst case, like the closing.",
+  },
+  {
+    id: "reading-list-made",
+    feature: "A store from before lists given one the first time a sales reading or its calendar file would name someone, so a deleted person is looked up where the copy is kept (review of fe4cb5e56)",
+    monthlyUsd: () => readShapeCost(LIST_MADE_SHAPE),
+    sources: [
+      { file: "lib/store-readings.ts", names: ["ensureListId(storeRef(store))", "store.catalog.id"] },
+      { file: "app/api/store/calendar/[token]/route.ts", names: ["ensureListId(storeRef(store))", "store.catalog.id"] },
+      { file: "lib/read-ceilings.ts", names: ["LIST_MADE_SHAPE", "STORE_LOCK_TRIES"] },
+    ],
+    basis: "Once for each store kept from before lists (every store made since #1680 has one): the list is written into its record (lib/store.ts, ensureListId, which writes nothing once there is one), so whichever reading comes first pays it, once, priced here in the first payment's worst case like the all-time filling (LIST_MADE_SHAPE: the record read twice and written once at its largest, its lock tried for its whole wait, its head's product records read). Only for a store already moved to product records; one not moved yet is shown its reading without keeping it until the daily job moves it.",
   },
   {
     id: "retained-files",

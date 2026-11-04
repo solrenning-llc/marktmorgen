@@ -14,7 +14,11 @@ import { normaliseEmail } from "@/lib/auth";
 import { type Store, storeForEmail } from "@/lib/store";
 import { erasePerson } from "@/lib/person-erasure";
 import { keptReading, keptSales, withoutErasedBuyers } from "@/lib/store-readings";
-import { bookedCalendar, bookedCalendarFeed, ensureFeedToken, withoutErasedBookers } from "@/lib/calendar-sync";
+import { CALENDAR_BUILDS_PER_DAY, bookedCalendar, bookedCalendarFeed, ensureFeedToken, newFeedToken, withoutErasedBookers } from "@/lib/calendar-sync";
+import { suppressCommand } from "@/lib/suppression";
+import { setStripeAccount } from "@/lib/store";
+import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { OWNER, makeWorld, seedPerson } from "./erasure-world";
 import { store as redis } from "./redis-stub";
@@ -23,8 +27,15 @@ import { done, is, part } from "./check";
 process.env.STRIPE_SECRET_KEY = "sk_test_readings_erasure_only";
 /** The checkouts the stand-in for Stripe lists (the races below); none otherwise. */
 let checkouts: Record<string, unknown>[] = [];
+/** Run once while Stripe lists the checkouts (a person's erasure while a reading is being made), then let go. */
+let whileListing: (() => Promise<unknown>) | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const listing = String(input).includes("/checkout/sessions?") && (init?.method ?? "GET") === "GET";
+  if (listing && whileListing) {
+    const run = whileListing;
+    whileListing = null;
+    await run();
+  }
   return new Response(JSON.stringify({ object: "list", data: listing ? checkouts : [], has_more: false }), { status: 200 });
 }) as typeof fetch;
 
@@ -34,6 +45,34 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
  * before anything else the work sends: the race of a reading begun before the
  * erasure and kept after it (review of #2111).
  */
+/**
+ * The order a review found (of fe4cb5e56): the erasure's print written right
+ * after the look among the deleted people, the copy's own step run, and only
+ * then the rest of the erasure, whose DEL finds no copy left.
+ */
+async function printThenErased<T>(store: Store, email: string, work: () => Promise<T>): Promise<T> {
+  const real = redis.pipeline;
+  let printed = false;
+  let erased = false;
+  redis.pipeline = async (batch) => {
+    const answer = await real(batch);
+    if (!printed && batch.some((c) => c[0] === "HMGET" && c[1] === `nl:erased:${store.listId}`)) {
+      printed = true;
+      await real([suppressCommand(store.listId as string, email)]);
+    } else if (printed && !erased && batch.some((c) => c[0] === "EVAL")) {
+      erased = true;
+      redis.pipeline = real;
+      await erasePerson(store, email, { kind: "person" });
+    }
+    return answer;
+  };
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = real;
+  }
+}
+
 async function erasedDuring<T>(store: Store, email: string, work: () => Promise<T>): Promise<{ value: T; raced: boolean }> {
   const real = redis.pipeline;
   let raced = false;
@@ -92,7 +131,7 @@ async function main(): Promise<void> {
   const readAgain = await keptReading(store, "sales", () => withoutErasedBuyers(store, { buyers: { top: sales.biggestBuyers.map((b) => ({ email: b.email, cents: b.cents, orders: 1, last: 0, reference: "" })) } }), Date.now(), true);
   const keptNow = String(redis.run(["GET", key]) ?? "");
   is("the next sales reading leaves them out of the biggest buyers, and keeps the others", [JSON.stringify(readAgain?.value).includes(person), keptNow.includes(person), keptNow.includes(other)], [false, false, true]);
-  is("the studio's sales reading goes through it", readFileSync("lib/store-readings.ts", "utf8").includes("return withoutErasedBuyers(store, await readSales(store, now));"), true);
+  is("the studio's sales reading goes through it", readFileSync("lib/store-readings.ts", "utf8").includes("return withoutErasedBuyers({ listId: guard.listId ?? null }, sales);"), true);
   const calls = [
     { session: "cs_1", start: Date.now() + 86_400_000, end: Date.now() + 90_000_000, product: "p1", email: person, name: "Rhea Reader", moves: 0 },
     { session: "cs_2", start: Date.now() + 2 * 86_400_000, end: Date.now() + 2 * 86_400_000 + 3_600_000, product: "p1", email: other, name: "Otto Other", moves: 0 },
@@ -100,7 +139,7 @@ async function main(): Promise<void> {
   const unnamed = await withoutErasedBookers(store, calls);
   const ics = bookedCalendar(store, unnamed, Date.now(), []);
   is("the calendar file made again keeps the booked time but does not name them", [ics.includes(person), ics.includes("Rhea"), ics.includes("A buyer whose details were deleted"), ics.includes(other)], [false, false, true, true]);
-  is("the feed's route goes through it", readFileSync("app/api/store/calendar/[token]/route.ts", "utf8").includes("await withoutErasedBookers(store, await paidCalls(store))"), true);
+  is("the feed's route goes through it", readFileSync("app/api/store/calendar/[token]/route.ts", "utf8").includes("const calls = await withoutErasedBookers(store, paid);"), true);
 
   part("A sales reading begun before a buyer's erasure keeps nothing naming them (the race, review of #2111)");
   const day = new Date().toISOString().slice(0, 10);
@@ -164,9 +203,92 @@ async function main(): Promise<void> {
   is("the erasure ran between the look among the deleted people and the copy kept", feedRace.raced, true);
   is("afterwards nothing kept names them", String(redis.run(["GET", feedKey]) ?? "").includes(booker), false);
   is("and the answer is not the file naming them: none, the app asks again", [feedRace.value.state, JSON.stringify(feedRace.value).includes(booker)], ["none", false]);
+
+  part("The race the review found: the copy's step runs before the erasure's DEL, and takes the day's last own making (review of fe4cb5e56)");
+  const late = normaliseEmail("lee.late@example.com");
+  const lateBooked = [...booked.slice(1), { ...booked[0], session: "cs_b3", email: late, name: "Lee Late" }];
+  const lateMaking = async () => {
+    const calls = await withoutErasedBookers(store, lateBooked);
+    return { ics: bookedCalendar(store, calls, Date.now(), []), listId: store.listId, named: calls.map((c) => c.email).filter((e): e is string => Boolean(e)) };
+  };
+  freshFeed();
+  const at = Date.now();
+  is("made once today, naming them", [(await bookedCalendarFeed(owner, lateMaking, at)).state, String(redis.run(["GET", feedKey]) ?? "").includes(late), Number(redis.run(["GET", buildsKey]))], ["made", true, 1]);
+  // The copy grown older than its refresh, so the next check makes it again with the day's last own making.
+  const aged = JSON.parse(String(redis.run(["GET", feedKey])));
+  redis.run(["SET", feedKey, JSON.stringify({ ...aged, at: at - 13 * 3_600_000 }), "EX", 86_400]);
   redis.run(["DEL", `nl:cal:pace:${store.statsId}`]);
-  const again = await bookedCalendarFeed(owner, making, Date.now() + 1);
-  is("the next making leaves them unnamed and is kept", [again.state, JSON.stringify(again).includes(booker), String(redis.run(["GET", feedKey]) ?? "").includes(guest), String(redis.run(["GET", feedKey]) ?? "").includes(booker)], ["made", false, true, false]);
+  const split = await printThenErased(store, late, () => bookedCalendarFeed(owner, lateMaking, at + 1));
+  is("the copy's step found their print: nothing answered, nothing kept naming them", [split.state, String(redis.run(["GET", feedKey]) ?? "").includes(late)], ["none", false]);
+  is(`the day's own makings are not left used up by it (${CALENDAR_BUILDS_PER_DAY} a day)`, Number(redis.run(["GET", buildsKey])) < CALENDAR_BUILDS_PER_DAY, true);
+  redis.run(["DEL", `nl:cal:pace:${store.statsId}`]);
+  const after = await bookedCalendarFeed(owner, lateMaking, at + 2);
+  is("the app's next check makes the file again, without them, and keeps it", [after.state, JSON.stringify(after).includes(late), String(redis.run(["GET", feedKey]) ?? "").includes(guest), String(redis.run(["GET", feedKey]) ?? "").includes(late)], ["made", false, true, false]);
+
+  part("A making that cannot look the bookers up where it keeps the copy (no list) answers the file but keeps nothing naming them");
+  freshFeed();
+  const listless = await bookedCalendarFeed(owner, async () => ({ ics: `BEGIN:VCALENDAR\r\nATTENDEE:mailto:${guest}\r\nEND:VCALENDAR`, listId: null, named: [guest] }), at + 3);
+  is("answered, not kept", [listless.state, redis.run(["GET", feedKey])], ["made", null]);
+  redis.run(["DEL", `nl:cal:pace:${store.statsId}`]);
+  const nobody = await bookedCalendarFeed(owner, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] }), at + 4);
+  is("a file naming nobody is kept as before", [nobody.state, redis.run(["GET", feedKey]) !== null], ["made", true]);
+
+  part("The feed's real route passes who the file names and the store's list to the step that keeps it (review of fe4cb5e56)");
+  await setStripeAccount(OWNER, "acct_test_readings_feed", true);
+  const routed = (await storeForEmail(OWNER))!;
+  const url = (await newFeedToken(routed)).subscribeUrl ?? "";
+  const token = url.slice(url.lastIndexOf("/") + 1);
+  const ask = () => feedRoute(new Request(url), { params: Promise.resolve({ token }) });
+  const callSession = (email: string, i: number) => ({
+    id: `cs_test_feedcall${String(i).padStart(6, "0")}`, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment",
+    created: Math.floor(Date.now() / 1000) - 3_600, amount_total: 5000, currency: "usd", customer_details: { email, name: email.split("@")[0] },
+    metadata: { store: routed.handle, kind: "call", product: "nolisting", start: String(Date.now() + (i + 1) * 86_400_000), end: String(Date.now() + (i + 1) * 86_400_000 + 1_800_000) },
+    payment_intent: { id: `pi_feedcall${i}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
+  });
+  const caller = normaliseEmail("cal.caller@example.com");
+  const keeper = normaliseEmail("kay.keeper@example.com");
+  checkouts = [callSession(caller, 1), callSession(keeper, 2)];
+  freshFeed();
+  const routeQuiet = await ask();
+  const routeQuietText = await routeQuiet.text();
+  is("no race: the route answers the file naming both and keeps it", [routeQuiet.status, routeQuietText.includes(caller), String(redis.run(["GET", feedKey]) ?? "").includes(caller)], [200, true, true]);
+  freshFeed();
+  const routeRace = await erasedDuring(routed, caller, ask);
+  const routeRaceText = await routeRace.value.text();
+  is("the erasure ran between the route's look among the deleted people and the copy kept", routeRace.raced, true);
+  is("the route's answer does not name them, and nothing kept does", [routeRace.value.status === 200 && routeRaceText.includes(caller), String(redis.run(["GET", feedKey]) ?? "").includes(caller)], [false, false]);
+
+  part("A store kept from before it had a list: its list is made before anyone is named, so the check where the copy is kept can be made (review of fe4cb5e56)");
+  // Its record as a store from before #1680 had it: no list.
+  const ownerKey = `nl:store:owner:${createHash("sha256").update(`nimbus-store:${OWNER.toLowerCase()}`).digest("hex").slice(0, 40)}`;
+  const record = JSON.parse(String(redis.run(["GET", ownerKey])));
+  is("the record found", record.handle, routed.handle);
+  const unlisted = () => redis.run(["SET", ownerKey, JSON.stringify({ ...record, listId: null })]);
+  unlisted();
+  const sayer = normaliseEmail("sal.sayer@example.com");
+  checkouts = [callSession(sayer, 3), callSession(keeper, 4)];
+  freshFeed();
+  // The person's erasure while Stripe is read (it makes the store's list for their print).
+  whileListing = async () => erasePerson((await storeForEmail(OWNER))!, sayer, { kind: "person" });
+  const listlessRoute = await ask();
+  const listlessText = await listlessRoute.text();
+  is("the route's file does not name them, nor anything kept", [listlessText.includes(sayer), String(redis.run(["GET", feedKey]) ?? "").includes(sayer)], [false, false]);
+  is("and the store has a list now", typeof (await storeForEmail(OWNER))?.listId, "string");
+
+  unlisted();
+  const unlistedStore = { ...(await storeForEmail(OWNER))!, stripeAccountId: "acct_test_readings_race" } as Store;
+  const saleSayer = normaliseEmail("sue.sales@example.com");
+  checkouts = [checkout(saleSayer, 9_900, 5), checkout(stayer, 1_900, 6)];
+  freshDay();
+  redis.run(["DEL", key]);
+  whileListing = async () => erasePerson((await storeForEmail(OWNER))!, saleSayer, { kind: "person" });
+  const listlessSales = await keptSales(unlistedStore, Date.now(), true);
+  is("a sales reading of a store with no list: neither shown nor kept naming them", [JSON.stringify(listlessSales.value).includes(saleSayer), String(redis.run(["GET", key]) ?? "").includes(saleSayer)], [false, false]);
+  unlisted();
+  freshDay();
+  redis.run(["DEL", key]);
+  const quietSales = await keptSales({ ...unlistedStore }, Date.now(), true);
+  is("with nobody deleted, its list is made and the reading kept as before", [String(redis.run(["GET", key]) ?? "").includes(stayer), typeof (await storeForEmail(OWNER))?.listId, quietSales.stale], [true, "string", false]);
   done();
 }
 

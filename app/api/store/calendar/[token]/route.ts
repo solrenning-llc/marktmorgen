@@ -1,4 +1,4 @@
-import { storeForHandle } from "@/lib/store";
+import { ensureListId, storeForHandle, storeRef } from "@/lib/store";
 import { paidCalls } from "@/lib/calls";
 import { FeedGone, bookedCalendar, bookedCalendarFeed, ensureFeedToken, slotRooms, storeIdForToken, withoutErasedBookers } from "@/lib/calendar-sync";
 import { readKind } from "@/lib/catalog";
@@ -33,12 +33,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
 
   try {
     const answer = await bookedCalendarFeed(owner, async () => {
-      const store = await storeForHandle(owner.handle);
+      let store = await storeForHandle(owner.handle);
       if (!store || store.statsId !== owner.statsId) throw new FeedGone();
       // Renamed, or settings from before they named the store's calls: written again, so its changes are read from now on.
       await ensureFeedToken(store).catch(() => {});
       // Who deleted their details from the store is not named, though Stripe keeps the booking (review of #2111).
-      const calls = store.stripeAccountId ? await withoutErasedBookers(store, await paidCalls(store)) : [];
+      const paid = store.stripeAccountId ? await paidCalls(store) : [];
+      // A store from before lists has none to keep deleted people's prints in: made now, once, before anyone is
+      // named, so they can be looked up here and where the copy is kept (review of fe4cb5e56; lib/read-ceilings.ts,
+      // LIST_MADE_SHAPE). Only for a store already moved to product records: moving one is a write of its own.
+      if (!store.listId && store.catalog.id && paid.some((c) => c.email)) store = (await ensureListId(storeRef(store)).catch(() => null)) ?? store;
+      const calls = await withoutErasedBookers(store, paid);
       const listings = await readKind(store, "call");
       const ics = bookedCalendar(store, calls, Date.now(), listings, await slotRooms(store, calls, listings));
       // Who the file may name, checked again where its copy is kept: a deletion meanwhile is not undone by it.

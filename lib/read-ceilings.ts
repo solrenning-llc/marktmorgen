@@ -92,7 +92,8 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  * NX, INCRBY, EXPIRE NX and, when refused, DECRBY: 4), the day's credits used
  * and the day's own makings (SET NX,
  * INCRBY, EXPIRE NX and, when refused, DECRBY: 4 each, 8); when it fails,
- * the day's retry (4) and the making given back (DECRBY, INCRBY, EXPIRE: 3); the store (its handle and its record: 2 GET) and its settings
+ * the day's retry (4) and the making given back (DECRBY, INCRBY, EXPIRE: 3; the same
+ * 3 when the copy's step found a deleted person instead, a making that did not fail); the store (its handle and its record: 2 GET) and its settings
  * written again when it was renamed (lib/calendar-sync.ts, ensureFeedToken:
  * GET and SET, 2); its Stripe pages; every call listing (one GET each, up to
  * MAX_PRODUCTS, the catalog's head aside); each booking's moves
@@ -229,6 +230,36 @@ export const STORE_READING_SHAPES: readonly ReadShape[] = [STATS_READ_SHAPE, SAL
  * left (lib/store-readings.ts, readingsLeft).
  */
 export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands: 3 + 2 * (3 + 1) + (5 + 2) + 2, dbBytes: 3 * READING_COPY_MAX_BYTES + 2 * 32, outBytes: 0, stripePages: 0 };
+
+/**
+ * A store kept from before it had a list (lists came with every new store in
+ * #1680, 2 November 2026) gets one the first time a sales reading or its
+ * calendar file would name someone (lib/store-readings.ts, keptSales;
+ * app/api/store/calendar/[token]/route.ts), so a deleted person's print can be
+ * looked up where the copy is kept (review of fe4cb5e56). Once ever for each
+ * store, and only for one already moved to product records:
+ * lib/store.ts, ensureListId: the record read (GET), its lock (SET NX, tried
+ * again every 20 to 250 ms for LOCK_WAIT_MS, 8 seconds: at most
+ * STORE_LOCK_TRIES), the record read again (GET), its first page's product
+ * records and their order bumps read for its head (one GET each,
+ * STORE_PAGE_SIZE x (1 + MAX_BUMPS)), the lock held longer (EVAL, GET,
+ * EXPIRE), the record written while held (EVAL, GET, EXISTS, SET) and the lock
+ * let go (EVAL, GET, DEL); the record at its largest read twice and written
+ * once. tests/read-ceilings.test.ts measures it and fails when one of the
+ * figures it is built from moves. Priced once, in the first payment's worst
+ * case (tests/plan-cost-registry.ts, reading-list-made).
+ */
+export const STORE_LOCK_TRIES = 4 + Math.ceil((8_000 - (20 + 40 + 80 + 160)) / 250) + 1;
+/** The head's reads: STORE_PAGE_SIZE (24, lib/catalog.ts) products and MAX_BUMPS (3, lib/product-extras.ts) bumps each. */
+export const LIST_MADE_HEAD_READS = 24 * (1 + 3);
+export const LIST_MADE_SHAPE: ReadShape = {
+  seconds: 9,
+  cpu: 0.5,
+  commands: 1 + STORE_LOCK_TRIES + 1 + LIST_MADE_HEAD_READS + 3 + 4 + 3,
+  dbBytes: 3 * MAX_STORE_BYTES + LIST_MADE_HEAD_READS * LISTING_READ_BYTES,
+  outBytes: 0,
+  stripePages: 0,
+};
 
 /**
  * Not one of these four reads, said so it is not taken for zero: the first

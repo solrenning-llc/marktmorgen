@@ -874,12 +874,27 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // one, otherwise nothing: the app asks again. Nor is a file kept or answered that names someone deleted from the
   // store since `make` looked (review of #2111): their prints are checked in the same step (2), the old copy goes
   // with it, and nothing is answered; the next making leaves them out. The making stays counted.
+  // A file that names someone with no list to look them up in (a store from before lists, whose list could not be
+  // made: the route makes it first) is answered while the settings exist, but never kept: its check cannot be made.
   const listId = made.listId;
-  const prints = listId ? [...new Set(made.named)].map((email) => suppressionPrint(listId, email)) : [];
-  const erased = listId ? suppressedKey(listId) : "nl:none";
-  const [written] = await redisPipeline([["EVAL", KEEP_COPY, 3, cfgKey(owner.statsId), outKey(owner.statsId), erased, file, CALENDAR_COPY_SECONDS, ...prints]]).catch(() => [null]);
+  const named = [...new Set(made.named)];
+  let written: unknown;
+  if (!listId && named.length) {
+    const [settings] = await redisPipeline([["EXISTS", cfgKey(owner.statsId)]]).catch(() => [null]);
+    written = settings === null ? null : Number(settings) === 0 ? 0 : 1;
+  } else {
+    const prints = listId ? named.map((email) => suppressionPrint(listId, email)) : [];
+    const erased = listId ? suppressedKey(listId) : "nl:none";
+    [written] = await redisPipeline([["EVAL", KEEP_COPY, 3, cfgKey(owner.statsId), outKey(owner.statsId), erased, file, CALENDAR_COPY_SECONDS, ...prints]]).catch(() => [null]);
+  }
   if (Number(written) === 0) return { state: "gone" };
-  if (Number(written) === 2) return { state: "none" };
+  if (Number(written) === 2) {
+    // Its copy gone with nothing kept in its place, the erasure's own DEL may find none and give no making back
+    // (review of fe4cb5e56): this one is given back, so the app's next check makes the file again without them.
+    // The try stays counted (calendarAttemptsKey), so what it read stays inside the priced figure.
+    await giveCounted(taken, 2 * 86_400);
+    return { state: "none" };
+  }
   if (Number(written) !== 1) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
   // A store whose feed is read has its refunds read by the five-minute job, meeting rooms or not, so a call refunded
   // or cancelled marks its bookings changed and the feed is made again at the app's next check (inbox C4-33, M3):

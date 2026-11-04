@@ -32,16 +32,19 @@ import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
   CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
-  CALENDAR_REFUSED_SHAPE, ERASED_LOOKUP_BYTES, KEPT_READINGS_SHAPE, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
+  CALENDAR_REFUSED_SHAPE, ERASED_LOOKUP_BYTES, KEPT_READINGS_SHAPE, LIST_MADE_HEAD_READS, LIST_MADE_SHAPE, STORE_LOCK_TRIES, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
 import { TOP_BUYERS } from "@/lib/stats";
+import { STORE_PAGE_SIZE } from "@/lib/catalog";
+import { MAX_BUMPS } from "@/lib/product-extras";
+import { createHash } from "node:crypto";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading } from "@/lib/store-readings";
 import { GB, STORAGE_PER_GB, providerFeeUsd, worstCost } from "./plan-cost-model";
 import { PRICES_WITHOUT_COMMISSION } from "@/lib/plan";
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { CLOSING_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
-import { claimHandle, createStore, ensureStatsId, renameHandle, setStripeAccount, setSubscription, storeForEmail, storeForHandle, storeForId, type Store } from "@/lib/store";
+import { claimHandle, createStore, ensureListId, ensureStatsId, renameHandle, setStripeAccount, setSubscription, storeForEmail, storeForHandle, storeForId, type Store } from "@/lib/store";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as storesRoute } from "@/app/api/store/stores/route";
@@ -289,6 +292,23 @@ async function main(): Promise<void> {
     // listing (one GET each) and every booking at the measured rate, is within the shape.
     const fixedMeasured = forty - 40 * perBooking - CALENDAR_POLL_SHAPE.commands;
     is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + MAX_PRODUCTS + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
+  }
+
+  part("A store from before lists gets one once, the first time a reading would name someone: measured, within its shape, priced once (review of fe4cb5e56)");
+  {
+    const ownerKey = `nl:store:owner:${createHash("sha256").update(`nimbus-store:${OWNER.toLowerCase()}`).digest("hex").slice(0, 40)}`;
+    const record = JSON.parse(String(redis.run(["GET", ownerKey])));
+    redis.run(["SET", ownerKey, JSON.stringify({ ...record, listId: null })]);
+    const made = await counted(() => ensureListId(OWNER));
+    const again = await counted(() => ensureListId(OWNER));
+    // Uncontended, with no product on its first page: what is left of the shape is the lock's whole wait and the head's reads.
+    const room = LIST_MADE_SHAPE.commands - (STORE_LOCK_TRIES - 1) - LIST_MADE_HEAD_READS;
+    is(`made, measured (${made.commands}), within LIST_MADE_SHAPE less the lock's other tries and the head's reads (${room})`, [typeof made.value?.listId, made.commands <= room], ["string", true]);
+    is("once there is one, nothing is written: one read", again.commands, 1);
+    is("the figures the shape is built from are the code's own", [read("lib/store.ts").includes("const LOCK_WAIT_MS = 8_000;"), read("lib/redis-lock.ts").includes("for (let wait = 20; ; wait = Math.min(wait * 2, 250))"), LIST_MADE_HEAD_READS === STORE_PAGE_SIZE * (1 + MAX_BUMPS)], [true, true, true]);
+    const listLine = PER_PAYMENT_LINES.find((l) => l.id === "reading-list-made");
+    is("priced once, in the first payment's worst case", (listLine?.monthlyUsd("creator") ?? 0) >= readShapeCost(LIST_MADE_SHAPE), true);
+    console.log(`  its own once-a-store line (reading-list-made): $${readShapeCost(LIST_MADE_SHAPE).toFixed(4)} once (${LIST_MADE_SHAPE.commands} commands)`);
   }
 
   part("Every figure costs at least the worst it stands for");

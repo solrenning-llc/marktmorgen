@@ -32,7 +32,7 @@ import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY }
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { keyFor } from "@/lib/stripe-account";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
-import type { Store } from "@/lib/store";
+import { type Store, ensureListId, storeRef } from "@/lib/store";
 import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { type Numbers, membershipNumbers } from "@/lib/membership-numbers";
 
@@ -241,11 +241,13 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   }
   const text = JSON.stringify({ at: now, value });
   if (value === null || value === undefined || Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) return { value, at: now, stale: false };
-  const names = guard?.listId ? [...new Set(guard.names(value))] : [];
-  if (!guard?.listId || !names.length) {
+  const names = guard ? [...new Set(guard.names(value))] : [];
+  if (!names.length) {
     await redisPipeline([["SET", key, text, "EX", READING_KEEP_SECONDS]]).catch(() => {});
     return { value, at: now, stale: false };
   }
+  // Someone named and no list to look them up in: shown, never kept (its check cannot be made).
+  if (!guard?.listId) return { value, at: now, stale: false };
   // Kept only when nobody it names was deleted meanwhile, checked where it is written (READING_COPY). Someone was:
   // shown without them and not kept; the next reading is made again without them. The step could not be run:
   // nothing kept, since its check could not be made, and shown as read (its read left the deleted out already).
@@ -272,16 +274,22 @@ export async function keptStats(store: Store, now = Date.now(), fresh = false): 
  * incomplete for being kept (inbox C4-33 (2)).
  */
 export async function keptSales(store: Store, now = Date.now(), fresh = false): Promise<Kept<SalesStats | null>> {
-  const kept = await keptReading(store, "sales", async () => {
-    // Selling not configured on our side: nothing is called, so the reading's unit is given back (inbox C4-53).
-    if (store.stripeAccountId && !keyFor(store.stripeAccountId)) throw new NotRead("selling is not configured");
-    return withoutErasedBuyers(store, await readSales(store, now));
-  }, now, fresh, {
-    // Checked again where the copy is written: an erasure between that look and the write is not undone by it (review of #2111).
+  // Checked again where the copy is written: an erasure between that look and the write is not undone by it (review of #2111).
+  const guard: ReadingGuard<SalesStats | null> = {
     listId: store.listId,
     names: (sales) => sales?.buyers?.top.map((b) => b.email) ?? [],
     without: (sales, gone) => (sales?.buyers ? { ...sales, buyers: { ...sales.buyers, top: sales.buyers.top.filter((b) => !gone.has(b.email)) } } : sales),
-  });
+  };
+  const kept = await keptReading(store, "sales", async () => {
+    // Selling not configured on our side: nothing is called, so the reading's unit is given back (inbox C4-53).
+    if (store.stripeAccountId && !keyFor(store.stripeAccountId)) throw new NotRead("selling is not configured");
+    const sales = await readSales(store, now);
+    // A store from before lists has none to keep deleted people's prints in: made now, once, before anyone is
+    // named (lib/read-ceilings.ts, LIST_MADE_SHAPE), only for a store already moved to product records (moving one
+    // is a write of its own, not priced here); when it is not made, the reading is shown and not kept.
+    if (!guard.listId && store.catalog.id && sales?.buyers?.top.length) guard.listId = (await ensureListId(storeRef(store)).catch(() => null))?.listId ?? null;
+    return withoutErasedBuyers({ listId: guard.listId ?? null }, sales);
+  }, now, fresh, guard);
   if (!kept) throw new ReadingsUsed();
   return kept;
 }

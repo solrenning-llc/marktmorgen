@@ -33,6 +33,9 @@ const en = {
   print: "Print or save as PDF",
   refundedTitle: "Refunded",
   refundedBody: (amount: string, store: string) => `${store} refunded ${amount} of this payment to you.`,
+  /** Paid outside this page (639 [GL7](30)): as the creator marked it, with no email claimed. */
+  paidOutsideBody: (amount: string, store: string, date: string, how: "cash" | "transfer" | "other") =>
+    `${store} marked ${amount} as paid on ${date}, ${how === "cash" ? "in cash" : how === "transfer" ? "by bank transfer" : "another way"}, outside this page. This page is your receipt.`,
   partRefund: (amount: string) => `${amount} of this payment was refunded to you.`,
   canceledTitle: "This request was withdrawn",
   canceledBody: (store: string) => `${store} withdrew it, so it can't be paid here. Nothing was charged.`,
@@ -89,6 +92,8 @@ const es: RequestWords = {
   print: "Imprimir o guardar como PDF",
   refundedTitle: "Reembolsado",
   refundedBody: (amount, store) => `${store} te reembolsó ${amount} de este pago.`,
+  paidOutsideBody: (amount, store, date, how) =>
+    `${store} marcó ${amount} como pagado el ${date}, ${how === "cash" ? "en efectivo" : how === "transfer" ? "por transferencia bancaria" : "de otra forma"}, fuera de esta página. Esta página es tu recibo.`,
   partRefund: (amount) => `Se te reembolsaron ${amount} de este pago.`,
   canceledTitle: "Esta solicitud fue retirada",
   canceledBody: (store) => `${store} la retiró, así que no se puede pagar aquí. No se cobró nada.`,
@@ -143,6 +148,8 @@ const fr: RequestWords = {
   print: "Imprimer ou enregistrer en PDF",
   refundedTitle: "Remboursé",
   refundedBody: (amount, store) => `${store} vous a remboursé ${amount} sur ce paiement.`,
+  paidOutsideBody: (amount, store, date, how) =>
+    `${store} a indiqué que ${amount} ont été payés le ${date}, ${how === "cash" ? "en espèces" : how === "transfer" ? "par virement bancaire" : "d'une autre manière"}, en dehors de cette page. Cette page est votre reçu.`,
   partRefund: (amount) => `${amount} de ce paiement vous ont été remboursés.`,
   canceledTitle: "Cette demande a été retirée",
   canceledBody: (store) => `${store} l'a retirée : elle ne peut donc plus être payée ici. Rien n'a été prélevé.`,
@@ -197,6 +204,8 @@ const de: RequestWords = {
   print: "Drucken oder als PDF speichern",
   refundedTitle: "Erstattet",
   refundedBody: (amount, store) => `${store} hat dir ${amount} dieser Zahlung erstattet.`,
+  paidOutsideBody: (amount, store, date, how) =>
+    `${store} hat ${amount} am ${date} als bezahlt vermerkt, ${how === "cash" ? "in bar" : how === "transfer" ? "per Banküberweisung" : "auf anderem Weg"}, außerhalb dieser Seite. Diese Seite ist deine Quittung.`,
   partRefund: (amount) => `${amount} dieser Zahlung wurden dir erstattet.`,
   canceledTitle: "Diese Anforderung wurde zurückgezogen",
   canceledBody: (store) => `${store} hat sie zurückgezogen, deshalb kann sie hier nicht bezahlt werden. Es wurde nichts abgebucht.`,
@@ -251,6 +260,8 @@ const it: RequestWords = {
   print: "Stampa o salva come PDF",
   refundedTitle: "Rimborsato",
   refundedBody: (amount, store) => `${store} ti ha rimborsato ${amount} di questo pagamento.`,
+  paidOutsideBody: (amount, store, date, how) =>
+    `${store} ha segnato ${amount} come pagati il ${date}, ${how === "cash" ? "in contanti" : how === "transfer" ? "con bonifico bancario" : "in un altro modo"}, fuori da questa pagina. Questa pagina è la tua ricevuta.`,
   partRefund: (amount) => `Ti sono stati rimborsati ${amount} di questo pagamento.`,
   canceledTitle: "Questa richiesta è stata ritirata",
   canceledBody: (store) => `${store} l'ha ritirata, quindi non si può pagare qui. Non è stato addebitato nulla.`,
@@ -305,6 +316,8 @@ const nl: RequestWords = {
   print: "Afdrukken of als pdf opslaan",
   refundedTitle: "Terugbetaald",
   refundedBody: (amount, store) => `${store} heeft ${amount} van deze betaling aan je terugbetaald.`,
+  paidOutsideBody: (amount, store, date, how) =>
+    `${store} heeft ${amount} op ${date} als betaald gemarkeerd, ${how === "cash" ? "contant" : how === "transfer" ? "per bankoverschrijving" : "op een andere manier"}, buiten deze pagina. Deze pagina is je ontvangstbewijs.`,
   partRefund: (amount) => `${amount} van deze betaling is aan je terugbetaald.`,
   canceledTitle: "Dit verzoek is ingetrokken",
   canceledBody: (store) => `${store} heeft het ingetrokken, dus het kan hier niet worden betaald. Er is niets afgeschreven.`,
@@ -359,6 +372,8 @@ const pt: RequestWords = {
   print: "Imprimir ou guardar como PDF",
   refundedTitle: "Reembolsado",
   refundedBody: (amount, store) => `${store} reembolsou-lhe ${amount} deste pagamento.`,
+  paidOutsideBody: (amount, store, date, how) =>
+    `${store} registou ${amount} como pagos a ${date}, ${how === "cash" ? "em dinheiro" : how === "transfer" ? "por transferência bancária" : "de outra forma"}, fora desta página. Esta página é o seu recibo.`,
   partRefund: (amount) => `Foram-lhe reembolsados ${amount} deste pagamento.`,
   canceledTitle: "Este pedido foi retirado",
   canceledBody: (store) => `${store} retirou-o, por isso não pode ser pago aqui. Nada foi cobrado.`,

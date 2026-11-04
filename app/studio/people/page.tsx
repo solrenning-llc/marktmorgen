@@ -2,15 +2,21 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PersonFind } from "@/components/person-find";
 import { PersonNotes } from "@/components/person-notes";
+import { PersonTasks } from "@/components/person-tasks";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
-import { readFields, readValues } from "@/lib/crm";
+import { readAllTasks, readFields, readPersonTasks, readValues } from "@/lib/crm";
+import { PERSON_KEY, addressForPerson, agendaForDays, daysAround, personAddresses } from "@/lib/person-agenda";
+import type { PersonTask } from "@/lib/person-tasks";
+import { TasksAgendaList } from "@/components/tasks-agenda";
+import { readTeam } from "@/lib/team";
 import type { CrmField } from "@/lib/crm-rules";
 import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken } from "@/lib/buyer-profile";
 import { channelName } from "@/lib/channel-names";
@@ -82,6 +88,8 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
 
   const token = typeof query.p === "string" ? query.p : "";
   const sale = typeof query.sale === "string" && SALE_REFERENCE.test(query.sale) ? query.sale : "";
+  // A person's key, from a task in the agenda below: their address read again from the store's buyers.
+  const who = typeof query.who === "string" && PERSON_KEY.test(query.who) ? query.who : "";
   let email: string | null = null;
   let lookupFailed = false;
   if (token) email = await addressForToken(store, token);
@@ -91,12 +99,21 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       lookupFailed = true;
       return null;
     });
+  } else if (who) {
+    email = await addressForPerson(store, who).catch((error) => {
+      console.error("reading a task's buyer failed", error);
+      lookupFailed = true;
+      return null;
+    });
   }
-  const asked = Boolean(token || sale);
+  const asked = Boolean(token || sale || who);
   const profile = email ? await buyerProfile(store, email) : null;
   // The store's own fields about each person (lib/crm-rules.ts), and this one's answers.
   const fields = profile ? await readFields(store.statsId) : [];
   const values = profile?.person ? await readValues(store.statsId, profile.person, fields) : {};
+  // Tasks about this person (639 [GL7](6)), and who may be made responsible: the owner and teammates who can see orders.
+  const [tasks, team] = profile?.person ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null)]) : [null, null];
+  const assignees = [store.email.toLowerCase(), ...(team?.members ?? []).filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())];
   // Deleting the person needs the page's token, never the address in a link (lib/person-erasure.ts).
   const mayErase = can(view.role, "erase");
   const eraseToken = profile && email && mayErase ? (token || (await findToken(store, email).catch(() => null)) || "") : "";
@@ -115,7 +132,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
           <p className="eyebrow">Buyers</p>
           {profile ? (
-            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} />
+            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} />
           ) : (
             <>
               {erased ? (
@@ -136,7 +153,9 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                     ? "Stripe could not be read just now. Nothing was changed. Try again in a moment."
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
-                      : "That sale is not one of this store's, or it has no email address on it."}
+                      : who
+                        ? "That person is not among the buyers read from your Stripe account just now. Look their address up below."
+                        : "That sale is not one of this store's, or it has no email address on it."}
                 </p>
               ) : null}
               <section aria-labelledby="find-title" className="card mt-8 p-6 sm:p-8">
@@ -146,12 +165,70 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                   <PersonFind />
                 </div>
               </section>
+              <Suspense fallback={<TasksAgendaWaiting />}>
+                <TasksAgenda store={store} />
+              </Suspense>
               <LatestBuyers store={store} />
             </>
           )}
         </main>
       </StudioStorePin>
     </div>
+  );
+}
+
+function TasksAgendaWaiting() {
+  return (
+    <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8" aria-busy="true">
+      <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
+      <p className="mt-2 text-sm text-ink-soft" role="status">Reading your team&apos;s tasks…</p>
+    </section>
+  );
+}
+
+/**
+ * Everyone's open tasks (lib/person-tasks.ts), past their date first, each
+ * opening the page of the person it is about (lib/person-agenda.ts). The
+ * server knows only its own (UTC) day, so the groups are made for each day
+ * the creator's may be and the browser shows its own (components/tasks-agenda.tsx).
+ */
+async function TasksAgenda({ store }: { store: Store }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const all = await readAllTasks(store.statsId).catch((error) => {
+    console.error("reading the tasks agenda failed", error);
+    return null;
+  });
+  if (!all) {
+    return (
+      <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
+        <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
+        <p className="notice notice-warn mt-4">Your team&apos;s tasks could not be read just now. Nothing was changed. Try again in a moment.</p>
+      </section>
+    );
+  }
+  const agenda = agendaForDays(all, daysAround(today));
+  // Only the people of the tasks shown, on any of those days, are looked up.
+  const persons = new Set(agenda.rows.map((row) => row.person));
+  const found = await personAddresses(store, persons).catch((error) => {
+    console.error("reading the agenda's buyers failed", error);
+    return null;
+  });
+  const rows = agenda.rows.map((row) => {
+    const email = found?.addresses.get(row.person) ?? null;
+    return { ...row, email, href: email ? studioPath(store, `who=${row.person}`, "people") : "" };
+  });
+  const open = all.filter((entry) => !entry.task.done).length;
+  return (
+    <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
+      <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
+      <p className="mt-2 text-sm text-ink-soft">
+        {open
+          ? `${open} open ${open === 1 ? "task" : "tasks"} across your buyers. Open a person to mark one done or change it.`
+          : "No open tasks. Add one on a person's page, under Tasks."}
+      </p>
+      {!found && open ? <p className="notice notice-warn mt-4">Stripe could not be read just now, so who each task is about is not shown. Try again in a moment.</p> : null}
+      <TasksAgendaList rows={rows} days={agenda.days} serverDay={today} found={found ? { partial: found.partial } : null} />
+    </section>
   );
 }
 
@@ -206,7 +283,7 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string }) {
+function Profile({ store, profile, fields, values, eraseToken, tasks, assignees }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
@@ -385,6 +462,16 @@ function Profile({ store, profile, fields, values, eraseToken }: { store: Store;
           </Link>
         </p>
         {profile.person && fields.length ? <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} /> : null}
+      </section>
+
+      <section aria-labelledby="tasks-title" className="card mt-8 p-6 sm:p-8">
+        <h2 id="tasks-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks</h2>
+        <p className="mt-1 text-sm text-ink-soft">What you still owe this person, beside any deal. For you and your team only.</p>
+        {profile.person && tasks ? (
+          <PersonTasks key={profile.person} person={profile.person} initial={tasks} assignees={assignees} today={new Date().toISOString().slice(0, 10)} />
+        ) : profile.person ? (
+          <p className="mt-2 text-sm text-ink-soft" role="status">This person&apos;s tasks could not be read just now. Open this page again in a moment.</p>
+        ) : null}
       </section>
 
       <section aria-labelledby="notes-title" className="card mt-8 p-6 sm:p-8">

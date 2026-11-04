@@ -63,26 +63,31 @@ async function main(): Promise<void> {
   is("white on a dark color, ink on a light one", [monogramInk("#5a36ee"), monogramInk("#ffd400"), monogramInk("#111111")], ["#ffffff", INK, "#ffffff"]);
 
   part("The file");
-  const plain = await certificatePdf(sheet);
+  // One moment for every file compared by size: the creation date sits in a
+  // compressed part of the file, so two files a second apart can differ in size.
+  const AT = new Date(Date.UTC(2026, 10, 3, 12, 0, 0));
+  const plain = await certificatePdf(sheet, AT);
   const sizes: number[] = [];
   for (const { id: backdrop } of BACKDROPS) {
     for (const { id: font } of FONTS) {
-      const bytes = await certificatePdf({ ...sheet, look: { font, backdrop }, monogram: "H" });
+      const bytes = await certificatePdf({ ...sheet, look: { font, backdrop }, monogram: "H" }, AT);
       sizes.push((await PDFDocument.load(bytes)).getPageCount() === 1 ? bytes.length : -1);
     }
   }
   is("every look makes a one-page file under 250 KB", sizes.every((n) => n > 0 && n < 250_000), true);
-  const looked = await certificatePdf({ ...sheet, look: { font: "modern", backdrop: "dots" }, monogram: "H" });
+  const looked = await certificatePdf({ ...sheet, look: { font: "modern", backdrop: "dots" }, monogram: "H" }, AT);
   const doc = await PDFDocument.load(looked);
   const plainDoc = await PDFDocument.load(plain);
   is("still tagged: a structure tree, marked, with its language", Boolean(doc.catalog.lookup(PDFName.of("StructTreeRoot"), PDFDict)) && Boolean(doc.catalog.lookup(PDFName.of("MarkInfo"), PDFDict)) && doc.catalog.get(PDFName.of("Lang")) !== undefined, true);
   const artifacts = (d: PDFDocument) => (content(d).match(/\/Artifact BMC/g) ?? []).length;
   is("the backdrop is one more piece of decoration a reader skips", [artifacts(plainDoc), artifacts(doc)], [3, 4]);
-  is("a look changes the file; without one it is the sheet as it was", [looked.length !== plain.length, (await certificatePdf(sheet)).length === plain.length], [true, true]);
-  const noInitial = await certificatePdf({ ...sheet, look: { font: "modern", backdrop: "plain" }, monogram: "" });
-  const withInitial = await certificatePdf({ ...sheet, look: { font: "modern", backdrop: "plain" }, monogram: "H" });
+  is("a look changes the file; without one it is the sheet as it was", [looked.length !== plain.length, (await certificatePdf(sheet, AT)).length === plain.length], [true, true]);
+  const again = await certificatePdf(sheet, AT);
+  is("the same sheet at the same moment is the same file, byte for byte", again.length === plain.length && again.every((byte, i) => byte === plain[i]), true);
+  const noInitial = await certificatePdf({ ...sheet, look: { font: "modern", backdrop: "plain" }, monogram: "" }, AT);
+  const withInitial = await certificatePdf({ ...sheet, look: { font: "modern", backdrop: "plain" }, monogram: "H" }, AT);
   is("an initial in the seal, or the check mark without one", withInitial.length !== noInitial.length, true);
-  is("an initial the letters cannot draw falls back to the check mark", (await certificatePdf({ ...sheet, look: { font: "modern", backdrop: "plain" }, monogram: "中" })).length, noInitial.length);
+  is("an initial the letters cannot draw falls back to the check mark", (await certificatePdf({ ...sheet, look: { font: "modern", backdrop: "plain" }, monogram: "中" }, AT)).length, noInitial.length);
 
   done();
 }

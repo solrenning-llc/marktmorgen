@@ -558,6 +558,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A signed proposal or agreement takes one more before the workflows that start on signing are checked (635 [GL3], 2 November 2026).
+      { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
+      // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
+      { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
     ],
     basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
   },
@@ -908,6 +912,9 @@ export const NOT_A_COST: Record<string, string> = {
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   MAX_PAGES_PER_STORE: "Pages of Stripe sessions the five-minute job reads per store per run: a scheduled job, bounded by its schedule (a company fixed cost).",
+  STRIPE_LOOKUPS_PER_STORE: "Calls to the creator's Stripe account the five-minute job makes per store per run to tell whose a refunded charge is and to read a canceled member's address (lib/webhooks.ts, watchStore): a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call, and a membership's charge (three calls) is taken from the same ten, so no run asks more than before.",
+  GIVEN_UP_LINES_PER_DAY: "A cap on the lines passed-over Stripe events leave for each endpoint of a store a day, at most MAX_ENDPOINTS endpoints a store a day, past which one summary line an endpoint counts the rest (lib/webhooks.ts, markGivenUp): no endpoint is called and no delivery taken; what the lines keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:evt:), and the job that writes them is the five-minute schedule's (a company fixed cost).",
+  DISPUTE_LOOKUPS_PER_STORE: "The same job's separate budget of calls per store per run to tell whose a disputed payment is (lib/webhooks.ts, paymentMeta): inside the same schedule, the same ten as before, each call of a membership's lookup counted.",
   TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   QUIET_PER_HOUR: "Sale notifications to the creator's phone: one per counted order at most, inside the order's compute.",
   VERCEL_CPU_MICRO_USD_PER_HOUR: "A rate, not a cap.",

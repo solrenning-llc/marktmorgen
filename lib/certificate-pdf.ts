@@ -47,7 +47,7 @@ type Fonts = { sans: Uint8Array; semi: Uint8Array; serif: Uint8Array };
 let fonts: Promise<Fonts> | null = null;
 
 /** The three faces, read once per server. */
-function loadFonts(): Promise<Fonts> {
+export function loadFonts(): Promise<Fonts> {
   // Each path written out whole, so the deployment's file tracing sees them
   // (next.config.ts lists the folder too).
   fonts ??= Promise.all([
@@ -179,8 +179,12 @@ function centered(page: PDFPage, font: PDFFont, text: string, y: number, max: nu
   return line;
 }
 
-/** The certificate, drawn as a one-page PDF. */
-export async function certificatePdf(sheet: CertificateSheet): Promise<Uint8Array> {
+/**
+ * The certificate, drawn as a one-page PDF. `at` is the file's creation date
+ * (its metadata); the same sheet at the same moment makes the same file, so a
+ * test that compares two files gives both the same moment.
+ */
+export async function certificatePdf(sheet: CertificateSheet, at: Date = new Date()): Promise<Uint8Array> {
   const loaded = await loadFonts();
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
@@ -262,6 +266,6 @@ export async function certificatePdf(sheet: CertificateSheet): Promise<Uint8Arra
     const width = semi.widthOfTextAtSize(sheet.stamp, size);
     tag.artifact(() => page.drawText(sheet.stamp, { x: (W - width * 0.8) / 2, y: H / 2 - 120, size, font: semi, color: accent, opacity: 0.12, rotate: degrees(20) }));
   }
-  tag.finish({ title: `${sheet.kicker} — ${sheet.name}`, author: sheet.storeName, producer: sheet.storeName, lang: sheet.lang, at: new Date() });
+  tag.finish({ title: `${sheet.kicker} — ${sheet.name}`, author: sheet.storeName, producer: sheet.storeName, lang: sheet.lang, at });
   return pdf.save();
 }

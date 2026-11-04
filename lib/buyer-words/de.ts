@@ -52,9 +52,11 @@ export const de: BuyerWords = {
   callLive: (dates) => `Live-Session, online, ${dates} ${plural(dates, "Termin", "Termine")} geplant`,
   callGroup: (minutes, seats) => `Gruppengespräch, ${minutes} Minuten, bis zu ${seats} Personen, online`,
   callOne: (minutes) => `${minutes}-minütiges Gespräch, online`,
+  callLengths: (list) => `Gespräch von ${list} Minuten, online`,
   inPersonLive: (dates) => `Live-Session, vor Ort, ${dates} ${plural(dates, "Termin", "Termine")} geplant`,
   inPersonGroup: (minutes, seats) => `${minutes} Minuten, bis zu ${seats} Personen, vor Ort`,
   inPersonOne: (minutes) => `${minutes} Minuten, vor Ort`,
+  inPersonLengths: (list) => `${list} Minuten, vor Ort`,
   inPersonLiveNone: "Live-Session, vor Ort, keine Termine geplant",
   bundleOf: (count, worth) => `Paket mit ${count} Produkten${worth ? ` · ${worth}` : ""}`,
   worth: (worth, price) => `Produkte im Wert von ${worth} für ${price}`,
@@ -304,4 +306,9 @@ export const de: BuyerWords = {
   cardTestMode: "Testmodus: Es wird keine echte Karte belastet.",
   cardCheckout: "Sichere Zahlung über Stripe, in einem neuen Tab.",
   cardOpens: (store) => `Öffnet sich im Shop von ${store}, in einem neuen Tab.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} oder mehr`,
+  plusTax: "plus anfallende Steuern",
+  salePriceUntil: (price, when) => `Aktionspreis: ${price}, bis ${when}`,
 };

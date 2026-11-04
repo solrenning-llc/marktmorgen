@@ -4,7 +4,7 @@ import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
 import { dropStamped } from "@/lib/pdf-stamp";
-import { readListing } from "@/lib/catalog";
+import { deliveredFile, readDelivery } from "@/lib/catalog";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 
@@ -40,8 +40,9 @@ export async function POST(request: NextRequest) {
     }
 
     // A new file deletes the one there, with the buyers' stamped copies: not from a session let in
-    // without its second step (lib/two-step.ts).
-    if (!detach && (await lockedFor(request, "products", "replace")) && (await readListing(store, id))?.file) return refusedJson("locked");
+    // without its second step (lib/two-step.ts). The id may name a price option, whose file is its
+    // own, so the file is read where the id points (readDelivery), not on a product only.
+    if (!detach && (await lockedFor(request, "products", "replace")) && deliveredFile(await readDelivery(store, id))) return refusedJson("locked");
 
     let file: ProductFile | null = null;
     if (!detach) {

@@ -52,7 +52,13 @@ export function PersonFields({ person, fields, initial }: { person: string; fiel
         setWriteUnconfirmed(true);
         setMessage("This change could not be confirmed and may already be saved. Keep a copy of your values, then reload and check the contact before trying again. Saving is paused until you reload.");
       } else {
-        setMessage(answer.error === "value" ? "This field cannot keep that value. Your entry is still here; correct it and try again." : "This change was refused. Your entry is still here; check your access and try again.");
+        setMessage(
+          answer.error === "value"
+            ? "This field cannot keep that value. Your entry is still here; correct it and try again."
+            : answer.error === "busy"
+              ? "Another change to your contacts was being saved at the same moment, so this one was not saved. Your entry is still here; try again in a moment."
+              : "This change was refused. Your entry is still here; check your access and try again.",
+        );
       }
     } catch {
       uncertain.current = true;

@@ -3,6 +3,7 @@ import { StoreFullError } from "@/lib/store-full";
 import { guardStoreWrite } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { LockBusyError } from "@/lib/redis-lock";
 import { ensureStatsId } from "@/lib/store";
 import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
 import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
@@ -163,6 +164,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof CrmFieldsKept) return refusedJson("locked");
     if (error instanceof CrmDealReadUnavailable) return refuse("crm_deal_read_unavailable", 503);
     if (error instanceof CrmDealWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
+    // A value set while the person's other changes, or their deletion, held the store's people lock: nothing written.
+    if (error instanceof LockBusyError) return refuse("busy", 409);
     console.error("saving a store's fields or deals failed", error);
     return refuse("server_error", 500);
   }

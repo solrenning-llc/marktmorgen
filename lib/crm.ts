@@ -10,7 +10,8 @@
  *                                    absent until the creator first changes one, and then it wins
  *   nl:crm:deals:<statsId>           hash  deal id -> deal (JSON)
  *   nl:crm:tasks:<statsId>           hash  person -> their tasks (JSON, lib/person-tasks.ts), gone with the person
- *   nl:crm:tasklock:<statsId>        one change of the store's tasks at a time (lib/redis-lock.ts), ten seconds at the most
+ *   nl:crm:tasklock:<statsId>        one change of the store's tasks, or of a person's value, at a time (lib/redis-lock.ts),
+ *                                    ten seconds at the most
  *
  * A value is kept under the person's key, never the address (as a note
  * about them is), one hash a field, so the list's file reads each field once
@@ -81,6 +82,9 @@ const TASKS_SLOT = "crm:tasks";
  * changes it and writes it back whole, so two at once (two quick clicks, two
  * teammates) would each write what they read and one change would be lost.
  * The whole store, not one person, so the store's cap is counted exactly too.
+ * Setting a person's value takes it as well (setValue), and so does deleting
+ * a person (forgetCrmPerson): a value set while its person is deleted is
+ * always set first and deleted after, never left behind.
  */
 const tasksLockKey = (statsId: string) => `nl:crm:tasklock:${statsId}`;
 const TASKS_LOCK_SECONDS = 10;
@@ -146,21 +150,53 @@ export async function readValues(statsId: string | null, person: string, fields:
   return Object.fromEntries(fields.flatMap((f, i) => (typeof got[i] === "string" && got[i] ? [[f.id, got[i] as string]] : [])));
 }
 
-/** Sets one value for one person; "" clears it. False when it is not a value the field keeps. */
+/**
+ * Sets one person's value of one field, or clears it with "", in one step on
+ * the Redis side, and only while the store's people lock (tasksLockKey) is
+ * still the caller's: 0, and nothing written, when it is not; {1, before}
+ * with what it replaced, or {1} when there was nothing.
+ */
+export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+local before = redis.call("HGET", KEYS[2], ARGV[2])
+if ARGV[3] == "" then redis.call("HDEL", KEYS[2], ARGV[2]) else redis.call("HSET", KEYS[2], ARGV[2], ARGV[3]) end
+if before then return {1, before} end
+return {1}`;
+
+/**
+ * Sets one value for one person; "" clears it. False when it is not a value the field keeps.
+ *
+ * Under the store's people lock, which deleting a person takes too (forgetCrmPerson): a deletion that starts while a
+ * value is being set waits for it and then deletes it, so a value set at the same time as its person's deletion never
+ * outlives the deletion. The new value's whole room is taken first (DataRoomError, and nothing written, when it does
+ * not fit); the write answers what it replaced, in the same step, and that room is given back after. So what is
+ * counted is exactly what is kept, whatever ran before. LockBusyError, with nothing written, when the lock stays taken
+ * past TASKS_LOCK_WAIT_MS or is lost before the write.
+ */
 export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore): Promise<boolean> {
   if (!PERSON.test(person)) return false;
   const value = fieldValue(field, raw);
   if (value === null) return false;
-  // A value takes room in the store's data room first (DataRoomError when it does not fit); one cleared gives it back.
-  const [before] = await redisPipeline([["HGET", valuesKey(statsId, field.id), person]]);
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([person, v], 1) : 0);
-  const grown = weight(value) - weight(before);
-  if (grown > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: grown }]);
-  else if (grown < 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: -grown }]);
-  try {
-    const response = await redisPipeline([value ? ["HSET", valuesKey(statsId, field.id), person, value] : ["HDEL", valuesKey(statsId, field.id), person]]);
-    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 0 && response[0] !== 1)) throw new CrmValueWriteUnconfirmed();
-  } catch { throw new CrmValueWriteUnconfirmed(); }
+  await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, async (held) => {
+    const charged = weight(value);
+    if (charged > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: charged }]);
+    let answer: unknown;
+    try {
+      const response = await redisPipeline([["EVAL", SET_CRM_VALUE, 2, held.key, valuesKey(statsId, field.id), held.token, person, value]]);
+      answer = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
+    } catch { throw new CrmValueWriteUnconfirmed(); }
+    if (answer === 0) {
+      // The lock ran out before the write (a stalled request): nothing was written, so the room taken goes back.
+      if (charged > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: charged }]).catch(() => {});
+      throw new LockBusyError();
+    }
+    // Any other answer may or may not have landed: the room taken stays counted, never less than what is kept.
+    if (!Array.isArray(answer) || answer[0] !== 1 || answer.length > 2 || (answer.length === 2 && typeof answer[1] !== "string")) throw new CrmValueWriteUnconfirmed();
+    const freed = weight(answer[1]);
+    // The value replaced gives its room back; one that cannot be given back now stays counted (more, never less, than kept).
+    if (freed > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: freed }]).catch(() => {});
+  });
   return true;
 }
 
@@ -430,6 +466,8 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore, ed
     preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)]]);
   } catch { throw new CrmDealReadUnavailable(); }
   if (!Array.isArray(preflight) || preflight.length !== 2 || (preflight[0] !== 0 && preflight[0] !== 1) || typeof preflight[1] !== "number" || !Number.isSafeInteger(preflight[1]) || preflight[1] < preflight[0]) throw new CrmDealReadUnavailable();
+  // An edit of a deal deleted since it was read is "gone", full board or not, and its room is not touched.
+  if (preflight[0] === 0 && edit) return "gone";
   if (preflight[0] === 0 && preflight[1] >= MAX_DEALS) return false;
   await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
   try {
@@ -538,41 +576,42 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     const deal = json(value) as { email?: unknown } | null;
     return typeof deal?.email === "string" && deal.email.trim().toLowerCase() === address;
   }).map(([id]) => id);
-  // Each value taken out in one script that answers what it deleted, each deal
-  // deleted on its own: what goes back to the store's data room is exactly
-  // what was removed, even with a change of the same value at the same time.
-  const commands: (string | number)[][] = [
-    ...fields.map((f) => ["EVAL", TAKE_CRM_VALUE, 1, valuesKey(statsId, f.id), person]),
-    ...theirs.map((id) => ["HDEL", dealsKey(statsId), id]),
-  ];
-  const replies = commands.length ? await redisPipeline(commands) : [];
-  let records = 0;
-  let valuesFreed = 0;
-  fields.forEach((_, i) => {
-    const taken = replies[i];
-    if (typeof taken !== "string") return;
-    records += 1;
-    if (taken) valuesFreed += dataBytes([person, taken], 1);
-  });
-  const dealsGone = theirs.filter((_, i) => replies[fields.length + i] === 1);
-  records += dealsGone.length;
-  if (room && (valuesFreed > 0 || dealsGone.length)) {
-    await giveData(room, [
-      ...(valuesFreed > 0 ? [{ slot: VALUES_SLOT, bytes: valuesFreed }] : []),
-      ...dealsGone.map((id) => ({ slot: dealSlot(id), bytes: 0, set: true })),
-    ]);
-  }
-  // Their tasks (639 [GL7](6)) go with them, under the tasks' lock, so a
-  // change read before the deletion cannot write them back after it; their
-  // values and deals above never wait on it. A lock still taken after the
-  // wait throws (LockBusyError): the deletion fails and says so, never skips
-  // them.
+  // Each deal deleted on its own: what goes back to the store's data room is exactly what was removed.
+  const dealReplies = theirs.length ? await redisPipeline(theirs.map((id) => ["HDEL", dealsKey(statsId), id])) : [];
+  const dealsGone = theirs.filter((_, i) => dealReplies[i] === 1);
+  let records = dealsGone.length;
+  if (room && dealsGone.length) await giveData(room, dealsGone.map((id) => ({ slot: dealSlot(id), bytes: 0, set: true })));
+  // Their values and their tasks (639 [GL7](6)) go under the store's people
+  // lock, which setting a value and changing tasks take too: a value being set
+  // when the deletion starts is set first and deleted here after, never left
+  // behind, and a change of tasks read before the deletion cannot write them
+  // back after it. Each value is taken out in one script that answers what it
+  // deleted, so what goes back to the room is exactly what was removed. A lock
+  // still taken after the wait throws (LockBusyError): the deletion fails and
+  // says so, never skips them.
   records += await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, async () => {
-    // One pipeline: what is given back is what the deletion removed.
-    const [before, gone] = await redisPipeline([["HGET", tasksKey(statsId), person], ["HDEL", tasksKey(statsId), person]]);
-    const freed = taskWeight(person, before);
-    if (gone === 1 && freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
-    return gone === 1 ? 1 : 0;
+    const replies = await redisPipeline([
+      ...fields.map((f) => ["EVAL", TAKE_CRM_VALUE, 1, valuesKey(statsId, f.id), person]),
+      ["HGET", tasksKey(statsId), person],
+      ["HDEL", tasksKey(statsId), person],
+    ]);
+    let taken = 0;
+    let valuesFreed = 0;
+    fields.forEach((_, i) => {
+      const value = replies[i];
+      if (typeof value !== "string") return;
+      taken += 1;
+      if (value) valuesFreed += dataBytes([person, value], 1);
+    });
+    const [before, gone] = [replies[fields.length], replies[fields.length + 1]];
+    const tasksFreed = gone === 1 ? taskWeight(person, before) : 0;
+    if (room && (valuesFreed > 0 || tasksFreed > 0)) {
+      await giveData(room, [
+        ...(valuesFreed > 0 ? [{ slot: VALUES_SLOT, bytes: valuesFreed }] : []),
+        ...(tasksFreed > 0 ? [{ slot: TASKS_SLOT, bytes: tasksFreed }] : []),
+      ]);
+    }
+    return taken + (gone === 1 ? 1 : 0);
   });
   return records;
 }

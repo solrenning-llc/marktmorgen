@@ -3,7 +3,9 @@ import { POST } from "@/app/api/store/crm/route";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { crmAnswer } from "@/lib/crm-response";
-import { CrmValueWriteUnconfirmed, setValue } from "@/lib/crm";
+import { CrmValueWriteUnconfirmed, SET_CRM_VALUE, setValue } from "@/lib/crm";
+import { LockBusyError } from "@/lib/redis-lock";
+import { dataUsed } from "@/lib/store-data";
 import { type CrmField } from "@/lib/crm-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -13,18 +15,29 @@ async function main() {
   const person="a".repeat(32), field: CrmField={id:"cust01",name:"Company",type:"text",options:[]};
   const key="nl:crm:v:contact-check:"+field.id;
   const original=redis.pipeline;
-  let reply: unknown=[1], applied=false, writes=0;
-  redis.pipeline=async commands=>{if (!commands.some(c=>c[0]==="HSET" || c[0]==="HDEL")) return original.call(redis,commands);writes++;if(applied)await original.call(redis,commands);if(reply instanceof Error)throw reply;return reply as unknown[];};
+  // The value is written by one script (SET_CRM_VALUE), under the store's people lock.
+  const isWrite=(c:(string|number)[])=>c[0]==="EVAL" && c[1]===SET_CRM_VALUE;
+  let reply: unknown=[[1]], applied=false, writes=0;
+  redis.pipeline=async commands=>{if (!commands.some(isWrite)) return original.call(redis,commands);writes++;if(applied)await original.call(redis,commands);if(reply instanceof Error)throw reply;return reply as unknown[];};
   try {
     part("Contact saves and clears require exact acknowledgements");
     for(const value of ["Acme", ""]) {
-      for(const invalid of [null, {}, [], [null], ["1"], [true], [-1], [2], [1,1], new Error("reply lost")]) {
+      for(const invalid of [null, {}, [], [null], ["1"], [true], [-1], [1], [2], [[]], [[2]], [[1,5]], [[1,"a","b"]], [1,1], new Error("reply lost")]) {
         reply=invalid;writes=0;let uncertain=false;
         try { await setValue("contact-check",person,field,value, ROOM); } catch(error) { uncertain=error instanceof CrmValueWriteUnconfirmed; }
         is("unknown save or clear stays uncertain",uncertain,true);
         is("unknown save or clear is never retried",writes,1);
       }
-      for(const result of [0,1]) { reply=[result];is("numeric acknowledgement confirms save or clear",await setValue("contact-check",person,field,value, ROOM),true); }
+      for(const result of [[1],[1,"Before"]]) { reply=[result];is("the script's acknowledgement confirms save or clear",await setValue("contact-check",person,field,value, ROOM),true); }
+    }
+    part("A lock lost before the write: nothing written, the room taken given back, and it says so");
+    {
+      const used=async()=>(await dataUsed(ROOM))?.used ?? 0;
+      const before=await used();
+      reply=[0];writes=0;let busy=false;
+      try { await setValue("contact-check",person,field,"Acme Corporation", ROOM); } catch(error) { busy=error instanceof LockBusyError; }
+      is("LockBusyError, tried once",[busy,writes],[true,1]);
+      is("the room taken first is given back",await used(),before);
     }
     part("Applied writes with lost replies are not rolled back");
     applied=true;reply=[];writes=0;let uncertain=false;
@@ -47,13 +60,22 @@ async function main() {
     const sid=(await storeForEmail(owner))!.statsId!;const session=await openSession(owner);
     await original.call(redis,[["SET","nl:crm:fields:"+sid,JSON.stringify([field])]]);
     writes=0;
-    redis.pipeline=async commands=>{if(commands.some(c=>c[0]==="HSET" || c[0]==="HDEL")){writes++;await original.call(redis,commands);return [];}return original.call(redis,commands);};
+    redis.pipeline=async commands=>{if(commands.some(isWrite)){writes++;await original.call(redis,commands);return [];}return original.call(redis,commands);};
     const response=await POST(new NextRequest("https://marktmorgen.com/api/store/crm",{method:"POST",headers:{"content-type":"application/json",cookie:SESSION_COOKIE+"="+session},body:JSON.stringify({action:"value",field:field.id,person,value:"Acme"})}));
     const body=await response.json();
     is("API exposes uncertain write",[response.status,body.error],[502,"crm_write_unconfirmed"]);
     is("client recognizes recovery state",crmAnswer(response.ok,body),{ok:false,error:"crm_write_unconfirmed"});
     is("route attempts write once",writes,1);
     is("applied contact value remains",(await original.call(redis,[["HGET","nl:crm:v:"+sid+":"+field.id,person]]))[0],"Acme");
+    // The store's people lock held by another change past the wait: 409 busy, nothing written, and the page says so.
+    redis.pipeline=original;
+    await original.call(redis,[["SET","nl:crm:tasklock:"+sid,"someone-else","EX",10]]);
+    const busy=await POST(new NextRequest("https://marktmorgen.com/api/store/crm",{method:"POST",headers:{"content-type":"application/json",cookie:SESSION_COOKIE+"="+session},body:JSON.stringify({action:"value",field:field.id,person,value:"Globex"})}));
+    const busyBody=await busy.json();
+    is("busy lock: 409 busy",[busy.status,busyBody.error],[409,"busy"]);
+    is("the page reads it as a refusal, not an unconfirmed write",crmAnswer(busy.ok,busyBody),{ok:false,error:"busy"});
+    is("nothing written",(await original.call(redis,[["HGET","nl:crm:v:"+sid+":"+field.id,person]]))[0],"Acme");
+    await original.call(redis,[["DEL","nl:crm:tasklock:"+sid]]);
   } finally {redis.pipeline=original;}
   done();
 }

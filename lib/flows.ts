@@ -68,7 +68,7 @@ import {
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
 import { CrmDealReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
-import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
 import { readForm } from "@/lib/form-store";
@@ -746,6 +746,8 @@ async function actOnPeople(
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: `“${field.name}” was not set: the store's data room is full.` });
+        // Another change of the store's people held their lock past the wait (lib/crm.ts, setValue): nothing was written.
+        else if (error instanceof LockBusyError) out.push({ email, state: "failed", note: `“${field.name}” was not set: another change to your contacts was being saved at the same moment.` });
         else out.push({ email, state: "uncertain", note: `Whether “${field.name}” was set could not be confirmed.` });
       }
     }

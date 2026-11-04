@@ -39,8 +39,12 @@ export function cleanReviewText(value: string): string {
     .replace(/\b[\p{L}\p{N}._-]+\s+(?:at|\(at\)|\[at\])\s+[\p{L}\p{N}-]+\s+(?:dot|\(dot\)|\[dot\])\s+[a-z]{2,}\b/giu, "[email]")
     .replace(/(?<![\p{L}\p{N}])@[A-Za-z0-9_.]{2,}/gu, "[handle]")
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
-    // A web address without http or www ("more at janesmith.dev/shop") is a link too.
-    .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/\S*)?\b/gi, "[link]")
+    // A dot before a capitalised word ("the course.Loved it") ends a sentence, unless the word is a common ending of
+    // a web address ("JaneSmith.Dev"): a space put after it, so the words are kept.
+    .replace(/(?<=[\p{L}\p{N}])\.(?=\p{Lu}\p{Ll}+\b)(?!(?:Com|Net|Org|Io|Co|Dev|App|Shop|Store|Me|Info|Biz|Xyz|Site|Online|Ai|Uk|Us)\b)/gu, ". ")
+    // A web address without http or www ("more at janesmith.dev/shop") is a link too; ".js" is a library's name
+    // ("Node.js"), never a web address's ending.
+    .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}(?:\/\S*)?\b/gi, "[link]")
     // A phone number in any digits (Arabic-Indic, fullwidth), seven digits or more.
     .replace(/\+?\p{Nd}(?:[\p{Nd}\s().-]*\p{Nd}){6,}/gu, "[number]")
     .replace(/\s+/g, " ")

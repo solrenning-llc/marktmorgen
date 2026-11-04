@@ -298,20 +298,22 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       if (after) query.set("starting_after", after);
       const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
       const rows = Array.isArray(listed.data) ? (listed.data as Row[]) : [];
-      for (const refund of rows) {
-        const id = typeof refund.id === "string" ? refund.id : "";
-        const created = typeof refund.created === "number" ? refund.created : 0;
-        if (!id) continue;
-        if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-        if (!refundedInFull(refund.charge)) continue;
-        const pi = idOf(refund.payment_intent);
-        const [seen] = await redisPipeline([["SISMEMBER", seenKey(statsId), id]]);
-        if (Number(seen) !== 1 && INTENT_ID.test(pi)) marked += await markRefunded(statsId, pi);
-        await redisPipeline([
-          ["SADD", seenKey(statsId), id],
-          ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS + 86_400],
-        ]);
-        newest = Math.max(newest, created);
+      // The page's refunds in full, and which of them an earlier pass already took: one request for the page, and
+      // nothing written again for one already taken (each pass reads the last days' refunds again).
+      const full = rows
+        .filter((refund) => typeof refund.id === "string" && refund.id && (refund.status === "succeeded" || refund.status === "pending") && refundedInFull(refund.charge))
+        .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
+      const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
+      for (const [i, refund] of full.entries()) {
+        if (Number(seen[i]) !== 1) {
+          if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi);
+          // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
+          await redisPipeline([
+            ["SADD", seenKey(statsId), refund.id],
+            ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS + 86_400],
+          ]);
+        }
+        newest = Math.max(newest, refund.created);
       }
       const last = rows[rows.length - 1];
       if (listed.has_more !== true || !last || typeof last.id !== "string") {

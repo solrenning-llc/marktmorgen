@@ -16,6 +16,8 @@ const inputs = summaryInputs([review(1, { rating: 1 }), review(2, { hidden: true
 is("only what the page shows of this product, newest first, numbered", inputs, [{ id: 1, text: "Write me at [email]" }, { id: 2, text: "Words 1" }]);
 is("a one-star review is read as a five-star one", summaryInputs([review(1, { rating: 1 }), review(2, { rating: 5 })], "p1").length, 2);
 is("addresses, links and phone numbers taken out", cleanReviewText("See www.example.com or call " + "+" + "1 555 010 2030"), "See [link] or call [number]");
+is("a sentence run on after a dot, and a library's name, are words, never links (#2066 review)", [cleanReviewText("Great course.Loved it"), cleanReviewText("Uses Node.js and Vue.js well"), cleanReviewText("Good lessons.Live sessions too")], ["Great course. Loved it", "Uses Node.js and Vue.js well", "Good lessons. Live sessions too"]);
+is("while an address with a capitalised ending, or a path, is still one", [cleanReviewText("Visit JaneSmith.Dev now"), cleanReviewText("see Example.Com"), cleanReviewText("at jane.Shop/pots"), cleanReviewText("my site jane.js.org")], ["Visit [link] now", "see [link]", "at [link]", "my site [link]"]);
 is("a web address with neither http nor www is taken out too", [cleanReviewText("More at janesmith.dev"), cleanReviewText("my shop: shop.jane-smith.co.uk/pots?x=1 thanks"), cleanReviewText("Visit JaneSmith.DEV")], ["More at [link]", "my shop: [link] thanks", "Visit [link]"]);
 is("but a price, a rating or an abbreviation is kept", cleanReviewText("Worth $4.50, 4.5 stars, e.g. the glaze part"), "Worth $4.50, 4.5 stars, e.g. the glaze part");
 is("the source never chooses by stars", !/rating\s*[<>=]/.test(readFileSync("lib/review-ai-summary-rules.ts", "utf8")), true);

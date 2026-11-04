@@ -366,7 +366,7 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     const grown = reviewBytes(review) - reviewBytes(before);
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
-    await write(statsId, review, before && before.text !== review.text ? summaryGone(statsId, review.productId) : []);
+    await write(statsId, review, before && before.text !== review.text ? summaryGone(statsId, review.productId, before.createdAt) : []);
     await redisPipeline([
       ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],
       ["SADD", REVIEW_STORES_KEY, statsId],
@@ -401,7 +401,7 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       ["ZREM", allKey(statsId), `${productId}|${id}`],
       ["ZREM", newKey(statsId), `${productId}|${id}`],
       // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it.
-      ...summaryGone(statsId, productId),
+      ...summaryGone(statsId, productId, gone.createdAt),
     ]);
     // Its room given back only once its own HDEL answered that it removed the review: never twice for two
     // deletions racing. A request that failed may still have run the HDEL (an error on another command); the room
@@ -434,7 +434,7 @@ async function creatorChange(
     // A review hidden or refunded leaves the product's AI summary of its reviews (lib/review-ai-summary.ts) behind:
     // it goes in the same request as the change, so a failure fails the change too.
     const gone = (after.hidden && !before.hidden) || (after.refunded && !before.refunded);
-    await write(statsId, after, gone ? summaryGone(statsId, productId) : []);
+    await write(statsId, after, gone ? summaryGone(statsId, productId, before.createdAt) : []);
     // What a shorter answer frees is given back only once it is written.
     if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
     await recount(statsId, productId);
@@ -443,14 +443,21 @@ async function creatorChange(
 }
 
 /**
- * What takes the product's AI summary of its reviews (lib/review-ai-summary.ts) away when a review it may count
- * goes or changes, sent in the same request as that change: a new mark first (a summary being made now is kept
- * only while the mark it read is still there, so it is not kept either), then the summary. Kept eight days, as the
- * summary. When the week's last summary was made (nl:rsum:last:) is never deleted here.
+ * What takes the product's AI summary of its reviews (lib/review-ai-summary.ts) away when a review it counted goes
+ * or changes, sent in the same request as that change, so a failure fails the change too. A new mark first: a
+ * summary being made now is kept only while the mark it read is still there (it cannot yet say which reviews it
+ * read), so it is not kept either; the mark is kept eight days, as the summary. Then the kept summary's themes,
+ * in one command: they are scored by the newest review the summary read (nl:rsum:<statsId>:<productId>:themes),
+ * so only a review created at or before that (`createdAt`, ms; "all" when the product goes) removes them, and a
+ * review written after the summary was made never takes it away. Its head (nl:rsum:) is never read without them.
+ * When the week's last summary was made (nl:rsum:last:) is never deleted here.
  */
-const summaryGone = (statsId: string, productId: string): (string | number)[][] => [
+const summaryGone = (statsId: string, productId: string, createdAt: number | "all"): (string | number)[][] => [
   ["SET", `nl:rsum:ver:${statsId}:${productId}`, randomBytes(12).toString("hex"), "EX", 8 * 86_400],
-  ["DEL", `nl:rsum:${statsId}:${productId}`],
+  createdAt === "all" || !Number.isSafeInteger(createdAt) || createdAt <= 0
+    ? ["DEL", `nl:rsum:${statsId}:${productId}:themes`]
+    : ["ZREMRANGEBYSCORE", `nl:rsum:${statsId}:${productId}:themes`, createdAt, "+inf"],
+  ...(createdAt === "all" ? [["DEL", `nl:rsum:${statsId}:${productId}`]] : []),
 ];
 
 /**
@@ -660,7 +667,7 @@ async function dropReviewRecords(statsId: string, productId: string, members: st
     ["DEL", productKey(statsId, productId)],
     ["DEL", visibleKey(statsId, productId)],
     ["HDEL", summaryKey(statsId), productId],
-    ...summaryGone(statsId, productId),
+    ...summaryGone(statsId, productId, "all"),
     ...(members.length ? [["ZREM", allKey(statsId), ...members], ["ZREM", newKey(statsId), ...members]] : []),
   ]);
 }

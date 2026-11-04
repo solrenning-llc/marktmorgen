@@ -12,12 +12,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GET } from "@/app/api/v1/sales/route";
 import { makeKey } from "@/lib/api-keys";
-import { SALE_TEXT_LIMITS, SALES_PAGE, SALES_TITLE_IDS, cutText, saleKind, titleIds } from "@/lib/api-sales";
+import { SALE_FIELDS, SALE_TEXT_LIMITS, SALES_PAGE, SALES_TITLE_IDS, cutText, saleKind, sales, titleIds } from "@/lib/api-sales";
+import { readListings } from "@/lib/catalog";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
 import { API_SALES_UNITS, allowanceFor } from "@/lib/store-allowance-rules";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS, bundleMeta } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
-import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { API_SALE_BYTES, API_SALES_ANSWER_BYTES } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -111,6 +112,7 @@ async function main(): Promise<void> {
     discount_cents: 500,
     currency: "usd",
     buyer: { email: "dana@example.com", name: "Dana Ortiz" },
+    opened_at: new Date(1_790_000_000_000).toISOString(),
     paid_at: new Date(1_790_000_060_000).toISOString(),
     refunded_cents: 0,
     disputed: false,
@@ -291,30 +293,65 @@ async function main(): Promise<void> {
   const ids = titleIds(metas);
   is("cut at the most, products sold first, then the checked boxes", [ids.length, ids.slice(0, 10), ids.slice(10, 13)], [SALES_TITLE_IDS, metas.map((m) => m.product), [metas[0].bump, metas[0].bump2, metas[0].bump3]]);
 
-  part("A page at every limit weighs no more than the cost registry's figure");
-  const products: string[] = [];
-  for (let i = 0; i < 1 + MAX_BUNDLE_ITEMS + BUMP_KEYS.length * (1 + MAX_BUNDLE_ITEMS); i += 1) {
-    const made = await addProduct(OWNER, `${"漢".repeat(MAX_TITLE_LENGTH - 4)}${String(i).padStart(4, "0")}`, "", "10", null);
-    if (!made.ok) throw new Error(`no product ${i}: ${JSON.stringify(made)}`);
-    products.push(made.product.id);
-  }
+  part("A page at every limit weighs no more than the cost registry's figure, and not much less");
+  // A catalog built directly: ids at their 64 characters, titles at MAX_TITLE_LENGTH three-byte characters.
+  const made = await addProduct(OWNER, "Template", "", "10", null);
+  if (!made.ok) throw new Error("no template product");
+  const base = (await storeForEmail(OWNER))!;
+  const itemOf = base.catalog.items.find((x) => x.id === made.product.id)!;
+  const listingOf = (await readListings(base, [made.product.id]))[0];
+  const ids64 = Array.from({ length: 1 + MAX_BUNDLE_ITEMS + BUMP_KEYS.length * (1 + MAX_BUNDLE_ITEMS) }, (_, i) => `${"P".repeat(60)}${String(i).padStart(4, "0")}`);
+  const wide = { ...base, catalog: { ...base.catalog, items: ids64.map((id) => ({ ...itemOf, id })), head: ids64.map((id) => ({ ...listingOf, id, title: "漢".repeat(MAX_TITLE_LENGTH) })) } } as Store;
   let k = 1;
-  const full: Record<string, string> = { product: products[0], option: "o".repeat(64), title: "\\".repeat(SALE_TEXT_LIMITS.title), ...bundleMeta("bundle", products.slice(k, (k += MAX_BUNDLE_ITEMS))) };
-  for (const key of BUMP_KEYS) Object.assign(full, { [key]: products[k++] }, bundleMeta(`${key}_bundle`, products.slice(k, (k += MAX_BUNDLE_ITEMS))));
+  const full: Record<string, string> = { store: HANDLE, product: ids64[0], option: "o".repeat(64), title: "漢".repeat(SALE_TEXT_LIMITS.title), trial_days: "7", ...bundleMeta("bundle", ids64.slice(k, (k += MAX_BUNDLE_ITEMS))) };
+  for (const key of BUMP_KEYS) Object.assign(full, { [key]: ids64[k++] }, bundleMeta(`${key}_bundle`, ids64.slice(k, (k += MAX_BUNDLE_ITEMS))));
   for (const utm of ["utm_source", "utm_medium", "utm_campaign", "utm_content"]) full[utm] = "漢".repeat(SALE_TEXT_LIMITS.utm);
   full.embed_site = `https://${"a".repeat(60)}.${"b".repeat(60)}.${"c".repeat(60)}.${"d".repeat(60)}.example`;
-  const worst = (i: number) => session(`cs_${"W".repeat(246)}${String(i).padStart(4, "0")}`, {
-    kind: "payment_plan", amount_total: Number.MAX_SAFE_INTEGER, total_details: { amount_discount: Number.MAX_SAFE_INTEGER },
-    payment_intent: { id: "pi_w", latest_charge: charge("ch_w", 1_790_000_060, { amount_refunded: Number.MAX_SAFE_INTEGER }) },
-    customer_details: { email: "漢".repeat(SALE_TEXT_LIMITS.email), name: "漢".repeat(SALE_TEXT_LIMITS.name) },
-  }, { ...full, trial_days: "7" });
+  const worst = (i: number) => ({
+    ...session(`cs_${"W".repeat(246)}${String(i).padStart(4, "0")}`, {
+      amount_total: Number.MAX_SAFE_INTEGER, total_details: { amount_discount: Number.MAX_SAFE_INTEGER },
+      payment_intent: { id: "pi_w", latest_charge: charge("ch_w", 1_790_000_060, { amount_refunded: Number.MAX_SAFE_INTEGER }) },
+      customer_details: { email: "漢".repeat(SALE_TEXT_LIMITS.email), name: "漢".repeat(SALE_TEXT_LIMITS.name) },
+    }),
+    metadata: { ...full, kind: "plan" },
+  });
   pages = [{ object: "list", has_more: true, data: Array.from({ length: SALES_PAGE }, (_, i) => worst(i)) }];
-  const heavy = await GET(new Request("https://marktmorgen.com/api/v1/sales", { headers: { Authorization: `Bearer ${key.key}` } }));
-  const bytes = Buffer.byteLength(await heavy.text());
-  const one = JSON.parse(JSON.stringify(((await (async () => { pages = [{ object: "list", has_more: false, data: [worst(0)] }]; return (await call()).body; })()) as { data: unknown[] }).data[0]));
-  is("every product of the sale is listed, with its catalog title", [(one as { order_bumps: unknown[] }).order_bumps.length, ((one as { bundle_items: { title: string | null }[] }).bundle_items ?? []).every((p) => p.title?.startsWith("漢"))], [BUMP_KEYS.length, true]);
-  is(`a full page: ${bytes} bytes, within API_SALES_ANSWER_BYTES (${API_SALES_ANSWER_BYTES})`, [heavy.status, bytes <= API_SALES_ANSWER_BYTES], [200, true]);
-  is(`one sale: ${Buffer.byteLength(JSON.stringify(one))} bytes, within API_SALE_BYTES (${API_SALE_BYTES})`, Buffer.byteLength(JSON.stringify(one)) <= API_SALE_BYTES, true);
+  const heavy = await sales(wide, null);
+  if (!heavy) throw new Error("the worst page was not read");
+  const bytes = Buffer.byteLength(JSON.stringify(heavy));
+  const one = Buffer.byteLength(JSON.stringify(heavy.data[0]));
+  const sale = heavy.data[0] as { order_bumps: unknown[]; bundle_items: { title: string | null }[] };
+  is("every product of the sale is listed, with its catalog title", [heavy.data.length, sale.order_bumps.length, sale.bundle_items.every((p) => p.title === "漢".repeat(MAX_TITLE_LENGTH))], [SALES_PAGE, BUMP_KEYS.length, true]);
+  is(`a full page: ${bytes} bytes, within API_SALES_ANSWER_BYTES (${API_SALES_ANSWER_BYTES})`, bytes <= API_SALES_ANSWER_BYTES, true);
+  // Tight enough that a figure leaving out a part of a sale (the order_bump said twice, a bundle) fails here.
+  is(`one sale: ${one} bytes, within API_SALE_BYTES (${API_SALE_BYTES}) and above 90% of it`, [one <= API_SALE_BYTES, one >= 0.9 * API_SALE_BYTES], [true, true]);
+  pages = [{ object: "list", has_more: false, data: Array.from({ length: SALES_PAGE + 1 }, (_, i) => session(`cs_test_many${i}`)) }];
+  is("more checkouts than a page asks for: unknown, 502", (await call()).status, 502);
+
+  part("A sale's fields are SALE_FIELDS, in order");
+  pages = [{ object: "list", has_more: false, data: [session("cs_test_keys")] }];
+  is("the same list ?fields= is checked against", Object.keys(((await call()).body as { data: Record<string, unknown>[] }).data[0]), [...SALE_FIELDS]);
+
+  part("Times a Date cannot hold, and a missing opening time: unknown, never a thrown error");
+  for (const [what, extra] of [
+    ["a charge time past what a Date holds", { payment_intent: { id: "pi_t", latest_charge: charge("ch_t", 9e12) } }],
+    ["a first invoice paid past what a Date holds", { mode: "subscription", payment_intent: null, invoice: { id: "in_t", status_transitions: { paid_at: 9e12 } } }],
+    ["an opening time past what a Date holds", { created: 9e12 }],
+    ["no opening time", { created: null }],
+  ] as [string, Record<string, unknown>][]) {
+    pages = [{ object: "list", has_more: false, data: [session("cs_test_time", extra)] }];
+    is(`${what}: 502`, (await call()).status, 502);
+  }
+  pages = [{ object: "list", has_more: false, data: [session("cs_test_opened")] }];
+  is("opened_at is when the checkout page opened", ((await call()).body as { data: Record<string, unknown>[] }).data[0].opened_at, new Date(1_790_000_000_000).toISOString());
+
+  part("An address is kept whole or not at all");
+  for (const [what, email] of [["255 characters", `${"a".repeat(249)}@x.com`], ["a control character", "da\u0007na@example.com"]] as [string, string][]) {
+    pages = [{ object: "list", has_more: false, data: [session("cs_test_mail", { customer_details: { email, name: "Dana" } })] }];
+    is(`${what}: null, never cut or cleaned`, (((await call()).body as { data: Record<string, Record<string, unknown>>[] }).data[0].buyer.email), null);
+  }
+  pages = [{ object: "list", has_more: false, data: [session("cs_test_mail254", { customer_details: { email: `${"a".repeat(248)}@x.com`, name: "Dana" } })] }];
+  is("254 characters: kept as it is", (((await call()).body as { data: Record<string, Record<string, unknown>>[] }).data[0].buyer.email as string).length, 254);
 
   part("The privacy policy says a key reads buyers' addresses and names here");
   const privacy = readFileSync(join(process.cwd(), "app/privacy/page.tsx"), "utf8").replace(/\s+/g, " ").replace(/&apos;/g, "'");

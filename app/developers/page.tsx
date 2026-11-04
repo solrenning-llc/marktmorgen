@@ -544,6 +544,7 @@ export default function DevelopersPage() {
       "discount_cents": 0,
       "currency": "usd",
       "buyer": { "email": "dana@example.com", "name": "Dana Ortiz" },
+      "opened_at": "2026-09-20T09:38:52.000Z",
       "paid_at": "2026-09-20T09:41:10.000Z",
       "refunded_cents": 0,
       "disputed": false,
@@ -590,15 +591,20 @@ export default function DevelopersPage() {
           your studio to be told of each one, or read them in Stripe&apos;s own API with your own Stripe key.
         </p>
         <p>
-          The list is in the order Stripe keeps checkouts: newest first by when the checkout page was opened, not by{" "}
+          The list is in the order Stripe keeps checkouts: newest first by{" "}
+          <code className="font-mono">opened_at</code>, when the checkout page was opened, not by{" "}
           <code className="font-mono">paid_at</code>. A buyer can open a checkout and pay later, and some payment methods,
           such as bank debits, settle days after that, so a sale can appear below sales you already read. To keep a copy
-          in step, read again from the top each time and go on until you reach checkouts opened before the last read,
-          less a margin: at least the last 24 hours, and a week or more if your store takes payment methods that settle
-          later. Use <code className="font-mono">checkout_session</code> to skip a sale you already have.
+          in step, read again from the top each time and go on until a sale&apos;s{" "}
+          <code className="font-mono">opened_at</code> is earlier than your last read, less a margin: at least 24 hours,
+          and a week or more if your store takes payment methods that settle later. Use{" "}
+          <code className="font-mono">checkout_session</code> to skip a sale you already have.
         </p>
         <p>
-          {`Texts are cut to a fixed length, so a page stays small: a product's title from the checkout to ${SALE_TEXT_LIMITS.title} characters, the buyer's name to ${SALE_TEXT_LIMITS.name}, each utm tag to ${SALE_TEXT_LIMITS.utm} and the site to ${SALE_TEXT_LIMITS.site}, with control characters left out. An email address longer than ${SALE_TEXT_LIMITS.email} characters is not a real one, so it is null rather than cut.`}
+          {`Texts are cut to a fixed length, so a page stays small: a product's title from the checkout to ${SALE_TEXT_LIMITS.title} characters, the buyer's name to ${SALE_TEXT_LIMITS.name}, each utm tag to ${SALE_TEXT_LIMITS.utm} and the site to ${SALE_TEXT_LIMITS.site}, with control characters left out. Lengths are counted in UTF-16 code units, as JavaScript counts them, so an emoji counts as 2. An email address longer than ${SALE_TEXT_LIMITS.email} characters is not a real one, so it is null rather than cut, and so is one holding a control character.`}{" "}
+          <code className="font-mono">product.id</code> and <code className="font-mono">option</code> are{" "}
+          <code className="font-mono">null</code> when the id stored on the checkout is not shaped like an id (letters,
+          digits, hyphens and underscores, up to 64).
         </p>
         <p>
           A <code className="font-mono">cursor</code> this list did not give, or sent twice, is answered 400{" "}

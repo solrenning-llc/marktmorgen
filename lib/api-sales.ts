@@ -60,7 +60,7 @@ export const SALE_TEXT_LIMITS = { title: 480, utm: 40, site: 300, name: 150, ema
 /** Every field of a sale, in the order the answer writes them: what ?fields= may choose. */
 export const SALE_FIELDS = [
   "checkout_session", "kind", "product", "option", "bundle_items", "order_bump", "order_bumps", "amount_cents", "discount_cents",
-  "currency", "buyer", "paid_at", "refunded_cents", "disputed", "trial", "source",
+  "currency", "buyer", "opened_at", "paid_at", "refunded_cents", "disputed", "trial", "source",
 ] as const;
 
 export type SalesPage = { data: Record<string, unknown>[]; next: string | null };
@@ -68,7 +68,8 @@ export type SalesPage = { data: Record<string, unknown>[]; next: string | null }
 type Row = { id?: unknown; status?: unknown; payment_status?: unknown; mode?: unknown; created?: unknown; payment_intent?: unknown; invoice?: unknown; amount_total?: unknown; currency?: unknown; customer_email?: unknown; customer_details?: unknown; total_details?: unknown; metadata?: Record<string, string> | null };
 
 const cents = (value: unknown) => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null);
-const iso = (seconds: unknown) => (typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toISOString() : null);
+/** Seconds as an ISO time; null when not a time a Date can hold (past 8.64e15 ms it would throw), never a RangeError. */
+const iso = (seconds: unknown) => (typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 && seconds * 1000 <= 8.64e15 ? new Date(seconds * 1000).toISOString() : null);
 /**
  * A text cut to `max`: control characters dropped first, a surrogate left
  * alone by the cut (or by the account) dropped after, so every unit left is
@@ -113,8 +114,11 @@ export function payment(row: { payment_intent?: unknown; invoice?: unknown }): P
     if (!paidAt || refundedCents === null || typeof charge.disputed !== "boolean") return null;
     return { paidAt, refundedCents, disputed: charge.disputed };
   }
-  const invoice = obj(row.invoice);
-  return { paidAt: invoice ? iso(obj(invoice.status_transitions)?.paid_at) : null, refundedCents: null, disputed: null };
+  // An invoice not paid yet (a trial's) has no moment; one that cannot be read is unknown.
+  const at = obj(obj(row.invoice)?.status_transitions)?.paid_at;
+  const paidAt = at === null || at === undefined ? null : iso(at);
+  if (at !== null && at !== undefined && !paidAt) return null;
+  return { paidAt, refundedCents: null, disputed: null };
 }
 
 /** What kind of sale a checkout was, as sale.completed says it. */
@@ -136,17 +140,19 @@ function isSale(row: Row): boolean {
   return isSettled(row) && (row.mode === "payment" || row.mode === "subscription") && row.metadata?.kind !== "card";
 }
 
-type Read = { row: Row; paid: Payment; amount: number; discount: number | null };
+type Read = { row: Row; paid: Payment; amount: number; discount: number | null; openedAt: string };
 
 /** A sale's money and payment, or null when Stripe's answer for it cannot be read. */
 function readSale(row: Row): Read | null {
   const amount = cents(row.amount_total);
   const paid = payment(row);
-  if (amount === null || !paid) return null;
+  // When the checkout page was opened: the order of the list, and what a sync reads back to.
+  const openedAt = iso(row.created);
+  if (amount === null || !paid || !openedAt) return null;
   // No discount details from Stripe is an unknown discount (null); details that cannot be read make the sale unknown.
-  if (row.total_details === null || row.total_details === undefined) return { row, paid, amount, discount: null };
+  if (row.total_details === null || row.total_details === undefined) return { row, paid, amount, discount: null, openedAt };
   const discount = cents(obj(row.total_details)?.amount_discount);
-  return discount === null ? null : { row, paid, amount, discount };
+  return discount === null ? null : { row, paid, amount, discount, openedAt };
 }
 
 /**
@@ -173,7 +179,7 @@ export async function sales(store: Store, cursor: string | null): Promise<SalesP
   const page = await onAccount("GET", store.stripeAccountId as string, `/checkout/sessions?limit=${SALES_PAGE}&expand[]=data.payment_intent.latest_charge&expand[]=data.invoice${cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ""}`);
   // An unreadable list is unknown, never proof of no sales.
   if (typeof page !== "object" || page === null || Array.isArray(page) || !Array.isArray(page.data) || typeof page.has_more !== "boolean" ||
-      page.data.some((row: unknown) => typeof row !== "object" || row === null || Array.isArray(row))) return null;
+      page.data.length > SALES_PAGE || page.data.some((row: unknown) => typeof row !== "object" || row === null || Array.isArray(row))) return null;
   const rows = page.data as Row[];
   // More to come without a cursor to go on from would look like the end: unknown instead.
   const lastId = rows.length ? rows[rows.length - 1].id : null;
@@ -199,10 +205,12 @@ export async function sales(store: Store, cursor: string | null): Promise<SalesP
   };
   const { title: TITLE, utm: UTM, site: SITE, name: NAME, email: EMAIL } = SALE_TEXT_LIMITS;
   return {
-    data: read.map(({ row, paid, amount, discount }) => {
+    data: read.map(({ row, paid, amount, discount, openedAt }) => {
       const m = meta(row);
       const details = (obj(row.customer_details) ?? {}) as { email?: unknown; name?: unknown };
-      const email = cutText(details.email, EMAIL + 1) ?? cutText(row.customer_email, EMAIL + 1);
+      // An address is kept only as it is: longer than an address can be, or holding what cutText drops, it is null, never cut.
+      const whole = (e: unknown) => (typeof e === "string" && e.length <= EMAIL && cutText(e, EMAIL) === e ? e : null);
+      const email = typeof details.email === "string" && details.email ? whole(details.email) : whole(row.customer_email);
       const productId = safeId(m.product);
       const source = sourceOf(m);
       // Every product checked at checkout, in the order of its boxes; the first also under its old name, as sale.completed sends them.
@@ -219,8 +227,8 @@ export async function sales(store: Store, cursor: string | null): Promise<SalesP
         discount_cents: discount,
         // Unknown is null, never a guessed currency.
         currency: typeof row.currency === "string" && /^[a-z]{3}$/.test(row.currency) ? row.currency : null,
-        // An address longer than an address can be is not one: null, never cut.
-        buyer: { email: email && email.length <= EMAIL ? email : null, name: cutText(details.name, NAME) },
+        buyer: { email, name: cutText(details.name, NAME) },
+        opened_at: openedAt,
         paid_at: paid.paidAt,
         refunded_cents: paid.refundedCents,
         disputed: paid.disputed,

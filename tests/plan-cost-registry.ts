@@ -1049,18 +1049,21 @@ export const EMAIL_SITES: Record<string, string[]> = {
  * SALES_TEXT_BYTES bytes (a CJK character is three; a quote or a backslash, escaped, two). A sale holds its
  * checkout id, its product (an id and a title as the checkout writes it), its option, a bundle of
  * MAX_BUNDLE_ITEMS products, BUMP_KEYS.length checked boxes each with a bundle of its own, the first of them twice
- * (order_bump and order_bumps), the buyer's address and name, four utm tags and a site; every listed product has
+ * (order_bump and order_bumps), the buyer's address and name, four utm tags and a site, two times; every listed product has
  * a catalog title (MAX_TITLE_LENGTH). SALES_KEY_BYTES is each object's keys and punctuation, with the kind, the
  * numbers, the time and the flags: tests/api-sales.test.ts holds a page built at these limits under the figure.
  */
 const SALES_TEXT_BYTES = 3;
 const SALES_KEY_BYTES = { sale: 600, entry: 32, bump: 50, page: 300 };
+/** A time as the answer writes it ("2026-09-20T09:41:10.000Z"): opened_at and paid_at. */
+const SALES_TIME_BYTES = 24;
 const SALES_ENTRY_BYTES = SALES_KEY_BYTES.entry + SALES_SAFE_ID_LENGTH + SALES_LISTING_TITLE * SALES_TEXT_BYTES;
 const SALES_BUMP_BYTES = SALES_KEY_BYTES.bump + SALES_ENTRY_BYTES + MAX_BUNDLE_ITEMS * SALES_ENTRY_BYTES;
 export const API_SALE_BYTES = SALES_KEY_BYTES.sale + SALES_ID_LENGTH
   + SALES_SAFE_ID_LENGTH + SALE_TEXT_LIMITS.title * SALES_TEXT_BYTES + SALES_SAFE_ID_LENGTH
   + MAX_BUNDLE_ITEMS * SALES_ENTRY_BYTES + (BUMP_KEYS.length + 1) * SALES_BUMP_BYTES
-  + (SALE_TEXT_LIMITS.email + SALE_TEXT_LIMITS.name + 4 * SALE_TEXT_LIMITS.utm + SALE_TEXT_LIMITS.site) * SALES_TEXT_BYTES;
+  + (SALE_TEXT_LIMITS.email + SALE_TEXT_LIMITS.name + 4 * SALE_TEXT_LIMITS.utm + SALE_TEXT_LIMITS.site) * SALES_TEXT_BYTES
+  + 2 * SALES_TIME_BYTES;
 export const API_SALES_ANSWER_BYTES = SALES_KEY_BYTES.page + SALES_ID_LENGTH + SALES_PAGE * (API_SALE_BYTES + 1);
 /**
  * One page of sales read through the API (GET /api/v1/sales, lib/api-sales.ts), at the most: Stripe waited on for

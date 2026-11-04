@@ -35,7 +35,7 @@ export async function checkGrowthAndContact({owner,LOCAL,abStore,second,contactT
     }else{
       await campaigns.waitFor();
       const cards=campaigns.locator(":scope > ul > li");
-      assert.equal(await cards.count(),{leads:2,sales:2,services:2}[goal]);
+      assert.equal(await cards.count(),{leads:2,sales:6,services:2}[goal]);
       for(const details of await cards.locator("details").all()){
         const summary=details.locator("summary");
         await summary.focus();await summary.press("Enter");

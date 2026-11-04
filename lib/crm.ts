@@ -9,13 +9,15 @@
  *   nl:crm:pipes:<statsId>           the pipelines and their stages (JSON, lib/crm-rules.ts);
  *                                    absent until the creator first changes one, and then it wins
  *   nl:crm:deals:<statsId>           hash  deal id -> deal (JSON)
+ *   nl:crm:lock:<statsId>            one deals import at a time (lib/hubspot-import.ts), a minute at most
  *
  * A value is kept under the person's key, never the address (as a note
  * about them is), one hash a field, so the list's file reads each field once
  * however long the list is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type Held, LockBusyError, holdLock, takeLock } from "@/lib/redis-lock";
+import { type DataChange, type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import {
   type CrmField,
@@ -64,6 +66,7 @@ const valuesKey = (statsId: string, field: string) => `nl:crm:v:${statsId}:${fie
 const stagesKey = (statsId: string) => `nl:crm:stages:${statsId}`;
 const dealsKey = (statsId: string) => `nl:crm:deals:${statsId}`;
 const pipesKey = (statsId: string) => `nl:crm:pipes:${statsId}`;
+const lockKey = (statsId: string) => `nl:crm:lock:${statsId}`;
 const PERSON = /^[0-9a-f]{32}$/;
 /** Where people's field values are counted in the store's data room (lib/store-data.ts). */
 const VALUES_SLOT = "crm:v";
@@ -387,6 +390,79 @@ export async function dropDeal(statsId: string, id: string, room: DataStore): Pr
   if (!Array.isArray(removed) || removed.length !== 1 || (removed[0] !== 0 && removed[0] !== 1)) throw new CrmDealWriteUnconfirmed();
   if (removed[0] === 1) await giveData(room, [{ slot: dealSlot(id), bytes: 0, set: true }]);
   return removed[0] === 1;
+}
+
+// ---------------------------------------------------------------- deals brought in from a file
+
+/** How long a deals import may hold the store's CRM lock, and how long a second one waits for it. */
+export const CRM_LOCK_SECONDS = 60;
+export const CRM_LOCK_WAIT_MS = 2_000;
+
+/** The store's CRM lock (an import of deals, lib/hubspot-import.ts): LockBusyError when another holds it. */
+export function takeCrmLock(statsId: string): Promise<Held> {
+  return takeLock(lockKey(statsId), CRM_LOCK_SECONDS, CRM_LOCK_WAIT_MS);
+}
+
+/**
+ * What an import of deals reads before it changes anything: the pipelines
+ * exactly as saved (the record a write is compared with) and the id of every
+ * deal. An unreadable or malformed record never stands in for an empty one.
+ */
+export async function importSnapshot(statsId: string): Promise<{ raw: string; pipelines: Pipeline[]; dealIds: Set<string> }> {
+  const { raw, pipelines } = await pipelineSnapshot(statsId);
+  let response: unknown;
+  try {
+    response = await redisPipeline([["HKEYS", dealsKey(statsId)]]);
+  } catch { throw new CrmDealReadUnavailable(); }
+  if (!Array.isArray(response) || response.length !== 1 || !Array.isArray(response[0])) throw new CrmDealReadUnavailable();
+  const ids: unknown[] = response[0];
+  if (ids.some((id) => typeof id !== "string" || !DEAL_ID.test(id))) throw new CrmDealReadUnavailable();
+  return { raw, pipelines, dealIds: new Set(ids as string[]) };
+}
+
+/** The room an import takes before it writes (`take`), and what goes back when it writes nothing (`back`). */
+export function importRoom(snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[]): { take: DataChange[]; back: DataChange[] } {
+  const pipes: DataChange[] = pipelines ? [{ slot: PIPES_SLOT, bytes: dataBytes([JSON.stringify(pipelines)], 1), set: true }] : [];
+  const pipesBack: DataChange[] = pipelines ? [{ slot: PIPES_SLOT, bytes: snapshotRaw ? dataBytes([snapshotRaw], 1) : 0, set: true }] : [];
+  return {
+    take: [...pipes, ...deals.map((deal) => ({ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }))],
+    back: [...pipesBack, ...deals.map((deal) => ({ slot: dealSlot(deal.id), bytes: 0, set: true }))],
+  };
+}
+
+/**
+ * Writes an import of deals whose room was already taken (importRoom), under
+ * the CRM lock `held`: the pipelines over the snapshot read (CrmSchemaConflict,
+ * and nothing written, when they changed meanwhile), then every new deal in
+ * one round trip, each with the store's ceiling checked as it lands
+ * (SAVE_CRM_DEAL). Answers how many deals were saved and the ids of those
+ * refused for the ceiling meanwhile, whose room goes back. Starts no
+ * workflow: a deal brought in from a file is not a deal entering a stage.
+ */
+export async function writeImport(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[], room: DataStore): Promise<{ saved: number; full: string[] }> {
+  // The lock may have run out on a slow request: then nothing is written.
+  if (!(await holdLock(held))) {
+    await giveData(room, importRoom(snapshotRaw, pipelines, deals).back);
+    throw new LockBusyError();
+  }
+  if (pipelines) {
+    try {
+      await writePipelines(statsId, snapshotRaw, pipelines, [], room);
+    } catch (error) {
+      // No deal was written: their room goes back (the pipelines' went back in writePipelines on a conflict).
+      await giveData(room, importRoom(snapshotRaw, null, deals).back);
+      throw error;
+    }
+  }
+  if (!deals.length) return { saved: 0, full: [] };
+  let saved: unknown;
+  try {
+    saved = await redisPipeline(deals.map((deal) => ["EVAL", SAVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, JSON.stringify(deal), MAX_DEALS]));
+  } catch { throw new CrmDealWriteUnconfirmed(); }
+  if (!Array.isArray(saved) || saved.length !== deals.length || saved.some((value) => value !== 0 && value !== 1)) throw new CrmDealWriteUnconfirmed();
+  const full = deals.filter((_, i) => saved[i] === 0);
+  if (full.length) await giveData(room, full.map((deal) => ({ slot: dealSlot(deal.id), bytes: 0, set: true })));
+  return { saved: deals.length - full.length, full: full.map((deal) => deal.id) };
 }
 
 /** Everything kept here for a store that is being deleted. */

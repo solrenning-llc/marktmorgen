@@ -317,6 +317,20 @@ function stagesOf(labels: readonly string[]): { stages: ProposedStage[]; over: s
   return { stages, over: ordered.slice(room) };
 }
 
+/** Why a deal in a pipeline past the store's room does not come in, with what to do. */
+export function pipelineRoomReason(room: number): string {
+  return `Your store has room for ${room <= 0 ? "no more pipelines" : room === 1 ? "1 more pipeline" : `${room} more pipelines`}, and this file has more, so the deals in this pipeline were not brought in. Remove a pipeline you no longer need here, or move these deals to another pipeline in HubSpot, then bring the file in again.`;
+}
+
+/** Why a deal in a stage past what its pipeline holds does not come in. */
+export const STAGE_PAST_REASON = `A pipeline here holds up to ${MAX_STAGES} stages, won and lost included, and this deal's stage is past them, so it was not brought in. Move it to another stage in HubSpot, then bring the file in again.`;
+
+/** Said when a file has more deals to bring in than the store has room for: nothing comes in. */
+export function tooManyDealsSentence(count: number, room: number): string {
+  const many = (n: number) => `${n.toLocaleString("en-US")} ${n === 1 ? "deal" : "deals"}`;
+  return `This file has ${many(count)} to bring in, and your store has room for ${many(Math.max(0, room))} more (a store holds up to ${MAX_DEALS.toLocaleString("en-US")}). Nothing was brought in. Remove deals from the file, or delete deals you no longer need here, then bring it in again.`;
+}
+
 /**
  * Reads a HubSpot deals file into what would be made here: the pipelines
  * and stages to create and each deal, with every row that does not come in
@@ -398,7 +412,7 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
         line: deal.line,
         column: label(columns.pipeline),
         value: deal.pipeline,
-        reason: `Your store has room for ${pipelineRoom === 0 ? "no more pipelines" : pipelineRoom === 1 ? "1 more pipeline" : `${pipelineRoom} more pipelines`}, and this file has more, so the deals in this pipeline were not brought in. Remove a pipeline you no longer need here, or move these deals to another pipeline in HubSpot, then bring the file in again.`,
+        reason: pipelineRoomReason(pipelineRoom),
       });
       continue;
     }
@@ -407,7 +421,7 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
         line: deal.line,
         column: label(columns.stage),
         value: deal.stage,
-        reason: `A pipeline here holds up to ${MAX_STAGES} stages, won and lost included, and this deal's stage is past them, so it was not brought in. Move it to another stage in HubSpot, then bring the file in again.`,
+        reason: STAGE_PAST_REASON,
       });
       continue;
     }
@@ -420,14 +434,7 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
 
   const room = Math.max(0, Math.min(MAX_DEALS, Math.floor(options.dealRoom ?? MAX_DEALS)));
   if (deals.length > room) {
-    const many = (n: number) => `${n.toLocaleString("en-US")} ${n === 1 ? "deal" : "deals"}`;
-    return {
-      ok: false,
-      reason: "too_many",
-      count: deals.length,
-      room,
-      sentence: `This file has ${many(deals.length)} to bring in, and your store has room for ${many(room)} more (a store holds up to ${MAX_DEALS.toLocaleString("en-US")}). Nothing was brought in. Remove deals from the file, or delete deals you no longer need here, then bring it in again.`,
-    };
+    return { ok: false, reason: "too_many", count: deals.length, room, sentence: tooManyDealsSentence(deals.length, room) };
   }
   return { ok: true, pipelines, deals, refused, ignored: columns.ignored };
 }

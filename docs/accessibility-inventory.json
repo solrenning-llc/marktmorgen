@@ -1729,6 +1729,7 @@
     "app/api/store/image/route.ts",
     "app/api/store/image/upload/route.ts",
     "app/api/store/import/funnel/route.ts",
+    "app/api/store/import/hubspot/route.ts",
     "app/api/store/import/route.ts",
     "app/api/store/inbox/route.ts",
     "app/api/store/intro/route.ts",

@@ -224,6 +224,12 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * partial Lua failure; the whole tail is unknown, not bounded by the receipt.
  * No PER_EMAIL/ORDER_COST coefficient, real review, quota protection, paid
  * financial envelope or retention approval is changed/certified here.
+ * CX-70 selected digital-option retention is also outside ORDER_COST: its
+ * own digital-option-retention scope is required in the same pending pool.
+ * Exact Redis7.4.12 first-enqueue measurement:27 commands including EVAL
+ * and execution-time TIME, plus TS TIME/readback. The complete indefinite
+ * storage/copy/cleanup/trigger cost remains unknown/rejected, never zero.
+ * No production caller, new family, provider permission or real review.
  */
 export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
 

@@ -11,6 +11,8 @@
  * against the costs lib/studio-demo-rules.ts was worked out with.
  */
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { shareAddress } from "@/lib/traffic-rules";
 import { DELETE, GET, POST } from "@/app/api/studio-demo/route";
 import {
   DEMO_DAY_KEEP_SECONDS, DEMO_TAKE_COMMANDS, STUDIO_DEMO_SEED, STUDIO_DEMO_SEED_BYTES, STUDIO_DEMO_SEED_VALUES,
@@ -24,6 +26,8 @@ import {
 import * as rulesNs from "@/lib/studio-demo-rules";
 import { store } from "./redis-stub";
 import { done, is, part } from "./check";
+
+const chunk = (flat: string[]): [string, string][] => Array.from({ length: Math.floor(flat.length / 2) }, (_, i) => [flat[2 * i], flat[2 * i + 1]]);
 
 // Every command sent, and the bytes each pipeline moves both ways.
 const sent: (string | number)[][] = [];
@@ -105,6 +109,13 @@ async function run(): Promise<void> {
   is("another network still opens", (await openStudioDemo(door("2001:db8:abce::1"), at(clock))).ok, true);
   is("no address or network is kept in the clear", store.keys().some((k) => /198\.51\.100|2001:db8/.test(k)) || JSON.stringify(store.run(["HGETALL", `${DEMO_NAMESPACE}addr:2026-11-04`])).includes("db8"), false);
   is("the addresses' counts end with the day", store.run(["PEXPIRETIME", `${DEMO_NAMESPACE}addr:2026-11-04`]), Date.UTC(2026, 10, 5));
+  {
+    // An address's field is made with the deployment's key: a plain hash of an
+    // IPv4 address can be found again by trying all 2^32 of them.
+    const plain = createHash("sha256").update(`marktmorgen-studio-demo:${shareAddress("198.51.100.1")}`).digest("hex").slice(0, 32);
+    const fields = Object.keys(Object.fromEntries(chunk(store.run(["HGETALL", `${DEMO_NAMESPACE}addr:2026-11-04`]) as string[])));
+    is("an address is counted under a keyed fingerprint, never a plain hash anyone can recompute", [fields.length > 0, fields.includes(plain)], [true, false]);
+  }
 
   part("The day's last place, taken by one of two doors");
   fresh();
@@ -300,7 +311,7 @@ async function run(): Promise<void> {
   is("the first drafts are far under a session's bytes", STUDIO_DEMO_SEED_BYTES < DEMO_ACTION_MAX_BYTES, true);
   const source = readFileSync("lib/studio-demo.ts", "utf8");
   const imports = [...source.matchAll(/^import[^;]*?from "([^"]+)";/gm)].map((m) => m[1]).sort();
-  is("it imports only the bot check, Redis, the request guard, its rules and the address rule", imports, ["@/lib/bot-check", "@/lib/redis", "@/lib/request-guard", "@/lib/studio-demo-rules", "@/lib/traffic-rules"]);
+  is("it imports only the bot check, Redis, the request guard, its rules, the address rule and the key its fingerprints are made with", imports, ["@/lib/bot-check", "@/lib/redis", "@/lib/request-guard", "@/lib/secret-box", "@/lib/studio-demo-rules", "@/lib/traffic-rules", "node:crypto"]);
   is("the route imports only the module", [...readFileSync("app/api/studio-demo/route.ts", "utf8").matchAll(/from "([^"]+)"/g)].map((m) => m[1]), ["@/lib/studio-demo"]);
   is("no switch is read from the environment", /process\.env/.test(source), false);
 }

@@ -45,6 +45,8 @@ import {
   type DemoRefusal, demoActionAllowed, demoAddressKey, demoDayKey, demoSessionAllowed, isDemoSessionId, sandboxKey,
 } from "@/lib/studio-demo-rules";
 import { shareAddress } from "@/lib/traffic-rules";
+import { deriveKey } from "@/lib/secret-box";
+import { createHash, createHmac } from "node:crypto";
 
 // ---------------------------------------------------------------- the sandbox's first drafts
 
@@ -199,11 +201,19 @@ function newSessionId(): string {
   return "sd" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** The field an address is counted under: a one-way hash of the address, or of the network of a new-kind one. */
-async function addressField(request: Request): Promise<string> {
+/**
+ * The field an address is counted under: a one-way fingerprint of the address,
+ * or of the network of a new-kind one, made with a key only this deployment
+ * has (lib/secret-box.ts, as lib/traffic.ts does), so that somebody who read
+ * the day's set could not find an address in it by trying every address there
+ * is. Without the key (a local run) it is a plain hash.
+ */
+export function demoAddressField(request: Request): string {
   const block = shareAddress(clientAddress(request)) || "unknown";
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`marktmorgen-studio-demo:${block}`));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+  const of = `marktmorgen-studio-demo:${block}`;
+  const key = deriveKey("studio-demo-address");
+  const made = key ? createHmac("sha256", key).update(of) : createHash("sha256").update(of);
+  return made.digest("hex").slice(0, 32);
 }
 
 /**
@@ -252,7 +262,7 @@ export async function openStudioDemo(request: Request, options: StudioDemoOption
   if (gate !== "open") return { ok: false, reason: gate };
   if (await (options.isAutomated ?? isAutomated)()) return { ok: false, reason: "automated" };
 
-  const field = await addressField(request);
+  const field = demoAddressField(request);
   const dayEnds = (Math.floor(now / 86_400_000) + 1) * 86_400;
   let taken: number[] | null;
   try {

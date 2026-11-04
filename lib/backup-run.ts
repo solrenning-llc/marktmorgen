@@ -35,12 +35,16 @@
  *      deletes the oldest first, never the last verified copy (the manifest
  *      kept with the last good copy's time, and the parts it names), until
  *      the set fits; if that deletion fails, it writes nothing ("room_error",
- *      "room_cutoff"; the day's new try may try again).
- *   2. Then it writes the set, and after it deletes every copy of its own the
- *      bucket says was written more than retentionDays days before the run
- *      started, as best it can: a failure ("prune_error", "prune_pages",
- *      "prune_cutoff") is in the owner's report and never costs the day's copy;
- *      the next run's step 1 holds the ceiling meanwhile.
+ *      "room_cutoff"; the day's new try may try again). It deletes only when it
+ *      knows the last verified copy for sure (lastVerified): otherwise nothing
+ *      is deleted and nothing written ("room_unverified").
+ *   2. Then it writes the set and, only when the set was verified, deletes
+ *      every copy of its own the bucket says was written more than
+ *      retentionDays days before the run started, as best it can: a failure
+ *      ("prune_error", "prune_pages", "prune_cutoff") is in the owner's report
+ *      and never costs the day's copy; the next run's step 1 holds the ceiling
+ *      meanwhile. A failed day deletes nothing after it, so the last good copy
+ *      stays, past the retention if need be, until a new one is verified.
  * The ceiling is a proof: no other run writes while one holds the lock (its
  * writes end by its cutoff, before the lock expires, and R2 lists what was
  * written), and a run writes only after its own complete listing showed room
@@ -49,7 +53,11 @@
  * retention + 2 sets (backupPeakSets): with one good run a day, the copies of
  * the last retentionDays days and the one that is about to age out are there
  * before the day's write, so step 1 deletes nothing inside the retention; it
- * acts only after failed runs or failed deletions. Names under backups/ this
+ * acts only after failed runs or failed deletions. The last good copy kept
+ * past the retention stays inside the ceiling: it is one set, and step 1 can
+ * always make room for one more beside it by deleting the others (2 sets <=
+ * retention + 2, the retention being at least 3), so keeping it never stops
+ * a write while the deletions work. Names under backups/ this
  * code does not write are never listed as its own nor deleted; the bucket's
  * lifecycle rule, kept as a safety net, removes them and anything left while
  * no run happens. Nothing schedules it: vercel.json is untouched (owner
@@ -117,7 +125,9 @@ const STALE_MS = 48 * 3_600_000;
 const LAST_OK = "nl:backup:last-ok";
 const LAST_FAIL = "nl:backup:last-fail";
 const LOCK = "nl:backup:lock";
-/** The outcome's life: 8 days, and for the last good copy never less than its retention and two days (it names the copy to keep). */
+/** A copy's id, as the store names it: a random UUID. */
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** The last failure's life: 8 days, or the retention and two days when longer. The last good copy's mark has no end. */
 const outcomeSeconds = (review: BackupCostReview) => Math.max(8, review.retentionDays + 2) * 86_400;
 
 /** The UTC day of a moment. */
@@ -202,7 +212,7 @@ export type BackupRunResult =
       ok: false;
       reason:
         | "off_review" | "off_store" | "off_key" | "busy" | "already_ran" | "mark_error"
-        | "room_error" | "room_pages" | "room_cutoff"
+        | "room_error" | "room_pages" | "room_cutoff" | "room_unverified"
         | "export_limits" | "export_budget" | "export_cutoff" | "export_scan_pages" | "export_too_many" | "export_too_big" | "export_too_many_parts" | "export_unreadable" | "export_error"
         | "verify";
     };
@@ -286,15 +296,21 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
     const room = await makeRoom(review, store, key);
     if (!room.ok) return { ok: false, reason: room.reason };
     const copied = await copy(review, store, key, now);
-    // After the write, as best it can: a failure is reported and never costs the copy just made.
+    // A failed day deletes nothing after it (Codex G on e95705e66): the last good copy stays, past the retention if
+    // need be, until a new one is verified.
+    if (!copied.ok) return copied;
+    // After a verified write, as best it can: a failure is reported and never costs the copy just made. The copy just
+    // made is the last verified one now, and it is younger than the retention.
     const pruned = await prune(review, store, now);
-    return copied.ok ? { ...copied, pruned: room.deleted + pruned.deleted, prune: pruned.state } : copied;
+    return { ...copied, pruned: room.deleted + pruned.deleted, prune: pruned.state };
   });
   try {
     await redisPipeline(
       result.ok
         ? [
-            ["SET", LAST_OK, JSON.stringify({ at: now, set: result.id }), "EX", keep],
+            // Kept for good: it names the copy never deleted to make room, which may outlive any expiry while new copies
+            // fail; its absence is then a loss, never "no copy yet" (lastVerified).
+            ["SET", LAST_OK, JSON.stringify({ at: now, set: result.id })],
             // Done: no new try today; the count goes past the day's limit.
             ["INCRBY", day, BACKUP_RUNS_PER_DAY],
             ...(result.prune === "done" ? [] : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.prune }), "EX", keep]]),
@@ -327,12 +343,28 @@ async function listAll(review: BackupCostReview, store: BackupBucket): Promise<B
 }
 
 /** The ids of the last verified copy that are still in the bucket: its manifest and every part it names. */
+/** The last verified copy could not be known for sure: nothing is deleted to make room. */
+class Unverified extends Error {}
+
+/**
+ * The ids of the last verified copy: its manifest and every part it names, all of them listed. Fails closed (Codex G
+ * on e95705e66): a database answer that is not exactly one, a mark that is not text or not the kept shape, an old mark
+ * with a time and no manifest, no mark at all, a manifest the bucket does not list, or one it cannot read and open,
+ * all throw Unverified, and makeRoom then deletes nothing. No mark with copies in the bucket is not taken as "never a
+ * good copy": the mark is kept for good once written, so its absence is a loss, and the run never deletes to make
+ * room without knowing what to keep; copies left that way go by the bucket's lifecycle rule.
+ */
 async function lastVerified(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[]): Promise<Set<string>> {
-  const [raw] = await redisPipeline([["GET", LAST_OK]]);
-  const set = readLastOk(raw)?.set;
-  if (!set || !listed.some((o) => o.id === set)) return new Set();
-  // Listed but unreadable: thrown, so nothing is deleted on doubt.
-  const manifest = openManifest(await store.read(set, manifestBound(MAX_PARTS)), key);
+  const replies: unknown = await redisPipeline([["GET", LAST_OK]]);
+  if (!Array.isArray(replies) || replies.length !== 1 || typeof replies[0] !== "string") throw new Unverified();
+  const set = readLastOk(replies[0])?.set;
+  if (!set || !ID.test(set) || !listed.some((o) => o.id === set)) throw new Unverified();
+  let manifest: ReturnType<typeof openManifest>;
+  try {
+    manifest = openManifest(await store.read(set, manifestBound(MAX_PARTS)), key);
+  } catch {
+    throw new Unverified();
+  }
   return new Set([set, ...manifest.parts.map((part) => part.id)]);
 }
 
@@ -344,7 +376,7 @@ async function makeRoom(
   review: BackupCostReview,
   store: BackupBucket,
   key: Uint8Array,
-): Promise<{ ok: true; deleted: number } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" }> {
+): Promise<{ ok: true; deleted: number } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified" }> {
   const need = objectBound(review);
   const objects = runLimits(review).maxParts + 1;
   const most = backupKeptObjects(review);
@@ -367,7 +399,8 @@ async function makeRoom(
       deleted += 1;
     }
     return fits() ? { ok: true, deleted } : { ok: false, reason: "room_error" };
-  } catch {
+  } catch (error) {
+    if (error instanceof Unverified) return { ok: false, reason: "room_unverified" };
     return { ok: false, reason: timeLeft() <= 0 ? "room_cutoff" : "room_error" };
   }
 }

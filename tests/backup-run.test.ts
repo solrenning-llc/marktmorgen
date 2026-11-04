@@ -19,8 +19,8 @@
  *     (retention + 2 sets), or one after a deletion at the ceiling that failed;
  *     the last verified copy deleted to make room; two runs at once;
  *   - a copy that does not read back the same counted as done;
- *   - a good copy's time lost to a later failure, a failure's reason not kept,
- *     the outcome kept without expiry, or a failed write of the outcome turned
+ *   - a good copy's time lost to a later failure, a failure's reason not kept
+ *     or kept without expiry, the last good copy's mark let expire, or a failed write of the outcome turned
  *     into an exception after a good copy;
  *   - a step that throws, instead of a result that says which;
  *   - the report saying no good copy while one is under 48 hours old, or
@@ -180,12 +180,13 @@ async function main(): Promise<void> {
   is("done, with the keys copied (its own day count and lock among them), one part and its manifest", [ran.ok, ran.ok && ran.keys, ran.ok && ran.parts, objects.size], [true, 4, 1, 2]);
   is("a second run the same day is refused before anything is written", [await runBackup({ now: T0 + HOUR, review, store: broken, key }), objects.size], [{ ok: false, reason: "already_ran" }, 2]);
   is("the good copy's time and its manifest are kept, and survive that refusal", [await backupStale(T0 + 2 * HOUR), JSON.parse(String(redis.run(["GET", "nl:backup:last-ok"])))], [false, { at: T0, set: ran.ok ? ran.id : "" }]);
-  is("the outcome expires by itself", Number(redis.run(["TTL", "nl:backup:last-ok"])) > 0, true);
+  is("the last good copy's mark is kept for good: it names the copy never deleted to make room", Number(redis.run(["TTL", "nl:backup:last-ok"])), -1);
 
   part("Failures say which step, and keep the last good copy's time");
   at(T0 + DAY);
   is("a copy that does not read back the same is a failure", await runBackup({ now: clock, review, store: broken, key }), { ok: false, reason: "verify" });
   is("its reason is kept, with its time", await backupLastFailure(), { at: clock, reason: "verify" });
+  is("a failure's note expires by itself", Number(redis.run(["TTL", "nl:backup:last-fail"])) > 0, true);
   is("one failed day after a good one: a good copy is still under 48 hours old", await backupStale(T0 + DAY + 20 * HOUR), false);
   at(T0 + 2 * DAY);
   is("a cap reached is a failure that says which", await runBackup({ now: clock, review: { ...review, maxRows: 1 }, store, key }), { ok: false, reason: "export_too_many" });
@@ -309,6 +310,70 @@ async function main(): Promise<void> {
     const room = await runBackup({ now: clock, review, store, key });
     is("the day's new try makes room from the oldest, keeps the last verified copy, and writes", [room.ok, goodIds.length > 1 && goodIds.every((id) => objects.has(id)), deletes.length > 0 && deletes.every((id) => !goodIds.includes(id))], [true, true, true]);
     is("and the bucket stays within the review's ceiling", held() <= review.maxStoredBytes, true);
+  }
+
+  part("The last verified copy is known for sure before any copy is deleted to make room (Codex G on e95705e66)");
+  {
+    // A verified copy, then the bucket filled to the ceiling with younger sets, so the next run must make room.
+    const fill = async (day: number) => {
+      objects.clear();
+      writtenAt.clear();
+      wipe();
+      redis.run(["SET", "nl:store:one", "a shop"]);
+      at(T0 + day * DAY);
+      const good = await runBackup({ now: clock, review, store, key });
+      for (let i = 0; i < 31; i += 1) {
+        const id = `cccccccc-cccc-4ccc-8ccc-${String(i).padStart(12, "0")}`;
+        objects.set(id, new Uint8Array(SET_BOUND));
+        writtenAt.set(id, clock + 1_000 + i);
+      }
+      at(T0 + (day + 1) * DAY);
+      return good.ok ? good.id : "";
+    };
+    const real = redis.pipeline;
+    const answerLastOk = (reply: unknown[] | null, value?: unknown) => {
+      (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
+        if (list.length === 1 && list[0][0] === "GET" && list[0][1] === "nl:backup:last-ok") return reply ?? [value];
+        return real(list);
+      }) as typeof redis.pipeline;
+    };
+    for (const [name, reply, value] of [
+      ["an empty answer from the database", [], undefined],
+      ["two answers for one command", ["x", "y"], undefined],
+      ["a value that is not text", null, 7],
+      ["a value that is not the kept shape", null, "{not json"],
+      ["an old mark with a time and no manifest", null, String(T0)],
+      ["a manifest the bucket does not list", null, JSON.stringify({ at: T0, set: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" })],
+      ["no mark at all, with copies in the bucket", null, null],
+    ] as [string, unknown[] | null, unknown][]) {
+      const good = await fill(500);
+      deletes.length = 0;
+      answerLastOk(reply, value);
+      // The day's write would fail after the room was made (the read-back differs).
+      const result = await runBackup({ now: clock, review, store: broken, key });
+      (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = real;
+      is(`${name}: no copy deleted to make room, nothing written, said so`, [result, deletes.length, objects.has(good), (await backupLastFailure())?.reason], [{ ok: false, reason: "room_unverified" }, 0, true, "room_unverified"]);
+    }
+  }
+
+  part("A failed day deletes nothing after it: the last good copy stays past the retention while new ones fail (Codex G on e95705e66)");
+  {
+    objects.clear();
+    writtenAt.clear();
+    wipe();
+    redis.run(["SET", "nl:store:one", "a shop"]);
+    const short = { ...review, retentionDays: 3 };
+    at(T0 + 700 * DAY);
+    const good = await runBackup({ now: clock, review: short, store, key });
+    const goodIds = good.ok ? [good.id, ...openManifest(objects.get(good.id)!, key).parts.map((p) => p.id)] : [];
+    at(T0 + 704 * DAY);
+    const refusing: BackupBucket = { ...store, putNew: async () => { throw new Error("write refused"); } };
+    deletes.length = 0;
+    const failed = await runBackup({ now: clock, review: short, store: refusing, key });
+    is("day 4, the first write refused: a failure, nothing deleted, the good copy of day 0 whole", [failed.ok, deletes.length, goodIds.length > 1 && goodIds.every((id) => objects.has(id))], [false, 0, true]);
+    at(T0 + 705 * DAY);
+    const next = await runBackup({ now: clock, review: short, store, key });
+    is("the next good copy is written, and only then is the old one, past the retention, deleted", [next.ok, goodIds.every((id) => !objects.has(id))], [true, true]);
   }
 
   part("When even deleting every other copy leaves no room, nothing is written");

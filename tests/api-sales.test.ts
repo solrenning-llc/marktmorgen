@@ -35,6 +35,8 @@ const session = (id: string, extra: Record<string, unknown> = {}, meta: Record<s
   payment_status: "paid",
   mode: "payment",
   created: 1_790_000_000,
+  // Expanded on the list request: the charge came a minute after the page opened.
+  payment_intent: { id: `pi_${id}`, object: "payment_intent", created: 1_790_000_060, latest_charge: { id: `ch_${id}`, object: "charge", created: 1_790_000_060 } },
   amount_total: 4900,
   currency: "usd",
   total_details: { amount_discount: 500 },
@@ -91,7 +93,7 @@ async function main(): Promise<void> {
     discount_cents: 500,
     currency: "usd",
     buyer: { email: "dana@example.com", name: "Dana Ortiz" },
-    paid_at: new Date(1_790_000_000_000).toISOString(),
+    paid_at: new Date(1_790_000_060_000).toISOString(),
     trial: false,
     source: { utm_source: "newsletter", utm_medium: null, utm_campaign: null, utm_content: null, site: null },
   });
@@ -116,6 +118,28 @@ async function main(): Promise<void> {
     const r = await call();
     is(`refused: ${JSON.stringify(bad)}`, [r.status, (r.body as { error?: string }).error], [502, "unavailable"]);
   }
+
+  part("When the buyer paid, not when the checkout page opened");
+  const opened = Date.UTC(2026, 11, 31, 23, 50) / 1000;
+  const paid = Date.UTC(2027, 0, 1, 0, 5) / 1000;
+  const firstInvoicePaid = Date.UTC(2027, 0, 1, 0, 7) / 1000;
+  pages = [{
+    object: "list",
+    has_more: false,
+    data: [
+      session("cs_test_newyear", { created: opened, payment_intent: { id: "pi_ny", object: "payment_intent", created: opened, latest_charge: { id: "ch_ny", object: "charge", created: paid } } }),
+      session("cs_test_newyear_sub", { mode: "subscription", created: opened, payment_intent: null, invoice: { id: "in_ny", object: "invoice", status_transitions: { paid_at: firstInvoicePaid } } }),
+      session("cs_test_free", { payment_status: "no_payment_required", amount_total: 0, created: opened, payment_intent: null, invoice: null }),
+      session("cs_test_nocurrency", { currency: null, payment_intent: { id: "pi_nc", object: "payment_intent", created: paid, latest_charge: { id: "ch_nc", object: "charge", created: paid } } }),
+    ],
+  }];
+  const asOf = asked.length;
+  const newYear = (await call()).body as { data: Record<string, unknown>[] };
+  is("the payment and the first invoice are read in the same single request", [asked.length - asOf, asked[asOf].searchParams.getAll("expand[]")], [1, ["data.payment_intent.latest_charge", "data.invoice"]]);
+  is("opened on 31 December, paid on 1 January: the 1 January moment, the year the webhook says", newYear.data[0].paid_at, "2027-01-01T00:05:00.000Z");
+  is("a membership: when its first invoice was paid", newYear.data[1].paid_at, "2027-01-01T00:07:00.000Z");
+  is("nothing charged at checkout: no payment moment, never the page's opening", newYear.data[2].paid_at, null);
+  is("no currency from Stripe: null, never a guessed usd", newYear.data[3].currency, null);
 
   part("Kinds");
   is("as sale.completed names them", [saleKind({ metadata: { kind: "call" } }), saleKind({ metadata: { kind: "plan" }, mode: "subscription" }), saleKind({ mode: "subscription" }), saleKind({ mode: "payment" })], ["call", "payment_plan", "membership", "one_time"]);

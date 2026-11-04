@@ -548,6 +548,13 @@ export default function DevelopersPage() {
   "refunds_checked": false
 }`}</Code>
         <p>
+          <code className="font-mono">paid_at</code> is when the buyer paid: the charge, or for a membership or
+          payment plan, when its first invoice was paid (with a free trial, that invoice is for $0, so this is when the
+          trial began). It is not when the checkout page was opened. It is{" "}
+          <code className="font-mono">null</code> when nothing was charged at checkout, such as a free order.{" "}
+          <code className="font-mono">currency</code> is <code className="font-mono">null</code> if Stripe did not give one.
+        </p>
+        <p>
           Refunds are not read per sale (<code className="font-mono">refunds_checked</code> says so): add the{" "}
           <code className="font-mono">refund.issued</code> webhook in your studio to be told of each one, or read them in
           Stripe&apos;s own API with your own Stripe key.

@@ -12,7 +12,8 @@
  *
  * The cursor is Stripe's own: the id of the last checkout of the page Stripe
  * gave, so a page whose checkouts are all another store's comes back empty
- * with a `next` to go on from. One request to Stripe per call.
+ * with a `next` to go on from. One request to Stripe per call: the payment
+ * moment comes from the same request, expanded (paidAt).
  */
 import { isSettled } from "@/lib/instant-pay";
 import { onAccount } from "@/lib/stripe-account";
@@ -26,11 +27,25 @@ const CURSOR = /^cs_[A-Za-z0-9_]{1,250}$/;
 
 export type SalesPage = { data: Record<string, unknown>[]; next: string | null; refunds_checked: false };
 
-type Row = { id?: unknown; status?: unknown; payment_status?: unknown; mode?: unknown; created?: unknown; amount_total?: unknown; currency?: unknown; customer_email?: unknown; customer_details?: unknown; total_details?: unknown; metadata?: Record<string, string> | null };
+type Row = { id?: unknown; status?: unknown; payment_status?: unknown; mode?: unknown; created?: unknown; payment_intent?: unknown; invoice?: unknown; amount_total?: unknown; currency?: unknown; customer_email?: unknown; customer_details?: unknown; total_details?: unknown; metadata?: Record<string, string> | null };
 
 const str = (value: unknown) => (typeof value === "string" && value ? value : null);
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 const iso = (seconds: unknown) => (typeof seconds === "number" && seconds > 0 ? new Date(seconds * 1000).toISOString() : null);
+const obj = (value: unknown) => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
+
+/**
+ * When the buyer paid, never when the checkout page opened (the session's own
+ * `created`): the charge of a one-time payment, or the payment of the first
+ * invoice of a membership or payment plan, both expanded on the same list
+ * request. A checkout that charged nothing (a free order) has no payment
+ * moment, so null.
+ */
+export function paidAt(row: { payment_intent?: unknown; invoice?: unknown }): string | null {
+  const charge = obj(obj(row.payment_intent)?.latest_charge);
+  if (charge) return iso(charge.created);
+  return iso(obj(obj(row.invoice)?.status_transitions)?.paid_at);
+}
 
 /** What kind of sale a checkout was, as sale.completed says it. */
 export function saleKind(row: { mode?: unknown; metadata?: Record<string, string> | null }): string {
@@ -44,7 +59,7 @@ export function saleKind(row: { mode?: unknown; metadata?: Record<string, string
 /** One page of the store's sales, or null when Stripe's answer could not be read whole. */
 export async function sales(store: Store, rawCursor: string | null): Promise<SalesPage | null> {
   const cursor = rawCursor && CURSOR.test(rawCursor) ? rawCursor : null;
-  const page = await onAccount("GET", store.stripeAccountId as string, `/checkout/sessions?limit=${SALES_PAGE}${cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ""}`);
+  const page = await onAccount("GET", store.stripeAccountId as string, `/checkout/sessions?limit=${SALES_PAGE}&expand[]=data.payment_intent.latest_charge&expand[]=data.invoice${cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ""}`);
   // An unreadable list is unknown, never proof of no sales.
   if (typeof page !== "object" || page === null || Array.isArray(page) || !Array.isArray(page.data) || typeof page.has_more !== "boolean" ||
       page.data.some((row: unknown) => typeof row !== "object" || row === null || Array.isArray(row))) return null;
@@ -67,9 +82,10 @@ export async function sales(store: Store, rawCursor: string | null): Promise<Sal
         option: str(meta.option),
         amount_cents: num(row.amount_total),
         discount_cents: num(totals.amount_discount),
-        currency: str(row.currency) ?? "usd",
+        // Unknown is null, never a guessed currency.
+        currency: str(row.currency),
         buyer: { email: str(details.email) ?? str(row.customer_email), name: str(details.name) },
-        paid_at: iso(row.created),
+        paid_at: paidAt(row),
         trial: Number(meta.trial_days) > 0,
         source: sourceOf(meta),
       };

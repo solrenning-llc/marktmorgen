@@ -1865,6 +1865,7 @@
     "app/api/stripe/disconnect/route.ts",
     "app/api/stripe/refresh/route.ts",
     "app/api/stripe/return/route.ts",
+    "app/api/studio-demo/route.ts",
     "app/api/takedown/route.ts",
     "app/api/v1/access/route.ts",
     "app/api/v1/affiliates/route.ts",

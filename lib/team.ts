@@ -31,6 +31,7 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
+import { forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
@@ -407,6 +408,8 @@ export async function removeMember(store: Store, email: string): Promise<boolean
     return true;
   });
   if (removed) await redisPipeline([["SREM", indexKey(address), store.sid]]).catch(() => {});
+  // What they could do with each pipeline (639 [GL7](7)) goes with them.
+  if (removed) await forgetPipelineAccess(store.statsId, address).catch(() => {});
   return removed;
 }
 

@@ -151,6 +151,11 @@ export type FormDef = {
 /** The latest moment a form may be set to open or close: the end of 2100, in seconds. */
 export const LATEST_SCHEDULE = Date.UTC(2100, 11, 31, 23, 59) / 1000;
 
+/** Whether a form is long enough to offer keeping its answers on the visitor's device (639 [GL7](26)): four questions or more, or one to write at length. */
+export function offersKeep(form: Pick<FormDef, "fields">): boolean {
+  return form.fields.length >= 4 || form.fields.some((f) => f.type === "long");
+}
+
 /** When a form opens, as a visitor reads it: the date and time in UTC, said so, in the store's language. */
 export function scheduleWhen(seconds: number, lang: string): string {
   return new Intl.DateTimeFormat(lang, { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(new Date(seconds * 1000));

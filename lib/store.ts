@@ -39,6 +39,7 @@ import { type ShipProblem, type Shipping, shipProblem, readShippingSku } from "@
 import { type CartDeal, NO_DEAL, parseCartDeal } from "@/lib/cart-rules";
 import { type Video, parseVideo } from "@/lib/sales-page";
 import { type FaqItem, parseFaq } from "@/lib/store-faq";
+import { type FaqAddRefusal, faqAddition } from "@/lib/faq-from-inbox";
 import { type StoreQuote, parseQuotes } from "@/lib/store-quotes-rules";
 import { type Social, parseSocials } from "@/lib/store-socials";
 import type { CallPackage } from "@/lib/call-package-rules";
@@ -3753,6 +3754,18 @@ export async function setOrder(email: string, order: unknown): Promise<Store | n
 export async function setFaq(email: string, raw: unknown): Promise<Store | null> {
   const faq = parseFaq(raw);
   return patchStore(email, () => ({ faq }));
+}
+
+/** Adds one question and its answer at the end of the store's own (lib/faq-from-inbox.ts), read and written as one change. */
+export async function addFaq(email: string, raw: unknown): Promise<{ ok: true; faq: FaqItem[] } | { ok: false; reason: FaqAddRefusal | "none" }> {
+  let refused: FaqAddRefusal | null = null;
+  const store = await patchStore(email, (current) => {
+    const added = faqAddition(current.faq, raw);
+    refused = added.ok ? null : added.reason;
+    return added.ok ? { faq: added.faq } : null;
+  });
+  if (!store) return { ok: false, reason: "none" };
+  return refused ? { ok: false, reason: refused } : { ok: true, faq: store.faq };
 }
 
 /** Switches the store page's contact form and saves its words (lib/store-contact.ts). */

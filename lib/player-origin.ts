@@ -46,6 +46,16 @@ export function framePlayer(src: string): PlayerKind | null {
 }
 
 /**
+ * Where a message to a player frame may go: that frame's exact origin, and
+ * only when it is a player's; null otherwise, and nothing is sent. Never "*",
+ * so a frame that navigated elsewhere is not told anything.
+ */
+export function frameTarget(src: string): string | null {
+  const origin = originOf(src);
+  return isPlayerOrigin(origin) ? origin : null;
+}
+
+/**
  * The player a message came from: its origin is a player's, its sender is
  * the window of one of the page's own player frames, and that frame was
  * drawn from the same origin. Null otherwise, and the message is ignored.

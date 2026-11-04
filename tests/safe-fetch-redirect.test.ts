@@ -89,10 +89,10 @@ async function main(): Promise<void> {
   };
 
   part("Which headers are credentials");
-  for (const name of ["Authorization", "authorization", "PROXY-AUTHORIZATION", "Cookie", "X-Api-Key", "x-api-key", "X-Auth-Token", "X-Client-Secret", "Stripe-Signature", "X-Hub-Signature-256", "Private-Token", "Apikey"]) {
+  for (const name of ["Authorization", "authorization", "PROXY-AUTHORIZATION", "Cookie", "X-Api-Key", "x-api-key", "X-Auth-Token", "X-Client-Secret", "Stripe-Signature", "X-Hub-Signature-256", "Private-Token", "Apikey", "X-Authorization", "X-Auth", "X-Auth-User", "X-Cookie", "X-Session-Id", "X-Csrf-Token", "X-Credential", "X-Password", "X-Amz-Security-Token"]) {
     is(`a credential: ${name}`, sensitiveHeader(name), true);
   }
-  for (const name of ["Accept", "Accept-Encoding", "User-Agent", "Content-Type", "Content-Length", "Keep-Alive", "If-None-Match"]) {
+  for (const name of ["Accept", "Accept-Encoding", "User-Agent", "Content-Type", "Content-Length", "Keep-Alive", "If-None-Match", "Accept-Language", "Cache-Control", "X-Request-Id"]) {
     is(`not a credential: ${name}`, sensitiveHeader(name), false);
   }
 

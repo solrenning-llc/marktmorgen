@@ -1,6 +1,8 @@
 /** Exact test credential registration, never actual account approval. */
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync,readdirSync} from 'node:fs';
+import {resolve} from 'node:path';
 import {syntheticResendCredential} from './resend-fixture-credentials';
 import {prepareResendFallbackFixture} from './resend-fallback-fixture';
 import {currentResendFallbackProofIsMissing} from '../lib/resend-fallback-transport';
@@ -28,4 +30,12 @@ test('registering copy-test credentials does not supply the product review or cr
  const old=process.env.RESEND_API_KEY;
  try{for(const key of keys){process.env.RESEND_API_KEY=key;assert.equal(currentResendFallbackProofIsMissing(),true);}}
  finally{if(old===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=old;}
+});
+test('every Redis security journey that sends through Resend receives the reviewed synthetic transport',()=>{
+ const root=process.cwd();
+ const security=resolve(root,'tests/security');
+ const runner=readFileSync(resolve(root,'scripts/security-redis.mjs'),'utf8');
+ const sending=readdirSync(security).filter(file=>file.endsWith('.redis-run.ts')&&readFileSync(resolve(security,file),'utf8').includes('RESEND_API_KEY')).sort();
+ assert.deepEqual(sending,['access-email-reserve.redis-run.ts','agreement-signature.redis-run.ts','erasure-request-asked.redis-run.ts','payment-request-state.redis-run.ts']);
+ for(const file of sending)assert.ok(runner.includes(`"${file}"`),`${file} must use the finite reviewed test transport`);
 });

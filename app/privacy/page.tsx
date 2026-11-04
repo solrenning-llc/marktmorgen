@@ -1,4 +1,5 @@
 import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
+import { IDLE_WARN_DAYS } from "@/lib/affiliate-idle-rules";
 import {CERTIFICATE_PRIVACY} from "@/lib/path-certificate";
 import {PATH_WORDING_PRIVACY} from "@/lib/path-wording-rules";
 import {RETURN_PRIVACY_LINE} from "@/lib/path-return-rules";
@@ -1050,7 +1051,12 @@ export default function PrivacyPage() {
           and sales, and the payments the creator records to them with the
           date and reference the creator types. An affiliate who signs in to
           their page keeps a cookie named <code>nl_aff_</code> followed by the
-          store&apos;s address, for 30 days. Where a creator pays affiliates
+          store&apos;s address, for 30 days. Where a creator chooses to take
+          out affiliates with no sale and no lead for a time they set, we keep
+          the date each affiliate was last warned. Before an affiliate is taken
+          out, we email them at the address they joined with, at least {IDLE_WARN_DAYS} days
+          ahead. An affiliate taken out keeps their records, as when a creator
+          removes them by hand. Where a creator pays affiliates
           per lead (since October 18, 2026) &mdash; an email sign-up to their
           list the person confirmed, a free product claimed from its emailed
           link, or a booked call that took place &mdash; the affiliate the

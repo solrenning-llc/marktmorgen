@@ -9,6 +9,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { formatMoney } from "@/lib/money";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
+import { IDLE_WARN_DAYS, readIdleDays } from "@/lib/affiliate-idle-rules";
 import { commissionRate, creditsContacts, nextPayday } from "@/lib/affiliate-setting";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { listCodes } from "@/lib/discount";
@@ -514,6 +515,8 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                         ? [lw.term(terms.lead.kind, money(terms.lead.cents, store.currency), store.name), lw.termRules(terms.lead.hold, terms.lead.daily, money(terms.lead.budget, store.currency), store.name)]
                         : []),
                       ...(terms.paidSearch ? [] : [a.termNoPaidSearch(store.name)]),
+                      // Removing affiliates who bring nothing (630 [HN6](3)): said before anyone applies.
+                      ...(readIdleDays(terms.idle) > 0 ? [a.termIdle(readIdleDays(terms.idle), IDLE_WARN_DAYS, terms.lead.kind !== "none")] : []),
                       attribution(terms),
                       a.termRefunds,
                       a.termDisclose,

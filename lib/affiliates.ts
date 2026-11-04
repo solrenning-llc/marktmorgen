@@ -114,6 +114,7 @@ import { readMoves } from "@/lib/call-records";
 import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { formatMoney } from "@/lib/money";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
+import { idleStep, readIdleDays } from "@/lib/affiliate-idle-rules";
 
 /** How long the emailed link to apply or sign in keeps working. */
 export const AFFILIATE_LINK_SECONDS = 24 * 60 * 60;
@@ -198,6 +199,11 @@ export type Affiliate = {
    * of this one's own share. Null for everybody else.
    */
   by: { id: string; percent: number } | null;
+  /**
+   * When they were last warned that they would be removed for bringing no
+   * sale and no lead (630 [HN6](3), idleSweep), in seconds; 0 if never.
+   */
+  warned?: number;
 };
 
 /**
@@ -346,6 +352,7 @@ function parseAffiliate(raw: unknown): Affiliate | null {
         const percent = Number(by.percent);
         return Number.isInteger(percent) && percent >= 1 && percent <= MAX_COMMISSION ? { id: by.id, percent } : null;
       })(),
+      warned: Number.isInteger(value.warned) && Number(value.warned) > 0 ? Number(value.warned) : 0,
     };
   } catch {
     return null;
@@ -2298,4 +2305,173 @@ export async function programNumbers(store: Store): Promise<ProgramNumbers | nul
       .reduce((sum, p) => sum + p.cents, 0),
     since: approved.reduce((first, a) => (first === 0 || (a.decidedAt > 0 && a.decidedAt < first) ? a.decidedAt : first), 0),
   };
+}
+
+/** The most warnings and removals one store's sweep does in one run; the rest wait for the next day. */
+export const MAX_IDLE_STEPS = 25;
+
+/**
+ * Whether a program can have idle affiliates removed at all (630 [HN6](3)):
+ * not while it credits memberships and payment plans, whose payments are read
+ * from Stripe's invoices when the book is opened and never written down as
+ * sales, so an affiliate who brings only members would look idle.
+ */
+export function idleRemovalAllowed(setting: { recurring: number }): boolean {
+  return !(setting.recurring > 0);
+}
+
+/**
+ * Removing approved affiliates who bring nothing, where the creator asked for
+ * it (630 [HN6](3), lib/affiliate-idle-rules.ts idleStep): run once a day by
+ * the affiliates' schedule (app/api/cron/affiliates), until `deadline` (ms).
+ *
+ * What it reads, four commands for the whole store: the affiliates, the
+ * sales, the leads and the payments the creator wrote down, already kept and
+ * bounded by the store's data room. A sale counts from when it was credited,
+ * unless it was the affiliate's own purchase, and counts for the affiliate who
+ * invited its affiliate too (their second tier); a lead from when it was
+ * confirmed, whatever was decided on it later, so a refund or a reversal never
+ * brings an old warning back to life.
+ *
+ * Who is never warned or removed by it:
+ *   - a partner holding a standing share (lib/partner-share.ts): their shares
+ *     come from every sale of the product, not through a link;
+ *   - anybody who may still be owed something: what their sales, second tier,
+ *     leads and monthly goals could have earned, before refunds and so on the
+ *     high side, is more than the creator wrote down as paid to them (a sale
+ *     in another currency counts as owed). Removal takes them out of every
+ *     later payment batch, so it waits until they are paid;
+ *   - every affiliate of a program that credits memberships (idleRemovalAllowed).
+ *
+ * The count starts no earlier than when the creator switched this on, changed
+ * it or switched the program back on (idleOn), so nobody is removed for a
+ * stretch that came before the rule or during a pause.
+ *
+ * What it does, at most MAX_IDLE_STEPS a run: removals first, then warnings.
+ * A warning is sent only after the affiliate's record is read again and still
+ * matches, by email in the store's language from the store's own emails; the
+ * first one refused (the store's emails spent, or the provider declining)
+ * ends the store's run for the day. Only a warning that went out is written
+ * down, on the affiliate's record read again just before, as every writer of
+ * that record does. On the date it named, with still nothing, the same removal
+ * as the creator's "Remove" (decide): their record stays, and the creator can
+ * restore them, which starts the count again.
+ */
+export async function idleSweep(store: Store, nowMs: number = Date.now(), deadline = Number.POSITIVE_INFINITY): Promise<{ warned: number; removed: number }> {
+  const done = { warned: 0, removed: 0 };
+  const days = readIdleDays(store.affiliates.idle);
+  if (days === 0 || !affiliatesOn(store) || !idleRemovalAllowed(store.affiliates)) return done;
+  const statsId = store.statsId as string;
+  const now = Math.floor(nowMs / 1000);
+  const [peopleReply, salesReply, leadsReply, payoutsReply] = await redisPipeline([
+    ["HGETALL", peopleKey(statsId)],
+    ["HGETALL", salesKey(statsId)],
+    ["HGETALL", leadsKey(statsId)],
+    ["HGETALL", payoutsKey(statsId)],
+  ]);
+  const everyone = pairs(peopleReply)
+    .map(([, raw]) => parseAffiliate(raw))
+    .filter((a): a is Affiliate => a !== null);
+  const inviter = new Map(everyone.filter((a) => a.by).map((a) => [a.id, a.by as { id: string; percent: number }]));
+  const lastActive = new Map<string, number>();
+  const owedHigh = new Map<string, number>();
+  const foreign = new Set<string>();
+  const active = (id: string, at: number) => lastActive.set(id, Math.max(lastActive.get(id) ?? 0, at));
+  const earn = (id: string, cents: number) => owedHigh.set(id, (owedHigh.get(id) ?? 0) + Math.max(0, Math.ceil(cents)));
+  const salesByMonth = new Map<string, number>();
+  for (const [, raw] of pairs(salesReply)) {
+    const sale = parseReferral(raw);
+    if (!sale || sale.self) continue;
+    active(sale.aff, sale.at);
+    if (sale.currency !== store.currency) foreign.add(sale.aff);
+    earn(sale.aff, (sale.base * sale.rate) / 100);
+    const up = inviter.get(sale.aff);
+    if (up) {
+      active(up.id, sale.at);
+      if (sale.currency !== store.currency) foreign.add(up.id);
+      earn(up.id, (sale.base * up.percent) / 100);
+    }
+    if (sale.rate > 0) {
+      const month = `${sale.aff}:${new Date(sale.at * 1000).toISOString().slice(0, 7)}`;
+      salesByMonth.set(month, (salesByMonth.get(month) ?? 0) + 1);
+    }
+  }
+  for (const [month, count] of salesByMonth) {
+    const aff = month.slice(0, month.indexOf(":"));
+    for (const goal of store.affiliates.bonuses) if (count >= goal.sales) earn(aff, goal.cents);
+  }
+  for (const [, raw] of pairs(leadsReply)) {
+    const lead = parseLead(raw);
+    if (!lead) continue;
+    active(lead.aff, lead.at);
+    if (lead.state !== "reversed") earn(lead.aff, lead.cents);
+    if (lead.currency !== store.currency) foreign.add(lead.aff);
+  }
+  const paid = new Map<string, number>();
+  for (const [, raw] of pairs(payoutsReply)) {
+    const payout = parsePayout(raw);
+    if (payout && payout.currency === store.currency) paid.set(payout.aff, (paid.get(payout.aff) ?? 0) + payout.cents);
+  }
+  const mayBeOwed = (id: string) => foreign.has(id) || (owedHigh.get(id) ?? 0) > (paid.get(id) ?? 0);
+
+  const steps = everyone
+    .filter((a) => a.status === "approved" && a.share === null && !mayBeOwed(a.id))
+    .map((affiliate) => ({
+      affiliate,
+      step: idleStep(
+        {
+          status: affiliate.status,
+          // Counted from their approval, or from when the creator switched this on, changed it or switched the
+          // program back on, whichever is later: nobody is removed for a stretch that came before the rule.
+          since: Math.max(Math.floor(affiliate.decidedAt / 1000), store.affiliates.idleOn ?? 0),
+          lastSale: lastActive.get(affiliate.id) ?? 0,
+          lastLead: 0,
+          warnedAt: affiliate.warned ?? 0,
+          onSince: store.affiliates.idleOn ?? 0,
+        },
+        days,
+        now,
+      ),
+    }))
+    .filter(({ step }) => step.do === "remove" || step.do === "warn")
+    // Removals first: they were warned longest ago.
+    .sort((x, y) => (x.step.do === y.step.do ? 0 : x.step.do === "remove" ? -1 : 1))
+    .slice(0, MAX_IDLE_STEPS);
+
+  const a = affiliatesWords(store.language);
+  const locale = LANGUAGES[parseLanguage(store.language)].locale;
+  const leads = store.affiliates.lead.kind !== "none";
+  // Read again and still the very affiliate the snapshot saw: approved, not decided on, warned as it was.
+  const same = (fresh: Affiliate | null, seen: Affiliate): fresh is Affiliate =>
+    fresh !== null && fresh.status === "approved" && fresh.share === null && fresh.decidedAt === seen.decidedAt && (fresh.warned ?? 0) === (seen.warned ?? 0);
+  for (const { affiliate, step } of steps) {
+    if (Date.now() >= deadline) break;
+    const fresh = await readAffiliate(store, affiliate.id);
+    if (!same(fresh, affiliate)) continue;
+    if (step.do === "remove") {
+      if (await decide(store, affiliate.id, "remove")) done.removed += 1;
+      continue;
+    }
+    if (step.do !== "warn" || !isSenderConfigured()) continue;
+    const date = new Date(step.removeOn * 1000).toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+    const sent = await sendEmail({
+      meter: { by: "store", store, kind: "email" },
+      from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
+      replyTo: store.email,
+      to: fresh.email,
+      subject: a.idleSubject(store.name, date),
+      text: [a.idleBody(store.name, days, date, leads), "", a.approvedPage(`${SITE_URL}/@${store.handle}/affiliates`)].join("\n"),
+    }).catch((error) => {
+      console.error("warning an idle affiliate failed", error);
+      return false;
+    });
+    // Refused past the store's emails, or not delivered: nobody is warned, so nobody is removed, and the store waits for tomorrow.
+    if (sent !== true) break;
+    const again = await readAffiliate(store, affiliate.id);
+    if (same(again, affiliate)) {
+      await writeAffiliate(store, { ...again, warned: now });
+      done.warned += 1;
+    }
+  }
+  return done;
 }

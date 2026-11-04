@@ -280,6 +280,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:course:@lib/assignment.ts": { what: "A course's assignments, the work handed in and what came back", room: ["lib/assignment.ts"], parts: [per("studio", 1, KEY, "The creator told of new work, an hour.")] },
   "nl:tasks:bytes:@lib/assignment.ts": { what: "What a store's students keep handed in, in bytes", parts: [capped(KEY, "One count a store.")] },
   "nl:tasks:doors@lib/assignment.ts": company("Hand-in doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's (priced in buyer-actions), gone within two days."),
+  "nl:pictures:doors:@lib/picture-door.ts": { what: "A store's picture uploads not yet put on anything", parts: [capped(1_000 * 128, "One sorted set a store, trimmed to a day and to its newest 1,000 notes (PICTURE_DOOR_MAX) each time one is added, and expiring a day after the last.")] },
   "nl:auth:devices:@lib/auth.ts": company("Devices an account signed in on", "An account's, not a store's."),
   "nl:auth:fresh:@lib/auth.ts": company("A fresh sign-in", "An account's, minutes."),
   "nl:auth:link:@lib/auth.ts": company("A sign-in link", "An account's, minutes."),

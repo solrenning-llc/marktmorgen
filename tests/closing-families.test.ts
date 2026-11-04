@@ -34,6 +34,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],
   "nl:adsrv:ctx:": ["lib/ad-events.ts", "CTX_SECONDS"],
   "nl:adsrv:sent:": ["lib/ad-events.ts", "SENT_SECONDS"],
+  // A store's picture uploads not yet put on anything (a capped part): the list expires a window after its last note.
+  "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_DOOR_SECONDS"],
 };
 /** A person's records across stores that hold a store's id among others and run out by the quarter (lib/joined-stores.ts), and the file that writes them. */
 const PERSON_RECORDS: Record<string, string> = {

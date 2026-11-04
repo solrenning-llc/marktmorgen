@@ -1,5 +1,9 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
+import { AGENDA_READ, BUYER_LEDGER } from "./plan-cost-registry";
+import { AGENDA_UNITS } from "@/lib/person-agenda";
+import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
+import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
 import { ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
 import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
@@ -21,7 +25,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
@@ -32,6 +36,7 @@ import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/l
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
+import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
 import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
@@ -204,6 +209,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.
   assert.ok(PICTURE_REQUEST_UNITS * laterPageCost() >= PICTURE_READ, `${PICTURE_REQUEST_UNITS} x ${laterPageCost()} < ${PICTURE_READ}`);
+  // A certificate's PDF is CERTIFICATE_PDF_UNITS public requests, all taken before it is drawn: more than its CPU, its time and its bytes cost.
+  assert.ok(CERTIFICATE_PDF_UNITS * laterPageCost() >= CERTIFICATE_PDF_READ, `${CERTIFICATE_PDF_UNITS} x ${laterPageCost()} < ${CERTIFICATE_PDF_READ}`);
+  console.log(`a certificate's PDF: $${CERTIFICATE_PDF_READ.toFixed(6)} at most, counted as ${CERTIFICATE_PDF_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
   console.log(`next product after a purchase: $${NEXT_OFFER_READ.toFixed(6)} at most, counted as ${NEXT_OFFER_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
@@ -254,6 +262,31 @@ test("the uses the owner named on October 18, 2026 have left the open list, the 
 
 test("Path page and its actual usage count fit its reserved studio page", () => {
  assert.ok(PATH_PAGE <= UNIT_COST.studio * STUDIO_PAGE_UNITS);
+});
+
+test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {
+ assert.ok(BUYER_LEDGER <= UNIT_COST.studio * BUYER_LEDGER_UNITS, `${BUYER_LEDGER} > ${BUYER_LEDGER_UNITS} x ${UNIT_COST.studio}`);
+ assert.ok(BUYER_LEDGER > UNIT_COST.studio * (BUYER_LEDGER_UNITS - 1), `${BUYER_LEDGER} <= ${BUYER_LEDGER_UNITS - 1} x ${UNIT_COST.studio}: lower BUYER_LEDGER_UNITS`);
+});
+
+test("what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out", () => {
+ // A megabyte through the database and parsed, at a light request's shape, fits in one studio request.
+ assert.ok(request("light", 2, LEDGER_BYTES_PER_UNIT) <= UNIT_COST.studio, `${request("light", 2, LEDGER_BYTES_PER_UNIT)} > ${UNIT_COST.studio}`);
+ // The imported buyers are read and written again in the copy: twice their address and date.
+ assert.ok(IMPORTED_BUYER_BYTES >= 2 * (254 + 10), "an imported buyer is read and written in the copy: never priced as less");
+ // BUYER_LEDGER prices Stripe's pages and rows only; the imported are counted by size, so the source must count them.
+ const source = read("lib/segments.ts");
+ assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };") && !source.includes("store.paypalSeller ? await paypalKept") && source.includes("ledgerUnits(moved)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers and PayPal's sales are counted before they are read");
+ assert.ok(source.includes('["STRLEN", ledgerKey(store.statsId)]') && source.indexOf("STRLEN") < source.indexOf('["GETRANGE", ledgerKey(store.statsId)'), "the copy is measured and counted before it is read, and read no further");
+ // PayPal's reading is counted in full (round 5, H1): what ledgerReadBytes counts for the most PayPal kept covers PAYPAL_LEDGER.
+ const paypalUnits = ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: Number.MAX_SAFE_INTEGER, paypalRefunds: Number.MAX_SAFE_INTEGER }));
+ assert.ok(PAYPAL_LEDGER <= UNIT_COST.studio * paypalUnits, `${PAYPAL_LEDGER} > ${paypalUnits} x ${UNIT_COST.studio}`);
+ assert.ok(ledgerReadBytes({ imported: 0, paypalSales: 3_000, paypalRefunds: 500 }) >= PAYPAL_LEDGER_BYTES, "every PayPal record read is counted");
+});
+
+test("the tasks agenda at its most fits the studio requests it counts", () => {
+ assert.ok(AGENDA_READ <= UNIT_COST.studio * AGENDA_UNITS, `${AGENDA_READ} > ${AGENDA_UNITS} x ${UNIT_COST.studio}`);
+ // AGENDA_UNITS is what agendaReadUnits and the rows' size count at the most (lib/person-agenda.ts): never less than the cost.
 });
 
 test("Path push fits its reserved studio requests", () => {
@@ -326,7 +359,11 @@ test("an API reading that reads more than a page takes further requests that cov
   const calls = read("lib/calls.ts");
   assert.ok(calls.includes(`const MAX_PAGES = ${BOOKING_PAGES};`) && calls.includes("/checkout/sessions?limit=100"), "the bookings' pages");
   const paypal = read("lib/paypal-sales.ts");
-  assert.ok(paypal.includes(`"LIMIT", "0", "${BOOK_PAYPAL_REFUNDS + 1}"`) && paypal.includes(`Math.min(flat.length, ${BOOK_PAYPAL_REFUNDS * 2})`), "PayPal refunds read");
+  assert.ok(
+    (paypal.includes(`"LIMIT", "0", "${BOOK_PAYPAL_REFUNDS + 1}"`) && paypal.includes(`Math.min(flat.length, ${BOOK_PAYPAL_REFUNDS * 2})`))
+      || (paypal.includes(`PAYPAL_REFUNDS_READ = ${BOOK_PAYPAL_REFUNDS};`) && paypal.includes('"LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)') && paypal.includes("Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ)")),
+    "PayPal refunds read",
+  );
   const book = read("lib/affiliates.ts");
   assert.ok(book.includes(`.slice(0, ${BOOK_MOVES})`) && book.includes(`const INVOICE_PAGES = ${BOOK_INVOICES / 100};`) && book.includes('limit: "100"'), "the book's moves and invoices");
   assert.ok(BOOK_STRIPE_PAGES >= BOOK_INVOICES / 100);

@@ -35,7 +35,7 @@ import { membershipLine } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
-import { withLock } from "@/lib/redis-lock";
+import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
 
@@ -227,7 +227,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
       return { ok: true, title: found.product.title };
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "LockBusyError") return { ok: false, reason: "busy" };
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     if (!(error instanceof StripeError)) console.error("moving a membership to yearly failed", error);
     return { ok: false, reason: "error" };
   }

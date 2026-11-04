@@ -11,8 +11,10 @@
  * on a store, and a purchase for several people — could only be looked at on
  * a store with products that can sell, which production does not have yet.
  *
- * What runs: the real app, built as the site builds it (`next build`, then
- * `next start`; E2E_DEV=1 runs `next dev` instead), unchanged, pointed at one local
+ * What runs: the production build first, then a separate disposable copy
+ * with an explicit synthetic reviewed-account mail fixture and the real
+ * transport guard (Lua is proved separately). E2E_DEV=1 uses next dev on that
+ * copy. The production mail policy stays null and unchanged. Pointed at one local
  * stand-in for its database, for Stripe and for the email sender
  * (tests/e2e/services.mjs), through the addresses the code already accepts
  * for exactly this (STRIPE_CONNECT_API_BASE, RESEND_API_BASE, and the
@@ -52,6 +54,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { startServices } from "./services.mjs";
+import { prepareReviewedMailApp } from "./reviewed-mail-app.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../..");
@@ -73,6 +76,7 @@ const env = {
   STRIPE_SECRET_KEY: "sk_test_local_only_a_stand_in_0000",
   STRIPE_CONNECT_API_BASE: FAKE,
   RESEND_API_KEY: "re_local_only_a_stand_in",
+  RESEND_READ_API_KEY: "re_local_only_a_stand_in",
   // Google Fonts cannot be reached from here: next/font is answered by a stand-in (google-fonts-mock.cjs).
   NEXT_FONT_GOOGLE_MOCKED_RESPONSES: join(here, "google-fonts-mock.cjs"),
   E2E_FONT_ORIGIN: FAKE,
@@ -148,6 +152,7 @@ const words = async (locator) => (await locator.innerText()).replace(/\s+/g, " "
 
 const services = await startServices(SERVICES);
 let app = null;
+let reviewedApp = null;
 let browser = null;
 /** Starts the app again (set once the app is up). */
 let restartApp = async () => {};
@@ -215,13 +220,15 @@ try {
     if (built.status !== 0) throw new Error(`the app did not build:\n${built.said.slice(-3000)}`);
   }
 
+  reviewedApp = await prepareReviewedMailApp(root, env);
+
   // The app. A dev server stopped while writing can leave Turbopack's cache
   // unreadable, and the next one panics on it; it is only a cache, so it is
   // put aside once and the app started again.
   let log = "";
   const start = () => {
     log = "";
-    app = spawn("npx", ["next", PRODUCTION ? "start" : "dev", "-p", String(APP)], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    app = spawn(process.execPath, [join(reviewedApp.root, "node_modules/next/dist/bin/next"), PRODUCTION ? "start" : "dev", "-H", "127.0.0.1", "-p", String(APP)], { cwd: reviewedApp.root, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
     app.stdout.on("data", (chunk) => {
       log += chunk;
       appLog += chunk;
@@ -243,12 +250,12 @@ try {
     if (/panicked/.test(log) && !retried) {
       retried = true;
       await stop(app);
-      rmSync(join(root, ".next", "dev", "cache"), { recursive: true, force: true });
+      rmSync(join(reviewedApp.root, ".next", "dev", "cache"), { recursive: true, force: true });
       start();
       started = Date.now();
     }
     if (Date.now() - started > 180_000 || /panicked/.test(log)) throw new Error(`the app did not start:\n${log.slice(-2000)}`);
-    const up = await fetch(`${LOCAL}/@localshop`).then((r) => r.status === 200).catch(() => false);
+    const up = await fetch(`${LOCAL}/@localshop`, { signal: AbortSignal.timeout(5_000) }).then((r) => r.status === 200).catch(() => false);
     if (up) break;
     await new Promise((wait) => setTimeout(wait, 1500));
   }
@@ -275,10 +282,10 @@ try {
     if (restarts >= 2) throw new Error("the product page was not found on three dev servers in a row");
     console.log("the first product page was not found; the dev server is started again");
     await stop(app);
-    rmSync(join(root, ".next", "dev", "cache"), { recursive: true, force: true });
+    rmSync(join(reviewedApp.root, ".next", "dev", "cache"), { recursive: true, force: true });
     start();
     const again = Date.now();
-    while (!(await fetch(`${LOCAL}/@localshop`).then((r) => r.status === 200).catch(() => false))) {
+    while (!(await fetch(`${LOCAL}/@localshop`, { signal: AbortSignal.timeout(5_000) }).then((r) => r.status === 200).catch(() => false))) {
       if (Date.now() - again > 180_000) throw new Error(`the app did not start again:\n${log.slice(-2000)}`);
       await new Promise((wait) => setTimeout(wait, 1500));
     }
@@ -296,10 +303,10 @@ try {
   restartApp = async () => {
     for (let restarts = 0; ; restarts += 1) {
       await stop(app);
-      rmSync(join(root, ".next", "dev", "cache"), { recursive: true, force: true });
+      rmSync(join(reviewedApp.root, ".next", "dev", "cache"), { recursive: true, force: true });
       start();
       const again = Date.now();
-      while (!(await fetch(`${LOCAL}/@localshop`).then((r) => r.status === 200).catch(() => false))) {
+      while (!(await fetch(`${LOCAL}/@localshop`, { signal: AbortSignal.timeout(5_000) }).then((r) => r.status === 200).catch(() => false))) {
         if (Date.now() - again > 180_000) throw new Error(`the app did not start again:\n${log.slice(-2000)}`);
         await new Promise((wait) => setTimeout(wait, 1500));
       }
@@ -3897,6 +3904,7 @@ try {
   if (browser) await browser.close().catch(() => {});
   await stop(app);
   await services.close().catch(() => {});
+  if (reviewedApp) await reviewedApp.cleanup();
   if (process.env.E2E_APP_LOG) writeFileSync(process.env.E2E_APP_LOG, appLog);
 }
 

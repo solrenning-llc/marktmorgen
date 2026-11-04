@@ -116,7 +116,8 @@ const MESSAGES: Record<string, string> = {
   hero_first: "The hero can only be the first block: it carries the page's main headline.",
   two_reviews: "Reviews can sit in one place on the page. Remove the second block of them.",
   video: "That video address is not one we can play. Paste a YouTube, Vimeo or Loom link.",
-  pictures: `A picture on the page could not be kept. A page holds up to ${MAX_PAGE_PICTURES} pictures, each shown once: remove the one that was added twice, or add it again.`,
+  // Also a new picture whose upload is no longer known (more than a day old, or one used elsewhere): lib/sales-page-store.ts.
+  pictures: `A picture on the page could not be kept. Add the picture again from your device, then save. A page holds up to ${MAX_PAGE_PICTURES} pictures, and each one is shown once, so remove any picture that is there twice.`,
   countdown: "Give the countdown the moment it runs to, no more than a year away, or remove the block.",
   quote_length: `A quotation exceeds the ${MAX_QUOTE}-character limit. Use a shorter, complete quotation from the source or remove it. Nothing was saved.`,
   quote_link: "Each thing said elsewhere needs the full https address of where it was said, so visitors can check it. Add it, or remove that one.",

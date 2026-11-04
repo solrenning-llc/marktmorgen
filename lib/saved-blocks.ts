@@ -72,10 +72,18 @@ export function sectionBlocks(blocks: readonly PageBlock[]): { blocks: PageBlock
       picturesLeft += 1;
       block.picture = null;
     }
+    // A row's pictures too (as copyOfPage in lib/sales-page.ts): a picture belongs to the one page that shows it.
+    if (block.kind === "row") {
+      picturesLeft += block.columns.reduce((n, column) => n + column.filter((element) => element.kind === "image").length, 0);
+      block.columns = block.columns.map((column) => column.filter((element) => element.kind !== "image"));
+    }
     return block;
   });
   return { blocks: out, picturesLeft };
 }
+
+/** A row's element as sent that is a picture. */
+const rawImage = (element: unknown): boolean => Boolean(element) && typeof element === "object" && (element as { kind?: unknown }).kind === "image";
 
 export type SectionProblem = "name" | "empty" | "too_many" | "kind" | "too_big" | "shape";
 
@@ -98,11 +106,13 @@ export function readSectionInput(rawName: unknown, rawBlocks: unknown): { ok: tr
     const value = { ...(raw as Record<string, unknown>) };
     if (value.kind === "pictures") value.items = [];
     if (value.kind === "feature") value.picture = null;
+    if (value.kind === "row" && Array.isArray(value.columns)) value.columns = value.columns.map((column) => (Array.isArray(column) ? column.filter((element) => !rawImage(element)) : column));
     return value;
   });
   const sentPictures = rawBlocks.reduce<number>((n, raw) => {
-    const value = raw as { kind?: unknown; items?: unknown; picture?: unknown };
+    const value = raw as { kind?: unknown; items?: unknown; picture?: unknown; columns?: unknown };
     if (value.kind === "pictures" && Array.isArray(value.items)) return n + value.items.length;
+    if (value.kind === "row" && Array.isArray(value.columns)) return n + value.columns.reduce<number>((m, column) => m + (Array.isArray(column) ? column.filter(rawImage).length : 0), 0);
     return n + (value.kind === "feature" && value.picture ? 1 : 0);
   }, 0);
   const parsed = parsePage({ blocks: stripped });
@@ -147,7 +157,7 @@ export function updateProblem(page: SalesPage, sectionId: string): "pictures" | 
   const mine = page.blocks.filter((block) => block.saved === sectionId);
   if (!mine.length) return "gone";
   if (page.test || page.variant) return "test";
-  if (mine.some((block) => (block.kind === "pictures" && block.items.length > 0) || (block.kind === "feature" && block.picture))) return "pictures";
+  if (mine.some((block) => (block.kind === "pictures" && block.items.length > 0) || (block.kind === "feature" && block.picture) || (block.kind === "row" && block.columns.some((column) => column.some((element) => element.kind === "image"))))) return "pictures";
   return null;
 }
 

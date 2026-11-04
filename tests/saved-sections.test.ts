@@ -6,7 +6,7 @@
  */
 import { NextRequest } from "next/server";
 import { emptyBlock, parsePage, type PageBlock } from "@/lib/sales-page";
-import { blocksForPage, readSectionInput, sectionsOn, updateProblem, withSection } from "@/lib/saved-blocks";
+import { blocksForPage, parseSection, readSectionInput, sectionsOn, updateProblem, withSection } from "@/lib/saved-blocks";
 import { SITE_KINDS, siteKey } from "@/lib/site-page-rules";
 import { SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { readPage } from "@/lib/sales-page-store";
@@ -29,6 +29,17 @@ async function main() {
   is("at most eight blocks", (readSectionInput("Many", Array.from({ length: 9 }, () => cta("Go"))) as { error?: string }).error, "too_many");
   const withPicture = readSectionInput("Look", [{ ...(emptyBlock("pictures") as Extract<PageBlock, { kind: "pictures" }>), items: [picture] }]);
   is("pictures stay on their page, and are counted", withPicture.ok ? [withPicture.blocks[0].kind === "pictures" ? withPicture.blocks[0].items.length : -1, withPicture.picturesLeft] : null, [0, 1]);
+  // A row's pictures too (review, 4 November 2026: a row's picture was kept in the library with picturesLeft 0).
+  const rowImage = { kind: "image", picture: { ...picture, alt: "A page of the book" }, decorative: false };
+  const rowImage2 = { ...rowImage, picture: { ...rowImage.picture, path: `images/${"a".repeat(24)}/${"c".repeat(32)}.webp` } };
+  const row = { id: "rowb0001", kind: "row", columns: [[{ kind: "heading", text: "Inside" }, rowImage], [rowImage2]] };
+  is("a row with a picture is a row a page keeps", parsePage({ blocks: [row] }).blocks[0]?.kind === "row" && JSON.stringify(parsePage({ blocks: [row] }).blocks[0]).includes(picture.path), true);
+  const withRow = readSectionInput("Row", [row]);
+  is("a row's pictures stay on their page, and are counted", withRow.ok ? [JSON.stringify(withRow.blocks).includes(picture.path), withRow.blocks[0].kind === "row" ? withRow.blocks[0].columns.map((column) => column.map((element) => element.kind)) : null, withRow.picturesLeft] : null, [false, [["heading"], []], 2]);
+  const storedRow = parseSection({ id: "sect000002", name: "Row", blocks: [row] });
+  is("a stored section's row is read without its picture", storedRow ? JSON.stringify(storedRow.blocks).includes(picture.path) : null, false);
+  const rowPage = parsePage({ blocks: [{ ...row, saved: "sect000001" }] });
+  is("a page with its own picture in a row of the section is left alone", updateProblem(rowPage, "sect000001"), "pictures");
   const section = { id: "sect000001", blocks: [faq("New?"), cta("Buy")] };
   const page = parsePage({ blocks: [emptyBlock("hero"), ...blocksForPage({ id: "sect000001", blocks: [faq("Old?")] }), cta("Stay")] });
   const updated = withSection(page, section, SITE_KINDS);

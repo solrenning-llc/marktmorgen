@@ -20,8 +20,12 @@
  *     no file, so the product's file and an episode never meet);
  *   - a buyer's review photo, in the same picture folder: refused on a product, a link and a page;
  *   - and what keeps working: a new picture through the door; keeping and replacing a record's own picture; a picture
- *     put on before this rule (never noted) still shown and replaceable; a page's save tried again.
+ *     put on before this rule (never noted) still shown and replaceable; a page's save tried again;
+ *   - a try that failed half way spends the door and deletes nothing: tried again it is refused, and the creator is
+ *     told, neutrally and truly, to choose the picture again (never handed back to the door: a name noted again could
+ *     be deleted by a later failure, the very thing this file guards against).
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addOption, addProduct, addStoreLink, claimHandle, ensureStatsId, imageFolder, setProductImage, setSitePages, storeFolder, storeForEmail } from "@/lib/store";
@@ -192,6 +196,24 @@ async function main(): Promise<void> {
   const replacement = await upload({ productId: legacy });
   is("replaced by a new one", await attach(legacy, replacement), [200, "ok"]);
   is("the old one, its own, is deleted; the new one shown", [files.has(old), (await shownOn(legacy))?.path], [false, replacement]);
+
+  part("A try that failed half way, then tried again");
+  const early = name();
+  const askedEarly = await door(post("/api/store/image/upload", session, { type: "blob.generate-presigned-url", payload: { pathname: early, clientPayload: JSON.stringify({ productId: c }), multipart: false } }));
+  is("the door opened", askedEarly.status, 200);
+  is("put on before the file store has it: fails on our side", await attach(c, early), [500, "server_error"]);
+  files.set(early, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
+  is("tried again: refused, the door was spent", await attach(c, early), [400, "in_use"]);
+  is("and nothing was deleted", files.has(early), true);
+  const another = await upload({ productId: c });
+  is("the same picture chosen again from the device (a new upload): put on", await attach(c, another), [200, "ok"]);
+
+  part("What the creator reads");
+  const messageOf = (file: string, key: string) => readFileSync(file, "utf8").match(new RegExp(`\\n  ${key}: [\`"]([^\`"]*)[\`"]`))?.[1] ?? "";
+  for (const file of ["components/product-image-editor.tsx", "components/link-picture.tsx"]) {
+    is(`${file}: the refusal says what to do, and claims nothing it cannot know`, messageOf(file, "in_use"), "That picture could not be used here. Choose it from your device again.");
+  }
+  is("the page editor says what to do when a picture is not kept", messageOf("components/page-editor.tsx", "pictures").includes("Add the picture again from your device, then save."), true);
 
   part("A picture taken once is never fresh again");
   is("a door asked for a name already stored is refused", (await door(post("/api/store/image/upload", session, { type: "blob.generate-presigned-url", payload: { pathname: aPicture, clientPayload: JSON.stringify({ productId: c }), multipart: false } }))).status, 400);

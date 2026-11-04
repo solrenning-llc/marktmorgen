@@ -737,8 +737,10 @@ function Terms({
           <span className="text-sm">
             <span className="block font-semibold text-ink">Buyers join without applying</span>
             <span className="block text-ink-soft">
-              The thanks page and the purchase email offer everyone who buys their own link, approved at once. Anyone you
-              declined or removed stays out, and everyone else still applies.
+              The thanks page and the purchase email offer everyone who buys their own link, approved at once. Someone you
+              declined or removed cannot rejoin this way with the same address, and an address that matches one on your list
+              written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Everyone else
+              still applies.
             </span>
           </span>
         </label>
@@ -754,7 +756,7 @@ function Terms({
             <span className="block font-semibold text-ink">Approve every application at once</span>
             <span className="block text-ink-soft">
               Anyone who applies gets their link straight away, and you are told who joined; you can remove them at any time.
-              Anyone you declined or removed stays out: an application from an address already in your program, even written another way, waits for you. Off, each application waits for you.
+              Someone you declined or removed stays out with the same address, and an application whose address matches one on your list written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Off, each application waits for you.
             </span>
           </span>
         </label>
@@ -1364,7 +1366,7 @@ function Member({
             {row.flags.includes("paid-search") ? (
               <li>{`${row.paidClicks.toLocaleString("en-US")} ${row.paidClicks === 1 ? "click" : "clicks"} on their link came from a paid search ad, which your program does not allow.`}</li>
             ) : null}
-            {row.flags.includes("same-address") ? <li>Another affiliate in your program has the same inbox or payout address, written the same or another way.</li> : null}
+            {row.flags.includes("same-address") ? <li>Another affiliate in your program, or someone you declined or removed, has the same inbox or payout address, written the same or another way.</li> : null}
           </ul>
           <button
             type="button"

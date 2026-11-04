@@ -47,7 +47,7 @@ export function CertificateValidity({ productId, months }: { productId: string; 
   return (
     <form onSubmit={save} className="mt-4 flex flex-wrap items-end gap-3">
       <label className="block" htmlFor={`${id}-months`}>
-        <span className="field-label">Valid for (optional)</span>
+        <span className="field-label">Valid for, in months (optional)</span>
         <span className="relative block max-w-[12rem]">
           <input
             id={`${id}-months`}

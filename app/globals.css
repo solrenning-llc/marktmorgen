@@ -3137,6 +3137,49 @@ a.sp-product:focus-visible {
 .sp-feature-words {
   min-width: 0;
 }
+/* A row of one to three columns (lib/sales-page.ts, RowBlock): one column on
+   a phone, in the markup's reading order; side by side once there is room.
+   The grid only places the columns, it never reorders them. Nothing moves. */
+.sp-row {
+  display: grid;
+  gap: 2rem;
+  width: 100%;
+}
+.sp-row-column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+  min-width: 0;
+}
+.sp-style-bands .sp-row-column {
+  align-items: center;
+}
+.sp-row-picture,
+.sp-row-video {
+  width: 100%;
+  margin: 0;
+}
+.sp-row-picture img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 1rem;
+  background: var(--st-item);
+}
+.sp-row-icon {
+  display: inline-flex;
+}
+@container (min-width: 560px) {
+  .sp-row-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (min-width: 700px) {
+  .sp-row-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
 /* Who it is for, and who it is not for: two lists side by side once there is room. */
 .sp-fit {
   display: grid;

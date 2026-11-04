@@ -49,6 +49,12 @@ export const MAX_TEAM = 5;
 export { INVITE_DAYS };
 /** How many lines of the activity log are kept. */
 export const LOG_LINES = 500;
+/**
+ * The most one stored log line weighs, its JSON in UTF-8 bytes (logTeam):
+ * with what Redis keeps beside a list entry, within the 512 bytes a line
+ * tests/store-data-registry.ts counts for the log.
+ */
+export const LOG_LINE_BYTES = 448;
 /** Invitations one store may send in a day, so an inbox is never flooded from here. */
 const INVITES_PER_DAY = 20;
 
@@ -242,13 +248,29 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
   return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
 }
 
+/**
+ * One log line as stored, never over LOG_LINE_BYTES: a pipeline-access
+ * change's details (`access`) are kept only while the line fits, and the
+ * line's own words (`what`, which name every pipeline) stay; past that, the
+ * words, then the address, are shortened. So the log's room is what the
+ * data registry counts, whatever a line holds.
+ */
+export function logLineRecord(entry: LogLine): string {
+  const bytes = (value: LogLine) => Buffer.byteLength(JSON.stringify(value), "utf8");
+  let line: LogLine = entry;
+  if (bytes(line) > LOG_LINE_BYTES && line.access) line = { at: line.at, who: line.who, role: line.role, what: line.what };
+  while (bytes(line) > LOG_LINE_BYTES && line.what.length) line = { ...line, what: [...line.what].slice(0, -8).join("") };
+  while (bytes(line) > LOG_LINE_BYTES && line.who.length) line = { ...line, who: [...line.who].slice(0, -8).join("") };
+  return JSON.stringify(line);
+}
+
 /** Writes one line into a store's activity log. Never throws. */
 export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<void> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return;
   const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200), ...(line.access ? { access: line.access } : {}) };
   try {
     await redisPipeline([
-      ["LPUSH", logKey(sid), JSON.stringify(entry)],
+      ["LPUSH", logKey(sid), logLineRecord(entry)],
       ["LTRIM", logKey(sid), 0, LOG_LINES - 1],
     ]);
   } catch (error) {

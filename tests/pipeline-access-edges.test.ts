@@ -16,8 +16,9 @@ import { redisPipeline } from "@/lib/redis";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { dataKey } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { moveMemberships, putMember, readLog, readTeam } from "@/lib/team";
-import { accessLogNamer, accessLogWords } from "@/lib/pipeline-access-rules";
+import { LOG_LINE_BYTES, logTeam, moveMemberships, putMember, readLog, readTeam } from "@/lib/team";
+import { type AccessLog, accessLogNamer, accessLogWords, parseAccessLog } from "@/lib/pipeline-access-rules";
+import { MAX_PIPELINE_NAME, PIPELINES_BY_TIER } from "@/lib/crm-rules";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -305,6 +306,30 @@ async function main(): Promise<void> {
   redis.pipeline = real;
   is("is said as gone, their access having been checked", [vanished.status, vanished.body.error], [404, "unknown"]);
   is("and a removal refused as changed says nothing was removed", readFileSync("components/deals-board.tsx", "utf8").includes('answer.error === "deal_conflict" && body.action === "undeal" ? "Somebody else changed this deal a moment ago, so nothing was removed.'), true);
+
+  part("Round 7: every log line stays within what the data registry counts");
+  const logKeyOf = `nl:team:log:${store.sid}`;
+  const rawNewest = async () => String(((await redisPipeline([["LRANGE", logKeyOf, 0, 0]]))[0] as string[])[0]);
+  // The largest line a Save can make: the longest address, every pipeline of the largest plan with the longest name, in letters that take three bytes each.
+  const longest = `${"a".repeat(64)}@${"b".repeat(185)}.com`;
+  const bigName = "\u20AC".repeat(MAX_PIPELINE_NAME);
+  const worst: AccessLog = { email: longest, one: false, changes: Array.from({ length: PIPELINES_BY_TIER.scale }, (_, i) => ({ id: `pipe${String(i).padStart(2, "0")}`, name: bigName, now: "none", was: "edit" })) };
+  await logTeam(store.sid, { who: longest, role: "owner", what: accessLogWords(worst, (c) => c.name), access: worst });
+  const worstRaw = await rawNewest();
+  is("the largest line fits: its details are dropped first, then its words shortened", [Buffer.byteLength(worstRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(worstRaw), "access"), (await readLog(store.sid))[0].what.startsWith("Set ")], [true, false, true]);
+  const many: AccessLog = { ...worst, email: "sam@example.com", changes: worst.changes.map((c) => ({ ...c, name: "P".repeat(MAX_PIPELINE_NAME) })) };
+  await logTeam(store.sid, { who: owner, role: "owner", what: accessLogWords(many, (c) => c.name), access: many });
+  const manyRaw = await rawNewest();
+  is("with usual addresses and names, every pipeline at once: its details dropped, its words (which name the pipelines) kept whole", [Buffer.byteLength(manyRaw, "utf8") <= LOG_LINE_BYTES, Object.hasOwn(JSON.parse(manyRaw), "access"), (await readLog(store.sid))[0].what === accessLogWords(many, (c) => c.name).slice(0, 200)], [true, false, true]);
+  const small: AccessLog = { email: "sam@example.com", one: true, changes: [{ id: "wkshp1", name: "Workshops", now: "view", was: "edit" }] };
+  await logTeam(store.sid, { who: owner, role: "owner", what: accessLogWords(small, (c) => c.name), access: small });
+  is("a usual one keeps its details, so the team page names its pipeline as it is when shown", [Buffer.byteLength(await rawNewest(), "utf8") <= LOG_LINE_BYTES, (await readLog(store.sid))[0].access], [true, small]);
+  await logTeam(store.sid, { who: longest, role: "owner", what: "\u20AC".repeat(200) });
+  is("and any line at all, its words shortened when they must be", Buffer.byteLength(await rawNewest(), "utf8") <= LOG_LINE_BYTES, true);
+  is("the registry counts the log from the same bound", readFileSync("tests/store-data-registry.ts", "utf8").includes("capped(LOG_LINES * (LOG_LINE_BYTES + 64)") && LOG_LINE_BYTES + 64 <= 512, true);
+
+  part("Round 7: a logged access change names a real address");
+  is("anything else is not read as one, and the line's own words are shown", [parseAccessLog({ email: "not an address", one: true, changes: [] }), parseAccessLog({ email: "sam@example.com", one: true, changes: [] })], [null, { email: "sam@example.com", one: true, changes: [] }]);
 
   done();
 }

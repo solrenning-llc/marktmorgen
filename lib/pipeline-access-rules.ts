@@ -79,7 +79,7 @@ export function accessLogWords(log: AccessLog, nameOf: (change: AccessChange) =>
 export function parseAccessLog(raw: unknown): AccessLog | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const value = raw as Record<string, unknown>;
-  if (typeof value.email !== "string" || value.email.length > 254 || typeof value.one !== "boolean" || !Array.isArray(value.changes) || value.changes.length > 50) return null;
+  if (typeof value.email !== "string" || value.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email) || typeof value.one !== "boolean" || !Array.isArray(value.changes) || value.changes.length > 50) return null;
   const changes: AccessChange[] = [];
   for (const entry of value.changes) {
     const c = entry as Record<string, unknown> | null;

@@ -26,3 +26,20 @@ The source chain explains the excess: lib/calls.ts reads five provider pages and
 This is a lower bound, not the completed CX-40 financial model. Purchases, bundles/bumps, partial refunds, installment-invoice lookups, imports, requests/agreements and their 14-command maximum, feeds, keys, malformed/oversized lists, metadata/cache behavior, CPU, provider latency and response bytes still require coverage. The provider's query limits are not local array caps. The inspected page also has no takePublicRequest guard yet; CX-44 assigns that follow-up to Claude3. A token lifetime does not fund unlimited repeated openings. Whole-page funding remains UNKNOWN/rejected until a genuine request budget and complete MR/TX calculations exist.
 
 Validation: two real-entry cases execute all functional assertions and fail only the unchanged18-command ceiling. Type/lint/public-data checks are run separately; no full suite or hosted green status is claimed for this deliberately rejected study. Coordinate the result before any cost-table or runtime change.
+
+
+## Full waiting block follow-up
+
+The second fixture uses an existing paid Scale allowance and the public createRequest/changeRequest and createAgreement/saveAgreement writers to prepare 24 requests and 20 agreements with their authentic stored first versions. Sent timestamps are synthetic historical-state inputs, not proof of email delivery. Setup and these writes are outside the measured page. Exactly ten request links and ten agreement links render; the entry genuinely takes the payment-request branch.
+
+| Measured entry with full waiting and empty purchases | New rooms | Existing rooms |
+| --- | ---: | ---: |
+| Total Redis commands | 759 | 679 |
+| Waiting commands | 14 | 14 |
+| Logical JSON Redis request bytes | 52695 | 43134 |
+| Logical JSON Redis response bytes | 46109 | 45708 |
+| Rendered HTML bytes | 56970 | 56970 |
+
+The 14 comprise two person-set reads, two MGETs of 24/20 records and ten agreement-version GETs. The empty baseline already spends two person-set reads, so the populated block adds 12 commands, not 14 again. Call/move/room counts and the six basic provider GETs remain as in the first table. At the repository's recorded command input, the partial Redis-only sums are 0.001518 and0.001358 dollars. All four cases now fail only the preserved 18-command ceiling, after passing their functional/source/privacy assertions. No rate or ceiling has been changed.
+
+This still excludes actual purchases and the other worst-case branches listed above. The larger HTML/record sizes are observations of this synthetic data, not certified maxima. The branch remains a rejected study without a PR. TypeScript, strict lint, public-data scanner and scoped ownership checks are independent from the four deliberate cost REDs.

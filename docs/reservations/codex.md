@@ -7,4 +7,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |
-| Codex principal | CX-44/CX-40 baseline: actual buyer-orders entry, 500 paid-call rows and 40 shown, existing/new rooms; measurement only, no approved cost change | codex/buyer-orders-cost-baseline | `tests/buyer-orders-cost-baseline.test.ts`, `tests/test-config.mjs` (own alias row), `docs/buyer-orders-call-cost-baseline.md` | 04/11/2026 |
+| Codex principal | CX-44/CX-40 baseline: actual buyer-orders entry, 500 paid-call rows and 40 shown, existing/new rooms, then 24 requests and 20 agreements; measurement only, no approved cost change | codex/buyer-orders-cost-baseline | `tests/buyer-orders-cost-baseline.test.ts`, `tests/test-config.mjs` (own alias row), `docs/buyer-orders-call-cost-baseline.md` | 04/11/2026 |

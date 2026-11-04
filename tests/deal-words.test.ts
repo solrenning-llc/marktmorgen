@@ -20,7 +20,7 @@ is("every one is caught", caught(["discounts", "discounted", "coupons", "promos"
 
 part("Each language a store speaks, singular and plural");
 is("Spanish", caught(["descuento", "descuentos", "cupón", "cupones", "código promocional", "códigos promocionales", "rebajas", "oferta limitada", "última oportunidad", "testimonios", "cinco estrellas", "más vendidos"]), []);
-is("French", caught(["réduction", "réductions", "remises", "code promo", "codes promo", "offre limitée", "dernière chance", "dépêchez-vous", "témoignages", "cinq étoiles", "meilleures ventes"]), []);
+is("French", caught(["réduction", "réductions", "des remises", "code promo", "codes promo", "offre limitée", "dernière chance", "dépêchez-vous", "témoignages", "cinq étoiles", "meilleures ventes"]), []);
 is("German", caught(["Rabatt", "Rabatte", "Gutschein", "Gutscheine", "Rabattcode", "Sonderangebote", "letzte Chance", "nur heute", "Kundenstimmen", "fünf Sterne"]), []);
 is("Italian", caught(["sconto", "sconti", "codice promozionale", "codici promozionali", "offerta limitata", "ultima occasione", "affrettati", "testimonianze", "cinque stelle", "più venduti"]), []);
 is("Dutch", caught(["korting", "kortingen", "kortingscode", "kortingscodes", "tijdelijke aanbieding", "laatste kans", "alleen vandaag", "vijf sterren"]), []);
@@ -186,4 +186,23 @@ is("while a site in any case is still refused", [
   heldToFacts("Visit Evil.Com today", probe), heldToFacts("Visit EVIL.COM today", probe), heldToFacts("See //evil.com/x", probe), heldToFacts("See /evil.com", probe),
   heldToFacts("See _evil.com", probe), heldToFacts("Visit evil.eu today", probe), heldToFacts("Visit Evil.Eu/now", probe), heldToFacts("Visit EVIL.EU now", probe),
 ], [false, false, false, false, false, false, false, false]);
+part("Review of #2084: honest words that only share letters with a deal word pass");
+const course = "Pottery course. Lessons online.";
+is("the Portuguese and Spanish verb promover", ["Nós promovemos o acesso aos cursos.", "O curso promove a criatividade.", "Ela promoveu o evento.", "Vamos promover o curso.", "El curso promueve la creatividad."].filter((reply) => !heldToFacts(reply, course)), []);
+is("the verbs to guarantee, in the store languages that have a noun of their own", [
+  "Para garantizar el acceso, inicia sesión.", "Garantizamos el acceso al curso.", "El curso garantiza el acceso de por vida.",
+  "Para garantir o acesso, entre na sua conta.", "Garantimos o acesso ao curso.", "O curso garante o acesso.",
+  "Pour garantir l'accès, connectez-vous.", "Le cours garantit l'accès.", "Per garantire l'accesso, accedi.", "Il corso garantisce l'accesso.",
+  "Wir garantieren den Zugang.",
+].filter((reply) => !heldToFacts(reply, course)), []);
+is("Dutch words for an abbreviation or a shortening", ["Een afkorting staat in de lijst.", "De afkortingen worden uitgelegd.", "Een verkorting van de les.", "De inkorting van het programma."].filter((reply) => !heldToFacts(reply, course)), []);
+is("French remise as handing over", ["La remise en main propre est possible.", "La remise du certificat a lieu en juin.", "La date de remise est sur la page.", "La remise des diplômes est en juin."].filter((reply) => !heldToFacts(reply, course)), []);
+is("while the deal words are still caught", caught([
+  "promoção", "promo", "promocional", "promoción", "código promocional", "promo code",
+  "garantía", "garantías", "garantia", "garantias", "garantizado", "garantido", "garantie", "Garantie", "Garantiezeit", "garantiert", "garantito", "garanzia", "gegarandeerd",
+  "guarantee", "guaranteed", "guarantees",
+  "zomerkorting", "kortingscode", "extra korting", "prijskorting",
+  "une remise", "des remises", "remise de 20 %", "remises exceptionnelles", "une remise spéciale", "20 % de remise", "remise sur tout",
+]), []);
+is("and in English, where the noun and the verb are one word, a reply that guarantees is still refused", heldToFacts("We guarantee access.", course), false);
 done();

@@ -225,18 +225,48 @@ export const HANDOFF_WORDS =
  * before it (\p{L}+) is the German or Dutch compound ("Frühlingsrabatt").
  * Singular and plural share one term, so the store's "Discounts" allows "a
  * discount"; another form ("discounted") is its own term.
+ *
+ * Words that only share letters with a deal word are left out (review of
+ * #2084): "promote" and the Portuguese and Spanish "promover" ("promovemos",
+ * "promoveu"), not "promo", "promoção" or "promocional"; the Dutch
+ * "afkorting" (abbreviation), "verkorting" and "inkorting" (shortening), not
+ * "zomerkorting" or "kortingscode"; the verbs to guarantee and the French
+ * "remise" as handing over (GUARANTEE_NOUNS, REMISE_AS_DISCOUNT).
  */
+/**
+ * The guarantee stem shared by Spanish, Portuguese, French, German, Italian
+ * and Dutch: its nouns ("garantía", "garantia", "garantie", "Garantie",
+ * "Garantiezeit") and the participles that promise ("garantizado",
+ * "garantido", "garanti", "garantiert", "garantito"), but not the verbs that
+ * say what a store does ("garantizar el acceso", "garantimos", "garante",
+ * "garantit", "garantire", "garantisce", "garantieren"). "garanzia" is the
+ * Italian term below, "gegarandeerd" the Dutch one. English keeps the whole
+ * stem: there the noun and the verb are one word ("a guarantee", "we
+ * guarantee"), so a reply that guarantees is refused either way.
+ */
+const GUARANTEE_NOUNS = "garant(?:[ií]as?|izad[oa]s?|id[oa]s?|is?|ie(?!r(?:e|en|st)(?!\\p{L}))\\p{L}*|it[oaie])";
+/**
+ * The French "remise" is a discount only where its neighbours say so: after
+ * "une" or "des", after a percentage ("20 % de remise"), or before an amount
+ * ("remise de 20 %"), "sur" or a discount adjective ("remises
+ * exceptionnelles", "remise spéciale", "remise immédiate", "de bienvenue",
+ * "de fidélité"). Any other "remise" is handing over ("remise en main
+ * propre", "la remise du certificat", "date de remise") and passes; a figure
+ * in it is still held to the facts like any number.
+ */
+const REMISE_AS_DISCOUNT =
+  "(?:une|des) remises?|\\d+[- ]?% de remises?|remises? (?:(?:de |d')?\\d+|sur|exceptionnelles?|sp[ée]ciales?|imm[ée]diates?|de bienvenue|de fid[ée]lit[ée])";
 const DEAL_TERMS = [
   // English
-  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|uv\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
+  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|u?v\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
   "per[- ]?cent off", "on sale", "sale prices?", "free shipping", "limited[- ]time", "only \\d+ left", "hurry", "selling fast", "last chance",
   "ends (?:today|tonight|soon)", "act now", "today only", "exclusive offers?", "guarant\\p{L}*", "best[- ]?sell(?:ing|ers?)", "testimonials?",
   "five[- ]stars?", "5[- ]stars?",
   // Spanish
   "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promociona(?:l|les|is)", "rebaj\\p{L}*", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad",
-  "date prisa", "s[oó]lo hoy", "garant\\p{L}*", "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
+  "date prisa", "s[oó]lo hoy", GUARANTEE_NOUNS, "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
   // French
-  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
+  "r[ée]ductions?", REMISE_AS_DISCOUNT, "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
   "livraison gratuite", "soldes", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
   // German
   "rabatt\\p{L}*", "\\p{L}+rabatt\\p{L}*", "gutschein\\p{L}*", "\\p{L}+gutschein\\p{L}*", "kostenlos\\p{L}* versand", "\\p{L}*(?:gratis|kostenlos)versand\\p{L}*",
@@ -246,7 +276,7 @@ const DEAL_TERMS = [
   "scont[oi]", "scontat[aeio]", "spedizione gratuita", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi",
   "garanz\\p{L}*", "saldi", "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
   // Dutch
-  "korting\\p{L}*", "\\p{L}+korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
+  "korting\\p{L}*", "\\p{L}+(?<!(?<!\\p{L})(?:af|ver|in))korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
   "gegarandeerd\\p{L}*", "\\p{L}*uitverkoop\\p{L}*", "vijf sterren",
   // Portuguese
   "descontos?", "cup(?:om|ons)", "cup(?:[aã]o|[oõ]es)", "ofertas? limitadas?", "[uú]ltima oportunidade", "s[oó] hoje", "frete gr[aá]tis", "depoimentos?",

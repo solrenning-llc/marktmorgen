@@ -333,6 +333,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cal:busy:@lib/calendar-sync.ts": { what: "A calendar feed's busy times, ten minutes", parts: [capped(MAX_FEEDS * READING_BYTES, "MAX_FEEDS feeds, each its parsed busy times: at most 2,000 of them.", src("lib/calendar-sync.ts", "MAX_FEEDS"), src("lib/ics-parse.ts", "maxIntervals ?? 2000"))] },
   "nl:cal:cfg:@lib/calendar-sync.ts": { what: "The store's calendar feeds", parts: [capped(MAX_FEEDS * 2 * KB, "MAX_FEEDS addresses.", src("lib/calendar-sync.ts", "MAX_FEEDS"))] },
   "nl:cal:err:@lib/calendar-sync.ts": { what: "A feed's last failure", parts: [capped(MAX_FEEDS * KB, "One per feed, six hours.")] },
+  "nl:none@lib/calendar-sync.ts": company("A key that is never written", "Read in place of a list a store does not have."),
   "nl:cal:good:@lib/calendar-sync.ts": { what: "A feed's last good reading", parts: [capped(MAX_FEEDS * READING_BYTES, "One per feed, six hours.", src("lib/calendar-sync.ts", "MAX_FEEDS"))] },
   "nl:cal:lock:@lib/calendar-sync.ts": short("A feed read at a time", "request", 1, 128, REQ("page")),
   // Since 4 November 2026 (C4-4) the last good copy of the store's feed, kept CALENDAR_COPY_SECONDS, at most CALENDAR_MAX_EVENTS events (lib/read-ceilings.ts, CALENDAR_FILE_BYTES).

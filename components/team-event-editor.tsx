@@ -49,6 +49,7 @@ const MESSAGES: Record<string, string> = {
   team_plan: "Team event types need a plan, or its free trial.",
   team_plan_hosts: "Your plan allows fewer hosts on one team event.",
   team_plan_types: "Your plan allows no more team event types. Stop another one first.",
+  team_lengths: "A call that offers several lengths is booked on your own calendar. Keep one length in its hours first, then book it with your team.",
   team_not_member: "Someone picked is not on this store's team any more. Reload the page.",
   unknown: "That product is not a call any more. Reload the page.",
   signed_out: "Your session ended. Log in again.",

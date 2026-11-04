@@ -62,7 +62,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -548,8 +548,10 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     const listed = await onAccount("GET", account, `/refunds?${query}`);
     const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
     // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
-    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline) : { rows: [], complete: true };
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : { rows: [], complete: true, newest: 0 };
     if (!lost.complete) unsure = true;
+    // The latest closing of the whole sweep (lib/refunds.ts, lostDisputesSince): reached the end, the place moves past it.
+    else newest = Math.max(newest, lost.newest);
     const rows = [...lost.rows, ...refunds];
     for (const refund of rows) {
       if (Date.now() >= deadline) break;

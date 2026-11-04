@@ -33,7 +33,7 @@ import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
-import { lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
 import { readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
@@ -188,8 +188,10 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     // A dispute closed as lost ends the booking's meeting
     // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
     // with the first page, from Stripe's closing events (kept thirty days).
-    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline) : { rows: [], complete: true };
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("meet", callsId)) : { rows: [], complete: true, newest: 0 };
     if (!lost.complete) unsure = true;
+    // The latest closing of the whole sweep (lib/refunds.ts, lostDisputesSince): reached the end, the place moves past it.
+    else newest = Math.max(newest, lost.newest);
     const rows = [...lost.rows, ...refunds];
     for (const refund of rows) {
       if (Date.now() >= deadline) break;

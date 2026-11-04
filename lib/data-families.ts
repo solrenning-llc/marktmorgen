@@ -37,7 +37,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
 export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lockedset:", "nl:2fa:rescue:",
   "nl:2fa:setup:", "nl:ab:paid:", "nl:account:stores:", "nl:adsrv:", "nl:adsrv:last:", "nl:adsrv:sub:",
-  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:",
+  "nl:aff:leads:lock:", "nl:aff:link:", "nl:lostdispute:cursor:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:",
   "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:alert:",
   "nl:alert:seen:", "nl:allow:", "nl:api:k:", "nl:api:keys:", "nl:ask:", "nl:ask:a:", "nl:ask:missed:",
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
@@ -263,6 +263,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:inbox:": E, "nl:inbox:tok:": T("nl:inbox:"),
   "nl:intro:c:": E,
   "nl:indexnow:sent": C,
+  "nl:lostdispute:cursor:": X(30), // a job's place in a store's lost disputes (lib/refunds.ts), thirty days at the most
   "nl:join:t:": T("nl:erase:ix:", 7),
   "nl:keys:": E,
   "nl:lc:": E,

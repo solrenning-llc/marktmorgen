@@ -255,6 +255,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:aff:leads:lock:@lib/affiliate-leads.ts": short("A program's leads being decided or a person's address taken off one, ten seconds at the most", "studio", 1, 128),
   "nl:aff:@lib/affiliate-lead-rules.ts": { what: "Confirmed leads an affiliate was credited for: the person's address, the kind, the terms then and the creator's decision", room: ["lib/affiliate-leads.ts"] },
   "nl:aff:link:@lib/affiliates.ts": short("An emailed link to apply or sign in, a day", "store", 1, LINK_BYTES, MAIL("affiliate")),
+  "nl:lostdispute:cursor:@lib/refunds.ts": short("Where a job that takes things back left off in a store's lost disputes, when there were more than one run reads", "run", 30),
   "nl:aff:seen:@lib/affiliates.ts": short("A click counted once per visitor a day", "request", 2, KEY, REQ("affiliate")),
   "nl:aff:session:@lib/affiliates.ts": short("An affiliate signed in on one browser, thirty days, from an emailed link", "store", 30, KEY, MAIL("affiliate")),
   "nl:rl:aff:addr:@lib/affiliates.ts": short("Applications per address, an hour", "request", 1, KEY, REQ("affiliate")),

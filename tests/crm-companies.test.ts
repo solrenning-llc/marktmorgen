@@ -12,6 +12,8 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { forgetCrmPerson } from "@/lib/crm";
 import {
   COMPANY_REFUSALS,
+  changeCompanies,
+  companyNameKey,
   forgetCompanyPerson,
   restoreCompany,
   type Company,
@@ -32,6 +34,7 @@ import { personKey } from "@/lib/person-key";
 import { redisPipeline } from "@/lib/redis";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { dataKey } from "@/lib/store-data";
+import { dataBytes } from "@/lib/store-data-rules";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -62,6 +65,24 @@ async function main(): Promise<void> {
   is("taken off every company", unlinkPerson(two, a).map((c) => c.people), [[], []]);
   is("deleted", dropCompany(two, "bbbbbbbbbb"), { ok: true, companies: [two[0]] });
   is("read back, checked again", [parseCompany({ ...two[1], people: [a, a, "nope"] })?.people, parseCompany({ ...two[1], name: "" })], [[a], null]);
+  part("Text as it is typed (edge review)");
+  const typedName = (name: string) => { const r = readCompanyInput({ name }); return r.ok ? r.value.name : r.error; };
+  is("a name of only signs that are not drawn is no name", ["\u200b\u200b", "\u2060", "\u3164", "\u00a0\u200d", "\u0301"].map(typedName), ["name", "name", "name", "name", "name"]);
+  is("a name that reads backwards from where it is shown loses its direction signs", typedName("Acme\u202e moc.live"), "Acme moc.live");
+  is("half a character pair (never typed) is shown as the replacement sign, never kept broken", typedName("A\ud800B"), "A\ufffdB");
+  is("an accent typed as two characters is kept as one", typedName("Cafe\u0301"), "Caf\u00e9");
+  const typedNote = readCompanyInput({ name: "N", note: "a\u0085b\u009bc" });
+  is("the C1 controls in a note are made spaces, like the others", typedNote.ok ? typedNote.value.note : typedNote, "a b c");
+  is("emoji joined by a joiner stay as typed", typedName("Team \u{1F469}\u200d\u{1F4BB}"), "Team \u{1F469}\u200d\u{1F4BB}");
+  const school = [base("aaaaaaaaaa", "Stra\u00dfe AG")];
+  is("one name once, whatever the case folds to (\u00df is ss)", addCompany(school, { name: "STRASSE AG", website: "", note: "" }, "bbbbbbbbbb", 2), { ok: false, error: "taken" });
+  is("one name once, typed wide or with a zero-width space", [addCompany([base("aaaaaaaaaa", "North")], { name: "\uff2e\uff2f\uff32\uff34\uff28", website: "", note: "" }, "bbbbbbbbbb", 2), addCompany([base("aaaaaaaaaa", "North School")], { name: "North\u200b School", website: "", note: "" }, "bbbbbbbbbb", 2)].map((r) => (r.ok ? "added" : r.error)), ["taken", "taken"]);
+  is("one name once, with an accent typed either way", addCompany([base("aaaaaaaaaa", "Caf\u00e9 Uno")], { name: "Cafe\u0301 uno", website: "", note: "" }, "bbbbbbbbbb", 2), { ok: false, error: "taken" });
+  is("the name compared is the folded one", companyNameKey("\u03a3\u0399\u03a3\u03a5\u03a6\u039f\u03a3"), companyNameKey("\u03c3\u03b9\u03c3\u03c5\u03c6\u03bf\u03c2"));
+  const kept = { ...base("aaaaaaaaaa", "North"), website: "https://north.example.com/", note: "Pays by invoice" };
+  is("an edit keeps a website and a note it leaves out", editCompany([kept], "aaaaaaaaaa", { name: "North Academy" }), { ok: true, companies: [{ ...kept, name: "North Academy" }] });
+  is("an edit clears one sent empty", editCompany([kept], "aaaaaaaaaa", { name: "North", website: "", note: "" }), { ok: true, companies: [{ ...kept, website: "", note: "" }] });
+  is("websites with a port, or a name in another script", ["north.example.com:8080", "example.\u0440\u0444", "b\u00fccher.de"].map((website) => { const r = readCompanyInput({ name: "N", website }); return r.ok ? r.value.website : r.error; }), ["https://north.example.com:8080/", "https://example.xn--p1ai/", "https://xn--bcher-kva.de/"]);
   is("every refusal says what to do", Object.values(COMPANY_REFUSALS).every((words) => /^(Type|You|Keep|Your|A company|That|Someone)/.test(words)), true);
 
   part("Through the studio's route");
@@ -115,13 +136,67 @@ async function main(): Promise<void> {
   for (const c of await readCompanies(statsId)) if (c.name !== "North School") await post({ action: "remove", id: c.id });
   const pipe = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "HSET" && String(c[1]).startsWith("nl:crm:co:"))) throw new Error("down");
+    if (commands.some((c) => (c[0] === "HSET" && String(c[1]).startsWith("nl:crm:co:")) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-companies-write:")))) throw new Error("down");
     return pipe(commands);
   }) as typeof redis.pipeline;
   const failed = await post({ action: "add", name: "Failing School" });
   redis.pipeline = pipe;
   const [left] = await redisPipeline([["GET", lock]]);
   is("and when a write fails too, so the next change is not refused", [failed.status >= 500, left, (await post({ action: "edit", id, name: "North School" })).status], [true, null, 200]);
+
+  part("The room, counted as kept (edge review)");
+  const slotOf = async () => Number((await redisPipeline([["HGET", dataKey(store)!, "crm:co"]]))[0] ?? 0);
+  const weighs = async () => {
+    const [raw] = await redisPipeline([["HGETALL", `nl:crm:co:${statsId}`]]);
+    const flat = Array.isArray(raw) ? raw.map(String) : Object.entries((raw ?? {}) as Record<string, string>).flat();
+    let bytes = 0;
+    for (let i = 0; i + 1 < flat.length; i += 2) bytes += dataBytes([flat[i], flat[i + 1]], 1);
+    return bytes;
+  };
+  is("before: what the room counts is what the companies weigh", await slotOf(), await weighs());
+  const leaving = Array.from({ length: 6 }, (_, i) => personKey(statsId, `leaving${i}@example.com`));
+  for (const person of leaving) await post({ action: "link", id, person });
+  const withThem = await slotOf();
+  for (const [i, person] of leaving.entries()) await forgetCrmPerson(statsId, person, `leaving${i}@example.com`, store);
+  is("people deleted from the store give back the room their links took", [(await slotOf()) < withThem, await slotOf()], [true, await weighs()]);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-companies-write:"))) throw new Error("down");
+    return pipe(commands);
+  }) as typeof redis.pipeline;
+  const lost = await post({ action: "add", name: "Never Written", note: "n".repeat(300) });
+  redis.pipeline = pipe;
+  is("a write that failed gives back the room it took", [lost.status, await slotOf()], [500, await weighs()]);
+
+  part("A change whose lock ran out never writes over the next one (edge review)");
+  const target = (await post({ action: "add", name: "Race School" })).body.added!;
+  const other = (await post({ action: "add", name: "Other School" })).body.added!;
+  const slow = personKey(statsId, "slow@example.com");
+  const quick = personKey(statsId, "quick@example.com");
+  let stalled = false;
+  const race: { second?: Awaited<ReturnType<typeof changeCompanies>> } = {};
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const out = await pipe(commands);
+    if (!stalled && commands.some((c) => c[0] === "HGETALL" && c[1] === `nl:crm:co:${statsId}`)) {
+      stalled = true;
+      // The first change is held up past its lock's 10 seconds; the next one takes the lock and goes through.
+      await pipe([["DEL", lock]]);
+      redis.pipeline = pipe;
+      race.second = await changeCompanies(statsId, store, (companies) => linkPerson(companies, target, quick));
+    }
+    return out;
+  }) as typeof redis.pipeline;
+  const first = await changeCompanies(statsId, store, (companies) => linkPerson(companies, other, slow));
+  redis.pipeline = pipe;
+  const raced = await readCompanies(statsId);
+  is("the late change is refused as busy and writes nothing; the one that went through is kept", [first, race.second?.ok, raced.find((c) => c.id === target)?.people, raced.find((c) => c.id === other)?.people], [{ ok: false, error: "busy" }, true, [quick], []]);
+  is("and the room counts what is kept", await slotOf(), await weighs());
+  for (const c of raced) if (c.id !== id) await post({ action: "remove", id: c.id });
+
+  part("An edit through the route keeps what it leaves out (edge review)");
+  await post({ action: "edit", id, name: "North School", website: "north.example.com", note: "Pays by invoice" });
+  const renamed = await post({ action: "edit", id, name: "North Academy" });
+  is("renamed, its website and note kept", renamed.body.companies?.find((c) => c.id === id) && [renamed.body.companies.find((c) => c.id === id)!.name, renamed.body.companies.find((c) => c.id === id)!.website, renamed.body.companies.find((c) => c.id === id)!.note], ["North Academy", "https://north.example.com/", "Pays by invoice"]);
+  await post({ action: "edit", id, name: "North School", website: "", note: "" });
 
   part("A delete undone (review A2/A3)");
   is("the rule: the company back with its people, except who is at another company now", (() => { const r = restoreCompany([{ ...base("bbbbbbbbbb", "South"), people: [b] }], { name: "North", website: "", note: "" }, "cccccccccc", 9, [a, b, "nope", a]); return r.ok ? [r.companies.find((c) => c.id === "cccccccccc")?.people, r.skipped] : r; })(), [[a], [b]]);

@@ -32,18 +32,46 @@ export const COMPANY_REFUSALS: Record<CompanyRefusal, string> = {
 
 export type CompanyResult = { ok: true; companies: Company[] } | { ok: false; error: CompanyRefusal };
 
-/** One line: control characters and runs of spaces made single spaces, trimmed; null when longer than allowed. */
+/**
+ * Characters that change how the text around them is drawn without being
+ * seen: the bidirectional embeddings, overrides and isolates (a name that
+ * reads backwards from where it is shown, Unicode Technical Report 36), the
+ * byte order mark and the invisible "function" signs.
+ */
+const UNSEEN = /[\u202a-\u202e\u2066-\u2069\ufeff\u2060-\u2064]/g;
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+
+/**
+ * One line: control characters (C0 and C1) and runs of spaces made single
+ * spaces, the unseen formatting signs taken out, half a character pair (a
+ * lone surrogate, never typed) shown as U+FFFD, in the composed form (NFC) so
+ * a name typed with an accent as one character or as two is the same text;
+ * trimmed; null when longer than allowed.
+ */
 function line(raw: unknown, max: number): string | null {
   if (raw === undefined || raw === null) return "";
   if (typeof raw !== "string") return null;
-  const value = raw.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  const value = raw.replace(LONE_SURROGATE, "\ufffd").normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(UNSEEN, "").replace(/\s+/g, " ").trim();
   return value.length <= max ? value : null;
+}
+
+/** True when the text has a character that is drawn: not only spaces, joiners, marks or fillers. */
+const seen = (value: string) => /[^\s\p{C}\p{M}\u115f\u1160\u3164\uffa0\u2800]/u.test(value);
+
+/**
+ * What a company's name is compared by, so one name is kept once: the
+ * compatibility form (NFKC: "ＮＯＲＴＨ" is "NORTH"), without the signs that
+ * are not drawn (a zero-width space), and with case folded fully ("Straße"
+ * is "STRASSE", a final sigma is a sigma).
+ */
+export function companyNameKey(name: string): string {
+  return name.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/g, " ").trim().toUpperCase().toLowerCase();
 }
 
 /** What the creator typed for a company, made safe, or what is wrong with it. Never cut. */
 export function readCompanyInput(raw: Record<string, unknown>): { ok: true; value: Pick<Company, "name" | "website" | "note"> } | { ok: false; error: CompanyRefusal } {
   const name = line(raw.name, MAX_COMPANY_NAME);
-  if (!name) return { ok: false, error: "name" };
+  if (!name || !seen(name)) return { ok: false, error: "name" };
   const typed = line(raw.website, MAX_COMPANY_WEBSITE);
   const website = typed ? crmUrl(typed) : "";
   if (typed === null || website === null) return { ok: false, error: "website" };
@@ -63,7 +91,7 @@ export function parseCompany(raw: unknown): Company | null {
   return id && input.ok ? { id, ...input.value, people, createdAt } : null;
 }
 
-const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+const sameName = (a: string, b: string) => companyNameKey(a) === companyNameKey(b);
 
 /** A new company, last; refused when the name is taken or the store is full. */
 export function addCompany(companies: readonly Company[], value: Pick<Company, "name" | "website" | "note">, id: string, nowSeconds: number): CompanyResult {
@@ -87,13 +115,18 @@ export function restoreCompany(companies: readonly Company[], value: Pick<Compan
   return { ok: true, companies: added.companies.map((c) => (c.id === id ? { ...c, people: back } : c)), skipped: asked.filter((p) => !back.includes(p)) };
 }
 
-/** A company's name, website and note changed in place; its people stay. */
-export function editCompany(companies: readonly Company[], id: string, value: Pick<Company, "name" | "website" | "note">): CompanyResult {
+/**
+ * A company's name, website and note changed in place; its people stay. A
+ * website or a note left out of `value` stays as it is (an empty one clears
+ * it).
+ */
+export function editCompany(companies: readonly Company[], id: string, value: Pick<Company, "name"> & Partial<Pick<Company, "website" | "note">>): CompanyResult {
   const at = companies.findIndex((c) => c.id === id);
   if (at < 0) return { ok: false, error: "unknown" };
   if (companies.some((c) => c.id !== id && sameName(c.name, value.name))) return { ok: false, error: "taken" };
   const next = [...companies];
-  next[at] = { ...companies[at], ...value };
+  const { name, website = companies[at].website, note = companies[at].note } = value;
+  next[at] = { ...companies[at], name, website, note };
   return { ok: true, companies: next };
 }
 

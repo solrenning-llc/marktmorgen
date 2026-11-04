@@ -24,7 +24,8 @@ import { jsonAccess } from "@/lib/studio-route";
 /**
  * Companies in the CRM: 639 [GL7](4), unit 1. GET lists every company, or
  * `?person=<key>` the one that person works at. POST `{ action: "add", name,
- * website?, note? }`, `{ action: "edit", id, name, website?, note? }`,
+ * website?, note? }`, `{ action: "edit", id, name, website?, note? }` (a
+ * website or a note left out stays as it is),
  * `{ action: "remove", id }`, `{ action: "restore", name, website?, note?,
  * people }` (a delete undone, in one change), `{ action: "link", id, person }` (moving them
  * from any other company) or `{ action: "unlink", person }`. The same
@@ -71,7 +72,10 @@ export async function POST(request: NextRequest) {
       // The new company's id is made here and sent back, so the screen links the person to this one, never to one
       // another tab added at the same moment.
       const madeId = newCompanyId();
-      result = await changeCompanies(statsId, store, (companies) => (body.action === "add" ? addCompany(companies, input.value, madeId, Date.now() / 1000) : editCompany(companies, id, input.value)));
+      // An edit changes only what it sends: a website or a note left out stays as it is (an empty one clears it).
+      const { name, website, note } = input.value;
+      const edited = { name, ...(body.website === undefined ? {} : { website }), ...(body.note === undefined ? {} : { note }) };
+      result = await changeCompanies(statsId, store, (companies) => (body.action === "add" ? addCompany(companies, input.value, madeId, Date.now() / 1000) : editCompany(companies, id, edited)));
       if (result.ok && body.action === "add") return Response.json({ ok: true, companies: result.companies, added: madeId }, { headers: NO_STORE });
     } else if (body.action === "remove") {
       result = await changeCompanies(statsId, store, (companies) => dropCompany(companies, id));

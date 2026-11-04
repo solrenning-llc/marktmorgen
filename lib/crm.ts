@@ -418,9 +418,10 @@ export async function forgetCrm(statsId: string | null): Promise<void> {
 /**
  * Deletes one person from the store's fields and deals (lib/person-erasure.ts):
  * every value kept under their key, and every deal with them, by the address
- * a deal names. Answers how many records went.
+ * a deal names. Answers how many records went. With the store's `room`, the
+ * room their companies' records took is given back too.
  */
-export async function forgetCrmPerson(statsId: string | null, person: string, email: string): Promise<number> {
+export async function forgetCrmPerson(statsId: string | null, person: string, email: string, room: DataStore | null = null): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
   const fields = await readFields(statsId);
   const address = email.trim().toLowerCase();
@@ -441,7 +442,7 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   commands.push(["HDEL", tasksKey(statsId), person]);
   const replies = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline(commands));
   // And they are taken off any company they were linked to (639 [GL7](4)).
-  const companies = await forgetCompanyPerson(statsId, person);
+  const companies = await forgetCompanyPerson(statsId, person, undefined, room);
   return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + companies;
 }
 

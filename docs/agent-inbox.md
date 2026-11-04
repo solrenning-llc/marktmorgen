@@ -771,6 +771,9 @@ A linha do Claude 4 que reserva lib/passkeys.ts e lib/two-step.ts é do #2136 (M
 ### C3-99 — 04/11/2026 11h40 — Ritmo de uso (AV10): neste ritmo você esgota sexta à noite, antes da renovação de segunda 02h00
 A sua página de uso (11h30) mostra 48% da semana e o aviso de que o limite acaba na noite de sexta. Pela AV10 (chegar à renovação entre 90% e 100%, sem parar): a partir de agora, esforço Médio em telas, textos, testes de interface e documentos; Alto só em dinheiro, cobrança, segurança, lei e na revisão independente; no máximo 2 subagentes ao mesmo tempo; nada de reler o que já está registrado. Confira de novo a página às 18h e, se o aviso sumir, pode subir um pouco. Ordem: #2140 (com a C3-95/C3-96), #2105 e claude3/orders-page-bounds, #2083 e o contador de tarefas.
 
+### C3-100 — 04/11/2026 12h00 — Resposta às 11h37: as chaves de API dos membros pausam
+Decisão (pelo dono): quando o criador liga a exigência de segunda etapa para a equipe, as chaves de API criadas por membros numa sessão sem segunda etapa param de valer (pausadas, nunca apagadas); o membro as reativa depois de entrar com a segunda etapa, e as do próprio dono não mudam. Antes de salvar o interruptor, a tela diz quantas chaves vão pausar e de quem (3.3.6), e cada membro afetado recebe um e-mail curto explicando como reativar. Faça isso numa unidade própria depois do #2140 (app/api/store/api-keys, guardStoreWrite), com teste: chave de membro criada sem segunda etapa recusada depois de ligar; reativada depois do login com segunda etapa; chave do dono intacta. Siga com as correções do alto e dos três médios da 4ª revisão no #2140; nenhum login cancela remoção sozinho, só o Keep it explícito com segunda etapa válida, como você escreveu.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar
@@ -1098,4 +1101,7 @@ Decisão (pelo dono, MR): conte o custo pelo que o fornecedor de fato cobra, con
 
 ### CX-65 — 04/11/2026 12h50 — Para o Codex A: assuma agora a tarefa do Codex B, depois do #2020
 Decisão (pelo dono): o Codex B não dá sinal desde 08h34 (último commit 08h32 em codex/b-cx55-platform-search-cost; a conversa dele no ChatGPT ficou presa numa execução e não aceita mensagem). Não espere mais a condição da CX-61: assim que o #2020 estiver enviado e em revisão, **a tarefa da CX-61 é sua**, a partir desse ramo (fonte e relatório estão lá): a busca de duas leituras por evento, a linha de custo de duas leituras somada só a checkout, exclusão e fechamento, a MR conferida com ela, depois #1478 e #1492, um por vez, com revisão pelo canal. Se o Codex B voltar, ele lê esta mensagem e passa a ajudar no que você indicar no canal, sem refazer o seu trabalho.
+
+### CX-66 — 04/11/2026 11h55 — Para o Codex A: a tarefa do B foi para o Codex B2 (substitui a CX-65)
+O dono tem 96% do uso semanal do Codex sobrando, então abri uma conversa nova, o Codex B2, que assume a base da pilha (CX-61: busca de duas leituras em codex/b-cx55-platform-search-cost, depois #1478 e #1492). **A CX-65 fica sem efeito:** você segue só com o topo da pilha (#1502, #2020, #2067) e o próximo produtor P1, sem tocar no ramo do B nem no #1478/#1492. Se já tiver começado algo da CX-61, avise no canal o que e em qual commit, para o B2 continuar dali sem refazer. Com uso de sobra, suba o ritmo (AV10): revisão própria de cada delta antes de pedir a do canal, testes mais completos.
 

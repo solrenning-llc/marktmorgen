@@ -110,6 +110,7 @@ export function SlotPicker({
   host,
   minutes,
   newTab,
+  embed,
   shownCents,
   words,
 }: {
@@ -129,6 +130,8 @@ export function SlotPicker({
   minutes?: number;
   /** Inside a frame on the creator's own site (app/embed): Stripe's page opens in a new tab, never in the frame. */
   newTab?: boolean;
+  /** Opened by the checkout script on a listed site: the site and where to send the buyer back to, checked again by the booking route. */
+  embed?: { site: string; back: string | null } | null;
   /** Beside it, the price the page showed for it, in cents: only compared with the creator's record, never charged (price-changed). */
   shownCents?: number;
   words: SlotWords;
@@ -174,6 +177,8 @@ export function SlotPicker({
         <input type="hidden" name="tz" value={tz} />
         {pkg ? <input type="hidden" name="pkg" value={pkg} /> : null}
         {minutes && !move ? <input type="hidden" name="minutes" value={minutes} /> : null}
+        {embed && !move ? <input type="hidden" name="site" value={embed.site} /> : null}
+        {embed?.back && !move ? <input type="hidden" name="return" value={embed.back} /> : null}
         {minutes && !move && shownCents !== undefined ? <input type="hidden" name="shown" value={shownCents} /> : null}
         {host && !move ? (
           <>

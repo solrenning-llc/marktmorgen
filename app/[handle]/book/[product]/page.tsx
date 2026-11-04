@@ -25,8 +25,9 @@ import { type SessionChoice, SessionPicker, type SessionWords } from "@/componen
 import { StoreTracking } from "@/components/store-tracking";
 import { readListing } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
-import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
+import { type BookingWords, bookingNotice, bookingWords } from "@/lib/buyer-words/booking";
 import { NewTab } from "@/components/new-tab";
+import { listedReturn, listedSite } from "@/lib/embed-sites";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -60,9 +61,15 @@ export default async function BookPage({ params, searchParams }: Params) {
   const moving = typeof query.move === "string" ? query.move : "";
   if (moving) return <MovePage store={store} product={product} session={moving} status={status} />;
 
+  // Sent here from the calendar on one of the creator's listed sites (app/embed), after a refusal or back from Stripe:
+  // the site and the way back stay with the booking, read against the creator's list again, so a second try is still the
+  // site's (3.3.7). Anything not on the list is dropped; the booking route checks both once more.
+  const embedSite = listedSite(store.embedSites, typeof query.site === "string" ? query.site : null);
+  const embedBack = listedReturn(store.embedSites, typeof query.return === "string" ? query.return : typeof query.site === "string" && query.site !== embedSite ? query.site : null);
+  const embed = embedSite && !pkgOf(query) ? { site: embedSite, back: embedBack } : null;
+
   const { w, money, lang } = speech(store);
   const b = bookingWords(store.language);
-  const notice = b.notices[status] ?? null;
   // Booking from a package (lib/call-packages.ts): how many are left, said up top.
   const pkgToken = typeof query.pkg === "string" ? query.pkg : "";
   const found = pkgToken ? await boughtByToken(pkgToken) : null;
@@ -93,6 +100,8 @@ export default async function BookPage({ params, searchParams }: Params) {
     return `?${next.toString()}#times`;
   };
   const chosen = choices.length ? askedLength ?? choices[0] : null;
+  // A length taken off meanwhile asks for a length again only while the page still offers several (bookingNotice).
+  const notice = bookingNotice(b, status, choices, product.call.minutes);
   const pickedHost = (read && "picked" in read ? read.picked : null) ?? null;
   const days = read ? read.days : null;
   const starts = days ? days.flatMap((day) => day.starts) : [];
@@ -236,6 +245,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                   host={pickedHost}
                   minutes={chosen ? chosen.minutes : undefined}
                   shownCents={chosen ? chosen.cents : undefined}
+                  embed={embed}
                   words={{ ...slotWords(store, b, chosen ? chosen.minutes : setup.minutes, payNow, false, fromPackage), code }}
                 />
               </>
@@ -249,6 +259,11 @@ export default async function BookPage({ params, searchParams }: Params) {
 }
 
 /** The length a booking moves at, as moveBooking keeps it (lib/call-lengths.ts, ownLength). */
+/** A package's token in the address, when there is one: a session from a package is never the listed site's sale. */
+function pkgOf(query: { [key: string]: string | string[] | undefined }): boolean {
+  return typeof query.pkg === "string" && query.pkg.length > 0;
+}
+
 function movesAt(setup: CallListing["call"], booking: { start: number; end: number }): number {
   const kept = ownLength(setup, booking.end - booking.start);
   return typeof kept === "number" ? kept : setup.minutes;

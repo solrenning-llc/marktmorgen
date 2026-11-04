@@ -280,7 +280,7 @@ export function optionRemovalWords(
       const kept = product.introKept && product.yearlyKept ? ", with its introductory and yearly prices" : product.introKept ? ", with its introductory price" : product.yearlyKept ? ", with its yearly price" : "";
       // A membership's price is said with its period, as buyers see it: "$20 a month".
       const own = `${money(product.ownPriceCents)}${product.interval ? ` a ${product.interval}` : ""}`;
-      said.push(`It is the last price, so buyers ${product.hidden ? "will pay, once you publish it," : "then pay"} its own price, ${own}${kept}.`);
+      said.push(`It is the last price, so ${product.hidden ? "once published, buyers pay" : "buyers then pay"} its own price, ${own}${kept}.`);
     }
   }
   if (product.interval) said.push("Members who joined at it keep being charged what they joined at until they or you cancel.");

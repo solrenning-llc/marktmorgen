@@ -33,6 +33,7 @@ test("both explicit paid-file choices match the actual original checkout body wi
   }
   return Response.json({object:"list",data:[],has_more:false});
  };
+ const originalNow=Date.now,fixedNow=Date.now();Date.now=()=>fixedNow;
  try{
   for(const option of product.options){
    const selected=selectedDigitalOptionFromOriginal(product,option.id,folder);assert.ok(selected);
@@ -51,6 +52,11 @@ test("both explicit paid-file choices match the actual original checkout body wi
    const snapshot=captureDigitalOptionRequestSnapshot({store,product,optionId:option.id,folder,body:prepared.toString(),nonce,consent,maximumBytes:60000});
    assert.ok(snapshot,"the original real wire, with explicit future-private markers, fits the closed snapshot");
    assert.equal(snapshot.selected.id,option.id);assert.equal(snapshot.selected.priceCents,option.priceCents);assert.equal(snapshot.permitsCheckout,false);assert.equal(snapshot.grantsAccess,false);
+   for(const [key,value] of [["customer_email","buyer@example.test"],["automatic_tax[enabled]","true"],["allow_promotion_codes","true"],["payment_method_types[0]","card"],["metadata[unsupported]","not-this-recipe"],["adaptive_pricing[enabled]","true"],["excluded_payment_method_types[0]","substituted"]]){
+    const changed=new URLSearchParams(prepared);changed.set(key,value);changed.set("metadata[mm_order_hash]",confirmationBodyDigest(changed.toString()));
+    const freshAdmission=await admitOrders(store,1);assert.ok(freshAdmission.ok);
+    assert.equal(await prepareDigitalOptionPreintent({store,product,optionId:option.id,folder,body:changed.toString(),nonce,consent,maximumBytes:60000,admission:freshAdmission}),null,key+": unsupported request shape must refuse before binding");
+   }
    const admission=await admitOrders(store,1);assert.ok(admission.ok);
    const request={store,product,optionId:option.id,folder,body:prepared.toString(),nonce,consent,maximumBytes:60000,admission};
    assert.equal(await prepareDigitalOptionPreintent({...request,admission:JSON.parse(JSON.stringify(admission))}),null,"cloned admission is not authority");
@@ -68,5 +74,5 @@ test("both explicit paid-file choices match the actual original checkout body wi
    for(const other of product.options.filter(o=>o.id!==option.id))assert.equal(digitalOptionBodyMatches(last.body,{options:[selected]},other.id,folder,{storeHandle:store.handle,productId:product.id,title:product.title,currency:store.currency,consent,summary:product.summary},60000),false);
   }
   assert.equal(posted.length,2,"one existing synthetic Checkout POST for each explicit option");
- }finally{globalThis.fetch=originalFetch;}
+ }finally{globalThis.fetch=originalFetch;Date.now=originalNow;}
 });

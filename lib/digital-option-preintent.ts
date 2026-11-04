@@ -6,6 +6,8 @@ import {captureDigitalOptionRequestSnapshot,type DigitalOptionRequestSnapshot} f
 import {prepareOrderConfirmationPreintent,type OrderConfirmationPreintent} from "@/lib/orders";
 import type {Admission} from "@/lib/order-admission";
 import {canSeal,unseal} from "@/lib/secret-box";
+import {DELAYED_METHODS} from "@/lib/instant-pay";
+import {LANGUAGES,type LanguageCode} from "@/lib/store-language";
 import type {Store} from "@/lib/store";
 
 type Data=Record<string,unknown>;
@@ -26,6 +28,22 @@ function originalStore(value:unknown):Readonly<Data>|null{
  }else if(source.period===null)out.period=null;
  return Object.freeze(out);
 }
+/** Narrow request shape only; never legal consent, catalog or funding proof. */
+function supportedShape(snapshot:DigitalOptionRequestSnapshot,store:Readonly<Data>):boolean{
+ try{
+  const form=new URLSearchParams(snapshot.body),language=store.language;
+  if(typeof language!=="string"||!Object.hasOwn(LANGUAGES,language)||form.get("locale")!==LANGUAGES[language as LanguageCode].stripe||form.get("adaptive_pricing[enabled]")!=="false")return false;
+  const allowed=new Set(["mode","locale","success_url","cancel_url","adaptive_pricing[enabled]",
+   ...["store","product","option","title","dc","mm_order_origin","mm_order_intent","mm_order_hash","mm_admit"].map(k=>`metadata[${k}]`),
+   ...["store","product","option","dc"].map(k=>`payment_intent_data[metadata][${k}]`),
+   "line_items[0][quantity]","line_items[0][price_data][currency]","line_items[0][price_data][unit_amount]","line_items[0][price_data][product_data][name]","line_items[0][price_data][product_data][description]",
+   ...DELAYED_METHODS.map((_,i)=>`excluded_payment_method_types[${i}]`)]);
+  if([...form.keys()].some(k=>!allowed.has(k))||DELAYED_METHODS.some((method,i)=>form.get(`excluded_payment_method_types[${i}]`)!==method))return false;
+  const success=form.get("success_url"),cancel=form.get("cancel_url");if(!success||!cancel)return false;
+  const url=new URL(success);
+  return url.protocol==="https:"&&!url.username&&!url.password&&!url.hash&&url.pathname===`/@${snapshot.identity.storeHandle}/thanks`&&url.search==="?session_id={CHECKOUT_SESSION_ID}"&&cancel===`${url.origin}/@${snapshot.identity.storeHandle}`;
+ }catch{return false;}
+}
 export type DigitalOptionPreintentReceipt=Readonly<{
  kind:"digital-option-pre-url-candidate";authority:"same-process-only";
  admitted:false;permitsCheckout:false;grantsAccess:false;
@@ -39,7 +57,7 @@ export async function prepareDigitalOptionPreintent(input:unknown):Promise<Digit
   if(!value||Object.keys(value).length!==names.length||!names.every(k=>Object.hasOwn(value,k))||!canSeal()||Object.getOwnPropertyDescriptor(Object.prototype,"toJSON"))return null;
   const store=originalStore(value.store);if(!store)return null;
   const fields=Object.fromEntries(names.filter(k=>k!=="admission").map(k=>[k,k==="store"?store:value[k]]));
-  const snapshot=captureDigitalOptionRequestSnapshot(fields);if(!snapshot)return null;
+  const snapshot=captureDigitalOptionRequestSnapshot(fields);if(!snapshot||!supportedShape(snapshot,store))return null;
   const now=Date.now();if(!Number.isSafeInteger(now))return null;
   // Retain the actual Admission reference: a JSON copy loses its WeakMap proof.
   const result=await prepareOrderConfirmationPreintent(store as unknown as Store,value.admission as Admission,{nonce:snapshot.nonce,accountId:snapshot.accountId,bodyDigest:snapshot.bodyDigest},{now:()=>now});

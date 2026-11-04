@@ -1,6 +1,6 @@
 import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
 import { apiOkFields, badFields } from "@/lib/api-fields";
-import { bookings } from "@/lib/api-read";
+import { BOOKING_FIELDS, bookings } from "@/lib/api-read";
 
 /**
  * GET /api/v1/bookings — paid calls and session seats, each at the time it is booked for now. With
@@ -9,11 +9,11 @@ import { bookings } from "@/lib/api-read";
 export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
-  // A `?fields=` that cannot be read is refused before any further request is taken or anything read.
-  const bad = badFields(request);
+  // A `?fields=` that cannot be answered is refused before any further request is taken or anything read.
+  const bad = badFields(request, BOOKING_FIELDS);
   if (bad) return bad;
   try {
-    const found = await bookings(store, (more) => takeMoreApi(store, more));
+    const found = await bookings(store, (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
     return apiOkFields(request, { data: found });
   } catch (error) {

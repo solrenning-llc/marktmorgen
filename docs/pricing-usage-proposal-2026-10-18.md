@@ -19,8 +19,8 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $31.90 | $197.50 | $69 / $690 |
-| Studio | $84.88 | $814.63 | $449 / $4,490 |
+| Store | $31.90 | $197.55 | $69 / $690 |
+| Studio | $84.88 | $814.80 | $449 / $4,490 |
 | Scale | $175.80 | $1,873.40 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
@@ -48,7 +48,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $129 / $1,290 **(recommended)** | 10.9% | 60.20% | 60.05% | $77.67 | 3.49 |
 | $149 / $1,490 | 17.1% | 60.24% | 60.06% | $89.76 | 3.02 |
 | $199 / $1,990 | 31.4% | 60.27% | 60.03% | $119.94 | 2.26 |
-| $249 / $2,490 | 45.0% | 60.33% | 60.07% | $150.23 | 1.80 |
+| $249 / $2,490 | 45.0% | 60.32% | 60.07% | $150.22 | 1.80 |
 | $299 / $2,990 | 60.0% | 60.33% | 60.04% | $180.40 | 1.50 |
 | $449 / $4,490 | 100.0% | 60.38% | 60.06% | $271.11 | 1.00 |
 
@@ -61,7 +61,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $299 / $2,990 **(recommended)** | 12.0% | 60.39% | 60.04% | $180.58 | 3.34 |
 | $349 / $3,490 | 18.7% | 60.38% | 60.02% | $210.74 | 2.87 |
 | $399 / $3,990 | 25.0% | 60.40% | 60.04% | $241.01 | 2.51 |
-| $499 / $4,990 | 38.0% | 60.40% | 60.02% | $301.42 | 2.00 |
+| $499 / $4,990 | 38.0% | 60.40% | 60.02% | $301.41 | 2.00 |
 | $999 / $9,990 | 100.0% | 60.46% | 60.07% | $604.03 | 1.00 |
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).

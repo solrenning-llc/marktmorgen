@@ -26,6 +26,7 @@ import { POST as passkeyRoute } from "@/app/api/auth/passkey/route";
 import { POST as passkeySignIn } from "@/app/api/auth/passkey/signin/route";
 import { POST as twoStepRoute } from "@/app/api/auth/two-step/route";
 import { makePasskey } from "./passkey-world";
+import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -304,7 +305,19 @@ async function main(): Promise<void> {
   is("once in the first hour", told(), 1);
   await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), t0 + 61 * 60_000);
   is("again an hour later", told(), 2);
-  is("the email says the moment with its time zone spelled out, and how to stop it", [...mails].reverse().find((m) => m.to === TIA)?.text.includes("Coordinated Universal Time (UTC)") && [...mails].reverse().find((m) => m.to === TIA)?.text.includes("Logging in with this passkey itself does not."), true);
+  const tiaMail = [...mails].reverse().find((m) => m.to === TIA && m.subject === "A passkey is set to be removed from your Marktmorgen account")?.text ?? "";
+  is("the email says when, with the time and the time zone spelled out", tiaMail.includes(`It will be removed on ${removalWhen(t0 + REMOVAL_DAYS * 86_400_000)}.`) && tiaMail.includes("Coordinated Universal Time (UTC)"), true);
+  is(
+    "and what to do if it was not them: log in with another passkey or the app's code, Keep it; not with this passkey",
+    [
+      tiaMail.includes(`If it was not you, stop it before ${removalWhen(t0 + REMOVAL_DAYS * 86_400_000)}:`),
+      tiaMail.includes("with another of your passkeys, or with the emailed link and the code from your authenticator app. That login stops the removal."),
+      tiaMail.includes("press “Keep it” next to the passkey"),
+      tiaMail.includes("Logging in with the passkey that is being removed does not stop it."),
+      tiaMail.includes("If this was you, there is nothing to do: it is removed on that day."),
+    ],
+    [true, true, true, true, true],
+  );
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";

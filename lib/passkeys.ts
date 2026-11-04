@@ -151,7 +151,7 @@ async function saveList(email: string, list: Passkey[]): Promise<void> {
 }
 
 /** A short plain notice to the account's address when its passkeys change. */
-async function tell(email: string, subject: string, line: string): Promise<void> {
+async function tell(email: string, subject: string, line: string, own?: { ifYou: string; ifNotYou: string[] }): Promise<void> {
   if (!isSenderConfigured()) return;
   const when = new Date().toISOString().replace("T", " ").slice(0, 16);
   await sendEmail({ meter: { by: "company" },
@@ -164,11 +164,13 @@ async function tell(email: string, subject: string, line: string): Promise<void>
       "",
       `When: ${when} UTC`,
       "",
-      "If this was you, there is nothing to do.",
+      own?.ifYou ?? "If this was you, there is nothing to do.",
       "",
-      "If it was not you: log in at",
-      `${SITE_URL}/signin`,
-      "with this email address, remove any passkey you do not recognize, choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.",
+      ...(own?.ifNotYou ?? [
+        "If it was not you: log in at",
+        `${SITE_URL}/signin`,
+        "with this email address, remove any passkey you do not recognize, choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.",
+      ]),
     ].join("\n"),
   }).catch(() => false);
 }
@@ -328,10 +330,22 @@ export async function scheduleRemoval(email: string, id: string, session: string
   });
   if (!asked) return null;
   if (asked.tellNow) {
+    // Owner C3-96: what to do if it was not them, and when it happens, in plain words.
+    const when = removalWhen(asked.at);
     await tell(
       address,
       "A passkey is set to be removed from your Marktmorgen account",
-      `Somebody logged in to your Marktmorgen account (${address}) without a passkey or an app code and asked to remove the passkey called “${headerText(asked.name, 60)}”. It will be removed on ${removalWhen(asked.at)}. Logging in with another of your passkeys or with your app's code before then stops it, and so does “Keep it” next to the passkey in your studio after such a login. Logging in with this passkey itself does not.`,
+      `Somebody logged in to your Marktmorgen account (${address}) without a passkey or an app code and asked to remove the passkey called “${headerText(asked.name, 60)}”.\n\nIt will be removed on ${when}.`,
+      {
+        ifYou: "If this was you, there is nothing to do: it is removed on that day.",
+        ifNotYou: [
+          `If it was not you, stop it before ${when}:`,
+          `1. Log in at ${SITE_URL}/signin with another of your passkeys, or with the emailed link and the code from your authenticator app. That login stops the removal.`,
+          "2. To be sure, open Account in your studio and press “Keep it” next to the passkey.",
+          "Logging in with the passkey that is being removed does not stop it.",
+          "Then choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.",
+        ],
+      },
     );
   }
   return asked.at;

@@ -18,10 +18,13 @@
  *   - pay_by_link: its payment failed and waits on the buyer: the link
  *     works until `until`, unpaid by then it is canceled, nothing charged.
  * `date` arrives written in the store's language; `hours` is the deadline
- * promised when booking (0 for none). The buyer is never named to the
- * creator. Browser-safe.
+ * promised when booking (0 for none), never the 0 that failedCharge, payBy
+ * and failedChargeWords take for a session the creator moved inside its
+ * deadline (C2-94): held_until_start and charged_now name the deadline, so
+ * seriesMoveMessage refuses them without one of SERIES_DEADLINES. The buyer
+ * is never named to the creator. Browser-safe.
  */
-import type { MoveCase } from "@/lib/call-series-billing";
+import { type MoveCase, SERIES_DEADLINES } from "@/lib/call-series-billing";
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 
 export type MoveBy = "creator" | "buyer";
@@ -175,5 +178,7 @@ export const SERIES_MOVE_WORDS: Record<LanguageCode, SeriesMoveWords> = { en, es
 
 /** The payment part of a moved session's message, for the buyer or the creator, in the store's language (English when unknown). */
 export function seriesMoveMessage(language: unknown, to: "buyer" | "creator", which: MoveCase, input: MoveInput): string {
+  // Never "less than 0 hours away": these two say the deadline promised at booking, which only moveCase's cases with one reach.
+  if ((which === "held_until_start" || which === "charged_now") && !(SERIES_DEADLINES as readonly number[]).includes(input.hours)) throw new Error(`series move words: ${which} needs the deadline promised at booking, not ${input.hours} hours`);
   return SERIES_MOVE_WORDS[parseLanguage(language)][to][which](input).join(" ");
 }

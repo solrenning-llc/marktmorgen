@@ -69,7 +69,14 @@ export const FEED_TIMEOUT_MS = 8_000;
 export const CALENDAR_MAX_EVENTS = 1_000;
 /** How long the last good copy of the subscription file is kept for the calendar app (bookedCalendarFeed). */
 export const CALENDAR_COPY_SECONDS = 40 * 86_400;
-/** The copy is made again when a booking changed (lib/call-records.ts, bookingsChangedKey: a booking made or moved, or a time let go), or once it is this old. */
+/**
+ * The copy is made again when a booking changed (lib/call-records.ts,
+ * bookingsChangedKey: a booking made or moved, or a time let go), or once it
+ * is this old. What marks nothing (a refund, a cancellation, a live session
+ * the creator adds: their paths are other agents' files) shows at the next
+ * making: within this, or up to a day when the UTC day's makings
+ * (CALENDAR_BUILDS_PER_DAY) are spent.
+ */
 export const CALENDAR_REFRESH_SECONDS = 12 * 3_600;
 /** Times a store's file may be made again in a UTC day, every reason together. */
 export const CALENDAR_BUILDS_PER_DAY = 4;
@@ -550,14 +557,25 @@ export function keptSlots<T extends { start: number; end: number }>(slots: T[], 
 }
 
 /** The last good copy of a store's file, and when it was begun. */
-type Copy = { at: number; ics: string };
-function parseCopy(raw: unknown): Copy | null {
-  if (typeof raw !== "string" || !raw) return null;
+/**
+ * The last good copy of a store's file: when it was begun, the file, and what
+ * the store's handle led to when it was made (`ref`, the handle's key as read),
+ * so a copy is answered only while the handle still leads to the store that
+ * made it. Or, once the handle was found to lead to another store, a
+ * tombstone (`gone`: what it leads to now), so the feed answers 404 at once
+ * without making anything again.
+ */
+type Copy = { at: number; ics: string; ref: string };
+type Kept = { copy: Copy | null; gone: string | null };
+function parseKept(raw: unknown): Kept {
+  if (typeof raw !== "string" || !raw) return { copy: null, gone: null };
   try {
-    const value = JSON.parse(raw) as Partial<Copy>;
-    return typeof value.at === "number" && typeof value.ics === "string" && value.ics ? { at: value.at, ics: value.ics } : null;
+    const value = JSON.parse(raw) as Partial<Copy> & { gone?: unknown };
+    if (typeof value.gone === "string") return { copy: null, gone: value.gone };
+    const copy = typeof value.at === "number" && typeof value.ics === "string" && value.ics ? { at: value.at, ics: value.ics, ref: typeof value.ref === "string" ? value.ref : "" } : null;
+    return { copy, gone: null };
   } catch {
-    return null;
+    return { copy: null, gone: null };
   }
 }
 
@@ -590,9 +608,9 @@ export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "pac
  * must never spend anything the creator sees counted (their studio's
  * requests): it is answered from the last good copy of the file, kept
  * CALENDAR_COPY_SECONDS, and the file is made again (`make`, which reads the
- * store and its Stripe account) only when a booking was made, moved or
- * cancelled since the copy was begun (lib/call-records.ts,
- * bookingsChangedKey) or the copy is CALENDAR_REFRESH_SECONDS old; at most
+ * store and its Stripe account) only when a booking was made or moved, or a
+ * time let go, since the copy was begun (lib/call-records.ts,
+ * bookingsChangedKey), or the copy is CALENDAR_REFRESH_SECONDS old; at most
  * CALENDAR_BUILDS_PER_DAY times a store a UTC day, counted before it is made.
  * Past that, or when making it fails, the copy is answered as it is. One
  * feed is answered CALENDAR_POLLS_PER_HOUR times an hour, counted before its
@@ -604,6 +622,24 @@ export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "pac
  * (tests/plan-cost-registry.ts, calendar-feed). "none" when there is no copy
  * and none could be made.
  */
+/**
+ * Forgets a deleted store's feed at once (app/api/store/stores, its delete):
+ * its settings, its subscription address, its feeds' readings and the last
+ * copy of its file, which names its buyers, as a closed store's are
+ * (lib/closed-store-data.ts, calendarKeys).
+ */
+export async function forgetStoreCalendar(statsId: string | null | undefined): Promise<void> {
+  if (!statsId || !isRedisConfigured()) return;
+  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
+  let parsed: unknown = null;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  await redisPipeline([["DEL", cfgKey(statsId), outKey(statsId), ...calendarKeys(parsed)]]);
+}
+
 export async function bookedCalendarFeed(owner: { statsId: string; handle: string }, make: () => Promise<string>, now = Date.now()): Promise<FeedAnswer> {
   if (!(await takeCounted(paceKey(owner.statsId, Math.floor(now / 3_600_000)), CALENDAR_POLLS_PER_HOUR, 3_600))) return { state: "paced" };
   let raw: unknown[];
@@ -613,8 +649,18 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     return { state: "none" };
   }
   const [copyRaw, changedRaw, handleRaw] = Array.isArray(raw[0]) ? (raw[0] as unknown[]) : [null, null, null];
-  if (!handleLeadsToStore(handleRaw)) return { state: "gone" };
-  const copy = parseCopy(copyRaw);
+  // The store was deleted or closed (its handle let go): what it kept, which names its buyers, goes now.
+  if (!handleLeadsToStore(handleRaw)) {
+    await redisPipeline([["DEL", outKey(owner.statsId)]]).catch(() => {});
+    return { state: "gone" };
+  }
+  const ref = handleRaw as string;
+  const kept = parseKept(copyRaw);
+  // Already found to lead to another store: 404 at once, nothing made, nothing of the old store's shown.
+  if (kept.gone === ref) return { state: "gone" };
+  // A copy is answered only while the handle leads to the store that made it; otherwise the file is made again,
+  // and `make` reads the store behind the handle and compares its id with the feed's (FeedGone when it is another store).
+  const copy = kept.copy && kept.copy.ref === ref ? kept.copy : null;
   const changed = Number(changedRaw) || 0;
   const fresh = copy !== null && changed <= copy.at && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
   if (fresh) return { state: "copy", ics: copy.ics };
@@ -626,15 +672,20 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   try {
     ics = await make();
   } catch (error) {
-    // Stripe did not answer: the copy stands. The store is no longer the one that kept it: nothing is answered.
-    if (copy && !(error instanceof FeedGone)) return { state: "copy", ics: copy.ics };
+    // The handle leads to another store now: the old copy goes, a tombstone answers 404 from now on.
+    if (error instanceof FeedGone) {
+      await redisPipeline([["SET", outKey(owner.statsId), JSON.stringify({ gone: ref }), "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
+      return { state: "gone" };
+    }
+    // Stripe did not answer: the copy stands.
+    if (copy) return { state: "copy", ics: copy.ics };
     throw error;
   }
-  const kept = JSON.stringify({ at: now, ics });
-  if (Buffer.byteLength(kept, "utf8") > CALENDAR_FILE_MAX_BYTES) {
+  const file = JSON.stringify({ at: now, ics, ref });
+  if (Buffer.byteLength(file, "utf8") > CALENDAR_FILE_MAX_BYTES) {
     console.error("a booking calendar file is larger than its ceiling, so it is neither kept nor sent", owner.statsId);
     return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
   }
-  await redisPipeline([["SET", outKey(owner.statsId), kept, "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
+  await redisPipeline([["SET", outKey(owner.statsId), file, "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
   return { state: "made", ics };
 }

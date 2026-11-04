@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CALENDAR_BUILDS_PER_DAY, CALENDAR_FILE_MAX_BYTES, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS,
-  bookedCalendar, bookedCalendarFeed, keptSlots, newFeedToken,
+  FeedGone, bookedCalendar, bookedCalendarFeed, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
@@ -32,7 +32,7 @@ import {
   CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, TOTALS_STORE_SHAPE, TOTALS_STORE_UNITS,
   UPDATE_READ_SHAPE, UPDATE_READ_UNITS,
 } from "@/lib/read-ceilings";
-import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { claimHandle, ensureStatsId, renameHandle, setStripeAccount, setSubscription, storeForEmail, storeForHandle, type Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
 import { readNumbers } from "@/lib/stats-report";
 import { COST_LINES, PER_PAYMENT_LINES, UNIT_COST, readShapeCost } from "./plan-cost-registry";
@@ -190,6 +190,65 @@ async function main(): Promise<void> {
   is(`one store's numbers make no more commands than TOTALS_STORE_SHAPE counts (${reading.commands} <= ${TOTALS_STORE_SHAPE.commands})`, reading.commands <= TOTALS_STORE_SHAPE.commands, true);
   const totals = read("app/studio/totals/page.tsx");
   is("each store's numbers, this page's store's too, take their units before they are read", [totals.indexOf("countStudio(store, null, TOTALS_STORE_UNITS)") >= 0 && totals.indexOf("countStudio(store, null, TOTALS_STORE_UNITS)") < totals.indexOf("readNumbers(store)"), totals.includes("alreadyCounted")], [true, false]);
+
+  part("A handle taken by another store never brings the old copy back (M2-bis)");
+  {
+    redis.clear();
+    const ONE = "first@example.com";
+    const TWO = "second@example.com";
+    await claimHandle(ONE, "takenback", "First Store", "");
+    await ensureStatsId(ONE);
+    await setStripeAccount(ONE, "acct_1TestFirst00001", true);
+    await setSubscription(ONE, { customerId: "cus_First000001", subscriptionId: "sub_First000001", active: true, tier: "pro", period: paidPeriod() });
+    const firstStore = (await storeForEmail(ONE))!;
+    const firstFeed = (await newFeedToken(firstStore)).subscribeUrl ?? "";
+    const firstToken = firstFeed.slice(firstFeed.lastIndexOf("/") + 1).replace(/\.ics$/, "");
+    const feedOwner = (await storeIdForToken(firstToken))!;
+    // As the route makes it: the store behind the handle, refused when it is not the feed's.
+    const asRoute = async () => {
+      const behind = await storeForHandle(feedOwner.handle);
+      if (!behind || behind.statsId !== feedOwner.statsId) throw new FeedGone();
+      return "BEGIN:VCALENDAR\r\nX-WHO:first\r\nEND:VCALENDAR";
+    };
+    const t0 = Date.UTC(2032, 2, 1, 0, 30);
+    is("the first store's copy is made", (await bookedCalendarFeed(feedOwner, asRoute, t0)).state, "made");
+    // Deleted without its feed forgotten (as before this fix), the handle held back, then taken by another account's store.
+    redis.run(["SET", `nl:store:handle:${feedOwner.handle}`, `released:${new Date(t0).toISOString()}`]);
+    is("deleted: gone", (await bookedCalendarFeed(feedOwner, asRoute, t0 + 3_600_000)).state, "gone");
+    redis.run(["DEL", `nl:store:handle:${feedOwner.handle}`]);
+    await claimHandle(TWO, "takenback", "Second Store", "");
+    await ensureStatsId(TWO);
+    const states: string[] = [];
+    for (let n = 0; n < 6; n += 1) states.push((await bookedCalendarFeed(feedOwner, asRoute, t0 + 86_400_000 + n * 3_600_000)).state);
+    is("the handle taken by another store: every answer is 404, the fifth too, and never the old copy", [states[4], states.every((s) => s === "gone")], ["gone", true]);
+    is("and nothing of the old copy is kept", String(redis.run(["GET", `nl:cal:out:${feedOwner.statsId}`]) ?? "").includes("X-WHO"), false);
+    // The day's makings already spent when the handle is taken: still never the copy.
+    redis.run(["SET", `nl:cal:out:${feedOwner.statsId}`, JSON.stringify({ at: t0, ics: "BEGIN:VCALENDAR\r\nX-WHO:first\r\nEND:VCALENDAR", ref: ONE })]);
+    const day3 = t0 + 2 * 86_400_000;
+    redis.run(["SET", `nl:cal:builds:${feedOwner.statsId}:${new Date(day3).toISOString().slice(0, 10)}`, String(CALENDAR_BUILDS_PER_DAY), "EX", 86_400]);
+    const spent = await bookedCalendarFeed(feedOwner, asRoute, day3);
+    is("with the day's makings spent, the old copy is not answered either", [spent.state, "ics" in spent], ["none", false]);
+
+    part("A renamed store keeps its feed (L-c)");
+    await claimHandle("third@example.com", "renamedfrom", "Third Store", "");
+    await ensureStatsId("third@example.com");
+    const third = (await storeForEmail("third@example.com"))!;
+    const thirdUrl = (await newFeedToken(third)).subscribeUrl ?? "";
+    const thirdOwner = (await storeIdForToken(thirdUrl.slice(thirdUrl.lastIndexOf("/") + 1).replace(/\.ics$/, "")))!;
+    const thirdMake = async () => {
+      const behind = await storeForHandle(thirdOwner.handle);
+      if (!behind || behind.statsId !== thirdOwner.statsId) throw new FeedGone();
+      return "BEGIN:VCALENDAR\r\nEND:VCALENDAR";
+    };
+    const renamed = await renameHandle("third@example.com", "renamedto");
+    is("renamed", renamed.ok, true);
+    is("its feed, still under the old handle in its settings, answers: no 404 by mistake", (await bookedCalendarFeed(thirdOwner, thirdMake, t0)).state, "made");
+
+    part("A store deleted from the studio forgets its feed at once (M2-bis, 1)");
+    await forgetStoreCalendar(thirdOwner.statsId);
+    is("its address leads nowhere, and its copy is gone", [await storeIdForToken(thirdUrl.slice(thirdUrl.lastIndexOf("/") + 1).replace(/\.ics$/, "")), redis.run(["GET", `nl:cal:out:${thirdOwner.statsId}`])], [null, null]);
+    is("the studio's deletion forgets it", read("app/api/store/stores/route.ts").includes("forgetStoreCalendar(result.store.statsId)"), true);
+  }
 
   done();
 }

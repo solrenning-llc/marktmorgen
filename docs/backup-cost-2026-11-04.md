@@ -1,6 +1,6 @@
 # Backup cost — 273 [BK1], worst case under the MR rule (4 November 2026)
 
-Status: **cost review prepared; not admitted.** Nothing is switched on by this document. `BACKUP_COST_REVIEW` in `lib/backup-run.ts` stays `null`; no bucket, key, variable, lifecycle rule, cron entry or route is created. The owner sets up the bucket and the variables (docs/backup.md, owner prerequisites). Under the MR rule (AGENTS.md, "MR — Regra de margem vigente"), an unknown cost fails and is never zero, and no supplier free quota is counted as zero. The open items in "What is still unknown" below keep this review from passing.
+Status: **cost review prepared; not admitted.** Nothing is switched on by this document. `BACKUP_COST_REVIEW` in `lib/backup-run.ts` stays `null`; no bucket, key, variable, lifecycle rule, cron entry or route is created. The owner sets up the bucket and the variables (docs/backup.md, owner prerequisites). Under the MR rule (AGENTS.md, "MR — Regra de margem vigente"), an unknown cost fails and is never zero, and no supplier free quota is counted as zero. The open items in "What is still unknown" below keep this review from passing. The owner's bucket, key and variables (inbox C4-25) and the proposed 30-day retention are in section 5a.
 
 Code read: `origin/main` at `fcd1617ac` (4 November 2026): `lib/backup-run.ts`, `lib/backup-export.ts`, `lib/backup-store.ts`, `lib/backup-roundtrip.ts`, `lib/backup-codec.ts`, `lib/store-data-rules.ts`, `tests/store-data-registry.ts`, `lib/spend-cost-table.ts`, `lib/llc-fixed-costs.ts`, `docs/backup.md`; queue item 273 [BK1] in docs/codex-queue.md.
 
@@ -103,6 +103,27 @@ The monthly and annual intervals have the same worst month (one run a day either
 8. **Repository bundles** (item 4 of BK1): not built; sizes not measured (this session has a shallow clone and no GitHub API access to the three repositories).
 9. **Second copy of sold files** (item 3 of BK1): not built. For scale only, one extra copy of a full Scale store's 80 GiB would be 85.9 GB → 86 GB-month × $0.015 = $1.29 a month per store, before operations. Not a proposal.
 10. **No fixed-cost line exists**: `LLC_FIXED_COST_IDS` in `lib/llc-fixed-costs.ts` has no backup or R2-rounding entry, and `tests/plan-cost-registry.ts` has no backup line. Adding them is a code change for a later unit.
+
+## 5a. The owner's setup (inbox C4-25, 4 November 2026) and the retention to set
+
+What the owner did today, as reported through the inbox (not verified from this session, which has no access to the Cloudflare or Vercel accounts):
+
+- R2 bucket `marktmorgen-backup`: private, public access off, **Standard** class, location chosen automatically (Eastern North America), **no jurisdiction** (so `BACKUP_R2_JURISDICTION` stays unset), separate from `marktmorgen-files`.
+- An account R2 token `marktmorgen-backup-production`: Object Read & Write, on that bucket only, no expiry.
+- In Vercel, Production only: `BACKUP_R2_ACCOUNT_ID`, `BACKUP_R2_BUCKET`, `BACKUP_R2_ACCESS_KEY_ID`, `BACKUP_R2_SECRET_ACCESS_KEY`, `BACKUP_ENCRYPTION_KEY` (32 random bytes in base64, with a copy kept by the owner outside Vercel).
+- The account's R2 billing has no free credit counted here (MR: a supplier's free quota is never zero cost).
+
+None of this switches the backup on (docs/backup.md): `BACKUP_COST_REVIEW` is still `null`, and the lifecycle rule, the daily schedule and the report's delivery do not exist.
+
+**Retention: 30 days (proposal for the lifecycle rule).**
+
+- **Cost:** 30 and 90 days differ by $0.0038 a month in storage (section 3). Cost does not decide.
+- **Privacy:** a backup keeps a person's data after it is erased on the site. A shorter retention lets that copy go sooner, and the privacy text that must be published when the backup is switched on (docs/backup.md, prerequisite 7) can say "up to 30 days".
+- **Recovery:** 30 daily copies are enough to notice a mistake and go back to before it within a month. Upstash's own provider backup keeps 1 or 3 days (docs/backup.md, provider research), so this is the only longer history.
+- **Rule for the owner:** in the bucket `marktmorgen-backup`, an object lifecycle rule that deletes objects with prefix `backups/` **30 days** after they were created. The code has no delete (`lib/backup-store.ts`), so this rule is the only retention.
+- **Matching review figures:** `retentionDays` 30; `maxStoredBytes` = (30 + 1) × 4,259,840 = **132,055,040 bytes**, which `validReview` accepts, because (retentionDays + 1) × objectBound ≤ maxStoredBytes holds with equality.
+
+**Still blocking the review** (section 5, unchanged): the official price pages could not be read today. This session's network denies `developers.cloudflare.com`, `upstash.com` and `vercel.com`, so the prices in section 2 carry their earlier dates and are not re-read with today's date. The other open items in section 5 also remain. Until they are closed, this review is not admitted and `BACKUP_COST_REVIEW` stays `null`.
 
 ## 6. Where each cost belongs
 

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { fromAnotherSite } from "@/lib/studio-route";
+import { fromAnotherSite, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { CREATOR, readMembers, within } from "@/lib/community";
@@ -106,6 +107,8 @@ export async function POST(request: NextRequest) {
 
   // Taking something out, and emptying the room: the creator's alone.
   if (!owner) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
+  // Neither comes back: a session let in without its second step waits (lib/two-step.ts).
+  if (await lockedFor(request, "community", action)) return refusedJson("locked");
   if (action === "unsay") {
     const number = Number(body.number);
     if (!Number.isInteger(number) || number <= 0) return Response.json({ ok: false, error: "bad" }, { status: 400 });

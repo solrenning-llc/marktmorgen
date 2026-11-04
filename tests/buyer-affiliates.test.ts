@@ -17,6 +17,8 @@
  */
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { affiliateForSession, decide, joinAsBuyer, listAffiliates } from "@/lib/affiliates";
+import { NextRequest } from "next/server";
+import { POST as joinRoute } from "@/app/api/store/affiliates/join/route";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { confirmationFor } from "@/lib/purchase-email";
 import { store as redis } from "./redis-stub";
@@ -111,6 +113,40 @@ async function main(): Promise<void> {
   if (!hal.ok) throw new Error("no hal");
   await decide(store, hal.affiliate.id, "remove");
   is("and so does somebody they removed", await refuse("cs_test_hal000000001"), "declined");
+
+  part("The same inbox written another way waits for the creator (624 [SZ8](35))");
+  paid("cs_test_gusplus000001", "gus+shop@example.com");
+  const gusTag = await joinAsBuyer(store, "cs_test_gusplus000001");
+  is("declined gus, buying as gus+shop: an application that waits, not a link", gusTag.ok && [gusTag.affiliate.status, gusTag.created], ["pending", true]);
+  paid("cs_test_haldot0000001", "Hal@Example.com.");
+  const halDot = await joinAsBuyer(store, "cs_test_haldot0000001");
+  is("removed hal, buying with a trailing dot on the domain: waits too", halDot.ok && halDot.affiliate.status, "pending");
+  const halAgain = await joinAsBuyer(store, "cs_test_haldot0000001");
+  is("and buying again does not approve the waiting one", halAgain.ok && halAgain.affiliate.status, "pending");
+  // Jo applied the ordinary way as jo+news, and the creator declined jo; jo+news then buys.
+  await redis.pipeline([
+    ["HSET", `nl:aff:${statsId}:people`, "abcdefabcdef", JSON.stringify({ id: "abcdefabcdef", email: "jo@example.com", code: "jo", status: "declined", appliedAt: 1, decidedAt: 2, note: "" })],
+    ["HSET", `nl:aff:${statsId}:emails`, "jo@example.com", "abcdefabcdef"],
+    ["HSET", `nl:aff:${statsId}:people`, "fedcbafedcba", JSON.stringify({ id: "fedcbafedcba", email: "jo+news@example.com", code: "jonews", status: "pending", appliedAt: 3, decidedAt: 0, note: "" })],
+    ["HSET", `nl:aff:${statsId}:emails`, "jo+news@example.com", "fedcbafedcba"],
+  ]);
+  paid("cs_test_jonews000001", "jo+news@example.com");
+  const jo = await joinAsBuyer(store, "cs_test_jonews000001");
+  is("somebody waiting whose inbox the creator declined is not approved by buying", jo.ok && [jo.affiliate.id, jo.affiliate.status], ["fedcbafedcba", "pending"]);
+  paid("cs_test_owntag000001", "owner+shop@example.com");
+  is("the creator under a + tag is still the creator", await refuse("cs_test_owntag000001"), "owner");
+  paid("cs_test_kim000000001", "kim@example.com");
+  const kim = await joinAsBuyer(store, "cs_test_kim000000001");
+  is("an unrelated buyer still joins at once", kim.ok && kim.affiliate.status, "approved");
+  const viaRoute = async (order: string) => {
+    const form = new FormData();
+    form.set("handle", "harbor");
+    form.set("order", order);
+    const response = await joinRoute(new NextRequest("https://marktmorgen.com/api/store/affiliates/join", { method: "POST", headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: form }));
+    return response.headers.get("location") ?? `status ${response.status}`;
+  };
+  is("the page then says the application is in, not that a link is ready", await viaRoute("cs_test_gusplus000001"), "https://marktmorgen.com/@harbor/affiliates?status=applied");
+  is("and a buyer let in hears their link is ready", await viaRoute("cs_test_kim000000001"), "https://marktmorgen.com/@harbor/affiliates?status=joined");
 
   part("The purchase email offers it only where it works");
   const session = { ...sessions.get("cs_test_dana000000001")!, metadata: { store: "harbor", product: "p8w2m4q9zz" } };

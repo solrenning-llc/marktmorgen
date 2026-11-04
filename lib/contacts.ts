@@ -38,7 +38,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
-import { type DataStore, needData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -93,7 +93,7 @@ export { MAX_CONTACT_NAME, MAX_CONTACT_TAGS, MAX_TAG_LENGTH, readTags } from "@/
 /**
  * What contacts take in the store's data room (lib/store-data.ts), all in
  * one slot. A contact put on the list by an order is part of what the order
- * left, so those writes pass `room` as { order: store } and are written by
+ * left, so those writes pass `room` as orderRoom(store) and are written by
  * lib/order-data.ts, which charges the room what each really adds (a buyer
  * already on the list, only what their record grew by); every other way on
  * (a sign-up, an import, the API, labels a sequence adds) takes what it grows
@@ -106,14 +106,52 @@ const CONTACTS_SLOT = "ct";
 export const TOKEN_BYTES = dataBytes(["0".repeat(40), "x".repeat(40 + 254 + 40)], 1) + 64;
 const contactBytes = (contact: Contact | null) => (contact ? dataBytes([JSON.stringify(contact)], 1) + TOKEN_BYTES : 0);
 
-/** Who a contact's write is counted for: the store's room, an order of the store's, or nobody (the company's own lists). */
-export type ContactRoom = DataStore | { order: DataOwner } | null;
+/**
+ * An order's writes, marked as such by orderRoom and nothing else. It used to
+ * be told apart by having an `order` field, but every store record has one
+ * (the order of its page's parts), so a write passed the whole store was taken
+ * for an order's: not charged first, and written through lib/order-data.ts
+ * with no owner, so never counted (edge tests of 4 November 2026).
+ */
+const ORDER_ROOM: unique symbol = Symbol("an order's contact writes");
+export type OrderRoom = { readonly [ORDER_ROOM]: true; readonly order: DataOwner };
+/** The room for contacts an order puts on the list: charged by lib/order-data.ts at what each really adds. */
+export function orderRoom(owner: DataOwner): OrderRoom {
+  return { [ORDER_ROOM]: true, order: owner };
+}
+/**
+ * The older way to say an order's: an object holding `order` and nothing
+ * else. Still read, exactly (a store record has many fields, never only
+ * that one), until its last caller (app/[handle]/thanks/page.tsx, reserved
+ * by another lane) moves to orderRoom.
+ */
+type LegacyOrderRoom = { order: DataOwner };
+const isOrderRoom = (room: ContactRoom): room is OrderRoom | LegacyOrderRoom =>
+  room !== null && ((room as Partial<OrderRoom>)[ORDER_ROOM] === true || (Object.keys(room).length === 1 && Object.getOwnPropertySymbols(room).length === 0 && "order" in room));
+
+/** Who a contact's write is counted for: the store's room, an order of the store's (orderRoom), or nobody (the company's own lists). */
+export type ContactRoom = DataStore | OrderRoom | LegacyOrderRoom | null;
 
 /** Takes what writing these contacts over what they were grows the list by; nothing when the writes are an order's. */
 async function needContacts(room: ContactRoom, pairs: { before: Contact | null; next: Contact }[]): Promise<void> {
-  if (!room || "order" in room) return;
+  if (!room || isOrderRoom(room)) return;
   const grown = pairs.reduce((sum, { before, next }) => sum + Math.max(0, contactBytes(next) - contactBytes(before)), 0);
   if (grown > 0) await needData(room, [{ slot: CONTACTS_SLOT, bytes: grown }]);
+}
+
+/**
+ * Puts the room right after writes needContacts was charged for: gives back
+ * the growth of each one not written (it lost the race, and is charged again
+ * when tried again), and what each one written shrank the record by (a label
+ * taken off). Nothing when the writes are an order's.
+ */
+async function settleContacts(room: ContactRoom, pairs: { before: Contact | null; next: Contact }[], written: boolean[]): Promise<void> {
+  if (!room || isOrderRoom(room)) return;
+  const back = pairs.reduce((sum, { before, next }, i) => {
+    const grown = contactBytes(next) - contactBytes(before);
+    return sum + (written[i] ? Math.max(0, -grown) : Math.max(0, grown));
+  }, 0);
+  if (back > 0) await giveData(room, [{ slot: CONTACTS_SLOT, bytes: back }]);
 }
 
 export const leadsKey = (listId: string) => `nl:store:leads:${listId}`;
@@ -184,7 +222,7 @@ export async function upsertContact(
     /** The store's id, given when the person typed the address themselves, so asking to be deleted from every store finds this one (lib/joined-stores.ts). */
     sid?: string;
   },
-  /** The store whose data room the contact takes from; { order: store } for one an order put on (lib/order-data.ts); null for the company's own lists. */
+  /** The store whose data room the contact takes from; orderRoom(store) for one an order put on (lib/order-data.ts); null for the company's own lists. */
   room: ContactRoom,
 ): Promise<AddResult> {
   const none = { joined: false, gotProduct: false, full: false };
@@ -252,7 +290,7 @@ export async function upsertContact(
   if (resubscribe) commands.push(["DECR", unsubKey(listId)]);
   if (deleted && ownYes) commands.push(liftCommand(listId, email));
   if (input.sid) commands.push(...joinedCommands(input.sid, email));
-  if (room && "order" in room) await orderWrite(room.order, commands);
+  if (room && isOrderRoom(room)) await orderWrite(room.order, commands);
   else await redisPipeline(commands);
   return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
 }
@@ -297,7 +335,7 @@ export async function importContacts(
   listId: string,
   emails: string[],
   data: DataStore,
-): Promise<{ added: number; already: number; full: boolean }> {
+): Promise<{ added: number; already: number; full: boolean; roomFull?: { left: number; message: string } }> {
   if (!isRedisConfigured() || !listId || !emails.length) return { added: 0, already: emails.length, full: false };
   const key = leadsKey(listId);
   const [size] = await redisPipeline([["HLEN", key]]);
@@ -345,7 +383,15 @@ export async function importContacts(
       newlyAgreed += 1;
     });
     if (pairs.length) {
-      await needContacts(data, sizes);
+      try {
+        await needContacts(data, sizes);
+      } catch (error) {
+        // The store's data room is full: what was added stays and is said, the
+        // rest is not written, and the caller still starts the ramp for those added.
+        if (!(error instanceof DataRoomError)) throw error;
+        const left = emails.length - i;
+        return { added, already: i - added, full, roomFull: { left, message: error.message } };
+      }
       await redisPipeline([
         ["HSET", key, ...pairs],
         ["INCRBY", agreedKey(listId), newlyAgreed],
@@ -573,7 +619,10 @@ const CAS_HSET = [
  * Writes each field that still holds what was read; says which were written.
  * Upstash runs the script; where a Redis does not (the local stand-ins), the
  * same check is made as a read just before the write, which keeps the rule
- * and only narrows the gap rather than closing it.
+ * and only narrows the gap rather than closing it. A field that already holds
+ * what was to be written counts as written: the script ran and only its
+ * answer was lost, and reporting it as lost would leave that write out of
+ * what its caller answers (and of an undo).
  */
 async function casWrite(key: string, writes: { email: string; value: string; was: string }[]): Promise<boolean[]> {
   try {
@@ -582,13 +631,13 @@ async function casWrite(key: string, writes: { email: string; value: string; was
     throw new Error("unexpected answer");
   } catch {
     const [now] = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]);
-    const same = writes.map((w, i) => {
-      const raw = Array.isArray(now) ? now[i] : null;
-      return (typeof raw === "string" ? sha1(raw) : "") === w.was;
-    });
+    const read = writes.map((_, i) => (Array.isArray(now) ? now[i] : null));
+    // A field that already holds what was to be written was written (the script ran and its answer was lost): not written again, never reported as lost.
+    const landed = writes.map((w, i) => read[i] === w.value);
+    const same = writes.map((w, i) => !landed[i] && (typeof read[i] === "string" ? sha1(read[i] as string) : "") === w.was);
     const pairs = writes.flatMap((w, i) => (same[i] ? [w.email, w.value] : []));
     if (pairs.length) await redisPipeline([["HSET", key, ...pairs]]);
-    return same;
+    return writes.map((_, i) => landed[i] || same[i]);
   }
 }
 
@@ -599,42 +648,83 @@ async function casWrite(key: string, writes: { email: string; value: string; was
  * only if the contact still holds what was read (casWrite), so an
  * unsubscribe or a purchase noted in the same moment is never written over;
  * one that changed is read again and decided again, three times at most.
+ * `gone` lists those no longer on the list when read. With `keepWritten`, a
+ * round that fails stops there and what the earlier rounds wrote is still
+ * answered: its contacts come back in `noRoom` when their new labels do not
+ * fit in the data room, or in `failed` on any other error (a write that may
+ * or may not have been made), with the `error` and `unsure` when the write
+ * itself failed (it may have landed); without it the error is thrown.
  */
 export async function changeLabels(
   listId: string,
   emails: string[],
-  change: (tags: string[]) => string[] | "same" | "skip",
+  /** Called with each contact's labels as read and its address. */
+  change: (tags: string[], email: string) => string[] | "same" | "skip",
   /** The store whose data room new labels take from (DataRoomError when they do not fit). */
   room: DataStore,
-): Promise<{ changed: string[]; same: string[] }> {
+  options: { keepWritten?: boolean } = {},
+): Promise<{ changed: string[]; same: string[]; gone: string[]; noRoom: string[]; failed: string[]; error?: unknown; unsure: boolean }> {
   const key = leadsKey(listId);
   const changed: string[] = [];
   const same: string[] = [];
+  const gone: string[] = [];
+  let noRoom: string[] = [];
+  let failed: string[] = [];
+  let failure: unknown;
+  let unsure = false;
   let pending = [...new Set(emails)];
   for (let round = 0; round < 3 && pending.length; round += 1) {
-    const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
     const writes: { email: string; value: string; was: string }[] = [];
     const sizes: { before: Contact | null; next: Contact }[] = [];
-    pending.forEach((email, i) => {
-      const raw = Array.isArray(rows) ? rows[i] : null;
-      const contact = parseContact(raw);
-      if (!contact || typeof raw !== "string") return;
-      const next = change(contact.tags);
-      if (next === "same") same.push(email);
-      else if (next !== "skip") {
-        writes.push({ email, value: JSON.stringify({ ...contact, tags: next }), was: sha1(raw) });
-        sizes.push({ before: contact, next: { ...contact, tags: next } });
-      }
-    });
-    if (!writes.length) break;
-    await needContacts(room, sizes);
-    const written = await casWrite(key, writes);
+    try {
+      const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
+      pending.forEach((email, i) => {
+        const raw = Array.isArray(rows) ? rows[i] : null;
+        const contact = parseContact(raw);
+        if (!contact || typeof raw !== "string") {
+          gone.push(email);
+          return;
+        }
+        const next = change(contact.tags, email);
+        if (next === "same") same.push(email);
+        else if (next !== "skip") {
+          writes.push({ email, value: JSON.stringify({ ...contact, tags: next }), was: sha1(raw) });
+          sizes.push({ before: contact, next: { ...contact, tags: next } });
+        }
+      });
+      if (!writes.length) break;
+      await needContacts(room, sizes);
+    } catch (error) {
+      if (!options.keepWritten) throw error;
+      // Nothing of this round was written: what it would have written is left, by why.
+      const left = writes.length ? writes.map((w) => w.email) : pending;
+      if (error instanceof DataRoomError) noRoom = left;
+      else failed = left;
+      failure = error;
+      break;
+    }
+    let written: boolean[];
+    try {
+      written = await casWrite(key, writes);
+    } catch (error) {
+      // Its charge is given back only when a read after it shows that none of them landed; unknown stays counted.
+      const landed = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]])
+        .then(([now]) => (Array.isArray(now) && now.length === writes.length ? writes.some((w, i) => now[i] === w.value) : true))
+        .catch(() => true);
+      if (!landed) await settleContacts(room, sizes, writes.map(() => false));
+      if (!options.keepWritten) throw error;
+      failed = writes.map((w) => w.email);
+      failure = error;
+      unsure = true;
+      break;
+    }
+    await settleContacts(room, sizes, written);
     pending = writes.filter((_, i) => !written[i]).map((w) => w.email);
     writes.forEach((w, i) => {
       if (written[i]) changed.push(w.email);
     });
   }
-  return { changed, same };
+  return { changed, same, gone, noRoom, failed, unsure, ...(failure === undefined ? {} : { error: failure }) };
 }
 
 /**

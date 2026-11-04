@@ -1056,6 +1056,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/labels/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/labels",
+      "parameters": []
+    },
+    {
       "source": "app/studio/meetings/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/meetings",
@@ -1238,6 +1244,7 @@
     "components/blog-body.tsx",
     "components/blog-browser.tsx",
     "components/blog-editor.tsx",
+    "components/bulk-labels.tsx",
     "components/bundle-delivery.tsx",
     "components/bundle-editor.tsx",
     "components/bundle-toggle.tsx",
@@ -1446,6 +1453,7 @@
     "components/report-form.tsx",
     "components/resend-purchase.tsx",
     "components/revenue-quality.tsx",
+    "components/review-ai-summaries.tsx",
     "components/review-form.tsx",
     "components/review-list.tsx",
     "components/review-photo-field.tsx",
@@ -1673,6 +1681,7 @@
     "app/api/store/community/rsvp/route.ts",
     "app/api/store/community/upload/route.ts",
     "app/api/store/contact-box/route.ts",
+    "app/api/store/contact-labels/route.ts",
     "app/api/store/contact/route.ts",
     "app/api/store/course/certificate/route.ts",
     "app/api/store/course/comment/route.ts",
@@ -1782,6 +1791,7 @@
     "app/api/store/paypal/disconnect/route.ts",
     "app/api/store/paypal/onboarded/route.ts",
     "app/api/store/paypal/return/route.ts",
+    "app/api/store/person-tasks/route.ts",
     "app/api/store/person/route.ts",
     "app/api/store/phone/route.ts",
     "app/api/store/photo/route.ts",
@@ -1802,6 +1812,7 @@
     "app/api/store/remind/route.ts",
     "app/api/store/rename/route.ts",
     "app/api/store/resend/route.ts",
+    "app/api/store/review-summary/route.ts",
     "app/api/store/review/route.ts",
     "app/api/store/reviews/route.ts",
     "app/api/store/sale/route.ts",
@@ -1944,6 +1955,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 133
+    "pageTemplates": 134
   }
 }

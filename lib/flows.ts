@@ -209,6 +209,14 @@ function cleanStep(raw: unknown, known: (productId: string) => boolean, isFlow: 
   return step;
 }
 
+/** How many bytes the store's sequences hold, before they are read (lib/mcp-tools.ts, emailsTool); null when it did not come back. */
+export async function flowsBytes(listId: string | null): Promise<number | null> {
+  if (!listId || !isRedisConfigured()) return 0;
+  const [n] = await redisPipeline([["STRLEN", flowsKey(listId)]]);
+  const bytes = Number(n);
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+}
+
 export async function readFlows(listId: string | null): Promise<Flow[]> {
   if (!listId || !isRedisConfigured()) return [];
   const [raw] = await redisPipeline([["GET", flowsKey(listId)]]);

@@ -553,19 +553,21 @@ export async function directorySize(id: string): Promise<number> {
  * Everyone who has come in, for the creator's list: a page at a time, in the
  * order Redis keeps them. `cursor` is Redis's own, "0" to begin.
  */
-export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number }> {
+export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number }> {
   const [reply, total] = await redisPipeline([
     ["HSCAN", membersKey(id), cursor, "COUNT", count],
     ["HLEN", membersKey(id)],
   ]);
-  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0 };
+  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0, bytes: 0 };
   const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
   const members: Member[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const member = parseMember(flat[i + 1]);
     if (member) members.push(member);
   }
-  return { members, next: String(reply[0]), total: Number(total) || 0 };
+  // The bytes the scan answered with, for a reading that pays for them (lib/api-read.ts, members).
+  const bytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
+  return { members, next: String(reply[0]), total: Number(total) || 0, bytes };
 }
 
 /** Every member who asked for announcement emails and is still here. */

@@ -5,7 +5,8 @@
  * longer keeps.
  */
 import { forgetCrmPerson, readFields, readValues, setValue, writeDeal, writeFields } from "@/lib/crm";
-import { DEFAULT_STAGES, type Deal } from "@/lib/crm-rules";
+import { DEFAULT_STAGES, MAX_DEALS, type Deal } from "@/lib/crm-rules";
+import { dataBytes } from "@/lib/store-data-rules";
 import { dataUsed } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -58,6 +59,39 @@ async function main(): Promise<void> {
   is("and the deal is not there again", (await redis.pipeline([["HEXISTS", `nl:crm:deals:${STATS}`, kept.id]]))[0], 0);
   is("nor its room taken", await used(), afterDeletion);
   is("an edit of a deal still there is written", [await writeDeal(STATS, deal("dealcccccc", "ben@example.com"), ROOM, "edit")], [true]);
+
+  part("A value changed while its person is deleted keeps the room exact");
+  const original = redis.pipeline;
+  await setValue(STATS, ANA, fields[0], "First words", ROOM);
+  const withFirst = await used();
+  let raced = false;
+  redis.pipeline = async (commands) => {
+    // The change read the old value; the person's deletion runs before the change writes.
+    if (!raced && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:crm-value-swap:")) {
+      raced = true;
+      redis.pipeline = original;
+      await forgetCrmPerson(STATS, ANA, "ana@example.com", ROOM);
+    }
+    return original.call(redis, commands);
+  };
+  const second = "A much longer second answer about the company";
+  try {
+    await setValue(STATS, ANA, fields[0], second, ROOM);
+  } finally {
+    redis.pipeline = original;
+  }
+  is("the deletion ran in between", raced, true);
+  is("the value written is counted whole, never with the deleted one's room", (await used()) - (withFirst - dataBytes([ANA, "First words"], 1)), dataBytes([ANA, second], 1));
+  await forgetCrmPerson(STATS, ANA, "ana@example.com", ROOM);
+  is("and its deletion gives back exactly that", await used(), withFirst - dataBytes([ANA, "First words"], 1));
+
+  part("An edit of a deleted deal is gone even when the board is full");
+  redis.pipeline = async (commands) => (commands[0]?.[0] === "HEXISTS" ? [0, MAX_DEALS] : original.call(redis, commands));
+  try {
+    is("gone, not full", await writeDeal(STATS, deal("deleeeeeee", "ana@example.com"), ROOM, "edit"), "gone");
+  } finally {
+    redis.pipeline = original;
+  }
 
   part("Without a room nothing is counted, and nothing breaks");
   is("Ben deleted", await forgetCrmPerson(STATS, BEN, "ben@example.com"), 2);

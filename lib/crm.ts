@@ -18,7 +18,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { type DueTask, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
@@ -134,6 +134,12 @@ export async function readValues(statsId: string | null, person: string, fields:
   return Object.fromEntries(fields.flatMap((f, i) => (typeof got[i] === "string" && got[i] ? [[f.id, got[i] as string]] : [])));
 }
 
+/** One person's value of a field set (or deleted when ARGV[2] is ""), answered with what it was before (null when there was none). */
+const SWAP_CRM_VALUE = `-- marktmorgen:crm-value-swap:v1
+local before = redis.call("HGET", KEYS[1], ARGV[1])
+if ARGV[2] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[2]) end
+return before`;
+
 /** Sets one value for one person; "" clears it. False when it is not a value the field keeps. */
 export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore): Promise<boolean> {
   if (!PERSON.test(person)) return false;
@@ -142,13 +148,21 @@ export async function setValue(statsId: string, person: string, field: CrmField,
   // A value takes room in the store's data room first (DataRoomError when it does not fit); one cleared gives it back.
   const [before] = await redisPipeline([["HGET", valuesKey(statsId, field.id), person]]);
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([person, v], 1) : 0);
-  const grown = weight(value) - weight(before);
-  if (grown > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: grown }]);
-  else if (grown < 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: -grown }]);
+  // Growth from the value read is taken first; the write answers what it really
+  // replaced, and the room is set right from that, so a change of the same
+  // value at the same time (another tab, the person's deletion) never leaves
+  // the room counting less than is kept.
+  const charged = Math.max(0, weight(value) - weight(before));
+  if (charged > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: charged }]);
+  let replaced: unknown;
   try {
-    const response = await redisPipeline([value ? ["HSET", valuesKey(statsId, field.id), person, value] : ["HDEL", valuesKey(statsId, field.id), person]]);
-    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 0 && response[0] !== 1)) throw new CrmValueWriteUnconfirmed();
+    const response = await redisPipeline([["EVAL", SWAP_CRM_VALUE, 1, valuesKey(statsId, field.id), person, value]]);
+    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== null && typeof response[0] !== "string")) throw new CrmValueWriteUnconfirmed();
+    replaced = response[0];
   } catch { throw new CrmValueWriteUnconfirmed(); }
+  const off = weight(value) - weight(replaced) - charged;
+  if (off > 0) await noteData(room, [{ slot: VALUES_SLOT, bytes: off }]);
+  else if (off < 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: -off }]);
   return true;
 }
 
@@ -391,6 +405,8 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore, ed
     preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)]]);
   } catch { throw new CrmDealReadUnavailable(); }
   if (!Array.isArray(preflight) || preflight.length !== 2 || (preflight[0] !== 0 && preflight[0] !== 1) || typeof preflight[1] !== "number" || !Number.isSafeInteger(preflight[1]) || preflight[1] < preflight[0]) throw new CrmDealReadUnavailable();
+  // An edit of a deal deleted since it was read is gone, whether or not the board is full.
+  if (edit && preflight[0] === 0) return "gone";
   if (preflight[0] === 0 && preflight[1] >= MAX_DEALS) return false;
   await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
   try {

@@ -355,6 +355,16 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:crm-value-swap:v1\n") && args[0] === "1" && args.length === 4) {
+          const target = args[1];
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const before = held instanceof Map ? (held.get(args[2]) ?? null) : null;
+          if (args[3] === "") { if (held instanceof Map) held.delete(args[2]); }
+          else this.hash(target).set(args[2], args[3]);
+          return before;
+        }
         if (key.startsWith("-- marktmorgen:crm-value-take:v1\n") && args[0] === "1" && args.length === 3) {
           const target = args[1];
           this.live(target);

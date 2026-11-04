@@ -14,17 +14,19 @@ async function main() {
   const key="nl:crm:v:contact-check:"+field.id;
   const original=redis.pipeline;
   let reply: unknown=[1], applied=false, writes=0;
-  redis.pipeline=async commands=>{if (!commands.some(c=>c[0]==="HSET" || c[0]==="HDEL")) return original.call(redis,commands);writes++;if(applied)await original.call(redis,commands);if(reply instanceof Error)throw reply;return reply as unknown[];};
+  // The write is one script that sets or clears the value and answers what it replaced (a string, or null when none).
+  const isWrite=(c: (string|number)[])=>c[0]==="EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-value-swap:");
+  redis.pipeline=async commands=>{if (!commands.some(isWrite)) return original.call(redis,commands);writes++;if(applied)await original.call(redis,commands);if(reply instanceof Error)throw reply;return reply as unknown[];};
   try {
     part("Contact saves and clears require exact acknowledgements");
     for(const value of ["Acme", ""]) {
-      for(const invalid of [null, {}, [], [null], ["1"], [true], [-1], [2], [1,1], new Error("reply lost")]) {
+      for(const invalid of [null, {}, [], [1], [0], [true], [-1], [2], [null,null], new Error("reply lost")]) {
         reply=invalid;writes=0;let uncertain=false;
         try { await setValue("contact-check",person,field,value, ROOM); } catch(error) { uncertain=error instanceof CrmValueWriteUnconfirmed; }
         is("unknown save or clear stays uncertain",uncertain,true);
         is("unknown save or clear is never retried",writes,1);
       }
-      for(const result of [0,1]) { reply=[result];is("numeric acknowledgement confirms save or clear",await setValue("contact-check",person,field,value, ROOM),true); }
+      for(const result of [null,"Before"]) { reply=[result];is("the replaced value (or none) confirms save or clear",await setValue("contact-check",person,field,value, ROOM),true); }
     }
     part("Applied writes with lost replies are not rolled back");
     applied=true;reply=[];writes=0;let uncertain=false;
@@ -47,7 +49,7 @@ async function main() {
     const sid=(await storeForEmail(owner))!.statsId!;const session=await openSession(owner);
     await original.call(redis,[["SET","nl:crm:fields:"+sid,JSON.stringify([field])]]);
     writes=0;
-    redis.pipeline=async commands=>{if(commands.some(c=>c[0]==="HSET" || c[0]==="HDEL")){writes++;await original.call(redis,commands);return [];}return original.call(redis,commands);};
+    redis.pipeline=async commands=>{if(commands.some(isWrite)){writes++;await original.call(redis,commands);return [];}return original.call(redis,commands);};
     const response=await POST(new NextRequest("https://marktmorgen.com/api/store/crm",{method:"POST",headers:{"content-type":"application/json",cookie:SESSION_COOKIE+"="+session},body:JSON.stringify({action:"value",field:field.id,person,value:"Acme"})}));
     const body=await response.json();
     is("API exposes uncertain write",[response.status,body.error],[502,"crm_write_unconfirmed"]);

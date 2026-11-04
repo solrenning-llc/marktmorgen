@@ -24,9 +24,10 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
  /** Public unit observation, not a reviewed account maximum or retention cap. */
  deploymentArtifacts: { currency: "USD", perGbMonthMinorEach: 10, products: ["Deployment Storage", "Functions Storage"], checked: "2026-10-30", published: "2026-10-09", source: "https://vercel.com/changelog/deployment-storage-pricing-expands-to-existing-teams", approvedCeiling: false },
  /** 273 [BK1]: the daily backup of the whole database (a company cost), its worst month from a review's caps by
-  * lib/backup-cost.ts (backupWorstMonth): R2 at retention + 3 sets with a GB-month and a million of each class of
-  * rounding, a Class A for each object's lifecycle deletion, Upstash at every command and byte the caps allow, no
-  * free quota. Not a reviewed ceiling: BACKUP_COST_UNKNOWNS are open and the owner has not approved a monthly cost. */
+  * lib/backup-cost.ts (backupWorstMonth): 64 runs (a run and a new try on 32 UTC days), R2 at 2 × (retention + 2)
+  * sets (the run deletes past the retention before it writes) with a GB-month and a million of each class of rounding,
+  * a Class A for each object's deletion and each listing page, Upstash at every command and byte the caps allow (200
+  * SCAN pages a run at the most), no free quota. Not a reviewed ceiling: BACKUP_COST_UNKNOWNS are open and the owner has not approved a monthly cost. */
  backup: { currency: "USD", model: "lib/backup-cost.ts", review: "lib/backup-run.ts BACKUP_COST_REVIEW", checked: "2026-11-04", source: "docs/backup-cost-2026-11-04.md", approvedCeiling: false },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },

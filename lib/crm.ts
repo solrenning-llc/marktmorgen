@@ -427,8 +427,8 @@ export async function forgetCrm(statsId: string | null): Promise<void> {
 /**
  * Deletes one person from the store's fields, deals and tasks
  * (lib/person-erasure.ts): every value kept under their key, every deal with
- * them, by the address a deal names, and the team's tasks about them, whose
- * room goes back to `room` when it is given. Answers how many records went.
+ * them, by the address a deal names, and the team's tasks about them; the
+ * room all of these took goes back to `room` when it is given. Answers how many records went.
  */
 export async function forgetCrmPerson(statsId: string | null, person: string, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
@@ -442,10 +442,29 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     const deal = json(value) as { email?: unknown } | null;
     return typeof deal?.email === "string" && deal.email.trim().toLowerCase() === address;
   }).map(([id]) => id);
-  const commands: (string | number)[][] = fields.map((f) => ["HDEL", valuesKey(statsId, f.id), person]);
-  if (theirs.length) commands.push(["HDEL", dealsKey(statsId), ...theirs]);
+  // Each value read and deleted in the same pipeline, each deal deleted on its
+  // own: what goes back to the store's data room is exactly what was removed.
+  const commands: (string | number)[][] = [
+    ...fields.flatMap((f) => [["HGET", valuesKey(statsId, f.id), person], ["HDEL", valuesKey(statsId, f.id), person]]),
+    ...theirs.map((id) => ["HDEL", dealsKey(statsId), id]),
+  ];
   const replies = commands.length ? await redisPipeline(commands) : [];
-  let records = replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  let records = 0;
+  let valuesFreed = 0;
+  fields.forEach((_, i) => {
+    if (replies[2 * i + 1] !== 1) return;
+    records += 1;
+    const before = replies[2 * i];
+    if (typeof before === "string" && before) valuesFreed += dataBytes([person, before], 1);
+  });
+  const dealsGone = theirs.filter((_, i) => replies[2 * fields.length + i] === 1);
+  records += dealsGone.length;
+  if (room && (valuesFreed > 0 || dealsGone.length)) {
+    await giveData(room, [
+      ...(valuesFreed > 0 ? [{ slot: VALUES_SLOT, bytes: valuesFreed }] : []),
+      ...dealsGone.map((id) => ({ slot: dealSlot(id), bytes: 0, set: true })),
+    ]);
+  }
   // Their tasks (639 [GL7](6)) go with them, under the tasks' lock, so a
   // change read before the deletion cannot write them back after it; their
   // values and deals above never wait on it. A lock still taken after the

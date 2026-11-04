@@ -239,7 +239,8 @@ async function publicAddressFor(host: string, resolve: Resolver): Promise<{ addr
  */
 export function sensitiveHeader(name: string): boolean {
   const lower = name.toLowerCase();
-  return lower === "authorization" || lower === "proxy-authorization" || lower === "cookie" || /token|secret|key|signature/.test(lower);
+  // By what the name holds, not its exact spelling: X-Authorization, X-Auth, X-Cookie, X-Session-Id and the like carry credentials too.
+  return /auth|cookie|token|secret|key|signature|session|credential|password|passwd/.test(lower);
 }
 
 /** The headers without any credential, for a request to another origin. */

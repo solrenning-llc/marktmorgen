@@ -4,6 +4,7 @@
  */
 import { singleDigitalAccessCovered, singleDigitalMessage, readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity, verifySingleDigitalRenewal, singleDigitalRenewalDraft, activateSingleDigitalRenewal, type SingleDigitalRenewalDraft } from "@/lib/single-digital-access";
 import { storeForEmail, storeRef } from "@/lib/store";
+import { physicalOptionCovered } from "@/lib/physical-option-confirmation";
 import { createHash, randomBytes } from "node:crypto";
 import { openCourseOriginBinding, type OpenedCourseOriginBinding } from "@/lib/course-origin-binding";
 import { performance } from "node:perf_hooks";
@@ -328,6 +329,10 @@ export async function reserveSingleDigitalConfirmationOrigin(input: Parameters<t
 export async function reserveConfirmationOrigin(input: Parameters<typeof reserveOrigin>[0], runtime: ShipmentMailRuntime = {}): Promise<{ ok: true; id: string } | { ok: false }> {
   const value = data(input);
   if (!value || typeof value.body !== "string" || new URLSearchParams(value.body).get("metadata[mm_order_origin]") !== "physical-v1") return { ok: false };
+  const snapshot = data(value.snapshot), product = data(snapshot?.product);
+  const selected = new URLSearchParams(value.body).has("metadata[option]") ||
+    product?.options !== undefined && array(product.options, 1)?.length !== 0;
+  if (selected && !physicalOptionCovered(value, confirmationOutboxPolicy(runtime), (runtime.now ?? Date.now)())) return { ok: false };
   return reserveOrigin(value as Parameters<typeof reserveOrigin>[0], runtime);
 }
 

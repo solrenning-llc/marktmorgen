@@ -12,6 +12,15 @@ import { affiliatesOn } from "@/lib/affiliates";
 
 const MAX_BODY_BYTES = 1_500;
 
+/**
+ * What one store's pages may say in ten minutes, from every address together,
+ * before its record is read for them: a store's busiest real ten minutes stay
+ * far under it (Scale's 40,000 visits a month are about nine a ten minutes,
+ * each a handful of these), while a flood from many machines at once stops
+ * costing a megabyte read each. Past it the counts are simply not made.
+ */
+const HIT_STORE_LIMIT = 3_000;
+
 const done = () => new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
 
 /**
@@ -42,16 +51,20 @@ export async function POST(request: NextRequest) {
 
   const handle = normaliseHandle(read("h", 40));
   if (!handle) return done();
-  const store = await storeForHandle(handle).catch(() => null);
-  if (!store) return done();
   // A page sends one of these per visit and per click; a script sending
   // thousands would only inflate the creator's numbers, so it stops counting.
   // A funnel's steps have an allowance of their own, so a person browsing the
   // store at length never crowds out the steps they walk afterwards: one
-  // person walks twenty at most.
+  // person walks twenty at most. Both are asked before the store's record is
+  // read (up to MAX_STORE_BYTES), and so is the store's own allowance, so a
+  // refused count reads nothing but its counter (independent review of #1496,
+  // 4 November 2026; until then the record was read first).
   const kind = read("k", 2);
   const allowance = kind === "f" ? (["hit-funnel", 60] as const) : (["hit", 120] as const);
-  if (!(await withinLimit(allowance[0], `${clientAddress(request)}|${store.handle}`, allowance[1], 600))) return done();
+  if (!(await withinLimit(allowance[0], `${clientAddress(request)}|${handle}`, allowance[1], 600))) return done();
+  if (!(await withinLimit("hit-store", handle, HIT_STORE_LIMIT, 600))) return done();
+  const store = await storeForHandle(handle).catch(() => null);
+  if (!store) return done();
 
   if (kind === "v") {
     const source = classifySource({
@@ -72,17 +85,18 @@ export async function POST(request: NextRequest) {
     if (product && productIdFor(store, product) === product) await countHit(request, store, { kind: "product", id: product });
   } else if (kind === "l") {
     // A click on one of the store's links, an affiliate's visit and a
-    // funnel's step are not a page of a visit: each takes one of the store's
-    // signals (lib/traffic.ts, takeSignal; lib/traffic-rules.ts,
-    // SIGNALS_PER_VISIT) once everything that costs nothing has passed and the
-    // store's own people are known not to be the ones looking, and past them
-    // it is simply not counted (4 November 2026, independent review of #1496;
-    // until then they were bounded only by the address's allowance). Never the
-    // requests the store's pages are drawn from: these never bring its pages
-    // to rest.
+    // funnel's step are not a page of a visit: each is written inside one of
+    // the store's signals (lib/traffic.ts, takeSignal; lib/traffic-rules.ts,
+    // SIGNALS_PER_VISIT), once everything that costs nothing has passed and
+    // the store's own people are known not to be the ones looking. A signal
+    // is kept only when something was written (a new funnel step, an approved
+    // affiliate's click new today), each connection takes its share of a day
+    // at most, and past the window's the count is not made (4 November 2026,
+    // independent review of #1496). Never the requests the store's pages are
+    // drawn from: these never bring its pages to rest.
     const id = read("id", 40);
-    if (store.links.some((link) => link.id === id) && !isBot(request.headers.get("user-agent") ?? "")) {
-      await countHit(request, store, { kind: "link", id }, () => takeSignal(store));
+    if (store.statsId && store.links.some((link) => link.id === id) && !isBot(request.headers.get("user-agent") ?? "")) {
+      await countHit(request, store, { kind: "link", id }, (write) => takeSignal(store, write));
     }
   } else if (kind === "f") {
     // A step of a funnel of pages was opened (lib/page-funnel.ts): one person
@@ -90,17 +104,18 @@ export async function POST(request: NextRequest) {
     // or product that is one of the funnel's steps.
     const userAgent = request.headers.get("user-agent") ?? "";
     if (!store.statsId || isBot(userAgent)) return done();
-    const funnel = await readPageFunnel(store.statsId, funnelMark(read("f", 10))).catch(() => null);
+    const statsId = store.statsId;
+    const funnel = await readPageFunnel(statsId, funnelMark(read("f", 10))).catch(() => null);
     const step = read("t", 1) === "g" ? "page" : "product";
     const index = funnel?.on ? stepIndex(funnel, step, read("id", 40)) : -1;
-    if (funnel && index >= 0 && !(await isStorePeople(request, store)) && (await takeSignal(store))) {
-      await countFunnelStep(store.statsId, funnel, index, funnelVisitor(store.statsId, funnel.id, clientAddress(request), userAgent));
+    if (funnel && index >= 0 && !(await isStorePeople(request, store))) {
+      await takeSignal(store, () => countFunnelStep(statsId, funnel, index, funnelVisitor(statsId, funnel.id, clientAddress(request), userAgent)));
     }
   } else if (kind === "a") {
     // A visit through an affiliate's link: counted for them, once a day.
     // `p`: the link was reached from a paid search ad (components/affiliate-click.tsx), counted apart.
     const code = read("c", 20).toLowerCase();
-    if (code && affiliatesOn(store)) await countAffiliateClick(request, store, code, read("p", 2) === "1", () => takeSignal(store));
+    if (code && affiliatesOn(store)) await countAffiliateClick(request, store, code, read("p", 2) === "1", (write) => takeSignal(store, write));
   }
   return done();
 }

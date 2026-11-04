@@ -34,6 +34,8 @@ export type SavedFunnel = {
   funnel: PageFunnel;
   pageIssues?: FunnelLaunchIssue[];
   steps: { editor?: FunnelStepEditorLink | null; title: string; open: boolean; why: string; free: boolean; product: boolean; seen: number | null; done: number | null }[];
+  /** Said instead of what the counts point to when the store's steps were not all counted (lib/traffic.ts, signalsShortWords); "" when they were. */
+  incomplete?: string;
 };
 
 type Draft = { id: string; name: string; slug: string; slugTouched: boolean; on: boolean; steps: PageFunnelStep[] };
@@ -217,11 +219,12 @@ export function PageFunnelEditor({
       ) : null}
 
       <ul className="mt-6 space-y-4">
-        {saved.map(({ funnel, steps, pageIssues = [] }) => {
+        {saved.map(({ funnel, steps, pageIssues = [], incomplete = "" }) => {
           const launchIssues = [...funnelLaunchIssues(funnel.on, steps, paymentReview?.available ?? null), ...pageIssues];
           const first = steps.find((s) => s.open)?.seen ?? null;
           const last = [...steps].reverse().find((s) => s.open);
-          const findings = funnelFindings(steps);
+          // Steps not all counted would point to drop-offs that are not there: nothing is read from them then.
+          const findings = incomplete ? [] : funnelFindings(steps);
           const checklist = funnelLaunchChecklist(funnel.name,funnel.on,steps,launchIssues);
           return (
             <li key={funnel.id} id={`funnel-review-${funnel.id}`} className="scroll-mt-24 rounded-2xl border border-line bg-white p-4 sm:p-5">
@@ -339,7 +342,7 @@ export function PageFunnelEditor({
                 ))}
               </ol>
               <p className="mt-3 text-xs text-ink-mute">
-                {funnelReachRatioMetric(first, last?.seen ?? null)}
+                {incomplete ? `${incomplete} ` : funnelReachRatioMetric(first, last?.seen ?? null)}
                 {`Approximate counts since ${new Date(funnel.since * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}, when its steps were last changed. Each visitor is counted at most once per step; you and your team are excluded. Visitors may enter at different steps.`}
               </p>
               {findings.length ? (

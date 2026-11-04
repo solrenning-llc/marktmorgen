@@ -166,6 +166,23 @@ export function requestLimitFor(store: PlanFields & { tier?: Tier }, nowSeconds 
  */
 export const SIGNALS_PER_VISIT = 6;
 
+/**
+ * Said beside a rate made from these counts (the affiliate directory's share
+ * of clicks that became a sale, a funnel's steps) once a window's signals ran
+ * out (lib/traffic.ts, signalsShortWords): this month, or an earlier one.
+ */
+export const SIGNALS_SHORT_THIS_MONTH = "Not complete this month: more clicks came than the plan counts.";
+export const SIGNALS_SHORT_BEFORE = "Not complete: in an earlier month more clicks came than the plan counts, so some were not counted.";
+
+/**
+ * The help center's sentence on them (lib/help-content.ts), its figures from
+ * these rules: what is counted, up to how many, and what happens past them.
+ */
+export function signalsWords(): string {
+  const month = (tier: Tier) => countWords(SIGNALS_PER_VISIT * VISITS_INCLUDED[tier]);
+  return `Clicks on your store's links, visits through an affiliate's link and steps of your page funnels are counted up to ${countWords(SIGNALS_PER_VISIT)} for each visit your plan covers: ${month("creator")} a billing month on Store, ${month("pro")} on Studio and ${month("scale")} on Scale. One connection is counted for only part of them in a day. Past that they are not counted until the month turns, and the rates made from them say they are not complete instead of showing a number that is too high. Nothing else stops.`;
+}
+
 /** The signals a store's window holds: SIGNALS_PER_VISIT for each visit of its figure. */
 export function signalLimitFor(store: PlanFields & { tier?: Tier }, nowSeconds = Date.now() / 1000): number {
   return SIGNALS_PER_VISIT * visitLimitFor(store, nowSeconds);

@@ -71,6 +71,7 @@ import { MAX_STORE_BYTES } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, SES_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { UPSTASH_MICRO_USD_PER_GB_TRANSFER } from "@/lib/spend-cost-table";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
+import { SHARE_COMMANDS_PER_REQUEST } from "@/lib/traffic-rules";
 
 export const CDN_PER_REQUEST = 2.0 / 1_000_000;
 export const COMMAND = 2.0 / 1_000_000;
@@ -190,9 +191,15 @@ export const COMMANDS = {
    * (lib/traffic.ts, takeSignal): held in tests/traffic.test.ts at the
    * heaviest of the three, never more than two over it. 15 measured for a
    * link's click (its count script billed with what it runs), 13 for an
-   * affiliate's visit and 10 for a funnel's step.
+   * affiliate's visit and 10 for a funnel's step. Third round of the review
+   * (4 November 2026): the address's and the store's allowances asked before
+   * the store is read, the count's expiry in the same write, and the heavier
+   * paths measured too (a link's first click of the day, an affiliate's visit
+   * from a paid ad by another affiliate's browser): 19 at the most. A store
+   * in its trial reads its place in the pool as well, one more, priced in
+   * nonPayingWorst.
    */
-  signal: 15,
+  signal: 19,
 };
 
 /**
@@ -349,12 +356,19 @@ export const SIGNAL_READ_BYTES = 8_000;
  * One signal that is not a page (app/api/store/hit, k "l", "a", "f"): its
  * request at the CDN, the call, its commands, its count script, the store's
  * record and what else it reads, a hundredth of a second of work, memory held
- * while the database is waited on, and an empty answer. Priced on its own
- * line, SIGNALS_PER_VISIT for each visit of a plan's figure
+ * while the database is waited on, and an empty answer, with its connection's
+ * share of the day written a batch at a time (SHARE_COMMANDS_PER_REQUEST).
+ * Priced on its own line, SIGNALS_PER_VISIT for each visit of a plan's figure
  * (tests/plan-cost-registry.ts, signals).
+ *
+ * Not measured: a store whose period is funded (store.period.funded) asks
+ * reservePaidResourceWindow, an EVAL of its own, before each signal, as before
+ * each request. That path must be measured and priced here before
+ * commercialMarginReady is switched on (independent review of #1496, 4
+ * November 2026).
  */
 export function signalCost(): number {
-  return CDN_PER_REQUEST + CALL + COMMANDS.signal * COMMAND + evalCost(EVALS.signal) + storeReadCost(STORE_READS.signal) + SIGNAL_READ_BYTES * DB_BYTE + 0.01 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
+  return CDN_PER_REQUEST + CALL + (COMMANDS.signal + SHARE_COMMANDS_PER_REQUEST) * COMMAND + evalCost(EVALS.signal) + storeReadCost(STORE_READS.signal) + SIGNAL_READ_BYTES * DB_BYTE + 0.01 * CPU_PER_SECOND + 0.3 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
 }
 
 /**

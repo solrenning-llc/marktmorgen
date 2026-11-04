@@ -251,11 +251,16 @@ export function funnelVisitor(statsId: string, funnelId: string, ip: string, use
   return createHash("sha256").update(`funnel|${statsId}|${funnelId}|${ip}|${userAgent}`).digest("hex").slice(0, 24);
 }
 
-/** Counts a person opening step `index`. Never throws: a count must not stop a page. */
-export async function countFunnelStep(statsId: string, funnel: PageFunnel, index: number, visitor: string): Promise<void> {
-  if (!isRedisConfigured() || index < 0 || index >= funnel.steps.length) return;
+/**
+ * Counts a person opening step `index`. Never throws: a count must not stop a
+ * page. Answers whether the count changed, false for somebody it already
+ * had (app/api/store/hit keeps the store's signal only then).
+ */
+export async function countFunnelStep(statsId: string, funnel: PageFunnel, index: number, visitor: string): Promise<boolean> {
+  if (!isRedisConfigured() || index < 0 || index >= funnel.steps.length) return false;
   const key = seenKey(statsId, funnel, index);
-  await redisPipeline([["PFADD", key, visitor], ["EXPIRE", key, KEEP_SECONDS]]).catch(() => {});
+  const [added] = await redisPipeline([["PFADD", key, visitor], ["EXPIRE", key, KEEP_SECONDS]]).catch(() => [0]);
+  return Number(added) === 1;
 }
 
 /** Counts a person signing up or paying at step `index`. Never throws. */

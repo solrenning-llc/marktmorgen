@@ -286,3 +286,16 @@ export async function forgetChatPerson(id: string, who: string): Promise<number>
   await redisPipeline([["DEL", spokeKey(id, who)], ...(theirs.length ? [["ZREM", roomKey(id), ...theirs]] : [])]);
   return theirs.length;
 }
+
+/** What one member said in the community's room, for the copy of their data (619 [SZ3]): the messages the erasure deletes. Only reads. */
+export async function chatMessagesOf(id: string, who: string): Promise<{ text: string; at: number }[]> {
+  const [raw] = await redisPipeline([["ZRANGEBYSCORE", roomKey(id), "-inf", "+inf"]]);
+  return (Array.isArray(raw) ? raw : []).map(String).flatMap((row) => {
+    try {
+      const message = JSON.parse(row) as Partial<ChatMessage>;
+      return message.a === who && typeof message.text === "string" ? [{ text: message.text, at: Number(message.at) || 0 }] : [];
+    } catch {
+      return [];
+    }
+  });
+}

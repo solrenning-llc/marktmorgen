@@ -107,7 +107,9 @@ export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", MAX_BODY_LENGTH * 4 + 4_000);
   if (!guarded.ok) return guarded.response;
   const { ref, body } = guarded;
-  const action = text(body.action, 10);
+  // Long enough for the longest action below ("cert-months" has 11 letters);
+  // tests/certificate-validity.test.ts holds every action within it.
+  const action = text(body.action, 20);
   const id = text(body.id, 40);
   if (!id) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
 
@@ -331,6 +333,14 @@ export async function POST(request: NextRequest) {
 
       if (action === "cert") {
         const result = editCourse(course, { op: "certificate", on: body.on === true });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
+      // How long certificates issued from now on stay valid (639 [GL7](32)): 1 to 120 months, or for good.
+      if (action === "cert-months") {
+        const result = editCourse(course, { op: "certificate-months", months: body.months ?? null });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         return Response.json({ ok: true, course: result.course });

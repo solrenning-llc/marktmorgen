@@ -38,6 +38,7 @@
  * confirmed — such a call shows what it would fall back to: the creator's
  * own link, or a room made here when they have none.
  */
+import { whereOf } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type CallSetup, isGroup, roomFor } from "@/lib/call-setup";
 import { callScope, givenLink, parseRecord, recordKey } from "@/lib/meet-records";
@@ -95,6 +96,16 @@ export function fallbackSetup(setup: CallSetup, start: number): CallSetup {
  * own link. Two round trips at most, however many.
  */
 export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise<(string | null)[]> {
+  // In person (lib/call-place.ts): no room, not even one kept from when it was online; the others are asked as before.
+  if (asks.some((a) => whereOf(a.setup).kind === "place")) {
+    const online = asks.map((a, i) => ({ a, i })).filter(({ a }) => whereOf(a.setup).kind !== "place");
+    const found = await roomsFor(callsId, online.map(({ a }) => a));
+    const out: (string | null)[] = asks.map(() => null);
+    online.forEach(({ i }, k) => {
+      out[i] = found[k];
+    });
+    return out;
+  }
   if (!callsId || !isRedisConfigured() || asks.length === 0) return asks.map((a) => roomFor(a.setup, a.start));
   const read = await redisPipeline(
     asks.flatMap((a) => [

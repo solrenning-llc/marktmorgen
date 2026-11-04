@@ -58,6 +58,10 @@ export const fr: BuyerWords = {
   callLive: (dates) => `Session en direct, en ligne, ${dates}${S}${plural(dates, "date prévue", "dates prévues")}`,
   callGroup: (minutes, seats) => `Appel de groupe, ${minutes}${S}minutes, jusqu'à ${seats}${S}personnes, en ligne`,
   callOne: (minutes) => `Appel de ${minutes}${S}minutes, en ligne`,
+  inPersonLive: (dates) => `Séance en personne, ${dates}${S}${plural(dates, "date prévue", "dates prévues")}`,
+  inPersonGroup: (minutes, seats) => `${minutes}${S}minutes, jusqu'à ${seats}${S}personnes, en personne`,
+  inPersonOne: (minutes) => `${minutes}${S}minutes, en personne`,
+  inPersonLiveNone: "Séance en personne, aucune date prévue",
   bundleOf: (count, worth) => `Lot de ${count}${S}produits${worth ? ` · ${worth}` : ""}`,
   worth: (worth, price) => `${worth} de produits pour ${price}`,
   podcast: (episodes) => `Podcast privé, ${episodes}${S}${plural(episodes, "épisode", "épisodes")}, dans votre propre application de podcasts`,
@@ -306,4 +310,9 @@ export const fr: BuyerWords = {
   cardTestMode: `Mode test${S}: aucune vraie carte n'est débitée.`,
   cardCheckout: "Paiement sécurisé par Stripe, dans un nouvel onglet.",
   cardOpens: (store) => `S'ouvre dans la boutique de ${store}, dans un nouvel onglet.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} ou plus`,
+  plusTax: "+ taxes, le cas échéant",
+  salePriceUntil: (price, when) => `Prix soldé${S}: ${price}, jusqu'au ${when}`,
 };

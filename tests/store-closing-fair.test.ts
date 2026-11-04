@@ -159,6 +159,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (!account) {
     const plan = world.plans.find((row) => path === `/subscriptions/${String(row.id)}`);
     if (plan) return json(plan);
+    // Search deliberately lags the platform plan list in this journey.
+    // Match its endpoint before the generic single-subscription fallback.
+    if (path === "/subscriptions/search" && method === "GET") return json({ object: "search_result", data: [], has_more: false, next_page: null });
     if (path.startsWith("/subscriptions/")) return json({ id: path.split("/").pop(), status: "canceled", items: { data: [] } });
     if (path === "/subscriptions" && method === "GET") {
       const customer = url.searchParams.get("customer");

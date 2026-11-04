@@ -12,6 +12,8 @@ for(const [name,repo] of [
  ["contradictory visibility",{...repository,visibility:"private"}],
  ["missing repository",undefined],
 ] as const)is("disable "+name,publicStandardAx2Run(env,()=>({repository:repo})),false);
+is("allow the same repository after a move to another owner, by its ID",publicStandardAx2Run({GITHUB_REPOSITORY:"new-owner/marktmorgen",GITHUB_REPOSITORY_ID:"1334793724",GITHUB_EVENT_PATH:"synthetic-event.json"},()=>({repository:{id:1334793724,full_name:"new-owner/marktmorgen",private:false,visibility:"public"}})),true);
+is("disable a copy under another owner with another ID",publicStandardAx2Run({GITHUB_REPOSITORY:"new-owner/marktmorgen",GITHUB_REPOSITORY_ID:"99",GITHUB_EVENT_PATH:"synthetic-event.json"},()=>({repository:{id:99,full_name:"new-owner/marktmorgen",private:false,visibility:"public"}})),false);
 is("disable unknown environment",publicStandardAx2Run({},()=>({repository})),false);
 is("disable foreign environment",publicStandardAx2Run({...env,GITHUB_REPOSITORY:"someone/another"},()=>({repository})),false);
 is("disable missing event path",publicStandardAx2Run({GITHUB_REPOSITORY:env.GITHUB_REPOSITORY},()=>({repository})),false);

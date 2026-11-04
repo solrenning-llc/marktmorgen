@@ -612,7 +612,10 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // A plan paid for it since its day began (a checkout opened before and
     // finished on it) is ended and returned in full (lib/closing-plan-guard.ts).
     await markShut(store, final.day ?? now, was);
-    const latePlansChecked = await refuseLatePlans(store);
+    // The durable final index survives a late active snapshot, which clears
+    // planEndedAt. Keep the original closing proof for the refund guard.
+    const closingStore = store.planEndedAt ? store : { ...store, planEndedAt: new Date(was).toISOString() };
+    const latePlansChecked = await refuseLatePlans(closingStore);
     if (!latePlansChecked) return { key, state: "held", note: "its plan subscriptions could not all be checked" };
     if (final.removed) {
       if (!final.due) {

@@ -607,6 +607,13 @@ async function main() {
   world.failPlanSearch = false;
   world.plans.length = 0;
   await setSubscription(ned, { customerId: "cus_ned0001", subscriptionId: "sub_nedplan02", active: true, tier: "creator", cycle: "month", trialEnds: 0 });
+  const observedLateNed = { ...lateNed, id: "sub_nedlate002", status: "active" };
+  world.plans.push(observedLateNed);
+  const observedWrites = world.writes.length;
+  const finalAfterObservation = await closeOne(ned, N + (CLOSING_DAYS + 1) * DAY, hands, Number.POSITIVE_INFINITY);
+  is("the durable final closing still stops a late plan after the active snapshot cleared planEndedAt", [world.writes.slice(observedWrites).some(w => w.method === "DELETE" && w.path === "/subscriptions/sub_nedlate002"), observedLateNed.status], [true, "canceled"]);
+  is("known final coverage and completed plan refunds let the closing finish", finalAfterObservation.state, "removed");
+  world.plans.length = 0;
   const nedBefore = sent.length;
   await releaseRestarted(Date.now() + 60_000, tellStaysOpen, Date.now());
   is("no \"it stays open\" is sent: what its buyers paid for has ended", sent.slice(nedBefore).filter((m) => m.subject.includes("staying open")).length, 0);

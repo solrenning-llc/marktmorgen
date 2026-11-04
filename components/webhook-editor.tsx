@@ -344,7 +344,7 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
                     </button>
                   ) : null}
                   <span
-                    className={`shrink-0 text-xs font-semibold ${result.tone === "ok" ? "text-mint-deep" : result.tone === "bad" ? "text-danger" : "text-ink-soft"}`}
+                    className={`shrink-0 text-xs font-semibold ${result.tone === "ok" ? "text-mint-deep" : result.tone === "bad" ? "text-danger-text" : "text-ink-soft"}`}
                   >
                     {result.text}
                   </span>

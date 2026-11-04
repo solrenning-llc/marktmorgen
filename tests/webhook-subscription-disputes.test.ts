@@ -8,7 +8,7 @@
  * only; the endpoint's name resolves to a private address, so nothing leaves
  * this machine.
  */
-import { DISPUTE_LOOKUPS_PER_STORE, STRIPE_LOOKUPS_PER_STORE, STRIPE_WAIT_RUNS, addEndpoint, eventIdFor, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
+import { DISPUTE_LOOKUPS_PER_STORE, GIVEN_UP_LINES_PER_DAY, STRIPE_LOOKUPS_PER_STORE, STRIPE_REFUSED_RUNS, STRIPE_WAIT_RUNS, STRIPE_WAIT_SECONDS, addEndpoint, eventIdFor, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { allowanceUsed } from "@/lib/store-allowance";
@@ -28,7 +28,7 @@ const intents: Record<string, Record<string, string>> = {};
 const paidBy: Record<string, string> = {};
 const invoices: Record<string, Record<string, unknown>> = {};
 /** How many more times each path answers 500, fails without an answer, or is refused with another Stripe error. */
-type Failure = "500" | "network" | "403" | "400";
+type Failure = "500" | "network" | "403" | "400" | "429";
 const failing: Record<string, { left: number; how: Failure }> = {};
 /** A canceled member's customer record, as GET /v1/customers answers. */
 const customers: Record<string, string> = {};
@@ -49,6 +49,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     fail.left -= 1;
     if (fail.how === "network") throw new TypeError("fetch failed");
     if (fail.how === "403") return Response.json({ error: { type: "invalid_request_error", code: "account_invalid", message: "The account cannot be read." } }, { status: 403 });
+    if (fail.how === "429") return Response.json({ error: { type: "invalid_request_error", code: "rate_limit", message: "Too many requests." } }, { status: 429 });
     if (fail.how === "400") return Response.json({ error: { type: "invalid_request_error", code: "parameter_unknown", message: "Received unknown parameter." } }, { status: 400 });
     return Response.json({ error: { type: "api_error", message: "Something went wrong on Stripe's end." } }, { status: 500 });
   }
@@ -100,6 +101,12 @@ const lookups = () => asked.filter((a) => a.path !== "/v1/events");
 let statsId = "";
 const anchor = async () => (await redis.pipeline([["GET", `nl:hooks:anchor:${statsId}`]]))[0];
 const waitRecord = async () => (await redis.pipeline([["GET", `nl:hooks:wait:${statsId}`]]))[0];
+/** The wait record without the time it began: "<evt>|<visits>". */
+const waitOf = async () => {
+  const raw = await waitRecord();
+  return typeof raw === "string" ? raw.split("|").slice(0, 2).join("|") : raw;
+};
+const nowSeconds = () => Math.floor(Date.now() / 1000);
 const anchorTtl = async () => Number((await redis.pipeline([["TTL", `nl:hooks:anchor:${statsId}`]]))[0]);
 const cancel = (n: number) => evt(`evt_Cancel${n}`, "customer.subscription.updated", 1_790_070_000 + n, {
   id: `sub_Cancel${n}`, object: "subscription", customer: `cus_Cancel${n}`, cancel_at_period_end: true, current_period_end: 1_792_000_000,
@@ -228,13 +235,13 @@ async function main() {
   timeline = [evt("evt_Bad400", "charge.dispute.created", 1_790_080_000, dispute("dp_bad400", "pi_Member"))];
   failing["/v1/invoices/in_Member01"] = { left: 1, how: "400" };
   await watchStripe(Date.now() + 10_000);
-  is("a 400 that is not resource_missing sends nothing and keeps no anchor past it", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [[], null, "evt_Bad400|1"]);
+  is("a 400 that is not resource_missing sends nothing and keeps no anchor past it", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitOf()], [[], null, "evt_Bad400|1"]);
   await watchStripe(Date.now() + 10_000);
   is("and is sent once Stripe answers; the wait is let go", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_bad400"], "evt_Bad400", null]);
 
-  part("A lookup Stripe keeps refusing waits a bounded number of runs, then is passed over loudly");
+  part("A lookup that keeps failing waits a bounded number of visits, then is passed over loudly");
   store = await setup(["dispute.opened"]);
-  // A paid plan, so the store has webhook deliveries this month for the line the passed-over event leaves.
+  // A paid plan, so the store's month's deliveries can be counted (a passed-over line takes none).
   await setSubscription(OWNER, { customerId: "cus_SubDisputesPlan", subscriptionId: "sub_SubDisputesPlan", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
   store = (await storeForEmail(OWNER))!;
   timeline = [
@@ -242,23 +249,24 @@ async function main() {
     evt("evt_Refused", "charge.dispute.created", 1_790_090_100, dispute("dp_refused", "pi_Member")),
     evt("evt_KAfter", "charge.dispute.created", 1_790_090_200, dispute("dp_kafter", "pi_Once")),
   ];
-  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "403" };
+  // A failure that may clear (a 500): the long wait.
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
   const usedBeforeDispute = await allowanceUsed(store, "webhook");
   await watchStripe(Date.now() + 10_000);
-  is("the first run sends what came before and counts one run of waiting", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_kbefore"], "evt_KBefore", "evt_Refused|1"]);
-  // Two days go by: the anchor's expiry is renewed while it does not move (without it, 28 days would be left).
+  is("the first visit sends what came before and counts one visit of waiting, with when it began", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitOf(), Math.abs(Number(String(await waitRecord()).split("|")[2]) - nowSeconds()) < 60], [["dp_kbefore"], "evt_KBefore", "evt_Refused|1", true]);
+  // Two days go by in the store: the anchor's expiry is renewed while it does not move (without it, 28 days would be left).
   redis.advance(2 * 86400 * 1000);
   await watchStripe(Date.now() + 10_000);
-  is("each run it waits is counted", await waitRecord(), "evt_Refused|2");
+  is("each visit it waits is counted", await waitOf(), "evt_Refused|2");
   is("the anchor, not moving, is kept as long as Stripe keeps events", [await anchor(), (await anchorTtl()) > 29 * 86400], ["evt_KBefore", true]);
-  // Jump to the last run before the cap.
-  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Refused|${STRIPE_WAIT_RUNS - 1}`, "EX", 30 * 86400]]);
+  // Jump to two visits before the cap.
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Refused|${STRIPE_WAIT_RUNS - 2}|${nowSeconds()}`, "EX", 30 * 86400]]);
   await watchStripe(Date.now() + 10_000);
-  is("still waiting at the last run before the cap", [await waitRecord(), await sentIds(store, "dispute.opened", "dispute")], [`evt_Refused|${STRIPE_WAIT_RUNS}`, ["dp_kbefore"]]);
+  is("still waiting one visit before the cap", [await waitOf(), await sentIds(store, "dispute.opened", "dispute")], [`evt_Refused|${STRIPE_WAIT_RUNS - 1}`, ["dp_kbefore"]]);
   said.length = 0;
   asked.length = 0;
   const givingUp = await watchStripe(Date.now() + 10_000);
-  is("past the cap it is passed over, asking Stripe nothing for it", lookups().map((a) => a.path), ["/v1/payment_intents/pi_Once"]);
+  is("the visit that reaches the cap tries once more, then passes it over", lookups().map((a) => a.path), ["/v1/payment_intents/pi_Member", "/v1/invoice_payments?pi_Member", "/v1/invoices/in_Member01", "/v1/payment_intents/pi_Once"]);
   is("and it is not counted among the events read; the one after it is", givingUp.events, 1);
   const view = await webhooksView(store);
   const line = view.log.find((d) => d.givenUp);
@@ -269,7 +277,59 @@ async function main() {
   is("and no message made of it", (await recentMessages(store, "dispute.opened", 10)).map((m) => (m.data as { dispute: string }).dispute).sort(), ["dp_kafter", "dp_kbefore"]);
   is("said loudly in the log", said.some((line) => line.startsWith("WEBHOOK EVENT GIVEN UP") && line.includes("evt_Refused")), true);
   is("what came after is sent, the anchor moves on and the wait is let go", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_kafter", "dp_kbefore"], "evt_KAfter", null]);
-  is("about a day of five-minute runs", STRIPE_WAIT_RUNS * 5 / 60, 24);
+  is("about a day of five-minute visits", STRIPE_WAIT_RUNS * 5 / 60, 24);
+
+  part("A store visited seldom gives up by time, long before Stripe's thirty days");
+  store = await setup(["dispute.opened"]);
+  timeline = [
+    evt("evt_Slow", "charge.dispute.created", 1_790_091_000, dispute("dp_slow", "pi_Member")),
+    evt("evt_SlowAfter", "charge.dispute.created", 1_790_091_100, dispute("dp_slowafter", "pi_Once")),
+  ];
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
+  // Visited every few hours: only five visits so far, the first two days and a minute ago.
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Slow|5|${nowSeconds() - STRIPE_WAIT_SECONDS - 60}`, "EX", 30 * 86400]]);
+  await watchStripe(Date.now() + 10_000);
+  is("two days after it first stopped, it is passed over with its line, and the next is sent", [(await webhooksView(store)).log.filter((d) => d.givenUp).length, await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [1, ["dp_slowafter"], "evt_SlowAfter", null]);
+  store = await setup(["dispute.opened"]);
+  timeline = [evt("evt_Slow2", "charge.dispute.created", 1_790_091_200, dispute("dp_slow2", "pi_Member"))];
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Slow2|5|${nowSeconds() - STRIPE_WAIT_SECONDS + 3600}`, "EX", 30 * 86400]]);
+  await watchStripe(Date.now() + 10_000);
+  is("an hour short of two days it still waits", await waitOf(), "evt_Slow2|6");
+
+  part("Stripe refusing the request itself gives up after a few visits; a limit keeps the long wait");
+  for (const [how, code] of [["400", "parameter_unknown"], ["403", "account_invalid"]] as const) {
+    store = await setup(["dispute.opened"]);
+    timeline = [
+      evt("evt_Ref4xx", "charge.dispute.created", 1_790_092_000, dispute("dp_ref4xx", "pi_Member")),
+      evt("evt_Ref4xxAfter", "charge.dispute.created", 1_790_092_100, dispute("dp_ref4xxafter", "pi_Once")),
+    ];
+    failing["/v1/invoice_payments?pi_Member"] = { left: 1_000_000, how };
+    for (let visit = 1; visit < STRIPE_REFUSED_RUNS; visit += 1) await watchStripe(Date.now() + 10_000);
+    is(`${how} ${code}: waits ${STRIPE_REFUSED_RUNS - 1} visits`, [await waitOf(), await sentIds(store, "dispute.opened", "dispute")], [`evt_Ref4xx|${STRIPE_REFUSED_RUNS - 1}`, []]);
+    await watchStripe(Date.now() + 10_000);
+    is(`${how} ${code}: passed over on visit ${STRIPE_REFUSED_RUNS}, with its line; the next is sent`, [(await webhooksView(store)).log.filter((d) => d.givenUp).length, await sentIds(store, "dispute.opened", "dispute"), await waitRecord()], [1, ["dp_ref4xxafter"], null]);
+  }
+  store = await setup(["dispute.opened"]);
+  timeline = [evt("evt_Limited", "charge.dispute.created", 1_790_093_000, dispute("dp_limited", "pi_Member"))];
+  failing["/v1/invoice_payments?pi_Member"] = { left: 1_000_000, how: "429" };
+  for (let visit = 0; visit < STRIPE_REFUSED_RUNS + 2; visit += 1) await watchStripe(Date.now() + 10_000);
+  is("429: still waiting after more visits than a refusal gets", [await waitOf(), (await webhooksView(store)).log.some((d) => d.givenUp)], [`evt_Limited|${STRIPE_REFUSED_RUNS + 2}`, false]);
+
+  part("A failure inside one event's handling is counted too, and ends in a give-up");
+  store = await setup(["sale.completed"]);
+  const brokenSale = evt("evt_Broken", "checkout.session.completed", 1_790_094_000, { id: "cs_Broken01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } });
+  const nextSale = evt("evt_NextSale", "checkout.session.completed", 1_790_094_100, { id: "cs_Next01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } });
+  timeline = [brokenSale, nextSale];
+  const brokenMark = `nl:hooks:evt:${eventIdFor(statsId, "sale.completed", "cs_Broken01")}`;
+  const realPipelineEarly = redis.pipeline.bind(redis);
+  redis.pipeline = ((commands: (string | number)[][]) => (commands.some((c) => c[1] === brokenMark) ? Promise.reject(new Error("synthetic store failure")) : realPipelineEarly(commands))) as typeof redis.pipeline;
+  await watchStripe(Date.now() + 10_000);
+  is("the visit is not lost: the event waits, counted, and the anchor stays before it", [await waitOf(), await anchor(), (await recentMessages(store, "sale.completed")).length], ["evt_Broken|1", null, 0]);
+  await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_Broken|${STRIPE_WAIT_RUNS - 1}|${nowSeconds()}`, "EX", 30 * 86400]]);
+  await watchStripe(Date.now() + 10_000);
+  redis.pipeline = realPipelineEarly as typeof redis.pipeline;
+  is("at the cap it is passed over (a sale leaves no line) and the next one is sent", [await waitRecord(), await anchor(), (await recentMessages(store, "sale.completed")).map((m) => (m.data as { checkout_session: string }).checkout_session)], [null, "evt_NextSale", ["cs_Next01"]]);
 
   part("membership.canceled waits for the member's address instead of going out without it");
   store = await setup(["membership.canceled"]);
@@ -290,7 +350,7 @@ async function main() {
   (timeline[0].data as Record<string, unknown>).previous_attributes = cancelPrevious;
   failing["/v1/customers/cus_Cancel0"] = { left: 1, how: "500" };
   await watchStripe(Date.now() + 10_000);
-  is("an address that failed to load waits too", [(await cancels()).length, await waitRecord()], [0, "evt_Cancel0|1"]);
+  is("an address that failed to load waits too", [(await cancels()).length, await waitOf()], [0, "evt_Cancel0|1"]);
   await watchStripe(Date.now() + 10_000);
   is("and goes out with it next run", await cancels(), ["member0@example.net"]);
   store = await setup(["membership.canceled"]);
@@ -322,6 +382,15 @@ async function main() {
   is("with no call about a customer, a payment or an invoice", lookups().map((a) => a.path), []);
   is("nothing waits and the anchor reaches the newest", [await waitRecord(), await anchor()], [null, "evt_Sale"]);
 
+  part("While the plan's costs are paused, the wait is kept with the anchor");
+  store = await setup(["dispute.opened"]);
+  await setSubscription(OWNER, { customerId: "cus_SubDisputesPaused", subscriptionId: "sub_SubDisputesPaused", active: true, tier: "pro", cycle: "month", period: paidPeriod(), renewalUnpaid: true });
+  await redis.pipeline([["SET", `nl:hooks:anchor:${statsId}`, "evt_Paused01", "EX", 60], ["SET", `nl:hooks:wait:${statsId}`, `evt_Paused02|4|${nowSeconds()}`, "EX", 60]]);
+  asked.length = 0;
+  await watchStripe(Date.now() + 10_000);
+  const pausedTtls = (await redis.pipeline([["TTL", `nl:hooks:anchor:${statsId}`], ["TTL", `nl:hooks:wait:${statsId}`]])).map(Number);
+  is("nothing asked of Stripe; the anchor and the wait both kept thirty days", [asked.length, pausedTtls.every((ttl) => ttl > 29 * 86400), await waitOf()], [0, true, "evt_Paused02|4"]);
+
   part("Forgetting a store's webhooks forgets its wait too");
   await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, "evt_Any|3", "EX", 60]]);
   const { forgetStoreWebhooks } = await import("@/lib/webhooks");
@@ -350,20 +419,32 @@ async function main() {
   timeline = [heldCancel(0), sale];
   await seedWait("evt_Cancel0");
   const used0 = await allowanceUsed(store, "webhook");
-  // The next event of the same visit dies on the store, so the visit ends before its anchor and its wait are written.
-  const saleMark = `nl:hooks:evt:${eventIdFor(statsId, "sale.completed", "cs_Throw01")}`;
-  breakWhen((command) => command[1] === saleMark);
+  // The visit dies on the store after giving up, before its anchor and its wait are written.
+  breakWhen((command) => command[0] === "SET" && command[1] === `nl:hooks:anchor:${statsId}`);
   await watchStripe(Date.now() + 10_000);
   mend();
-  is("a visit that gives up and then dies: one line, no delivery taken, the wait still at the cap", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, await waitRecord(), await anchor()], [1, 0, `evt_Cancel0|${STRIPE_WAIT_RUNS}`, null]);
+  is("a visit that gives up and then dies: one line, no delivery taken, the wait still at the cap", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, await waitOf(), await anchor()], [1, 0, `evt_Cancel0|${STRIPE_WAIT_RUNS}`, null]);
   is("a known event's line does not say it may not be the store's", (await givenUpLines())[0]?.lastError.includes("may not be"), false);
   await watchStripe(Date.now() + 10_000);
   is("the next visit gives up again but writes nothing more, and sends the sale", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, (await recentMessages(store, "sale.completed")).length, await anchor(), await waitRecord()], [1, 0, 1, "evt_SaleAfter", null]);
-  // Stripe lost the anchor: everything is read again from far back and the same event waits to the cap again.
+  // A week and a day later the line itself is gone; then Stripe loses the anchor, everything is read
+  // again from far back and the same event waits to the cap again: only the event's mark says it was told.
+  redis.advance(8 * 86400 * 1000);
+  is("the line has expired after its week", (await givenUpLines()).length, 0);
   await redis.pipeline([["DEL", `nl:hooks:anchor:${statsId}`]]);
   await seedWait("evt_Cancel0");
   await watchStripe(Date.now() + 10_000);
-  is("read again from far back and given up again: still one line, no delivery", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0], [1, 0]);
+  is("read again from far back and given up again: the mark holds, no line written again, no delivery", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, await waitRecord()], [0, 0, null]);
+
+  part("Lines of passed-over events are capped a day");
+  store = await setup(["dispute.opened"]);
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
+  for (let n = 0; n <= GIVEN_UP_LINES_PER_DAY; n += 1) {
+    timeline = [...timeline, evt(`evt_Day${n}`, "charge.dispute.created", 1_790_120_000 + n, dispute(`dp_day${n}`, "pi_Member"))];
+    await seedWait(`evt_Day${n}`);
+    await watchStripe(Date.now() + 10_000);
+  }
+  is(`${GIVEN_UP_LINES_PER_DAY} lines a day; one more is said in the server log only`, [(await givenUpLines()).length, said.some((l) => l.includes("more Stripe events were passed over today")), await anchor()], [GIVEN_UP_LINES_PER_DAY, true, `evt_Day${GIVEN_UP_LINES_PER_DAY}`]);
 
   for (const [what, bad] of [
     ["the line written, the log not", (command: (string | number)[]) => command[0] === "LPUSH" && command[1] === `nl:hooks:log:${statsId}`],

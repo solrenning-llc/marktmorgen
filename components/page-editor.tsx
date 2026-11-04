@@ -929,9 +929,9 @@ export function PageEditor({
       <ReviewsSection heading={heading} summary={summary} reviews={previewReviews} storeName={storeName} productTitle={product.title} moreHref={null} preview picked={pickedIds} />
     ) : null;
   const buyPreview = (
-    <section className="st-card sp-section p-6 sm:p-8">
+    <section className="st-card sp-section p-6 page-sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <p className="font-display text-xl font-semibold leading-snug sm:text-2xl">{product.free ? `Get ${product.title}` : product.title}</p>
+        <p className="font-display text-xl font-semibold leading-snug page-sm:text-2xl">{product.free ? `Get ${product.title}` : product.title}</p>
         {pill}
       </div>
       <p className="st-muted mt-3 text-sm">
@@ -967,7 +967,7 @@ export function PageEditor({
                           {pill}
                           {rating}
                         </div>
-                        <p className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em]">{product.title}</p>
+                        <p className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] page-sm:text-5xl">{product.title}</p>
                       </header>
                     )}
                     {product.free && !site ? buyPreview : null}

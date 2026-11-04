@@ -17,7 +17,13 @@
  *     gets it as raw text.
  *   - Links carry the email's tag, as every other link; an email address
  *     opens the reader's mail app and carries none.
+ *   - In the store's own language, with the store page's own words
+ *     (lib/buyer-words/blocks.ts): its email address and website by their
+ *     words there, and a profile elsewhere as "{store} on {network}", so
+ *     each link says where it goes by its own text (WCAG 2.4.9), in the HTML
+ *     and in the plain text alike.
  */
+import { type BlockWords } from "@/lib/buyer-words/blocks";
 import { SOCIALS, type Social } from "@/lib/store-socials";
 
 export const SOCIALS_LINE = "@socials";
@@ -52,21 +58,31 @@ export function socialsProblem(body: string, socials: readonly Social[]): string
 
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/** The row in the email's HTML: each profile's name as a link, in the store's order; empty with none. */
-export function socialsHtml(socials: readonly Social[], goesTo?: (href: string) => string): string {
+/** Whose profiles they are and in which words: the store's name and its language's words. */
+export type SocialsVoice = { name: string; words: Pick<BlockWords, "socialEmail" | "socialWebsite" | "socialOn"> };
+
+/** A profile's words, as the store page says them: its own address and site by their words, any other "{store} on {network}". */
+export function socialName(social: Social, voice: SocialsVoice): string {
+  if (social.network === "email") return voice.words.socialEmail;
+  if (social.network === "website") return voice.words.socialWebsite;
+  return voice.words.socialOn(voice.name, SOCIALS[social.network].label);
+}
+
+/** The row in the email's HTML: each profile's words as a link, in the store's order; empty with none. */
+export function socialsHtml(socials: readonly Social[], voice: SocialsVoice, goesTo?: (href: string) => string): string {
   const links = socials
     .filter((social) => linkable(social.url))
     .map((social) => {
       const href = social.url.startsWith("https://") && goesTo ? goesTo(social.url) : social.url;
-      return `<a href="${escape(href)}" style="color:#4c1d95;text-decoration:underline">${escape(SOCIALS[social.network].label)}</a>`;
+      return `<a href="${escape(href)}" style="color:#4c1d95;text-decoration:underline">${escape(socialName(social, voice))}</a>`;
     });
   return links.length ? `<p style="margin:0 0 16px">${links.join(" · ")}</p>` : "";
 }
 
-/** The row in the plain-text email: each name and where it goes. */
-export function socialsText(socials: readonly Social[]): string {
+/** The row in the plain-text email: each profile's words and where it goes. */
+export function socialsText(socials: readonly Social[], voice: SocialsVoice): string {
   return socials
     .filter((social) => linkable(social.url))
-    .map((social) => `${SOCIALS[social.network].label}: ${social.url.replace(/^mailto:/, "")}`)
+    .map((social) => `${socialName(social, voice)}: ${social.url.replace(/^mailto:/, "")}`)
     .join("\n");
 }

@@ -190,10 +190,10 @@ export function HeroView({ block, ctx, pill, rating }: { block: HeroBlock; ctx: 
             {pill}
             {rating}
           </div>
-          <h1 className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] sm:text-5xl">
+          <h1 className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] page-sm:text-5xl">
             {block.headline || ctx.productTitle}
           </h1>
-          {block.sub ? <p className="mt-4 whitespace-pre-line text-lg leading-relaxed sm:text-xl">{block.sub}</p> : null}
+          {block.sub ? <p className="mt-4 whitespace-pre-line text-lg leading-relaxed page-sm:text-xl">{block.sub}</p> : null}
           {button}
         </div>
       </header>
@@ -206,10 +206,10 @@ export function HeroView({ block, ctx, pill, rating }: { block: HeroBlock; ctx: 
           {pill}
           {rating}
         </div>
-        <h1 className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] sm:text-5xl">
+        <h1 className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] page-sm:text-5xl">
           {block.headline || ctx.productTitle}
         </h1>
-        {block.sub ? <p className="st-muted mt-4 whitespace-pre-line text-lg leading-relaxed sm:text-xl">{block.sub}</p> : null}
+        {block.sub ? <p className="st-muted mt-4 whitespace-pre-line text-lg leading-relaxed page-sm:text-xl">{block.sub}</p> : null}
         {button}
       </div>
       {video ? (
@@ -237,7 +237,7 @@ export function HeroView({ block, ctx, pill, rating }: { block: HeroBlock; ctx: 
 function Heading({ text, id }: { text: string; id?: string }) {
   if (!text) return null;
   return (
-    <h2 id={id} className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-[1.75rem]">
+    <h2 id={id} className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] page-sm:text-[1.75rem]">
       {text}
     </h2>
   );
@@ -256,7 +256,7 @@ function RowElementView({ element, ctx, level }: { element: RowElement; ctx: Blo
       return <Heading text={element.text} />;
     case "subheading": {
       const Tag = level === 3 ? "h3" : "h2";
-      return <Tag className="font-display text-lg font-semibold leading-snug sm:text-xl">{element.text}</Tag>;
+      return <Tag className="font-display text-lg font-semibold leading-snug page-sm:text-xl">{element.text}</Tag>;
     }
     case "paragraph":
       return <PlainText text={element.text} preview={ctx.preview} className="text-[1.0625rem]" />;
@@ -365,7 +365,7 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
       return (
         <section className="sp-section">
           <Heading text={block.heading} />
-          <ul className={`grid gap-3 sm:grid-cols-2 ${block.heading ? "mt-5" : ""}`}>
+          <ul className={`grid gap-3 page-sm:grid-cols-2 ${block.heading ? "mt-5" : ""}`}>
             {block.items.map((item, i) => (
               <li key={i} className="sp-benefit">
                 <span className="sp-tick" aria-hidden="true">

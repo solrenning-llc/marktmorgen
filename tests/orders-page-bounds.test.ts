@@ -1032,6 +1032,8 @@ test("the line under a link: the whole address when short, else its host when sh
   const mixed = new URL("https://p\u0430ypal.com/").hostname;
   assert.ok(mixed.startsWith("xn--"), mixed);
   assert.equal(keptLine("en", long(mixed)), words.keptAt(mixed), "a mixed host is said as xn--");
+  // A whole name in a look-alike script under a Latin ending ("аррӏе.com", all Cyrillic, read as apple.com) is said as xn--, as browsers do (UTS #39).
+  assert.equal(keptLine("en", long("xn--80ak6aa92e.com")), words.keptAt("xn--80ak6aa92e.com"), "whole-script look-alike: xn--");
   // One script other than Latin is said in it: Cyrillic, and Japanese across Han, Hiragana and Katakana.
   const russian = new URL("https://\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444/").hostname;
   assert.equal(keptLine("en", long(russian)), words.keptAt("\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444"));

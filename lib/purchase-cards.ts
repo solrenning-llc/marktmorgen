@@ -121,25 +121,44 @@ const HOST_SCRIPTS: [string, RegExp][] = [
   ["Devanagari", /\p{Script=Devanagari}/u], ["Armenian", /\p{Script=Armenian}/u], ["Georgian", /\p{Script=Georgian}/u],
 ];
 
+/** The script of one part of a host: the one its letters are all in, "" when it has none, null when mixed or not listed. */
+function partScript(part: string): string | null {
+  let seen = "";
+  for (const char of part) {
+    if (!/\p{L}/u.test(char)) continue;
+    const script = HOST_SCRIPTS.find(([, test]) => test.test(char))?.[0];
+    if (!script || (seen && script !== seen)) return null;
+    seen = script;
+  }
+  return seen;
+}
+
+/** Country endings written in Latin letters whose own script a name may be in ("日本のサイト.jp", "пример.ru"). */
+const ENDING_SCRIPTS: Record<string, string[]> = {
+  jp: ["Han"], cn: ["Han"], tw: ["Han"], hk: ["Han"], mo: ["Han"], sg: ["Han"], kr: ["Hangul"],
+  ru: ["Cyrillic"], su: ["Cyrillic"], by: ["Cyrillic"], ua: ["Cyrillic"], bg: ["Cyrillic"], kz: ["Cyrillic"], mk: ["Cyrillic"], rs: ["Cyrillic"], mn: ["Cyrillic"], kg: ["Cyrillic"], tj: ["Cyrillic"],
+  gr: ["Greek"], cy: ["Greek"], il: ["Hebrew"], th: ["Thai"], in: ["Devanagari"], am: ["Armenian"], ge: ["Georgian"],
+  sa: ["Arabic"], ae: ["Arabic"], eg: ["Arabic"], ma: ["Arabic"], dz: ["Arabic"], iq: ["Arabic"], jo: ["Arabic"], qa: ["Arabic"],
+};
+
 /**
- * Whether every letter of each part of a host (between the dots) is in one
- * script, so it can be shown as a person reads it ("日本のサイト.jp" or
- * "пример.рф"). A part mixing alphabets ("pаypal.com" with a Cyrillic а) is
- * shown in its xn-- form instead, so a look-alike never passes for the real
- * name; a letter of a script not listed counts as mixed.
+ * Whether a host can be shown as a person reads it. Every part (between the
+ * dots) must be in one script, and a part not in Latin letters must match
+ * its ending: an ending in the same script ("пример.рф"), or a country ending
+ * whose script it is ("日本のサイト.jp"). Otherwise it is shown in its xn--
+ * form, so neither a mix ("pаypal.com" with a Cyrillic а) nor a whole name in
+ * a look-alike script ("аррӏе.com", all Cyrillic, read as apple.com) passes
+ * for a real one (the rule browsers follow, UTS #39); a letter of a script
+ * not listed counts as mixed.
  */
 export function oneScript(host: string): boolean {
-  return host.split(".").every((part) => {
-    const seen = new Set<string>();
-    for (const char of part) {
-      if (!/\p{L}/u.test(char)) continue;
-      const script = HOST_SCRIPTS.find(([, test]) => test.test(char))?.[0];
-      if (!script) return false;
-      seen.add(script);
-      if (seen.size > 1) return false;
-    }
-    return true;
-  });
+  const parts = host.split(".");
+  const scripts = parts.map(partScript);
+  if (scripts.some((script) => script === null)) return false;
+  const ending = parts[parts.length - 1]!.toLowerCase();
+  const endingScript = scripts[scripts.length - 1]!;
+  const allowed = new Set(["Latin", endingScript, ...(ENDING_SCRIPTS[ending] ?? [])]);
+  return scripts.every((script) => !script || script === "Latin" || allowed.has(script));
 }
 
 /**

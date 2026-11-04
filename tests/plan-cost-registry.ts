@@ -1,3 +1,4 @@
+import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
 /**
  * Every metered feature's per-store worst month, in one registry (added 17
  * October 2026). tests/plan-cost-model.ts sums COST_LINES into worstCost,
@@ -92,7 +93,7 @@ import { ALL_TIME_PAGES } from "@/lib/stats";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
-import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes } from "./store-data-registry";
+import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
   UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
@@ -109,6 +110,7 @@ import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
+import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -140,6 +142,7 @@ export const DB_BYTE_MONTH = micro(UPSTASH_MICRO_USD_PER_GB_MONTH) / 1e9;
 const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1_000_000;
 const CPU_SECOND = micro(VERCEL_CPU_MICRO_USD_PER_HOUR) / 3600;
 const MEMORY_SECOND = (micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) * VERCEL_FUNCTION_GB) / 3600;
+
 
 /**
  * What an order leaves that outlives its store, for its whole life (18
@@ -425,6 +428,23 @@ export const PAYPAL_LEDGER_BYTES = (ALL_TIME_PAGES * 100 + PAYPAL_REFUNDS_READ) 
 export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**
+ * A narrowed email's reading of the store's buyers made by the scheduled job
+ * (lib/broadcasts.ts, readNarrowing; the "scheduled-reads" line): one
+ * BUYER_LEDGER at the most, at most READS_HELD of them an email, each paid in
+ * studio requests before it is read, exactly as buyerLedger counts them: from
+ * what the email held in the month it goes out when it was accepted
+ * (createBroadcast, lib/store-allowance.ts holdAllowanceAt; all held for one
+ * month never passes that month's studio figure), and beyond that from the
+ * month it is read in; with none left there it waits, never read unpaid. A
+ * plan not paid and running when it is due, or a store that reads no buyers
+ * any more, reads nothing. A hold made under a larger plan draws no more than
+ * the month's own figure leaves. A reading that fails at Stripe or PayPal keeps
+ * spent what it drew, READ_MISSES_ALLOWED times in a row at most. A subject
+ * test decided by sales (countTest) pays a reading of every sale before it
+ * reads its TEST_SALES_PAGES pages.
+ */
+export const SCHEDULED_READS = { id: "scheduled-reads", each: BUYER_LEDGER, units: "studio" } as const;
+/**
  * The tasks agenda on the buyers page at the most (app/studio/people/page.tsx,
  * TasksAgenda; 639 [GL7](6)): every task of the store read and its rows sent
  * on. Counted as AGENDA_UNITS studio requests besides the page's own, taken
@@ -443,7 +463,59 @@ export const TEAM_COMMANDS_PER_VIEW = 2;
 
 /** Windows of a counter that a 31-day month can touch. */
 export const DAY_WINDOWS = 32;
+
+/** CX-61: two bounded provider reads, independent of released-name history.
+ * Vercel's official regional table read 2026-11-04 has a highest memory rate
+ * of $0.0183/GB-hour. Use it for this row while deployment region is unknown.
+ * The Stripe endpoint tariff stays explicitly unknown, never certified zero.
+ */
+export const PLATFORM_SUBSCRIPTION_SEARCH = {
+  maxGets: 2,
+  waitSeconds: STRIPE_TIMEOUT_MS / 1000,
+  memoryGb: 2,
+  memoryUsdPerGbHour: 0.0183,
+  memoryUsdPerGet: STRIPE_TIMEOUT_MS / 1000 * 2 * 0.0183 / 3600,
+  essentialEventsPerWindow: ESSENTIAL_PER_DAY * DAY_WINDOWS,
+  closingEventsPerWindow: DAY_WINDOWS,
+  stripeGetFeeUsd: null,
+  deploymentRegionVerified: false,
+} as const;
+export const PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD = PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet;
 export const UTC_DAYS = 31;
+
+/** CX-67 company exposure, deliberately outside paid-unit COST_LINES. These
+ * modeled components are not a complete tariff/tax/retention certification. */
+export const HELD_EXPOSURE = {
+  dailyAttempts: HELD_RECHECKS_PER_DAY,
+  monthlyAttempts: HELD_RECHECKS_PER_DAY * 31,
+  retryCounterSeconds: HELD_RETRY_COUNTER_SECONDS,
+  monthlyAggregateSeconds: HELD_MONTH_COUNT_SECONDS,
+  retryCommands: 128,
+  retryReplyBytes: MAX_STORE_BYTES + 128 * 1024,
+  indexBytesPerStore: 4096,
+  globalCounterBytes: 3 * (HELD_RECHECKS_PER_DAY * 256 + 1024) + 15 * 1024 + 1024,
+  stripeEndpointTariffUsd: null,
+  completeMonthlyCostUsd: null,
+  reviewedGlobalCaseCeiling: null,
+} as const;
+/** A full held store, not its smaller ended-store allowance, for31days. All
+ * still-retained outside-room keys are charged at peak for the whole month. */
+export function heldStoreMonthlyExposure(tier: Tier) {
+  const fileBytes = paidStorageBytes(tier) + TASK_ROOM_BYTES[tier] + COMMUNITY_PICTURES[tier] * PICTURE_BYTES;
+  const databaseBytes = DATA_ROOM_BYTES[tier] + reservePeakBytes(tier) + HELD_EXPOSURE.indexBytesPerStore;
+  const retentionUsd = fileBytes / GB * STORAGE_PER_GB * 31 / 30 + databaseBytes * DB_BYTE_MONTH * 31 / 30;
+  const retryUsd = heldRecheckMemoryUsd() + HELD_EXPOSURE.retryCommands * COMMAND + HELD_EXPOSURE.retryReplyBytes * DB_BYTE;
+  return { fileBytes, databaseBytes, retentionUsd, retryUsd, modeledMonthlyUsd: retentionUsd + 31 * retryUsd, completeMonthlyUsd: null };
+}
+/** Explicit reviewed finite case cap, never inferred from missing data. Existing
+ * over-cap obligations stay counted and invalidate a financed company total. */
+export function heldCompanyMonthlyExposure(caseCap: number | null, observed: number | null): { modeledUsd: number | null; completeUsd: null } {
+  if (caseCap === null || observed === null || !Number.isSafeInteger(caseCap) || !Number.isSafeInteger(observed) || caseCap < 0 || observed < 0 || observed > caseCap) return { modeledUsd: null, completeUsd: null };
+  const retention = Math.max(...(["creator", "pro", "scale"] as const).map(tier => heldStoreMonthlyExposure(tier).retentionUsd));
+  const retry = heldStoreMonthlyExposure("scale").retryUsd;
+  return { modeledUsd: caseCap * retention + HELD_EXPOSURE.monthlyAttempts * retry + HELD_EXPOSURE.globalCounterBytes * DB_BYTE_MONTH, completeUsd: null };
+}
+
 
 /** Historical operating model only: encoded-size assumptions and fetched-ahead factor.
  * This is not a verified bound on provider bytes, replay, invoice rates or taxes. */
@@ -468,6 +540,22 @@ export type CostLine = {
 const ALL_TIERS_SAME = (usd: number) => () => usd;
 
 export const COST_LINES: CostLine[] = [
+  {
+    id: "platform-subscription-search",
+    feature: "Platform subscription recovery during checkout, store deletion and scheduled closing (CX-61)",
+    monthlyUsd: () => PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD * (PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow + PLATFORM_SUBSCRIPTION_SEARCH.closingEventsPerWindow),
+    sources: [
+      { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
+      { file: "lib/fetch-timeout.ts", names: ["STRIPE_TIMEOUT_MS"] },
+      { file: "lib/billing.ts", names: ["findStoreSubscriptions", "completeSubscriptionPage"] },
+      { file: "lib/studio-allowance-rules.ts", names: ["ESSENTIAL_NEEDS", "ESSENTIAL_PER_DAY"] },
+      { file: "app/api/billing/checkout/route.ts", names: ["creatorFrom(request, \"billing\")", "findStoreSubscriptions(store)"] },
+      { file: "app/api/store/stores/route.ts", names: ["creatorFrom(request, \"delete\")", "findStoreSubscriptions(store)"] },
+      { file: "lib/plan-closing.ts", names: ["observeStoreSubscriptions(store)", "refuseLatePlans"] },
+      { file: "vercel.json", names: ["/api/cron/closing", "30 9 * * *"] },
+    ],
+    basis: "CX-61, sources read 2026-11-04: at most two GETs (one Search over at most MAX_ADDRESSES current names, one captured-customer List), each waited on for STRIPE_TIMEOUT_MS at 2 GB and the highest regional memory rate $0.0183/GB-hour (https://vercel.com/docs/functions/usage-and-pricing). Billing and deletion share ESSENTIAL_PER_DAY, not that many each; scheduled closing is counted at DAY_WINDOWS. Never multiplied by visits. This is a function-memory ceiling; existing CPU, invocation and other costs remain. Stripe GET tariff stays null (https://stripe.com/pricing does not establish an endpoint-specific zero); deployment region and financed post-cancellation exposure remain unverified. No sale, price, quota or gate is activated.",
+  },
   {
     id: "storage",
     feature: "Files and lesson files kept",
@@ -1078,6 +1166,7 @@ export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
+  HELD_RECHECKS_PER_DAY: "Company recovery work plus separate post_cancellation retention exposure, never a paid plan allowance: HELD_EXPOSURE in this registry and docs/funded-exposure-review.md count50 global daily rechecks, two actual bounded reads each, retained full stores/keys and aggregate counters. Actual case cap/rates remain unknown until reviewed; no zero subsidy.",
   PAGE_INCLUDED_BYTES: "What one studio request's own price already moves through the database and on to the browser (lib/sent-bytes.ts; UNIT_COST.studio prices fifty kilobytes): a reading or a page's sending up to it counts nothing beyond the request that asked, and past it one studio request a megabyte (LEDGER_BYTES_PER_UNIT, STUDIO_UNIT_SENT_BYTES, held in tests/plan-cost-registry.test.ts). A threshold inside the studio line, not a figure of its own.",
   FREE_CALL_HOLDS_PER_DAY: "A pace on how often one email address may hold a free intro call's time in one store in a day (lib/free-call-rules.ts, 551 [FB1]): every hold is first taken from the plan's own monthly orders as FREE_CALL_ORDER_UNITS, before any email, so it adds no cost and only refuses.",
   BUYER_CAP_MONTHS: "Queue item 307 EC1: the cap on one closing's buyers (lib/closing-buyers-rules.ts, buyerNoticeCap), a post-cancellation funded exposure of docs/funded-exposure-review.md (closingBuyersCost above), the company's, not a plan's line.",

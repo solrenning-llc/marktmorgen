@@ -33,6 +33,7 @@ import {
 } from "@/lib/plan";
 import { inTheCurrencyShown } from "@/lib/instant-pay";
 import { normaliseEmail } from "@/lib/auth";
+import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import {
   CUSTOMER_PATTERN,
   storeForRestartSource,
@@ -315,6 +316,7 @@ export async function createBillingCheckout(
   assertFunding(funding,tier,cycle,'checkout',store.statsId??'');
   const body = new URLSearchParams({
     mode: "subscription",
+    "subscription_data[billing_mode][type]": "classic",
     // Keep collection explicit even when a trial has nothing due today.
     payment_method_collection: "always",
     // English, always. Left to itself Stripe picks the language of the
@@ -367,7 +369,7 @@ export async function createBillingCheckout(
   let session: Record<string, unknown>;
   try {
     assertFunding(funding,tier,cycle,'checkout',store.statsId??'');
-    session = await onPlatform("POST", "/checkout/sessions", body);
+    session = await onPlatform("POST", "/checkout/sessions", body, { version: "2025-09-30.clover" });
   } catch (error) {
     if (!(error instanceof BillingError) || error.status !== 400) throw error;
     if (body.has("customer") && /customer/i.test(error.message)) {
@@ -385,7 +387,7 @@ export async function createBillingCheckout(
       throw error;
     }
     assertFunding(funding,tier,cycle,'checkout',store.statsId??'');
-    session = await onPlatform("POST", "/checkout/sessions", body);
+    session = await onPlatform("POST", "/checkout/sessions", body, { version: "2025-09-30.clover" });
   }
   if (typeof session.url !== "string" || !session.url) {
     throw new Error("Stripe did not return a checkout URL");
@@ -851,7 +853,7 @@ export async function restartPlan(input: {
     if (!fundedRestartSourceMatches(intent, currentSource) || !restartSubmissionOpenNow(armed)) {
       throw new Error("The current Store no longer matches the funded restart source");
     }
-    const subscription = await onPlatform("POST", "/subscriptions", body, {idempotencyKey:armed.idempotencyKey});
+    const subscription = await onPlatform("POST", "/subscriptions", body, {idempotencyKey:armed.idempotencyKey, version: "2025-09-30.clover"});
     // Persist an identified outcome BEFORE validating it for adoption. Even a
     // mismatched customer/price is evidence for read-only reconciliation.
     const resultId = subscription?.id;
@@ -870,6 +872,7 @@ export async function restartPlan(input: {
   const priceId = await ensurePrice(input.tier, "month");
   const body = new URLSearchParams({
     customer: input.customerId,
+    "billing_mode[type]": "classic",
     "items[0][price]": priceId,
     "items[0][quantity]": "1",
     default_payment_method: input.paymentMethod,
@@ -879,7 +882,7 @@ export async function restartPlan(input: {
     "metadata[tier]": input.tier,
     "metadata[restarted]": "break",
   });
-  const subscription = await onPlatform("POST", "/subscriptions", body, { idempotencyKey: input.idempotencyKey });
+  const subscription = await onPlatform("POST", "/subscriptions", body, { idempotencyKey: input.idempotencyKey, version: "2025-09-30.clover" });
   return observeRestartedPlan({ customerId: input.customerId, tier: input.tier, priceId }, subscription);
 }
 
@@ -906,6 +909,7 @@ export function fundedRestartRequestBody(intent:OwnedRestartIntent,priceId:strin
     !/^ctr_[A-Za-z0-9_-]{1,80}$/.test(intent.grant.id)||!/^claim_[A-Za-z0-9_-]{1,80}$/.test(intent.claim))
   throw Error("The restart request does not match its immutable owned source");
  return new URLSearchParams({
+  "billing_mode[type]":"classic",
   customer:pause.customer,"items[0][price]":priceId,"items[0][quantity]":"1",
   default_payment_method:pause.paymentMethod,off_session:"true",payment_behavior:"error_if_incomplete",
   "metadata[store]":intent.handle,"metadata[tier]":tier,"metadata[restarted]":"break",
@@ -1437,6 +1441,149 @@ export async function startedFromObservedSubscription(store:Store,subscription:R
 
 /** How many of a store's subscriptions one search looks at. */
 const SEARCH_LIMIT = 100;
+const SEARCH_STATUSES = new Set(["active", "trialing", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "paused"]);
+
+/**
+ * Provider search members are evidence only when their identity, ownership
+ * fields and cancellation clock are explicit data properties. Stripe JSON is
+ * ordinary data; accessors, inherited fields and partial expanded customers
+ * are therefore an unknown observation, never proof that checkout is safe.
+ */
+function searchDataRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+    throw new Error(`Subscription search ${label} is unknown`);
+  }
+  const copy: Record<string, unknown> = Object.create(null);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") throw new Error(`Subscription search ${label} is unknown`);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !Object.hasOwn(descriptor, "value")) throw new Error(`Subscription search ${label} is unknown`);
+    copy[key] = descriptor.value;
+  }
+  return copy;
+}
+
+type SearchOwnership = { customerId: string | null; released: Set<string> };
+type SearchMember = { subscription: Record<string, unknown>; terminalOwn: boolean };
+/** Only plain dense own data can prove a released handle, without rereading accessors. */
+function releasedSearchEvidence(value: unknown): Set<string> | null {
+  const unknown = null;
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return unknown;
+  const descriptors = Object.getOwnPropertyDescriptors(value as object);
+  const length = descriptors.length;
+  if (!length || !Object.hasOwn(length, "value") || !Number.isSafeInteger(length.value) || length.value < 0 ||
+      Reflect.ownKeys(descriptors).length !== length.value + 1) return unknown;
+  const handles = new Set<string>();
+  for (let index = 0; index < length.value; index++) {
+    const slot = descriptors[String(index)];
+    if (!slot || !Object.hasOwn(slot, "value") || typeof slot.value !== "string" || !HANDLE_PATTERN.test(slot.value)) return unknown;
+    handles.add(slot.value);
+  }
+  return handles;
+}
+function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwnership): SearchMember | null {
+  const member = searchDataRecord(value, "member");
+  if (typeof member.id !== "string" || !SUBSCRIPTION_PATTERN.test(member.id) ||
+      typeof member.status !== "string" || !SEARCH_STATUSES.has(member.status) ||
+      !Number.isSafeInteger(member.created) || (member.created as number) < 0) {
+    throw new Error("Subscription search member is unknown");
+  }
+  const metadata = searchDataRecord(member.metadata, "member metadata");
+  const named = metadata.store;
+  if (typeof named !== "string" || !HANDLE_PATTERN.test(named)) {
+    throw new Error("Subscription search member ownership is unknown");
+  }
+  const customer = searchDataRecord(member.customer, "expanded customer");
+  // Stripe's DeletedCustomer has id/object/deleted, without an email.
+  // A proved canceled prior owner is terminal history, including a name
+  // this store acquired later. Unknown own funding is never adopted.
+  if (customer.deleted === true) {
+    const valid = customer.object === "customer" && !Object.hasOwn(customer, "email") &&
+      typeof customer.id === "string" && CUSTOMER_PATTERN.test(customer.id) && member.status === "canceled";
+    if (valid && ownership.released.has(named) && customer.id !== ownership.customerId) return null;
+    const marked = [member, metadata].some(record => Object.keys(record).some(key => /^(funding_|restart_|cf_)/.test(key)));
+    // A name can have belonged to another store before this one acquired it.
+    // Stripe documents customer deletion as canceling subscriptions and
+    // preventing further operations (customers/delete, read 2026-11-04).
+    // This is terminal history, never a candidate to adopt or charge again.
+    if (valid && handles.has(named) && customer.id !== ownership.customerId) return null;
+    if (valid && ownership.customerId && handles.has(named)) {
+      if (customer.id === ownership.customerId && !marked) {
+        member.metadata = metadata;
+        member.customer = customer;
+        return { subscription: member, terminalOwn: true };
+      }
+    }
+    throw new Error("Subscription search deleted customer ownership is unknown");
+  }
+  if (!handles.has(named)) throw new Error("Subscription search member ownership is unknown");
+  if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id) ||
+      !Object.prototype.hasOwnProperty.call(customer, "email") ||
+      customer.email !== null && typeof customer.email !== "string") {
+    throw new Error("Subscription search expanded customer is unknown");
+  }
+  member.metadata = metadata;
+  member.customer = customer;
+
+  // A good-standing row can block checkout and be adopted as paid rights, so
+  // its one product, price, interval and paid/trial window must also be
+  // explicit provider data. Missing items must not silently become Creator.
+  if (GOOD.has(member.status as string)) {
+    const items = searchDataRecord(member.items, "member items");
+    if (!Array.isArray(items.data) || items.data.length !== 1) {
+      throw new Error("Subscription search member items are unknown");
+    }
+    const slot = Object.getOwnPropertyDescriptor(items.data, "0");
+    if (!slot || !Object.hasOwn(slot, "value")) throw new Error("Subscription search member item is unknown");
+    const item = searchDataRecord(slot.value, "member item");
+    const price = searchDataRecord(item.price, "member price");
+    const recurring = searchDataRecord(price.recurring, "member recurrence");
+    if (item.quantity !== 1 || price.currency !== "usd" ||
+        typeof price.unit_amount !== "number" || !Number.isSafeInteger(price.unit_amount) || price.unit_amount <= 0 ||
+        recurring.interval !== "month" && recurring.interval !== "year" ||
+        recurring.interval_count !== 1) {
+      throw new Error("Subscription search member price is unknown");
+    }
+    item.price = price;
+    price.recurring = recurring;
+    items.data = [item];
+    member.items = items;
+    if (member.status === "trialing") {
+      if (typeof member.trial_start !== "number" || !Number.isSafeInteger(member.trial_start) ||
+          typeof member.trial_end !== "number" || !Number.isSafeInteger(member.trial_end) ||
+          member.trial_start < 0 || member.trial_end <= member.trial_start) {
+        throw new Error("Subscription search member trial is unknown");
+      }
+    } else {
+      const start = periodStart(member);
+      const end = periodEnd(member, false);
+      if (!isPeriod({ start, end, renews: true })) {
+        throw new Error("Subscription search member period is unknown");
+      }
+    }
+  }
+  return { subscription: member, terminalOwn: false };
+}
+
+/** A single full Search/List page, with no cursor, getter or omitted member. */
+function completeSubscriptionPage(page: unknown): unknown[] {
+  if (!page || typeof page !== "object" || Array.isArray(page)) throw new Error("Subscription search page is unknown");
+  const data = Object.getOwnPropertyDescriptor(page, "data");
+  const more = Object.getOwnPropertyDescriptor(page, "has_more");
+  const cursor = Object.getOwnPropertyDescriptor(page, "next_page");
+  if (!data || !Object.hasOwn(data, "value") || !Array.isArray(data.value) ||
+      !more || !Object.hasOwn(more, "value") || more.value !== false ||
+      cursor && (!Object.hasOwn(cursor, "value") || cursor.value !== null && cursor.value !== undefined) ||
+      data.value.length > SEARCH_LIMIT) throw new Error("Subscription search page is incomplete");
+  const rows: unknown[] = [];
+  for (let index = 0; index < data.value.length; index++) {
+    const entry = Object.getOwnPropertyDescriptor(data.value, String(index));
+    if (!entry || !Object.hasOwn(entry, "value")) throw new Error("Subscription search member is unknown");
+    rows.push(entry.value);
+  }
+  return rows;
+}
 
 /**
  * What Stripe already has for this store, looked up before a new checkout is
@@ -1448,51 +1595,147 @@ const SEARCH_LIMIT = 100;
  * store does not know about, and a second one started over the top of it,
  * both charged. So Stripe is asked by the handle the checkout wrote into the
  * subscription (Subscription Search: `metadata['store']:'<handle>'`), under
- * every address this store still answers to.
+ * current and previous addresses, and by the captured customer through the
+ * List API for names it has released. Each read must be one complete page.
  *
  * `live` is one in good standing, to be written down instead of starting
  * another; `customerId` is the customer this store last paid us from. Search
  * can lag a new subscription by a minute or so; the daily job in
  * lib/billing-sync.ts settles whatever it misses.
  */
-export async function findStoreSubscriptions(
-  store: Store,
-): Promise<{ live: StartedSubscription | null; customerId: string | null; lapsed: string[] }> {
-  // Stripe takes at most ten clauses in one query. An address the store let
-  // go of is looked under too, and kept only for its own customer (ownedBy).
-  const handles = [...new Set([store.handle, ...store.previousHandles, ...store.releasedHandles])]
-    .filter((handle) => HANDLE_PATTERN.test(handle))
-    .slice(0, 10);
-  if (handles.length === 0) return { live: null, customerId: null, lapsed: [] };
+export type StoreSubscriptionObservation = {
+  find: () => Promise<{ live: StartedSubscription | null; customerId: string | null; lapsed: string[] }>;
+  customerLive: () => Promise<StartedSubscription | null>;
+  customerPlans: () => { id: string; status: string; customerId: string }[];
+};
+/** Both independent observations are read at most once. Closing reuses the
+ * validated customer evidence even when Search is unknown; never a third GET. */
+export async function observeStoreSubscriptions(store: Store): Promise<StoreSubscriptionObservation> {
+  // Capture ownership before either awaited read. Released names never enter
+  // the Search query: only the captured customer's complete List can recover
+  // them, with no number of provider calls proportional to address history.
+  const releasedHandles = store.releasedHandles;
+  const handles = [...new Set([store.handle, ...store.previousHandles])];
+  if (handles.length === 0 || handles.length > MAX_ADDRESSES ||
+      handles.some((handle) => typeof handle !== "string" || !HANDLE_PATTERN.test(handle)) ||
+      !Array.isArray(releasedHandles) || releasedHandles.some(handle => typeof handle !== "string" || !HANDLE_PATTERN.test(handle))) {
+    throw new Error("Subscription search handle coverage is unknown");
+  }
+  const customerContext = Object.getOwnPropertyDescriptor(store, "stripeCustomerId");
+  const releasedContext = Object.getOwnPropertyDescriptor(store, "releasedHandles");
+  const released = releasedContext && Object.hasOwn(releasedContext, "value") && releasedContext.value === releasedHandles
+    ? releasedSearchEvidence(releasedHandles) : null;
+  if (released === null) throw new Error("Subscription search handle coverage is unknown");
+  const ownership: SearchOwnership = {
+    customerId: customerContext && Object.hasOwn(customerContext, "value") &&
+      typeof customerContext.value === "string" && CUSTOMER_PATTERN.test(customerContext.value) ? customerContext.value : null,
+    released,
+  };
+  const observedStore = {
+    handle: store.handle, previousHandles: [...store.previousHandles],
+    releasedHandles: [...ownership.released], stripeCustomerId: ownership.customerId,
+    email: store.email, statsId: store.statsId,
+  } as Store;
   const query = new URLSearchParams({
-    query: handles.map((handle) => `metadata['store']:'${handle}'`).join(" OR "),
+    query: handles.map(handle => `metadata['store']:'${handle}'`).join(" OR "),
     limit: String(SEARCH_LIMIT),
   });
   query.append("expand[]", "data.customer");
-  const page = await onPlatform("GET", `/subscriptions/search?${query}`);
-  const rows = (Array.isArray(page.data) ? (page.data as Record<string, unknown>[]) : [])
-    .filter((subscription) => ownedBy(store, subscription))
-    .sort((a, b) => (Number(b.created) || 0) - (Number(a.created) || 0));
-
-  let live: StartedSubscription | null = null;
-  for (const subscription of rows) {
-    live = await startedFromObservedSubscription(store,subscription);
-    if (live) break;
+  let search: unknown[] | null = null, own: unknown[] | null = ownership.customerId ? null : [];
+  let searchError: unknown = null, ownError: unknown = null;
+  try { search = completeSubscriptionPage(await onPlatform("GET", `/subscriptions/search?${query}`)); }
+  catch (error) { searchError = error instanceof Error ? error : new Error("Subscription search observation is unknown"); }
+  const ownQuery = new URLSearchParams({ customer: ownership.customerId ?? "", status: "all", limit: String(SEARCH_LIMIT) });
+  ownQuery.append("expand[]", "data.customer");
+  if (ownership.customerId) {
+    try { own = completeSubscriptionPage(await onPlatform("GET", `/subscriptions?${ownQuery}`)); }
+    catch (error) { ownError = error instanceof Error ? error : new Error("Subscription customer observation is unknown"); }
   }
-  const last = rows.map((subscription) => customerOf(subscription).id).find((id) => CUSTOMER_PATTERN.test(id));
-  // Not paying, but Stripe could still charge them: a card being retried, or
-  // a first payment not finished. Ended before a new one is started.
-  // A first payment still going through (a bank debit) is left alone for an hour.
-  const hourAgo = Date.now() / 1000 - 3600;
-  const lapsed = rows
-    .filter(
-      (subscription) =>
-        !startedFrom(subscription) &&
-        (subscription.status === "past_due" || (subscription.status === "incomplete" && (Number(subscription.created) || 0) < hourAgo)),
-    )
-    .map((subscription) => (typeof subscription.id === "string" ? subscription.id : ""))
-    .filter((id) => SUBSCRIPTION_PATTERN.test(id));
-  return { live, customerId: last ?? null, lapsed };
+  const current = new Set(handles), all = new Set([...handles, ...ownership.released]);
+  const ownEntries: SearchMember[] = [], searchEntries: SearchMember[] = [];
+  const evidence = ({ subscription, terminalOwn }: SearchMember) => canonicalFinancialSnapshot({
+    id: subscription.id, status: subscription.status, created: subscription.created,
+    metadata: subscription.metadata, customer: customerOf(subscription), terminalOwn,
+    state: stateOf(subscription), trialStart: subscription.trial_start ?? null,
+  });
+  const rowsFor = (entries: SearchMember[]) => {
+    const unique = new Map<string, SearchMember>();
+    for (const entry of entries) {
+      const id = entry.subscription.id as string, previous = unique.get(id);
+      if (previous) {
+        const before = evidence(previous), after = evidence(entry);
+        if (before === null || after === null || before !== after) throw new Error("Subscription search overlap is unknown");
+      } else unique.set(id, entry);
+    }
+    return [...unique.values()]
+      .filter(({ subscription, terminalOwn }) => terminalOwn || ownedBy(observedStore, subscription))
+      .map(({ subscription }) => subscription)
+      .sort((a, b) => (b.created as number) - (a.created as number));
+  };
+  let ownRows: Record<string, unknown>[] | null = null;
+  try {
+    if (own === null) throw ownError;
+    for (const value of own) {
+      const row = searchDataRecord(value, "listed member");
+      const metadata = searchDataRecord(row.metadata, "listed metadata");
+      if (typeof metadata.store !== "string" || !all.has(metadata.store)) continue;
+      const customer = searchDataRecord(row.customer, "listed customer");
+      if (customer.id !== ownership.customerId) throw new Error("Subscription search listed customer is unknown");
+      const member = searchMember(row, all, ownership);
+      if (member) ownEntries.push(member);
+    }
+    ownRows = rowsFor(ownEntries);
+  } catch (error) { ownError = error instanceof Error ? error : new Error("Subscription customer observation is unknown"); }
+  try {
+    if (search === null) throw searchError;
+    for (const value of search) {
+      const member = searchMember(value, current, ownership);
+      if (member) searchEntries.push(member);
+    }
+  } catch (error) { searchError = error instanceof Error ? error : new Error("Subscription search observation is unknown"); }
+  // No observation can activate the same grant twice, including a caller's
+  // independent positive-customer fallback after a failed Search.
+  const activations = new Map<string, Promise<StartedSubscription | null>>();
+  const liveFrom = async (rows: Record<string, unknown>[]) => {
+    for (const subscription of rows) {
+      if (stateOf(subscription).state !== "active") continue;
+      const id = subscription.id as string;
+      let pending = activations.get(id);
+      if (!pending) { pending = startedFromObservedSubscription(observedStore, subscription); activations.set(id, pending); }
+      const live = await pending;
+      if (!live) throw new Error("Subscription search activation is unknown");
+      return live;
+    }
+    return null;
+  };
+  return Object.freeze({
+    find: async () => {
+      if (searchError) throw searchError;
+      if (ownError) throw ownError;
+      const rows = rowsFor([...searchEntries, ...ownEntries]);
+      const live = await liveFrom(rows);
+      const last = rows.map(subscription => customerOf(subscription).id).find(id => CUSTOMER_PATTERN.test(id));
+      const hourAgo = Date.now() / 1000 - 3600;
+      const lapsed = rows.filter(subscription => !startedFrom(subscription) &&
+        (subscription.status === "past_due" || subscription.status === "incomplete" && (subscription.created as number) < hourAgo))
+        .map(subscription => subscription.id as string);
+      return { live, customerId: last ?? null, lapsed };
+    },
+    customerLive: async () => {
+      if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
+      return liveFrom(ownRows);
+    },
+    customerPlans: () => {
+      if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
+      return ownRows.map(row => ({ id: row.id as string, status: row.status as string, customerId: ownership.customerId! }));
+    },
+  });
+}
+
+/** Checkout needs complete absence; positive closing recovery uses the same
+ * complete customer page through the observation above, with no reread. */
+export async function findStoreSubscriptions(store: Store): Promise<{ live: StartedSubscription | null; customerId: string | null; lapsed: string[] }> {
+  return (await observeStoreSubscriptions(store)).find();
 }
 
 /**

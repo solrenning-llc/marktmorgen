@@ -1449,6 +1449,7 @@
     "components/recovery-editor.tsx",
     "components/refund-activity.tsx",
     "components/rename-form.tsx",
+    "components/renewal-mail-notice.tsx",
     "components/renewal-unpaid-notice.tsx",
     "components/report-download.tsx",
     "components/report-form.tsx",

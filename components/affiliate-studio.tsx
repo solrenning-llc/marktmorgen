@@ -41,11 +41,15 @@ import { LeadReview, type LeadRow, LeadTerms, type LeadTermsState } from "@/comp
 import { MAX_LEAD_BUDGET_CENTS, MAX_LEAD_CAP, MAX_LEAD_CENTS, MAX_LEAD_HOLD_DAYS, MIN_LEAD_BUDGET_CENTS, MIN_LEAD_CENTS, MIN_LEAD_HOLD_DAYS } from "@/lib/affiliate-lead-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
+import { MAX_NOTICE_DAYS, MIN_NOTICE_DAYS, noticeLines } from "@/lib/affiliate-notice";
+import { IDLE_WARN_DAYS, MAX_IDLE_DAYS, MIN_IDLE_DAYS } from "@/lib/affiliate-idle-rules";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   percent: `Type a whole share from ${MIN_COMMISSION} to ${MAX_COMMISSION} percent.`,
   days: `Type a whole number of days from ${MIN_COOKIE_DAYS} to ${MAX_COOKIE_DAYS}.`,
+  notice: `Type a whole number of days of notice from ${MIN_NOTICE_DAYS} to ${MAX_NOTICE_DAYS}, or leave it empty for none.`,
+  idle_days: `Pick never, or a number of days from ${MIN_IDLE_DAYS} to ${MAX_IDLE_DAYS}.`,
   rate: `A product's own share is a whole number from 0 to ${MAX_COMMISSION}; 0 leaves it out.`,
   rule: "Pick whether the first or the last link a buyer followed earns the sale.",
   share_percent: SHARE_PROBLEMS.percent,
@@ -221,6 +225,40 @@ export function AffiliateStudio({
   const batchTotal = owedNow.reduce((sum, r) => sum + r.payable, 0);
   const waitingTotal = rows.reduce((sum, r) => sum + r.waiting, 0);
   const [batchOpen, setBatchOpen] = useState(false);
+  // Several applications at once (630 [HN6](4)): which are ticked, and the last press, for its undo.
+  const [picked, setPicked] = useState<string[]>([]);
+  const [lastBulk, setLastBulk] = useState<{ decision: "approve" | "decline"; before: { id: string; status: string; decidedAt: number }[] } | null>(null);
+  const pickedNow = picked.filter((id) => pending.some((row) => row.affiliate.id === id));
+
+  async function bulk(decision: "approve" | "decline") {
+    setBusy("bulk");
+    setError(null);
+    try {
+      const response = await fetch("/api/store/affiliates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk", decision, ids: pickedNow }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; before?: { id: string; status: string; decidedAt: number }[] };
+      if (!data.ok || !Array.isArray(data.before)) {
+        setError({ where: "bulk", text: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error });
+        return;
+      }
+      setPicked([]);
+      setLastBulk({ decision, before: data.before });
+      router.refresh();
+    } catch {
+      setError({ where: "bulk", text: MESSAGES.server_error });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function undoBulk() {
+    if (!lastBulk) return;
+    const done = await act("bulk", { action: "bulk-undo", decision: lastBulk.decision, before: lastBulk.before }, "Put back as they were.");
+    if (done) setLastBulk(null);
+  }
   const [batchDate, setBatchDate] = useState(today);
   const [batchReference, setBatchReference] = useState("");
 
@@ -401,14 +439,62 @@ export function AffiliateStudio({
       </div>
 
       <div className="min-w-0 space-y-6">
-        {pending.length ? (
+        {pending.length || lastBulk ? (
           <section aria-labelledby="apps-title" className="card p-6 sm:p-8">
             <h2 id="apps-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
               {`Applications (${pending.length})`}
             </h2>
+            {lastBulk ? (
+              <div className="notice mt-3 flex flex-wrap items-center justify-between gap-3 text-sm" role="status">
+                <span>
+                  {`${lastBulk.before.length} ${lastBulk.before.length === 1 ? "application" : "applications"} ${lastBulk.decision === "approve" ? "approved" : "declined"}.`}
+                  {lastBulk.decision === "approve" ? " Each was emailed their link; undoing puts them back as applications but cannot take that email back." : ""}
+                  {" You can undo this for 10 minutes."}
+                </span>
+                <span className="flex gap-2">
+                  <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} aria-busy={busy === "bulk"} onClick={undoBulk}>
+                    Undo
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLastBulk(null)}>
+                    Dismiss
+                  </button>
+                </span>
+              </div>
+            ) : null}
+            {pending.length > 1 ? (
+              <div className="mt-4 flex flex-wrap items-center gap-3" role="group" aria-label="Several applications at once">
+                <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold text-ink">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5"
+                    checked={pickedNow.length === pending.length}
+                    onChange={(e) => setPicked(e.target.checked ? pending.map((row) => row.affiliate.id) : [])}
+                  />
+                  Select all
+                </label>
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null || pickedNow.length === 0} aria-busy={busy === "bulk"} onClick={() => bulk("approve")}>
+                  {`Approve selected (${pickedNow.length})`}
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={busy !== null || pickedNow.length === 0} onClick={() => bulk("decline")}>
+                  {`Decline selected (${pickedNow.length})`}
+                </button>
+              </div>
+            ) : null}
+            {errorAt("bulk")}
             <ul className="mt-4 space-y-3">
               {pending.map((row) => (
                 <li key={row.affiliate.id} className="rounded-2xl border border-line bg-paper p-4">
+                  {pending.length > 1 ? (
+                    <label className="mb-1 flex min-h-11 cursor-pointer items-center gap-2 text-sm text-ink-soft">
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5"
+                        checked={pickedNow.includes(row.affiliate.id)}
+                        onChange={(e) => setPicked(e.target.checked ? [...pickedNow, row.affiliate.id] : pickedNow.filter((id) => id !== row.affiliate.id))}
+                      />
+                      {`Select ${row.affiliate.email}`}
+                    </label>
+                  ) : null}
                   <p className="font-semibold text-ink [overflow-wrap:anywhere]">{row.affiliate.email}</p>
                   <p className="mt-0.5 text-xs text-ink-soft">
                     {`Applied ${dayMs(row.affiliate.appliedAt)}`}
@@ -465,6 +551,8 @@ export function AffiliateStudio({
                 : "Switch the program on and share your affiliate page; applications appear here."}
             </p>
           ) : (
+            <>
+            <ShareMany members={members.filter((row) => row.affiliate.status === "approved").map((row) => ({ id: row.affiliate.id, email: row.affiliate.email, rate: row.affiliate.rate }))} percent={setting.percent} busy={busy} act={act} error={errorAt("bulk-rate")} />
             <ul className="mt-4 space-y-3">
               {members.map((row) => (
                 <Member
@@ -481,6 +569,7 @@ export function AffiliateStudio({
                 />
               ))}
             </ul>
+            </>
           )}
         </section>
 
@@ -537,8 +626,11 @@ function Terms({
   error: React.ReactNode;
 }) {
   const [enabled, setEnabled] = useState(setting.enabled);
-  const [percent, setPercent] = useState(String(setting.percent));
-  const [days, setDays] = useState(String(setting.days));
+  // A cut under notice (630 [HN6](2)): the form shows the terms it leads to, so saving anything else keeps it.
+  const target = setting.pending ?? setting;
+  const [percent, setPercent] = useState(String(target.percent));
+  const [days, setDays] = useState(String(target.days));
+  const [notice, setNotice] = useState(setting.notice ? String(setting.notice) : "");
   const [rule, setRule] = useState<AttributionRule>(setting.rule);
   const [payday, setPayday] = useState(String(setting.payday));
   const [hold, setHold] = useState(String(setting.hold));
@@ -547,6 +639,10 @@ function Terms({
   const [numbers, setNumbers] = useState(setting.numbers);
   const [kit, setKit] = useState(setting.kit);
   const [lifetime, setLifetime] = useState(setting.lifetime);
+  const [contacts, setContacts] = useState(setting.contacts === true);
+  const [idle, setIdle] = useState(String(setting.idle ?? 0));
+  // The usual choices, and the one saved if it is another (set through the API).
+  const idleChoices = [...new Set([0, 90, 180, 365, setting.idle ?? 0])].sort((x, y) => x - y);
   const [recurringMonths, setRecurringMonths] = useState(String(setting.recurring));
   const [paidSearch, setPaidSearch] = useState(setting.paidSearch);
   const [secondTier, setSecondTier] = useState(String(setting.secondTier));
@@ -555,9 +651,9 @@ function Terms({
     setting.bonuses.map((b) => ({ sales: String(b.sales), amount: moneyField(b.cents, storeCurrency) })),
   );
   const [rates, setRates] = useState<Record<string, string>>(
-    Object.fromEntries(Object.entries(setting.rates).map(([id, n]) => [id, String(n)])),
+    Object.fromEntries(Object.entries(target.rates).map(([id, n]) => [id, String(n)])),
   );
-  const [showRates, setShowRates] = useState(Object.keys(setting.rates).length > 0);
+  const [showRates, setShowRates] = useState(Object.keys(target.rates).length > 0);
   const [lead, setLead] = useState<LeadTermsState>({
     kind: setting.lead.kind,
     amount: moneyField(setting.lead.cents, storeCurrency),
@@ -587,11 +683,16 @@ function Terms({
               enabled,
               percent: Number(percent.trim()),
               days: Number(days.trim()),
+              notice: notice.trim() ? Number(notice.trim()) : 0,
               rule,
               payday: Number(payday.trim()),
               hold: Number(hold.trim()),
               buyers,
               lifetime,
+              // Only a program that pays per lead has confirmed contacts to credit (lib/affiliate-setting.ts creditsContacts).
+              contacts: lead.kind !== "none" && contacts,
+              // Not while memberships are credited: their sales are read from Stripe, never written down (idleRemovalAllowed).
+              idle: recurringOn ? 0 : Number(idle),
               recurring: Number(recurringMonths),
               paidSearch,
               secondTier: Number(secondTier),
@@ -750,8 +851,43 @@ function Terms({
           </label>
         </div>
         <p className="mt-2 text-xs text-ink-soft">
-          {`From ${MIN_COMMISSION} to ${MAX_COMMISSION}%, of what the buyer paid before tax, and a window of ${MIN_COOKIE_DAYS} to ${MAX_COOKIE_DAYS} days. A change applies to sales from then on; a sale keeps the share it was made at. Visitors from the European Economic Area, the UK, Switzerland and Brazil are asked first, because the rules there require it, and their click is remembered once they allow it.`}
+          {`From ${MIN_COMMISSION} to ${MAX_COMMISSION}%, of what the buyer paid before tax, and a window of ${MIN_COOKIE_DAYS} to ${MAX_COOKIE_DAYS} days. A raise applies to sales from then on; a cut does too, unless you give notice below, and then it applies from the day the notice ends. A sale keeps the share it was made at. Visitors from the European Economic Area, the UK, Switzerland and Brazil are asked first, because the rules there require it, and their click is remembered once they allow it.`}
         </p>
+        <label className="mt-4 block" htmlFor="aff-notice">
+          <span className="field-label">Notice before a cut (optional)</span>
+          <span className="relative block max-w-[12rem]">
+            <input
+              id="aff-notice"
+              type="number"
+              inputMode="numeric"
+              min={MIN_NOTICE_DAYS}
+              max={MAX_NOTICE_DAYS}
+              step={1}
+              placeholder="None"
+              value={notice}
+              onChange={(e) => setNotice(e.target.value)}
+              aria-describedby="aff-notice-help"
+              className="field pr-14"
+            />
+            <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-3 grid place-items-center text-ink-soft">days</span>
+          </span>
+          <span id="aff-notice-help" className="mt-1 block text-xs text-ink-soft">
+            {`${MIN_NOTICE_DAYS} to ${MAX_NOTICE_DAYS} days. When you lower the share, a product's share or the days a click counts, your affiliates keep the old terms until then. Empty means none: a cut applies at once. A notice already running is never shortened.`}
+          </span>
+        </label>
+        {setting.pending ? (
+          <div className="notice mt-3 text-sm" role="note" aria-label="A cut waiting for its day">
+            <p className="font-semibold text-ink">
+              {`On ${new Date(setting.pending.from * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })} (UTC), these change:`}
+            </p>
+            <ul className="mt-1 list-disc pl-5 text-ink-soft">
+              {noticeLines(setting, setting.pending, (id) => products.find((p) => p.id === id)?.title ?? null).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <p className="mt-1 text-ink-soft">Until then your affiliates keep the terms they have. The fields above show the new terms.</p>
+          </div>
+        ) : null}
         <p className="mt-1 text-xs text-ink-soft">
           A click is remembered in the buyer&rsquo;s own browser, so the window runs for as long as that browser keeps it.
           Browsers set their own limit and shorten a long one without telling the site, and a buyer who clears their
@@ -1003,6 +1139,54 @@ function Terms({
 
         {/* Pay per lead (components/affiliate-leads-studio.tsx, lib/affiliate-leads.ts). */}
         <LeadTerms value={lead} onChange={setLead} currency={storeCurrency} />
+        {/*
+          A purchase by a contact an affiliate brought (630 [HN6](1),
+          lib/affiliate-leads.ts contactFor). Shown only while leads are paid,
+          because only then is a contact confirmed and written down as theirs.
+          Off until the creator says so, like the bond above.
+        */}
+        {lead.kind !== "none" ? (
+          <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
+            <input
+              type="checkbox"
+              checked={contacts}
+              onChange={(e) => setContacts(e.target.checked)}
+              className="h-5 w-5 shrink-0 accent-[var(--violet)]"
+            />
+            <span className="text-sm">
+              <span className="block font-semibold text-ink">A lead who buys later earns the affiliate who brought them</span>
+              <span className="block text-ink-soft">
+                A one-off purchase not credited to an affiliate&rsquo;s link, code or an earlier purchase goes to the affiliate
+                who brought the buyer as a confirmed lead before they bought, at that affiliate&rsquo;s share, on any device. A
+                lead counts from when it is confirmed, even while it waits for your approval. Once you mark a lead as not
+                genuine, or delete the person from your store, their later purchases earn nobody. Your affiliate page says so
+                before anyone applies.
+              </span>
+            </span>
+          </label>
+        ) : null}
+
+        {/* Removing affiliates who bring nothing (630 [HN6](3), lib/affiliates.ts idleSweep). */}
+        {recurringOn ? (
+          <p className="mt-5 text-xs text-ink-soft">
+            Removing affiliates who bring nothing is not available while memberships and payment plans earn commission: their payments
+            are read from Stripe each time, so a link that brings only members would look idle.
+          </p>
+        ) : (
+        <label className="mt-5 block" htmlFor="aff-idle">
+          <span className="field-label">Remove affiliates who bring nothing</span>
+          <select id="aff-idle" value={idle} onChange={(e) => setIdle(e.target.value)} aria-describedby="aff-idle-help" className="field max-w-[16rem]">
+            {idleChoices.map((n) => (
+              <option key={n} value={String(n)}>
+                {n === 0 ? "Never" : `After ${n} days with no sale and no lead`}
+              </option>
+            ))}
+          </select>
+          <span id="aff-idle-help" className="mt-1 block text-xs text-ink-soft">
+            {`Counted from today when you switch it on. An approved affiliate whose link brings no sale${lead.kind !== "none" ? " and no lead" : ""} in that time is emailed ${IDLE_WARN_DAYS} days before, with the date, and removed on it if still nothing comes. Never a partner, and never anybody you may still owe: they stay until you have paid them. Their record stays, and you can add them back.`}
+          </span>
+        </label>
+        )}
 
         <label className="mt-5 flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
           <input
@@ -1033,6 +1217,115 @@ function Terms({
         </div>
       </form>
     </section>
+  );
+}
+
+/**
+ * The share of several affiliates at once (630 [HN6](4), unit 2): pick them,
+ * type a share or leave it empty for the program's, save; then undo while the
+ * note shows. Each share applies to sales from then on; a sale keeps the share
+ * it was made at.
+ */
+function ShareMany({
+  members,
+  percent,
+  busy,
+  act,
+  error,
+}: {
+  members: { id: string; email: string; rate: number | null }[];
+  percent: number;
+  busy: string | null;
+  act: (where: string, payload: Record<string, unknown>, confirmation: string) => Promise<boolean>;
+  error: React.ReactNode;
+}) {
+  const router = useRouter();
+  const [picked, setPicked] = useState<string[]>([]);
+  const [rate, setRate] = useState("");
+  const [last, setLast] = useState<{ rate: number | null; before: { id: string; rate: number | null }[] } | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  if (members.length < 2 && !last) return null;
+  const chosen = picked.filter((id) => members.some((m) => m.id === id));
+  const asked = rate.trim() === "" ? null : Number(rate.trim());
+
+  async function save() {
+    setProblem(null);
+    try {
+      const response = await fetch("/api/store/affiliates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk-rate", ids: chosen, rate: asked }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; before?: { id: string; rate: number | null }[] };
+      if (!data.ok || !Array.isArray(data.before)) {
+        setProblem(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+        return;
+      }
+      setLast({ rate: asked, before: data.before });
+      setPicked([]);
+      toast("Shares saved. They apply to sales from now on.");
+      router.refresh();
+    } catch {
+      setProblem(MESSAGES.server_error);
+    }
+  }
+
+  return (
+    <details className="mt-4 rounded-2xl border border-line bg-paper p-4">
+      <summary className="cursor-pointer font-semibold text-ink">Change the share of several affiliates</summary>
+      {last ? (
+        <div className="notice mt-3 flex flex-wrap items-center justify-between gap-3 text-sm" role="status">
+          <span>{`${last.before.length} ${last.before.length === 1 ? "share" : "shares"} changed to ${last.rate === null ? `the program's ${percent}%` : `${last.rate}%`}. It applies to sales from now on.`}</span>
+          <span className="flex gap-2">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={busy !== null}
+              onClick={async () => {
+                if (await act("bulk-rate", { action: "bulk-rate-undo", before: last.before, rate: last.rate }, "Shares put back as they were.")) setLast(null);
+              }}
+            >
+              Undo
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLast(null)}>
+              Dismiss
+            </button>
+          </span>
+        </div>
+      ) : null}
+      <fieldset className="mt-3">
+        <legend className="text-sm text-ink-soft">Affiliates whose share changes</legend>
+        <ul className="mt-1 space-y-1">
+          {members.map((m) => (
+            <li key={m.id}>
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5"
+                  checked={chosen.includes(m.id)}
+                  onChange={(e) => setPicked(e.target.checked ? [...chosen, m.id] : chosen.filter((id) => id !== m.id))}
+                />
+                <span className="[overflow-wrap:anywhere]">{m.email}</span>
+                <span className="text-ink-soft">{m.rate === null ? `· program's ${percent}%` : `· ${m.rate}%`}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </fieldset>
+      <label className="mt-3 block max-w-[12rem]" htmlFor="share-many">
+        <span className="field-label">New share</span>
+        <span className="relative block">
+          <input id="share-many" type="number" inputMode="numeric" min={MIN_COMMISSION} max={MAX_COMMISSION} step={1} placeholder={`${percent}`} value={rate} onChange={(e) => setRate(e.target.value)} aria-describedby="share-many-help" className="field pr-9" />
+          <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-3 grid place-items-center text-ink-soft">%</span>
+        </span>
+        <span id="share-many-help" className="mt-1 block text-xs text-ink-soft">{`${MIN_COMMISSION} to ${MAX_COMMISSION}%. Empty gives them the program's share again. A product you took out stays out for everyone.`}</span>
+      </label>
+      {problem ? <p className="notice notice-error mt-3" role="alert">{problem}</p> : null}
+      {error}
+      <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy !== null || chosen.length === 0} onClick={save}>
+        {`Save for ${chosen.length} ${chosen.length === 1 ? "affiliate" : "affiliates"}`}
+      </button>
+    </details>
   );
 }
 

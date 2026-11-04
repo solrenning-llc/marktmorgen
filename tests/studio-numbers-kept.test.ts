@@ -98,7 +98,10 @@ async function main(): Promise<void> {
     is("selling not configured: nothing called, the reading given back", [unsetSales, afterUnset.heavyLeft === beforeUnset.heavyLeft, afterUnset.anyLeft], ["not read", true, STORE_READINGS_PER_DAY]);
     const page = read("app/studio/page.tsx");
     is("the studio's page passes the failure and what is left to the line", [page.includes("failed: salesRead?.failed === true || visitsKept?.failed === true"), page.includes("left: readsSales(current) ? left.heavyLeft : left.anyLeft")], [true, true]);
-    is("the totals never say to reload, which would spend another reading", read("app/studio/totals/page.tsx").includes("Reload the page in a moment"), false);
+    const totals = read("app/studio/totals/page.tsx");
+    // Said the same whether a try failed, none was left, selling is not set up or the reading stopped at its pages:
+    // never "counted" (not always true) and never "reload" (which would spend another reading).
+    is("the totals never say to reload, nor that a try was counted, which is not always so", [totals.includes("Reload the page in a moment"), totals.includes("counted even when it fails")], [false, false]);
     const lineNone = renderToStaticMarkup(createElement(ReadingLine, { reading: { at, canRefresh: false, refreshHref: "/studio?numbers=fresh", backAt: at, salesUsed: false, failed: true, left: 0 } }));
     is("and with none left, 0 readings", lineNone.includes("The last reading failed and was counted; 0 readings left today."), true);
   }

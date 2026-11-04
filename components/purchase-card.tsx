@@ -8,7 +8,15 @@ import { OrdersKey } from "@/components/orders-shared";
 export type CardLink = { href: string; label: string };
 
 /** A file to download, or a link kept elsewhere with the address said as text. */
-export type CardDelivery = { href: string; label: string; external: boolean; keptOn: string | null };
+export type CardDelivery = {
+  href: string;
+  label: string;
+  external: boolean;
+  /** Where a link is kept, its address cut to LINK_SHOWN characters. */
+  keptOn: string | null;
+  /** The same with the whole address, for a screen reader, when the shown one is cut (C3-90); null when it is not. */
+  keptOnAll?: string | null;
+};
 
 /** A license key on the card, already in the store's language. */
 export type CardKey = { slot: string; title?: string; label: string; value: string | null; revoked: boolean; waiting: boolean };
@@ -47,8 +55,18 @@ function Delivery({ delivery, language }: { delivery: CardDelivery; language: un
         <a href={delivery.href} rel="noopener noreferrer" target="_blank" className="btn st-btn btn-block">
           {delivery.label}
         <NewTab language={language} /></a>
-        {/* The address as text, cut to LINK_SHOWN characters: the whole of it is the button's, one click away (C3-80). */}
-        {delivery.keptOn ? <span className="st-muted mt-2 block break-all text-xs">{delivery.keptOn}</span> : null}
+        {/* The address as text, cut to LINK_SHOWN characters: the whole of it is the button's, one click away (C3-80). A screen
+            reader reads the whole address instead of the cut one (C3-90). */}
+        {delivery.keptOn ? (
+          delivery.keptOnAll ? (
+            <span className="st-muted mt-2 block break-all text-xs">
+              <span aria-hidden="true">{delivery.keptOn}</span>
+              <span className="sr-only">{delivery.keptOnAll}</span>
+            </span>
+          ) : (
+            <span className="st-muted mt-2 block break-all text-xs">{delivery.keptOn}</span>
+          )
+        ) : null}
       </span>
     );
   }

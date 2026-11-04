@@ -105,11 +105,15 @@ export function BundleDelivery({
                   <a href={product.link} rel="noopener noreferrer nofollow" target="_blank" className="btn st-btn mt-3">
                     {words.openIt}
                   <NewTab /></a>
-                  <p className="st-muted mt-2 break-all text-xs">
-                    {words.keptOn
-                      .replace("{host}", linkHost(product.link))
-                      .replace("{link}", shownLink !== undefined && product.link.length > shownLink ? `${product.link.slice(0, shownLink)}…` : product.link)}
-                  </p>
+                  {shownLink !== undefined && product.link.length > shownLink ? (
+                    /* Cut where it is shown; a screen reader reads the whole address instead (C3-90). */
+                    <p className="st-muted mt-2 break-all text-xs">
+                      <span aria-hidden="true">{words.keptOn.replace("{host}", linkHost(product.link)).replace("{link}", `${product.link.slice(0, shownLink)}…`)}</span>
+                      <span className="sr-only">{words.keptOn.replace("{host}", linkHost(product.link)).replace("{link}", product.link)}</span>
+                    </p>
+                  ) : (
+                    <p className="st-muted mt-2 break-all text-xs">{words.keptOn.replace("{host}", linkHost(product.link)).replace("{link}", product.link)}</p>
+                  )}
                 </>
               ) : line.download ? (
                 <a href={line.download} className="btn st-btn mt-3">

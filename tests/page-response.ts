@@ -18,12 +18,16 @@
  *     JSON-escaped and then HTML-escaped (& < > as & < >). Each
  *     row is counted as its own script, more than Next ever writes;
  *   - the shell no page here can draw by itself: the root layout and the store
- *     layout, the document's head, the scripts with their nonces, the router's
+ *     layout, the document's head with the whole stylesheet inlined
+ *     (next.config.ts, inlineCss), the scripts with their nonces, the router's
  *     own rows of the payload and each client component's chunk list. It is
- *     SHELL_BYTES, an allowance and not a measurement: marktmorgen.com cannot
- *     be reached from the test machines and a production build is not made in
- *     the tests, so it is set well above what a small App Router page's
- *     shell weighs (tens of kilobytes) and named as a gap where it is used.
+ *     SHELL_BYTES, measured on 4 November 2026 on a local production build
+ *     (next build --webpack, next start) of this branch: the orders page of a
+ *     synthetic store with its chat on, opened with a link that lists nothing,
+ *     answered 403,137 bytes, of which the page's own HTML was 1,636 and its
+ *     payload rows 2,737 (unescaped, the least they add): 398,764 bytes of
+ *     shell, 178,341 of them the inlined stylesheet. Taken as 400,000, above
+ *     the 160,000 allowed before it was measured.
  *
  * Only the measuring is here; what a page may send is held by its own test.
  */
@@ -33,8 +37,8 @@ import { Writable } from "node:stream";
 import type { ReactElement } from "react";
 import { renderToString } from "react-dom/server";
 
-/** The shell besides the page's own tree: layouts, head, scripts, the router's rows (an allowance; see above). */
-export const SHELL_BYTES = 160_000;
+/** The shell besides the page's own tree: layouts, head with the inlined stylesheet, scripts, the router's rows (measured; see above). */
+export const SHELL_BYTES = 400_000;
 /** The most bytes a script's nonce attribute takes (nonce="…", a base64 nonce of at most 64 characters). */
 const NONCE = 64;
 /** What one embedded chunk adds around its data: <script nonce="…">self.__next_f.push( and )</script>. */

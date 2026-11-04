@@ -122,7 +122,14 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
   const delivery = (given: Delivery, item: "main" | BumpKey): CardDelivery => {
     if (given.link) {
       const shown = given.link.length > LINK_SHOWN ? `${given.link.slice(0, LINK_SHOWN)}…` : given.link;
-      return { href: given.link, external: true, label: item !== "main" ? words.openTitle(given.title) : words.openIt, keptOn: words.keptOn(linkHost(given.link), shown) };
+      const host = linkHost(given.link);
+      return {
+        href: given.link,
+        external: true,
+        label: item !== "main" ? words.openTitle(given.title) : words.openIt,
+        keptOn: words.keptOn(host, shown),
+        keptOnAll: shown === given.link ? null : words.keptOn(host, given.link),
+      };
     }
     const query = new URLSearchParams({ handle, ref: purchase.reference, token });
     if (item !== "main") query.set("item", item);

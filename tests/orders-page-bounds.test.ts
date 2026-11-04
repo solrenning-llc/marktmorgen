@@ -18,7 +18,7 @@
  *
  * What a page sends is measured as the App Router sends it (tests/page-response.ts):
  * its HTML, its RSC payload drawn by React's own Flight server and embedded as
- * Next embeds it, and an allowance for the shell. Measured with the HTML alone,
+ * Next embeds it, and the shell measured on a local production build. Measured with the HTML alone,
  * the page at every limit was 2.51 MB under 2.65 MB; as sent, with every text
  * made of the character that costs the most in both (&: five bytes in the
  * HTML, six in the payload's script), it was 5.08 MB (review of
@@ -552,7 +552,9 @@ test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES", 
   const { html, size } = await openSize((await storeForEmail(OWNER))!);
   const words = ordersWords("en");
   const count = (text: string) => html.split(text).length - 1;
-  assert.equal(count("Kept on example.test: "), MAX_LISTED * 4, "forty purchases, each with three checked at checkout");
+  assert.equal(count('<span aria-hidden="true">Kept on example.test: '), MAX_LISTED * 4, "forty purchases, each with three checked at checkout");
+  // Each address shown cut is read whole by a screen reader (C3-90).
+  for (let i = 0; i < MAX_LISTED * 4; i++) assert.ok(html.includes(`<span class="sr-only">Kept on example.test: ${costlyLink(i).replaceAll("&", "&amp;")}</span>`), `link ${i}`);
   assert.equal(count('<input type="hidden" name="bundle"'), MAX_LISTED * 4, "and a bundle under each");
   assert.equal(count(`>${words.addToCalendar}<`), MAX_LISTED, "forty calls");
   assert.ok(count("<code") >= MAX_LISTED * 4, "with their license keys");
@@ -770,6 +772,7 @@ test("without JavaScript, a bundle's button shows its products on the page itsel
   assert.ok(html.includes(`<h1 class="font-display`) && html.includes(words.insideTitle("0".padEnd(MAX_TITLE_LENGTH, "&")).replaceAll("&", "&amp;")));
   assert.equal((html.match(/<code/g) ?? []).length, MAX_BUNDLE_ITEMS, "each product with its key");
   assert.equal((html.match(/href="https:\/\/example\.test\/\?/g) ?? []).length, MAX_BUNDLE_ITEMS, "each product with its whole address");
+  assert.equal((html.match(/<span class="sr-only">Kept on example\.test: https:\/\/example\.test\/\?(&amp;){1900}/g) ?? []).length, MAX_BUNDLE_ITEMS, "read whole by a screen reader where it is shown cut (C3-90)");
   assert.ok(html.includes(`href="/@bounds/orders?token=${token}"`) && html.includes(words.backToList), "and the way back to the list");
   const size = await responseSize(tree);
   const listKeys = MAX_BUNDLE_ITEMS * MAX_KEY_LENGTH * 12;

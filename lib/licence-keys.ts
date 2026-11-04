@@ -570,7 +570,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         // read, and a lost dispute like it never holds the place back (review of #2158).
         await redisPipeline([
           ["SADD", refundSeenKey(store), id],
-          ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS + 86_400],
+          ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
         ]);
         newest = Math.max(newest, created);
         continue;
@@ -627,7 +627,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       }
       await redisPipeline([
         ["SADD", refundSeenKey(store), id],
-        ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS + 86_400],
+        ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
       ]);
       newest = Math.max(newest, created);
     }
@@ -648,16 +648,18 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     if (!(await confirmLostRead(lostRead, refundSeenKey(store)))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
-  // Every run that ends writes the place: moved forward only past what was read to the end, otherwise the one it
-  // started from, its time renewed. So a store with no anchor yet keeps its window and the lost disputes' kept place
-  // still counts, and runs that stay unsure never let the place lapse back to thirty days ago. The set of refunds
-  // already read lives at least as long as the place, so a refund read long ago is never taken for new and a key the
-  // creator gave back by hand is never revoked again (reviews of #2158). A run that throws writes nothing.
+  // The place moves only past what was read to the end, sure, with lookups left and inside its time. A store with no place yet keeps
+  // the one it started from, so the next run reads the same window and the lost disputes' kept place still counts; its
+  // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
+  // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  await redisPipeline([
-    ["SET", refundAnchorKey(store), String(done ? Math.max(newest, anchor) : anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
-    ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
-  ]);
+  if (done) await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  else if (!(Number(anchorRaw) > 0)) {
+    await redisPipeline([
+      ["SET", refundAnchorKey(store), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
+      ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+    ]);
+  }
   return revoked;
 }
 

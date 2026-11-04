@@ -213,7 +213,7 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         // lost dispute like it never holds the place back (review of #2158).
         await redisPipeline([
           ["SADD", seenKey(callsId), id],
-          ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS],
+          ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
         ]);
         newest = Math.max(newest, created);
         continue;
@@ -236,7 +236,7 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       }
       await redisPipeline([
         ["SADD", seenKey(callsId), id],
-        ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS],
+        ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
       ]);
       newest = Math.max(newest, created);
     }
@@ -254,14 +254,17 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     if (!(await confirmLostRead(lostRead, seenKey(callsId)))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
-  // Every run that ends writes the place: moved forward only past what was read to the end, with lookups left and
-  // inside its time, otherwise the one it started from, its time renewed, and the set of refunds already read lives at
-  // least as long, as the license keys do. A first run that could not look up every refund no longer moves past the
-  // ones it left (reviews of #2158). A run that throws writes nothing.
+  // The place moves only past what was read to the end, sure, with lookups left and inside its time. A store with no place yet keeps
+  // the one it started from, so the next run reads the same window and the lost disputes' kept place still counts; its
+  // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
+  // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  await redisPipeline([
-    ["SET", anchorKey(callsId), String(done ? Math.max(newest, anchor) : anchor), "EX", REFUND_KEEP_SECONDS * 2],
-    ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
-  ]);
+  if (done) await redisPipeline([["SET", anchorKey(callsId), String(Math.max(newest, anchor)), "EX", REFUND_KEEP_SECONDS * 2]]);
+  else if (!(Number(anchorRaw) > 0)) {
+    await redisPipeline([
+      ["SET", anchorKey(callsId), String(anchor), "EX", REFUND_KEEP_SECONDS * 2],
+      ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
+    ]);
+  }
   return handled;
 }

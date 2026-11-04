@@ -321,7 +321,7 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
           // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
           await redisPipeline([
             ["SADD", seenKey(statsId), refund.id],
-            ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS + 86_400],
+            ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
           ]);
         }
         newest = Math.max(newest, refund.created);
@@ -345,14 +345,18 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
     if (!(await confirmLostRead(lostRead, seenKey(statsId)))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
-  // Every run that ends writes the place: moved forward only past what was read to the end, otherwise the one it
-  // started from, its time renewed, and the set of refunds already read lives at least as long (reviews of #2158), as
-  // the license keys do. A run that throws writes nothing.
+  // The place moves only past what was read to the end, sure and inside its time. A store with no place yet keeps
+  // the one it started from, so the next run reads the same window and the lost disputes' kept place still counts; its
+  // refunds already read are kept as long (reviews of #2158). Otherwise nothing is written: a place that cannot move
+  // lapses as it always did, and the read refunds, kept sixty-one days after the last one, always outlive it.
   const done = complete && !unsure && Date.now() < deadline;
-  await redisPipeline([
-    ["SET", anchorKey(statsId), String(done ? Math.max(newest, anchor) : anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
-    ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
-  ]);
+  if (done) await redisPipeline([["SET", anchorKey(statsId), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  else if (!(Number(anchorRaw) > 0)) {
+    await redisPipeline([
+      ["SET", anchorKey(statsId), String(anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
+      ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+    ]);
+  }
   return marked;
 }
 

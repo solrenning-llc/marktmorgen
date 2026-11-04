@@ -919,3 +919,29 @@ export async function forgetOrderConfirmationMail(statsId: string | null | undef
   if (receipt?.length !== 1 || receipt[0] !== "finished") throw Error("Confirmation erasure completion is unknown");
   return deleted;
 }
+
+/** One person's linked originals only. No provider call, lease or mutation.
+ * Unbound sources contain no identified recipient and cannot be disclosed to
+ * an arbitrary address. Kept erasure/accounting marks are described separately. */
+export async function orderConfirmationMailOf(statsId: string, email: string, runtime: ShipmentMailRuntime = {}): Promise<unknown[]> {
+  const lifecycle = runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE;
+  if (lifecycle === "never_activated") return [];
+  if (!["active", "retired"].includes(lifecycle) || !STORE.test(statsId) || !email.trim()) throw Error("Confirmation copy ownership is unknown");
+  const person = hash(email.trim().toLowerCase()), index = `nl:order-confirmation:person:${statsId}:${person}`, pipeline = runtime.pipeline ?? redisPipeline;
+  const counts = array(await pipeline([["TYPE", index], ["SCARD", index]]));
+  if (!counts || counts.length !== 2 || !["none", "set"].includes(String(counts[0])) || typeof counts[1] !== "number" || !Number.isSafeInteger(counts[1]) || counts[1] < 0 || counts[1] > confirmationOriginIndexLimit) throw Error("Confirmation copy index is unknown");
+  if (counts[0] === "none" && counts[1] === 0) return [];
+  const reply = array(await pipeline([["SMEMBERS", index]])), ids = reply?.length === 1 ? array(reply[0], confirmationOriginIndexLimit) : null;
+  if (!ids || ids.length !== counts[1] || ids.some(id => typeof id !== "string" || !HASH.test(id)) || new Set(ids).size !== ids.length) throw Error("Confirmation copy index is incomplete");
+  const out: unknown[] = [];
+  for (const id of ids) {
+    const found = await readOrigin(String(id), runtime);
+    if (!found || found.row.statsId !== statsId || found.row.person !== person) throw Error("Confirmation copy source is unknown");
+    const message = found.payload.message;
+    if (message && hash(message.to.trim().toLowerCase()) !== person) throw Error("Confirmation copy recipient is unknown");
+    out.push({ checkout: found.row.session, phase: found.row.phase, created: found.row.created,
+      ...(found.payload.paidCents === undefined ? {} : { paidCents: found.payload.paidCents }),
+      ...(message ? { subject: message.subject, text: message.text } : {}) });
+  }
+  return out;
+}

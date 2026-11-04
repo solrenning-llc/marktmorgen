@@ -807,3 +807,28 @@ export async function forgetShipmentMail(statsId: string | null | undefined, ema
   if (!completed || completed.length !== 1 || completed[0] !== 1) throw Error("Shipment mail erasure completion was not confirmed");
   return deleted;
 }
+
+/** Existing protected messages for one person, without making a grant,
+ * updating a lease, dispatching, or claiming delivery. Retirement still reads.
+ * Any uncertain snapshot fails the whole copy rather than omitting records. */
+export async function shipmentMailOf(statsId: string, email: string, runtime: ShipmentMailRuntime = {}): Promise<unknown[]> {
+  if (lifecycle(runtime) === "never_activated") return [];
+  if (!["active", "retired"].includes(lifecycle(runtime)) || !STORE.test(statsId) || !email.trim()) throw Error("Shipment copy ownership is unknown");
+  const pipeline = runtime.pipeline ?? redisPipeline, fingerprint = person(email), index = personIndex(statsId, fingerprint);
+  const counts = ownArray(await pipeline([["TYPE", index], ["SCARD", index]]));
+  if (!counts || counts.length !== 2 || !["none", "set"].includes(String(counts[0])) || !integer(counts[1]) || counts[1] > SHIPMENT_MAIL_MAX_INDEX_ITEMS) throw Error("Shipment copy index is unknown");
+  if (counts[0] === "none" && counts[1] === 0) return [];
+  const reply = ownArray(await pipeline([["SMEMBERS", index]])), ids = reply?.length === 1 ? ownArray(reply[0]) : null;
+  if (!ids || ids.length !== counts[1] || ids.some(id => typeof id !== "string" || !HASH.test(id)) || new Set(ids).size !== ids.length) throw Error("Shipment copy index is incomplete");
+  const out: unknown[] = [];
+  for (const id of ids) {
+    const found = await read(String(id), pipeline);
+    if (!found || found === "unknown" || found.row.statsId !== statsId || found.row.person !== fingerprint) throw Error("Shipment copy source is unknown");
+    const opened = unseal(found.row.sealed, context(String(id)));
+    if (!opened.ok || digest(opened.value) !== found.row.fingerprint) throw Error("Shipment copy payload is unknown");
+    const message = data(JSON.parse(opened.value));
+    if (!message || Object.keys(message).length !== 5 || !["from", "to", "subject", "text", "replyTo"].every(k => typeof message[k] === "string") || person(String(message.to)) !== fingerprint) throw Error("Shipment copy recipient is unknown");
+    out.push({ checkout: found.row.session, state: found.row.state, created: found.row.created, subject: message.subject, text: message.text });
+  }
+  return out;
+}

@@ -544,6 +544,7 @@ def main():
         claim_call(acc, "accepted-before-reset", first, "dispatch")
         assert claim_call(acc, "accepted-before-reset", first, "settle", "accepted") == ["settled", "accepted"]
         pending = call(acc, "pending-reset", used=2, units=3, period_start=old_start, period_reset=old_reset)
+        idle = call(acc, "idle-reset", used=2, units=1, period_start=old_start, period_reset=old_reset)
         claim_call(acc, "pending-reset", pending, "dispatch")
         claim_call(acc, "pending-reset", pending, "settle", "unknown")
         while redis_now() <= old_reset:
@@ -561,6 +562,10 @@ def main():
         assert [int(x) for x in client.command("HMGET", keys(acc, "new-with-proof")[0], "spent", "held")] == [0, 1]
         assert claim_call(acc, "pending-reset", pending, "settle", "confirmed_not_accepted") == ["already_settled", "confirmed_not_accepted"]
         assert int(client.command("HGET", keys(acc, "new-with-proof")[0], "held")) == 1
+        assert claim_call(acc, "idle-reset", idle, "cancel") == ["released"]
+        assert claim_call(acc, "idle-reset", idle, "cancel") == ["already_released"]
+        assert int(client.command("HGET", keys(acc, "new-with-proof")[0], "held")) == 1
+        assert call(acc, "idle-reset", prior=[old_start, old_reset, 5, old_reset], **next_period) == ["denied", "closed_period"]
         print("PASS: reviewed closure releases old holds; late old settlements cannot alter the new period")
 
         acc = account()

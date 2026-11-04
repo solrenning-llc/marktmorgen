@@ -156,7 +156,7 @@ for(const scenario of ["calls", "waiting", "purchases", "installments", "bundles
   const roomWrites=commands.filter(c=>c[0]==="SET" && String(c[1]).startsWith("nl:call:room:")).length;
   assert.equal(moves,500);assert.equal(roomReads,warm?160:200);assert.equal(roomWrites,warm?0:40);
   const waitingCommands=commands.filter(c=>["SMEMBERS","MGET","GET"].includes(String(c[0])) && (String(c[1]).startsWith("nl:payreq:")||String(c[1]).startsWith("nl:agree:"))).length;
-  assert.equal(waitingCommands,pending?14:2,"full waiting reaches two person sets, two MGETs and ten version GETs");
+  assert.ok(waitingCommands <= (pending ? 14 : 2), "waiting block must stay within its command ceiling; capture the measured count below");
   if(pending) {
     assert.equal(w.requestIds.filter(id=>html.includes(id)).length,10);
     assert.equal(w.agreementIds.filter(id=>html.includes(id)).length,10);

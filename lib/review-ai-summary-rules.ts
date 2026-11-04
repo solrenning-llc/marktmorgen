@@ -35,6 +35,8 @@ export function cleanReviewText(value: string): string {
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "[email]")
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
+    // A web address without http or www ("more at janesmith.dev/shop") is a link too.
+    .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/\S*)?\b/gi, "[link]")
     .replace(/\+?\d[\d\s().-]{7,}\d/g, "[number]")
     .replace(/\s+/g, " ")
     .trim()

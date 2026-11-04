@@ -125,6 +125,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/companies": row("buyers", read),
   "POST store/companies": row("buyers", draft),
   "POST store/contact-box": row("pages", draft),
+  "POST store/contact-labels": row("buyers", draft),
   "GET store/course": row("courses", read),
   "POST store/course": row("courses", draft),
   "GET store/course/task": row("courses", read),

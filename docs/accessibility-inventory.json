@@ -1062,6 +1062,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/labels/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/labels",
+      "parameters": []
+    },
+    {
       "source": "app/studio/meetings/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/meetings",
@@ -1244,6 +1250,7 @@
     "components/blog-body.tsx",
     "components/blog-browser.tsx",
     "components/blog-editor.tsx",
+    "components/bulk-labels.tsx",
     "components/bundle-delivery.tsx",
     "components/bundle-editor.tsx",
     "components/bundle-toggle.tsx",
@@ -1685,6 +1692,7 @@
     "app/api/store/community/upload/route.ts",
     "app/api/store/companies/route.ts",
     "app/api/store/contact-box/route.ts",
+    "app/api/store/contact-labels/route.ts",
     "app/api/store/contact/route.ts",
     "app/api/store/course/certificate/route.ts",
     "app/api/store/course/comment/route.ts",

@@ -811,6 +811,11 @@ Revisor 3, ciclo 81 parte 1 (15h24), reproduzido por ele (repro/C81a/*):
 **Leves (faça junto):** (1) o "Keep it" só avisa o login (lib/passkeys.ts:507): chamar tellRecovery também; (2) clearBrokenMoveByHand (lib/move-repair.ts:76-89) sem a conferência moveRunning(from/to) de repairMove; (3) pedir de novo a mesma remoção desloga o dono outra vez (lib/passkeys.ts:396): deslogar só quando o pedido é novo.
 Não é defeito: o dono entrar não cancela a remoção (decidido, 1ba63eb8). Um PR só, ramo novo a partir do main, testes que falham antes para cada item, e peça a revisão ao Revisor 3 (ele tem as reproduções). A parte 2 da revisão dele ainda vem; junte o que ela trouxer. Isso passa na frente do #2192 e do #2220.
 
+### C3-111 — 04/11/2026 17h25 — Respostas: o interruptor da equipe fica; a vírgula deixa de liberar
+(1) **#1814 (WP11 unidades 2–3):** foi fechado hoje às 13:57 UTC sem comentário e sem nenhuma decisão do dono contra o interruptor; o item 612 [WP11] da fila pede justamente a página da segunda etapa e o interruptor do dono para a equipe. **Mantenha o interruptor** no PR da C3-100 (ação 'two-step' na rota da equipe e o interruptor na página), com a revisão antes de salvar (3.3.6) dizendo quantas chaves e de quem pausam. Ordem: primeiro a correção grave da C3-110 (passkeys), depois este PR, com revisão independente; e confira que o interruptor usa o mesmo gate de segunda etapa já corrigido.
+(2) **claude3/assistant-deal-nouns (e2f7def0):** o Revisor 2 achou que uma lista com vírgula depois do acesso ainda passa: "Garantizamos el acceso, resultados y éxito." e "Nous garantissons l'accès, des résultats rapides.". Decisão: **a vírgula deixa de liberar**; o verbo de garantia só é liberado quando o acesso fecha a oração (ponto, ponto e vírgula, !, ?, fim) com no máximo um complemento de acesso. Na dúvida, recusa. Teste com as duas frases, falhando antes. Faça junto do #2220, depois da C3-110.
+(3) claude3/mail-ledger-counted (d46f80cb): sem achado do Revisor 2; incorpore o #2205 com os 9 verdes.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

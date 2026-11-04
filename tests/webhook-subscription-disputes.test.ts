@@ -8,7 +8,7 @@
  * only; the endpoint's name resolves to a private address, so nothing leaves
  * this machine.
  */
-import { DISPUTE_LOOKUPS_PER_STORE, GIVEN_UP_LINES_PER_DAY, STRIPE_LOOKUPS_PER_STORE, STRIPE_REFUSED_RUNS, STRIPE_WAIT_RUNS, STRIPE_WAIT_MAX_SECONDS, STRIPE_WAIT_TIME_VISITS, addEndpoint, eventIdFor, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
+import { DISPUTE_LOOKUPS_PER_STORE, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, removeEndpoint, STRIPE_LOOKUPS_PER_STORE, STRIPE_REFUSED_RUNS, STRIPE_WAIT_RUNS, STRIPE_WAIT_MAX_SECONDS, STRIPE_WAIT_TIME_VISITS, addEndpoint, eventIdFor, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { allowanceUsed } from "@/lib/store-allowance";
@@ -28,7 +28,7 @@ const intents: Record<string, Record<string, string>> = {};
 const paidBy: Record<string, string> = {};
 const invoices: Record<string, Record<string, unknown>> = {};
 /** How many more times each path answers 500, fails without an answer, or is refused with another Stripe error. */
-type Failure = "500" | "network" | "403" | "400" | "429";
+type Failure = "500" | "network" | "403" | "400" | "429" | "html";
 const failing: Record<string, { left: number; how: Failure }> = {};
 /** A canceled member's customer record, as GET /v1/customers answers. */
 const customers: Record<string, string> = {};
@@ -51,6 +51,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     fail.left -= 1;
     if (fail.how === "network") throw new TypeError("fetch failed");
     if (fail.how === "403") return Response.json({ error: { type: "invalid_request_error", code: "account_invalid", message: "The account cannot be read." } }, { status: 403 });
+    // An error page in front of Stripe: not JSON at all.
+    if (fail.how === "html") return new Response("<html><body>502 Bad Gateway</body></html>", { status: 502, headers: { "Content-Type": "text/html" } });
     if (fail.how === "429") return Response.json({ error: { type: "invalid_request_error", code: "rate_limit", message: "Too many requests." } }, { status: 429 });
     if (fail.how === "400") return Response.json({ error: { type: "invalid_request_error", code: "parameter_unknown", message: "Received unknown parameter." } }, { status: 400 });
     return Response.json({ error: { type: "api_error", message: "Something went wrong on Stripe's end." } }, { status: 500 });
@@ -587,6 +589,74 @@ async function main() {
   is("the deliveries could not be written: no mark left, nothing in the log, the event waits", [(await redis.pipeline([["GET", queuedMark]]))[0], (await webhooksView(store)).log.length, await waitOf()], [null, 0, "evt_Queued|1"]);
   await watchStripe(Date.now() + 10_000);
   is("and the next visit sends it", [(await recentMessages(store, "sale.completed")).length, await waitRecord()], [1, null]);
+
+  part("A delivery whose write's reply was lost is written again to the same delivery, never twice");
+  // Runs the pipeline, then loses its reply, the first time `bad` matches it.
+  const loseReplyOnce = (bad: (command: (string | number)[]) => boolean) => {
+    let lost = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const reply = await realPipeline(commands);
+      if (!lost && commands.some(bad)) {
+        lost = true;
+        throw new TypeError("fetch failed");
+      }
+      return reply;
+    }) as typeof redis.pipeline;
+  };
+  const queued = async () => ((await redis.pipeline([["ZRANGEBYSCORE", "nl:hooks:q", "-inf", "+inf"]]))[0] as string[]).filter((m) => m.startsWith(`${statsId}|`));
+  for (const [what, bad] of [
+    ["the deliveries written", (command: (string | number)[]) => command[0] === "SET" && String(command[1]).startsWith("nl:hooks:d:") && command[3] === "NX"],
+    ["the deliveries queued", (command: (string | number)[]) => command[0] === "ZADD" && command[1] === "nl:hooks:q"],
+    ["the deliveries in the log", (command: (string | number)[]) => command[0] === "LPUSH"],
+  ] as const) {
+    store = await setup(["sale.completed"]);
+    is(`${what}: a second endpoint is kept`, (await addEndpoint(store, "https://hooks.example.org/two", ["sale.completed"])).ok, true);
+    timeline = [evt("evt_LostReply", "checkout.session.completed", 1_790_140_000, { id: "cs_LostReply01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } })];
+    loseReplyOnce(bad);
+    await watchStripe(Date.now() + 10_000);
+    mend();
+    is(`${what}, the reply lost: the event waits for the next visit`, await waitOf(), "evt_LostReply|1");
+    await watchStripe(Date.now() + 10_000);
+    const log = (await webhooksView(store)).log;
+    is(`${what}, the reply lost: exactly one delivery an endpoint in the log and on the queue after the next visit`, [log.length, new Set(log.map((d) => d.id)).size, log.map((d) => d.endpoint).sort(), (await queued()).length, await waitRecord()], [2, 2, ["hooks.example.net/in", "hooks.example.org/two"], 2, null]);
+  }
+  store = await setup(["sale.completed"]);
+  timeline = [evt("evt_Lost", "checkout.session.completed", 1_790_141_000, { id: "cs_Lost01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } })];
+  const lostMark = `nl:hooks:evt:${eventIdFor(statsId, "sale.completed", "cs_Lost01")}`;
+  breakWhen((command) => (command[0] === "ZADD" && command[1] === "nl:hooks:q") || (command[0] === "DEL" && command[1] === lostMark));
+  await watchStripe(Date.now() + 10_000);
+  mend();
+  is("when the mark cannot be taken back either, the lost event is said loudly", said.some((l) => l.startsWith("WEBHOOK EVENT LOST") && l.includes("sale.completed")), true);
+
+  part("An answer that is not JSON is Stripe's passing failure, not ours");
+  store = await setup(["dispute.opened"]);
+  timeline = [evt("evt_Html", "charge.dispute.created", 1_790_142_000, dispute("dp_html", "pi_Member"))];
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "html" };
+  for (let visit = 0; visit < STRIPE_REFUSED_RUNS + 1; visit += 1) await watchStripe(Date.now() + 10_000);
+  is("still waiting past a refusal's visits, with no line", [await waitOf(), (await givenUpLines()).length], [`evt_Html|${STRIPE_REFUSED_RUNS + 1}`, 0]);
+  await seedWait("evt_Html");
+  await watchStripe(Date.now() + 10_000);
+  is("passed over at the cap as Stripe's failure", (await givenUpLines())[0]?.lastError.startsWith("Stripe kept refusing or failing to answer about dispute dp_html"), true);
+
+  part("At most MAX_ENDPOINTS endpoints a store a day are told, however they are removed and added");
+  store = await setup(["dispute.opened"]);
+  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "500" };
+  timeline = [];
+  const removed: string[] = [];
+  for (let n = 0; n <= MAX_ENDPOINTS; n += 1) {
+    if (n > 0) {
+      const old = (await webhooksView(store)).endpoints[0];
+      removed.push(old.id);
+      is(`endpoint ${n + 1} is added`, (await addEndpoint(store, `https://hooks.example.org/turn${n}`, ["dispute.opened"])).ok, true);
+      await removeEndpoint(store, old.id);
+    }
+    timeline = [...timeline, evt(`evt_Turn${n}`, "charge.dispute.created", 1_790_143_000 + n, dispute(`dp_turn${n}`, "pi_Member"))];
+    await seedWait(`evt_Turn${n}`);
+    await watchStripe(Date.now() + 10_000);
+  }
+  is(`${MAX_ENDPOINTS} endpoints told, the one past them in the server log only`, [(await givenUpLines()).length, said.some((l) => l.startsWith("more endpoints of a store were to be told")), await anchor()], [MAX_ENDPOINTS, true, `evt_Turn${MAX_ENDPOINTS}`]);
+  const turnToday = Math.floor(Date.now() / 86_400_000);
+  is("removing an endpoint took its day set with it", (await redis.pipeline(removed.map((id) => ["EXISTS", `nl:hooks:wait:${statsId}:day:${turnToday}:${id}`]))).map(Number), removed.map(() => 0));
 
   part("The call budget per run is the same as before");
   is("ten calls for refunds and addresses, ten for disputes", [STRIPE_LOOKUPS_PER_STORE, DISPUTE_LOOKUPS_PER_STORE], [10, 10]);

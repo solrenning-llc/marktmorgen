@@ -211,6 +211,8 @@ const anchorKey = (statsId: string) => `nl:hooks:anchor:${statsId}`;
 const waitKey = (statsId: string) => `nl:hooks:wait:${statsId}`;
 /** The passed-over events said to one endpoint of a store on one UTC day, a sorted set by when each was first passed over; gone at the end of the next day. */
 const givenUpDayKey = (statsId: string, day: number, endpoint: string) => `nl:hooks:wait:${statsId}:day:${day}:${endpoint}`;
+/** The endpoints of a store told of passed-over events on one UTC day, at most MAX_ENDPOINTS, so removing and adding endpoints makes no more day sets. */
+const givenUpEndpointsKey = (statsId: string, day: number) => `nl:hooks:wait:${statsId}:eps:${day}`;
 const testsKey = (statsId: string) => `nl:rl:hooks:test:${statsId}`;
 const POSITION_KEY = "nl:hooks:pos";
 
@@ -489,10 +491,16 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
     store: { handle: store.handle, name: store.name, url: `${SITE_URL}/@${store.handle}` },
     data,
   });
+  // Each delivery's id is made from the event and the endpoint, so writing
+  // them again (after a reply that was lost) finds the same ones: SET NX
+  // keeps what is there, the queue keeps its place (ZADD NX; a delivery
+  // already sent is taken off it by runClaimed), and the log gets only what
+  // it does not hold. Deleting the event's mark after a failure can then
+  // never send it twice.
   const ids: string[] = [];
-  const commands: (string | number)[][] = [];
+  const writes: (string | number)[][] = [];
   for (const endpoint of listening) {
-    const id = `dlv_${randomBytes(12).toString("hex")}`;
+    const id = `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`;
     ids.push(id);
     const delivery: Delivery = {
       id,
@@ -510,17 +518,18 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
       lastAt: 0,
       createdAt: now,
     };
-    commands.push(["SET", deliveryKey(id), JSON.stringify(delivery), "EX", DELIVERY_SECONDS]);
-    commands.push(["ZADD", QUEUE_KEY, now, `${statsId}|${id}`]);
-    commands.push(["LPUSH", logKey(statsId), id]);
+    writes.push(["SET", deliveryKey(id), JSON.stringify(delivery), "NX", "EX", DELIVERY_SECONDS]);
   }
-  commands.push(["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]);
   try {
-    await redisPipeline(commands);
+    const written = await redisPipeline(writes);
+    await redisPipeline(ids.map((id) => ["ZADD", QUEUE_KEY, "NX", now, `${statsId}|${id}`]));
+    await pushMissing(statsId, ids.filter((_, at) => written[at] !== "OK"), ids.filter((_, at) => written[at] === "OK"));
   } catch (error) {
     // The event is marked sent above; without its deliveries written it
-    // would never be: the mark goes, so the next time it is noticed it is.
-    await redisPipeline([["DEL", eventKey(eventId)]]).catch(() => undefined);
+    // would never be: the mark goes, so the next time it is noticed it is
+    // written again, to the same deliveries.
+    await redisPipeline([["DEL", eventKey(eventId)]]).catch((lost) =>
+      console.error("WEBHOOK EVENT LOST: its deliveries could not be written and its sent mark could not be taken back", statsId, type, eventId, lost));
     throw error;
   }
   await soon(async () => {
@@ -752,6 +761,11 @@ export async function removeEndpoint(store: Store, id: string): Promise<Webhooks
     fresh && fresh.endpoints.some((e) => e.id === id) ? { ...fresh, handle: store.handle, endpoints: fresh.endpoints.filter((e) => e.id !== id) } : null,
   );
   if (written && !written.after.endpoints.length) await redisPipeline([["SREM", STORES_KEY, store.statsId]]);
+  // Its sets of passed-over events, today's and yesterday's (none older is kept).
+  if (written) {
+    const today = Math.floor(Date.now() / 86_400_000);
+    await redisPipeline([["DEL", givenUpDayKey(store.statsId, today, id)], ["DEL", givenUpDayKey(store.statsId, today - 1, id)]]);
+  }
   return webhooksView(store);
 }
 
@@ -966,8 +980,10 @@ type Outcome = true | Waits;
 /** How a failed Stripe call waits. */
 function waitsOn(error: unknown): Waits {
   if (error instanceof StripeError) return error.status >= 400 && error.status < 500 && error.status !== 429 && error.status !== 409 ? "refused" : "passing";
-  // No answer: the network failed or the call ran out of time (lib/fetch-timeout.ts gives up with this TypeError).
+  // No answer: the network failed or the call ran out of time (lib/fetch-timeout.ts gives up with this TypeError);
+  // or an answer that is not JSON at all (an error page in front of Stripe), which onAccount cannot read.
   if (error instanceof TypeError && error.message === "fetch failed") return "passing";
+  if (error instanceof SyntaxError) return "passing";
   return "ours";
 }
 
@@ -1403,12 +1419,25 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
   const [marked, ...sent] = await redisPipeline([["GET", mark], ...as.parts.map((part) => ["GET", eventKey(eventIdFor(statsId, part.type, part.seed))])]);
   if (marked !== null && marked !== undefined) return;
   const unsent = as.parts.filter((_, at) => sent[at] === null || sent[at] === undefined);
-  const listening = config.endpoints.flatMap((endpoint) => {
+  const hearing = config.endpoints.flatMap((endpoint) => {
     const part = unsent.find((p) => endpoint.events.includes(p.type));
     return part ? [{ endpoint, type: part.type }] : [];
   });
   const day = Math.floor(now / 86_400_000);
   const eventId = eventIdFor(statsId, "stripe.given_up", stripeEvent);
+  // At most MAX_ENDPOINTS endpoints a store a day are told; one past them (a
+  // store removing and adding endpoints) is said in the server's log only.
+  const endpointsKey = givenUpEndpointsKey(statsId, day);
+  const joined = hearing.length ? await redisPipeline([
+    ...hearing.flatMap(({ endpoint }) => [["SADD", endpointsKey, endpoint.id], ["SCARD", endpointsKey]]),
+    ["EXPIREAT", endpointsKey, (day + 2) * 86400],
+  ]) : [];
+  const over = hearing.filter((_, n) => Number(joined[n * 2]) === 1 && Number(joined[n * 2 + 1]) > MAX_ENDPOINTS);
+  if (over.length) {
+    await redisPipeline(over.map(({ endpoint }) => ["SREM", endpointsKey, endpoint.id]));
+    console.error("more endpoints of a store were to be told of passed-over Stripe events today than it can have; said here only", statsId, stripeEvent, over.map(({ endpoint }) => endpoint.id));
+  }
+  const listening = hearing.filter((at) => !over.includes(at));
   const placed = listening.length ? await redisPipeline(listening.flatMap(({ endpoint }) => {
     const key = givenUpDayKey(statsId, day, endpoint.id);
     // Gone at the end of the next UTC day: two days' sets an endpoint at most.
@@ -1650,16 +1679,23 @@ export async function watchStripe(deadline: number, now = Date.now()): Promise<{
  */
 export async function forgetStoreWebhooks(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const [rawLog, rawConfig] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1], ["GET", cfgKey(statsId)]]);
-  const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
   const today = Math.floor(Date.now() / 86_400_000);
+  const [rawLog, rawConfig, ...rawTold] = await redisPipeline([
+    ["LRANGE", logKey(statsId), 0, -1],
+    ["GET", cfgKey(statsId)],
+    ...[0, 1, 2].map((back) => ["SMEMBERS", givenUpEndpointsKey(statsId, today - back)]),
+  ]);
+  const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
+  // The endpoints told on those days, removed since or not.
+  const told = new Set([...(parseConfig(rawConfig)?.endpoints ?? []).map((e) => e.id), ...rawTold.flatMap((members) => (Array.isArray(members) ? (members as unknown[]).map(String) : []))]);
   await redisPipeline([
     ["DEL", cfgKey(statsId)],
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],
     ["DEL", waitKey(statsId)],
     // Each endpoint's sets of passed-over events, today's and the two days before (an endpoint removed since: gone within two days by itself).
-    ...(parseConfig(rawConfig)?.endpoints ?? []).flatMap((e) => [0, 1, 2].map((back) => ["DEL", givenUpDayKey(statsId, today - back, e.id)])),
+    ...[...told].flatMap((endpoint) => [0, 1, 2].map((back) => ["DEL", givenUpDayKey(statsId, today - back, endpoint)])),
+    ...[0, 1, 2].map((back) => ["DEL", givenUpEndpointsKey(statsId, today - back)]),
     ["DEL", logKey(statsId)],
     ...ids.flatMap((id) => [
       ["DEL", deliveryKey(id)],

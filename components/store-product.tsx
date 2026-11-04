@@ -35,6 +35,7 @@ import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import { assistReminderOffered } from "@/lib/assistant-reminder";
 import { type AskWhen, isAskWhen } from "@/lib/ask-when";
 import { type UnitLine, unitLines } from "@/lib/option-units";
+import { hasDateOnSale } from "@/lib/call-on-sale";
 
 /**
  * How many price options are drawn as cards before they become a list to pick
@@ -141,20 +142,19 @@ export function SaleNote({ store, product }: { store: Store; product: Listing })
 /** What a card says about a call: one person, a group, or dated live sessions. */
 function callLine(store: Store, call: NonNullable<Listing["call"]>, now = Date.now()): string {
   const { w } = speech(store);
+  // In person (lib/call-place.ts): no call and nothing online; the address is on its booking page.
+  const inPerson = Boolean(call.place);
   if (call.kind === "live") {
     const coming = call.sessions.filter((s) => s.start > now).length;
-    if (coming === 0) return w.callLiveNone;
-    return w.callLive(coming);
+    if (coming === 0) return inPerson ? w.inPersonLiveNone : w.callLiveNone;
+    return inPerson ? w.inPersonLive(coming) : w.callLive(coming);
   }
-  if (call.seats > 1) return w.callGroup(call.minutes, call.seats);
-  return w.callOne(call.minutes);
+  if (call.seats > 1) return inPerson ? w.inPersonGroup(call.minutes, call.seats) : w.callGroup(call.minutes, call.seats);
+  return inPerson ? w.inPersonOne(call.minutes) : w.callOne(call.minutes);
 }
 
-/** Whether a call can still be booked: always for weekly hours, and for dated sessions while one is before its notice. */
-export function hasDateOnSale(call: NonNullable<Listing["call"]>, now = Date.now()): boolean {
-  if (call.kind !== "live") return true;
-  return call.sessions.some((s) => s.start - call.noticeHours * 3600_000 > now);
-}
+/** Whether a call can still be booked (lib/call-on-sale.ts). */
+export { hasDateOnSale };
 
 /**
  * The line under the title that says what the pill cannot: the length of a

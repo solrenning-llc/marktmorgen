@@ -55,6 +55,10 @@ export const es: BuyerWords = {
   callLive: (dates) => `Sesión en vivo, en línea, ${dates} ${plural(dates, "fecha programada", "fechas programadas")}`,
   callGroup: (minutes, seats) => `Llamada en grupo, ${minutes} minutos, hasta ${seats} personas, en línea`,
   callOne: (minutes) => `Llamada de ${minutes} minutos, en línea`,
+  inPersonLive: (dates) => `Sesión en vivo, en persona, ${dates} ${plural(dates, "fecha programada", "fechas programadas")}`,
+  inPersonGroup: (minutes, seats) => `${minutes} minutos, hasta ${seats} personas, en persona`,
+  inPersonOne: (minutes) => `${minutes} minutos, en persona`,
+  inPersonLiveNone: "Sesión en vivo, en persona, sin fechas programadas",
   bundleOf: (count, worth) => `Paquete de ${count} productos${worth ? ` · ${worth}` : ""}`,
   worth: (worth, price) => `${worth} en productos por ${price}`,
   podcast: (episodes) => `Pódcast privado, ${episodes} ${plural(episodes, "episodio", "episodios")}, en tu propia app de pódcast`,
@@ -303,4 +307,9 @@ export const es: BuyerWords = {
   cardTestMode: "Modo de prueba: no se cobra ninguna tarjeta real.",
   cardCheckout: "Pago seguro con Stripe, en una pestaña nueva.",
   cardOpens: (store) => `Se abre en la tienda de ${store}, en una pestaña nueva.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} o más`,
+  plusTax: "+ impuestos, si corresponden",
+  salePriceUntil: (price, when) => `Precio de oferta: ${price}, hasta el ${when}`,
 };

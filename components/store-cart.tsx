@@ -90,7 +90,12 @@ export function AddToCart({
   );
 }
 
-type Line = { id: string; title: string; href: string; price: string; ok: boolean };
+/** `ships`: for a product the creator ships, its line about shipping, as its own page says it (lib/shipping.ts). */
+type Line = { id: string; title: string; href: string; price: string; ok: boolean; ships?: string | null };
+/** What shipping comes to and where it can go, said before paying (lib/cart-shipping.ts). */
+type ShippingRow = { amount: string | null; label: string; where: string; notTo: string | null };
+/** Products that cannot ship with the rest: the cart cannot be paid for until they are taken out. */
+type Apart = { ids: string[]; why: string };
 /**
  * Something that could go in the cart too, with why it is shown: the
  * creator's own pick (lib/store-collections.ts) or something the buyers of
@@ -142,6 +147,10 @@ export function CartButton({
   const [next, setNext] = useState<{ more: number; percent: number } | null>(null);
   const [suggest, setSuggest] = useState<Suggestion[]>([]);
   const [bundle, setBundle] = useState<BundleSwap | null>(null);
+  const [shipping, setShipping] = useState<ShippingRow | null>(null);
+  const [apart, setApart] = useState<Apart | null>(null);
+  // Whether anything is handed over digitally: only then is the box to start at once asked for (lib/digital-consent.ts).
+  const [digital, setDigital] = useState(true);
   const panel = useRef<HTMLDivElement>(null);
   const wanted = ids.join(",");
 
@@ -150,7 +159,7 @@ export function CartButton({
     let live = true;
     fetch(`/api/store/cart?${new URLSearchParams({ handle, ids: wanted })}`)
       .then((r) => r.json())
-      .then((data: { ok?: boolean; items?: Line[]; total?: string; deal?: { percent: number; saved: string } | null; next?: { more: number; percent: number } | null; suggest?: Suggestion[]; bundle?: BundleSwap | null }) => {
+      .then((data: { ok?: boolean; items?: Line[]; total?: string; deal?: { percent: number; saved: string } | null; next?: { more: number; percent: number } | null; suggest?: Suggestion[]; bundle?: BundleSwap | null; shipping?: ShippingRow | null; apart?: Apart | null; digital?: boolean }) => {
         if (!live || !data.ok) return;
         setLines(data.items ?? []);
         setTotal(data.total ?? "");
@@ -158,6 +167,10 @@ export function CartButton({
         setNext(data.next ?? null);
         setSuggest(data.suggest ?? []);
         setBundle(data.bundle ?? null);
+        setShipping(data.shipping ?? null);
+        setApart(data.apart ?? null);
+        // Unknown is asked: a cart that does not say is treated as holding something digital.
+        setDigital(data.digital !== false);
       })
       .catch(() => {});
     return () => {
@@ -172,6 +185,7 @@ export function CartButton({
   if (ids.length === 0 && notice === null && !restoring) return null;
   const shown = (lines ?? []).filter((line) => ids.includes(line.id));
   const payable = shown.filter((line) => line.ok);
+  const held = apart !== null && apart.ids.some((id) => ids.includes(id));
 
   return (
     <div id="cart" className="st-cart">
@@ -206,6 +220,7 @@ export function CartButton({
                     <span className="min-w-0">
                       <a href={line.href} className="st-title-link block font-semibold">{line.title}</a>
                       {line.ok ? null : <span className="st-muted block text-xs">{c.gone}</span>}
+                      {line.ok && line.ships ? <span className="st-muted block text-xs">{line.ships}</span> : null}
                     </span>
                     <span className="flex shrink-0 items-center gap-3">
                       {line.ok ? <span className="st-price text-sm tabular-nums">{line.price}</span> : null}
@@ -286,7 +301,9 @@ export function CartButton({
                     );
                   })
                 : null}
-              {payable.length > 0 ? (
+              {/* Always there, so a screen reader hears the sentence when it appears: nothing can be paid for until what cannot go together is taken out (lib/cart-shipping.ts). */}
+              <p className={held ? "st-note mt-3 text-sm" : "sr-only"} role="status" data-cart-apart="">{held ? apart.why : ""}</p>
+              {held ? null : payable.length > 0 ? (
                 <form action="/api/store/cart" method="post" target="_top" className="mt-3 space-y-3" data-checkout="">
                   <input type="hidden" name="handle" value={handle} />
                   {payable.map((line) => (
@@ -300,13 +317,22 @@ export function CartButton({
                   ) : next ? (
                     <p className="st-muted text-sm font-semibold">{c.dealNext(next.more, next.percent)}</p>
                   ) : null}
+                  {shipping ? (
+                    <div className="text-sm" data-cart-shipping="">
+                      <p className="flex justify-between font-semibold">
+                        <span>{shipping.label}</span>
+                        {shipping.amount ? <span className="tabular-nums">{shipping.amount}</span> : null}
+                      </p>
+                      <p className="st-muted text-xs">{shipping.notTo ? `${shipping.where}. ${shipping.notTo}` : shipping.where}</p>
+                    </div>
+                  ) : null}
                   <p className="flex justify-between text-sm font-semibold">
                     <span>{c.total}</span>
                     <span className="tabular-nums">{total}</span>
                   </p>
                   {remind ? <AssistReminderBox id={`r-cart-${handle}`} lang={lang} store={remind} /> : null}
-                  {/* Everything a cart holds is handed over digitally (lib/cart-rules.ts, cartable), so it always asks. */}
-                  <DigitalConsentBox id={`dc-cart-${handle}`} lang={lang} refused={notice === "consent"} />
+                  {/* Asked when anything in the cart is handed over digitally; a cart of shipped products only has nothing to start at once. */}
+                  {digital ? <DigitalConsentBox id={`dc-cart-${handle}`} lang={lang} refused={notice === "consent"} /> : null}
                   <button type="submit" className="btn st-btn btn-block">{c.checkout(total)}</button>
                   <p className="st-muted text-xs">{c.note}</p>
                 </form>

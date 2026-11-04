@@ -49,6 +49,14 @@ export const ORDERS_KEY_COMMANDS = 24;
  */
 export const ORDERS_READ_MS = 25_000;
 /**
+ * How long a request for the link waits on what it reads (lib/buyer-orders.ts,
+ * requestOrdersLink): shorter than an opening's, so the link's grant (a write,
+ * REDIS_TIMEOUT_MS at the most) and its email (RESEND_TIMEOUT_MS at the most)
+ * still fit in the route's maxDuration, ORDERS_OPEN_SECONDS
+ * (tests/orders-open.test.ts holds it).
+ */
+export const ORDERS_LINK_READ_MS = 12_000;
+/**
  * What one download from the list of purchases takes to find its purchase
  * (lib/buyer-orders.ts, findPurchase; C3-78, MR, 4 November 2026), besides the
  * download's own request: DOWNLOAD_LOOKUP_UNITS of the store's buyer requests,

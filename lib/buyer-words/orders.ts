@@ -69,8 +69,8 @@ const en = {
     `If that address bought something from ${store}, a link to all of it usually arrives within a minute and works for 24 hours. We say the same thing whether or not it did, so nobody can use this page to find out who bought what.`,
   checkInbox: "Check your inbox",
   sentBody: (store: string) =>
-    `If that address bought something from ${store}, a link is normally on its way. It comes from ${store} via Marktmorgen and usually arrives within a minute. If it is not there, look in spam.`,
-  nothingArrived: "Nothing arrived? You may have paid with a different address: the one you typed at checkout. Try that one below. If it was the right one, try again later: the store may have been too busy to look it up just then.",
+    `If that address bought something from ${store}, a link is normally on its way. It comes from ${store} via Marktmorgen and can take a few minutes. If it is not there, look in spam.`,
+  nothingArrived: "Nothing arrived? You may have paid with a different address: the one you typed at checkout. Try that one below. If it was the right one, try again later, or reply to your order confirmation to reach the creator.",
 
   // ---- The list of purchases -------------------------------------------------------
   bookedCalls: (count: number): string => (count === 1 ? "Your booking" : "Your bookings"),
@@ -315,8 +315,8 @@ const es: OrdersWords = {
     `Si esa dirección le compró algo a ${store}, normalmente en menos de un minuto llega un enlace a todo ello, que funciona durante 24 horas. Decimos lo mismo tanto si compró como si no, para que nadie pueda usar esta página para averiguar quién compró qué.`,
   checkInbox: "Revisa tu bandeja de entrada",
   sentBody: (store) =>
-    `Si esa dirección le compró algo a ${store}, normalmente el enlace va en camino. Llega de ${store} vía Marktmorgen, por lo general en menos de un minuto. Si no está, mira en la carpeta de spam.`,
-  nothingArrived: "¿No te llegó nada? Puede que hayas pagado con otra dirección: la que escribiste al pagar. Prueba con esa abajo. Si era la correcta, inténtalo de nuevo más tarde: puede que la tienda estuviera demasiado ocupada para buscarla en ese momento.",
+    `Si esa dirección le compró algo a ${store}, normalmente el enlace va en camino. Llega de ${store} vía Marktmorgen y puede tardar unos minutos. Si no está, mira en la carpeta de spam.`,
+  nothingArrived: "¿No te llegó nada? Puede que hayas pagado con otra dirección: la que escribiste al pagar. Prueba con esa abajo. Si era la correcta, inténtalo de nuevo más tarde o responde a la confirmación de tu pedido para escribir al creador.",
 
   bookedCalls: (count) => (count === 1 ? "Tu reserva" : "Tus reservas"),
   waiting: "Te espera",
@@ -534,8 +534,8 @@ const fr: OrdersWords = {
     `Si cette adresse a acheté quelque chose chez ${store}, un lien vers tous ses achats arrive généralement en moins d'une minute et reste valable 24${S}heures. Nous affichons le même message dans tous les cas, pour que personne ne puisse se servir de cette page pour savoir qui a acheté quoi.`,
   checkInbox: "Consultez votre boîte de réception",
   sentBody: (store) =>
-    `Si cette adresse a acheté quelque chose chez ${store}, le lien est normalement en route. Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute. S'il n'y est pas, regardez dans les spams.`,
-  nothingArrived: `Rien reçu${S}? Vous avez peut-être payé avec une autre adresse${S}: celle saisie lors du paiement. Essayez-la ci-dessous. Si c'était la bonne, réessayez plus tard${S}: la boutique était peut-être trop occupée pour la rechercher à ce moment-là.`,
+    `Si cette adresse a acheté quelque chose chez ${store}, le lien est normalement en route. Il vient de ${store} via Marktmorgen et peut mettre quelques minutes. S'il n'y est pas, regardez dans les spams.`,
+  nothingArrived: `Rien reçu${S}? Vous avez peut-être payé avec une autre adresse${S}: celle saisie lors du paiement. Essayez-la ci-dessous. Si c'était la bonne, réessayez plus tard, ou répondez à la confirmation de votre commande pour joindre le créateur.`,
 
   bookedCalls: (count) => (count < 2 ? "Votre réservation" : "Vos réservations"),
   waiting: "Ce qui vous attend",
@@ -751,8 +751,8 @@ const de: OrdersWords = {
     `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, kommt ein Link zu allem in der Regel innerhalb einer Minute an und gilt 24 Stunden. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand über diese Seite herausfinden kann, wer was gekauft hat.`,
   checkInbox: "Sehen Sie in Ihrem Posteingang nach",
   sentBody: (store) =>
-    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, ist der Link normalerweise unterwegs. Er kommt von ${store} über Marktmorgen und trifft in der Regel innerhalb einer Minute ein. Wenn er nicht da ist, sehen Sie im Spam-Ordner nach.`,
-  nothingArrived: "Nichts angekommen? Vielleicht haben Sie mit einer anderen Adresse bezahlt: der, die Sie beim Bezahlen eingegeben haben. Versuchen Sie es unten mit dieser. Wenn es die richtige war, versuchen Sie es später noch einmal: Der Shop war in dem Moment vielleicht zu ausgelastet, um sie nachzuschlagen.",
+    `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, ist der Link normalerweise unterwegs. Er kommt von ${store} über Marktmorgen und kann ein paar Minuten dauern. Wenn er nicht da ist, sehen Sie im Spam-Ordner nach.`,
+  nothingArrived: "Nichts angekommen? Vielleicht haben Sie mit einer anderen Adresse bezahlt: der, die Sie beim Bezahlen eingegeben haben. Versuchen Sie es unten mit dieser. Wenn es die richtige war, versuchen Sie es später noch einmal oder antworten Sie auf Ihre Bestellbestätigung, um den Anbieter zu erreichen.",
 
   bookedCalls: (count) => (count === 1 ? "Ihre Buchung" : "Ihre Buchungen"),
   waiting: "Wartet auf Sie",
@@ -973,8 +973,8 @@ const it: OrdersWords = {
     `Se quell'indirizzo ha acquistato qualcosa da ${store}, di solito entro un minuto arriva un link a tutto, valido per 24 ore. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi ha comprato cosa.`,
   checkInbox: "Controlla la tua casella di posta",
   sentBody: (store) =>
-    `Se quell'indirizzo ha acquistato qualcosa da ${store}, di norma il link è in arrivo. Arriva da ${store} tramite Marktmorgen, di solito entro un minuto. Se non lo trovi, guarda nella cartella spam.`,
-  nothingArrived: "Non è arrivato nulla? Forse hai pagato con un altro indirizzo: quello che hai inserito al momento del pagamento. Prova con quello qui sotto. Se era quello giusto, riprova più tardi: forse in quel momento il negozio era troppo occupato per cercarlo.",
+    `Se quell'indirizzo ha acquistato qualcosa da ${store}, di norma il link è in arrivo. Arriva da ${store} tramite Marktmorgen e può richiedere qualche minuto. Se non lo trovi, guarda nella cartella spam.`,
+  nothingArrived: "Non è arrivato nulla? Forse hai pagato con un altro indirizzo: quello che hai inserito al momento del pagamento. Prova con quello qui sotto. Se era quello giusto, riprova più tardi o rispondi alla conferma dell'ordine per scrivere al creatore.",
 
   bookedCalls: (count) => (count === 1 ? "La tua prenotazione" : "Le tue prenotazioni"),
   waiting: "Ti aspetta",
@@ -1191,8 +1191,8 @@ const nl: OrdersWords = {
     `Als met dat adres iets is gekocht bij ${store}, komt er meestal binnen een minuut een link naar alles, die 24 uur werkt. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie wat heeft gekocht.`,
   checkInbox: "Kijk in je inbox",
   sentBody: (store) =>
-    `Als met dat adres iets is gekocht bij ${store}, is de link normaal gesproken onderweg. Hij komt van ${store} via Marktmorgen en komt meestal binnen een minuut aan. Staat hij er niet, kijk dan in je spam.`,
-  nothingArrived: "Niets ontvangen? Misschien heb je met een ander adres betaald: het adres dat je bij het afrekenen hebt ingevuld. Probeer dat hieronder. Was het het juiste adres, probeer het dan later opnieuw: de winkel had het op dat moment misschien te druk om het op te zoeken.",
+    `Als met dat adres iets is gekocht bij ${store}, is de link normaal gesproken onderweg. Hij komt van ${store} via Marktmorgen en kan een paar minuten duren. Staat hij er niet, kijk dan in je spam.`,
+  nothingArrived: "Niets ontvangen? Misschien heb je met een ander adres betaald: het adres dat je bij het afrekenen hebt ingevuld. Probeer dat hieronder. Was het het juiste adres, probeer het dan later opnieuw of antwoord op je orderbevestiging om de maker te bereiken.",
 
   bookedCalls: (count) => (count === 1 ? "Je boeking" : "Je boekingen"),
   waiting: "Wacht op jou",
@@ -1408,8 +1408,8 @@ const pt: OrdersWords = {
     `Se esse endereço comprou algo a ${store}, uma ligação para tudo chega normalmente em menos de um minuto e funciona durante 24 horas. Dizemos o mesmo quer tenha comprado quer não, para que ninguém possa usar esta página para descobrir quem comprou o quê.`,
   checkInbox: "Verifique a sua caixa de entrada",
   sentBody: (store) =>
-    `Se esse endereço comprou algo a ${store}, a ligação normalmente está a caminho. Chega de ${store} via Marktmorgen, geralmente em menos de um minuto. Se não estiver lá, veja na pasta de spam.`,
-  nothingArrived: "Não recebeu nada? Talvez tenha pago com outro endereço: o que introduziu no pagamento. Experimente esse abaixo. Se era o correto, tente novamente mais tarde: a loja pode ter estado demasiado ocupada para o procurar nesse momento.",
+    `Se esse endereço comprou algo a ${store}, a ligação normalmente está a caminho. Chega de ${store} via Marktmorgen e pode demorar alguns minutos. Se não estiver lá, veja na pasta de spam.`,
+  nothingArrived: "Não recebeu nada? Talvez tenha pago com outro endereço: o que introduziu no pagamento. Experimente esse abaixo. Se era o correto, tente novamente mais tarde ou responda à confirmação da sua encomenda para contactar o criador.",
 
   bookedCalls: (count) => (count === 1 ? "A sua marcação" : "As suas marcações"),
   waiting: "À sua espera",

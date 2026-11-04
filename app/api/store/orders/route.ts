@@ -73,7 +73,8 @@ export async function POST(request: NextRequest) {
     if (result === "busy") return tooMany();
     return away(`${page}?status=${result}`);
   } catch (error) {
+    // Said only in the log: the answer must not differ between an address that bought and one that did not.
     console.error("sending a purchases link failed", error);
-    return away(`${page}?status=error`);
+    return away(`${page}?status=sent`);
   }
 }

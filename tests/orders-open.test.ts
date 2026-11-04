@@ -25,6 +25,7 @@ import {
   ORDERS_ROOM_COMMANDS,
   ORDERS_UNIT_COMMANDS,
   DOWNLOAD_LOOKUP_UNITS,
+  ORDERS_LINK_READ_MS,
   OrdersBusy,
   OrdersLate,
   OrdersMeter,
@@ -42,6 +43,7 @@ import { NextRequest } from "next/server";
 import { GET as downloadRoute } from "@/app/api/store/download/route";
 import { POST as ordersRoute } from "@/app/api/store/orders/route";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { REDIS_TIMEOUT_MS, RESEND_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { requestsIn } from "@/lib/traffic";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -58,6 +60,11 @@ let intents: Record<string, unknown>[] = [];
 let asked = 0;
 /** The paths asked of Stripe from here on. */
 const paths: string[] = [];
+/** Emails handed to the sender from here on. */
+let mails = 0;
+/** Stripe, or the sender, failing every call. */
+let stripeFails = false;
+let senderFails = false;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   asked += 1;
@@ -65,6 +72,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const answer = (body: unknown) => new Response(JSON.stringify(body));
   if (url.hostname === "api.stripe.com") paths.push(path);
+  if (url.hostname === "api.stripe.com" && stripeFails) return new Response(JSON.stringify({ error: { type: "api_error" } }), { status: 500 });
+  if (url.hostname.includes("resend")) {
+    mails += 1;
+    if (senderFails) return new Response(JSON.stringify({ message: "daily quota exceeded" }), { status: 429 });
+    return answer({ id: "00000000-0000-4000-8000-000000000000" });
+  }
+  // What was taken in one click for a customer, as the list reads it.
+  if (path === "/payment_intents") return answer({ object: "list", data: intents.filter((intent) => intent.customer === url.searchParams.get("customer")), has_more: false });
   if (path === "/checkout/sessions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: sessions, has_more: false });
   // One checkout or one payment by its id, as the download reads it.
   const one = path.match(/^\/(checkout\/sessions|payment_intents)\/([A-Za-z0-9_]+)$/);
@@ -90,6 +105,9 @@ beforeEach(() => {
   asked = 0;
   intents = [];
   paths.length = 0;
+  mails = 0;
+  stripeFails = false;
+  senderFails = false;
   process.env.STRIPE_SECRET_KEY = "sk_test_orders_only_a_stand_in";
   // A sender, so the link can be asked for (lib/buyer-orders.ts, canRecover); what it sends goes to the stand-in fetch above.
   process.env.RESEND_API_KEY = "re_test_orders_only_a_stand_in";
@@ -464,6 +482,38 @@ test("a download in one click is refused where the list would not read it: the c
   }
 });
 
+test("a download in one click is handed over exactly when the list shows it", async () => {
+  const { ids, refs, token } = await linkStore(["Guide", "Gift card"]);
+  // A product that hands nothing over: a checkout of it alone is not on the list, so neither is what followed it.
+  const bare = await addProduct("moss@example.com", "Talk", "", "19", null);
+  if (!bare.ok) throw new Error("no product");
+  const shop = (await storeForEmail("moss@example.com")) as Store;
+  intents = [{
+    id: "pi_testupsell000001",
+    object: "payment_intent",
+    status: "succeeded",
+    created: Math.floor(Date.now() / 1000),
+    customer: "cus_buyer00001",
+    metadata: { kind: "upsell", store: "moss", product: ids[1], parent: refs[0] },
+    latest_charge: { refunded: false, amount_refunded: 0 },
+  }];
+  sessions = [sessions[0]];
+  const parent = sessions[0] as Record<string, unknown> & { metadata: Record<string, string> };
+  const cases: [string, Record<string, unknown>, boolean][] = [
+    ["a checkout the list hands over", {}, true],
+    ["a checkout given back", { payment_intent: { id: "pi_testmoss000000", status: "succeeded", latest_charge: { refunded: true, amount_refunded: 1900 } } }, false],
+    ["a checkout of something that hands nothing over", { metadata: { ...parent.metadata, product: bare.product.id } }, false],
+    ["a checkout with something ticked that hands over", { metadata: { ...parent.metadata, product: bare.product.id, bump: ids[0] } }, true],
+    ["a checkout without a customer", { customer: null }, false],
+  ];
+  for (const [what, change, shown] of cases) {
+    sessions[0] = { ...parent, ...change };
+    const listed = (await purchasesFor(shop, BUYER)).some((p) => p.reference === "pi_testupsell000001");
+    const given = Boolean(await findPurchase(shop, token, "pi_testupsell000001"));
+    assert.deepEqual([listed, given], [shown, shown], what);
+  }
+});
+
 test("a product of a bundle costs its lookup and two listings, whatever the bundle holds, and is read once", async () => {
   const { store, ids, refs, token, folder, window } = await linkStore(Array.from({ length: 21 }, (_, i) => (i === 0 ? "Kit" : `Part ${i}`)));
   sessions[0] = { ...sessions[0], metadata: { store: "moss", product: ids[0], bundle: ids.slice(1).join(",") } };
@@ -512,13 +562,27 @@ test("a download the store has no room for reads nothing; a token or a reference
   const { store, refs, token, folder, window } = await linkStore();
   asked = 0;
   sent.length = 0;
+  // Its grant is read under the download's own request; past it, nothing: no Stripe, no listing.
   await assert.rejects(findPurchase({ ...store, period: null }, token, refs[0]), OrdersBusy);
   assert.equal(asked, 0);
-  assert.deepEqual(sent.filter((command) => command.includes("nl:orders:link:") || command.includes(":l:")), []);
+  assert.deepEqual(sent.filter((command) => command.includes(":l:")), []);
   const at = await requestsIn(folder, window);
   assert.equal(await findPurchase(store, "not-a-token", refs[0]), null);
   assert.equal(await findPurchase(store, token, "../etc"), null);
   assert.deepEqual([asked, (await requestsIn(folder, window)) - at], [0, 0]);
+});
+
+test("a download with a token shaped like one that opens nothing reads its grant and takes nothing more", async () => {
+  const { store, refs, folder, window } = await linkStore();
+  const at = await requestsIn(folder, window);
+  sent.length = 0;
+  assert.equal(await findPurchase(store, "f".repeat(64), refs[0]), null);
+  assert.deepEqual([asked, (await requestsIn(folder, window)) - at], [0, 0]);
+  assert.equal(sent.filter((command) => command.includes("nl:orders:link:")).length, 1, "the grant, once");
+  // Through the route it is the download's one request and nothing more.
+  const before = await requestsIn(folder, window);
+  const answer = await downloadRoute(new NextRequest(`${ORIGIN}/api/store/download?handle=moss&token=${"e".repeat(64)}&ref=${refs[0]}`));
+  assert.deepEqual([answer.status, (await requestsIn(folder, window)) - before, asked], [410, 1, 0]);
 });
 
 /** Fills the store's window up to `left` requests from its end. */
@@ -555,8 +619,36 @@ test("a link request whose meter is refused after its units says sent, as for an
   sent.length = 0;
   assert.equal(await requestOrdersLink({ store, email: BUYER, ip: "203.0.113.50", origin: ORIGIN }), "sent");
   assert.deepEqual(sent.filter((command) => command.includes("nl:orders:link:")), [], "no link was made");
-  assert.ok(!paths.some((path) => path.startsWith("/emails")), "nothing was emailed");
+  assert.equal(mails, 0, "nothing was emailed");
   // The page's words hold for both: a link normally arrives; if it does not, try again later.
   const words = ordersWords("en");
-  assert.ok(words.sentBody("Olive Studio").includes("a link is normally on its way") && words.nothingArrived.includes("try again later"));
+  assert.ok(words.sentBody("Olive Studio").includes("a link is normally on its way") && words.nothingArrived.includes("try again later") && words.nothingArrived.includes("reply to your order confirmation"));
+});
+
+test("a link request says sent whatever happens past its units: the email not sent, the purchases not read", async () => {
+  const { store } = await linkStore();
+  const ask = (email: string, ip: string) => requestOrdersLink({ store, email, ip, origin: ORIGIN });
+  // An address that bought nothing.
+  assert.equal(await ask("nobody@example.com", "198.51.100.1"), "sent");
+  // One that bought, with the sender refusing (its figure used, or down): no link arrives, and the answer is the same.
+  senderFails = true;
+  assert.equal(await ask(BUYER, "198.51.100.2"), "sent");
+  assert.ok(mails > 0, "the email was tried");
+  senderFails = false;
+  // One whose purchases cannot be read from Stripe: the same.
+  stripeFails = true;
+  assert.equal(await ask(BUYER, "198.51.100.3"), "sent");
+  stripeFails = false;
+  // And through the route, the page it leads to is the same page.
+  stripeFails = true;
+  const body = new URLSearchParams({ handle: "moss", email: BUYER });
+  const answer = await ordersRoute(new NextRequest(`${ORIGIN}/api/store/orders`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "198.51.100.4" }, body: body.toString() }));
+  assert.deepEqual([answer.status, answer.headers.get("location")], [303, `${ORIGIN}/@moss/orders?status=sent`]);
+  const route = readFileSync("app/api/store/orders/route.ts", "utf8");
+  assert.ok(!route.includes("status=error"));
+});
+
+test("a link request reads for ORDERS_LINK_READ_MS at the most, so its grant and email fit in the route's time", () => {
+  assert.ok(ORDERS_LINK_READ_MS + REDIS_TIMEOUT_MS + RESEND_TIMEOUT_MS < ORDERS_OPEN_SECONDS * 1000, String(ORDERS_LINK_READ_MS));
+  assert.ok(readFileSync("lib/buyer-orders.ts", "utf8").includes("callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS);"));
 });

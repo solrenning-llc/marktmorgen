@@ -47,6 +47,7 @@ import { IMPORTED_REFERENCE, type ImportedPurchase, importedFor, importedFrom, i
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { takePublicRequest } from "@/lib/traffic";
 import {
+  ORDERS_LINK_READ_MS,
   DOWNLOAD_LOOKUP_MS,
   DOWNLOAD_LOOKUP_UNITS,
   ORDERS_CALL_MOVES,
@@ -67,6 +68,7 @@ export const ORDERS_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 export const MAX_LISTED = 40;
 
 export {
+  ORDERS_LINK_READ_MS,
   DOWNLOAD_LOOKUP_COMMANDS,
   DOWNLOAD_LOOKUP_MS,
   DOWNLOAD_LOOKUP_UNITS,
@@ -742,7 +744,7 @@ type Grant = {
   e: string;
 };
 
-export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable" | "error";
+export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable";
 
 /**
  * Emails a way back to what the address bought here.
@@ -754,13 +756,17 @@ export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable
  * What is read for the address is paid for before it is read, as an opening
  * of the list is (openOrders): past the per-address and per-IP limits,
  * ORDERS_OPEN_UNITS of the store's buyer requests, then every read that grows
- * with what the address has through an OrdersMeter, waited on ORDERS_READ_MS
- * at the most. "busy" when the store had no room for those units: nothing was
- * read, whatever the address. Once they are taken, the meter takes more only
- * for what the address has, so a refusal from it, or a reading that ran out of
- * time, is answered "sent" like everything else: anything else would tell who
- * bought here. The page's words say so honestly (lib/buyer-words/orders.ts,
- * sentBody and nothingArrived: a link normally arrives; if not, try later).
+ * with what the address has through an OrdersMeter, waited on
+ * ORDERS_LINK_READ_MS at the most so the link's grant and its email still fit
+ * in the route's maxDuration. "busy" when the store had no room for those
+ * units: nothing was read, whatever the address. Once they are taken, the
+ * answer is always "sent", for an address that bought and one that did not:
+ * a refusal from the meter, a reading that failed or ran out of time, and an
+ * email that could not be sent (its figure used, its provider down) go only
+ * to the server's log, since anything else would tell who bought here. The
+ * page's words hold for both (lib/buyer-words/orders.ts, sentBody and
+ * nothingArrived: a link normally arrives; if not, the spam folder, another
+ * address, later, or the order confirmation to reach the creator).
  */
 export async function requestOrdersLink(input: {
   store: Store;
@@ -778,17 +784,22 @@ export async function requestOrdersLink(input: {
   if (!(await within(addressKey(email), ADDRESS_LIMIT))) return "limited";
 
   if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS))) return "busy";
-  const meter = new OrdersMeter(store);
-  let read: [Purchase[], BookedCall[]] | "late";
+  // From here the answer is "sent" whatever happens: what failed is said only in the server's log.
   try {
-    read = await withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter);
+    await sendLink(store, raw, email, origin);
   } catch (error) {
-    if (error instanceof OrdersBusy) return "sent";
-    throw error;
+    if (!(error instanceof OrdersBusy)) console.error("sending a purchases link failed", error);
   }
-  if (read === "late") return "sent";
+  return "sent";
+}
+
+/** Reads what the address has and, when it has anything, emails it the link; throws or logs what failed, never says it. */
+async function sendLink(store: Store, raw: string, email: string, origin: string): Promise<void> {
+  const meter = new OrdersMeter(store);
+  const read = await withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS);
+  if (read === "late") return;
   const [purchases, calls] = read;
-  if (purchases.length === 0 && calls.length === 0) return "sent";
+  if (purchases.length === 0 && calls.length === 0) return;
 
   const token = randomBytes(32).toString("hex");
   // Kept as typed: Stripe matches the address as it was written at checkout.
@@ -815,7 +826,7 @@ export async function requestOrdersLink(input: {
       `${words.ordersSentBy(name)} ${chargedLine(name, purchases, store.language)}`,
     ].join("\n"),
   });
-  return sent ? "sent" : "error";
+  if (!sent) console.error("a purchases link could not be emailed");
 }
 
 /**
@@ -869,8 +880,9 @@ export type DownloadWant = { pid?: string; item?: string };
  * is already honoured.
  *
  * Only that purchase is read, by its own reference, never the whole list:
- * DOWNLOAD_LOOKUP_UNITS of the store's buyer requests are taken before the
- * link's grant is read, and the listings it reads through the meter, all
+ * the link's grant first (one read, inside the download's own request), then
+ * DOWNLOAD_LOOKUP_UNITS of the store's buyer requests before anything else,
+ * and the listings it reads through the meter, all
  * waited on DOWNLOAD_LOOKUP_MS at the most. A checkout is read alone and must
  * have been paid with the link's address; a payment taken in one click after
  * one, with the checkout it followed, which must, and which the list would
@@ -890,9 +902,10 @@ export async function findPurchase(
 ): Promise<{ purchase: Purchase; email: string; listing: (id: string) => Promise<Listing | null> } | null> {
   const kind = SESSION_ID_PATTERN.test(reference) ? "session" : INTENT_ID_PATTERN.test(reference) ? "intent" : IMPORTED_REFERENCE.test(reference) ? "imported" : null;
   if (!kind || !ORDERS_TOKEN_PATTERN.test(token)) return null;
-  if (!(await takePublicRequest(store, "buyer", Date.now(), DOWNLOAD_LOOKUP_UNITS))) throw new OrdersBusy();
+  // The grant is one read, paid by the download's own request: a link that opens nothing takes nothing more.
   const email = await ordersGrant(store, token);
   if (!email) return null;
+  if (!(await takePublicRequest(store, "buyer", Date.now(), DOWNLOAD_LOOKUP_UNITS))) throw new OrdersBusy();
   const meter = new OrdersMeter(store);
   const found = await withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS);
   if (found === "late") throw new OrdersLate();
@@ -939,26 +952,6 @@ function onlyFinder(store: Store, meter: OrdersMeter): { find: Finder; allow: (.
 /** A product of a bundle asked for: only one on the order's own list (its metadata), read with nothing else of it. */
 const inList = (ids: string[], pid: string | undefined) => !pid || ids.includes(pid);
 
-/**
- * Whether the checkout a payment in one click followed is one the list would
- * hand over and so read that payment under: paid, this store's, not a gift,
- * a place, a call, a package of calls or a pre-order, its product there and
- * not a call, a membership still paid for, and not given back.
- */
-async function handsOverAfter(store: Store, session: Row, find: Finder, meter: OrdersMeter): Promise<boolean> {
-  const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
-  if (!saleHandles(store).has(meta.store ?? "") || !isSettled(session)) return false;
-  if (meta.kind === "call" || meta.kind === "package" || meta.gift || meta.group || meta.preorder) return false;
-  const product = await find(meta.product);
-  if (!product || product.call) return false;
-  if (soldAMembership(product, { mode: session.mode, metadata: meta })) {
-    const sub = session.subscription as { status?: unknown } | null;
-    if (!sub || typeof sub !== "object" || !isLiveSub(sub)) return false;
-  }
-  meter.alive();
-  return !(await purchaseRefunded(store.stripeAccountId, session));
-}
-
 async function lookUp(
   store: Store,
   email: string,
@@ -996,8 +989,10 @@ async function lookUp(
     allow(meta.product, bump?.id, want.pid);
     return done((await purchaseFromSession(store, session, find, meter))?.purchase ?? null);
   }
-  // A payment taken in one click: its own, made for the customer of the checkout it followed (lib/upsell.ts, metadata[parent]),
-  // which must have been paid with this address and be one the list reads such payments under.
+  // A payment taken in one click: shown on the list when it was made for the customer of one of the address's checkouts
+  // that the list hands over (purchasesFor: that checkout's own reading names the customer). Read here with the checkout
+  // it followed (lib/upsell.ts, metadata[parent]), which must have been paid with this address and be read by that same
+  // rule: its product and the products ticked with it, and nothing of a bundle.
   const intent = await readOne(store, `/payment_intents/${encodeURIComponent(reference)}?expand[]=latest_charge`, meter);
   const intentMeta = (intent?.metadata ?? {}) as Record<string, string>;
   const parent = intentMeta.parent ?? "";
@@ -1005,11 +1000,10 @@ async function lookUp(
   if (!inList(bundleFromMeta(intentMeta, "bundle"), want.pid)) return null;
   const session = await sessionOf(store, email, parent, meter);
   if (!session) return null;
-  const customer = (value: unknown) => (typeof value === "string" ? value : value && typeof value === "object" ? (value as { id?: unknown }).id : null);
-  const owner = customer(session.customer);
-  if (!owner || !CUSTOMER_PATTERN.test(String(owner)) || owner !== customer(intent.customer)) return null;
-  allow(currentMeta((session.metadata ?? {}) as Record<string, string>, session).product);
-  if (!(await handsOverAfter(store, session, find, meter))) return null;
+  const parentMeta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
+  allow(parentMeta.product, ...bumpsFromMeta(parentMeta).map((bump) => bump.id));
+  const customer = (await purchaseFromSession(store, session, find, meter))?.customer ?? null;
+  if (!customer || customer !== intent.customer) return null;
   allow(intentMeta.product, want.pid);
   return done(await purchaseFromIntent(store, intent, find));
 }

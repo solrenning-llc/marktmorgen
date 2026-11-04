@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const product = (params.get("product") ?? "").slice(0, 60);
   if (!product) return apiError(400, "product_required", "Say which course: ?product=<the course product's id>, from /api/v1/products.");
   try {
-    const found = await students(store, product, params.get("cursor"), (more) => takeMoreApi(store, more));
+    const found = await students(store, product, params.get("cursor"), (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
     if (!found) return apiError(404, "not_a_course", "No course product with that id in this store.");
     return apiOkFields(request, found);

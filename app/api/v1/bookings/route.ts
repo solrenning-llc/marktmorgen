@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const bad = badFields(request, BOOKING_FIELDS);
   if (bad) return bad;
   try {
-    const found = await bookings(store, (more) => takeMoreApi(store, more));
+    const found = await bookings(store, (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
     return apiOkFields(request, { data: found });
   } catch (error) {

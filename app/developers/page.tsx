@@ -8,8 +8,8 @@ import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
 import { API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { PLAN_TITLES } from "@/lib/plan";
 import {
-  BLOCKED_READ_MAX, BOOKINGS_READ, MEMBERSHIPS_COLD_WORK, apiReadUnits, bookWork, bookingsWork, codesWork, membershipsWork, numbersWork, productsPageWork,
-  scannedPageWork, studentsPageWork,
+  BLOCKED_READ_MAX, BOOKINGS_READ, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_NUMBERS_BYTES, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, apiReadUnits, bookWork,
+  bookingsWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 
@@ -24,11 +24,19 @@ const AFFILIATES_COUNT_EXAMPLE =
 const PRODUCTS_PAGE_MOST = 1 + apiReadUnits(productsPageWork(API_PAGE, API_PAGE));
 const ROWS_EXAMPLE = { rows: API_PAGE, kb: 2 };
 const LIST_PAGE_EXAMPLE = 1 + apiReadUnits(scannedPageWork(1, ROWS_EXAMPLE.rows * ROWS_EXAMPLE.kb * 1_000, ROWS_EXAMPLE.rows * ROWS_EXAMPLE.kb * 1_000));
-const NUMBERS_COUNT = 1 + apiReadUnits(numbersWork({ kept: true, sales: true, stripe: true, paypalSales: 0, paypalRefunds: 0 }));
-const NUMBERS_COUNT_NO_SALES = 1 + apiReadUnits(numbersWork({ kept: true, sales: false, stripe: false, paypalSales: 0, paypalRefunds: 0 }));
+/** A page of any size: its scan and its take, settled at one more than the door's. */
+const LIST_PAGE_LEAST = 1 + apiReadUnits(scannedPageWork(1, 1, 1));
+const LIST_PAGE_HELD = 1 + apiReadUnits(listPageMost("leads", API_PAGE));
+const MEMBERS_PAGE_HELD = 1 + apiReadUnits(listPageMost("members", API_PAGE));
+const NUMBERS_COUNT = 1 + apiReadUnits(addWork(numbersWork({ kept: true, sales: true, stripe: true, paypalSales: 0, paypalRefunds: 0 }), NUMBERS_KEEP_WORK));
+const NUMBERS_COUNT_NO_SALES = 1 + apiReadUnits(addWork(numbersWork({ kept: true, sales: false, stripe: false, paypalSales: 0, paypalRefunds: 0 }), NUMBERS_KEEP_WORK));
+/** Numbers read from the copy kept an hour: as few as this, and at most this for the largest copy and answer. */
+const NUMBERS_KEPT_LEAST = 1 + apiReadUnits(keptNumbersWork(1, 1));
+const NUMBERS_KEPT_MOST = 1 + apiReadUnits(keptNumbersWork(NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES));
 const CODES_COUNT = 1 + apiReadUnits(codesWork());
-const MEMBERSHIPS_COUNT = 1 + apiReadUnits(membershipsWork(100));
-const MEMBERSHIPS_COUNT_COLD = MEMBERSHIPS_COUNT + apiReadUnits(MEMBERSHIPS_COLD_WORK);
+const EVENTS_COUNT = 1 + apiReadUnits(eventsWork());
+const MEMBERSHIPS_COUNT = 1 + apiReadUnits(membershipsWork(MEMBERSHIP_NUMBERS_BYTES));
+const MEMBERSHIPS_COUNT_COLD = 1 + apiReadUnits(addWork(membershipsWork(0), MEMBERSHIPS_COLD_WORK));
 const n = (count: number) => count.toLocaleString("en-US");
 
 export const metadata: Metadata = {
@@ -118,7 +126,7 @@ export default function DevelopersPage() {
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
         <p>
-          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Every read except Store counts as more than one when it reads more than one request's worth: a page of products, of your list or of your members, a course's students, your numbers, your discount codes, your affiliates, your bookings and the recent events, as said with each below; what it will take is taken before it reads. Past the figure, or when a read needs more than are left, the answer is 429 `}
+          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Every read except Store counts as more than one when it reads more than one request's worth: a page of products, of your list or of your members, a course's students, your numbers, your discount codes, your affiliates, your bookings and the recent events (/api/v1/events, the examples a tool such as Zapier shows while you set up a step: ${n(EVENTS_COUNT)} each), as said with each below; what it will take is taken before it reads. A read whose size is known only once it is read (a page of your list or your members, your numbers from their copy) sets aside the most it may take first, and gives back at once what it did not need. Past the figure, or when a read needs more than are left, the answer is 429 `}
           <code className="font-mono">monthly_limit</code>
           {", and its message says when the figure opens again, if it does. A trial or a store without a paid plan also needs one of the month's places for such stores; without one, the answer is 429 "}
           <code className="font-mono">no_place</code>
@@ -130,6 +138,7 @@ export default function DevelopersPage() {
 429  {"error": "rate_limited", "message": "At most ${API_RATE} requests a minute per key. Try again in a minute."}
 429  {"error": "monthly_limit", "message": "Your store's API requests for this month are used: 2,000 API requests. This opens again with your next billing month, on …"}
 429  {"error": "monthly_limit", "message": "This read takes ${n(BOOKINGS_COUNT)} of your store's API requests, more than your store has left, so nothing was read."}
+429  {"error": "monthly_limit", "message": "This read may take up to ${n(LIST_PAGE_HELD)} of your store's API requests, more than your store has left, so nothing was read."}
 400  {"error": "unknown_field", "message": "No item in this answer has a field named “nothing_here”."}
 400  {"error": "fields", "message": "“bad-name” cannot be a field name. Use letters, digits and underscores, at most 30 fields."}
 429  {"error": "no_place", "message": "Stores without a paid plan are full for this month, so this can't run right now. …"}
@@ -186,7 +195,7 @@ export default function DevelopersPage() {
           CSV export in your studio. Add <code className="font-mono">?agreed=true</code> for only those who agreed to hear
           from you and have not unsubscribed: the ones it is fair to email.
         </Endpoint>
-        <p>{`A page counts as one request and more when its rows are long, by the bytes it reads and sends: for example, ${n(LIST_PAGE_EXAMPLE)} for ${n(ROWS_EXAMPLE.rows)} rows of about ${ROWS_EXAMPLE.kb} KB each. Members count the same way.`}</p>
+        <p>{`A page counts as at least ${n(LIST_PAGE_LEAST)} of your API requests (one while your store has no list yet), and more when its rows are long, by the bytes it reads and sends: for example, ${n(LIST_PAGE_EXAMPLE)} for ${n(ROWS_EXAMPLE.rows)} rows of about ${ROWS_EXAMPLE.kb} KB each. Before a page is read, ${n(LIST_PAGE_HELD)} are set aside, what a full page of the longest rows could take, and what it did not need comes back at once; so with fewer left, a page is refused and nothing is read. Members count the same way, with ${n(MEMBERS_PAGE_HELD)} set aside.`}</p>
         <Code>{`{
   "data": [
     {
@@ -264,7 +273,7 @@ export default function DevelopersPage() {
           Your numbers for the last 7, 30 and 90 days, the same ones your studio shows: visitors, checkouts, sales and
           revenue, each channel from visit to sale, and page views by country and by device.
         </Endpoint>
-        <p>{`It reads 180 days of counts and, with your Stripe account connected, every page of your sales, renewals, refunds and disputes it may need, so it counts as ${n(NUMBERS_COUNT)} of your API requests (${n(NUMBERS_COUNT_NO_SALES)} for a store with no sales to read), and more when you have PayPal sales or refunds.`}</p>
+        <p>{`Read anew, it reads 180 days of counts and, with your Stripe account connected, every page of your sales, renewals, refunds and disputes it may need, so it counts as ${n(NUMBERS_COUNT)} of your API requests (${n(NUMBERS_COUNT_NO_SALES)} for a store with no sales to read), and more when you have PayPal sales or refunds. A copy of the numbers is then kept for an hour: within that hour, a read comes from the copy and counts only for reading it and its answer, as few as ${n(NUMBERS_KEPT_LEAST)} and at most ${n(NUMBERS_KEPT_MOST)}. `}<code className="font-mono">asOf</code>{" says when the numbers were read, in ISO 8601 (UTC), so a number up to an hour old is never taken for one of this minute."}</p>
         <Code>{`{
   "data": {
     "currency": "usd",
@@ -296,7 +305,8 @@ export default function DevelopersPage() {
       "last_30_days": { "...": "the same fields" },
       "last_90_days": { "...": "the same fields" }
     }
-  }
+  },
+  "asOf": "2026-10-14T16:05:12.000Z"
 }`}</Code>
         <p>
           Money is in the smallest unit of your store&apos;s currency, before Stripe&apos;s fee. <code className="font-mono">sales</code>{" "}
@@ -430,7 +440,7 @@ export default function DevelopersPage() {
           and the people on your list did not agree to that. The endpoints above are where your own tools read them.
         </p>
         <p>
-          {`Each tool counts as many of your API requests as the address that reads the same: your numbers and the tools about a stretch of days as /api/v1/stats (those also count the products they name), your products as /api/v1/products and your affiliates as /api/v1/affiliates. Your memberships count as about ${n(MEMBERSHIPS_COUNT)}, or ${n(MEMBERSHIPS_COUNT_COLD)} when they were not read in the last ten minutes; your emails count by how many emails and sequences you have, and more when what they sold was not read in the last ten minutes. Which store the key belongs to counts as one.`}
+          {`Each tool counts as many of your API requests as the address that reads the same: your numbers and the tools about a stretch of days as /api/v1/stats, read anew or from the copy kept an hour (the tools about a stretch of days keep their own copy, with the products they name, and count those products when read anew), each answer with its asOf; each product's numbers also count what buyers bought next, by its size; your products as /api/v1/products and your affiliates as /api/v1/affiliates. Your memberships count as about ${n(MEMBERSHIPS_COUNT)}, or ${n(MEMBERSHIPS_COUNT_COLD)} when they were not read in the last ten minutes, and more for the names of the products they name; your emails count by how many emails and sequences you have, and more when what they sold was not read in the last ten minutes. Which store the key belongs to counts as one.`}
         </p>
       </LegalSection>
 

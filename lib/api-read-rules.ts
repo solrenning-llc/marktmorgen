@@ -7,16 +7,19 @@
  * and nothing more. Every reading past the door takes, on top, the further
  * requests its work below adds up to, and is refused with 429 when they are
  * not left: a page of products (its listings), of the list or of the members
- * (its rows, counted as they came back, before they are sent), a course's
+ * (set aside at its most before the scan, settled at its rows as they came
+ * back, before they are sent), a course's
  * students (each one's progress), the affiliates (the whole program and pages
  * of the creator's Stripe account), the bookings (up to five pages of it and
  * every booking's move), the numbers (ninety days of counts and up to
  * NUMBERS_STRIPE_PAGES pages of sales, renewals, refunds and disputes), the
  * memberships, the emails and what they sold, the recent events and the
  * discount codes. Whatever can be counted first (the program, the PayPal
- * sales and refunds, the listings a page needs, the emails' records) is
- * counted first; what cannot is taken at its most. A store's own record, the
- * key and the answer's envelope are the door's.
+ * sales and refunds, the listings a page needs, the emails' records, a kept
+ * copy's size) is counted first; what cannot is taken at its most, or set
+ * aside at its most and settled once measured (lib/api-guard.ts,
+ * holdMoreApi). A store's own record, the key and the answer's envelope are
+ * the door's.
  *
  * One further request pays for at most one of these, in any mix that adds up
  * to one: API_UNIT_COMMANDS database commands, API_UNIT_BYTES bytes read from
@@ -74,6 +77,26 @@ export function apiReadUnits(work: Partial<ReadWork>): number {
 /** The work with what taking the further requests itself costs, at its most (refused, so given back). */
 export function withTaking(w: ReadWork): ReadWork {
   return { ...w, commands: w.commands + MORE_TAKE_COMMANDS + MORE_GIVE_BACK_COMMANDS, roundTrips: w.roundTrips + MORE_TAKE_ROUND_TRIPS };
+}
+
+/** Two works done by one reading, taken together in one go (one take, so one taking's cost). */
+export function addWork(a: Partial<ReadWork>, b: Partial<ReadWork>): ReadWork {
+  const x = { ...NONE, ...a };
+  const y = { ...NONE, ...b };
+  return { commands: x.commands + y.commands, bytes: x.bytes + y.bytes, sent: x.sent + y.sent, stripePages: x.stripePages + y.stripePages, roundTrips: x.roundTrips + y.roundTrips };
+}
+
+/**
+ * The further requests a reading that was set aside at its most and then
+ * measured (lib/api-guard.ts, holdMoreApi) settles at: its measured work, and
+ * one more when the measure passes what was set aside, for the second take
+ * that then follows. A failure after the take (a database or Stripe error,
+ * a crash) gives nothing back: what was set aside stays counted, by design,
+ * because the work may have been done.
+ */
+export function settledUnits(work: Partial<ReadWork>, held: number): number {
+  const units = apiReadUnits(work);
+  return units > held ? units + 1 : units;
 }
 
 // ---------------------------------------------------------------- students
@@ -198,6 +221,9 @@ export function bookingsWork(stripe: boolean): ReadWork {
 
 // ---------------------------------------------------------------- pages of products, the list and the members
 
+/** How many rows one page of a long list holds (lib/api-read.ts, API_PAGE). */
+export const API_PAGE_ROWS = 200;
+
 /** One product as the API sends it: its title in any script, its link and the rest. */
 export const PRODUCT_SENT_BYTES = 1_024;
 
@@ -211,11 +237,40 @@ export function productsPageWork(listed: number, read: number): ReadWork {
  * What a page of a list read with HSCAN did, counted as it came back and
  * before it is sent: its commands, the bytes Redis answered with and the
  * bytes the answer holds. A page's rows cannot be counted before they are
- * read (COUNT is only a hint), so the scan is the door's, and nothing is sent
- * unless what it read is taken.
+ * read (COUNT is only a hint), so a page is set aside at its most first
+ * (listPageMost), scanned, and settled at this, before anything is sent.
  */
 export function scannedPageWork(commands: number, readBytes: number, sentBytes: number): ReadWork {
   return { commands, bytes: readBytes, sent: sentBytes, stripePages: 0, roundTrips: 1 };
+}
+
+/**
+ * A contact of the list as kept, at its largest (lib/contacts.ts): its
+ * address as the field (254 characters, three bytes each), and as the value
+ * twenty product titles of MAX_TITLE_LENGTH (80) and their ids, a name of
+ * MAX_CONTACT_NAME (100), MAX_CONTACT_TAGS (10) labels of MAX_TAG_LENGTH (40),
+ * six times of up to 40 characters, the unsubscribe token and the keys, every
+ * character escaped at six bytes. About 16,000 bytes; room above it.
+ */
+export const CONTACT_ROW_BYTES = 20_480;
+/** A contact as the API sends it, at its largest: the same titles, ids, name and labels, its address escaped, five times. */
+export const CONTACT_SENT_BYTES = 20_480;
+/**
+ * A community member as kept, at its largest (lib/community.ts, parseMember):
+ * its key, an address, a display name and handle of MAX_DISPLAY_NAME (40),
+ * MAX_QUESTIONS (3) answers of MAX_ANSWER (500) and questions of MAX_QUESTION
+ * (200), the token and the keys, every character escaped at six bytes. About
+ * 15,000 bytes; room above it.
+ */
+export const MEMBER_ROW_BYTES = 20_480;
+/** A member as the API sends it: an address, a name and a handle escaped, two times and four flags. */
+export const MEMBER_SENT_BYTES = 4_096;
+
+/** A page of the list (one HSCAN) or of the members (an HSCAN and an HLEN) at its most, set aside before the scan: API_PAGE rows at their largest, read and sent. */
+export function listPageMost(list: "leads" | "members", rows: number): ReadWork {
+  return list === "leads"
+    ? scannedPageWork(1, rows * CONTACT_ROW_BYTES, rows * CONTACT_SENT_BYTES)
+    : scannedPageWork(2, rows * MEMBER_ROW_BYTES, rows * MEMBER_SENT_BYTES);
 }
 
 // ---------------------------------------------------------------- numbers
@@ -269,6 +324,19 @@ export function numbersWork(s: NumbersSizes): ReadWork {
   };
 }
 
+/** How long the API and the MCP tools keep a copy of the numbers they read (lib/api-numbers.ts): an hour, said as `asOf`. */
+export const NUMBERS_KEPT_SECONDS = 60 * 60;
+/** The largest copy of the numbers kept: a larger reading is not kept, so every reading of it is read whole and taken as such. */
+export const NUMBERS_KEPT_BYTES = 1_000_000;
+
+/** What keeping a copy of the numbers adds to a reading of them: its size looked up first, and the copy written (at its largest). */
+export const NUMBERS_KEEP_WORK: ReadWork = { commands: 2, bytes: NUMBERS_KEPT_BYTES, sent: 0, stripePages: 0, roundTrips: 2 };
+
+/** A reading of the numbers from their kept copy: its size looked up, the copy read (`bytes`, measured first) and the answer sent. */
+export function keptNumbersWork(bytes: number, sent: number): ReadWork {
+  return { commands: 2, bytes, sent, stripePages: 0, roundTrips: 2 };
+}
+
 /** The listings readFullNumbers reads for the products the numbers name, once it knows them. */
 export function listingsWork(read: number): ReadWork {
   return read > 0 ? { commands: read, bytes: read * LISTING_BYTES, sent: 0, stripePages: 0, roundTrips: 1 } : { ...NONE };
@@ -280,12 +348,15 @@ export function listingsWork(read: number): ReadWork {
 export const MEMBERSHIP_PAGES = 2 * 20;
 /** The membership numbers as kept and as sent: by product, by channel, why members left, thirteen months: a review ceiling. */
 export const MEMBERSHIP_NUMBERS_BYTES = 256_000;
-/** The titles the memberships are named by: every product's id and title in any script (lib/catalog.ts, readTitles). */
-export const TITLE_BYTES = 512;
-
-/** What get_memberships does before Stripe: the kept numbers looked for, the titles read, the answer sent. */
-export function membershipsWork(products: number): ReadWork {
-  return { commands: 2, bytes: MEMBERSHIP_NUMBERS_BYTES + products * TITLE_BYTES, sent: MEMBERSHIP_NUMBERS_BYTES, stripePages: 0, roundTrips: 2 };
+/**
+ * What get_memberships does before Stripe and before naming them: whether
+ * the numbers are kept and how big they are looked up (`keptBytes`,
+ * measured), the kept numbers read and the answer sent. The products they
+ * name are read afterwards, counted first (listingsWork), or named by their
+ * id when that is not left.
+ */
+export function membershipsWork(keptBytes = MEMBERSHIP_NUMBERS_BYTES): ReadWork {
+  return { commands: 2, bytes: keptBytes, sent: MEMBERSHIP_NUMBERS_BYTES, stripePages: 0, roundTrips: 2 };
 }
 /** And when they are not kept: every page of subscriptions and invoices, and the numbers kept again. */
 export const MEMBERSHIPS_COLD_WORK: ReadWork = { commands: 1, bytes: MEMBERSHIP_NUMBERS_BYTES, sent: 0, stripePages: MEMBERSHIP_PAGES, roundTrips: 1 };
@@ -317,10 +388,30 @@ export function emailsWork(s: { broadcasts: number; broadcastBytes: number; flow
     roundTrips: 2 + 4,
   };
 }
+/** What get_emails looks up before it takes: whether what they sold is kept and how big (STRLEN), and the PayPal sales and refunds it would read (two ZCARD), side by side. */
+export const EMAILS_PROBE_WORK: ReadWork = { commands: 3, bytes: 0, sent: 0, stripePages: 0, roundTrips: 1 };
 /** And when what they sold is not kept: every page of sales, the PayPal sales counted first, kept again. */
 export function mailRevenueColdWork(paypalSales: number): ReadWork {
   const paypal = Math.min(paypalSales, 10 * 100);
   return { commands: 3, bytes: paypal * PAYPAL_PAID_BYTES + MAIL_REVENUE_BYTES, sent: 0, stripePages: MAIL_REVENUE_PAGES, roundTrips: 2 };
+}
+
+// ---------------------------------------------------------------- what buyers bought next
+
+/** A step of what buyers bought next as get_product_numbers sends it: two titles escaped at six bytes, the numbers and the indentation. */
+export const NEXT_STEP_SENT_BYTES = 1_200;
+/** The least bytes one step takes as kept (lib/next-bought.ts): {"id":"…","buyers":3,"days":0}. */
+export const NEXT_STEP_KEPT_MIN_BYTES = 28;
+
+/**
+ * What get_product_numbers reads beside the numbers: what buyers bought next
+ * (its size `pathBytes` looked up first) and what it sends of it, at most a
+ * step for every NEXT_STEP_KEPT_MIN_BYTES kept. Set aside at its most and
+ * settled at what was sent (lib/api-guard.ts, holdMoreApi). The products it
+ * names that the numbers do not are read apart, counted first (listingsWork).
+ */
+export function boughtNextWork(pathBytes: number, sent = (Math.ceil(pathBytes / NEXT_STEP_KEPT_MIN_BYTES) + 5) * NEXT_STEP_SENT_BYTES): ReadWork {
+  return { commands: 2, bytes: pathBytes, sent, stripePages: 0, roundTrips: 2 };
 }
 
 // ---------------------------------------------------------------- events and codes

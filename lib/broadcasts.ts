@@ -146,7 +146,6 @@ async function save(b: Broadcast): Promise<void> {
   if (!Array.isArray(response) || response.length !== 1 || response[0] !== "OK") throw new Error("Campaign progress write could not be confirmed");
 }
 
-/** The store's broadcasts, newest first. */
 /**
  * How many of the newest `limit` broadcasts there are and how many bytes
  * their records hold, before they are read: for a reading that pays for its
@@ -163,6 +162,7 @@ export async function broadcastSizes(listId: string | null, limit = 30): Promise
   return { count: list.length, bytes: lengths.reduce((a, b) => a + b, 0) };
 }
 
+/** The store's broadcasts, newest first. */
 export async function listBroadcasts(listId: string | null, limit = 30): Promise<Broadcast[]> {
   if (!listId || !isRedisConfigured()) return [];
   const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);

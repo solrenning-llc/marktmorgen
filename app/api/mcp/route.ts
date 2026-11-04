@@ -1,7 +1,8 @@
-import { apiStore, takeMoreApi } from "@/lib/api-guard";
+import { apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { limited } from "@/lib/request-guard";
-import { chargeNumbers, products, storeInfo } from "@/lib/api-read";
-import { readNumbers, summaryOf } from "@/lib/stats-report";
+import { products, storeInfo } from "@/lib/api-read";
+import { apiNumbers } from "@/lib/api-numbers";
+import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
 import {
   affiliatesTool,
@@ -12,7 +13,6 @@ import {
   insightsTool,
   membershipsTool,
   productsTool,
-  readFullNumbersPaid,
   windowOf,
 } from "@/lib/mcp-tools";
 
@@ -94,33 +94,37 @@ export async function POST(request: Request) {
     if (params.name === "get_store") return result(id, said(storeInfo(store)));
     // Every other tool takes what it reads past the door before reading it (lib/api-read-rules.ts);
     // refused, the refusal's own sentence, as the door's.
-    const charge = (more: number) => takeMoreApi(store, more);
+    const charge = (more: number, taken?: number) => takeMoreApi(store, more, taken);
+    const hold = (most: number) => holdMoreApi(store, most);
     const refusedWith = async (refusal: Response) => {
       const words = (await refusal.json().catch(() => null)) as { message?: unknown } | null;
       return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be read just now. Try again in a moment.");
     };
     const answer = async (read: unknown) => (read instanceof Response ? refusedWith(read) : result(id, said(read)));
-    if (params.name === "get_numbers") {
-      const refused = await chargeNumbers(store, charge);
-      if (refused) return refusedWith(refused);
-      const data = await readNumbers(store);
-      return result(id, data ? said(summaryOf(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
-    }
     const days = windowOf(params.arguments?.days);
     const windowed: Record<string, (data: StatsData) => unknown | Promise<unknown>> = {
+      get_numbers: (data) => summaryOf(data),
       get_revenue_by_channel: (data) => channelsTool(data, days),
       get_funnel: (data) => funnelTool(data, days),
-      get_product_numbers: (data) => productsTool(store, data, days),
+      get_product_numbers: (data) => productsTool(store, data, days, { hold, charge }),
       get_buyers: (data) => buyersTool(data, days),
       get_worth_knowing: (data) => insightsTool(data, days),
     };
     const tool = typeof params.name === "string" && Object.hasOwn(windowed, params.name) ? windowed[params.name] : undefined;
     if (typeof tool === "function") {
-      const refused = await chargeNumbers(store, charge);
-      if (refused) return refusedWith(refused);
-      const data = await readFullNumbersPaid(store, charge);
-      if (data instanceof Response) return refusedWith(data);
-      return result(id, data ? said(await tool(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+      // The numbers, from the copy kept an hour or read anew, paid for first (lib/api-numbers.ts); get_numbers without the products' listings, as /api/v1/stats.
+      const read = await apiNumbers(store, params.name === "get_numbers" ? "plain" : "full", charge, hold);
+      if (read instanceof Response) return refusedWith(read);
+      if (!read) return result(id, said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+      const value = {
+        ...((await tool(read.data)) as Record<string, unknown>),
+        asOf: read.asOf,
+        ...(read.listed ? {} : { products_note: "The products' names were not read: your store's API requests left did not cover them." }),
+      };
+      const answer = said(value);
+      // What the answer sends is settled before it is sent.
+      const refused = await read.settle(Buffer.byteLength(answer.content[0].text));
+      return refused ? refusedWith(refused) : result(id, answer);
     }
     if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));
     if (params.name === "get_emails") return answer(await emailsTool(store, charge));

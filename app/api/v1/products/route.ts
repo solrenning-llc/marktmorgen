@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const bad = badFields(request, PRODUCT_FIELDS);
   if (bad) return bad;
   try {
-    const found = await products(store, new URL(request.url).searchParams.get("cursor"), (more) => takeMoreApi(store, more));
+    const found = await products(store, new URL(request.url).searchParams.get("cursor"), (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
     return apiOkFields(request, found);
   } catch (error) {

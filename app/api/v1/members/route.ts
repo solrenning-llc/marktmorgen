@@ -1,4 +1,4 @@
-import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
+import { apiError, apiStore, holdMoreApi } from "@/lib/api-guard";
 import { apiOkFields, badFields } from "@/lib/api-fields";
 import { MEMBER_FIELDS, members } from "@/lib/api-read";
 
@@ -11,8 +11,8 @@ export async function GET(request: Request) {
   const bad = badFields(request, MEMBER_FIELDS);
   if (bad) return bad;
   try {
-    // The page is scanned, then what it read and sends is taken before it is sent (lib/api-read-rules.ts, scannedPageWork).
-    const found = await members(store, new URL(request.url).searchParams.get("cursor"), (more) => takeMoreApi(store, more));
+    // A page at its most is set aside before the scan, and settled at what it read and sends before it is sent (lib/api-read-rules.ts, listPageMost, scannedPageWork).
+    const found = await members(store, new URL(request.url).searchParams.get("cursor"), (most) => holdMoreApi(store, most));
     if (found instanceof Response) return found;
     return apiOkFields(request, found);
   } catch (error) {

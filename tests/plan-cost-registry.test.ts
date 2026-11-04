@@ -6,6 +6,7 @@ import {
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
   codesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
+  API_PAGE_ROWS, EMAILS_PROBE_WORK, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, boughtNextWork, keptNumbersWork, listPageMost, settledUnits,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
@@ -323,10 +324,26 @@ test("an API reading that reads more than a page takes further requests that cov
   for (let read = 0; read <= 2_000; read += 1) covers(listingsWork(read), `listings ${read}`);
   for (let listed = 0; listed <= 210; listed += 1) for (const share of [0, 0.5, 1]) covers(productsPageWork(listed, Math.floor(listed * share)), `products ${listed}`);
   for (const commands of [1, 2]) for (const readBytes of [0, 1, 99_999, 1_000_000, 12_345_678]) for (const sent of [0, 2, 500_001, 9_000_000]) covers(scannedPageWork(commands, readBytes, sent), `page ${commands}/${readBytes}/${sent}`);
-  for (let products = 0; products <= 2_000; products += 50) covers(membershipsWork(products), `memberships ${products}`);
+  for (const kept of [0, 1, 256_000, 600_000]) covers(membershipsWork(kept), `memberships ${kept}`);
+  covers(addWork(membershipsWork(0), MEMBERSHIPS_COLD_WORK), "memberships not kept, in one go");
   covers(MEMBERSHIPS_COLD_WORK, "memberships not kept");
-  for (const broadcasts of [0, 1, EMAILS_BROADCASTS]) for (const bytes of [0, 70_000, 2_000_000]) for (const flowBytes of [0, 5_000, 30_000_000]) covers(emailsWork({ broadcasts, broadcastBytes: bytes, flowBytes }), `emails ${broadcasts}/${bytes}/${flowBytes}`);
+  for (const broadcasts of [0, 1, EMAILS_BROADCASTS]) for (const bytes of [0, 70_000, 2_000_000]) for (const flowBytes of [0, 5_000, 30_000_000]) {
+    const emails = addWork(EMAILS_PROBE_WORK, emailsWork({ broadcasts, broadcastBytes: bytes, flowBytes }));
+    covers(emails, `emails ${broadcasts}/${bytes}/${flowBytes}`);
+    for (const paypal of [0, 1_000, 40_000]) covers(addWork(emails, mailRevenueColdWork(paypal)), `emails and what they sold, in one go ${paypal}`);
+  }
   for (const paypal of [0, 9, 1_000, 40_000]) covers(mailRevenueColdWork(paypal), `what the emails sold ${paypal}`);
+  // The numbers kept an hour: read anew with their keeping, and from the copy at every size it can have.
+  for (const paypalSales of [0, 2_000, 50_000]) for (const paypalRefunds of [0, 500, 9_000]) covers(addWork(numbersWork({ kept: true, sales: true, stripe: true, paypalSales, paypalRefunds }), NUMBERS_KEEP_WORK), `numbers kept ${paypalSales}/${paypalRefunds}`);
+  for (const bytes of [1, 999, 50_000, 400_000, NUMBERS_KEPT_BYTES + 64]) for (const sent of [0, 2, 30_000, NUMBERS_SENT_BYTES, 3_000_000]) covers(keptNumbersWork(bytes, sent), `numbers from the copy ${bytes}/${sent}`);
+  // A page of the list or the members at its most, and what buyers bought next with its cards.
+  for (const list of ["leads", "members"] as const) for (let rows = 0; rows <= API_PAGE_ROWS; rows += 25) covers(listPageMost(list, rows), `${list} page at its most ${rows}`);
+  for (const paths of [0, 28, 5_000, 262_144]) for (const sent of [0, 1_200, undefined]) covers(boughtNextWork(paths, sent), `bought next ${paths}/${sent}`);
+  // Settled: never under what was measured, one more when it passes what was set aside.
+  for (const held of [0, 3, 13]) for (const bytes of [0, 4_000_000, 9_000_000]) {
+    const w = scannedPageWork(1, bytes, bytes);
+    assert.equal(settledUnits(w, held), apiReadUnits(w) > held ? apiReadUnits(w) + 1 : apiReadUnits(w));
+  }
   covers(eventsWork(), "events");
   covers(codesWork(), "codes");
   // The bookings at their most; nothing without Stripe.
@@ -364,24 +381,35 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/mcp-tools.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store);");
   before("lib/api-read.ts", "const refused = await charge(apiReadUnits(productsPageWork(", "const slice = await readListings(store, page);");
   before("lib/mcp-tools.ts", "const refused = charge ? await charge(apiReadUnits(listingsWork(", "const listings = await readListings(store, named)");
-  before("lib/mcp-tools.ts", "const first = await charge(apiReadUnits(membershipsWork(", "membershipNumbersPaid(store");
+  before("lib/mcp-tools.ts", "const first = await charge(units);", "membershipNumbersPaid(store");
+  before("lib/mcp-tools.ts", "membershipNumbersPaid(store", "await titlesFor(store, n.byProduct");
+  before("lib/mcp-tools.ts", "if (charge && (await charge(apiReadUnits(listingsWork(listingsToRead(store, missing))), taken)))", "await readListings(store, missing)");
   before("lib/membership-numbers.ts", 'if (beforeStripe && !(await beforeStripe())) return "refused";', "/subscriptions?");
-  before("lib/mcp-tools.ts", "const first = await charge(apiReadUnits(emailsWork(", "listBroadcasts(store.listId, EMAILS_BROADCASTS)");
+  before("lib/mcp-tools.ts", "const units = apiReadUnits(salesRead ? addWork(work, mailRevenueColdWork(paypal.sales)) : work);", "listBroadcasts(store.listId, EMAILS_BROADCASTS)");
+  before("lib/mcp-tools.ts", "const held = await meter.hold(most);", "await readPaths(store.statsId)");
+  before("lib/api-read.ts", "const settle = await hold(held);", "const { out, work } = await read();");
+  before("lib/api-read.ts", "return scannedPage(hold, listPageMost(\"leads\", API_PAGE)", "await scanLeads(store, cursor, onlyAgreed)");
+  before("lib/api-read.ts", "return scannedPage(hold, listPageMost(\"members\", API_PAGE)", "await memberPage(id, start, API_PAGE)");
+  before("lib/api-numbers.ts", "const settle = await hold(most);", '["GET", key]');
+  before("lib/api-numbers.ts", "const refused = await charge(units, taken);", "await readNumbers(store, now)");
+  assert.ok(!read("lib/mcp-tools.ts").includes("readTitles("), "the MCP tools never read every card, nor the listings' fall-back that reads every product");
+  assert.ok(read("docs/zapier-app.md").includes(`counts as ${1 + apiReadUnits(eventsWork())} (\`1 + apiReadUnits(eventsWork())\`)`), "the Zapier notes say what a sample of events counts as");
   before("lib/mail-revenue.ts", 'if (beforeStripe && !(await beforeStripe())) return "refused";', "readPaidSales(store, since, PAGES)");
-  before("app/api/v1/stats/route.ts", "const refused = await chargeNumbers(store,", "const data = await readNumbers(store);");
+  before("app/api/v1/stats/route.ts", "const read = await apiNumbers(store,", "summaryOf(read.data");
+  before("app/api/v1/stats/route.ts", "const refused = await read.settle(", "apiOk(body)");
   before("app/api/v1/events/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(eventsWork()));", "recentMessages(");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codesWork()));", "listCodes(");
-  before("app/api/mcp/route.ts", "const refused = await chargeNumbers(store, charge);", "const data = await readNumbers(store);");
-  before("app/api/mcp/route.ts", "const refused = await chargeNumbers(store, charge);", "readFullNumbersPaid(store, charge)");
+  before("app/api/mcp/route.ts", "const read = await apiNumbers(store,", "await tool(read.data)");
+  before("app/api/mcp/route.ts", "const refused = await read.settle(", "result(id, answer)");
   // Every GET of the API and every MCP tool past the door takes what it reads; only the store's own record fits in its request.
   const v1 = readdirSync(join(root, "app/api/v1")).filter((d) => existsSync(join(root, "app/api/v1", d, "route.ts")));
   for (const dir of v1) {
     const route = read(`app/api/v1/${dir}/route.ts`);
     if (!route.includes("export async function GET") || dir === "store") continue;
-    assert.ok(route.includes("takeMoreApi(store"), `app/api/v1/${dir}: a GET past the door takes what it reads`);
+    assert.ok(route.includes("takeMoreApi(store") || route.includes("holdMoreApi(store"), `app/api/v1/${dir}: a GET past the door takes what it reads`);
   }
   const mcp = read("app/api/mcp/route.ts");
-  for (const call of ["membershipsTool(store, charge)", "emailsTool(store, charge)", "affiliatesTool(store, charge)", "products(store, cursor, charge)"]) assert.ok(mcp.includes(call), call);
+  for (const call of ["membershipsTool(store, charge)", "emailsTool(store, charge)", "affiliatesTool(store, charge)", "products(store, cursor, charge)", "productsTool(store, data, days, { hold, charge })", "apiNumbers(store, "]) assert.ok(mcp.includes(call), call);
   const page = apiReadUnits(studentsPageWork(200, 0));
   console.log(`API readings: a page of 200 students takes ${page} more, the bookings ${apiReadUnits(bookingsWork(true))} more, an empty program ${apiReadUnits(bookWork({ kept: true, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 0 }, BOOK_STRIPE_PAGES))} more`);
 });

@@ -81,6 +81,18 @@ export function flowMoney(revenue: MailRevenue | null, flowId: string): MailMone
   return total.sales || total.elsewhere ? total : null;
 }
 
+/**
+ * How many bytes what the emails sold holds as kept, 0 when it is not kept,
+ * looked up before it is read by a reading that pays for its size
+ * (lib/mcp-tools.ts, emailsTool); null when it did not come back.
+ */
+export async function keptMailRevenueBytes(store: Store): Promise<number | null> {
+  if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return 0;
+  const [n] = await redisPipeline([["STRLEN", cacheKey(store.statsId)]]);
+  const bytes = Number(n);
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+}
+
 /** The store's email sales, from the cache when it is fresh. Never throws: a page is not lost over a number. */
 export async function readMailRevenue(store: Store): Promise<MailRevenue | null> {
   const read = await readMailRevenuePaid(store, null);

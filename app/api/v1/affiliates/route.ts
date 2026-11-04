@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const bad = badFields(request, AFFILIATE_FIELDS);
   if (bad) return bad;
   try {
-    const found = await affiliates(store, (more) => takeMoreApi(store, more));
+    const found = await affiliates(store, (more, taken) => takeMoreApi(store, more, taken));
     if (found instanceof Response) return found;
     return apiOkFields(request, found);
   } catch (error) {

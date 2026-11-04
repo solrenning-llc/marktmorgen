@@ -182,9 +182,9 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   let failed = false;
   if (email) {
     try {
-      [purchases, calls, waiting] = await Promise.all([purchasesFor(store, email), callsFor(store, email), waitingFor(store, email).catch(() => waiting)]);
-      // A request is shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen).
-      if (!requestsOpen(store)) waiting = { ...waiting, requests: [], requestsTotal: 0 };
+      // A request is read and shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen);
+      // a failure nobody expected is said as "could not be read", never as nothing waiting.
+      [purchases, calls, waiting] = await Promise.all([purchasesFor(store, email), callsFor(store, email), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
     } catch (error) {
       console.error("listing purchases failed", error);
       failed = true;

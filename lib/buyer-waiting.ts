@@ -52,8 +52,9 @@ export function openAgreementsFor(agreements: readonly Agreement[], email: strin
  * at most, with how many in all. A list that cannot be read is said to be
  * unread, never guessed.
  */
-export async function waitingFor(store: Store, email: string, now = Date.now()): Promise<Waiting> {
-  const [requests, agreements] = await Promise.all([requestsOfPerson(store, email).catch(() => null), agreementsOfPerson(store, email).catch(() => null)]);
+export async function waitingFor(store: Store, email: string, now = Date.now(), withRequests = true): Promise<Waiting> {
+  // Requests are not read at all where their page does not take payment (lib/payment-requests.ts, requestsOpen).
+  const [requests, agreements] = await Promise.all([withRequests ? requestsOfPerson(store, email).catch(() => null) : Promise.resolve([]), agreementsOfPerson(store, email).catch(() => null)]);
   const allRequests = openRequestsFor(requests ?? [], email, now);
   const allAgreements = openAgreementsFor(agreements ?? [], email, now);
   let unread = requests === null || agreements === null;
@@ -66,11 +67,13 @@ export async function waitingFor(store: Store, email: string, now = Date.now()):
       return version ? { id: agreement.id, kind: agreement.kind, title: version.title, expiresAt: agreement.expiresAt } : null;
     }),
   );
+  const shown = titled.filter((item): item is WaitingAgreement => item !== null);
   return {
     requests: allRequests.slice(0, WAITING_SHOWN),
-    agreements: titled.filter((item): item is WaitingAgreement => item !== null),
+    agreements: shown,
     requestsTotal: allRequests.length,
-    agreementsTotal: allAgreements.length,
+    // One whose text could not be read is said in "could not be read", not counted in "and N more".
+    agreementsTotal: allAgreements.length - (titled.length - shown.length),
     unread,
   };
 }

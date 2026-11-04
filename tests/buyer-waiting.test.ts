@@ -70,15 +70,15 @@ async function main(): Promise<void> {
   is("the page says how many more there are", ORDERS_WORDS.en.waitingMore(4), "And 4 more. Open the email each one came in to see it.");
   await redis.pipeline([["SET", `nl:payreq:r:${mine[0].id}`, "not a record"]]);
   is("a record that does not read: the page says it could not read what waits", (await waitingFor(shop, "ana@example.com", NOW)).unread, true);
+  is("where requests take no payment they are not read, so their failure says nothing", await waitingFor(shop, "ana@example.com", NOW, false), { requests: [], agreements: [], requestsTotal: 0, agreementsTotal: 0, unread: false });
 
 
   part("On the orders page");
   const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
   is("a named section with its heading, before the bookings", page.includes('aria-labelledby="waiting-title"') && page.includes('<h2 id="waiting-title"') && page.indexOf("<WaitingList") < page.indexOf('aria-labelledby="calls-title"'), true);
   is("each linked to the page that was emailed to them", page.includes("href={`/@${store.handle}/pay/${request.id}`}") && page.includes("href={`/@${store.handle}/sign/${agreement.id}`}"), true);
-  is("payment requests only where their page takes payment", page.includes("if (!requestsOpen(store)) waiting = { ...waiting, requests: [], requestsTotal: 0 };"), true);
+  is("payment requests read and shown only where their page takes payment; a surprise failure is 'could not be read'", page.includes("waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))"), true);
   is("a list that cannot be read is said, never 'nothing to open'", page.includes("{waiting.unread ? (") && page.includes("{words.waitingUnread}") && page.includes("|| waiting.unread) ? null"), true);
-  is("a list that cannot be read leaves the page as it was", page.includes("waitingFor(store, email).catch(() => waiting)"), true);
   is("the dates and amounts as their own pages say them", page.includes("rw.due(day(request.dueDate))") && page.includes("aw.until(said.date(agreement.expiresAt))") && page.includes("said.money(request.total)"), true);
   is("buttons tall enough to tap", (page.match(/btn st-btn btn-wrap mt-3 inline-flex min-h-11/g) ?? []).length, 2);
 

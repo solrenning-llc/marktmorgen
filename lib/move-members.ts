@@ -22,6 +22,7 @@ import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { namedPriceGone } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { onAccount } from "@/lib/stripe-account";
 import { storeBase } from "@/lib/purchase-email";
@@ -149,8 +150,9 @@ export async function noteKept(store: Store, email: string, productId: string, n
 /** What a member's page and emails say about the payments: the first one here, and the price as it goes on. */
 export function priceWords(store: Store, product: Listing, optionId: string): { amount: string; line: string } | null {
   if (!product.recurring) return null;
+  // The price the email named, or nothing: never another option, nor the product's own price once its option is gone.
+  if (namedPriceGone(product, optionId)) return null;
   const option = product.options.find((o) => o.id === optionId) ?? null;
-  if (product.options.length && !option) return null;
   const say = speech(store);
   const regular = option ? option.priceCents : product.priceCents;
   const intro = option ? null : activeIntro(product, store.tiers);
@@ -258,7 +260,7 @@ export async function readMove(store: Store, productId: string, token: string): 
   }
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "refused" | "consent" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" };
 
 /** The checkout a member's link opens: this membership, this address, first charged on the renewal date. */
 export async function openMove(
@@ -273,11 +275,13 @@ export async function openMove(
   const invite = await readMove(store, productId, token);
   if (!invite) return { ok: false, reason: "expired" };
   const product: Product | null = await readProduct(store, productId);
-  if (!product?.recurring || !canSellProduct(store, product)) return { ok: false, reason: "unavailable" };
-  // The option they had. One the creator has since taken away is not swapped
-  // for another at a price the email never named.
-  const option = product.options.length ? product.options.find((o) => o.id === invite.o)?.id : undefined;
-  if (product.options.length && !option) return { ok: false, reason: "unavailable" };
+  if (!product?.recurring) return { ok: false, reason: "unavailable" };
+  // The option they had. One the creator has since taken away, even the last,
+  // is not swapped for another or for the product's own price: the page says
+  // that price is no longer offered, with a link to the product's page.
+  if (namedPriceGone(product, invite.o)) return { ok: false, reason: "price" };
+  if (!canSellProduct(store, product)) return { ok: false, reason: "unavailable" };
+  const option = product.options.length ? invite.o : undefined;
   try {
     const held = await withStockHold(store, product, (holding) =>
       createCheckout(store, product, origin, option, { email: invite.e, noTrial: true, held: holding, moved: { firstChargeAt: firstChargeAt(invite.r, now) }, digitalConsent: consent }),

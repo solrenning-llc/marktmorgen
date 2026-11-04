@@ -246,6 +246,17 @@ export function handsOver(product: Listing): boolean {
   return product.file !== null || product.link !== null;
 }
 
+/**
+ * Whether the price an email named is no longer offered: the option it named
+ * (`optionId`) was removed, or it named the product's own price (no option)
+ * and the product is now sold only at its options. A member's moving-in link
+ * (lib/move-members.ts) and a come-back offer (lib/winback-send.ts) then open
+ * nothing, never another price than the one the email named (owner, C2-89).
+ */
+export function namedPriceGone(product: { options: { id: string }[] }, optionId: string): boolean {
+  return optionId ? !product.options.some((option) => option.id === optionId) : product.options.length > 0;
+}
+
 /** The option to have chosen when the page opens: the creator's pick, else the first. */
 export function startingOption(options: ProductOption[]): ProductOption | null {
   return options.find((option) => option.best) ?? options[0] ?? null;

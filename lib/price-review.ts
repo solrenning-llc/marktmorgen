@@ -293,9 +293,9 @@ export function optionPriceReview(
  *     they or you cancel, or after the last payment when it ends after some;
  *   - on a membership, an open invitation for it to a member moving here from
  *     another platform (lib/move-members.ts, openMove) or a come-back offer
- *     for it (lib/winback-send.ts) no longer opens a checkout, since the
- *     option it names is gone; with no option left, both open at the
- *     product's own price, while the product can be sold;
+ *     for it (lib/winback-send.ts) no longer opens a checkout, even when it
+ *     was the last (lib/product-option.ts, namedPriceGone): its page says the
+ *     price is no longer offered, with a link to the product's page;
  *   - a payment plan that starts or stops being offered without it
  *     (lib/product-extras.ts, activePlan).
  *
@@ -358,11 +358,10 @@ export function optionRemovalWords(
         ? "Members who joined at it keep being charged what they joined at. Each membership ends when they or you cancel it, or after its last payment."
         : "Members who joined at it keep being charged what they joined at until they or you cancel.",
     );
-    // lib/move-members.ts openMove and lib/winback-send.ts: an invitation or offer names its option, and one gone is not swapped for another.
+    // lib/move-members.ts openMove and lib/winback-send.ts: an invitation or offer names its option, and one gone,
+    // even the last, is never swapped for another price (owner, C2-89): its page says so, with a link to the product's page.
     said.push(
-      last && product.sellsAfter
-        ? `Unused invitations for it, sent to members moving here from another platform, and unused come-back offers for it then open at the product's own price${product.hidden ? " once published" : ""}.`
-        : "Unused invitations for it, sent to members moving here from another platform, and unused come-back offers for it stop working.",
+      "Anyone with an unused invitation for it (sent to members moving here from another platform) or an unused come-back offer for it is told this price is no longer offered, with a link to the product's page.",
     );
   }
   if (product.planBefore && !product.planAfter) said.push("Your payment plan stops being offered.");

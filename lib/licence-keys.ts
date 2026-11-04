@@ -62,7 +62,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { lostDisputesSince, rowGivesBack } from "@/lib/refunds";
+import { lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -478,7 +478,13 @@ export function storeHasKeys(store: Store): boolean {
  * the key back as a full refund does (queue 388 [TB14]): the disputes closed
  * since the last run are read with the first page of refunds, from Stripe's
  * closing events, so a lost dispute revokes within the same five minutes;
- * one still open, or won, changes nothing. Returns how many keys it revoked.
+ * one still open, won, or lost for part of the price changes nothing. That
+ * is one more GET /events every five minutes per store that hands out keys
+ * (and one charge read per lost dispute). Stripe keeps events thirty days,
+ * so a job down longer than that misses lost disputes; refunds are not
+ * affected. A failed read of the disputes leaves the refunds handled and the
+ * anchor where it was. The limit of the pages and lookups read per run,
+ * which also keeps the anchor, was there before. Returns how many keys it revoked.
  */
 const idOf = (value: unknown): string =>
   typeof value === "string"
@@ -540,8 +546,8 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
     const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    // Lost disputes, read once with the first page; more than it reads keeps the anchor.
-    const lost = page === 0 ? await lostDisputesSince(account, since) : { rows: [], complete: true };
+    // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since) : { rows: [], complete: true };
     if (!lost.complete) unsure = true;
     const rows = [...lost.rows, ...refunds];
     for (const refund of rows) {

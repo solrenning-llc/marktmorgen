@@ -36,7 +36,7 @@ import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
 import { isLiveSub, soldAMembership } from "@/lib/membership-access";
-import { disputeLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
+import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, readListings, sellsAny, sellsThings } from "@/lib/catalog";
 import { paidCalls } from "@/lib/calls";
@@ -595,8 +595,9 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
       const meta = (intent.metadata ?? {}) as Record<string, string>;
       if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) continue;
       if (intent.status !== "succeeded" || refunded(intent)) continue;
-      // Lost to a dispute is given back too (lib/refunds.ts); asked only of a charge Stripe marks disputed.
-      if (await disputeLost(account as string, intent)) continue;
+      // Lost to a dispute is given back too (lib/refunds.ts); asked only of a
+      // charge Stripe marks disputed, and a failed read keeps it on the list.
+      if (await keptUnlessLost(account as string, intent)) continue;
       const product = await find(meta.product);
       const items = product ? await linesOf(find, bundleFromMeta(meta, "bundle")) : null;
       if (!product || !(product.file || product.link || items)) continue;

@@ -33,7 +33,7 @@ import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
-import { refundedInFull } from "@/lib/refunds";
+import { lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
 import { readMoves } from "@/lib/call-records";
 import { readRecord } from "@/lib/meet-records";
@@ -177,18 +177,26 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   let handled = 0;
   let after = "";
   let complete = false;
+  // A failed or unfinished read of the lost disputes keeps the anchor.
+  let unsure = false;
   for (let page = 0; page < REFUND_PAGES && Date.now() < deadline; page += 1) {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // A dispute closed as lost for the whole charge ends the booking's meeting
+    // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
+    // with the first page, from Stripe's closing events (kept thirty days).
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since) : { rows: [], complete: true };
+    if (!lost.complete) unsure = true;
+    const rows = [...lost.rows, ...refunds];
     for (const refund of rows) {
       if (Date.now() >= deadline) break;
       const id = typeof refund.id === "string" ? refund.id : "";
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
-      if ((refund.status !== "succeeded" && refund.status !== "pending") || !refundedInFull(refund.charge)) {
+      if (!rowGivesBack(refund)) {
         newest = Math.max(newest, created);
         continue;
       }
@@ -220,7 +228,7 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       ]);
       newest = Math.max(newest, created);
     }
-    const last = rows[rows.length - 1];
+    const last = refunds[refunds.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") {
       complete = true;
       break;
@@ -228,8 +236,8 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     after = last.id;
   }
   // Moved forward only past what was read to the end, as the license keys do.
-  if ((complete && lookups > 0 && Date.now() < deadline) || !(Number(anchorRaw) > 0)) {
-    await redisPipeline([["SET", anchorKey(callsId), String(complete ? Math.max(newest, anchor) : anchor), "EX", REFUND_KEEP_SECONDS * 2]]);
+  if ((complete && !unsure && lookups > 0 && Date.now() < deadline) || !(Number(anchorRaw) > 0)) {
+    await redisPipeline([["SET", anchorKey(callsId), String(complete && !unsure ? Math.max(newest, anchor) : anchor), "EX", REFUND_KEEP_SECONDS * 2]]);
   }
   return handled;
 }

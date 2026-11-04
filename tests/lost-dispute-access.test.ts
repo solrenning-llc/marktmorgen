@@ -74,6 +74,8 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     return list(disputes[url.searchParams.get("charge") ?? ""] ?? []);
   }
   if (path === "/events") return list(url.searchParams.get("type") === "charge.dispute.closed" ? closings : []);
+  const read = /^\/charges\/(ch_[A-Za-z0-9]+)$/.exec(path);
+  if (read) return answer(charge(read[1], 4900, true));
   return list([]);
 }) as typeof fetch;
 

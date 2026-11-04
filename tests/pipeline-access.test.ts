@@ -14,6 +14,9 @@ import { DEFAULT_STAGES, FIRST_PIPELINE_ID, type Pipeline } from "@/lib/crm-rule
 import { PIPELINE_ACCESS_REFUSAL, accessOf, parseAccessMap, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
 import { readPipelineAccess, writePipelineAccess } from "@/lib/pipeline-access";
 import { redisPipeline } from "@/lib/redis";
+import { dataKey } from "@/lib/store-data";
+import { dataBytes } from "@/lib/store-data-rules";
+import { POST as FORM } from "@/app/api/store/form-opportunity/route";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { moveMemberships, putMember, removeMember } from "@/lib/team";
 import { readFileSync } from "node:fs";
@@ -88,12 +91,24 @@ async function main(): Promise<void> {
   is("a removed stage's deals sent by one stage for all (a string) into a pipeline they cannot change: refused", stringMoves.status, 403);
   is("and the deal did not move", (await post("owner", { action: "deal", deal: { id: ownerDeal, title: "Ten seats", email: "", cents: 50_000, stage: "wnew01", note: "" } })).status, 200);
   is("a deal that is not there, or cannot be read, is never removed by someone limited", (await post("sam", { action: "undeal", id: "zzzzzzzzzz" })).status, 403);
+  const roomOf = async () => Number((await redisPipeline([["HGET", dataKey(store)!, "crm:pacc"]]))[0] ?? 0);
+  const roomBefore = await roomOf();
   await moveMemberships("sam@example.com", "sam2@example.com");
   cookies.sam = `${SESSION_COOKIE}=${await openSession("sam2@example.com")}`;
+  is("the room the restrictions take moves with them: the old address gives its own back, the new one takes its own", [roomBefore > 0, (await roomOf()) - roomBefore], [true, dataBytes(["sam2@example.com", JSON.stringify({ sales0: "none" })], 1) - dataBytes(["sam@example.com", JSON.stringify({ sales0: "none" })], 1)]);
   is("moving their sign-in to another address keeps exactly their restrictions", [await readPipelineAccess(statsId, "sam@example.com"), await readPipelineAccess(statsId, "sam2@example.com")], [{}, { sales0: "none" }]);
   is("and the new address is refused where the old one was", (await deal("sam", "lead00")).status, 403);
   await moveMemberships("sam2@example.com", "sam@example.com");
   cookies.sam = `${SESSION_COOKIE}=${await openSession("sam@example.com")}`;
+  // A store whose data room is full: changing one's sign-in moves a record, it never refuses.
+  const [usedBefore] = await redisPipeline([["HGET", dataKey(store)!, "#"]]);
+  await redisPipeline([["HSET", dataKey(store)!, "#", 10 ** 12]]);
+  await moveMemberships("sam@example.com", "sam4@example.com");
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam4@example.com")}`;
+  is("with the store's data room full, the new address still gets the store and exactly its restrictions", [await readPipelineAccess(statsId, "sam4@example.com"), await readPipelineAccess(statsId, "sam@example.com"), (await deal("sam", "wnew01")).status !== 403, (await deal("sam", "lead00")).status], [{ sales0: "none" }, {}, true, 403]);
+  await moveMemberships("sam4@example.com", "sam@example.com");
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam@example.com")}`;
+  await redisPipeline([["HSET", dataKey(store)!, "#", Number(usedBefore ?? 0)]]);
 
   part("Moving one's sign-in when the database fails");
   await writePipelineAccess(statsId, "sam@example.com", { sales0: "none" }, store);
@@ -101,9 +116,13 @@ async function main(): Promise<void> {
   // Both the read of the restrictions and any write of them fail while the sign-in moves.
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (commands.some((c) => (c[0] === "HGET" || c[0] === "HSET") && String(c[1]).startsWith("nl:crm:pacc:"))) throw new Error("stand-in failure");
+    // As the real Redis does: SREM with a key and no member is an error.
+    if (commands.some((c) => c[0] === "SREM" && c.length < 3)) throw new Error("ERR wrong number of arguments for 'srem' command");
     return realPipeline(commands);
   }) as typeof redis.pipeline;
-  await moveMemberships("sam@example.com", "sam3@example.com");
+  let threw = false;
+  await moveMemberships("sam@example.com", "sam3@example.com").catch(() => { threw = true; });
+  is("when every store stays on the old address, nothing is sent that the real database refuses: the move finishes", threw, false);
   redis.pipeline = realPipeline;
   cookies.sam = `${SESSION_COOKIE}=${await openSession("sam3@example.com")}`;
   is("the new address never gets the store without its restrictions: it is not on the team at all", (await deal("sam", "wnew01")).status >= 400, true);
@@ -113,12 +132,18 @@ async function main(): Promise<void> {
 
   part("Leaving the team");
   await writePipelineAccess(statsId, "sam@example.com", { wkshp1: "view" }, store);
+  is("(their restrictions take room)", (await roomOf()) > 0, true);
   await removeMember(store, "sam@example.com");
   is("their restrictions go with them", await readPipelineAccess(statsId, "sam@example.com"), {});
+  is("and so does the room they took: none is left held", await roomOf(), 0);
 
   part("The form route too");
-  const form = readFileSync("app/api/store/form-opportunity/route.ts", "utf8");
-  is("a deal made from a form goes only where its maker may change", form.includes('accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) !== "edit"') && form.includes('error: "pipeline_access"'), true);
+  await putMember(store, "sam@example.com", "support");
+  await writePipelineAccess(statsId, "sam@example.com", { sales0: "none" }, store);
+  const fromForm = await FORM(new NextRequest("https://marktmorgen.com/api/store/form-opportunity", { method: "POST", headers: { "content-type": "application/json", cookie: cookies.sam }, body: JSON.stringify({ form: "f000000001", responseRef: "a".repeat(64), deal: { title: "From a form", note: "", email: "", cents: 0, stage: "lead00" } }) }));
+  is("a deal made from a form: someone who can be restricted cannot make one at all (export is the owner's and Admins'), so a pipeline they may not change is never reached", [fromForm.status, ((await fromForm.json()) as { error?: string }).error], [403, "role"]);
+  const formCode = readFileSync("app/api/store/form-opportunity/route.ts", "utf8");
+  is("and the route still checks the pipeline, should that ever change", formCode.includes('accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) !== "edit"'), true);
 
   done();
 }

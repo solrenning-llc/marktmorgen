@@ -13,7 +13,7 @@
 import { normaliseEmail } from "@/lib/auth";
 import { type AccessMap, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const accessKey = (statsId: string) => `nl:crm:pacc:${statsId}`;
@@ -75,19 +75,27 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
  * without its restrictions. The old field is deleted only once the team
  * record has moved (forgetPipelineAccess).
  */
-export async function copyPipelineAccess(statsId: string | null, from: string, to: string): Promise<void> {
+export async function copyPipelineAccess(store: DataStore, from: string, to: string): Promise<void> {
+  const statsId = store.statsId;
   if (!statsId || !isRedisConfigured()) return;
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
   if (before === after) return;
   const [raw] = await redisPipeline([["HGET", accessKey(statsId), before]]);
   if (raw === null || raw === undefined || raw === "") return;
+  // A record moved, not a new one: it is counted as written (noteData never refuses), so a full data room
+  // never leaves a teammate off the store when they change their sign-in. The old field gives its room back
+  // when it is forgotten. Only a write that cannot be confirmed throws.
   const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]);
   if (written !== 0 && written !== 1) throw new Error("copying a teammate's pipeline access could not be confirmed");
+  await noteData(store, [{ slot: ACCESS_SLOT, bytes: dataBytes([after, String(raw)], 1) }]);
 }
 
-/** A teammate who left: their restrictions go with them. */
-export async function forgetPipelineAccess(statsId: string | null, email: string): Promise<void> {
+/** A teammate who left: their restrictions go with them, and the room they took is given back. */
+export async function forgetPipelineAccess(store: DataStore, email: string): Promise<void> {
+  const statsId = store.statsId;
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["HDEL", accessKey(statsId), normaliseEmail(email)]]);
+  const who = normaliseEmail(email);
+  const [raw, deleted] = await redisPipeline([["HGET", accessKey(statsId), who], ["HDEL", accessKey(statsId), who]]);
+  if (deleted === 1 && typeof raw === "string" && raw) await giveData(store, [{ slot: ACCESS_SLOT, bytes: dataBytes([who, raw], 1) }]);
 }

@@ -409,7 +409,7 @@ export async function removeMember(store: Store, email: string): Promise<boolean
   });
   if (removed) await redisPipeline([["SREM", indexKey(address), store.sid]]).catch(() => {});
   // What they could do with each pipeline (639 [GL7](7)) goes with them.
-  if (removed) await forgetPipelineAccess(store.statsId, address).catch(() => {});
+  if (removed) await forgetPipelineAccess(store, address).catch(() => {});
   return removed;
 }
 
@@ -527,7 +527,7 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
       // be confirmed, this store's membership stays on the old address: the new one never has the store without
       // its restrictions.
       try {
-        await copyPipelineAccess(store.statsId, before, after);
+        await copyPipelineAccess(store, before, after);
       } catch (error) {
         console.error("copying pipeline access failed; the membership stays on the old address", error);
         stayed.push(sid);
@@ -538,9 +538,12 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
     });
     if (!role) continue;
     // The old address's restrictions go only once the team names the new one.
-    await forgetPipelineAccess(store.statsId, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
+    await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
     await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
   }
-  await redisPipeline([stayed.length ? ["SREM", indexKey(before), ...list.filter((sid) => !stayed.includes(sid))] : ["DEL", indexKey(before)]]);
+  // The old address keeps only the stores that stayed on it; SREM with no member is an error in Redis, so it is sent only with some.
+  const moved = list.filter((sid) => !stayed.includes(sid));
+  if (!stayed.length) await redisPipeline([["DEL", indexKey(before)]]);
+  else if (moved.length) await redisPipeline([["SREM", indexKey(before), ...moved]]);
 }

@@ -325,6 +325,60 @@ async function main(): Promise<void> {
   } finally { redis.pipeline = original; }
   is("the rows stay counted and the room stays taken: the write may have happened", [await rowsUsed() > rowsUnsure, ((await dataUsed(store))?.used ?? 0) > (roomUnsure?.used ?? 0)], [true, true]);
 
+  part("A lock that cannot be confirmed before the write sends nothing, and gives back the room and the rows");
+  const isExtend = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).includes('"EXPIRE"') && String(c[3]).startsWith("nl:crm:lock:");
+  for (const [label, failing] of [["the database does not answer", "throw"], ["the lock ran out", "lost"]] as const) {
+    const rowsLock = await rowsUsed();
+    const roomLock = await dataUsed(store);
+    let sent = false, extended = false;
+    try {
+      redis.pipeline = async (commands: (string | number)[][]) => {
+        if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-deals-import"))) sent = true;
+        if (commands.some(isExtend)) {
+          if (failing === "lost") return [0];
+          extended = true;
+          throw new Error("network down");
+        }
+        // holdLock's own fallback read fails too; letting go of the lock after works again.
+        if (extended && commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:crm:lock:"))) {
+          extended = false;
+          throw new Error("network down");
+        }
+        return original(commands);
+      };
+      const lost = await call({ action: "save", header: HEADER, rows: [row("9291", "Lock deal", "New", "Sales")] });
+      is(`${label}: said as not saved, to try again`, [lost.status, lost.body.error, lost.body.message], [503, "lock_lost", HUBSPOT_IMPORT_WORDS.lock_lost]);
+    } finally { redis.pipeline = original; }
+    is(`${label}: the import was never sent, and the room and the month's rows went back`, [sent, await rowsUsed(), (await dataUsed(store))?.used, await dealCount(statsId)], [false, rowsLock, roomLock?.used, 10]);
+  }
+  const rowsRefused = await rowsUsed();
+  let refusedSent = false;
+  try {
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-deals-import"))) {
+        refusedSent = true;
+        const raw = String((await original([["GET", "nl:crm:pipes:" + statsId]]))[0]);
+        await original([["SET", "nl:crm:pipes:" + statsId, JSON.stringify(JSON.parse(raw), null, 1)]]);
+      } else if (refusedSent && commands.some((c) => c[0] === "EVAL" && String(c[3]).startsWith("nl:data:"))) throw new Error("network down");
+      return original(commands);
+    };
+    const refusedRoom = await call({ action: "save", header: HEADER, rows: [row("9295", "Refused deal", "New", "Sales")] });
+    is("a refused step whose room cannot be put right is still said as refused", [refusedSent, refusedRoom.status, refusedRoom.body.error], [true, 409, "changed"]);
+  } finally { redis.pipeline = original; }
+  is("and the month's rows still come back", await rowsUsed(), rowsRefused);
+
+  part("Busy is said without naming who holds the lock; a lost lock on the board is not busy");
+  const boardHolds = await takeCrmLock(statsId);
+  try {
+    const waitingImport = await call({ action: "save", header: HEADER, rows: [row("9296", "Waiting deal", "New", "Sales")] });
+    is("an import while the board changes pipelines is not told another file is coming in", [waitingImport.status, waitingImport.body.error, /deals or pipelines are being changed/.test(waitingImport.body.message), /file of deals/.test(waitingImport.body.message)], [409, "busy", true, false]);
+  } finally { await releaseLock(boardHolds); }
+  try {
+    redis.pipeline = async (commands: (string | number)[][]) => (commands.some(isExtend) ? [0] : original(commands));
+    const lostBoard = await crmCall({ action: "pipeline", pipeline: (await readPipelines(statsId))[0], moves: {} });
+    is("the board's change whose lock ran out is not saved, and says so, not busy", [lostBoard.status, lostBoard.body.error, crmAnswer(false, lostBoard.body)], [503, "crm_not_saved", { ok: false, error: "crm_not_saved" }]);
+  } finally { redis.pipeline = original; }
+
   part("A deal is never overwritten");
   const foreign = JSON.stringify({ id: hubSpotDealId("9301"), title: "Made meanwhile", email: "", cents: 0, stage: "lead00", note: "", createdAt: 1, updatedAt: 1 });
   let planted = false;

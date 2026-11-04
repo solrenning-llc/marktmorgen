@@ -39,7 +39,8 @@
  *     the rows, then the pipelines and every deal are written in one step
  *     (lib/crm.ts, IMPORT_CRM_DEALS). When that step writes nothing (the
  *     pipelines changed, a deal's id was taken, the store filled up, or the
- *     lock ran out), the room and the rows go back. When whether it wrote
+ *     lock ran out or could not be confirmed, so the step was never sent),
+ *     the room and the rows go back. When whether it wrote
  *     cannot be confirmed, both stay counted, as for what was written.
  *   - One import of deals or change of pipelines at a time per store, under
  *     the store's CRM lock (lib/crm.ts, takeCrmLock): every change of
@@ -57,7 +58,7 @@
  * (lib/crm.ts, forgetCrmPerson).
  */
 import { createHash } from "node:crypto";
-import { CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
+import { CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmLockLost, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
 import { type Deal, type Pipeline, type Stage, MAX_DEALS, MAX_PIPELINES, MAX_STAGES, allStages, newCrmId, parseDeal, parsePipelines, pipelineLimit } from "@/lib/crm-rules";
 import { HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_REASON, hubSpotDealColumns, hubSpotFileOf, oneLine, pipelineRoomReason, planHubSpotDeals, tooManyDealsSentence } from "@/lib/hubspot-csv";
 import { giveImportRows, takeImportRows } from "@/lib/imports";
@@ -118,6 +119,7 @@ export type HubSpotImportRefusal =
   | "too_many"
   | "deals_full"
   | "busy"
+  | "lock_lost"
   | "changed"
   | "store_full"
   | "rows_month"
@@ -133,7 +135,9 @@ export const HUBSPOT_IMPORT_WORDS: Record<Exclude<HubSpotImportRefusal, "too_man
     'This is not a deals file exported from HubSpot with English column names. In HubSpot, export your deals list, choose English under "Language of column headers", then bring that file in.',
   no_record_id:
     "This deals file has no Record ID column, so deals brought in from it could be brought in twice. In HubSpot, export your deals list with all properties, so the file has the Record ID column, then bring that file in.",
-  busy: "Another file of deals is being brought into this store right now. Wait a minute, then bring this file in again.",
+  // The lock is taken by another import and by every change of pipelines on the board: the sentence names neither.
+  busy: "Your deals or pipelines are being changed right now, so nothing was brought in. Wait a moment, then bring the file in again.",
+  lock_lost: "Saving could not start in time, so nothing was brought in. Bring the file in again.",
   changed: "Your pipelines changed while this file was being brought in, so nothing was brought in. Bring the file in again.",
   unavailable: "Your deals could not be read just now, so nothing was brought in. Try again in a minute.",
   unconfirmed: "Saving could not be confirmed. Bring the same file in again: deals already here are never added twice.",
@@ -350,8 +354,9 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     return { ok: true, summary: { ...summary, written: true } };
   } catch (error) {
     // The month's rows go back only when the step surely wrote nothing; unconfirmed, they stay counted, as the room does.
-    if (counted && (error instanceof CrmSchemaConflict || error instanceof CrmDealsFull || error instanceof LockBusyError)) await giveImportRows(store, counted, now);
+    if (counted && (error instanceof CrmSchemaConflict || error instanceof CrmDealsFull || error instanceof CrmLockLost || error instanceof LockBusyError)) await giveImportRows(store, counted, now).catch(() => undefined);
     if (error instanceof LockBusyError) return refuse("busy", HUBSPOT_IMPORT_WORDS.busy);
+    if (error instanceof CrmLockLost) return refuse("lock_lost", HUBSPOT_IMPORT_WORDS.lock_lost);
     if (error instanceof DataRoomError) return refuse("store_full", error.message);
     if (error instanceof CrmSchemaConflict) return refuse("changed", HUBSPOT_IMPORT_WORDS.changed);
     if (error instanceof CrmDealsFull) return refuse("deals_full", HUBSPOT_IMPORT_WORDS.deals_full);

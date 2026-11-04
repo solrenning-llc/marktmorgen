@@ -17,7 +17,7 @@
  * however long the list is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Held, LockBusyError, holdLock, takeLock, withLock } from "@/lib/redis-lock";
+import { type Held, holdLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type DataChange, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import {
@@ -57,6 +57,24 @@ export class CrmSchemaReadUnavailable extends Error {
 export class CrmSchemaWriteUnconfirmed extends Error {
   constructor() { super("CRM configuration change could not be confirmed"); this.name = "CrmSchemaWriteUnconfirmed"; }
 }
+/**
+ * The store's CRM lock could not be confirmed as still ours just before a
+ * write (it ran out on a slow request, or the database did not answer): the
+ * write was never sent, so nothing was written.
+ */
+export class CrmLockLost extends Error {
+  constructor() { super("CRM lock could not be confirmed before writing"); this.name = "CrmLockLost"; }
+}
+
+/** Whether the lock `held` is still ours: false, never an error, when that cannot be confirmed. */
+async function stillHeld(held: Held): Promise<boolean> {
+  try {
+    return await holdLock(held);
+  } catch {
+    return false;
+  }
+}
+
 /** Somebody else changed the pipelines between this change's read and its write: nothing was written. */
 export class CrmSchemaConflict extends Error {
   constructor() { super("CRM configuration changed meanwhile"); this.name = "CrmSchemaConflict"; }
@@ -218,12 +236,12 @@ return 1`;
  * Writes pipelines over the snapshot read, then the first pipeline's copy
  * for the board's old key, then moves each deal whose stage went to the
  * stage `target` names, over its exact record (MOVE_CRM_DEAL). Only while
- * the store's CRM lock `held` is still ours (LockBusyError otherwise, and
+ * the store's CRM lock `held` is still ours (CrmLockLost otherwise, and
  * nothing is written): no deals import can land deals in a stage between
  * the deals read and this write.
  */
 async function writePipelines(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[], moved: { id: string; before: string; record: Record<string, unknown> }[], room: DataStore): Promise<void> {
-  if (!(await holdLock(held))) throw new LockBusyError();
+  if (!(await stillHeld(held))) throw new CrmLockLost();
   const record = JSON.stringify(pipelines);
   // Their room in the store's data room first (DataRoomError when they do not fit, and nothing is written).
   await needData(room, [{ slot: PIPES_SLOT, bytes: dataBytes([record], 1), set: true }]);
@@ -252,8 +270,9 @@ async function writePipelines(statsId: string, held: Held, snapshotRaw: string, 
  * changePipeline), with the deals of every stage that goes moved where
  * `moves` says. A refusal writes nothing. Moves made here start no
  * workflow: a stage removed is not a deal entering a stage. Under the
- * store's CRM lock, as a deals import is: LockBusyError while one is being
- * brought in, and nothing is written.
+ * store's CRM lock, as a deals import is: LockBusyError while another
+ * change or an import holds it, CrmLockLost when it could not be kept until
+ * the write; nothing is written either way.
  */
 export function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore): Promise<PipelineChange> {
   return withCrmLock(statsId, (held) => changePipelines(statsId, held, change, moves, limit, room));
@@ -527,10 +546,10 @@ function importReply(reply: unknown, sent: number): { written: true } | { writte
  * stage.
  */
 export async function writeImport(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[], room: DataStore): Promise<void> {
-  // The lock may have run out on a slow request: then nothing is written.
-  if (!(await holdLock(held))) {
-    await giveData(room, importRoom(snapshotRaw, pipelines, deals).back);
-    throw new LockBusyError();
+  // The lock may have run out on a slow request, or not be confirmed at all: then nothing is sent, and the room goes back.
+  if (!(await stillHeld(held))) {
+    await giveData(room, importRoom(snapshotRaw, pipelines, deals).back).catch(() => undefined);
+    throw new CrmLockLost();
   }
   if (!pipelines && !deals.length) return;
   let reply: unknown;
@@ -544,14 +563,18 @@ export async function writeImport(statsId: string, held: Held, snapshotRaw: stri
   const answer = importReply(reply, deals.length);
   if (!answer) throw new CrmDealWriteUnconfirmed();
   if (answer.written) return;
-  const free = deals.filter((deal) => !answer.there.has(deal.id));
-  await giveData(room, importRoom(snapshotRaw, null, free).back);
-  // Counted as kept now, whatever it comes to: another write may have grown it since the room was taken.
-  const kept: DataChange[] = [...answer.there].map(([id, value]) => ({ slot: dealSlot(id), bytes: dataBytes([id, value], 1), set: true }));
-  if (pipelines) kept.push({ slot: PIPES_SLOT, bytes: answer.current ? dataBytes([answer.current], 1) : 0, set: true });
-  if (kept.length) await noteData(room, kept);
-  if (answer.code === -3) throw new CrmDealsFull();
-  throw new CrmSchemaConflict();
+  // Surely nothing was written: whatever happens while the room is put right, the caller is told so.
+  try {
+    const free = deals.filter((deal) => !answer.there.has(deal.id));
+    await giveData(room, importRoom(snapshotRaw, null, free).back);
+    // Counted as kept now, whatever it comes to: another write may have grown it since the room was taken.
+    const kept: DataChange[] = [...answer.there].map(([id, value]) => ({ slot: dealSlot(id), bytes: dataBytes([id, value], 1), set: true }));
+    if (pipelines) kept.push({ slot: PIPES_SLOT, bytes: answer.current ? dataBytes([answer.current], 1) : 0, set: true });
+    if (kept.length) await noteData(room, kept);
+  } catch {
+    // The room is put right as far as it can be; nothing was written either way.
+  }
+  throw answer.code === -3 ? new CrmDealsFull() : new CrmSchemaConflict();
 }
 
 /** The title and note of these deals as saved, by id (empty for one that is not there or cannot be read): what an import checks a deal it would bring in again against. */

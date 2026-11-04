@@ -226,7 +226,8 @@ export function readHubSpotAmount(raw: string, storeCurrency: string, columnCurr
   if (sign && sign !== narrowSymbol(store)) return unreadable;
   const [whole, fraction = ""] = number.split(".");
   // More digits after the point than the currency has: 1.500 may be fifteen hundred, written with a point between
-  // thousands. Only zeros after the point, and not three of them, read the same either way.
+  // thousands. Only zeros after the point, and not three of them, read the same either way. A currency with three
+  // digits of its own (KWD, BHD) reads "1.500" as one and a half, by design: three digits after the point are its own.
   if (fraction.length > digits && (fraction.length === 3 || /[^0]/.test(fraction))) {
     return { cents: null, note: `"${text}" has more digits after the point than ${store.toUpperCase()} has, so it could be read two ways and this deal comes in with no amount. Type it on the deal, ${example}.` };
   }

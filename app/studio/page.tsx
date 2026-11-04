@@ -1117,7 +1117,7 @@ export default async function StudioPage({
   // Passkeys whose wait to be removed has run out go first, so the list below is what is left; and
   // whether this session may add a passkey or an app (lib/second-step-gate.ts), so the managers say so.
   const removing = email ? await pendingRemoval(email).catch(() => null) : null;
-  const passkeyRemovals: Record<string, number> = removing ? Object.fromEntries(removing.ids.map((id) => [id, removing.at])) : {};
+  const passkeyRemovals: Record<string, number> = removing ? removing.atOf : {};
   const needsStep = email ? !(await mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : false;
   const canKeep = email ? mayKeepPasskey(await liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : false;
   const [passkeys, team, freshLogin, lockedTill, twoStep, recoveryShown] = await Promise.all([

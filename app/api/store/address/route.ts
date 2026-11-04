@@ -64,9 +64,6 @@ export async function POST(request: NextRequest) {
   // Moving the account outlives the session that asks, so an account with a passkey or an app asks it
   // from a session opened with one (lib/second-step-gate.ts): an emailed link alone never moves it.
   if ((await hasSecondStep(email)) && (await liveSecondStep(email, session)) === null) return back("second-step");
-  // Never onto an address with ways in of its own: they would join this account's (checked again at the tap).
-  if (await holdsSecondStep(wanted)) return back("has-login");
-
   // Moving is moving a store. With no store there is nothing to carry, and the
   // creator simply signs in with the other address instead.
   const store = await storeForEmail(email);
@@ -83,6 +80,10 @@ export async function POST(request: NextRequest) {
 
   try {
     if (!(await withinAddressLimit(wanted))) return back("limited");
+    // Never onto an address with ways in of its own: they would join this account's (checked again at the
+    // tap). Asked only after the store, a recent login and the address's hourly count, so it cannot be used
+    // to find out which addresses have passkeys.
+    if (await holdsSecondStep(wanted)) return back("has-login");
     await sendMoveLink(email, wanted, linkOrigin(request), session as string);
   } catch (error) {
     console.error("address move request failed", error);

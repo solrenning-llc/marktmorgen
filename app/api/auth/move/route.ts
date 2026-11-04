@@ -9,7 +9,7 @@ import {
   sessionCookie,
   spendMoveLink,
 } from "@/lib/auth";
-import { moveAccount } from "@/lib/store";
+import { moveAccount, storeForEmail } from "@/lib/store";
 import { moveMemberships } from "@/lib/team";
 import { movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { holdsSecondStep } from "@/lib/second-step-gate";
@@ -57,18 +57,40 @@ export async function POST(request: NextRequest) {
   // two addresses' ways in are never merged (security review of da5191515).
   if (await holdsSecondStep(moved.to).catch(() => true)) return away("/signin?status=move-has-login");
 
+  const { from, to } = moved;
+  // The ways in move first, and each refuses an address with its own (lib/passkeys.ts movePasskeys,
+  // lib/two-step.ts moveTwoStep): when one refuses, or the store cannot move, whatever already moved goes
+  // back and nothing else moves, so a move never ends split between two addresses.
+  let keysMoved = false;
+  let appMoved = false;
+  const undo = async () => {
+    if (appMoved) await moveTwoStep(to, from).catch((error) => console.error("moving two-step login back failed", error));
+    if (keysMoved) await movePasskeys(to, from).catch((error) => console.error("moving passkeys back failed", error));
+  };
+  try {
+    await movePasskeys(from, to);
+    keysMoved = true;
+    await moveTwoStep(from, to);
+    appMoved = true;
+  } catch (error) {
+    console.error("moving the ways in refused", error);
+    await undo();
+    return away("/signin?status=move-has-login");
+  }
+
   let sessionId: string;
   try {
-    const result = await moveAccount(moved.from, moved.to);
-    if (!result.ok) return away(`/signin?status=move-${result.reason}`);
+    const result = await moveAccount(from, to);
+    if (!result.ok) {
+      await undo();
+      return away(`/signin?status=move-${result.reason}`);
+    }
     // What belongs to the person rather than to a store goes with them: the
-    // teams they are on, their passkeys, the browsers they sign in from.
+    // teams they are on, the browsers they sign in from, the recovery address.
     await Promise.all([
-      moveMemberships(moved.from, moved.to),
-      movePasskeys(moved.from, moved.to),
-      moveDevices(moved.from, moved.to),
-      moveTwoStep(moved.from, moved.to),
-      moveRecoveryAddress(moved.from, moved.to),
+      moveMemberships(from, to),
+      moveDevices(from, to),
+      moveRecoveryAddress(from, to),
     ]).catch((error) => console.error("moving what belongs to the account failed", error));
     // Phones follow once the memberships have: an owner's stay the owner's,
     // a team member's become the new address's (lib/phone-alerts.ts).
@@ -81,6 +103,8 @@ export async function POST(request: NextRequest) {
     await pendingRemoval(moved.to).catch((error) => console.error("applying a passkey removal failed", error));
   } catch (error) {
     console.error("address move failed", error);
+    // The store did not move, or did and something after it failed: put the ways in back only in the first case.
+    if (!(await storeForEmail(to).catch(() => null))) await undo();
     return away("/signin?status=move-error");
   }
 

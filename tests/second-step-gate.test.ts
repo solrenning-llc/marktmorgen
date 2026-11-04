@@ -28,7 +28,8 @@ import { POST as twoStepRoute } from "@/app/api/auth/two-step/route";
 import { makePasskey } from "./passkey-world";
 import { POST as addressRoute } from "@/app/api/store/address/route";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
-import { claimHandle } from "@/lib/store";
+import { claimHandle, storeForEmail } from "@/lib/store";
+import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
 import { sendMoveLink } from "@/lib/auth";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
@@ -72,6 +73,12 @@ const twoStep = async (session: string) => {
 const form = (url: string, fields: Record<string, string>, cookie = "") =>
   new NextRequest(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields) });
 const cookieOf = (response: Response, name: string) => (response.headers.get("set-cookie") ?? "").match(new RegExp(`${name}=([^;]*)`))?.[1] ?? "";
+/** A removal record with every passkey's moment already past, as if its days were over. */
+const overdue = (raw: unknown) => {
+  const record = JSON.parse(String(raw)) as { atOf?: Record<string, number>; ids?: string[]; told: number };
+  if (!record.atOf) return JSON.stringify({ ...record, at: Date.now() - 1_000 });
+  return JSON.stringify({ ...record, atOf: Object.fromEntries(Object.keys(record.atOf).map((id) => [id, Date.now() - 1_000])) });
+};
 const lockOf = (email: string) => `nl:pk:lock:${hex(`nimbus-passkey-lock:${email}`).slice(0, 40)}`;
 
 /** Turns the app on for an account, as the studio does; answers its secret and recovery codes. */
@@ -140,7 +147,7 @@ async function main(): Promise<void> {
   await passkeys(byLink, { action: "remove", id: "cred-kai-1" });
   const dropKai = `nl:pk:drop:${hex(`nimbus-passkey-drop:${KAI}`).slice(0, 40)}`;
   const [rawDrop] = await redis.pipeline([["GET", dropKai]]);
-  await redis.pipeline([["SET", dropKai, JSON.stringify({ ...JSON.parse(String(rawDrop)), at: Date.now() - 1_000 })]]);
+  await redis.pipeline([["SET", dropKai, overdue(rawDrop)]]);
   is("once its days are over, it does not log in", await signInWithPasskey(kai), "");
   const after = Date.now() + 60_000;
   is("it is gone", [await pendingRemoval(KAI, after), (await listPasskeys(KAI)).length, await hasSecondStep(KAI, after)], [null, 0, false]);
@@ -192,7 +199,7 @@ async function main(): Promise<void> {
   part("Once the days are over: nothing is called off, and the old session does nothing");
   const dropBo = `nl:pk:drop:${hex(`nimbus-passkey-drop:${BO}`).slice(0, 40)}`;
   const [rawBo] = await redis.pipeline([["GET", dropBo]]);
-  await redis.pipeline([["SET", dropBo, JSON.stringify({ ...JSON.parse(String(rawBo)), at: Date.now() - 1_000 })]]);
+  await redis.pipeline([["SET", dropBo, overdue(rawBo)]]);
   is("a removal whose days are over cannot be kept", [await cancelRemoval(BO, "cred-bo-p", await openSession(BO, "app")), (await listPasskeys(BO)).length], ["unknown", 0]);
   is("the session P opened before is logged out with it", await emailForSession(byP), null);
   is("and used by the API it removes nothing and adds nothing", [(await passkeys(byP, { action: "remove", id: "cred-bo-q" })).error, (await passkeys(byP, { action: "options" })).error], ["signed_out", "signed_out"]);
@@ -318,9 +325,11 @@ async function main(): Promise<void> {
     [
       tiaMail.includes("every passkey on your account is set to be removed and you have no authenticator app, so nothing can stop it"),
       tiaMail.includes(`On ${removalWhen(t0 + REMOVAL_DAYS * 86_400_000)}, log in at`),
-      tiaMail.includes("If this was you, there is nothing to do: it is removed on that day."),
+      tiaMail.includes("If this was you, there is nothing to do: each is removed on its day."),
+      tiaMail.includes("anyone who can open this email inbox can do the same and add a passkey of their own"),
+      tiaMail.includes("without a passkey or an app code"),
     ],
-    [true, true, true],
+    [true, true, true, true, false],
   );
   const UNA = "una-two@example.com";
   const unaP = makePasskey(UNA, "cred-una-p");
@@ -336,8 +345,8 @@ async function main(): Promise<void> {
     [
       unaMail.includes(`It will be removed on ${removalWhen(atUna!)}.`),
       unaMail.includes(`If it was not you, stop it before ${removalWhen(atUna!)}:`),
-      unaMail.includes("with another of your passkeys, or the emailed link and the code from your authenticator app."),
-      unaMail.includes("press “Keep it” next to the passkey. Only “Keep it” stops the removal: logging in alone does not, and logging in with the passkey that is being removed cannot."),
+      unaMail.includes("with a passkey that is not on that list, or the emailed link and the code from your authenticator app."),
+      unaMail.includes("press “Keep it” next to each passkey you want to keep. Only “Keep it” stops a removal: logging in alone does not, and logging in with a passkey that is being removed cannot."),
     ],
     [true, true, true, true],
   );
@@ -490,6 +499,114 @@ async function main(): Promise<void> {
   const lost = await removePasskey(LIA, "cred-lia-p", liaSession).catch((error: unknown) => (error instanceof Error ? error.name || error.message : "error"));
   redis.pipeline = pipe;
   is("a removal whose lock ran out writes nothing: both passkeys stay", [lost !== "removed", (await listPasskeys(LIA)).map((p) => p.id).sort()], [true, ["cred-lia-p", "cred-lia-q"]]);
+
+  part("Each passkey waits its own days, and each new one is told (review of 693f44f0b)");
+  const NED = "ned-own@example.com";
+  const nedP1 = makePasskey(NED, "cred-ned-1");
+  const nedP2 = makePasskey(NED, "cred-ned-2");
+  const nedP3 = makePasskey(NED, "cred-ned-3");
+  await nedP1.keep();
+  await nedP2.keep();
+  await nedP3.keep();
+  const T0 = Date.now();
+  mails.length = 0;
+  await scheduleRemoval(NED, "cred-ned-1", "a".repeat(64), false, T0);
+  const at2 = await scheduleRemoval(NED, "cred-ned-2", "a".repeat(64), false, T0 + REMOVAL_DAYS * 86_400_000 - 60_000);
+  is("a passkey asked a minute before another's day waits its own full days", at2, T0 + 2 * REMOVAL_DAYS * 86_400_000 - 60_000);
+  const nedMails = mails.filter((m) => m.to === NED && m.subject === "A passkey is set to be removed from your Marktmorgen account");
+  is("each new passkey asked is emailed, even within the hour", nedMails.length, 2);
+  is(
+    "the second email lists both, each with its own day, and points to a passkey not on the list",
+    [nedMails[1].text.includes(`“Phone”: ${removalWhen(T0 + REMOVAL_DAYS * 86_400_000)}`), nedMails[1].text.includes(`“Phone”: ${removalWhen(at2!)}`), nedMails[1].text.includes("a passkey that is not on that list")],
+    [true, true, true],
+  );
+  const dayOne = T0 + REMOVAL_DAYS * 86_400_000 + 1_000;
+  is("on the first one's day only it goes; the second stays set to go", [await pendingRemoval(NED, dayOne).then((p) => p?.ids), (await listPasskeys(NED)).map((p) => p.id).sort()], [["cred-ned-2"], ["cred-ned-2", "cred-ned-3"]]);
+  is("the account still has a second step, so the emailed link adds nothing", await mayAddSecondStep(NED, await openSession(NED), dayOne), false);
+  await scheduleRemoval(NED, "cred-ned-3", "a".repeat(64), false, T0 + 1_000);
+  const lastMail = [...mails].reverse().find((m) => m.to === NED && m.subject === "A passkey is set to be removed from your Marktmorgen account")?.text ?? "";
+  is("when every passkey left is set to go and there is no app, the email says nothing can stop it", lastMail.includes("so nothing can stop it"), true);
+
+  const OLA = "ola-hour@example.com";
+  await makePasskey(OLA, "cred-ola-1").keep();
+  await makePasskey(OLA, "cred-ola-2").keep();
+  await makePasskey(OLA, "cred-ola-3").keep();
+  const olaAt = Date.now();
+  await scheduleRemoval(OLA, "cred-ola-1", "a".repeat(64), false, olaAt);
+  await scheduleRemoval(OLA, "cred-ola-2", "a".repeat(64), false, olaAt + 5 * 60_000);
+  await scheduleRemoval(OLA, "cred-ola-2", "a".repeat(64), false, olaAt + 6 * 60_000);
+  is("a second passkey asked five minutes later is emailed too; the same one asked again is not", mails.filter((m) => m.to === OLA && m.subject === "A passkey is set to be removed from your Marktmorgen account").length, 2);
+
+  part("The recovery address needs the second step to change, and its old address is told");
+  const REX = "rex-recovery@example.com";
+  const rexP = makePasskey(REX, "cred-rex-1");
+  await rexP.keep();
+  await keepRecoveryAddress(REX, "rex-old@example.org");
+  const recovery = async (session: string, body: Record<string, unknown>) => {
+    const r = await recoveryRoute(asJson(`${ORIGIN}/api/auth/recovery-address`, body, `nl_session=${session}`));
+    return ((await r.json()) as { ok?: boolean; error?: string }).error ?? "ok";
+  };
+  const rexLink = await linkSession(REX);
+  is("an emailed link alone cannot change it", await recovery(rexLink, { action: "start", address: "rex-new@example.org" }), "second_step");
+  is("nor take it away", await recovery(rexLink, { action: "remove" }), "second_step");
+  const rexKey = await signInWithPasskey(rexP);
+  is("with the passkey it starts", await recovery(rexKey, { action: "start", address: "rex-new@example.org" }), "ok");
+  const rexCode = /Your code: (\d{6})/.exec([...mails].reverse().find((m) => m.to === "rex-new@example.org")?.text ?? "")?.[1] ?? "";
+  mails.length = 0;
+  is("and is confirmed", await recovery(rexKey, { action: "confirm", code: rexCode }), "ok");
+  is("the old address is told it was replaced", mails.some((m) => m.to === "rex-old@example.org" && m.subject === "This is no longer the recovery address of a Marktmorgen account"), true);
+  mails.length = 0;
+  await recovery(rexKey, { action: "remove" });
+  is("and when it is taken away, the address it had is told", mails.some((m) => m.to === "rex-new@example.org" && m.subject === "This is no longer the recovery address of a Marktmorgen account"), true);
+
+  part("A move refused halfway leaves everything where it was");
+  const MOV = "mov-from@example.com";
+  await claimHandle(MOV, "mov-from", "Mov From", "");
+  const movP = makePasskey(MOV, "cred-mov-1");
+  await movP.keep();
+  const movKey = await signInWithPasskey(movP);
+  const DEST = "mov-dest@example.com";
+  const destList = `nl:pk:${hex(`nimbus-passkeys:${DEST}`).slice(0, 40)}`;
+  let reads = 0;
+  const movePipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // A passkey lands on the new address between the route's check and the passkeys' own.
+    if (commands.some((c) => c[0] === "GET" && c[1] === destList) && ++reads === 2) {
+      await movePipe([["SET", destList, JSON.stringify([{ id: "cred-late", publicKey: "pk", counter: 0, transports: [], name: "Late", createdAt: "", lastUsedAt: "", synced: false }])]]);
+    }
+    return movePipe(commands);
+  }) as typeof redis.pipeline;
+  mails.length = 0;
+  await sendMoveLink(MOV, DEST, ORIGIN, movKey);
+  const movToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === DEST)?.text ?? "")?.[1] ?? "";
+  const movAnswer = (await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: movToken }))).headers.get("location");
+  redis.pipeline = movePipe;
+  is("refused", movAnswer, `${ORIGIN}/signin?status=move-has-login`);
+  is("the store, the passkey and the session stay with the old address", [Boolean(await storeForEmail(MOV)), Boolean(await storeForEmail(DEST)), (await listPasskeys(MOV)).map((p) => p.id), await emailForSession(movKey)], [true, false, ["cred-mov-1"], MOV]);
+
+  part("Asking to move does not tell which addresses have passkeys");
+  const PROBE = "probe-target@example.com";
+  await makePasskey(PROBE, "cred-probe").keep();
+  const staleSession = await openSession(MOV, "passkey", "cred-mov-1");
+  await redis.pipeline([["DEL", `nl:auth:fresh:${hex(`nimbus-auth-fresh:${staleSession}`).slice(0, 40)}`]]);
+  const probe = await addressRoute(form(`${ORIGIN}/api/store/address`, { email: PROBE }, `nl_session=${staleSession}`));
+  is("a session that is not fresh is told to log in again, not that the address has passkeys", (probe.headers.get("location") ?? "").split("address=")[1], "reauth");
+
+  part("A fenced write never falls back when its script cannot run");
+  const FEN = "fen-strict@example.com";
+  const fenP = makePasskey(FEN, "cred-fen-p");
+  const fenQ = makePasskey(FEN, "cred-fen-q");
+  await fenP.keep();
+  await fenQ.keep();
+  const fenSession = await signInWithPasskey(fenQ);
+  const strictPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-"))) throw new Error("EVAL unavailable");
+    return strictPipe(commands);
+  }) as typeof redis.pipeline;
+  const strict = await removePasskey(FEN, "cred-fen-p", fenSession).catch(() => "refused");
+  redis.pipeline = strictPipe;
+  is("nothing is written: both passkeys stay", [strict, (await listPasskeys(FEN)).map((p) => p.id).sort()], ["refused", ["cred-fen-p", "cred-fen-q"]]);
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";

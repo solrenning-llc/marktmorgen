@@ -44,7 +44,7 @@ import { dropSecondStep, normaliseEmail, sessionMark } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SITE_URL } from "@/lib/site-url";
-import { type Held, LockBusyError, holdLock, setIfHeld, withLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
 import { removalWhen } from "@/lib/removal-time";
 import { recoveryAddressOf } from "@/lib/two-step";
 
@@ -95,13 +95,12 @@ function withPasskeys<T>(email: string, work: (held: Held) => Promise<T>): Promi
  * lock is answered as busy, to try again.
  */
 async function fencedSet(held: Held, key: string, value: string): Promise<void> {
-  if (!(await setIfHeld(held, key, value))) throw new LockBusyError();
+  if (!(await setIfHeldOnly(held, key, value))) throw new LockBusyError();
 }
 
 async function fencedDel(held: Held, keys: string[]): Promise<void> {
   if (!keys.length) return;
-  if (!(await holdLock(held))) throw new LockBusyError();
-  await redisPipeline([["DEL", ...keys]]);
+  if (!(await deleteIfHeldOnly(held, keys))) throw new LockBusyError();
 }
 
 /** Reads a key and deletes it in one step, so a challenge answers once. */
@@ -294,11 +293,19 @@ export const REMOVAL_DAYS = 7;
 
 const dropKey = (email: string) => `nl:pk:drop:${sha(`nimbus-passkey-drop:${normaliseEmail(email)}`).slice(0, 40)}`;
 
-/** Passkeys waiting to be removed, and when, in ms. */
-export type PendingRemoval = { ids: string[]; at: number };
+/**
+ * Passkeys waiting to be removed, each with its own moment in ms
+ * (security review of 693f44f0b): every passkey waits REMOVAL_DAYS from its
+ * own request, never the moment of one asked before it.
+ */
+export type PendingRemoval = { ids: string[]; atOf: Record<string, number> };
 
-/** The record behind it, and when the account was last emailed about it (a request asked again within the hour is not emailed again). */
+/** The record behind it, and when the account was last emailed about it (the same request asked again within the hour is not emailed again; a new passkey always is). */
 type DropRecord = PendingRemoval & { told: number };
+
+function dropOf(atOf: Record<string, number>, told: number): DropRecord {
+  return { ids: Object.keys(atOf), atOf, told };
+}
 
 /** How long a request asked again waits before it is emailed again. */
 const RETELL_MS = 60 * 60 * 1000;
@@ -307,10 +314,17 @@ async function readDrop(email: string): Promise<DropRecord | null> {
   if (!isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", dropKey(email)]]);
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as { ids?: unknown; at?: unknown; told?: unknown }) : null;
-    if (!value || !Array.isArray(value.ids) || typeof value.at !== "number") return null;
-    const ids = value.ids.filter((id): id is string => typeof id === "string").slice(0, MAX_PASSKEYS);
-    return ids.length ? { ids, at: value.at, told: typeof value.told === "number" ? value.told : 0 } : null;
+    const value = typeof raw === "string" ? (JSON.parse(raw) as { atOf?: unknown; ids?: unknown; at?: unknown; told?: unknown }) : null;
+    if (!value) return null;
+    const atOf: Record<string, number> = {};
+    if (value.atOf && typeof value.atOf === "object" && !Array.isArray(value.atOf)) {
+      for (const [id, at] of Object.entries(value.atOf as Record<string, unknown>)) if (typeof at === "number" && Number.isFinite(at)) atOf[id] = at;
+    } else if (Array.isArray(value.ids) && typeof value.at === "number") {
+      // A record written before each passkey had its own moment: each takes the one moment it had.
+      for (const id of value.ids) if (typeof id === "string") atOf[id] = value.at;
+    }
+    const ids = Object.keys(atOf).slice(0, MAX_PASSKEYS);
+    return ids.length ? dropOf(Object.fromEntries(ids.map((id) => [id, atOf[id]])), typeof value.told === "number" ? value.told : 0) : null;
   } catch {
     return null;
   }
@@ -323,7 +337,13 @@ async function readDrop(email: string): Promise<DropRecord | null> {
  * (pendingRemoval, removeDue), and it goes with the account when it moves.
  */
 async function writeDrop(held: Held, email: string, record: DropRecord): Promise<void> {
-  await fencedSet(held, dropKey(email), JSON.stringify(record));
+  if (!record.ids.length) await fencedDel(held, [dropKey(email)]);
+  else await fencedSet(held, dropKey(email), JSON.stringify({ atOf: record.atOf, told: record.told }));
+}
+
+/** The record without `gone`, the passkeys it no longer waits on. */
+function without(record: DropRecord, gone: (id: string) => boolean): DropRecord {
+  return dropOf(Object.fromEntries(Object.entries(record.atOf).filter(([id]) => !gone(id))), record.told);
 }
 
 /**
@@ -345,13 +365,15 @@ async function sessionPasskey(email: string, session: string | undefined): Promi
 
 /**
  * Asked by a session opened without a valid second step: the passkey is
- * removed REMOVAL_DAYS after the first such request (asking again does not
- * move the moment), and the account is told now, and again only an hour or
- * more later. The sessions it opened are logged out at once (`session`, the
- * one asking, only loses its mark), so nothing it opened before stays open
- * through the wait, whatever happens to the removal later. `appOn`: whether
- * the account has an authenticator app, for the email's words. Answers the
- * moment, or null when the account has no such passkey.
+ * removed REMOVAL_DAYS after its own first request (asking again does not
+ * move its moment; another passkey asked later waits its own full days). The
+ * account is told at once whenever a passkey is added to the list, and again
+ * for the same list only an hour or more later; the email lists every passkey
+ * set to go with its own moment. The sessions the passkey opened are logged
+ * out at once, under the lock (`session`, the one asking, only loses its
+ * mark), so nothing it opened before stays open through the wait. `appOn`:
+ * whether the account has an authenticator app, for the email's words.
+ * Answers the passkey's moment, or null when the account has no such passkey.
  */
 export async function scheduleRemoval(email: string, id: string, session: string, appOn = false, now = Date.now()): Promise<number | null> {
   const address = normaliseEmail(email);
@@ -362,35 +384,39 @@ export async function scheduleRemoval(email: string, id: string, session: string
     const row = list.find((p) => p.id === id);
     if (!row) return null;
     const before = await readDrop(address);
-    const at = before?.at ?? now + REMOVAL_DAYS * 86_400_000;
-    const tellNow = !before || now - before.told >= RETELL_MS;
-    const ids = [...new Set([...(before?.ids ?? []), id])];
-    await writeDrop(held, address, { ids, at, told: tellNow ? now : (before?.told ?? now) });
+    const atOf = { ...(before?.atOf ?? {}) };
+    const isNew = atOf[id] === undefined;
+    if (isNew) atOf[id] = now + REMOVAL_DAYS * 86_400_000;
+    const tellNow = isNew || !before || now - before.told >= RETELL_MS;
+    await writeDrop(held, address, dropOf(atOf, tellNow ? now : (before?.told ?? now)));
+    // Logged out under the same lock: nothing P opened stays open past this request.
+    await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session);
     // Whether a second step is left that can still keep it: another passkey not set to go, or the app.
-    const another = list.some((p) => !ids.includes(p.id));
-    return { at, name: row.name, tellNow, another };
+    const another = list.some((p) => atOf[p.id] === undefined);
+    const waiting = list.filter((p) => atOf[p.id] !== undefined).map((p) => ({ name: p.name, at: atOf[p.id] }));
+    return { at: atOf[id], name: row.name, tellNow, another, waiting };
   });
   await afterDue(address, gone);
   if (!asked) return null;
-  await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session);
   if (asked.tellNow) {
-    // Owner C3-96 and the review of 3467adf6d: when it happens, and what to do if it was not them, in plain words.
+    // Owner C3-96 and the reviews of 3467adf6d and 693f44f0b: when each goes, and what to do if it was not them, in plain words.
     const when = removalWhen(asked.at);
     const canStop = asked.another || appOn;
     const subject = "A passkey is set to be removed from your Marktmorgen account";
-    const line = `Somebody logged in to your Marktmorgen account (${address}) without a passkey or an app code and asked to remove the passkey called “${headerText(asked.name, 60)}”. Every browser that logged in with it was logged out.\n\nIt will be removed on ${when}.`;
+    const all = asked.waiting.length > 1 ? `\n\nEvery passkey set to be removed now, each on its own day:\n${asked.waiting.map((p) => `- “${headerText(p.name, 60)}”: ${removalWhen(p.at)}`).join("\n")}` : "";
+    const line = `Somebody logged in to your Marktmorgen account (${address}) and asked to remove the passkey called “${headerText(asked.name, 60)}”. Every browser that logged in with it was logged out.\n\nIt will be removed on ${when}.${all}`;
     const own = {
-      ifYou: "If this was you, there is nothing to do: it is removed on that day.",
+      ifYou: "If this was you, there is nothing to do: each is removed on its day.",
       ifNotYou: canStop
         ? [
             `If it was not you, stop it before ${when}:`,
-            `1. Log in at ${SITE_URL}/signin with ${asked.another ? "another of your passkeys" : ""}${asked.another && appOn ? ", or " : ""}${appOn ? "the emailed link and the code from your authenticator app" : ""}.`,
-            "2. Open Account in your studio and press “Keep it” next to the passkey. Only “Keep it” stops the removal: logging in alone does not, and logging in with the passkey that is being removed cannot.",
+            `1. Log in at ${SITE_URL}/signin with ${asked.another ? "a passkey that is not on that list" : ""}${asked.another && appOn ? ", or " : ""}${appOn ? "the emailed link and the code from your authenticator app" : ""}.`,
+            "2. Open Account in your studio and press “Keep it” next to each passkey you want to keep. Only “Keep it” stops a removal: logging in alone does not, and logging in with a passkey that is being removed cannot.",
             "Then choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.",
           ]
         : [
-            "If it was not you: every passkey on your account is set to be removed and you have no authenticator app, so nothing can stop it. That also means nobody can use these passkeys to add new ones in the meantime.",
-            `On ${when}, log in at ${SITE_URL}/signin with the emailed link, and add a new passkey or turn on an authenticator app under Account in your studio.`,
+            "If it was not you: every passkey on your account is set to be removed and you have no authenticator app, so nothing can stop it. Nobody can use these passkeys to add new ones in the meantime.",
+            `On ${when}, log in at ${SITE_URL}/signin with the emailed link, and add a new passkey or turn on an authenticator app under Account in your studio. On that day, anyone who can open this email inbox can do the same and add a passkey of their own, so keep the inbox safe and add yours first.`,
             "Now, choose “Log out of all devices” at the bottom of your studio, change your email password, and reply to this email so we can help.",
           ],
     };
@@ -408,11 +434,13 @@ export async function scheduleRemoval(email: string, id: string, session: string
  */
 async function removeDue(held: Held, address: string, now: number): Promise<Passkey[] | null> {
   const record = await readDrop(address);
-  if (!record || now < record.at) return null;
+  const due = (id: string) => (record?.atOf[id] ?? Infinity) <= now;
+  if (!record || !record.ids.some(due)) return null;
   const list = await listPasskeys(address);
-  const removed = list.filter((p) => record.ids.includes(p.id));
-  await saveList(held, address, list.filter((p) => !record.ids.includes(p.id)));
-  await fencedDel(held, [dropKey(address), ...removed.map((p) => credKey(p.id))]);
+  const removed = list.filter((p) => due(p.id));
+  await saveList(held, address, list.filter((p) => !due(p.id)));
+  await fencedDel(held, removed.map((p) => credKey(p.id)));
+  await writeDrop(held, address, without(record, due));
   return removed;
 }
 
@@ -435,14 +463,15 @@ export async function pendingRemoval(email: string, now = Date.now()): Promise<P
   const address = normaliseEmail(email);
   const pending = await readDrop(address);
   if (!pending) return null;
-  if (now < pending.at) return { ids: pending.ids, at: pending.at };
+  if (pending.ids.every((id) => now < pending.atOf[id])) return { ids: pending.ids, atOf: pending.atOf };
   const gone = await withPasskeys(address, (held) => removeDue(held, address, now));
   if (gone === null) {
     const left = await readDrop(address);
-    return left ? { ids: left.ids, at: left.at } : null;
+    return left ? { ids: left.ids, atOf: left.atOf } : null;
   }
   await afterDue(address, gone);
-  return null;
+  const left = await readDrop(address);
+  return left ? { ids: left.ids, atOf: left.atOf } : null;
 }
 
 /**
@@ -460,9 +489,7 @@ export async function cancelRemoval(email: string, id: string, session: string |
     const own = await sessionPasskey(address, session);
     if (own && (record?.ids.includes(own) || !(await listPasskeys(address)).some((p) => p.id === own))) return "second_step";
     if (!record || !record.ids.includes(id)) return "unknown";
-    const ids = record.ids.filter((x) => x !== id);
-    if (ids.length) await writeDrop(held, address, { ...record, ids });
-    else await fencedDel(held, [dropKey(address)]);
+    await writeDrop(held, address, without(record, (x) => x === id));
     return "kept";
   });
   await afterDue(address, gone);
@@ -490,11 +517,7 @@ export async function removePasskey(email: string, id: string, keep?: string, no
     if (!row) return "unknown";
     await saveList(held, address, list.filter((p) => p.id !== id));
     await fencedDel(held, [credKey(id)]);
-    if (record?.ids.includes(id)) {
-      const ids = record.ids.filter((x) => x !== id);
-      if (ids.length) await writeDrop(held, address, { ...record, ids });
-      else await fencedDel(held, [dropKey(address)]);
-    }
+    if (record?.ids.includes(id)) await writeDrop(held, address, without(record, (x) => x === id));
     return row;
   });
   await afterDue(address, due);
@@ -614,9 +637,9 @@ export async function movePasskeys(from: string, to: string, now = Date.now()): 
       const pending = await readDrop(source);
       if (list.length) {
         await fencedSet(heldTo, listKey(address), JSON.stringify(list));
-        await redisPipeline(list.map((p) => ["SET", credKey(p.id), address]));
+        for (const p of list) await fencedSet(heldTo, credKey(p.id), address);
       }
-      if (pending) await fencedSet(heldTo, dropKey(address), JSON.stringify(pending));
+      if (pending) await writeDrop(heldTo, address, pending);
       await fencedDel(heldFrom, [listKey(source), dropKey(source)]);
     }),
   );

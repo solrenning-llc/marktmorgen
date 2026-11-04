@@ -67,7 +67,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, dropSecondStep, endSession, normaliseEmail, openSession } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Held, holdLock, setIfHeld, withLock } from "@/lib/redis-lock";
+import { type Held, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
 import { withinLimit } from "@/lib/request-guard";
 import { LOCKED_LIST } from "@/lib/locked-words";
 import { seal, unseal } from "@/lib/secret-box";
@@ -124,13 +124,11 @@ function withTwoStep<T>(email: string, work: (held: Held) => Promise<T>): Promis
 }
 
 async function writeHeld(held: Held, email: string, record: TwoStep, options: { absent?: boolean } = {}): Promise<boolean> {
-  return setIfHeld(held, recordKey(email), JSON.stringify(record), options);
+  return setIfHeldOnly(held, recordKey(email), JSON.stringify(record), options);
 }
 
 async function deleteHeld(held: Held, keys: string[]): Promise<boolean> {
-  if (!(await holdLock(held))) return false;
-  await redisPipeline([["DEL", ...keys]]);
-  return true;
+  return deleteIfHeldOnly(held, keys);
 }
 
 const holdKey = (token: string) => `nl:2fa:hold:${sha(`nimbus-2fa-hold:${token}`).slice(0, 40)}`;

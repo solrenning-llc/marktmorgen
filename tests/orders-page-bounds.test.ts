@@ -1037,15 +1037,38 @@ test("without JavaScript, the older purchases' button checks the next batch on t
   assert.deepEqual(calls, []);
 });
 
-test("the status regions are always on the page; after the last batch focus goes to its first purchase or to the status; a bundle's button keeps one name", () => {
+test("without JavaScript, each language describes only the purchases on the current batch page", async () => {
+  const store = await shop();
+  const checked = Math.floor((ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS) / PLAN_REFUND_CALLS);
+  const drafts = await addDraftProducts(OWNER, Array.from({ length: checked + 3 }, (_, i) => ({ title: `Batch ${i}`, summary: "", priceCents: 1000, link: `https://example.test/batch/${i}` })));
+  assert.ok(drafts.ok);
+  checkouts = drafts.ids.map((id, i) => plan(i, 60 * (i + 1), id));
+  await open(store);
+  const expected = {
+    en: "This page shows 3 purchases from this batch.",
+    es: "Esta página muestra 3 compras de este grupo.",
+    fr: "Cette page présente 3 achats de ce groupe.",
+    de: "Diese Seite zeigt 3 Käufe aus dieser Gruppe.",
+    it: "Questa pagina mostra 3 acquisti di questo gruppo.",
+    nl: "Deze pagina toont 3 aankopen uit deze groep.",
+    pt: "Esta página mostra 3 compras deste grupo.",
+  };
+  for (const language of LANGUAGE_CODES) {
+    assert.ok(await setLanguage(OWNER, language));
+    const batch = renderToStaticMarkup(await pageTree((await storeForEmail(OWNER))!, { token, older: checkouts[checked].id as string }));
+    assert.equal(listed(batch).length, 3, language);
+    assert.ok(batch.includes(expected[language]), `${language}: the page must describe this batch, not additions to a list on another page`);
+    assert.ok(!batch.includes(ordersWords(language).olderShown(3)), `${language}: the accumulated-list status belongs only to the JavaScript view`);
+  }
+});
+
+test("the status regions stay on the page and a bundle's button keeps one name; real focus behavior is checked in the buyer browser matrix", () => {
   const bundle = readFileSync("components/orders-bundle.tsx", "utf8");
   const older = readFileSync("components/older-purchases.tsx", "utf8");
   for (const source of [bundle, older]) {
     assert.ok(!source.includes("empty:hidden"), "never hidden from a screen reader when empty");
     assert.match(source, /<p role="status"[^>]*className=\{[^}]*"sr-only"\}/);
   }
-  assert.ok(older.includes(`answer.older ? null : answer.cards.length > 0 ? "card" : "status"`));
-  assert.match(older, /<p role="status" ref=\{statusRef\} tabIndex=\{-1\}/);
   assert.ok(!/\bhide\b|hideInside/.test(bundle), "one name, whether shown or not");
   assert.match(bundle, /aria-expanded=\{ready \? open : undefined\}/);
 });

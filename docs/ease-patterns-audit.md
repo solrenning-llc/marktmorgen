@@ -222,7 +222,8 @@ The choice is one function, `profileKeyboard`, held by `tests/socials-keyboards.
   - with a payment plan set, either that a price above what its payments add up to stops the plan for the whole product (and how to bring it back), that a lower price brings a paused plan back, or that buyers who pay in parts still pay what the payments add up to.
 
   Only a save the option route takes is reviewed (a price in range, a name, no promise of fast money in its name or lines, a SKU it can keep), and the price is sent without spaces around it. Its plan sentences are the product's own (`planWords`).
-- still to do: a membership's free trial and number of payments; adding or removing a price option, and changing which is recommended;
+- a membership's free trial and the payments it ends after: **tested in a PR (2 November 2026).** Each is its own row ("Free trial", "Ends") in the same review, with a "Change" back to its field. Members who already joined keep theirs too: the trial and the end are set on each subscription at checkout, and the job that ends a membership reads them from it. They are read by the product route's own rule, so a value or a combination it refuses is not reviewed, and the save says why. For something bought once, "Ends" says "Not a membership".
+- still to do: adding or removing a price option, and changing which is recommended;
 - the community announcement email. Its composer is on the community page, in the buyer's language, with its words in `lib/buyer-words` in seven languages. A review there needs its new sentences written in each of them, so it gets a unit of its own, under the rules for buyer languages.
 
 ## Pattern 7: a live preview at phone width beside each editor (1 November 2026, first pass)

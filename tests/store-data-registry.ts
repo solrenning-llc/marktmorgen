@@ -912,6 +912,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:yearly-offer:@lib/yearly-offer.ts": company("A yearly offer made", "The company's offer to a creator about their own plan."),
   "nl:tier:@lib/yearly-switch.ts": short("A membership's lock while it goes yearly", "request", 1, 128, REQ("tier switch")),
   "nl:yearly:link:@lib/yearly-switch.ts": short("A link to go yearly", "own", 30, LINK_BYTES, MAIL("yearly")),
+  "nl:tier:@lib/yearly-fallback.ts": short("A membership's lock while a failed yearly renewal moves to monthly", "request", 1, 128, REQ("tier switch")),
+  "nl:yearly:fallback:try:@lib/yearly-fallback.ts": short("How many times one failed yearly renewal was tried on the monthly price", "request", 2, KEY, REQ("tier switch")),
+  "nl:yearly:fallback:void@lib/yearly-fallback.ts": company("Yearly renewals left open after a move to monthly, for the daily job to void", "One set for the company: one entry per failed yearly renewal moved to monthly (account, invoice, invoice), taken out by the daily job (630 [HN6](14) unit 2c)."),
+  "nl:yearly:fallback:check@lib/yearly-fallback.ts": company("Moves to monthly whose answer was unknown, for the daily job to check", "One set for the company: one entry per failed yearly renewal whose move came back unknown, taken out by the daily job (630 [HN6](14) unit 2c)."),
+  "nl:yearly:fallback:both@lib/yearly-fallback.ts": company("Renewals paid while their month was charged, for the daily job to refund the month", "One set for the company: one entry per failed yearly renewal found paid in the seconds of its move, taken out by the daily job (630 [HN6](14) unit 2c)."),
   "nl:yearly:price:@lib/yearly-switch.ts": { what: "A yearly price made, per product and currency: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
 };
 

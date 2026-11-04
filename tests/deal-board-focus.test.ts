@@ -6,7 +6,7 @@
  */
 import { readFileSync } from "node:fs";
 import { DEFAULT_STAGES, type Stage } from "@/lib/crm-rules";
-import { MOVE_HINT, PIPELINE_NAME_ID, SHOWN_SAY_AFTER_MS, VIEW_ONLY_WORDS, crmFieldChoicesId, crmFieldNameId, dealErrorField, fieldProblems, neighborAfterRemoval, pausedWords, pipelineProblems, shownWords, stageKindId, stageNameId } from "@/lib/deal-board-focus";
+import { moveConflictWords, MOVE_HINT, PIPELINE_NAME_ID, SHOWN_SAY_AFTER_MS, VIEW_ONLY_WORDS, crmFieldChoicesId, crmFieldNameId, dealErrorField, fieldProblems, neighborAfterRemoval, pausedWords, pipelineProblems, shownWords, stageKindId, stageNameId } from "@/lib/deal-board-focus";
 import { done, is, part } from "./check";
 
 part("Focus after a removal (2.4.3)");
@@ -40,6 +40,8 @@ is("in the order that matters: not confirmed, saving, an editor open; nothing wh
   pausedWords({ unconfirmed: false, saving: false, editing: true }),
   pausedWords({ unconfirmed: false, saving: false, editing: false }),
 ], ["Changes are paused until you reload this page.", "Please wait. Your last change is still being saved.", "Finish the open form first: save it or cancel it.", null]);
+is("after an answer, loading the deals is never called saving (L-F)", [pausedWords({ unconfirmed: false, saving: false, refreshing: true, editing: false }), pausedWords({ unconfirmed: false, saving: false, refreshing: true, editing: true })], ["Please wait. The latest deals are loading.", "Please wait. The latest deals are loading."]);
+is("a refused move says where the deal is now (M-A)", [moveConflictWords("here"), moveConflictWords("filtered"), moveConflictWords({ pipeline: "Coaching" })], ["This deal changed a moment ago, so it was not moved. Check it and move it again.", "This deal changed a moment ago, so it was not moved. It no longer matches your search or filter, so it is not shown here.", "This deal changed a moment ago and is now in Coaching, so it was not moved. Open Coaching to check it."]);
 is("Move says how to use it while no new stage is chosen", MOVE_HINT, "Choose a new stage, then press Move.");
 is("the view-only words use the typographic apostrophe", [VIEW_ONLY_WORDS.includes("store’s"), VIEW_ONLY_WORDS.includes("'")], [true, false]);
 is("short sentences, each under 15 words", [MOVE_HINT, VIEW_ONLY_WORDS, pausedWords({ unconfirmed: true, saving: false, editing: false })!, pausedWords({ unconfirmed: false, saving: true, editing: false })!, pausedWords({ unconfirmed: false, saving: false, editing: true })!].every((words) => words.split(/(?<=\.)\s+/).every((sentence) => sentence.split(/\s+/).length < 15)), true);
@@ -51,10 +53,11 @@ is("said once the person stops typing, never at each key", SHOWN_SAY_AFTER_MS >=
 part("An off control is never faded (app/globals.css): its focus ring keeps its contrast (2.4.11, 2.4.13)");
 const css = readFileSync("app/globals.css", "utf8");
 const offButton = css.slice(css.indexOf('.btn[aria-disabled="true"],'), css.indexOf("}", css.indexOf('.btn[aria-disabled="true"],')));
-is("an aria-disabled button is opaque, dashed, on sand, in --ink-soft (9.3:1)", [/opacity:\s*1;/.test(offButton), offButton.includes("border: 1px dashed var(--ink-mute)"), offButton.includes("background-color: var(--sand)"), offButton.includes("color: var(--ink-soft)")], [true, true, true, true]);
+is("an aria-disabled button is opaque, with a light dashed edge (--line-off), on sand, in --ink-soft (9.3:1)", [/opacity:\s*1;/.test(offButton), offButton.includes("border: 1px dashed var(--line-off)"), offButton.includes("background-color: var(--sand)"), offButton.includes("color: var(--ink-soft)"), css.includes("--line-off: #857f70;")], [true, true, true, true, true]);
+is("on the dark surfaces it takes their own tokens (L-G)", /:is\(\.on-dark, \.surface-night, \.surface-daybreak, \.surface-navy, \.surface-signature\) \.btn\[aria-disabled="true"\][^{]*\{[^}]*background-color: transparent;[^}]*color: var\(--on-dark-2\);[^}]*border-color: var\(--on-dark-3\);/.test(css), true);
 is("no rule fades an aria-disabled button", /\[aria-disabled="true"\][^{]*\{[^}]*opacity:\s*0\./.test(css), false);
 is("an aria-disabled field is drawn as off without fading", /\.field\[aria-disabled="true"\] \{[^}]*border-style: dashed;[^}]*\}/.test(css) && !/\.field\[aria-disabled="true"\] \{[^}]*opacity/.test(css), true);
-is("in forced colors the dashed border stays", /@media \(forced-colors: active\) \{\s*\/\*[^*]*\*\/\s*\.btn\[aria-disabled="true"\],[^}]*border-style: dashed;/.test(css), true);
+is("in forced colors the words are GrayText and the dashed border stays, for buttons and fields (L-C)", [/@media \(forced-colors: active\) \{\s*\/\*[^*]*\*\/\s*\.btn\[aria-disabled="true"\],[^}]*color: GrayText;\s*border-style: dashed;/.test(css), /@media \(forced-colors: active\) \{\s*\.field\[aria-disabled="true"\] \{\s*color: GrayText;\s*border-style: dashed;/.test(css)], [true, true]);
 
 part("The board itself (read from its source: states a server drawing cannot reach)");
 const board = readFileSync("components/deals-board.tsx", "utf8");
@@ -65,4 +68,5 @@ is("a stage select only marks a stage; nothing sends it but Move (3.2.2, 3.2.5)"
 is("the view-only notice is drawn once, at the top of the board", (board.match(/VIEW_ONLY_WORDS/g) ?? []).length, 2);
 is("\"Use this\" is off while saving and says why (M3)", board.includes('{...offProps(locked, EDITOR_WHY_ID)} onClick={() => { if (locked) return; const taken = takeSaved'), true);
 is("a 409 moves focus to the part in conflict, even from Save (H1)", board.includes("moveFocus(conflictFocus(rebased.conflicts))"), true);
+is("a removed stage or field takes its error marks with it (M-B)", [board.includes("fixed(stageNameId(stage.id), stageKindId(stage.id))"), board.includes("fixed(crmFieldNameId(field.id), crmFieldChoicesId(field.id))")], [true, true]);
 done();

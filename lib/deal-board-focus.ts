@@ -68,11 +68,24 @@ export function fieldProblems(fields: readonly { id: string; name: string; type:
 }
 
 /** Why a control on the board cannot be used now, said beside it (aria-describedby), in plain words; null when it can. */
-export function pausedWords(state: { unconfirmed: boolean; saving: boolean; editing: boolean }): string | null {
+export function pausedWords(state: { unconfirmed: boolean; saving: boolean; refreshing?: boolean; editing: boolean }): string | null {
   if (state.unconfirmed) return "Changes are paused until you reload this page.";
   if (state.saving) return "Please wait. Your last change is still being saved.";
+  // After a change was answered (saved or refused), the board loads the deals as they are now: nothing is being saved.
+  if (state.refreshing) return "Please wait. The latest deals are loading.";
   if (state.editing) return "Finish the open form first: save it or cancel it.";
   return null;
+}
+
+/**
+ * What the board says when a move was refused because the deal changed
+ * meanwhile (635 [GL3]): where it is now decides the words, so nobody looks
+ * for a card that is no longer shown. Nothing the creator chose is lost.
+ */
+export function moveConflictWords(now: "here" | "filtered" | { pipeline: string }): string {
+  if (now === "here") return "This deal changed a moment ago, so it was not moved. Check it and move it again.";
+  if (now === "filtered") return "This deal changed a moment ago, so it was not moved. It no longer matches your search or filter, so it is not shown here.";
+  return `This deal changed a moment ago and is now in ${now.pipeline}, so it was not moved. Open ${now.pipeline} to check it.`;
 }
 
 /** The one status region's words after the search or a filter changed, said once the person stops typing. */

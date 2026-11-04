@@ -6,7 +6,7 @@ import { dealActionFilter, filterDeals, type DealActionFilter } from "@/lib/crm-
 import { dealOrder, orderDeals, dealWorklistCsv, type DealOrder, type DealView } from "@/lib/crm-deal-worklist";
 import { DealAgenda } from "@/components/deal-agenda";
 import { crmAnswer, type CrmAnswer, type CrmCurrentDeal } from "@/lib/crm-response";
-import { MOVE_HINT, PIPELINE_NAME_ID, PIPELINE_REMOVE_TO_ID, SHOWN_SAY_AFTER_MS, VIEW_ONLY_WORDS, crmFieldChoicesId, crmFieldNameId, dealErrorField, fieldProblems, neighborAfterRemoval, pausedWords, pipelineProblems, shownWords, stageKindId, stageMovesId, stageNameId } from "@/lib/deal-board-focus";
+import { MOVE_HINT, PIPELINE_NAME_ID, moveConflictWords, PIPELINE_REMOVE_TO_ID, SHOWN_SAY_AFTER_MS, VIEW_ONLY_WORDS, crmFieldChoicesId, crmFieldNameId, dealErrorField, fieldProblems, neighborAfterRemoval, pausedWords, pipelineProblems, shownWords, stageKindId, stageMovesId, stageNameId } from "@/lib/deal-board-focus";
 import { DEAL_SAVE_ID, DRAFT_UNITS, changedFields, conflictFocus, conflictMessage, dealChanges, dealFieldId, draftFromDeal, emptyDraft, oneAtATime, rebaseDraft, refusalKind, savedNowText, savedNowId, stageMoveStep, stageChosenText, livePending, announce, focusWasLost, takeSaved, typedText, unitOf, DEAL_HIDDEN, DEAL_HIDDEN_ID, type DealDraft, type DraftField, type DraftConflict, type DraftUnit } from "@/lib/deal-draft";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -80,7 +80,6 @@ async function call(body: Record<string, unknown>): Promise<CrmAnswer> {
 type OpenDraft = DealDraft & { base: DealDraft; version: string; conflicts: DraftConflict[] };
 
 /** What the board says when a deal changed on the server meanwhile (635 [GL3]); nothing the creator typed is lost. */
-const MOVE_CONFLICT = "This deal changed a moment ago, so it was not moved. Check it and move it again.";
 
 /** What a deal's worth must look like, said beside the field (3.3.1, 3.3.3). */
 const MONEY_WORDS = "Type what it is worth as a number, like 1500 or 1500.50.";
@@ -220,14 +219,18 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
 
   /** Marks the controls an error is about, says it beside the first, and takes focus there (3.3.1, 3.3.3). */
   /** A control changed after an error about it is no longer marked invalid; the error's words move to the next one still wrong, or go. */
-  const fixed = (id: string) => setInvalid(previous => (!previous || !previous.ids.includes(id) ? previous : previous.ids.length > 1 ? { ...previous, ids: previous.ids.filter(other => other !== id) } : null));
+  const fixed = (...gone: string[]) => setInvalid(previous => {
+    if (!previous || !previous.ids.some(id => gone.includes(id))) return previous;
+    const ids = previous.ids.filter(id => !gone.includes(id));
+    return ids.length ? { ...previous, ids } : null;
+  });
   const showInvalid = (ids: string[], message: string) => {
     setError(null);
     setInvalid({ ids, message });
     moveFocus(ids[0]);
   };
 
-  async function run(body: Record<string, unknown>, done: string, after?: () => void, onConflict?: (current: CrmCurrentDeal) => void, refocus?: string, invalidFor?: (error: string) => string[]) {
+  async function run(body: Record<string, unknown>, done: string, after?: () => void, onConflict?: (current: CrmCurrentDeal) => void, refocus?: string | readonly string[], invalidFor?: (error: string) => string[]) {
     if (locked || writeUnconfirmed || !gate.current.enter()) return;
     setBusy(true);
     setError(null);
@@ -243,7 +246,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
       return;
     }
     if (answer.error === "crm_write_unconfirmed") setWriteUnconfirmed(true);
-    focusLater(refocus);
+    // Back where the change was asked, or, when that control is gone (the deal left the board), the next place in the list.
+    focusLater(...(typeof refocus === "string" ? [refocus] : refocus ?? []));
     // The deal changed meanwhile: nothing was written; the board takes the deal as it is now and loads the rest.
     const kind = refusalKind(body.action, answer, stage => editable.some(p => p.stages.some(st => st.id === stage)));
     if (kind === "rebase" && answer.current && onConflict) {
@@ -354,13 +358,18 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     setDraft({ ...draft, ...patch });
     for (const field of Object.keys(patch) as DraftField[]) fixed(dealFieldId(field));
   };
+  /** Whether a deal in this pipeline is shown under the search, the teammate and the action filter chosen now. */
+  const shownHere = (d: Deal) => filterDeals([d], search, responsible === "all" ? null : responsible === "unassigned" ? "" : responsible.slice(7)).length > 0 && (filter === "all" || dealFollowUps(stages, [d], today)[filter as keyof ReturnType<typeof dealFollowUps>].some(x => x.id === d.id));
   function moveDeal(deal: Deal, stage: string) {
     // Focus goes back to the deal's stage select after, moved or refused: the card may now be in another stage. When the deal
     // is no longer shown (another pipeline, or out of the filter), it goes to the next deal of the stage it left, else the one
     // before, else that stage's heading, else the board's title (2.4.3).
     const neighbor = neighborAfterRemoval(visibleDeals.filter(d => d.stage === deal.stage).map(d => d.id), deal.id);
-    focusLater(`deal-stage-${deal.id}`, neighbor ? `deal-stage-${neighbor}` : null, `deal-column-${deal.stage}`, "deals-title");
-    void run({ action: "deal", version: versions[deal.id] ?? "", deal: { id: deal.id, stage } }, here.has(stage) ? "Deal moved." : `Deal moved to ${pipelines.find(p => p.stages.some(st => st.id === stage))?.name ?? "another pipeline"}.`, undefined, () => setError(MOVE_CONFLICT), `deal-stage-${deal.id}`);
+    const places = [`deal-stage-${deal.id}`, ...(neighbor ? [`deal-stage-${neighbor}`] : []), `deal-column-${deal.stage}`, "deals-title"];
+    focusLater(...places);
+    // Refused because the deal changed meanwhile: said in words that fit where it is now (here, out of this search or filter, or in another pipeline).
+    const refused = (current: CrmCurrentDeal) => setError(moveConflictWords(here.has(current.deal.stage) ? (shownHere(current.deal) ? "here" : "filtered") : { pipeline: pipelines.find(p => p.stages.some(st => st.id === current.deal.stage))?.name ?? "another pipeline" }));
+    void run({ action: "deal", version: versions[deal.id] ?? "", deal: { id: deal.id, stage } }, here.has(stage) ? "Deal moved." : `Deal moved to ${pipelines.find(p => p.stages.some(st => st.id === stage))?.name ?? "another pipeline"}.`, undefined, refused, places);
   }
   function stageEvent(deal: Deal, event: Parameters<typeof stageMoveStep>[1]) {
     // Nothing is chosen or sent while the board is paused: the select keeps showing where the deal is.
@@ -393,13 +402,21 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     if (blocked) setMoving({});
   }
   const pendingMoves = blocked ? {} : livePending(moving, deals);
+  // A stage choice not said yet is never said once it is dropped (an editor opened, a change saved, the deal moved).
+  const pendingCount = Object.keys(pendingMoves).length;
+  useEffect(() => {
+    if ((blocked || pendingCount === 0) && sayTimer.current) {
+      clearTimeout(sayTimer.current);
+      sayTimer.current = null;
+    }
+  }, [blocked, pendingCount]);
   const dirty = (draft !== null && changedFields(draft.base, draft).length > 0) || Object.keys(pendingMoves).length > 0 || pipelineDirty || (fieldDraft !== null && JSON.stringify(fieldDraft) !== JSON.stringify(initialFields));
   useLeaveGuard(dirty);
   const editing = draft !== null || pipelineDraft !== null || fieldDraft !== null;
   // Controls that start a change are off while one is saved, an editor is open, or a change could not be confirmed;
   // they stay focusable and point to the words saying why (AX274: 2.4.3, 2.4.11, 3.3.5).
   const paused = locked || editing || writeUnconfirmed;
-  const why = pausedWords({ unconfirmed: writeUnconfirmed, saving: locked, editing });
+  const why = pausedWords({ unconfirmed: writeUnconfirmed, saving: busy, refreshing, editing });
   // How many deals each saved stage holds now: a stage removed with deals in it asks where they go.
   const dealsIn = (stageId: string) => deals.filter(d => d.stage === stageId).length;
 
@@ -683,8 +700,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                         <button type="button" id={`deal-move-${deal.id}`} className="btn btn-primary btn-sm" {...offProps(paused || pendingMoves[deal.id] === undefined, [pendingMoves[deal.id] === undefined ? `deal-stage-hint-${deal.id}` : "", paused ? WHY_ID : ""].filter(Boolean).join(" "))} onClick={() => stageEvent(deal, { kind: "move" })} aria-label={`Move ${deal.title}`}>
                           Move
                         </button>
-                        {/* Outside the label (so it is not part of the select's name); the status region says a stage chosen. */}
-                        <p id={`deal-stage-hint-${deal.id}`} className={pendingMoves[deal.id] !== undefined ? "w-full text-xs text-ink-soft" : "sr-only"}>{pendingMoves[deal.id] !== undefined ? stageChosenText(pendingMoves[deal.id], stageName) : MOVE_HINT}</p>
+                        {/* Shown, and outside the label (so it is not part of the select's name): how to move, or the stage chosen; the status region says a stage chosen. */}
+                        <p id={`deal-stage-hint-${deal.id}`} className="w-full text-xs text-ink-soft">{pendingMoves[deal.id] !== undefined ? stageChosenText(pendingMoves[deal.id], stageName) : MOVE_HINT}</p>
                         <button
                           type="button"
                           id={`deal-edit-${deal.id}`}
@@ -783,7 +800,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                     <button type="button" id={`stage-up-${stage.id}`} className="btn btn-secondary btn-sm" {...offProps(i === 0 || locked, i === 0 ? STAGE_EDGES_ID : EDITOR_WHY_ID)} onClick={() => { if (i === 0 || locked) return; moveStage(i, i - 1); moveFocus(`stage-up-${stage.id}`); }} aria-label={`Move stage ${i + 1} up`}>Up</button>
                     <button type="button" id={`stage-down-${stage.id}`} className="btn btn-secondary btn-sm" {...offProps(i === pipelineDraft.stages.length - 1 || locked, i === pipelineDraft.stages.length - 1 ? STAGE_EDGES_ID : EDITOR_WHY_ID)} onClick={() => { if (i === pipelineDraft.stages.length - 1 || locked) return; moveStage(i, i + 1); moveFocus(`stage-down-${stage.id}`); }} aria-label={`Move stage ${i + 1} down`}>Down</button>
                     {/* Focus goes to the next stage's name, else the one before, else "Add a stage" (2.4.3). */}
-                    <button type="button" className="btn btn-secondary btn-sm" {...offProps(locked, EDITOR_WHY_ID)} onClick={() => { if (locked) return; const neighbor = neighborAfterRemoval(pipelineDraft.stages.map(s => s.id), stage.id); setPipelineDraft({ ...pipelineDraft, stages: pipelineDraft.stages.filter((_, j) => j !== i) }); moveFocus(neighbor ? stageNameId(neighbor) : "stage-add"); }} aria-label={`Remove stage ${i + 1}`}>
+                    <button type="button" className="btn btn-secondary btn-sm" {...offProps(locked, EDITOR_WHY_ID)} onClick={() => { if (locked) return; const neighbor = neighborAfterRemoval(pipelineDraft.stages.map(s => s.id), stage.id); setPipelineDraft({ ...pipelineDraft, stages: pipelineDraft.stages.filter((_, j) => j !== i) }); fixed(stageNameId(stage.id), stageKindId(stage.id)); moveFocus(neighbor ? stageNameId(neighbor) : "stage-add"); }} aria-label={`Remove stage ${i + 1}`}>
                       <Icon name="minus" size={16} />
                     </button>
                   </li>
@@ -885,7 +902,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                   </label>
                   <label className="block min-w-0">
                     <span className="text-sm text-ink-soft">Kind</span>
-                    <select className="field mt-1" aria-label={`Kind of field ${i + 1}`} aria-disabled={locked || undefined} aria-describedby={locked ? EDITOR_WHY_ID : undefined} value={field.type} onChange={(e) => putFields(fieldDraft.map((f, j) => (j === i ? { ...f, type: e.target.value as FieldType } : f)))}>
+                    <select className="field mt-1" aria-label={`Kind of field ${i + 1}`} aria-disabled={locked || undefined} aria-describedby={locked ? EDITOR_WHY_ID : undefined} value={field.type} onChange={(e) => { const type = e.target.value as FieldType; putFields(fieldDraft.map((f, j) => (j === i ? { ...f, type } : f))); if (!hasChoices(type)) fixed(crmFieldChoicesId(field.id)); }}>
                       {FIELD_TYPES.map((t) => (
                         <option key={t.type} value={t.type}>
                           {t.label}
@@ -894,7 +911,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                     </select>
                   </label>
                   {/* Focus goes to the next field's name, else the one before, else "Add a field" (2.4.3). */}
-                  <button type="button" className="btn btn-secondary btn-sm" {...offProps(locked, EDITOR_WHY_ID)} onClick={() => { if (locked) return; const neighbor = neighborAfterRemoval(fieldDraft.map(f => f.id), field.id); setFieldDraft(fieldDraft.filter((_, j) => j !== i)); moveFocus(neighbor ? crmFieldNameId(neighbor) : "crm-field-add"); }} aria-label={`Remove field ${i + 1}`}>
+                  <button type="button" className="btn btn-secondary btn-sm" {...offProps(locked, EDITOR_WHY_ID)} onClick={() => { if (locked) return; const neighbor = neighborAfterRemoval(fieldDraft.map(f => f.id), field.id); setFieldDraft(fieldDraft.filter((_, j) => j !== i)); fixed(crmFieldNameId(field.id), crmFieldChoicesId(field.id)); moveFocus(neighbor ? crmFieldNameId(neighbor) : "crm-field-add"); }} aria-label={`Remove field ${i + 1}`}>
                     <Icon name="minus" size={16} />
                   </button>
                   {errorBeside(crmFieldNameId(field.id), "sm:col-span-3")}

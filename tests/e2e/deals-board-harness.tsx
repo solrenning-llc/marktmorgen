@@ -5,14 +5,14 @@
  * again from what the stand-in holds, as router.refresh() does in the studio.
  * Nothing leaves the page: no server, no store, no real person.
  */
-import { useEffect, useState } from "react";
+import { use, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DealsBoard } from "@/components/deals-board";
 import type { CrmField, Deal, Pipeline } from "@/lib/crm-rules";
 
 type World = { deals: Deal[]; versions: Record<string, string>; pipelines: Pipeline[]; fields: CrmField[]; viewOnly?: string[] };
 type Forced = { status: number; body: unknown };
-type Harness = { world: World; writes: Record<string, unknown>[]; next: Forced | null; delay: number; refresh: () => void; mount: (world: World) => void };
+type Harness = { world: World; writes: Record<string, unknown>[]; next: Forced | null; delay: number; refreshDelay: number; refresh: () => void; mount: (world: World) => void };
 
 /** The page's own handle on the harness, read by tests/e2e/deals-board-focus.mjs as page.harness. */
 const page = window as unknown as Window & { harness: Harness };
@@ -61,10 +61,16 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return crm(JSON.parse(String(init?.body ?? "{}")));
 };
 
+/**
+ * A refresh takes `refreshDelay` ms, as the studio's router.refresh() waits for
+ * the server: the board suspends inside the board's own transition, so its
+ * "refreshing" state lasts as long as it does in the studio.
+ */
 function Board() {
-  const [, setDrawn] = useState(0);
+  const [loading, setLoading] = useState<Promise<void> | null>(null);
+  if (loading) use(loading);
   useEffect(() => {
-    page.harness.refresh = () => setDrawn((n) => n + 1);
+    page.harness.refresh = () => setLoading(new Promise((resolve) => setTimeout(resolve, page.harness.refreshDelay)));
   }, []);
   const w = page.harness.world;
   return <DealsBoard deals={[...w.deals]} versions={{ ...w.versions }} stages={w.pipelines.flatMap((p) => p.stages)} pipelines={w.pipelines} pipelineMax={3} viewOnly={w.viewOnly} fields={w.fields} currency="usd" assignees={["owner@example.test"]} today="2026-11-04" />;
@@ -76,6 +82,7 @@ page.harness = {
   writes: [],
   next: null,
   delay: 60,
+  refreshDelay: 0,
   refresh: () => {},
   mount(world: World) {
     this.world = world;

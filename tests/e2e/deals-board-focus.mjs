@@ -88,7 +88,8 @@ const drawn = (page, id) => page.evaluate((id) => {
   let opacity = 1;
   for (let node = el; node; node = node.parentElement) opacity *= Number(getComputedStyle(node).opacity);
   const ring = rgb(style.outlineColor);
-  return { focused: document.activeElement === el, opacity, text: ratio(rgb(style.color), rgb(style.backgroundColor)), ring: Math.min(...[[255, 255, 255], [247, 245, 240], [239, 236, 229]].map((bg) => ratio(ring, bg))), ringStyle: style.outlineStyle, border: style.borderTopStyle };
+  const edge = rgb(style.borderTopColor);
+  return { edge: Math.min(...[[255, 255, 255], [239, 236, 229]].map((bg) => ratio(edge, bg))), color: style.color, focused: document.activeElement === el, opacity, text: ratio(rgb(style.color), rgb(style.backgroundColor)), ring: Math.min(...[[255, 255, 255], [247, 245, 240], [239, 236, 229]].map((bg) => ratio(ring, bg))), ringStyle: style.outlineStyle, border: style.borderTopStyle };
 }, id);
 
 try {
@@ -102,7 +103,7 @@ try {
   const active = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
   const writes = () => page.evaluate(() => window.harness.writes.map((w) => w.action));
   const press = async (id, key = "Enter") => { await page.locator("#" + id).focus(); await page.keyboard.press(key); };
-  const settled = () => page.waitForFunction(() => !document.getElementById("deal-board-why")?.textContent?.includes("still being saved"));
+  const settled = () => page.waitForFunction(() => !document.getElementById("deal-board-why")?.textContent?.startsWith("Please wait"));
   const attr = (id, name) => page.locator("#" + id).getAttribute(name);
   const text = (id) => page.locator("#" + id).textContent();
 
@@ -133,6 +134,9 @@ try {
   const offMove = await drawn(page, "deal-move-dealaaaaa1");
   is("an off Move reached by Tab is focused and not faded (opacity 1, dashed border)", [offMove.focused, offMove.opacity, offMove.border, offMove.ringStyle], [true, 1, "dashed", "solid"]);
   is("its words keep at least 7:1 and its focus ring at least 3:1 on white, paper and sand", [offMove.text >= 7, offMove.ring >= 3], [true, true]);
+  is("its dashed edge is light but seen: at least 3:1 on white and sand, under 5:1 (never louder than a working button)", [offMove.edge >= 3, offMove.edge < 5], [true, true]);
+  const hint = await page.locator("#deal-stage-hint-dealaaaaa1").boundingBox();
+  is("why Move is off is shown beside it, not only to a screen reader", [await text("deal-stage-hint-dealaaaaa1"), !!hint && hint.width > 40 && hint.height > 8], ["Choose a new stage, then press Move.", true]);
   await press("deal-move-dealaaaaa1");
   is("pressing Move with nothing chosen sends nothing and keeps focus", [await writes(), await active()], [[], "deal-move-dealaaaaa1"]);
   // M1: arrowing or picking through the stages says nothing at each one; the last choice is said after a pause.
@@ -144,6 +148,12 @@ try {
   await page.locator("#deal-stage-dealaaaaa1").selectOption("lead00");
   await page.waitForTimeout(1000);
   is("going back to where the deal is says nothing more", await page.evaluate(() => window.statusChanges), 1);
+  // L-A: a choice dropped by opening an editor is never said.
+  await page.locator("#deal-stage-dealaaaaa1").selectOption("won000");
+  await press("deal-edit-dealaaaaa2");
+  await page.waitForTimeout(1200);
+  is("a stage choice dropped when an editor opens is never said", await page.evaluate(() => window.statusChanges), 1);
+  await press("deal-cancel");
   await page.locator("#deal-stage-dealaaaaa1").focus();
   // Arrowing through a closed select changes it at each key in Chromium; nothing may be sent (WebKit and Firefox open a list instead).
   if (engine === "chromium") await page.keyboard.press("ArrowDown");
@@ -270,6 +280,24 @@ try {
   is("a field added gets focus on its name", fieldName.startsWith("crm-field-name-"), true);
   await press("crm-fields-save");
   is("a field with no name is said beside it, with focus there", [await active(), await attr(fieldName, "aria-invalid")], [fieldName, "true"]);
+  // M-B: two fields without a name; removing the first keeps the second's error shown and pointed to.
+  await press("crm-field-add");
+  const secondName = await active();
+  await press("crm-fields-save");
+  is("both fields without a name are marked", [await attr(fieldName, "aria-invalid"), await attr(secondName, "aria-invalid")], ["true", "true"]);
+  await page.locator('[aria-label="Remove field 1"]').focus();
+  await page.keyboard.press("Enter");
+  const pointsTo = (await attr(secondName, "aria-describedby")) ?? "";
+  is("after removing the first, the second keeps its error, shown and pointed to", [await active(), await attr(secondName, "aria-invalid"), pointsTo ? (await page.locator("#" + pointsTo.split(" ")[0]).textContent().catch(() => null)) : null], [secondName, "true", "Each field needs a name of its own, and a choice needs at least two options."]);
+  // L-B: a choice with one option, then made plain text: its error goes.
+  await page.locator("#" + secondName).fill("Offer");
+  const secondId = secondName.slice("crm-field-name-".length);
+  await page.locator('[aria-label="Kind of field 1"]').selectOption("choice");
+  await page.locator("#crm-field-choices-" + secondId).fill("Coaching");
+  await press("crm-fields-save");
+  is("one option is not enough: the choices are marked", await attr("crm-field-choices-" + secondId, "aria-invalid"), "true");
+  await page.locator('[aria-label="Kind of field 1"]').selectOption("text");
+  is("made plain text, the field has no error left on screen", [await page.locator("#crm-field-choices-" + secondId + "-error").count(), await page.locator("fieldset [aria-invalid=true]").count()], [0, 0]);
   await press("crm-fields-cancel");
   is("Cancel gives focus back to the button that opened it", await active(), "crm-fields-change");
 
@@ -295,6 +323,25 @@ try {
     await settled();
     await page.waitForTimeout(200);
   };
+  // M-A: refused because the deal changed meanwhile (409), and no longer shown under the filter: says so; focus goes to the next deal.
+  await page.locator("#deal-stage-dealoooo01").selectOption("won000");
+  await page.evaluate(() => {
+    const w = window.harness.world;
+    w.deals = w.deals.map((d) => (d.id === "dealoooo01" ? { ...d, nextAction: "", dueDate: "", updatedAt: d.updatedAt + 1 } : d));
+    w.versions = { ...w.versions, dealoooo01: "e".repeat(32) };
+    window.harness.refreshDelay = 1000;
+  });
+  await press("deal-move-dealoooo01");
+  // L-F: once answered, the board says it is loading, never that a change is still being saved.
+  await page.waitForFunction(() => document.getElementById("deal-board-why")?.textContent?.includes("loading"), null, { timeout: 5000 }).catch(() => {});
+  is("after the answer, while the board loads, it says so (not \"still being saved\")", await page.evaluate(() => document.getElementById("deal-board-why")?.textContent ?? ""), "Please wait. The latest deals are loading.");
+  await page.evaluate(() => { window.harness.refreshDelay = 0; });
+  await page.waitForFunction(() => !document.getElementById("deal-stage-dealoooo01"), null, { timeout: 5000 });
+  await settled();
+  await page.waitForTimeout(200);
+  is("a refused move of a deal that left the filter says so, and focus goes to the next deal of its stage", [await page.locator("#deal-board-alert").textContent(), await active(), (await writes()).filter((w) => w === "deal").length], ["This deal changed a moment ago, so it was not moved. It no longer matches your search or filter, so it is not shown here.", "deal-stage-dealoooo02", 1]);
+  await mount(world({ deals: [deal("dealoooo01", "Overdue one", "lead00", overdue), deal("dealoooo02", "Overdue two", "lead00", overdue), deal("dealoooo03", "Not dated", "lead00")], versions: { dealoooo01: v(11), dealoooo02: v(12), dealoooo03: v(13) } }));
+  await page.locator("button", { hasText: "Overdue (2)" }).click();
   await moveAway("dealoooo01", "won000");
   is("moved to Won under \"Overdue\", it leaves the list: focus goes to the next deal of its stage", await active(), "deal-stage-dealoooo02");
   await moveAway("dealoooo02", "won000");
@@ -308,6 +355,18 @@ try {
   await page.locator("#deal-search").fill("");
   await moveAway("dealpppp01", "cnew00");
   is("moved to another pipeline, it leaves the board: focus goes to the next deal of its stage", await active(), "deal-stage-dealpppp02");
+  // M-A: refused because someone moved it to another pipeline meanwhile: names that pipeline; focus goes to the stage's heading.
+  await page.locator("#deal-stage-dealpppp02").selectOption("talk00");
+  await page.evaluate(() => {
+    const w = window.harness.world;
+    w.deals = w.deals.map((d) => (d.id === "dealpppp02" ? { ...d, stage: "cnew00", updatedAt: d.updatedAt + 1 } : d));
+    w.versions = { ...w.versions, dealpppp02: "d".repeat(32) };
+  });
+  await press("deal-move-dealpppp02");
+  await page.waitForFunction(() => !document.getElementById("deal-stage-dealpppp02"), null, { timeout: 5000 });
+  await settled();
+  await page.waitForTimeout(200);
+  is("a refused move of a deal now in another pipeline names it, and focus goes to the stage's heading", [await page.locator("#deal-board-alert").textContent(), await active()], ["This deal changed a moment ago and is now in Coaching, so it was not moved. Open Coaching to check it.", "deal-column-lead00"]);
 
   // 639 [GL7](7): a pipeline this person may only see says so once, at the top of the board.
   await mount(world({ viewOnly: ["sales0"] }));
@@ -325,6 +384,8 @@ try {
   await forcedPage.keyboard.press("Tab");
   const forcedMove = await drawn(forcedPage, "deal-move-dealaaaaa1");
   is("in forced colors, a focused off Move is not faded, keeps a dashed border and its focus ring", [forcedMove.focused, forcedMove.opacity, forcedMove.border, forcedMove.ringStyle !== "none", forcedErrors], [true, 1, "dashed", true, []]);
+  const grayText = await forcedPage.evaluate(() => { const probe = document.createElement("span"); probe.style.color = "GrayText"; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
+  is("in forced colors, its words take the system's colour for an unavailable control (GrayText)", forcedMove.color, grayText);
   await forced.close();
 } finally {
   await browser.close();

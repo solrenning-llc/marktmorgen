@@ -430,39 +430,88 @@ export function importRoom(snapshotRaw: string, pipelines: Pipeline[] | null, de
   };
 }
 
+/** The store reached MAX_DEALS between an import's read and its write: nothing was written. */
+export class CrmDealsFull extends Error {
+  constructor() { super("CRM deals ceiling reached meanwhile"); this.name = "CrmDealsFull"; }
+}
+
+/**
+ * An import of deals in one step (lib/hubspot-import.ts): only over the
+ * pipelines record read before (ARGV[1]; "" when none was saved), so a stage
+ * or pipeline the board removed meanwhile never gets a deal (-1); only deals
+ * whose ids are all new (-2 when one is there: never overwritten); only when
+ * all of them fit under the ceiling (-3). Then the pipelines (ARGV[2], with
+ * the first one's stages copied for the board's old key, ARGV[3]; "" keeps
+ * them) and every deal. Answers how many deals were written.
+ *   KEYS: deals hash, pipelines record, first pipeline's stages copy
+ *   ARGV: expected pipelines, new pipelines or "", stages copy, ceiling, then id, deal pairs
+ */
+export const IMPORT_CRM_DEALS = `-- marktmorgen:crm-deals-import:v1
+local current = redis.call("GET", KEYS[2])
+if (current or "") ~= ARGV[1] then return -1 end
+local n = (#ARGV - 4) / 2
+for i = 5, #ARGV, 2 do
+  if redis.call("HEXISTS", KEYS[1], ARGV[i]) == 1 then return -2 end
+end
+if redis.call("HLEN", KEYS[1]) + n > tonumber(ARGV[4]) then return -3 end
+if ARGV[2] ~= "" then
+  redis.call("SET", KEYS[2], ARGV[2])
+  redis.call("SET", KEYS[3], ARGV[3])
+end
+for i = 5, #ARGV, 2 do redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1]) end
+return n`;
+
 /**
  * Writes an import of deals whose room was already taken (importRoom), under
- * the CRM lock `held`: the pipelines over the snapshot read (CrmSchemaConflict,
- * and nothing written, when they changed meanwhile), then every new deal in
- * one round trip, each with the store's ceiling checked as it lands
- * (SAVE_CRM_DEAL). Answers how many deals were saved and the ids of those
- * refused for the ceiling meanwhile, whose room goes back. Starts no
- * workflow: a deal brought in from a file is not a deal entering a stage.
+ * the CRM lock `held`, all or nothing (IMPORT_CRM_DEALS): CrmSchemaConflict
+ * when the pipelines changed since `snapshotRaw` was read or a deal's id is
+ * taken, CrmDealsFull past the ceiling; then nothing is written and the room
+ * goes back. Starts no workflow: a deal brought in from a file is not a deal
+ * entering a stage.
  */
-export async function writeImport(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[], room: DataStore): Promise<{ saved: number; full: string[] }> {
+export async function writeImport(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[], room: DataStore): Promise<void> {
+  const back = () => giveData(room, importRoom(snapshotRaw, pipelines, deals).back);
   // The lock may have run out on a slow request: then nothing is written.
   if (!(await holdLock(held))) {
-    await giveData(room, importRoom(snapshotRaw, pipelines, deals).back);
+    await back();
     throw new LockBusyError();
   }
-  if (pipelines) {
-    try {
-      await writePipelines(statsId, snapshotRaw, pipelines, [], room);
-    } catch (error) {
-      // No deal was written: their room goes back (the pipelines' went back in writePipelines on a conflict).
-      await giveData(room, importRoom(snapshotRaw, null, deals).back);
-      throw error;
-    }
-  }
-  if (!deals.length) return { saved: 0, full: [] };
-  let saved: unknown;
+  if (!pipelines && !deals.length) return;
+  let reply: unknown;
   try {
-    saved = await redisPipeline(deals.map((deal) => ["EVAL", SAVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, JSON.stringify(deal), MAX_DEALS]));
+    reply = await redisPipeline([[
+      "EVAL", IMPORT_CRM_DEALS, 3, dealsKey(statsId), pipesKey(statsId), stagesKey(statsId),
+      snapshotRaw, pipelines ? JSON.stringify(pipelines) : "", pipelines ? JSON.stringify(pipelines[0].stages) : "", MAX_DEALS,
+      ...deals.flatMap((deal) => [deal.id, JSON.stringify(deal)]),
+    ]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
-  if (!Array.isArray(saved) || saved.length !== deals.length || saved.some((value) => value !== 0 && value !== 1)) throw new CrmDealWriteUnconfirmed();
-  const full = deals.filter((_, i) => saved[i] === 0);
-  if (full.length) await giveData(room, full.map((deal) => ({ slot: dealSlot(deal.id), bytes: 0, set: true })));
-  return { saved: deals.length - full.length, full: full.map((deal) => deal.id) };
+  if (!Array.isArray(reply) || reply.length !== 1) throw new CrmDealWriteUnconfirmed();
+  if (reply[0] === -1 || reply[0] === -2) {
+    await back();
+    throw new CrmSchemaConflict();
+  }
+  if (reply[0] === -3) {
+    await back();
+    throw new CrmDealsFull();
+  }
+  if (reply[0] !== deals.length) throw new CrmDealWriteUnconfirmed();
+}
+
+/** The title and note of these deals as saved, by id (empty for one that is not there or cannot be read): what an import checks a deal it would bring in again against. */
+export async function readDealMarks(statsId: string, ids: readonly string[]): Promise<Map<string, { title: string; note: string }>> {
+  const out = new Map<string, { title: string; note: string }>();
+  if (!ids.length) return out;
+  let response: unknown;
+  try {
+    response = await redisPipeline([["HMGET", dealsKey(statsId), ...ids]]);
+  } catch { throw new CrmDealReadUnavailable(); }
+  if (!Array.isArray(response) || response.length !== 1 || !Array.isArray(response[0]) || response[0].length !== ids.length) throw new CrmDealReadUnavailable();
+  const values: unknown[] = response[0];
+  ids.forEach((id, i) => {
+    const record = json(values[i]) as { title?: unknown; note?: unknown } | null;
+    out.set(id, { title: typeof record?.title === "string" ? record.title : "", note: typeof record?.note === "string" ? record.note : "" });
+  });
+  return out;
 }
 
 /** Everything kept here for a store that is being deleted. */

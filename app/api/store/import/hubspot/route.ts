@@ -20,7 +20,8 @@ import { HUBSPOT_MAX_CELL, HUBSPOT_MAX_COLUMNS, HUBSPOT_MAX_ROWS, type HubSpotFi
  *
  * The file is read into rows on the creator's computer (lib/csv.ts), as the
  * other imports' are; `currency` is the one the creator says the file's
- * amounts are in, when the file does not say. A dry run counts as one of the
+ * amounts are in, when the file does not say: a three-letter code, or it is
+ * taken as not said. A dry run counts as one of the
  * month's import checks, a save as one of its imports started and every row
  * it carries against the month's rows (lib/import-limits.ts).
  */
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
       if (!(await withinMonth("import-start-month", who, allowance.starts, windowId(store)))) return refuse("starts_month", WORDS.month, 429, { limit: allowance.starts });
     }
     const bytes = Buffer.byteLength(JSON.stringify({ header: file.header, rows: file.rows }));
-    const result = await importHubSpotDeals(store, file, { write: action === "save", statedCurrency: text(body.currency, 3), bytes });
+    const result = await importHubSpotDeals(store, file, { write: action === "save", statedCurrency: typeof body.currency === "string" && /^[A-Za-z]{3}$/.test(body.currency) ? body.currency : "", bytes });
     if (!result.ok) {
       const status = result.reason === "busy" || result.reason === "changed" || result.reason === "store_full" ? 409 : result.reason === "rows_month" ? 429 : result.reason === "unavailable" ? 503 : result.reason === "unconfirmed" ? 502 : 400;
       return refuse(result.reason, result.message, status, result.limit === undefined ? {} : { limit: result.limit });

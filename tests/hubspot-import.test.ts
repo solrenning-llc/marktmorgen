@@ -24,13 +24,14 @@
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/import/hubspot/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { CRM_LOCK_WAIT_MS, dealCount, readDeals, readPipelines, takeCrmLock } from "@/lib/crm";
+import { CRM_LOCK_WAIT_MS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
 import { MAX_DEALS, MAX_STAGES, PIPELINES_BY_TIER, allStages } from "@/lib/crm-rules";
 import { STAGE_PAST_REASON, pipelineRoomReason } from "@/lib/hubspot-csv";
 import { HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
 import { takeImportRows } from "@/lib/imports";
 import { IMPORT_ALLOWANCES } from "@/lib/import-limits";
 import { releaseLock } from "@/lib/redis-lock";
+import { windowId } from "@/lib/allowance-window";
 import { claimHandle, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { dataUsed, takeData } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
@@ -127,6 +128,11 @@ async function main(): Promise<void> {
   part("The same file twice adds nothing");
   const again = await call({ action: "save", ...first });
   is("every deal is already there", [again.status, again.body.summary?.added, again.body.summary?.alreadyThere, again.body.summary?.pipelinesCreated, again.body.summary?.stagesCreated], [200, 0, 3, [], []]);
+  is("each deal already here is listed by row, with its name here", again.body.summary?.alreadyThereDeals, [
+    { line: 2, title: "Acme retainer", here: "Acme retainer" },
+    { line: 3, title: "Beta workshop", here: "Beta workshop" },
+    { line: 4, title: "Gamma course", here: "Gamma course" },
+  ]);
   is("no deal and no pipeline more", [await dealCount(statsId), (await readPipelines(statsId)).length], [3, 2]);
   is("and no more room", (await dataUsed(store))?.used, after?.used);
 
@@ -173,6 +179,20 @@ async function main(): Promise<void> {
   const tooMany: HubSpotImportResult = await importHubSpotDeals(full.store, { header: HEADER, rows: [row("5001", "One", "New", "Sales"), row("5002", "Two", "New", "Sales")] }, { write: true });
   is("two new deals and room for one: refused", tooMany.ok ? "" : [tooMany.reason, tooMany.message.startsWith("This file has 2 deals to bring in, and your store has room for 1 deal more")], ["too_many", true]);
   is("nothing written, no room taken", [await dealCount(fullId), (await readPipelines(fullId)).length, (await dataUsed(full.store))?.used], [MAX_DEALS - 1, 1, roomBefore?.used]);
+  const originalFull = redis.pipeline.bind(redis);
+  let filled = false;
+  try {
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      if (!filled && commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-deals-import"))) {
+        filled = true;
+        await originalFull([["HSET", "nl:crm:deals:" + fullId, "g000000001", JSON.stringify({ id: "g000000001", title: "From a form", email: "", cents: 0, stage: "lead00", note: "", createdAt: 1, updatedAt: 1 })]]);
+      }
+      return originalFull(commands);
+    };
+    const meanwhile = await importHubSpotDeals(full.store, { header: HEADER, rows: [row("5003", "Last one", "New", "Sales")] }, { write: true });
+    is("a store that fills up meanwhile refuses the whole file", meanwhile.ok ? "" : [meanwhile.reason, /reached its 1,000 deals while this file was being brought in, so nothing was brought in/.test(meanwhile.message)], ["too_many", true]);
+  } finally { redis.pipeline = originalFull; }
+  is("nothing of it written, its room given back", [await dealCount(fullId), (await readPipelines(fullId)).length, (await dataUsed(full.store))?.used], [MAX_DEALS, 1, roomBefore?.used]);
 
   part("A file past the month's rows is refused whole");
   const rows = await paidStore("hubsrows");
@@ -210,7 +230,7 @@ async function main(): Promise<void> {
   const roomChanged = await dataUsed(store);
   try {
     redis.pipeline = async (commands: (string | number)[][]) => {
-      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-pipelines-save"))) {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-deals-import"))) {
         const current = JSON.parse(String((await original([["GET", "nl:crm:pipes:" + statsId]]))[0]));
         current[1].name = "Renamed on the board";
         await original([["SET", "nl:crm:pipes:" + statsId, JSON.stringify(current)]]);
@@ -222,6 +242,77 @@ async function main(): Promise<void> {
   } finally { redis.pipeline = original; }
   is("the board's change stays, no deal added, the room given back", [(await readPipelines(statsId)).map((p) => p.name), await dealCount(statsId), (await dataUsed(store))?.used], [["Sales", "Renamed on the board"], 9, roomChanged?.used]);
 
+  part("A deal here without its HubSpot note is never taken for the same one");
+  const beta = (await readDeal(statsId, hubSpotDealId("1002"), allStages(await readPipelines(statsId))))!;
+  is("the creator rewrote that deal's note on the board", await writeDeal(statsId, { ...beta, note: "Called them on Monday." }, store), true);
+  const third = await call({ action: "save", ...first });
+  is("its row is refused with what to do; the others are already here", [third.status, third.body.summary?.alreadyThere, third.body.summary?.refused?.map((r: { line: number; value: string }) => [r.line, r.value]), /does not say it came from that record/.test(third.body.summary?.refused?.[0]?.reason)], [200, 2, [[3, "1002"]], true]);
+  is("and that deal is left as the creator made it", (await readDeal(statsId, beta.id, allStages(await readPipelines(statsId))))?.note, "Called them on Monday.");
+
+  const rowsKey = () => `nl:imports:rows:${store.sid}:${windowId(store, Date.now())}`;
+  const rowsUsed = async () => Number((await redis.pipeline([["GET", rowsKey()]]))[0] ?? 0);
+
+  part("A stage removed on the board meanwhile never gets a deal");
+  const boardRows = await rowsUsed();
+  let boardRoom: Awaited<ReturnType<typeof dataUsed>> = null;
+  let removed = false;
+  try {
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      if (!removed && commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-deals-import"))) {
+        removed = true;
+        const [salesNow] = await readPipelines(statsId);
+        await savePipelineChange(statsId, { pipeline: { ...salesNow, stages: salesNow.stages.filter((st) => st.name !== "Offer sent") } }, {}, 2, store);
+        // The room as the board's change leaves it, the import's own still taken.
+        boardRoom = await dataUsed(store);
+      }
+      return original(commands);
+    };
+    const orphan = await call({ action: "save", header: HEADER, rows: [row("9201", "Offer deal", "Offer sent", "Sales")] });
+    is("the import makes no pipeline and is still refused whole", [orphan.status, orphan.body.error, removed], [409, "changed", true]);
+  } finally { redis.pipeline = original; }
+  is("the stage is gone and no deal was left in it", [(await readPipelines(statsId))[0].stages.some((st) => st.name === "Offer sent"), await dealCount(statsId)], [false, 9]);
+  is("the month's rows and the import's room are given back", [await rowsUsed(), ((boardRoom as { used: number } | null)?.used ?? 0) > ((await dataUsed(store))?.used ?? 0)], [boardRows, true]);
+  is("so the opportunities review still reads every deal", (await readOpportunityReview(statsId)).available, true);
+
+  part("A deal is never overwritten");
+  const foreign = JSON.stringify({ id: hubSpotDealId("9301"), title: "Made meanwhile", email: "", cents: 0, stage: "lead00", note: "", createdAt: 1, updatedAt: 1 });
+  let planted = false;
+  try {
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      if (!planted && commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-deals-import"))) {
+        planted = true;
+        await original([["HSET", "nl:crm:deals:" + statsId, hubSpotDealId("9301"), foreign]]);
+      }
+      return original(commands);
+    };
+    const clash = await call({ action: "save", header: HEADER, rows: [row("9301", "From the file", "New", "Sales"), row("9302", "Another", "New", "Sales")] });
+    is("a deal that took the id meanwhile refuses the whole file", [clash.status, clash.body.error], [409, "changed"]);
+  } finally { redis.pipeline = original; }
+  is("the deal there is kept as it was, and the other is not added", [String((await redis.pipeline([["HGET", "nl:crm:deals:" + statsId, hubSpotDealId("9301")]]))[0]), await dealCount(statsId)], [foreign, 10]);
+
+  part("Rows refused or already here never take a pipeline's place");
+  const slot = await paidStore("hubsslot");
+  const slotId = slot.store.statsId!;
+  const [board] = await readPipelines(slotId);
+  await savePipelineChange(slotId, { pipeline: { ...board, name: "Main board" } }, {}, 2, slot.store);
+  const loose = await importHubSpotDeals(slot.store, { header: HEADER, rows: [row("1", "Loose deal", "New", "")] }, { write: true });
+  is("a deal with no pipeline goes to the store's first pipeline, whatever its name", [loose.ok && loose.summary.pipelinesCreated, (await readPipelines(slotId)).map((p) => p.name)], [[], ["Main board"]]);
+  const p1 = await importHubSpotDeals(slot.store, { header: HEADER, rows: [row("11", "First deal", "Pitch", "P1")] }, { write: true });
+  is("a second pipeline is made: the plan's two are used", [p1.ok && p1.summary.added, (await readPipelines(slotId)).map((p) => p.name)], [1, ["Main board", "P1"]]);
+  const p1Id = (await readPipelines(slotId))[1].id;
+  await savePipelineChange(slotId, { remove: p1Id }, "lead00", 2, slot.store);
+  const later = await importHubSpotDeals(slot.store, { header: HEADER, rows: [row("11", "First deal", "Pitch", "P1"), row("", "No id", "Pitch", "P1"), row("12", "Second deal", "Pitch", "P2")] }, { write: true });
+  is("the pipeline of a deal already here is not made again, so the new one fits", [later.ok && later.summary.pipelinesCreated.map((p) => p.name), later.ok && later.summary.alreadyThere, later.ok && later.summary.added, later.ok && later.summary.refused.map((r) => r.column)], [["P2"], 1, 1, ["Record ID"]]);
+  is("the store has its two pipelines", (await readPipelines(slotId)).map((p) => p.name), ["Main board", "P2"]);
+  const closedOnly = await importHubSpotDeals(slot.store, { header: HEADER, rows: [row("13", "Old win", "Closed won", "P3")] }, { write: false });
+  is("a dry run past the plan's pipelines refuses that pipeline's deals", closedOnly.ok && closedOnly.summary.refused.map((r) => r.column), ["Pipeline"]);
+
+  part("What the file says, read strictly");
+  const noId = await call({ action: "save", header: ["Deal name", "Deal stage", "Pipeline"], rows: [["One", "New", "Sales"]] });
+  is("a deals file with no Record ID column says to export with all properties", [noId.status, noId.body.error, noId.body.message], [400, "no_record_id", HUBSPOT_IMPORT_WORDS.no_record_id]);
+  const coin = await call({ action: "check", header: HEADER, currency: "USDC", rows: [row("9401", "Coin deal", "New", "Sales", "1500")] });
+  is("a currency that is not a three-letter code is taken as not said, never cut to one", [coin.status, /does not say which currency/.test(coin.body.summary?.notices?.[0]?.note)], [200, true]);
+
   part("Who may bring deals in");
   await putMember(store, "helper@example.com", "support");
   await putMember(store, "editor@example.com", "editor");
@@ -230,7 +321,7 @@ async function main(): Promise<void> {
   is("support and editors may not import", [support.status, editor.status], [403, 403]);
   const nobody = await call({ action: "save", ...first }, "");
   is("no session is refused", [nobody.status, nobody.body.error], [401, "signed_out"]);
-  is("nothing written by any of them", await dealCount(statsId), 9);
+  is("nothing written by any of them", await dealCount(statsId), 10);
 
   done();
 }

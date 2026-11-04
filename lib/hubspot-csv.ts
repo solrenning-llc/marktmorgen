@@ -43,7 +43,7 @@ export type HubSpotFile = "contacts" | "deals";
 export const HUBSPOT_LABELS = {
   recordId: "Record ID",
   contacts: { email: "Email", firstName: "First name", lastName: "Last name", phone: "Phone number" },
-  deals: { title: "Deal name", stage: "Deal stage", pipeline: "Pipeline", amount: "Amount", closeDate: "Close date" },
+  deals: { title: "Deal name", stage: "Deal stage", pipeline: "Pipeline", amount: "Amount", closeDate: "Close date", currency: "Currency" },
 } as const;
 
 /** How the start of an associated-contacts column reads, once squashed (see `squash`). */
@@ -71,9 +71,9 @@ export const HUBSPOT_ENGLISH_ONLY =
 export const HUBSPOT_NOTES_NOT_IMPORTED =
   "Notes are not in the file HubSpot exports from your contacts or deals list, so this import does not bring them in. To keep a contact's notes, open that contact in HubSpot, choose Actions, then Export contact data, and keep the file.";
 
-/** Said on the screen before contacts come in: HubSpot's file does not say who agreed to get emails. */
+/** Said on the screen before contacts come in: this import does not read consent from HubSpot's file. */
 export const HUBSPOT_CONTACTS_CONSENT =
-  "HubSpot's file does not say who agreed to get your emails. Bring these contacts in only if each of them agreed, and confirm it on the next step.";
+  "This import does not read consent from HubSpot's file. Bring these contacts in only if each of them agreed to get your emails, and confirm it on the next step.";
 
 /** Said about the columns this import does not bring in. */
 export const HUBSPOT_IGNORED_COLUMNS = "These columns are not brought in. Nothing in them is changed or kept here.";
@@ -153,7 +153,7 @@ export type HubSpotDealColumns = {
   pipeline: number;
   amount: number;
   closeDate: number;
-  /** A column whose label says "currency", when the file has one (HubSpot's pages do not name it). */
+  /** A column labeled exactly "Currency", when the file has one (HubSpot's pages do not name it). */
   currency: number;
   /** Every column whose label starts with "Associated Contact". */
   contacts: number[];
@@ -168,7 +168,7 @@ export function hubSpotDealColumns(header: readonly string[]): HubSpotDealColumn
   const pipeline = at(HUBSPOT_LABELS.deals.pipeline);
   const amount = at(HUBSPOT_LABELS.deals.amount);
   const closeDate = at(HUBSPOT_LABELS.deals.closeDate);
-  const currency = header.findIndex((h) => squash(h).includes("currency"));
+  const currency = at(HUBSPOT_LABELS.deals.currency);
   const contacts = header.flatMap((h, i) => (squash(h).startsWith(ASSOCIATED_CONTACT) ? [i] : []));
   const used = [recordId, title, stage, pipeline, amount, closeDate, currency, ...contacts];
   return { recordId, title, stage, pipeline, amount, closeDate, currency, contacts, ignored: ignoredOf(header, used) };
@@ -194,8 +194,9 @@ function narrowSymbol(currency: string): string {
  * A deal's amount, read only when the currency is known and is the store's:
  * from a code in the cell, then from a currency column, then from what the
  * creator said the file is in (`statedCurrency`). A currency nobody stated is
- * never assumed. Plain amounts read: 1500, 1500.50, 1,500.50 (commas only
- * between groups of three digits). Anything else, more decimals than the
+ * never assumed. Plain amounts read: 1500, 1500.50. A comma is never read
+ * (1,500 may be one and a half), nor a currency column that is not a
+ * three-letter code. Anything else, more decimals than the
  * currency has (other than zeros), or more than a deal holds, is no amount,
  * with a sentence saying why: never a rounded or guessed one.
  */
@@ -203,13 +204,17 @@ export function readHubSpotAmount(raw: string, storeCurrency: string, columnCurr
   const text = oneLine(raw);
   if (text === "") return { cents: null, note: "" };
   const store = storeCurrency.toLowerCase();
-  const unreadable = { cents: null, note: `"${text}" is not an amount this import can read, so this deal comes in with no amount. Type it on the deal, like 1500 or 1500.50.` } as const;
+  const unreadable = { cents: null, note: `"${text}" is not an amount this import can read, so this deal comes in with no amount. Type it on the deal, like 1500 or 1500.50, without commas.` } as const;
   const shaped = AMOUNT.exec(text);
   if (!shaped) return unreadable;
   const [, before = "", sign = "", number, after = ""] = shaped;
-  if ((before && after) || !/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(number)) return unreadable;
+  if ((before && after) || !/^\d+(?:\.\d+)?$/.test(number)) return unreadable;
   const inCell = (before || after).toLowerCase();
-  const currency = inCell || columnCurrency.trim().toLowerCase() || statedCurrency.trim().toLowerCase();
+  const column = oneLine(columnCurrency);
+  if (!inCell && column && !/^[A-Za-z]{3}$/.test(column)) {
+    return { cents: null, note: `The Currency column says "${column}", which is not a three-letter currency code like USD, so this deal comes in with no amount. Type the amount on the deal if you want one.` };
+  }
+  const currency = inCell || column.toLowerCase() || statedCurrency.trim().toLowerCase();
   if (!currency) return { cents: null, note: "The file does not say which currency this amount is in, so this deal comes in with no amount. Say which currency the file uses on the next step to keep amounts." };
   if (currency !== store) return { cents: null, note: `This amount is in ${currency.toUpperCase()} and your store uses ${store.toUpperCase()}, so this deal comes in with no amount. Type the amount in ${store.toUpperCase()} on the deal if you want one.` };
   if (sign && sign !== narrowSymbol(store)) return unreadable;
@@ -254,7 +259,7 @@ export type HubSpotDealDraft = {
   closeDateNote: string;
   pipeline: string;
   stage: string;
-  /** The first address in an associated-contacts column; "" for none. */
+  /** The first address in an associated-contacts column, when the column has one; "" for none. */
   email: string;
   /** Set when the deal had more than one associated address and only the first is kept. */
   emailNote: string;
@@ -280,6 +285,8 @@ export type HubSpotDealsOptions = {
   pipelineRoom: number;
   /** How many more deals the store may hold; at most MAX_DEALS. */
   dealRoom?: number;
+  /** The name of the store's first pipeline, where a deal with no pipeline in the file goes; FIRST_PIPELINE_NAME when not said. */
+  firstPipeline?: string;
 };
 
 /** The kind a HubSpot stage label stands for: "Closed won" and "Closed lost" by name, any other open. */
@@ -297,8 +304,9 @@ const defaultIndex = (label: string) => HUBSPOT_DEFAULT_STAGES.findIndex((s) => 
  * first (HubSpot's default ones in its order, then the others as they first
  * appear: the file does not say their order, so the creator can reorder
  * them after), then the won one, then the lost one. A pipeline with no
- * "Closed won" or "Closed lost" gets a "Won" or "Lost" stage added, so it
- * has the three kinds every pipeline here has. Open stages past what a
+ * "Closed won" or "Closed lost" gets a "Won" or "Lost" stage added, and one
+ * with no open stage a "New" one, so it has the three kinds every pipeline
+ * here has. Open stages past what a
  * pipeline holds are returned apart, to refuse their deals.
  */
 function stagesOf(labels: readonly string[]): { stages: ProposedStage[]; over: string[] } {
@@ -311,6 +319,8 @@ function stagesOf(labels: readonly string[]): { stages: ProposedStage[]; over: s
   const lost = labels.find((l) => stageKindOf(l) === "lost");
   const stages: ProposedStage[] = [
     ...ordered.slice(0, room).map((name) => ({ name, kind: "open" as const, fromFile: true })),
+    // Every pipeline here has an open stage: one whose deals are all closed gets a "New" one.
+    ...(ordered.length ? [] : [{ name: "New", kind: "open" as const, fromFile: false }]),
     won ? { name: won, kind: "won", fromFile: true } : { name: "Won", kind: "won", fromFile: false },
     lost ? { name: lost, kind: "lost", fromFile: true } : { name: "Lost", kind: "lost", fromFile: false },
   ];
@@ -351,16 +361,17 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
     const title = cell(columns.title);
     if (!title) return refuse(columns.title, "", "This deal has no name. Give it a name in HubSpot, then export again.");
     if (title.length > MAX_DEAL_TITLE) return refuse(columns.title, title, `A deal name here holds up to ${MAX_DEAL_TITLE} characters, and this one is longer. Shorten it in HubSpot, then export again.`);
-    if (recordId) {
-      const first = seen.get(recordId);
-      if (first !== undefined) return refuse(columns.recordId, recordId, `This is the same deal as row ${first}, so it is brought in once.`);
-      seen.set(recordId, line);
-    }
     const stage = cell(columns.stage);
     if (!stage) return refuse(columns.stage, "", "This deal has no stage. Choose its stage in HubSpot, then export again.");
     if (stage.length > MAX_STAGE_NAME) return refuse(columns.stage, stage, `A stage name here holds up to ${MAX_STAGE_NAME} characters, and this one is longer. Rename the stage in HubSpot, then export again.`);
-    const pipeline = cell(columns.pipeline) || FIRST_PIPELINE_NAME;
+    const pipeline = cell(columns.pipeline) || options.firstPipeline || FIRST_PIPELINE_NAME;
     if (pipeline.length > MAX_PIPELINE_NAME) return refuse(columns.pipeline, pipeline, `A pipeline name here holds up to ${MAX_PIPELINE_NAME} characters, and this one is longer. Rename the pipeline in HubSpot, then export again.`);
+    // Checked once the row itself reads, so a row refused above never takes its Record ID.
+    if (recordId) {
+      const first = seen.get(recordId);
+      if (first !== undefined) return refuse(columns.recordId, recordId, `Row ${first} has this Record ID too. Only the first row with a Record ID is read, so this row was not brought in.`);
+      seen.set(recordId, line);
+    }
     const amount = readHubSpotAmount(cell(columns.amount), options.currency, cell(columns.currency), options.statedCurrency ?? "");
     const close = readHubSpotDate(cell(columns.closeDate));
     const addresses = columns.contacts.flatMap((at) => (row[at] ?? "").match(ADDRESS) ?? []).map((a) => a.toLowerCase());
@@ -377,7 +388,7 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
       pipeline,
       stage,
       email: unique[0] ?? "",
-      emailNote: unique.length > 1 ? `This deal is with ${unique.length} people in HubSpot. A deal here is with one person, so the first address, ${unique[0]}, is kept.` : "",
+      emailNote: unique.length > 1 ? `The associated contacts column lists ${unique.length} addresses for this deal. A deal here is with one person, so the first address, ${unique[0]}, is kept.` : "",
     });
   });
 

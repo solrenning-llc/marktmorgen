@@ -24,6 +24,7 @@ import {
   HUBSPOT_NOTES_NOT_IMPORTED,
   hubSpotContactColumns,
   hubSpotContactRow,
+  hubSpotDealColumns,
   hubSpotFileOf,
   isHubSpotExport,
   planHubSpotDeals,
@@ -116,14 +117,17 @@ is("a custom pipeline keeps its stage names exactly, as first written", custom.p
 ]);
 is("a pipeline and a stage written in another case are the same ones", [custom.deals[2].pipeline, custom.deals[2].stage], ["Partners", "Discovery call"]);
 const noPipeline = ok(plan([["9", "Loose deal", "Contract sent"]], {}, ["Record ID", "Deal name", "Deal stage"]));
-is("a file without a pipeline column puts deals in a pipeline named Sales", noPipeline.pipelines.map((p) => p.name), ["Sales"]);
+is("a file without a pipeline column puts deals in the first pipeline, Sales when the store does not say its name", noPipeline.pipelines.map((p) => p.name), ["Sales"]);
 
 part("Amounts");
 is("plain amount in the stated store currency", readHubSpotAmount("1500", "usd", "", "usd"), { cents: 150000, note: "" });
-is("commas between thousands", readHubSpotAmount("12,500.50", "usd", "", "usd").cents, 1250050);
+is("a comma is never read (1,500 may be one and a half)", [readHubSpotAmount("12,500.50", "usd", "", "usd").cents, readHubSpotAmount("1,500", "usd", "", "usd").cents, /without commas/.test(readHubSpotAmount("1,5", "usd", "", "usd").note)], [null, null, true]);
 is("the store's own sign is read", readHubSpotAmount("$99.90", "usd", "", "usd").cents, 9990);
 is("a code in the cell states the currency", readHubSpotAmount("USD 40", "usd").cents, 4000);
 is("a currency column states it", readHubSpotAmount("40", "eur", "EUR").cents, 4000);
+is("a currency column that holds no code is said as such, never read as one", [readHubSpotAmount("40", "usd", "US Dollar", "usd").cents, /Currency column says "US Dollar", which is not a three-letter currency code/.test(readHubSpotAmount("40", "usd", "US Dollar", "usd").note), readHubSpotAmount("40", "usd", "USDC", "usd").cents], [null, true, null]);
+is("only a column labeled exactly Currency is the currency column", [hubSpotDealColumns([...DEALS_HEADER, "Amount in company currency"]).currency, hubSpotDealColumns([...DEALS_HEADER, "Amount in company currency", "Currency"]).currency], [-1, DEALS_HEADER.length + 1]);
+is("a code in the cell is read before such a column", readHubSpotAmount("USD 40", "usd", "US Dollar").cents, 4000);
 is("yen has no decimals", readHubSpotAmount("5000", "jpy", "", "jpy").cents, 5000);
 is("trailing zero decimals are fine", readHubSpotAmount("10.500", "usd", "", "usd").cents, 1050);
 is("no currency stated: no amount, and why", readHubSpotAmount("1500", "usd").cents, null);
@@ -148,7 +152,7 @@ is("an impossible day is refused", readHubSpotDate("2026-02-30").date, null);
 is("its sentence shows the form to use", /2026-11-04/.test(readHubSpotDate("01/12/2026").note), true);
 const many = ok(plan([row("1", "Group deal", "Contract sent", "P", "", "", "101 Ada@Example.com; 102 grace@example.com")]));
 is("the first associated address is kept, lowercased", many.deals[0].email, "ada@example.com");
-is("and the others are said", /2 people/.test(many.deals[0].emailNote), true);
+is("and the others are said, as the column lists them", /column lists 2 addresses/.test(many.deals[0].emailNote), true);
 
 part("Refusals, never cuts");
 const bad = ok(plan([row("1", "", "Contract sent"), row("2", "x".repeat(MAX_DEAL_TITLE + 1), "Contract sent"), row("3", "Fine", ""), row("4", "Again", "Contract sent"), row("4", "Twice", "Contract sent")]));
@@ -159,7 +163,14 @@ is("rows refused by line, with the column", bad.refused.map((r) => [r.line, r.co
   [6, "Record ID"],
 ]);
 is("a long name is refused, not shortened", bad.refused[1].value.length, MAX_DEAL_TITLE + 1);
-is("each reason says what to do", bad.refused.every((r) => /HubSpot|once/.test(r.reason)), true);
+is("each reason says what to do", bad.refused.every((r) => /HubSpot|first row/.test(r.reason)), true);
+const dup = ok(plan([row("9", "First", ""), row("9", "Second", "Contract sent"), row("9", "Third", "Contract sent")]));
+is("a row refused for itself never takes its Record ID: the next one with it is read", [dup.deals.map((d) => d.title), dup.refused.map((r) => [r.line, r.column])], [["Second"], [[2, "Deal stage"], [4, "Record ID"]]]);
+is("the repeat names the row that has the Record ID too", /^Row 3 has this Record ID too/.test(dup.refused[1].reason), true);
+const allClosed = ok(plan([row("1", "Old win", "Closed won", "Done deals")]));
+is("a pipeline whose deals are all closed still gets an open stage", allClosed.pipelines[0].stages.map((st) => `${st.name}:${st.kind}:${st.fromFile}`), ["New:open:false", "Closed won:won:true", "Lost:lost:false"]);
+const toFirst = ok(plan([row("1", "One", "Contract sent", "")], { firstPipeline: "Main board" }));
+is("a deal with no pipeline goes to the store's first pipeline, by its name", toFirst.deals[0].pipeline, "Main board");
 is("only the good row comes in", bad.deals.map((d) => d.title), ["Again"]);
 const tooMany = plan(Array.from({ length: 11 }, (_, i) => row(String(i), `Deal ${i}`, "Contract sent")), { dealRoom: 10 });
 is("more deals than the room refuses the whole file", tooMany.ok ? "taken" : [tooMany.reason, tooMany.count, tooMany.room], ["too_many", 11, 10]);

@@ -353,6 +353,25 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:crm-deals-import:v1\n") && args[0] === "3" && args.length >= 8 && (args.length - 8) % 2 === 0) {
+          const [, deals, pipes, stages, expected, next, copy, max, ...pairs] = args;
+          this.live(deals);
+          this.live(pipes);
+          const held = this.data.get(deals);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const current = this.data.get(pipes);
+          if (current !== undefined && typeof current !== "string") throw new Error("WRONGTYPE");
+          if ((current ?? "") !== expected) return -1;
+          const ids = pairs.filter((_, i) => i % 2 === 0);
+          if (held instanceof Map && ids.some((id) => held.has(id))) return -2;
+          if ((held instanceof Map ? held.size : 0) + ids.length > Number(max)) return -3;
+          if (next !== "") {
+            this.data.set(pipes, next);
+            this.data.set(stages, copy);
+          }
+          for (let i = 0; i < pairs.length; i += 2) this.hash(deals).set(pairs[i], pairs[i + 1]);
+          return ids.length;
+        }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);

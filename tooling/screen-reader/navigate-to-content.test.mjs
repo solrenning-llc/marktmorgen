@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
 import {NVDAKeyCodeCommands,WindowsKeyCodes,WindowsModifiers} from "@guidepup/guidepup";
-import {navigateToContent} from "./navigate-to-content.mjs";
+import {registerHooks} from "node:module";
+import {voiceOverKeyCodeCommands} from "@guidepup/guidepup";
+
+// Keep the actual helper and Guidepup commands; only OS activation is unavailable
+// on Linux. The synchronous hook is removed immediately after module loading.
+const guidepupURL=import.meta.resolve("@guidepup/guidepup");
+const wrapper="data:text/javascript,"+encodeURIComponent(`export * from ${JSON.stringify(guidepupURL)}; export async function macOSActivateId(id) { if(id!=="org.webkit.Playwright") throw Error("unexpected application"); }`);
+const hooks=registerHooks({resolve(specifier,context,next){
+ return specifier==="@guidepup/guidepup"?{url:wrapper,shortCircuit:true}:next(specifier,context);
+}});
+const {navigateToContent}=await import("./navigate-to-content.mjs");
+hooks.deregister();
 
 const title="Start your store — Marktmorgen";
 const browserTitle=title+" - Chromium";
@@ -119,3 +130,58 @@ test("unknown native snapshots stay explicit and cannot replace the reader gate"
  assert.equal(errors.length,8);assert.ok(errors.every(line=>line.startsWith("AX2_NVDA_NATIVE_FOREGROUND_UNKNOWN:")));
  assert.equal(state.reports.length,2,"Real NVDA gates are unchanged by diagnostic failure");
 });
+
+function voiceOverFixture({failAt}={}){
+ const state={marker:false,events:[],position:1,last:"",resets:0};
+ const failure=Error("synthetic "+failAt);
+ const reader={
+  async perform(command,options){
+   if(command===voiceOverKeyCodeCommands.openItemChooser)state.last="Item chooser";
+   if(command===voiceOverKeyCodeCommands.moveToAreaTop){
+    assert.equal(state.marker,false,"Remove temporary marker before resetting the cursor");
+    assert.equal(options?.capture,false);
+    state.events.push("reset");state.resets++;
+    if(failAt==="reset")throw failure;
+    state.position=-1;
+   }
+  },
+  async type(){state.last="web content";},
+  async lastSpokenPhrase(){return state.last;},
+  async interact(){state.position=1;},
+  async next(){if(failAt==="next")throw failure;state.position=1;},
+  async nextHeading(){state.events.push("heading");state.last=["Start your store heading level 1","Help heading level 2"][++state.position]??"No next heading";},
+ };
+ const page={async bringToFront(){},async evaluate(fn){
+  // Execute the actual helper callbacks against a minimal DOM, including cleanup.
+  const previous=globalThis.document;
+  globalThis.document={
+   createElement(){return {style:{},setAttribute(){}};},
+   body:{prepend(){state.marker=true;state.events.push("insert");}},
+   getElementById(id){assert.equal(id,"__guidepup_marker__");return state.marker?{remove(){state.marker=false;state.events.push("remove");}}:null;},
+  };
+  try{return fn();}finally{globalThis.document=previous;}
+ }};
+ return {state,reader,page,failure};
+}
+
+test("VoiceOver resets from H2 to area start after marker removal, before the first heading assertion",async()=>{
+ const {state,reader,page}=voiceOverFixture();
+ await navigateToContent(reader,page,"voiceover");
+ await reader.nextHeading();
+ assert.match(await reader.lastSpokenPhrase(),/Start your store heading level 1/);
+ assert.deepEqual(state.events,["insert","remove","reset","heading"]);
+ assert.equal(state.resets,1);
+});
+
+for(const failAt of ["next","reset"]){
+ test(`VoiceOver ${failAt} failure propagates without heading assertions and removes marker`,async()=>{
+  const {state,reader,page,failure}=voiceOverFixture({failAt});
+  await assert.rejects(async()=>{
+   await navigateToContent(reader,page,"voiceover");
+   await reader.nextHeading();
+  },error=>error===failure);
+  assert.equal(state.marker,false);
+  assert.deepEqual(state.events,failAt==="next"?["insert","remove"]:["insert","remove","reset"]);
+  assert.equal(state.resets,failAt==="next"?0:1);
+ });
+}

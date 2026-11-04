@@ -84,6 +84,8 @@ const filled = (block: PageBlock): boolean => {
       return Boolean(block.form);
     case "quotes":
       return block.items.length > 0;
+    case "row":
+      return block.columns.some((column) => column.length > 0);
     case "cta":
     case "reviews":
       return true;
@@ -197,7 +199,10 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
   // nothing is filled in for them.
   // The picture at the top is the product's own, with the product's description; each version counted once (the
   // editor sends the version not being edited as the variant).
-  const alts = [...input.page.blocks, ...(input.page.variant?.blocks ?? [])].flatMap(picturesOf).map((p) => p.alt);
+  // A row's picture the creator marked as decoration is meant to have no description (WCAG 1.1.1), so it is not asked for.
+  const described = (block: PageBlock) =>
+    block.kind === "row" ? block.columns.flat().flatMap((element) => (element.kind === "image" && !element.decorative ? [element.picture] : [])) : picturesOf(block);
+  const alts = [...input.page.blocks, ...(input.page.variant?.blocks ?? [])].flatMap(described).map((p) => p.alt);
   if (hero && hero.media === "picture" && input.picture) alts.push(input.pictureAlt);
   if (alts.length > 0) {
     const bare = alts.filter((alt) => !alt.trim()).length;

@@ -35,6 +35,7 @@ const subscription = () => ({
   status: "past_due",
   collection_method: "charge_automatically",
   customer: "cus_Dana000001",
+  default_payment_method: { id: "pm_Card00000001", type: "card" },
   discount: null,
   discounts: [],
   pause_collection: null,

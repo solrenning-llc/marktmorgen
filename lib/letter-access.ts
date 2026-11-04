@@ -83,16 +83,25 @@ export async function letterReader(store: Store, letter: Letter, cookies: Cookie
 }
 
 /**
- * Counts one more under `key` for LETTER_LINK_SECONDS from its first. The
- * count and its end are set together, the end only when the key has none, so
- * a key that ran out between two commands is never left without one.
+ * Counts one more under `key`, for LETTER_LINK_SECONDS from the first: the
+ * key is made with its end (SET NX EX, the pattern every counter here uses),
+ * then counted. A key that ran out between those two commands would be made
+ * again by INCR with no end; its TTL, read in the same round, says so (-1),
+ * and only then is it given one, so a counting key never stays without an
+ * end and a running window is never pushed back.
  */
-async function within(key: string, limit: number): Promise<boolean> {
-  const [count] = await redisPipeline([
+async function count(key: string): Promise<number> {
+  const [, counted, ttl] = await redisPipeline([
+    ["SET", key, "0", "EX", LETTER_LINK_SECONDS, "NX"],
     ["INCR", key],
-    ["EXPIRE", key, LETTER_LINK_SECONDS, "NX"],
+    ["TTL", key],
   ]);
-  return Number(count) <= limit;
+  if (Number(ttl) === -1) await redisPipeline([["EXPIRE", key, LETTER_LINK_SECONDS]]);
+  return Number(counted);
+}
+
+async function within(key: string, limit: number): Promise<boolean> {
+  return (await count(key)) <= limit;
 }
 
 function displayName(name: string): string {
@@ -163,19 +172,25 @@ function afterAnswer(task: () => Promise<void>): void {
   }
 }
 
-/** Spends one open of an emailed link, and says who and which email it was for. */
-export async function openLetterLink(token: string): Promise<LetterGrant | null> {
+/**
+ * Who and which email an emailed link is for, read only: nothing is written
+ * for a token that is not one, so the route counts its public request
+ * (takeBuyerRead) for the store the link names before anything is spent.
+ */
+export async function readLetterGrant(token: string): Promise<LetterGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw, opens] = await redisPipeline([
-    ["GET", linkKey(token)],
-    ["INCR", opensKey(token)],
-    ["EXPIRE", opensKey(token), LETTER_LINK_SECONDS, "NX"],
-  ]);
-  if (typeof raw !== "string" || Number(opens) > MAX_LINK_OPENS) return null;
+  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
+  if (typeof raw !== "string") return null;
   try {
     const grant = JSON.parse(raw) as LetterGrant;
     return typeof grant.e === "string" && typeof grant.k === "string" && typeof grant.h === "string" && typeof grant.l === "string" && LETTER_ID.test(grant.l) ? grant : null;
   } catch {
     return null;
   }
+}
+
+/** Spends one open of a link already read; false past MAX_LINK_OPENS. */
+export async function spendLetterOpen(token: string): Promise<boolean> {
+  if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return false;
+  return (await count(opensKey(token))) <= MAX_LINK_OPENS;
 }

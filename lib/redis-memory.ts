@@ -570,8 +570,6 @@ export class MemoryRedis {
       }
       case "EXPIRE":
         if (!this.data.has(key)) return 0;
-        // NX: only a key with no end yet is given one (Redis 7).
-        if (String(args[1] ?? "").toUpperCase() === "NX" && this.until.has(key)) return 0;
         this.until.set(key, this.now() + Number(args[0]) * 1000);
         return 1;
       case "TTL": {

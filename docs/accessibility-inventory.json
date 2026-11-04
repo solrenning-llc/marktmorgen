@@ -1362,6 +1362,7 @@
     "components/lesson-quiz.tsx",
     "components/lesson-task.tsx",
     "components/lesson-text.tsx",
+    "components/letter-publish-control.tsx",
     "components/licence-key-box.tsx",
     "components/licence-key-editor.tsx",
     "components/link-editor.tsx",

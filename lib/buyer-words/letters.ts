@@ -29,6 +29,7 @@ const en = {
     error: { title: "The email could not be sent", body: "Nothing is lost. Try again in a moment." },
   } as Record<string, { title: string; body: string }>,
   linkSubject: (subject: string) => `Read “${subject}”`,
+  linkGone: "This link has expired or was already used too many times. Open the email's page and ask for a new one.",
   linkBody: (subject: string, link: string, store: string) =>
     [
       `Here is your way to read “${subject}”:`,
@@ -69,6 +70,7 @@ const es: LetterWords = {
     error: { title: "No se pudo enviar el email", body: "No se perdió nada. Inténtalo de nuevo en un momento." },
   },
   linkSubject: (subject) => `Lee «${subject}»`,
+  linkGone: "Este enlace caducó o ya se usó demasiadas veces. Abre la página del email y pide uno nuevo.",
   linkBody: (subject, link, store) =>
     [
       `Este es tu acceso para leer «${subject}»:`,
@@ -107,6 +109,7 @@ const fr: LetterWords = {
     error: { title: "L'e-mail n'a pas pu être envoyé", body: "Rien n'est perdu. Réessayez dans un instant." },
   },
   linkSubject: (subject) => `Lire « ${subject} »`,
+  linkGone: "Ce lien a expiré ou a déjà été utilisé trop de fois. Ouvrez la page de l'e-mail et demandez-en un nouveau.",
   linkBody: (subject, link, store) =>
     [
       `Voici votre accès pour lire « ${subject} » :`,
@@ -145,6 +148,7 @@ const de: LetterWords = {
     error: { title: "Die E-Mail konnte nicht gesendet werden", body: "Nichts ist verloren. Versuchen Sie es gleich noch einmal." },
   },
   linkSubject: (subject) => `„${subject}“ lesen`,
+  linkGone: "Dieser Link ist abgelaufen oder wurde schon zu oft benutzt. Öffnen Sie die Seite der E-Mail und fordern Sie einen neuen an.",
   linkBody: (subject, link, store) =>
     [
       `So lesen Sie „${subject}“:`,
@@ -183,6 +187,7 @@ const it: LetterWords = {
     error: { title: "Non è stato possibile inviare l'email", body: "Non si è perso nulla. Riprova tra un momento." },
   },
   linkSubject: (subject) => `Leggi «${subject}»`,
+  linkGone: "Questo link è scaduto o è già stato usato troppe volte. Apri la pagina dell'email e chiedine uno nuovo.",
   linkBody: (subject, link, store) =>
     [
       `Ecco come leggere «${subject}»:`,
@@ -221,6 +226,7 @@ const nl: LetterWords = {
     error: { title: "De e-mail kon niet worden verstuurd", body: "Er is niets verloren. Probeer het zo opnieuw." },
   },
   linkSubject: (subject) => `Lees ‘${subject}’`,
+  linkGone: "Deze link is verlopen of al te vaak gebruikt. Open de pagina van de e-mail en vraag een nieuwe aan.",
   linkBody: (subject, link, store) =>
     [
       `Zo lees je ‘${subject}’:`,
@@ -259,6 +265,7 @@ const pt: LetterWords = {
     error: { title: "Não foi possível enviar o email", body: "Nada se perdeu. Tente de novo em instantes." },
   },
   linkSubject: (subject) => `Leia “${subject}”`,
+  linkGone: "Este link expirou ou já foi usado vezes demais. Abra a página do email e peça um novo.",
   linkBody: (subject, link, store) =>
     [
       `Aqui está seu acesso para ler “${subject}”:`,

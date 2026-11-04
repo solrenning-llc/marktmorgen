@@ -23,13 +23,14 @@
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import { addProduct, removeProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import type { Broadcast } from "@/lib/broadcasts";
 import { MAX_LETTER_PRODUCTS, membersOnly, parseLetter } from "@/lib/letter-rules";
-import { listLetters, publishLetter, readLetter } from "@/lib/letters";
+import { letterIdFor, listLetters, publishLetter, publishedLetters, readLetter } from "@/lib/letters";
 import { letterReader } from "@/lib/letter-access";
 import { mintPass, passCookieName } from "@/lib/learn";
 import LetterPage, { generateMetadata } from "@/app/[handle]/letters/[letter]/page";
@@ -37,9 +38,10 @@ import LettersPage from "@/app/[handle]/letters/page";
 import { POST as publishRoute } from "@/app/api/store/letters/route";
 import { POST as linkRoute } from "@/app/api/store/letters/link/route";
 import { GET as openRoute } from "@/app/api/store/letters/open/route";
+import { PublishControl } from "@/components/letter-publish-control";
 import { cookieValues } from "./letter-members-world";
 import { afterTasks } from "./next-server-after-world";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -133,6 +135,21 @@ function filesUnder(dir: string): string[] {
   });
 }
 
+/**
+ * EXPIRE with an option (NX, XX, GT, LT) is refused here, as a Redis or REST
+ * service that does not take it would: the code keeps to SET NX EX and INCR,
+ * the pattern every counter already uses.
+ */
+let expireOptions = 0;
+const realPipeline = redis.pipeline.bind(redis);
+(redis as unknown as { pipeline: typeof realPipeline }).pipeline = (commands) => {
+  if (commands.some((c) => String(c[0]).toUpperCase() === "EXPIRE" && c.length > 3)) {
+    expireOptions += 1;
+    return Promise.reject(new Error("ERR syntax error"));
+  }
+  return realPipeline(commands);
+};
+
 async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, HANDLE, "Mara's Club", "");
@@ -145,6 +162,13 @@ async function main(): Promise<void> {
   const other = await addProduct(OWNER, "Knife Skills", "", "29", null);
   if (!made.ok || !other.ok) throw new Error("no products");
   const club = made.product.id;
+  // Twenty-one more, all distinct, for the cap.
+  const many: string[] = [];
+  for (let i = 0; i < MAX_LETTER_PRODUCTS + 1; i += 1) {
+    const one = await addProduct(OWNER, `Workbook ${i + 1}`, "", "9", null);
+    if (!one.ok) throw new Error("no workbook");
+    many.push(one.product.id);
+  }
   const store = (await storeForEmail(OWNER))!;
   const now = Date.now();
 
@@ -152,8 +176,10 @@ async function main(): Promise<void> {
   const kept = broadcast(store, "a1");
   const refused = await publishLetter(store, kept, now, ["nope_not_a_product"]);
   is("a product this store does not have is refused", [refused.ok, refused.ok ? "" : refused.reason], [false, "products"]);
-  const tooMany = await publishLetter(store, kept, now, Array.from({ length: MAX_LETTER_PRODUCTS + 1 }, () => club));
-  is(`more than ${MAX_LETTER_PRODUCTS} given is refused`, tooMany.ok, false);
+  const tooMany = await publishLetter(store, kept, now, many);
+  is(`${MAX_LETTER_PRODUCTS + 1} distinct products of the store are refused`, [new Set(many).size, tooMany.ok, tooMany.ok ? "" : tooMany.reason], [MAX_LETTER_PRODUCTS + 1, false, "products"]);
+  const enough = await publishLetter(store, broadcast(store, "d1", { subject: "Workbook notes" }), now, many.slice(0, MAX_LETTER_PRODUCTS));
+  is(`${MAX_LETTER_PRODUCTS} are taken`, enough.ok ? enough.letter.products?.length : 0, MAX_LETTER_PRODUCTS);
   const published = await publishLetter(store, kept, now, [club]);
   if (!published.ok) throw new Error(published.message);
   const letter = published.letter;
@@ -170,8 +196,10 @@ async function main(): Promise<void> {
   is("published again with no products said: still kept for members", again.ok ? again.letter.products : null, [club]);
   const againNull = await publishLetter(store, kept, now + 2, null);
   is("or with null", againNull.ok ? againNull.letter.products : null, [club]);
-  const toAll = await publishLetter(store, kept, now + 3, []);
-  is("only an empty choice, on purpose, opens it to everyone", [toAll.ok, toAll.ok ? membersOnly(toAll.letter) : true], [true, false]);
+  const emptied = await publishLetter(store, kept, now + 3, []);
+  is("an empty choice over an email kept for members is refused, and it stays kept", [emptied.ok, emptied.ok ? "" : emptied.reason, (await readLetter(store, letter.id))?.products], [false, "kept", [club]]);
+  const toAll = await publishLetter(store, kept, now + 3, [], true);
+  is("only an empty choice said on purpose (open) opens it to everyone", [toAll.ok, toAll.ok ? membersOnly(toAll.letter) : true], [true, false]);
   const back = await publishLetter(store, kept, now + 4, [club]);
   is("and checking the product again keeps it again", back.ok ? back.letter.products : null, [club]);
 
@@ -208,6 +236,23 @@ async function main(): Promise<void> {
   const ownerHtml = await render(store, letter.id, { [SESSION_COOKIE]: owner });
   is("the creator reads them, told who else can", [ownerHtml.includes(SECRET), ownerHtml.includes("Only you and people who have one of these products")], [true, true]);
 
+  part("The studio sees which are kept, and a failed read is not \"not published\"");
+  const seen = await publishedLetters(store);
+  is("one read says it is published and kept for members", seen?.get(letter.id), { members: true });
+  is("and a public one is published for everyone", (await publishLetter(store, broadcast(store, "e1", { subject: "Public notes" }), now)).ok && (await publishedLetters(store))?.get(letterIdFor(store.sid, "e1".padStart(24, "0")))?.members, false);
+  const pipeline = redis.pipeline.bind(redis);
+  (redis as unknown as { pipeline: unknown }).pipeline = async () => {
+    throw new Error("the database is down");
+  };
+  const failed = await publishedLetters(store);
+  (redis as unknown as { pipeline: typeof pipeline }).pipeline = pipeline;
+  is("a failed read is unknown, not an empty list", failed, null);
+  const control = (props: { path: string | null; members: boolean; unknown: boolean }) =>
+    renderToStaticMarkup(createElement(PublishControl, { id: "x", disabled: false, onDone: () => {}, products: [{ id: club, title: "Butter Club" }], ...props }));
+  is("the studio says \"For members only\" beside \"Published on your store\"", [control({ path: "/@x/letters/y", members: true, unknown: false }).includes("For members only"), control({ path: "/@x/letters/y", members: false, unknown: false }).includes("For members only")], [true, false]);
+  const unknownHtml = control({ path: null, members: false, unknown: true });
+  is("and, when it could not read, says so and offers no Publish", [unknownHtml.includes("Could not check whether it is on your store"), unknownHtml.includes("Publish on your store")], [true, false]);
+
   part("A refund in full closes it");
   sessions["ana@example.com"] = [paid("cs_test_ana000000001", club, 4900)];
   is("kept answer: still open for its few minutes", (await letterReader(store, letter, jar({ [cookieName]: anaPass }))).state, "in");
@@ -215,6 +260,24 @@ async function main(): Promise<void> {
   is("asked again: closed", (await letterReader(store, letter, jar({ [cookieName]: anaPass }))).state, "closed");
   is("and the page no longer shows the words", (await render(store, letter.id, { [cookieName]: anaPass })).includes(SECRET), false);
   sessions["ana@example.com"] = [paid("cs_test_ana000000001", club)];
+  forgetAnswers();
+
+  part("A dispute lost, and a membership that stopped, close it too");
+  const cyPass = await pass("cy@example.com", "all");
+  const lost = paid("cs_test_cy0000000001", club);
+  sessions["cy@example.com"] = [lost];
+  is("paid and undisputed: open", (await letterReader(store, letter, jar({ [cookieName]: cyPass }))).state, "in");
+  sessions["cy@example.com"] = [{ ...lost, payment_intent: { id: "pi_cy01", latest_charge: { ...charge(4900, 0), id: "ch_TestCyLost01", disputed: true, dispute: { status: "lost" } } } }];
+  forgetAnswers();
+  is("the dispute lost: closed", (await letterReader(store, letter, jar({ [cookieName]: cyPass }))).state, "closed");
+  const deePass = await pass("dee@example.com", "all");
+  const member = (status: string) => ({ ...paid("cs_test_dee000000001", club), mode: "subscription", payment_intent: null, subscription: { id: "sub_TestDee0001", status } });
+  sessions["dee@example.com"] = [member("active")];
+  forgetAnswers();
+  is("a membership running: open", (await letterReader(store, letter, jar({ [cookieName]: deePass }))).state, "in");
+  sessions["dee@example.com"] = [member("canceled")];
+  forgetAnswers();
+  is("the membership stopped: closed", (await letterReader(store, letter, jar({ [cookieName]: deePass }))).state, "closed");
   forgetAnswers();
 
   part("The emailed link: the same answer, at once, whoever asks");
@@ -260,7 +323,18 @@ async function main(): Promise<void> {
   await runAfter();
   is("one left with none, by a key that ran out between two commands, is given one", Number(redis.run(["TTL", ipKey("203.0.113.11")])) > 0, true);
   is("and the count went on from it", redis.run(["GET", ipKey("203.0.113.11")]), "2");
+  await ask("nobody@example.com", "203.0.113.12");
+  await runAfter();
+  const firstTtl = Number(redis.run(["TTL", ipKey("203.0.113.12")]));
+  advance(10 * 60_000);
+  await ask("nobody@example.com", "203.0.113.12");
+  await runAfter();
+  const laterTtl = Number(redis.run(["TTL", ipKey("203.0.113.12")]));
+  is("the window does not slide: ten minutes on, it ends when it would have", [firstTtl, laterTtl <= firstTtl - 600 && laterTtl > 0], [3600, true]);
   const token = /token=([0-9a-f]{64})/.exec(mails.at(-1)!.text)![1];
+  const keysBefore = redis.keys().length;
+  const stranger = await openRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${"f".repeat(64)}`, { headers: { "accept-language": "es-MX,es;q=0.9" } }));
+  is("a token that is no link: gone, in the browser's language, and nothing written", [stranger.status, (await stranger.text()).startsWith("Este enlace caducó"), redis.keys().length], [410, true, keysBefore]);
   const opened = await openRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${token}`));
   const set = opened.headers.get("set-cookie") ?? "";
   is("opening it lets this browser in and goes back to the email", [opened.status, (opened.headers.get("location") ?? "").endsWith(`/@${HANDLE}/letters/${letter.id}`), set.startsWith(`${cookieName}=`)], [303, true, true]);
@@ -316,7 +390,8 @@ async function main(): Promise<void> {
   is("the studio's route takes the products", [viaRoute.status, routeBody.ok, (await readLetter(store, letter.id))?.products], [200, true, [club]]);
   const badRoute = await publishRoute(new NextRequest("https://marktmorgen.com/api/store/letters", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${owner}` }, body: JSON.stringify({ action: "publish", id: kept.id, products: ["nope_not_a_product"] }) }));
   is("and refuses one the store does not have", badRoute.status, 409);
-  is("the store lists both", (await listLetters(store)).length, 2);
+  is("no EXPIRE with an option was ever sent", expireOptions, 0);
+  is("the store lists all four", (await listLetters(store)).length, 4);
 
   part("The creator is told when none of the products is left");
   const lone = await publishLetter(store, broadcast(store, "c1", { subject: "Knife notes" }), now, [other.product.id]);

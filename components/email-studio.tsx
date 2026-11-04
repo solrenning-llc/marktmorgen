@@ -36,7 +36,7 @@ import { broadcastAnswer, cancellationAnswer } from "@/lib/broadcast-response";
 import type { DraftSubjectTest } from "@/lib/mail-draft-test";
 import { subjectTestPreview, type SubjectTestPreview } from "@/lib/mail-test-preview";
 import { readMailSchedule } from "@/lib/mail-schedule";
-import { MAX_LETTER_PRODUCTS, MEMBERS_PUBLISH_WARNING, PUBLISH_WARNING } from "@/lib/letter-rules";
+import { PublishControl } from "@/components/letter-publish-control";
 import { channelName } from "@/lib/channel-names";
 import { type Narrow, ACTIVE_DAYS, MAX_SPENT, readSegmentSpend, QUIET_DAYS, type Segment } from "@/lib/segments-rules";
 
@@ -166,6 +166,10 @@ type BroadcastRow = {
   test: SubjectTest | null;
   /** Where it is published on the store, or null when it is not (lib/letters.ts). */
   published?: string | null;
+  /** Whether it is published could not be read: then nothing is offered that would publish it on a guess. */
+  publishedUnknown?: boolean;
+  /** Whether it is published for members only (lib/letters.ts, listScore). */
+  publishedMembers?: boolean;
 };
 type Money = { sales: number; cents: number; elsewhere?: number };
 type FlowRow = Flow & { stats: FlowCounts; statsAvailable?: boolean; money: Money | null };
@@ -1497,86 +1501,6 @@ function waitWords(hours: number): string {
   return hours === 1 ? "an hour" : `${hours} hours`;
 }
 
-/**
- * Publishing a sent email on the store, or taking it off (lib/letter-rules.ts):
- * asked before it is published, because anyone can read it once it is,
- * unless the creator checks the products whose holders alone may read its
- * words (lib/letter-access.ts).
- */
-function PublishControl({ id, path, disabled, onDone, products }: { id: string; path: string | null; disabled: boolean; onDone: () => void; products: readonly { id: string; title: string }[] }) {
-  const [asking, setAsking] = useState(false);
-  const [working, setWorking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [chosen, setChosen] = useState<string[]>([]);
-  async function act(action: "publish" | "unpublish") {
-    if (working) return;
-    setWorking(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/store/letters", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action === "publish" ? { action, id, products: chosen } : { action, id }) });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string };
-      if (data.ok !== true) setError(data.message ?? MESSAGES.server_error);
-      else {
-        toast(action === "publish" ? (chosen.length ? "Published on your store for members." : "Published on your store.") : "Taken off your store.");
-        setChosen([]);
-        setAsking(false);
-        onDone();
-      }
-    } catch {
-      setError(MESSAGES.server_error);
-    } finally {
-      setWorking(false);
-    }
-  }
-  if (path) {
-    return (
-      <span className="inline-flex min-h-11 flex-wrap items-center gap-x-4 text-sm">
-        <a href={path} className="font-bold text-ink underline underline-offset-4">Published on your store</a>
-        <button type="button" disabled={disabled || working} aria-busy={working} className="font-bold text-ink-soft underline underline-offset-4 hover:text-danger" onClick={() => act("unpublish")}>
-          Take it off
-        </button>
-        {error ? <span role="alert" className="text-danger">{error}</span> : null}
-      </span>
-    );
-  }
-  return asking ? (
-    <div className="block w-full rounded-[var(--r-sm)] bg-sand p-3 text-sm text-ink">
-      {products.length ? (
-        <fieldset className="mb-3">
-          <legend className="font-bold">Who can read its words</legend>
-          <span className="mt-1 block text-ink-soft">Check nothing and everyone can. Check products and only people who have one of them can (up to {MAX_LETTER_PRODUCTS}).</span>
-          <div className="mt-2 max-h-48 overflow-y-auto">
-            {products.map((p) => {
-              const on = chosen.includes(p.id);
-              return (
-                <label key={p.id} className="flex min-h-11 items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    disabled={working || (!on && chosen.length >= MAX_LETTER_PRODUCTS)}
-                    onChange={(e) => setChosen((now) => (e.target.checked ? [...now, p.id] : now.filter((x) => x !== p.id)))}
-                  />
-                  <span className="[overflow-wrap:anywhere]">{p.title}</span>
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
-      ) : null}
-      <span className="block" aria-live="polite">{chosen.length ? MEMBERS_PUBLISH_WARNING : PUBLISH_WARNING}</span>
-      <span className="mt-2 flex flex-wrap gap-3">
-        <button type="button" className="btn btn-primary btn-sm" disabled={disabled || working} aria-busy={working} onClick={() => act("publish")}>Publish it</button>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={working} onClick={() => { setAsking(false); setChosen([]); }}>Not now</button>
-      </span>
-      {error ? <span role="alert" className="mt-2 block text-danger">{error}</span> : null}
-    </div>
-  ) : (
-    <button type="button" disabled={disabled} className="inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4" onClick={() => setAsking(true)}>
-      Publish on your store
-    </button>
-  );
-}
-
 function History({
   readFailed,
   broadcasts,
@@ -1756,7 +1680,7 @@ function History({
                 >
                   Write it again
                 </button>
-                {canSend ? <PublishControl id={b.id} path={b.published ?? null} disabled={busy} onDone={refreshHistory} products={products} /> : null}
+                {canSend ? <PublishControl id={b.id} path={b.published ?? null} members={b.publishedMembers ?? false} unknown={b.publishedUnknown ?? false} disabled={busy} onDone={refreshHistory} products={products} /> : null}
                 {/* Not offered for an email narrowed two ways at once: an
                     email in a sequence keeps one condition (lib/mail-reuse.ts). */}
                 {canSend && keepable(b) ? (

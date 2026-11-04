@@ -37,18 +37,34 @@ import DeletePage from "@/app/privacy/delete/page";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 
-/** The email goes after the answer (lib/erasure-request.ts, afterAnswer): wait for it before reading what was sent. */
-const settled = async () => {
-  for (let i = 0; i < 50; i += 1) await new Promise((resolve) => setImmediate(resolve));
-};
 import { done, is, part } from "./check";
 
 const sent: { to: string; text: string }[] = [];
+let deliveryObserved: (() => void) | null = null;
+/** The email goes after the answer: wait for the mock's delivery event, not for event-loop turns. */
+const waitForDelivery = (from: number, to: string): Promise<void> => {
+  const delivered = () => sent.slice(from).some((message) => message.to === to);
+  if (delivered()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const observe = () => {
+      if (!delivered()) return;
+      clearTimeout(timer);
+      if (deliveryObserved === observe) deliveryObserved = null;
+      resolve();
+    };
+    deliveryObserved = observe;
+    const timer = setTimeout(() => {
+      if (deliveryObserved === observe) deliveryObserved = null;
+      reject(new Error(`email delivery was not observed for ${to}`));
+    }, 2_000);
+  });
+};
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   if (url.hostname === "api.resend.com") {
     const body = JSON.parse(String(init?.body)) as { to?: unknown; text?: string };
     sent.push({ to: String(body.to), text: String(body.text ?? "") });
+    deliveryObserved?.();
     return new Response(JSON.stringify({ id: `email_${sent.length}` }), { status: 200 });
   }
   if (url.hostname === "api.stripe.com") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
@@ -108,11 +124,20 @@ async function main(): Promise<void> {
   await fill(first);
   const usedBefore = [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")];
   const from = sent.length;
-  is("the link is sent", await requestErasureLink({ email: TESS, ip: "203.0.113.20", origin: "https://marktmorgen.com" }), "sent");
-  await settled();
-  const link = sent.slice(from).find((m) => m.to === TESS);
-  is("to the address, naming both stores", [Boolean(link), link?.text.includes(one.name), link?.text.includes(two.name)], [true, true, true]);
-  is("taken from the second store's share, nothing more from the first", [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")], [usedBefore[0], usedBefore[1] + 1]);
+  const pipeline = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return pipeline(commands);
+  };
+  try {
+    is("the link is sent", await requestErasureLink({ email: TESS, ip: "203.0.113.20", origin: "https://marktmorgen.com" }), "sent");
+    await waitForDelivery(from, TESS);
+    const link = sent.slice(from).find((m) => m.to === TESS);
+    is("to the address, naming both stores", [Boolean(link), link?.text.includes(one.name), link?.text.includes(two.name)], [true, true, true]);
+    is("taken from the second store's share, nothing more from the first", [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")], [usedBefore[0], usedBefore[1] + 1]);
+  } finally {
+    redis.pipeline = pipeline;
+  }
 
   part("(b) Asked for every store, no store has room: the same answer as an unknown address");
   await fill(second);

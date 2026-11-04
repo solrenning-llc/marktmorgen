@@ -5,20 +5,20 @@
  * nothing is sent or charged by these rules.
  */
 import { readFileSync } from "node:fs";
-import { type FallbackInvoice, fallbackLines, monthlyFallback } from "@/lib/yearly-fallback-rules";
-import type { YearlySub } from "@/lib/yearly-switch-rules";
+import { type FallbackInvoice, type FallbackSub, fallbackLines, monthlyFallback } from "@/lib/yearly-fallback-rules";
 import { formatMoney } from "@/lib/money";
 import { done, is, part } from "./check";
 
 const NOW = Date.UTC(2026, 10, 4) / 1000;
 const product = { id: "p1", priceCents: 2000, recurring: { interval: "month", trialDays: 0, payments: 0 }, options: [], pwyw: false, yearly: { cents: 20000 } };
-const sub: YearlySub = {
+const sub: FallbackSub = {
   status: "past_due",
+  collection_method: "charge_automatically",
   metadata: { store: "lena" },
   items: { data: [{ quantity: 1, price: { unit_amount: 20000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] },
 };
 const invoice: FallbackInvoice = { subscription: "sub_1", billing_reason: "subscription_cycle", status: "open", amount_due: 20000, currency: "usd" };
-const offer = (s: YearlySub = sub, i: FallbackInvoice = invoice, p: typeof product | null = product, tiers: string[] = []) => monthlyFallback("sub_1", s, i, p, tiers, "usd", NOW);
+const offer = (s: FallbackSub = sub, i: FallbackInvoice = invoice, p: typeof product | null = product, tiers: string[] = []) => monthlyFallback("sub_1", s, i, p, tiers, "usd", NOW);
 
 part("When it is offered");
 is("a yearly membership whose renewal failed: one month at the product's own monthly price, the year not charged, and what twelve months cost more", offer(), { monthly: 2000, yearly: 20000, extraPerYear: 4000 });
@@ -35,8 +35,9 @@ is(
   [null, null, null, null, null, null],
 );
 is(
-  "only past due on it: never canceled, set to end, paused, a payment plan, discounted, or with an affiliate's months still running",
+  "only past due on it and charged automatically: never paid by invoice, canceled, set to end, paused, a payment plan, discounted, or with an affiliate's months still running",
   [
+    offer({ ...sub, collection_method: "send_invoice" } as FallbackSub),
     offer({ ...sub, status: "canceled" }),
     offer({ ...sub, status: "active" }),
     offer({ ...sub, cancel_at_period_end: true }),
@@ -46,7 +47,7 @@ is(
     offer({ ...sub, discount: { id: "di_1" } }),
     offer({ ...sub, metadata: { via: "aff1", via_months: "6", via_at: String(NOW - 86_400) } }),
   ],
-  [null, null, null, null, null, null, null, null],
+  [null, null, null, null, null, null, null, null, null],
 );
 is(
   "only once a year, one item of one, in the store's currency",

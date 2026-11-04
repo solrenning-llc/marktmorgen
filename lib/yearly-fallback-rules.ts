@@ -15,7 +15,8 @@
  *     `billing_reason` "subscription_cycle"), still open, never an invoice
  *     already paid, voided or of another subscription;
  *   - the membership pays once a year, one item of one, in the store's
- *     currency, past due on that renewal (not canceled, not set to end, not
+ *     currency, charged automatically (never sent as an invoice to pay by
+ *     hand), past due on that renewal (not canceled, not set to end, not
  *     paused), with no discount and no affiliate share still running for a
  *     set number of months (yearly-switch-rules' own reasons, read the same
  *     way);
@@ -31,6 +32,9 @@
  */
 import { type Yearly, type YearlyCandidate, activeYearly } from "@/lib/yearly-price";
 import { type YearlySub, affiliateMonthsLeft, discounted } from "@/lib/yearly-switch-rules";
+
+/** The parts of a Stripe subscription these rules read: yearly-switch-rules' own, and how it is collected. */
+export type FallbackSub = YearlySub & { collection_method?: unknown };
 
 /** The parts of a Stripe invoice these rules read. */
 export type FallbackInvoice = {
@@ -67,7 +71,7 @@ const num = (value: unknown) => (typeof value === "number" && Number.isFinite(va
  */
 export function monthlyFallback(
   subId: string,
-  sub: YearlySub,
+  sub: FallbackSub,
   invoice: FallbackInvoice,
   product: (YearlyCandidate & { yearly?: Yearly | null }) | null | undefined,
   tiers: readonly string[],
@@ -81,8 +85,10 @@ export function monthlyFallback(
   if (invoiceSub !== subId) return null;
   if (invoice.billing_reason !== "subscription_cycle" || invoice.status !== "open") return null;
   if (String(invoice.currency ?? "").toLowerCase() !== storeCurrency.toLowerCase()) return null;
-  // Past due on it: not canceled, not set to end, not paused.
+  // Past due on it: not canceled, not set to end, not paused. Charged automatically: the only kind a move made only if
+  // paid can be (Stripe, Pending updates: "if the subscription's collection_method is charge_automatically").
   if (sub.status !== "past_due") return null;
+  if (sub.collection_method !== "charge_automatically") return null;
   if (num(sub.cancel_at) > 0 || sub.cancel_at_period_end === true) return null;
   if (sub.pause_collection && typeof sub.pause_collection === "object") return null;
   const meta = sub.metadata ?? {};

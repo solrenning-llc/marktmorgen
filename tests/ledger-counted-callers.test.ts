@@ -20,7 +20,7 @@
  * says how many this needs and how many are left.
  */
 import { readFileSync } from "node:fs";
-import { type Broadcast, EXTRA_READS, LIST_RETRY_SECONDS, NOTE_ROOM, NO_BUYERS_NOTE, PLAN_OFF_NOTE, READS_HELD, READ_FAILED_NOTE, READ_GAVE_UP_NOTE, READ_MISSES_ALLOWED, READ_RETRY_SECONDS, advanceBroadcast, cancelBroadcast, countTest, createBroadcast, readsSpentNote, studioWaitNote } from "@/lib/broadcasts";
+import { type Broadcast, EXTRA_READS, LIST_RETRY_SECONDS, NOTE_ROOM, NO_BUYERS_NOTE, PLAN_OFF_NOTE, READS_HELD, READ_FAILED_NOTE, READ_GAVE_UP_NOTE, READ_MISSES_ALLOWED, READ_RETRY_SECONDS, advanceBroadcast, planOffPartNote, cancelBroadcast, countTest, createBroadcast, readsSpentNote, studioWaitNote } from "@/lib/broadcasts";
 import { giveAllowanceIn } from "@/lib/store-allowance";
 import { allowanceWindow, opensAgainWords, windowAt, windowId } from "@/lib/allowance-window";
 import { StoreFullError } from "@/lib/store-full";
@@ -223,6 +223,24 @@ async function main(): Promise<void> {
   stripeCalls = 0;
   const off = await run(far.broadcast.id);
   is("the plan ended before it was due: canceled, saying so; nothing read, sent or taken; its hold given back; out of the queue", [off?.status, off?.note, off?.sent, off?.listed, stripeCalls, await used(), await used(farKey), (await redisPipeline([["SISMEMBER", "nl:mail:queue", far.broadcast.id]]))[0]], ["cancelled", PLAN_OFF_NOTE, 0, false, 0, 0, 0, 0]);
+  // Owner, C3-108: an email to the whole list follows the same rule.
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", period: paidPeriod() });
+  const whole = await createBroadcast(await load(), { ...narrowed, narrow: undefined, sendAt: threeMonths } as Parameters<typeof createBroadcast>[1]);
+  if (!whole.ok) throw new Error("not written");
+  const part3 = await createBroadcast(await load(), { ...narrowed, narrow: undefined, sendAt: Date.now() + 3_600_000 } as Parameters<typeof createBroadcast>[1]);
+  if (!part3.ok) throw new Error("not written");
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: false, tier: "pro", period: null });
+  await dueNow(whole.broadcast.id);
+  // One already going out, one email of three sent, when the plan stops.
+  await setRecord(part3.broadcast.id, { sendAt: Math.floor(Date.now() / 1000) - 5, status: "sending", listed: true, sent: 1, total: 3 });
+  const wholeOff = await run(whole.broadcast.id);
+  const partOff = await run(part3.broadcast.id);
+  is("the plan ended: an email to the whole list is canceled too, saying so, nothing sent, out of the queue (never waiting for Pro)", [wholeOff?.status, wholeOff?.note, wholeOff?.sent, wholeOff?.listed, (await redisPipeline([["SISMEMBER", "nl:mail:queue", whole.broadcast.id]]))[0]], ["cancelled", PLAN_OFF_NOTE, 0, false, 0]);
+  is("one going out stops where it was, saying how many went", [partOff?.status, partOff?.sent, partOff?.note, (await redisPipeline([["EXISTS", `nl:mail:bc:${part3.broadcast.id}:to`]]))[0]], ["cancelled", 1, planOffPartNote(1, 3), 0]);
+  await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", period: paidPeriod() });
+  const revived = await run(whole.broadcast.id);
+  is("the plan on again later does not bring it back", [revived?.status, revived?.sent, revived?.listed], ["cancelled", 0, false]);
+
   await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", period: paidPeriod() });
 
   part("The month a moment ahead falls in, as the plan stands now (windowAt)");

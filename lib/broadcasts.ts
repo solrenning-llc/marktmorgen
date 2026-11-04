@@ -156,8 +156,12 @@ export const NO_BUYERS_NOTE = "Your store can no longer read its sales (Stripe a
 export const LIST_RETRY_SECONDS = 3_600;
 /** Said when a narrowed email's list could not be made now for a reason that passes: tried again in an hour. */
 const LIST_WAIT_NOTE = "The list of who it goes to could not be prepared just now. Nothing was sent. It is tried again in an hour.";
-/** Said on a narrowed email canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
+/** Said on an email canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
 export const PLAN_OFF_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent and none of your studio requests were used for it. To send it, write it again while your plan is on.";
+/** Said on an email stopped partway because the plan stopped being paid and running: how many had gone, and nothing more. */
+export function planOffPartNote(sent: number, total: number): string {
+  return `Your plan stopped being active while this email was going out, so the rest was canceled: ${sent.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} had gone out. Nothing more is sent. To reach the rest, write it again while your plan is on.`;
+}
 /** Said on a narrowed email whose reading of its buyers failed at Stripe or PayPal: nothing spent, tried again later. */
 export const READ_FAILED_NOTE = `Your sales could not be read just now, so the list of who it goes to could not be made. Nothing was sent. What that try used of your studio requests stays used. It is tried again later, up to ${READ_MISSES_ALLOWED} times in a row, then it stops.`;
 /** Said on a narrowed email waiting for the month whose studio requests will pay for its reading of the buyers. */
@@ -536,19 +540,19 @@ export async function advanceBroadcast(
       await redisPipeline([["SREM", QUEUE, id]]);
       return b;
     }
-    // A narrowed email due while the plan is not paid and running (ended, never started, its renewal unpaid or
-    // disputed) is canceled, saying so: its buyers are never read, nothing is taken or sent, and what it held for
-    // that month is given back. A trial running is its plan's own month.
-    if (!b.listed && !given && isNarrowed(b.narrow) && b.sent === 0) {
-      const standing = costStandingOf(store, now);
-      if (standing !== "paid" && standing !== "trial") {
-        const held = b.hold;
-        b = { ...b, status: "cancelled", note: PLAN_OFF_NOTE, finishedAt: now, ...(held ? { hold: { ...held, units: 0 } } : {}) };
-        await save(b);
-        await redisPipeline([["SREM", QUEUE, id], ["DEL", toKey(id)]]);
-        if (held?.units) await giveAllowanceIn(store, "studio", held.units, held.window);
-        return b;
-      }
+    // An email due while the plan is not paid and running (ended, never started, its renewal unpaid or disputed) is
+    // canceled, saying so, narrowed or to the whole list (owner, C3-108): nothing goes out after the plan ends, and a
+    // plan switched on again later does not bring it back. A narrowed one's buyers are never read, nothing is taken,
+    // and what it held for that month is given back. One part sent is stopped there, saying how many went. A trial
+    // running is its plan's own month.
+    const standing = costStandingOf(store, now);
+    if (standing !== "paid" && standing !== "trial") {
+      const held = b.hold;
+      b = { ...b, status: "cancelled", note: b.sent > 0 ? planOffPartNote(b.sent, b.total) : PLAN_OFF_NOTE, finishedAt: now, ...(held ? { hold: { ...held, units: 0 } } : {}) };
+      await save(b);
+      await redisPipeline([["SREM", QUEUE, id], ["DEL", toKey(id)]]);
+      if (held?.units) await giveAllowanceIn(store, "studio", held.units, held.window);
+      return b;
     }
     if (monthlyAllowance(store) === 0) {
       b = { ...b, status: "waiting", note: "Your plan does not include email right now. It goes out once Pro is on again." };

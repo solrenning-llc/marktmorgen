@@ -162,9 +162,10 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
       if (!Array.isArray(reply) || reply.length !== 2 || typeof reply[0] !== "string" || !Array.isArray(reply[1])) return fail("unreadable");
       for (const name of reply[1]) {
         if (typeof name !== "string" || name.includes("�")) return fail("unreadable");
-        // A key the format cannot keep: refused before anything is copied, never found out by a failed seal.
+        if (!name.startsWith(BACKUP_PREFIX)) continue;
+        // A key of ours the format cannot keep: refused before anything is copied, never found out by a failed seal.
         if (Buffer.byteLength(name, "utf8") > KEY_MAX_BYTES) return fail("too_big");
-        if (name.startsWith(BACKUP_PREFIX)) keys.add(name);
+        keys.add(name);
         if (keys.size > maxRows) return fail("too_many");
       }
       if (reply[0] !== "0" && reply[0] === cursor) return fail("unreadable");

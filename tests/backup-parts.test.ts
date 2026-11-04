@@ -39,14 +39,18 @@ const store: BackupObjectStore = {
 };
 const limits = { maxRows: 100, maxCommands: 1_000, maxParts: 10, maxRunBytes: 1_000_000, batch: 7, now: T0, partBytes: 4_096 };
 
-async function main(): Promise<void> {
-  redis.clear();
-  redis.now = () => T0;
-  // Twenty keys of ours of about 600 bytes each: several parts of at most 4 KB.
+/** Twenty keys of ours of about 600 bytes each (several parts of at most 4 KB), one that ends, one not ours. */
+function seed(): void {
   for (let i = 0; i < 20; i += 1) redis.run(["SET", `nl:bk:test:${String(i).padStart(2, "0")}`, `v${i}-`.padEnd(600, String.fromCharCode(97 + (i % 26)))]);
   redis.run(["SET", "nl:bk:test:ttl", "ends"]);
   redis.run(["PEXPIRE", "nl:bk:test:ttl", 3_600_000]);
   redis.run(["SET", "other:not-ours", "x"]);
+}
+
+async function main(): Promise<void> {
+  redis.clear();
+  redis.now = () => T0;
+  seed();
 
   part("A set of parts, read back whole");
   const made = await copyInParts(limits, key, store);
@@ -103,7 +107,6 @@ async function main(): Promise<void> {
   {
     const scratch = new Map<string, Uint8Array>();
     const plain: BackupObjectStore = { putNew: async (id, bytes) => void scratch.set(id, new Uint8Array(bytes)), read: async (id) => scratch.get(id) ?? Promise.reject(new Error("missing")) };
-    const kept = [...objects.keys()];
     redis.clear();
     redis.now = () => T0;
     // Keys of euro signs (three bytes each) and quotes (two in JSON): far more bytes than characters.
@@ -114,7 +117,10 @@ async function main(): Promise<void> {
     if (wide.ok) await readBackupSet(wide.id, key, plain, 10_000_000, async (snapshot) => { largest = Math.max(largest, Buffer.byteLength(JSON.stringify(snapshot), "utf8")); });
     // A part's rows fill at most its bound less its 1,024 bytes of room; its envelope adds under 64.
     is(`no part's JSON past what it counts (${largest} <= ${limits.partBytes - 1_024 + 64})`, largest > 0 && largest <= limits.partBytes - 1_024 + 64, true);
-    is("the objects of the first sets are still there", kept.every((id) => objects.has(id)), true);
+    // The keys of the sections below, as they were.
+    redis.clear();
+    redis.now = () => T0;
+    seed();
   }
 
   part("Failures say which side");

@@ -28,6 +28,14 @@ is("allowed with both behind it", rules(urgent, { realDeadline: true, realStockL
 part("The price is the product's");
 is("a wrong price is refused", rules({ text: "Join for just $19." }), ["price_mismatch"]);
 is("the right price goes", rules({ text: "Join for $49." }), []);
+// Found in review (inbox C3-45, item 2): price $49, no sale running.
+is("a lower price after now, today or sale is refused", [rules({ text: "Now $39." }), rules({ text: "Today $39 only." }), rules({ text: "Big sale $39 this week." })], [["price_mismatch"], ["price_mismatch"], ["price_mismatch"]]);
+is("an earlier price with no sale running is refused, even when it is the real price now", [rules({ text: "Now $39 instead of $49." }), rules({ text: "Was $79, now $49." })], [["price_mismatch", "price_mismatch"], ["price_mismatch"]]);
+is("with a real sale running, the earlier price is not taken for the price", rules({ text: "Was $79, now $49." }, { realDeadline: true }), []);
+is("a sale that ends on a weekday, or today only, with no real end date is refused", [rules({ headline: "Sale ends Sunday" }), rules({ text: "Only today." }), rules({ text: "Ends this Friday." })].map((r) => r.includes("false_urgency")), [true, true, true]);
+is("and allowed with a real end date behind it", rules({ headline: "Sale ends Sunday" }, { realDeadline: true }), []);
+is("a fee, a saving or a stated value is still not the price", [rules({ text: "Save $10 today." }), rules({ text: "Now with a $5 shipping fee." })], [[], []]);
+is("an amount in another currency is said not to be checked", AD_NOT_CHECKED.some((line) => line.includes("only when the store sells in US dollars")), true);
 
 part("Testimonials only from verified reviews");
 is("an invented quote is refused", rules({ text: "“Best course I ever took!” — Maria" }), ["testimonial_unverified"]);

@@ -55,6 +55,7 @@ export const AD_NOT_CHECKED: readonly string[] = [
   "Each ad platform's own policies beyond these words: Meta's were not readable in the official check; Google's unreliable-claims and TikTok's misleading-content rules are covered here only where they match the store's own (earnings, results); TikTok's AI-content label and before-and-after pictures are not read here (docs/ad-platforms-official-check-2026-11-02.md)",
   "Each platform's length limits for headlines and text",
   "Pictures and videos: only the words are read here",
+  "A price in a currency other than US dollars: an amount is compared with the product's price only when the store sells in US dollars and the amount is written with $",
 ];
 
 const REFUSED: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "earnings_claim", "false_urgency", "price_mismatch"]);

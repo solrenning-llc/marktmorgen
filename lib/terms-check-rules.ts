@@ -150,14 +150,16 @@ function fastMoneyExcused(text: string, index: number, length: number): boolean 
 }
 
 
-const URGENCY_TIME = /\b(limited time|ends (?:today|tonight|soon|at midnight)|today only|last chance|price (?:goes|will go) up|before the timer (?:runs out|ends)|act now|hurry)\b/gi;
+const URGENCY_TIME = /\b(limited time|ends (?:today|tonight|soon|at midnight|(?:this )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))|today only|only today|last chance|price (?:goes|will go) up|before the timer (?:runs out|ends)|act now|hurry)\b/gi;
 const URGENCY_STOCK = /\b(only \d+ (?:left|spots?|seats?|copies|places)|limited (?:spots|seats|copies|places)|selling fast|almost sold out)\b/gi;
 
 const RESALE = /\b(resell(?:ing)? rights?|resale rights?|master resell(?:ing)? rights?|PLR|private label rights?|white[- ]label rights?)\b/gi;
 
 const MONEY = /\$\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))?(?!\d)/g;
 /** A word saying what follows is the price, just before the amount. */
-const PRICE_WORD = /\b(price|priced|costs?|pay|paying|only|just|for)\b[^.!?;\n$]{0,12}$/i;
+const PRICE_WORD = /\b(price|priced|costs?|pay|paying|only|just|for|now|today|sale)\b[^.!?;\n$]{0,12}$/i;
+/** A word saying what follows is an earlier price ("was $49", "instead of $49"): only true while a sale is running. */
+const WAS_PRICE_WORD = /\b(was|were|instead of|regularly|originally|normally|usually|reg\.?)\b[^.!?;\n$]{0,8}$/i;
 /** An amount that is not the product's price: shipping, tax, a fee, a stated value, a saving. */
 const NOT_PRICE_BEFORE = /\b(shipping|delivery|postage|tax|taxes|fees?|save|saving|savings|worth|valued at|refunds?|deposit|tip|bonus)\b[^.!?;\n$]{0,16}$/i;
 const NOT_PRICE_AFTER = /^\S*\s*(?:\)|,)?\s*(value|worth|off|discount|shipping|tax|fee|deposit|bonus)\b/i;
@@ -253,7 +255,17 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
       const index = m.index ?? 0;
       const before = text.slice(Math.max(0, index - 30), index);
       const after = text.slice(index + m[0].length, index + m[0].length + 20);
-      if (!PRICE_WORD.test(before) || NOT_PRICE_BEFORE.test(before) || NOT_PRICE_AFTER.test(after)) continue;
+      if (NOT_PRICE_BEFORE.test(before) || NOT_PRICE_AFTER.test(after)) continue;
+      // An earlier price, with no sale running on this product, is a price that never was.
+      if (WAS_PRICE_WORD.test(before)) {
+        if (!input.realDeadline) {
+          add("price_mismatch", index, m[0].length,
+            `This gives ${m[0].replace(/\s/g, "")} as an earlier price, but no sale is running on this product: the page and checkout show ${formatUsd(input.priceCents)}.`,
+            "Remove the earlier price, or set a sale on this product with its real end date.");
+        }
+        continue;
+      }
+      if (!PRICE_WORD.test(before)) continue;
       const cents = Number(m[1].replace(/,/g, "")) * 100 + (m[2] ? Number(m[2]) : 0);
       if (cents === input.priceCents) continue;
       add("price_mismatch", index, m[0].length,

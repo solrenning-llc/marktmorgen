@@ -1543,6 +1543,7 @@
     "components/url-field.tsx",
     "components/usage-meter.tsx",
     "components/video-embed.tsx",
+    "components/video-window.tsx",
     "components/visit-us-block.tsx",
     "components/visit-us-editor.tsx",
     "components/waitlist-panel.tsx",

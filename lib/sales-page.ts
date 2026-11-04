@@ -343,11 +343,14 @@ export type FeatureBlock = { id: string; kind: "feature"; heading: string; body:
  * (quoteUrl). On a phone the columns become one, in reading order: the first
  * column's elements, then the second's, then the third's.
  *
+ * A video can also sit behind a button of its own words and open in a
+ * window over the page (unit 5): the same three players, loaded only once the
+ * button is pressed, in a dialog built the way the picture viewer's is
+ * (components/video-window.tsx after components/picture-viewer.tsx).
+ *
  * Left out, and why: audio (no block keeps an audio file of its own; a file
  * would need the claim and delete rules pictures have in
- * lib/sales-page-store.ts) and a video that opens in a window (the page has
- * no such window for a video yet; the picture viewer's dialog,
- * components/picture-viewer.tsx, is the pattern to reuse when it comes).
+ * lib/sales-page-store.ts).
  */
 export const MIN_ROW_COLUMNS = 1;
 export const MAX_ROW_COLUMNS = 3;
@@ -412,9 +415,16 @@ export type RowElement =
   | { kind: "icon"; name: RowIcon; label: string }
   | { kind: "button"; label: string; url: string }
   | { kind: "image"; picture: Picture; decorative: boolean }
-  | { kind: "video"; video: Video; title: string };
+  | { kind: "video"; video: Video; title: string }
+  /**
+   * A video behind a button (unit 5): the button's own words open a window
+   * with the player. A kind of its own, not a flag on "video", so every
+   * switch over the parts has to say how it draws, reads and copies one,
+   * and a part made before it can never be read as one.
+   */
+  | { kind: "video-window"; video: Video; title: string; label: string };
 export type RowElementKind = RowElement["kind"];
-export const ROW_ELEMENT_KINDS: readonly RowElementKind[] = ["heading", "subheading", "paragraph", "list", "icon", "button", "image", "video"];
+export const ROW_ELEMENT_KINDS: readonly RowElementKind[] = ["heading", "subheading", "paragraph", "list", "icon", "button", "image", "video", "video-window"];
 
 export type RowBlock = { id: string; kind: "row"; columns: RowElement[][] };
 
@@ -751,15 +761,17 @@ export function readVideo(raw: string): Video | null {
 }
 
 /** The only frame addresses a page ever gets, one per player, built from the id alone. */
-export function embedUrl(video: Video): string {
+export function embedUrl(video: Video, { autoplay = true }: { autoplay?: boolean } = {}): string {
+  // Off only for a visitor who asked for less motion (components/video-window.tsx): the player loads and waits for its own play button.
+  const play = autoplay ? 1 : 0;
   if (video.provider === "youtube") {
     // enablejsapi lets the page hear where the player is, for how far the video is watched (components/page-depth.tsx).
-    return `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`;
+    return `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=${play}&rel=0&modestbranding=1&enablejsapi=1`;
   }
   if (video.provider === "vimeo") {
-    return `https://player.vimeo.com/video/${video.id}?dnt=1&autoplay=1${video.hash ? `&h=${video.hash}` : ""}`;
+    return `https://player.vimeo.com/video/${video.id}?dnt=1&autoplay=${play}${video.hash ? `&h=${video.hash}` : ""}`;
   }
-  return `https://www.loom.com/embed/${video.id}?autoplay=1&hide_owner=true&hide_share=true&hide_title=true`;
+  return `https://www.loom.com/embed/${video.id}?autoplay=${play}&hide_owner=true&hide_share=true&hide_title=true`;
 }
 
 /** The address a person would open the video at, for the studio's field. */
@@ -862,6 +874,11 @@ export function parseRowElement(raw: unknown): RowElement | null {
       const video = parseVideo(value.video);
       return video ? { kind: "video", video, title: line(value.title, MAX_HEADING) } : null;
     }
+    case "video-window": {
+      const video = parseVideo(value.video);
+      const label = line(value.label, MAX_CTA_LABEL);
+      return video && label ? { kind: "video-window", video, title: line(value.title, MAX_HEADING), label } : null;
+    }
     default:
       return null;
   }
@@ -917,6 +934,8 @@ function rowElementWhole(raw: unknown, kept: RowElement): boolean {
     }
     case "video":
       return whole(value.title) === kept.title;
+    case "video-window":
+      return whole(value.title) === kept.title && whole(value.label) === kept.label;
   }
 }
 

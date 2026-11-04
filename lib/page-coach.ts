@@ -82,6 +82,8 @@ const filled = (block: PageBlock): boolean => {
       return Boolean(block.product);
     case "form":
       return Boolean(block.form);
+    case "booking":
+      return Boolean(block.product);
     case "quotes":
       return block.items.length > 0;
     case "row":

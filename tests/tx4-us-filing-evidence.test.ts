@@ -26,7 +26,8 @@ test("TX4 records the conditional Form 5472 and pro forma Form 1120 filing rules
     "name and address and items B and E",
     "same tax year as its owner for U.S. filing purposes or, if none, the calendar year",
   ]) assert.ok(section.includes(fact), fact);
-  assert.match(section, /does not determine whether Marktmorgen LLC meets those conditions/i);
+  assert.match(section, /does not determine whether Solrenning LLC meets those conditions/i);
+  assert.doesNotMatch(section, /Marktmorgen LLC/i);
 });
 
 test("TX4 records the official due-date, extension and foreign-owned-DE delivery rules", () => {

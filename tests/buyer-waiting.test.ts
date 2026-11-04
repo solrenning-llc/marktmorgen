@@ -12,14 +12,16 @@ import { WAITING_SHOWN, openAgreementsFor, openRequestsFor, waitingFor } from "@
 import type { PaymentRequest } from "@/lib/payment-request-rules";
 import type { Store } from "@/lib/store";
 import { done, is, part } from "./check";
+import { store as redis } from "./redis-stub";
+import { personKey } from "@/lib/person-key";
 
 async function main(): Promise<void> {
   const NOW = Date.UTC(2026, 10, 4, 12);
   const DAY = 86_400_000;
   const request = (id: string, over: Partial<PaymentRequest> = {}): PaymentRequest =>
-    ({ id: id.padEnd(32, "0"), sid: "s1", email: "ana@example.com", name: "", lines: [], note: "", currency: "usd", total: 5000, createdAt: NOW - DAY, dueDate: "", expiresAt: NOW + 30 * DAY, state: "open", autoReminders: 0, sent: [], failed: "", ...over }) as PaymentRequest;
+    ({ id: id.padEnd(32, "0"), sid: "s1", email: "ana@example.com", name: "", lines: [], note: "", currency: "usd", total: 5000, createdAt: NOW - DAY, dueDate: "", expiresAt: NOW + 30 * DAY, state: "open", autoReminders: 0, sent: [NOW - DAY], failed: "", ...over }) as PaymentRequest;
   const agreement = (id: string, over: Partial<Agreement> = {}): Agreement =>
-    ({ id: id.padEnd(32, "0"), sid: "s1", kind: "proposal", email: "ana@example.com", name: "", createdAt: NOW - DAY, expiresAt: NOW + 10 * DAY, state: "open", versions: [{ n: 1, sha256: "x", createdAt: NOW - DAY, signature: null }], sent: [], failed: "", payRequest: "", copies: 0, closedAt: 0, ...over }) as Agreement;
+    ({ id: id.padEnd(32, "0"), sid: "s1", kind: "proposal", email: "ana@example.com", name: "", createdAt: NOW - DAY, expiresAt: NOW + 10 * DAY, state: "open", versions: [{ n: 1, sha256: "x", createdAt: NOW - DAY, signature: null }], sent: [NOW - DAY], failed: "", payRequest: "", copies: 0, closedAt: 0, ...over }) as Agreement;
 
   part("Payment requests");
   const requests = [
@@ -31,24 +33,51 @@ async function main(): Promise<void> {
     request("a6", { state: "canceled" }),
     request("a7", { expiresAt: NOW - 1 }),
     request("a8", { email: " ANA@example.com " }),
+    request("a9", { sent: [], failed: "The month's emails are used." }),
   ];
   const open = openRequestsFor(requests, "ana@example.com", NOW);
-  is("only those sent to this address that still take payment", open.map((r) => r.id.slice(0, 2)), ["a2", "a1", "a3", "a8"]);
+  is("only those emailed to this address that still take payment (one whose email never went is not shown)", open.map((r) => r.id.slice(0, 2)), ["a2", "a1", "a3", "a8"]);
   is("soonest due first, undated after, oldest first", open.map((r) => r.dueDate), ["2026-11-10", "2026-11-20", "", ""]);
   is("with only what the page needs", Object.keys(open[0]).sort(), ["dueDate", "expiresAt", "id", "total"]);
-  is("at most a few", openRequestsFor(Array.from({ length: WAITING_SHOWN + 5 }, (_, i) => request(`b${i}`)), "ana@example.com", NOW).length, WAITING_SHOWN);
+  is("all of them, for the count", openRequestsFor(Array.from({ length: WAITING_SHOWN + 5 }, (_, i) => request(`b${i}`)), "ana@example.com", NOW).length, WAITING_SHOWN + 5);
 
   part("Proposals and agreements to sign");
   const signed = agreement("c3", { versions: [{ n: 1, sha256: "x", createdAt: NOW - DAY, signature: { name: "Ana", at: NOW - 1 } as never }] });
-  const agreements = [agreement("c1", { expiresAt: NOW + 20 * DAY }), agreement("c2", { expiresAt: NOW + 2 * DAY }), signed, agreement("c4", { state: "withdrawn" }), agreement("c5", { expiresAt: NOW - 1 }), agreement("c6", { email: "someone@example.com" })];
+  const agreements = [agreement("c1", { expiresAt: NOW + 20 * DAY }), agreement("c2", { expiresAt: NOW + 2 * DAY }), signed, agreement("c4", { state: "withdrawn" }), agreement("c5", { expiresAt: NOW - 1 }), agreement("c6", { email: "someone@example.com" }), agreement("c7", { sent: [] })];
   is("only those sent to this address still taking a signature, the first to stop first", openAgreementsFor(agreements, "ana@example.com", NOW).map((a) => a.id.slice(0, 2)), ["c2", "c1"]);
-  is("a store with nothing waiting, or nothing readable, shows nothing", await waitingFor({ sid: "", statsId: null } as unknown as Store, "ana@example.com", NOW), { requests: [], agreements: [] });
+  is("a store whose lists cannot be read shows nothing and says it could not read them", await waitingFor({ sid: "", statsId: null } as unknown as Store, "ana@example.com", NOW), { requests: [], agreements: [], requestsTotal: 0, agreementsTotal: 0, unread: true });
+
+  part("Read from the person's own records, whatever the store keeps");
+  const sid = "f".repeat(32);
+  const shop = { sid, statsId: null } as unknown as Store;
+  const mine = Array.from({ length: 14 }, (_, i) => request(`d${i.toString(16).padStart(2, "0")}`, { sid }));
+  await redis.pipeline([
+    ...mine.map((r) => ["SET", `nl:payreq:r:${r.id}`, JSON.stringify(r)]),
+    ["SADD", `nl:payreq:p:${sid}:${personKey(sid, "ana@example.com")}`, ...mine.map((r) => r.id)],
+    // Another buyer's, in the store's own list only: never read for Ana.
+    ["SET", `nl:payreq:r:${"e".repeat(32)}`, JSON.stringify(request("e", { sid, email: "bob@example.com" }))],
+  ]);
+  const keep = redis.pipeline.bind(redis);
+  let commands = 0;
+  redis.pipeline = (async (list: (string | number)[][]) => {
+    commands += list.length;
+    return keep(list);
+  }) as typeof redis.pipeline;
+  const read = await waitingFor(shop, "ana@example.com", NOW);
+  redis.pipeline = keep;
+  is("ten shown, fourteen counted, all read", [read.requests.length, read.requestsTotal, read.unread], [WAITING_SHOWN, 14, false]);
+  is("three commands for a person with requests and no agreements: their two sets and their records", commands, 3);
+  is("the page says how many more there are", ORDERS_WORDS.en.waitingMore(4), "And 4 more. Open the email each one came in to see it.");
+  await redis.pipeline([["SET", `nl:payreq:r:${mine[0].id}`, "not a record"]]);
+  is("a record that does not read: the page says it could not read what waits", (await waitingFor(shop, "ana@example.com", NOW)).unread, true);
+
 
   part("On the orders page");
   const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
   is("a named section with its heading, before the bookings", page.includes('aria-labelledby="waiting-title"') && page.includes('<h2 id="waiting-title"') && page.indexOf("<WaitingList") < page.indexOf('aria-labelledby="calls-title"'), true);
   is("each linked to the page that was emailed to them", page.includes("href={`/@${store.handle}/pay/${request.id}`}") && page.includes("href={`/@${store.handle}/sign/${agreement.id}`}"), true);
-  is("payment requests only where their page takes payment", page.includes("if (!requestsOpen(store)) waiting = { ...waiting, requests: [] };"), true);
+  is("payment requests only where their page takes payment", page.includes("if (!requestsOpen(store)) waiting = { ...waiting, requests: [], requestsTotal: 0 };"), true);
+  is("a list that cannot be read is said, never 'nothing to open'", page.includes("{waiting.unread ? (") && page.includes("{words.waitingUnread}") && page.includes("|| waiting.unread) ? null"), true);
   is("a list that cannot be read leaves the page as it was", page.includes("waitingFor(store, email).catch(() => waiting)"), true);
   is("the dates and amounts as their own pages say them", page.includes("rw.due(day(request.dueDate))") && page.includes("aw.until(said.date(agreement.expiresAt))") && page.includes("said.money(request.total)"), true);
   is("buttons tall enough to tap", (page.match(/btn st-btn btn-wrap mt-3 inline-flex min-h-11/g) ?? []).length, 2);

@@ -72,6 +72,8 @@ const en = {
   bookedCalls: (count: number): string => (count === 1 ? "Your booking" : "Your bookings"),
   /** What the store waits on from them: payment requests and agreements still open (lib/buyer-waiting.ts). */
   waiting: "Waiting for you",
+  waitingMore: (n: number) => `And ${n} more. Open the email each one came in to see it.`,
+  waitingUnread: "What is waiting for you could not be read just now. Try this page again in a moment.",
   /** Each link names what it opens, so two of them never read the same (WCAG 2.4.9). `due` is a date already said, or "". */
   openRequest: (amount: string, due: string): string => (due ? `Open the ${amount} payment request due ${due}` : `Open the ${amount} payment request`),
   openToSign: (title: string): string => `Read and sign “${title}”`,
@@ -310,6 +312,8 @@ const es: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "Tu reserva" : "Tus reservas"),
   waiting: "Te espera",
+  waitingMore: (n) => `Y ${n} más. Abre el correo con el que llegó cada uno para verlo.`,
+  waitingUnread: "No pudimos leer ahora lo que te espera. Vuelve a abrir esta página en un momento.",
   openRequest: (amount, due) => (due ? `Abrir la solicitud de pago de ${amount} con vencimiento el ${due}` : `Abrir la solicitud de pago de ${amount}`),
   openToSign: (title) => `Leer y firmar «${title}»`,
   nothingToOpen: (store) =>
@@ -523,6 +527,8 @@ const fr: OrdersWords = {
 
   bookedCalls: (count) => (count < 2 ? "Votre réservation" : "Vos réservations"),
   waiting: "Ce qui vous attend",
+  waitingMore: (n) => `Et ${n} de plus. Ouvrez l’e-mail par lequel chacun est arrivé pour le voir.`,
+  waitingUnread: "Ce qui vous attend n’a pas pu être lu pour le moment. Rouvrez cette page dans un instant.",
   openRequest: (amount, due) => (due ? `Ouvrir la demande de paiement de ${amount} à régler le ${due}` : `Ouvrir la demande de paiement de ${amount}`),
   openToSign: (title) => `Lire et signer «${S}${title}${S}»`,
   nothingToOpen: (store) =>
@@ -734,6 +740,8 @@ const de: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "Ihre Buchung" : "Ihre Buchungen"),
   waiting: "Wartet auf Sie",
+  waitingMore: (n) => `Und ${n} weitere. Öffnen Sie die E-Mail, mit der jeweils eines kam, um es zu sehen.`,
+  waitingUnread: "Was auf Sie wartet, konnte gerade nicht gelesen werden. Öffnen Sie diese Seite gleich noch einmal.",
   openRequest: (amount, due) => (due ? `Zahlungsanfrage über ${amount}, fällig am ${due}, öffnen` : `Zahlungsanfrage über ${amount} öffnen`),
   openToSign: (title) => `„${title}“ lesen und unterschreiben`,
   nothingToOpen: (store) =>
@@ -950,6 +958,8 @@ const it: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "La tua prenotazione" : "Le tue prenotazioni"),
   waiting: "Ti aspetta",
+  waitingMore: (n) => `E altri ${n}. Apri l’email con cui è arrivato ciascuno per vederlo.`,
+  waitingUnread: "Non è stato possibile leggere ora cosa ti aspetta. Riapri questa pagina tra un momento.",
   openRequest: (amount, due) => (due ? `Apri la richiesta di pagamento di ${amount} con scadenza ${due}` : `Apri la richiesta di pagamento di ${amount}`),
   openToSign: (title) => `Leggi e firma «${title}»`,
   nothingToOpen: (store) =>
@@ -1162,6 +1172,8 @@ const nl: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "Je boeking" : "Je boekingen"),
   waiting: "Wacht op jou",
+  waitingMore: (n) => `En nog ${n}. Open de e-mail waarmee elk binnenkwam om het te zien.`,
+  waitingUnread: "Wat op je wacht, kon nu niet worden gelezen. Open deze pagina zo meteen opnieuw.",
   openRequest: (amount, due) => (due ? `Het betaalverzoek van ${amount}, te betalen op ${due}, openen` : `Het betaalverzoek van ${amount} openen`),
   openToSign: (title) => `‘${title}’ lezen en ondertekenen`,
   nothingToOpen: (store) =>
@@ -1373,6 +1385,8 @@ const pt: OrdersWords = {
 
   bookedCalls: (count) => (count === 1 ? "A sua marcação" : "As suas marcações"),
   waiting: "À sua espera",
+  waitingMore: (n) => `E mais ${n}. Abra o email com que cada um chegou para o ver.`,
+  waitingUnread: "Não foi possível ler agora o que está à sua espera. Volte a abrir esta página daqui a pouco.",
   openRequest: (amount, due) => (due ? `Abrir o pedido de pagamento de ${amount} que vence a ${due}` : `Abrir o pedido de pagamento de ${amount}`),
   openToSign: (title) => `Ler e assinar «${title}»`,
   nothingToOpen: (store) =>

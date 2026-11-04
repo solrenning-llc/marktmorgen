@@ -178,13 +178,13 @@ export default async function OrdersPage({ params, searchParams }: Params) {
 
   let purchases: Purchase[] | null = null;
   let calls: BookedCall[] = [];
-  let waiting: Waiting = { requests: [], agreements: [] };
+  let waiting: Waiting = { requests: [], agreements: [], requestsTotal: 0, agreementsTotal: 0, unread: false };
   let failed = false;
   if (email) {
     try {
       [purchases, calls, waiting] = await Promise.all([purchasesFor(store, email), callsFor(store, email), waitingFor(store, email).catch(() => waiting)]);
       // A request is shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen).
-      if (!requestsOpen(store)) waiting = { ...waiting, requests: [] };
+      if (!requestsOpen(store)) waiting = { ...waiting, requests: [], requestsTotal: 0 };
     } catch (error) {
       console.error("listing purchases failed", error);
       failed = true;
@@ -354,6 +354,11 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                 {words.pageTitle}
               </h1>
               {waiting.requests.length + waiting.agreements.length > 0 ? <WaitingList waiting={waiting} store={store} words={words} /> : null}
+              {waiting.unread ? (
+                <p role="status" className="st-muted mt-4">
+                  {words.waitingUnread}
+                </p>
+              ) : null}
               {calls.length > 0 ? (
                 <section aria-labelledby="calls-title" className="mt-6">
                   <h2 id="calls-title" className="font-display text-xl font-semibold">
@@ -366,7 +371,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                   </ul>
                 </section>
               ) : null}
-              {purchases.length === 0 && calls.length + waiting.requests.length + waiting.agreements.length > 0 ? null : purchases.length === 0 ? (
+              {purchases.length === 0 && (calls.length + waiting.requests.length + waiting.agreements.length > 0 || waiting.unread) ? null : purchases.length === 0 ? (
                 <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
               ) : (
                 <>
@@ -582,6 +587,9 @@ function WaitingList({ waiting, store, words }: { waiting: Waiting; store: Store
           </li>
         ))}
       </ul>
+      {waiting.requestsTotal + waiting.agreementsTotal > waiting.requests.length + waiting.agreements.length ? (
+        <p className="st-muted mt-4">{words.waitingMore(waiting.requestsTotal + waiting.agreementsTotal - waiting.requests.length - waiting.agreements.length)}</p>
+      ) : null}
     </section>
   );
 }

@@ -912,8 +912,12 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
   ]);
 
   // Approved at once when the creator chose it (624 [SZ8](35)): through the same decision as by hand, so the
-  // approval email with their link goes as usual. Only a new application; someone declined or removed stays out.
-  const autoApproved = created && grant.k !== 1 && store.affiliates.autoApprove === true && affiliate.status === "pending";
+  // approval email with their link goes as usual. Only a new application; someone declined or removed stays out,
+  // and so does the same inbox written another way (a dot or a "+" tag): an application whose address matches any
+  // other record, declined and removed included, waits for the creator instead.
+  const autoChosen = created && grant.k !== 1 && store.affiliates.autoApprove === true && affiliate.status === "pending";
+  const knownInbox = autoChosen && (await sameInboxAsAnother(store, affiliate));
+  const autoApproved = autoChosen && !knownInbox;
   if (autoApproved) affiliate = (await decide(store, affiliate.id, "approve")) ?? affiliate;
 
   if (created && isSenderConfigured() && grant.k !== 1) {
@@ -926,6 +930,9 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
         autoApproved
           ? `${affiliate.email} joined as an affiliate of ${store.name}, approved at once because you chose to approve every application.`
           : `${affiliate.email} applied to be an affiliate of ${store.name}.`,
+        ...(knownInbox
+          ? ["It was not approved at once: the address matches someone already in your program, written another way, so it waits for you."]
+          : []),
         ...(affiliate.note ? [`Where they will share it: ${affiliate.note}`] : []),
         "",
         autoApproved ? `Remove them in your studio if you would rather not: ${studioLink}` : `Approve or decline them in your studio: ${studioLink}`,
@@ -951,6 +958,18 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
     ).catch((error) => console.error("an application notification failed", error));
   }
   return { ok: true, session, affiliate, created };
+}
+
+/**
+ * Whether another record of this store, in any state (declined and removed
+ * included), reaches the same inbox as this one, by its address or its
+ * payout address, written any way (canonicalEmail).
+ */
+async function sameInboxAsAnother(store: Store, affiliate: Affiliate): Promise<boolean> {
+  const mine = canonicalEmail(affiliate.email);
+  return (await listAffiliates(store)).some(
+    (other) => other.id !== affiliate.id && (canonicalEmail(other.email) === mine || canonicalEmail(payAddress(other)) === mine),
+  );
 }
 
 /** Whether buyers may join this store's programme on their own (lib/affiliate-setting.ts). */

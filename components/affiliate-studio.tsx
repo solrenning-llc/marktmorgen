@@ -754,7 +754,7 @@ function Terms({
             <span className="block font-semibold text-ink">Approve every application at once</span>
             <span className="block text-ink-soft">
               Anyone who applies gets their link straight away, and you are told who joined; you can remove them at any time.
-              Anyone you declined or removed stays out. Off, each application waits for you.
+              Anyone you declined or removed stays out: an application from an address already in your program, even written another way, waits for you. Off, each application waits for you.
             </span>
           </span>
         </label>

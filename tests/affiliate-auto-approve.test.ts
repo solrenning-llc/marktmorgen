@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, setAffiliateSetting, storeForEmail } from "@/lib/store";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
-import { openAffiliateLink } from "@/lib/affiliates";
+import { decide, openAffiliateLink } from "@/lib/affiliates";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -30,6 +30,11 @@ async function main(): Promise<void> {
     const result = await openAffiliateLink((await storeForEmail(owner))!, token);
     return result.ok ? result.affiliate.status : result.reason;
   };
+  const openId = async (email: string, token: string) => {
+    await redis.pipeline([["SET", linkKey(token), JSON.stringify({ s: statsId, e: email, n: "" }), "EX", 600]]);
+    const result = await openAffiliateLink((await storeForEmail(owner))!, token);
+    return result.ok ? result.affiliate.id : "";
+  };
 
   part("Off: each application waits");
   await setAffiliateSetting(owner, { ...NO_AFFILIATES, enabled: true, rates: {} });
@@ -40,9 +45,24 @@ async function main(): Promise<void> {
   is("a new applicant is approved", await open("second@example.com", "b".repeat(64)), "approved");
   is("someone already waiting is not changed by opening their link again", await open("first@example.com", "c".repeat(64)), "pending");
 
+  part("On: someone declined or removed, under another spelling of the same inbox, waits for the creator");
+  await setAffiliateSetting(owner, { ...NO_AFFILIATES, enabled: true, rates: {} });
+  const bob = await openId("bob@gmail.com", "d".repeat(64));
+  const carol = await openId("carol@gmail.com", "e".repeat(64));
+  const shop = async () => (await storeForEmail(owner))!;
+  await decide(await shop(), bob, "decline");
+  await decide(await shop(), carol, "approve");
+  await decide(await shop(), carol, "remove");
+  await setAffiliateSetting(owner, { ...NO_AFFILIATES, enabled: true, rates: {}, autoApprove: true });
+  is("declined bob@gmail.com: b.o.b@gmail.com stays pending", await open("b.o.b@gmail.com", "f".repeat(64)), "pending");
+  is("declined bob@gmail.com: bob+2@gmail.com stays pending", await open("bob+2@gmail.com", "1".repeat(64)), "pending");
+  is("removed carol@gmail.com: Carol+promo@Gmail.com stays pending", await open("Carol+promo@Gmail.com", "2".repeat(64)), "pending");
+  is("removed carol@gmail.com: c.arol@googlemail.com stays pending", await open("c.arol@googlemail.com", "3".repeat(64)), "pending");
+  is("an unrelated new address is still approved at once", await open("dave@gmail.com", "4".repeat(64)), "approved");
+
   part("The studio");
   const studio = readFileSync("components/affiliate-studio.tsx", "utf8");
-  is("a labeled switch that says what it does and that declined people stay out", studio.includes("Approve every application at once") && studio.includes("Anyone you declined or removed stays out. Off, each application waits for you."), true);
+  is("a labeled switch that says what it does and that declined people stay out", studio.includes("Approve every application at once") && studio.includes("Anyone you declined or removed stays out: an application from an address already in your program, even written another way, waits for you. Off, each application waits for you."), true);
   done();
 }
 

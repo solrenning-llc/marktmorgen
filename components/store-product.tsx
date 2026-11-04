@@ -35,6 +35,7 @@ import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import { assistReminderOffered } from "@/lib/assistant-reminder";
 import { type AskWhen, isAskWhen } from "@/lib/ask-when";
 import { type UnitLine, unitLines } from "@/lib/option-units";
+import { hasDateOnSale } from "@/lib/call-on-sale";
 
 /**
  * How many price options are drawn as cards before they become a list to pick
@@ -152,11 +153,8 @@ function callLine(store: Store, call: NonNullable<Listing["call"]>, now = Date.n
   return inPerson ? w.inPersonOne(call.minutes) : w.callOne(call.minutes);
 }
 
-/** Whether a call can still be booked: always for weekly hours, and for dated sessions while one is before its notice. */
-export function hasDateOnSale(call: NonNullable<Listing["call"]>, now = Date.now()): boolean {
-  if (call.kind !== "live") return true;
-  return call.sessions.some((s) => s.start - call.noticeHours * 3600_000 > now);
-}
+/** Whether a call can still be booked (lib/call-on-sale.ts). */
+export { hasDateOnSale };
 
 /**
  * The line under the title that says what the pill cannot: the length of a

@@ -33,7 +33,7 @@ import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MIN_CENTS, dollars } from "@/lib/auto-
 import { isDomainsConfigured } from "@/lib/domains";
 import { TEAM_LIMITS, teamLimitWords } from "@/lib/team-scheduling-rules";
 import { PLAN_TITLES, PRO_MONTHLY_EMAILS, REFUND_DAYS, TRIAL_MONTHLY_EMAILS, SCALE_MONTHLY_EMAILS } from "@/lib/plan";
-import { workflowLimitWords } from "@/lib/flow-limits";
+import { MAX_STEPS, workflowLimitWords } from "@/lib/flow-limits";
 import { pipelineLimitWords } from "@/lib/crm-rules";
 import { PLAN_BREAKS_ENABLED, PAID_MONTHS_BEFORE_PAUSE, PAUSE_MONTHS } from "@/lib/plan-pause-rules";
 import { healthRuleWords, rampRuleWords } from "@/lib/mail-health-rules";
@@ -48,6 +48,7 @@ import { ERASE_STUDIO_UNITS } from "@/lib/erasure-rules";
 import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib/agreement-rules";
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
+import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
 
 /**
  * The help center's questions a feature page asks too, word for word, so
@@ -694,6 +695,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           "Yes, on every plan: up to 10 pages of your own, from Your pages in the studio. Each is built from the same blocks as a sales page (a headline, text, pictures, a video, steps, who it is for, questions, things said about you elsewhere, your products, a countdown and buttons) and follows your store's look.",
           "A page has its own address under your store, such as /@yourname/about, and on your own domain, such as yourname.com/about. Its buttons lead to your store, or to one product you choose. Put it in the menu at the top of your store and of your other pages, or keep it out of the menu and share its link. A new page stays out of sight until you switch it on, or until a moment you set.",
+        ],
+      },
+      {
+        // 544 [SQ9]: the studio's "Bring in a sequence" (components/sequence-import-box.tsx, lib/sequence-import.ts), as it works.
+        q: "Can I bring my email sequences from another service?",
+        a: [
+          `Yes, on Studio and Scale. Under Sequences and workflows, choose “Download the template (CSV)”. Copy each email from your old service into it, one email per row. Each row has its subject, its words and days_after: how many days after the email before it goes out. Its columns are ${SEQUENCE_TEMPLATE.join(", ")}; leave preview empty. Then pick the file under “Bring in a sequence” and choose “Read the file”. A file can be up to ${MAX_SEQUENCE_FILE_BYTES / 1000} KB. A sequence holds up to ${MAX_STEPS} emails; any after that are left out and listed.`,
+          "The emails open in the sequence editor as a new sequence. You read each one, pick what starts it and save it. It is saved paused: nothing is sent until you preview it and switch it on from its card.",
+          "Emails written in HTML come in as text. Paragraphs, lists and links are kept, each link as its words and its address. Pictures and links through a known click-tracking address are taken out. So are merge fields like *|FNAME|* or {{ name }}. Each one taken out is listed by its line in the file, above the emails, so you can check it. So is each email left out, and each preview text, which an email in a sequence does not have yet.",
         ],
       },
       {

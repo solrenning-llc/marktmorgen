@@ -1042,7 +1042,7 @@ function LessonEditor({
                   onChange={(e) => setText(e.target.value)}
                 />
                 <p className="mt-1 text-sm text-ink-mute">
-                  {`Blank lines make paragraphs, lines starting with "- " make a list, and web addresses become links. ${MAX_BODY_LENGTH - text.length} characters left.`}
+                  {`Blank lines make paragraphs, lines starting with "- " make a list, and web addresses become links. Put code between two lines of three backticks (\`\`\`) to show it as typed. ${MAX_BODY_LENGTH - text.length} characters left.`}
                 </p>
               </div>
               {look ? (

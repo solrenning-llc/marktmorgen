@@ -54,6 +54,19 @@ export class MemoryRedis {
     }
   }
 
+  /**
+   * lib/crm.ts erasedGuard, step for step: true (refused, nothing written) when the person's deletion mark is there and
+   * the write was prepared before it or within the clocks' difference; otherwise the mark goes and the write goes on.
+   */
+  private erasedRefuses(mark: string, prepared: string, clock: string): boolean {
+    const at = this.run(["GET", mark]);
+    if (typeof at !== "string") return false;
+    const time = Number(at);
+    if (at.trim() === "" || !Number.isFinite(time) || Number(prepared) < time + Number(clock)) return true;
+    this.run(["DEL", mark]);
+    return false;
+  }
+
   /** For a test to look at what a flow left behind. */
   keys(): string[] {
     return [...this.data.keys()].sort();
@@ -449,9 +462,10 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {
-          // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step.
-          const [, target, person, read, value, added, start, field] = args;
+        if (key.startsWith("-- marktmorgen:crm-tasks-write:v2\n") && args[0] === "2" && args.length === 11) {
+          // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step, unless they were deleted after it was prepared.
+          const [, target, erased, person, read, value, added, start, field, prepared, clock] = args;
+          if (this.erasedRefuses(erased, prepared, clock)) return 3;
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
@@ -513,15 +527,20 @@ export class MemoryRedis {
         // lib/crm.ts SET_CRM_VALUE: a person's value written unless they were deleted after the request was prepared, answering what it replaced.
         if (key.startsWith("-- marktmorgen:crm-value-set:v3\n") && args[0] === "2" && args.length === 7) {
           const [, target, erased, person, value, prepared, clock] = args;
-          const mark = this.run(["GET", erased]);
-          if (typeof mark === "string") {
-            const at = Number(mark);
-            if (mark.trim() === "" || !Number.isFinite(at) || Number(prepared) < at + Number(clock)) return 2;
-            this.run(["DEL", erased]);
-          }
+          if (this.erasedRefuses(erased, prepared, clock)) return 2;
           const before = this.run(["HGET", target, person]);
           this.run(value === "" ? ["HDEL", target, person] : ["HSET", target, person, value]);
           return typeof before === "string" ? [1, before] : [1];
+        }
+        // lib/buyer-profile.ts ADD_PERSON_NOTE: a note and its person's place, unless they were deleted after it was prepared.
+        if (key.startsWith("-- marktmorgen:person-note-add:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, notes, who, erased, id, value, person, seconds, prepared, clock] = args;
+          if (this.erasedRefuses(erased, prepared, clock)) return 0;
+          this.run(["HSET", notes, id, value]);
+          this.run(["EXPIRE", notes, seconds]);
+          this.run(["SADD", who, person]);
+          this.run(["EXPIRE", who, seconds]);
+          return 1;
         }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {

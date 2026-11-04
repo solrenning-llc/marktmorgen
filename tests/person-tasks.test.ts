@@ -67,7 +67,8 @@ async function main(): Promise<void> {
   is("past, today, later, no date", [groups.overdue.map((e) => e.task.id), groups.today.map((e) => e.task.id), groups.upcoming.map((e) => e.task.id), groups.undated.map((e) => e.task.id)], [[id(1)], [id(2)], [id(3)], [id(4)]]);
 
   part("Kept in the CRM, with the room they take");
-  const change = (person: string, fn: (tasks: PersonTask[]) => ReturnType<typeof addTask>) => changePersonTasks(STATS, person, ROOM, fn);
+  // A change prepared now, by a page drawn just now (preparedAt): what a deletion's mark does is held in its own part below.
+  const change = (person: string, fn: (tasks: PersonTask[]) => ReturnType<typeof addTask>) => changePersonTasks(STATS, person, ROOM, fn, undefined, Date.now());
   is("kept", (await change(ANA, (t) => addTask(t, input({ text: "Send the workbook" }), id(1), NOW))).ok, true);
   await change(ANA, (t) => addTask(t, input({ text: "Ask for a review", due: "2026-11-05" }), id(2), NOW));
   await change(BEN, (t) => addTask(t, input({ text: "Book the call" }), id(3), NOW));
@@ -90,7 +91,12 @@ async function main(): Promise<void> {
   const used = async () => (await dataUsed(ROOM))?.used ?? 0;
   const stored = async (person: string) => (await redis.pipeline([["HGET", `nl:crm:tasks:${SAME}`, person]]))[0];
   const weighs = (person: string, value: unknown) => (typeof value === "string" && value ? dataBytes([person, value], 1) : 0);
-  const at = (person: string, fn: (tasks: PersonTask[]) => ReturnType<typeof addTask>) => changePersonTasks(SAME, person, ROOM, fn);
+  // These parts hold the lock and the room: a person deleted in one of them comes back, as if a page were drawn long after
+  // (their deletion's mark taken away first); the mark itself is held in "A change prepared before a deletion" below.
+  const at = async (person: string, fn: (tasks: PersonTask[]) => ReturnType<typeof addTask>) => {
+    await redis.pipeline([["DEL", `nl:crm:erased:${SAME}:${person}`]]);
+    return changePersonTasks(SAME, person, ROOM, fn, undefined, Date.now());
+  };
   const roomBefore = await used();
   const both = await Promise.all([at(ANA, (t) => addTask(t, input({ text: "First" }), id(11), NOW)), at(ANA, (t) => addTask(t, input({ text: "Second" }), id(12), NOW))]);
   is("two adds at once: both answered ok", both.map((r) => r.ok), [true, true]);

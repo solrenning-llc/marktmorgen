@@ -472,7 +472,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         <h2 id="tasks-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks</h2>
         <p className="mt-1 text-sm text-ink-soft">What you still owe this person, beside any deal. For you and your team only.</p>
         {profile.person && tasks ? (
-          <PersonTasks key={profile.person} person={profile.person} initial={tasks} owner={store.email.toLowerCase()} assignees={assignees} today={new Date().toISOString().slice(0, 10)} />
+          <PersonTasks key={profile.person} person={profile.person} initial={tasks} owner={store.email.toLowerCase()} assignees={assignees} today={new Date().toISOString().slice(0, 10)} preparedAt={readAt} />
         ) : profile.person ? (
           <p className="mt-2 text-sm text-ink-soft" role="status">This person&apos;s tasks could not be read just now. Open this page again in a moment.</p>
         ) : null}
@@ -481,7 +481,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
       <section aria-labelledby="notes-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="notes-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Notes</h2>
         <p className="mt-1 text-sm text-ink-soft">For you and your team only. The buyer never sees them.</p>
-        {profile.person ? <PersonNotes person={profile.person} initial={profile.notes} /> : null}
+        {profile.person ? <PersonNotes person={profile.person} initial={profile.notes} preparedAt={readAt} /> : null}
       </section>
 
       {eraseToken ? (

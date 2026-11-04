@@ -92,7 +92,7 @@ import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
-import { CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS } from "@/lib/crm";
+import { CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS, CRM_VALUE_SET_SENT } from "@/lib/crm";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
@@ -424,7 +424,8 @@ export const STRIPE_LIST_PAGE = EXPORT_PAGE_SECONDS * MEMORY_SECOND + 0.1 * CPU_
  * One contact value set (lib/crm.ts, setValue), at the most: no lock and no
  * wait, three trips to the database one after another (the room taken, the
  * write, the room given back) at ROUND_TRIP_SECONDS, held at 2 GB with the
- * studio shape's share of CPU; its CRM_VALUE_SET_COMMANDS; and its
+ * studio shape's share of CPU; its CRM_VALUE_SET_COMMANDS (the three sent,
+ * and what its script runs inside, which Upstash bills one by one); and its
  * CRM_VALUE_SET_BYTES through the database (the value, the one it replaced,
  * the keys). It is not counted on its own: it fits, with the save's own reads,
  * in the one studio request the save already takes (UNIT_COST.studio: its
@@ -434,7 +435,7 @@ export const STRIPE_LIST_PAGE = EXPORT_PAGE_SECONDS * MEMORY_SECOND + 0.1 * CPU_
  * tests/crm-contact-writes.test.ts measures the whole save through the route
  * under the studio request's commands, bytes and trips.
  */
-export const CRM_VALUE_SET_SECONDS = CRM_VALUE_SET_COMMANDS * ROUND_TRIP_SECONDS;
+export const CRM_VALUE_SET_SECONDS = CRM_VALUE_SET_SENT * ROUND_TRIP_SECONDS;
 export const CRM_VALUE_SET =
   CRM_VALUE_SET_SECONDS * MEMORY_SECOND
   + CRM_VALUE_SET_SECONDS * (SHAPES.studio.cpu / SHAPES.studio.seconds) * CPU_SECOND
@@ -917,7 +918,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
       // A contact value set (its three trips, commands and bytes) fits in the studio request of its save, which takes no
       // more (C3-123, 4 November 2026; tests/plan-cost-registry.ts, CRM_VALUE_SET).
-      { file: "lib/crm.ts", names: ["CRM_VALUE_SET_COMMANDS", "CRM_VALUE_SET_BYTES", "CRM_VALUE_MOST_BYTES"] },
+      { file: "lib/crm.ts", names: ["CRM_VALUE_SET_COMMANDS", "CRM_VALUE_SET_SENT", "CRM_VALUE_SET_BYTES", "CRM_VALUE_MOST_BYTES", "ERASED_GUARD_CALLS"] },
       // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).
       { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).

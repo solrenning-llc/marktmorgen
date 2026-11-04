@@ -4,7 +4,7 @@
  * so a store that deletes buyers is never left paying for records it no
  * longer keeps.
  */
-import { CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS, CrmPersonGone, ERASED_CLOCK_MS, ERASED_MARK_SECONDS, forgetCrmPerson, readFields, readValues, setValue, writeDeal, writeFields } from "@/lib/crm";
+import { CRM_VALUE_SET_BYTES, CRM_VALUE_SET_SENT, CrmPersonGone, ERASED_CLOCK_MS, ERASED_MARK_SECONDS, forgetCrmPerson, readFields, readValues, setValue, writeDeal, writeFields } from "@/lib/crm";
 import { SESSION_TTL_SECONDS } from "@/lib/auth";
 import { LEASE_SECONDS } from "@/lib/flows";
 import { utf8Length } from "@/lib/store-data-rules";
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
     await setValue(STATS, DAN, fields[0], "\u00e9".repeat(200), ROOM, Date.now());
     redis.pipeline = original;
     is("a new value: the room taken and the write", first, 2);
-    is("one replaced: and its room given back, CRM_VALUE_SET_COMMANDS in all", commands - first, CRM_VALUE_SET_COMMANDS);
+    is("one replaced: and its room given back, CRM_VALUE_SET_SENT in all", commands - first, CRM_VALUE_SET_SENT);
     is(`within its bytes (${bytes} for both)`, bytes <= 2 * CRM_VALUE_SET_BYTES, true);
     is("Dan deleted", await forgetCrmPerson(STATS, DAN, "dan@example.com", ROOM), 1);
     is("with his room", await used(), empty);

@@ -759,11 +759,13 @@ async function actOnPeople(
     const out: Acted[] = [];
     for (const email of emails) {
       try {
-        const kept = await addPersonNote(statsId, personKey(statsId, email), "sequence", `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`, store);
+        const kept = await addPersonNote(statsId, personKey(statsId, email), "sequence", `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`, store, Date.now(), at.takenAt * 1000);
         out.push(kept ? { email, state: "confirmed", changed: true, note: "Note written on their page." } : { email, state: "failed", note: "The note could not be written." });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: "The note was not written: the store's data room is full." });
+        // The person was deleted from the store after this step was taken (lib/crm.ts, erasedGuard): nothing about them is written again.
+        else if (error instanceof CrmPersonGone) out.push({ email, state: "failed", note: "The note was not written: this person was deleted from your store." });
         else out.push({ email, state: "uncertain", note: "Whether the note was written could not be confirmed." });
       }
     }

@@ -14,7 +14,8 @@ function when(seconds: number): string {
  * Your team's notes about one buyer (lib/buyer-profile.ts): what they asked,
  * what was promised, what they like. Seen only by whoever may read orders.
  */
-export function PersonNotes({ person, initial }: { person: string; initial: PersonNote[] }) {
+/** `preparedAt`: when the page read the person (ms), sent with every note, so a person deleted since is never written about again. */
+export function PersonNotes({ person, initial, preparedAt }: { person: string; initial: PersonNote[]; preparedAt: number }) {
   const [notes, setNotes] = useState(initial);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25,15 +26,15 @@ export function PersonNotes({ person, initial }: { person: string; initial: Pers
       const response = await fetch("/api/store/person", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, person }),
+        body: JSON.stringify({ ...body, person, preparedAt }),
       });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: PersonNote[] };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: PersonNote[]; error?: string };
       if (answer.ok && answer.notes) {
         setNotes(answer.notes);
         toast(done);
         return true;
       }
-      toast("That did not save. Try again in a moment.");
+      toast(answer.error === "unknown" ? "This person is no longer in your store, so the note was not saved. Reload the page." : "That did not save. Try again in a moment.");
     } catch {
       toast("That did not save. Check your connection and try again.");
     } finally {

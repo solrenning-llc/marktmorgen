@@ -5,6 +5,7 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
 import { studioPath } from "@/lib/studio-route";
 import { addPersonNote, addressForToken, findToken, forgetFindToken, readAddress, removePersonNote } from "@/lib/buyer-profile";
+import { CrmPersonGone } from "@/lib/crm";
 import { erasePerson } from "@/lib/person-erasure";
 
 /** How many addresses one store may look up in an hour: each look reads Stripe. */
@@ -60,7 +61,8 @@ export async function POST(request: NextRequest) {
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     const person = typeof body.person === "string" ? body.person : "";
     if (body.action === "note") {
-      const notes = await addPersonNote(store.statsId, person, guarded.email, body.text, store);
+      // When the page read the person (preparedAt, ms): a person deleted since is never written about again (lib/crm.ts).
+      const notes = await addPersonNote(store.statsId, person, guarded.email, body.text, store, Date.now(), typeof body.preparedAt === "number" ? body.preparedAt : 0);
       if (!notes) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       return Response.json({ ok: true, notes }, noStore);
     }
@@ -71,6 +73,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // What does not fit in the store's data room is not written (lib/store-data.ts).
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
+    // A person deleted after the page read them: nothing about them is written again, as for anything gone.
+    if (error instanceof CrmPersonGone) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
     console.error("a buyer's page could not do that", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

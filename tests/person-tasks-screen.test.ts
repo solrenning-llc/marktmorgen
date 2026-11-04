@@ -15,7 +15,7 @@ import { done, is, part } from "./check";
 
 const PERSON = "a".repeat(32);
 const task = (n: number, over: Partial<PersonTask> = {}): PersonTask => ({ id: `task${String(n).padStart(6, "0")}`, text: `Task ${n}`, due: "", assignee: "", done: false, createdAt: 1, doneAt: 0, ...over });
-const draw = (tasks: PersonTask[], today = "2026-11-03", assignees: string[] | null = ["owner@example.com", "sam@example.com"]) => renderToStaticMarkup(createElement(PersonTasks, { person: PERSON, initial: tasks, owner: "owner@example.com", assignees, today }));
+const draw = (tasks: PersonTask[], today = "2026-11-03", assignees: string[] | null = ["owner@example.com", "sam@example.com"]) => renderToStaticMarkup(createElement(PersonTasks, { person: PERSON, initial: tasks, owner: "owner@example.com", assignees, today, preparedAt: 1 }));
 
 part("Each task");
 const html = draw([task(1, { text: "Send the workbook", due: "2026-11-01", assignee: "sam@example.com" }), task(2, { text: "Book the call", due: "2026-11-10" }), task(3, { text: "Say thanks", done: true })]);

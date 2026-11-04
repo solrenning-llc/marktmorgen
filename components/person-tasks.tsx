@@ -231,7 +231,7 @@ export async function putBack(task: PersonTask, assignees: readonly string[] | n
  * the team): the tasks are read again so what is shown is what is kept.
  */
 export function staleRefusal(error: string | undefined): boolean {
-  return error === "unknown" || error === "full" || error === "store_full" || error === "assignee";
+  return error === "unknown" || error === "gone" || error === "full" || error === "store_full" || error === "assignee";
 }
 
 /**
@@ -241,8 +241,10 @@ export function staleRefusal(error: string | undefined): boolean {
  * words as well as by the line, until they are removed. Seen by whoever may
  * read orders, as the notes are.
  */
-export function PersonTasks({ person, initial, owner, assignees: drawnTeam, today: serverDay }: {
+export function PersonTasks({ person, initial, owner, assignees: drawnTeam, today: serverDay, preparedAt }: {
   person: string;
+  /** When the page read the person (ms), sent with every change: a person deleted since is refused "gone" (lib/crm.ts). */
+  preparedAt: number;
   initial: PersonTask[];
   /** The store owner's address, lower case: always offered. */
   owner: string;
@@ -347,7 +349,7 @@ export function PersonTasks({ person, initial, owner, assignees: drawnTeam, toda
       const response = await fetch("/api/store/person-tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, person }),
+        body: JSON.stringify({ ...body, person, preparedAt }),
       });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; tasks?: PersonTask[]; message?: string; error?: string };
       if (answer.ok && answer.tasks) {

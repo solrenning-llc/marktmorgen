@@ -41,6 +41,7 @@ import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { CrmPersonGone, ERASED_CLOCK_MS, erasedGuard, erasedKey, preparedTime } from "@/lib/crm";
 import { dataBytes } from "@/lib/store-data-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
@@ -164,23 +165,41 @@ export async function readPersonNotes(statsId: string | null, person: string): P
 }
 
 /**
+ * A note and its person's place on the store's list of people with notes,
+ * written in one step, unless the person was deleted after the note was
+ * prepared (lib/crm.ts, erasedGuard): 0, and nothing written, then; 1 once
+ * written.
+ */
+export const ADD_PERSON_NOTE = `-- marktmorgen:person-note-add:v1
+${erasedGuard(3, 5, "0")}
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+redis.call("EXPIRE", KEYS[1], ARGV[4])
+redis.call("SADD", KEYS[2], ARGV[3])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
+return 1`;
+
+/**
  * Adds a note about one person, written by `by` (the signed-in address).
  * Each note is a field of its own, so two people writing at once both keep
  * theirs. Over MAX_PERSON_NOTES, the oldest go. Null when the words are empty.
+ * `preparedAt` (ms) is when the request was prepared (the page read the
+ * person, a workflow took its step): a person deleted after it is never
+ * written about again (CrmPersonGone, with the room taken given back); none
+ * counts as before.
  */
-export async function addPersonNote(statsId: string, person: string, by: string, textRaw: unknown, room: DataStore, now = Date.now()): Promise<PersonNote[] | null> {
+export async function addPersonNote(statsId: string, person: string, by: string, textRaw: unknown, room: DataStore, now = Date.now(), preparedAt?: number): Promise<PersonNote[] | null> {
   const text = personNoteText(textRaw);
   if (!text || !PERSON_KEY.test(person) || !isRedisConfigured()) return null;
   const id = randomBytes(4).toString("hex");
   const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
   // Its room in the store's data room first (DataRoomError when it does not fit), its person's place with it.
-  await needData(room, [{ slot: NOTES_SLOT, bytes: dataBytes([id, json], 1) + dataBytes([person], 1) }]);
-  await redisPipeline([
-    ["HSET", notesKey(statsId, person), id, json],
-    ["EXPIRE", notesKey(statsId, person), NOTES_SECONDS],
-    ["SADD", whoKey(statsId), person],
-    ["EXPIRE", whoKey(statsId), NOTES_SECONDS],
-  ]);
+  const taken = dataBytes([id, json], 1) + dataBytes([person], 1);
+  await needData(room, [{ slot: NOTES_SLOT, bytes: taken }]);
+  const [written] = await redisPipeline([["EVAL", ADD_PERSON_NOTE, 3, notesKey(statsId, person), whoKey(statsId), erasedKey(statsId, person), id, json, person, NOTES_SECONDS, preparedTime(preparedAt), ERASED_CLOCK_MS]]);
+  if (written === 0) {
+    await giveData(room, [{ slot: NOTES_SLOT, bytes: taken }]).catch(() => {});
+    throw new CrmPersonGone();
+  }
   const notes = await readPersonNotes(statsId, person);
   if (notes.length > MAX_PERSON_NOTES) {
     const dropped = notes.slice(MAX_PERSON_NOTES);

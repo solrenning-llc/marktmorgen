@@ -31,7 +31,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
-import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { CRM_VALUE_MOST_BYTES, CRM_VALUE_SET_BYTES, CRM_VALUE_SET_COMMANDS, CRM_VALUE_SET_SENT, ERASED_GUARD_CALLS, TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_FIELD_OPTION, MAX_FIELD_OPTIONS, MAX_FIELD_VALUE } from "@/lib/crm-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
@@ -281,8 +281,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(CRM_VALUE_SET <= UNIT_COST.studio, `${CRM_VALUE_SET} > ${UNIT_COST.studio}`);
   assert.ok(CRM_VALUE_SET_SECONDS <= SHAPES.studio.seconds, `${CRM_VALUE_SET_SECONDS} s > ${SHAPES.studio.seconds} s`);
   assert.ok(CRM_VALUE_SET_COMMANDS <= 20 + TAKE_COMMANDS && CRM_VALUE_SET_BYTES <= 50_000);
-  assert.equal(CRM_VALUE_SET_SECONDS, CRM_VALUE_SET_COMMANDS * ROUND_TRIP_SECONDS);
-  assert.ok(CRM_VALUE_SET_COMMANDS <= 3, "a value set sends no more than the read, room and write it replaced");
+  assert.equal(CRM_VALUE_SET_SECONDS, CRM_VALUE_SET_SENT * ROUND_TRIP_SECONDS);
+  assert.ok(CRM_VALUE_SET_SENT <= 3, "a value set sends no more than the read, room and write it replaced");
+  // Billed: the three sent, and inside the write's script the mark read and taken away and the value read and written.
+  assert.equal(CRM_VALUE_SET_COMMANDS, CRM_VALUE_SET_SENT + ERASED_GUARD_CALLS + 2);
+  assert.equal(ERASED_GUARD_CALLS, 2);
   assert.ok(CRM_VALUE_MOST_BYTES >= 3 * MAX_FIELD_VALUE && CRM_VALUE_MOST_BYTES >= 3 * (MAX_FIELD_OPTIONS * MAX_FIELD_OPTION + MAX_FIELD_OPTIONS - 1));
   assert.ok(CRM_VALUE_SET_BYTES >= 2 * CRM_VALUE_MOST_BYTES);
   for (const file of ["app/api/store/crm/route.ts", "lib/flows.ts"]) assert.ok(!/CRM_VALUE_SET_UNITS|takeAllowance\(store, "studio"/.test(read(file)), `${file} takes no studio request more for a value set`);

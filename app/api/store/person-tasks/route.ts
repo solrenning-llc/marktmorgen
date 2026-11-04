@@ -87,13 +87,15 @@ export async function POST(request: NextRequest) {
   const person = typeof body.person === "string" ? body.person : "";
   const id = typeof body.id === "string" ? body.id : "";
   if (!store.statsId || !PERSON.test(person)) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
-  const refuse = (error: TaskRefusal) => Response.json({ ok: false, error, message: TASK_REFUSALS[error] }, { status: error === "unknown" ? 404 : 400 });
+  const refuse = (error: TaskRefusal) => Response.json({ ok: false, error, message: TASK_REFUSALS[error] }, { status: error === "unknown" || error === "gone" ? 404 : 400 });
   try {
     const team = await readTeam(store.sid);
     const assignees = new Set(taskAssignees(store.email, team.members));
     // `kept`: the one the task already names, which an edit may keep.
     const read = (kept = "") => readTaskInput({ text: body.text, due: body.due, assignee: body.assignee }, (email) => assignees.has(email) || (kept !== "" && email === kept));
     const now = Date.now() / 1000;
+    // When the page read the person (ms): a change prepared before they were deleted is refused "gone" (lib/crm.ts).
+    const preparedAt = typeof body.preparedAt === "number" ? body.preparedAt : 0;
     // What making the store's count of tasks again costs, taken before it is made, at most once a store.
     const pay = async (units: number): Promise<{ ok: true } | { ok: false; reason: string; message: string }> => {
       const counted = await countStudio(store, null, units);
@@ -103,18 +105,18 @@ export async function POST(request: NextRequest) {
     if (body.action === "add") {
       const input = read();
       if (!input.ok) return refuse(input.error);
-      result = await changePersonTasks(store.statsId, person, store, (tasks) => addTask(tasks, input.value, randomBytes(5).toString("hex"), now), pay);
+      result = await changePersonTasks(store.statsId, person, store, (tasks) => addTask(tasks, input.value, randomBytes(5).toString("hex"), now), pay, preparedAt);
     } else if (body.action === "edit") {
       // Read against the task as it is kept, inside the change, so the one it names is the one kept now.
       result = await changePersonTasks(store.statsId, person, store, (tasks) => {
         const input = read(tasks.find((t) => t.id === id)?.assignee ?? "");
         return input.ok ? editTask(tasks, id, input.value) : input;
-      }, pay);
+      }, pay, preparedAt);
     } else if (body.action === "done") {
       if (!TASK_ID.test(id)) return refuse("unknown");
-      result = await changePersonTasks(store.statsId, person, store, (tasks) => markTask(tasks, id, body.done === true, now), pay);
+      result = await changePersonTasks(store.statsId, person, store, (tasks) => markTask(tasks, id, body.done === true, now), pay, preparedAt);
     } else if (body.action === "remove") {
-      result = await changePersonTasks(store.statsId, person, store, (tasks) => ({ ok: true, tasks: dropTask(tasks, id) }), pay);
+      result = await changePersonTasks(store.statsId, person, store, (tasks) => ({ ok: true, tasks: dropTask(tasks, id) }), pay, preparedAt);
     } else {
       return Response.json({ ok: false, error: "unknown" }, { status: 400 });
     }

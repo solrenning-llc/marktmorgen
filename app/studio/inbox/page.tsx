@@ -12,6 +12,7 @@ import { openConversation, readInbox } from "@/lib/inbox";
 import { CONVERSATION_ID } from "@/lib/inbox-rules";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
+import { MAX_FAQ } from "@/lib/store-faq";
 
 export const metadata: Metadata = {
   title: "Inbox — Marktmorgen",
@@ -74,6 +75,7 @@ export default async function StudioInboxPage({ searchParams }: Params) {
               canSettings={can(view.role, "settings")}
               readAt={readAt}
               chatBlock={chatBlock}
+              faq={can(view.role, "page") ? { room: MAX_FAQ - store.faq.length, href: studioPath(store) } : null}
             />
           </div>
         </main>

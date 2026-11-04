@@ -6,7 +6,9 @@ export function pixelSettingsConfirmed(httpOK:boolean,value:unknown,requested:Pi
  const data=record(value),pixels=record(data?.pixels);
  if(!httpOK||data?.ok!==true||"error" in data||!pixels||PIXEL_KINDS.some(kind=>!Object.hasOwn(pixels,kind)))return false;
  const parsed=readPixels(pixels);
- return parsed.ok&&PIXEL_KINDS.every(kind=>pixels[kind]===requested[kind]&&parsed.pixels[kind]===requested[kind]);
+ // X's event IDs (613 [WP12]) have to come back as they were sent, too.
+ const events=(p:Pixels)=>JSON.stringify([p.xEvents??null,p.redditMatchingOff===true]);
+ return parsed.ok&&PIXEL_KINDS.every(kind=>pixels[kind]===requested[kind]&&parsed.pixels[kind]===requested[kind])&&events(parsed.pixels)===events(requested);
 }
 export function attributionSettingsConfirmed(httpOK:boolean,value:unknown,requested:number):boolean{
  const data=record(value);

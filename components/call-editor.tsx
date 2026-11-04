@@ -1,7 +1,7 @@
 "use client";
 
 import { MAX_PLACE_LINE, MAX_PLACE_LINES, placeLine } from "@/lib/call-place";
-import { useState } from "react";
+import { useState, useId } from "react";
 import { UrlField } from "@/components/url-field";
 import { roomOnLeave } from "@/lib/url-check";
 import { useRouter } from "next/navigation";
@@ -20,6 +20,7 @@ import {
   MAX_SESSIONS,
   MAX_SESSION_SEATS,
   NOTICE_CHOICES,
+  CANCEL_HOURS,
   type Range,
   SESSION_LENGTHS,
   SESSION_NOTICE_CHOICES,
@@ -37,6 +38,7 @@ const MESSAGES: Record<string, string> = {
   tz: "Pick your time zone.",
   weekly: "Check your hours: switch on at least one day, and make every stretch long enough for one call, with the second stretch starting after the first ends.",
   notice: "Pick how much notice you need.",
+  cancel: "Pick a cancellation deadline from the list, or none.",
   horizon: "Pick how far ahead people may book.",
   buffer: "Pick the gap between calls.",
   room: "The meeting link has to be a full web address starting with https://.",
@@ -128,6 +130,8 @@ export type Draft = {
   /** Typed, so a field being cleared to retype it is not snapped back to a number. */
   seats: string;
   sessions: SessionDraft[];
+  /** The cancellation deadline in hours before the start (lib/call-setup.ts, CANCEL_HOURS); 0 is none. */
+  cancelHours: number;
 };
 
 /** A Google Calendar or Zoom account this store can make meetings on, as the studio shows it. */
@@ -324,6 +328,7 @@ function toDraft(setup: CallSetup | null, kind: "weekly" | "live"): Draft {
       inPerson: Boolean(setup.place),
       place: setup.place?.lines.join("\n") ?? "",
       seats: String(setup.seats),
+      cancelHours: setup.cancelHours ?? 0,
       // Sessions that are over are not shown, and are let go when this is saved.
       sessions: setup.sessions
         .filter((s) => s.start + s.minutes * 60_000 > now)
@@ -356,6 +361,7 @@ function toDraft(setup: CallSetup | null, kind: "weekly" | "live"): Draft {
     place: "",
     seats: "1",
     sessions: kind === "live" ? [newSession(tz, undefined)] : [],
+    cancelHours: 0,
   };
 }
 
@@ -582,6 +588,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
                 video: draft.video,
                 meet: draft.meet,
                 ...(draft.inPerson ? { place: draft.place } : {}),
+                ...(draft.cancelHours ? { cancelHours: draft.cancelHours } : {}),
                 sessions: draft.sessions.map((s) => ({
                   id: s.id,
                   date: s.date,
@@ -619,6 +626,8 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
             </select>
           </label>
         </div>
+
+        <CancelChoice value={draft.cancelHours} onChange={(cancelHours) => setDraft({ ...draft, cancelHours })} />
 
         <RoomChoice
           where={whereOf(draft)}
@@ -768,6 +777,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
               video: draft.video,
               meet: draft.meet,
               ...(draft.inPerson ? { place: draft.place } : {}),
+              ...(draft.cancelHours ? { cancelHours: draft.cancelHours } : {}),
               seats: Number(draft.seats),
             },
           },
@@ -931,6 +941,8 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         </label>
       </div>
 
+      <CancelChoice value={draft.cancelHours} onChange={(cancelHours) => setDraft({ ...draft, cancelHours })} />
+
       <RoomChoice
         where={whereOf(draft)}
         live={false}
@@ -975,5 +987,31 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         </button>
       </div>
     </form>
+  );
+}
+
+/**
+ * The creator's cancellation deadline (lib/call-setup.ts, cancelHours): what
+ * buyers are told before paying, on Stripe's page and in their confirmation.
+ * The refund it promises is the creator's to make.
+ */
+function CancelChoice({ value, onChange }: { value: number; onChange: (hours: number) => void }) {
+  const help = useId();
+  const id = useId();
+  return (
+    <div>
+      <label htmlFor={id} className="field-label">Cancellation deadline</label>
+      <select id={id} className="field mt-2" value={value} onChange={(e) => onChange(Number(e.target.value))} aria-describedby={help}>
+        <option value={0}>None: buyers cancel by replying, and you decide</option>
+        {CANCEL_HOURS.map((h) => (
+          <option key={h} value={h}>{`At least ${h} hours before`}</option>
+        ))}
+      </select>
+      <p id={help} className="mt-1 text-sm text-ink-soft">
+        {value
+          ? `Buyers are told before paying: cancel at least ${value} hours before, by replying, and you refund what they paid online; if they cancel later or miss it, you do not have to; if you cancel, they get it all back. You make the refund in your Stripe dashboard. A change applies to new bookings only.`
+          : "Buyers are told to cancel by replying to their confirmation, and you decide."}
+      </p>
+    </div>
   );
 }

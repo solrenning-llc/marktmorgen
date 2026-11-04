@@ -310,4 +310,9 @@ export const fr: BuyerWords = {
   cardTestMode: `Mode test${S}: aucune vraie carte n'est débitée.`,
   cardCheckout: "Paiement sécurisé par Stripe, dans un nouvel onglet.",
   cardOpens: (store) => `S'ouvre dans la boutique de ${store}, dans un nouvel onglet.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} ou plus`,
+  plusTax: "+ taxes, le cas échéant",
+  salePriceUntil: (price, when) => `Prix soldé${S}: ${price}, jusqu'au ${when}`,
 };

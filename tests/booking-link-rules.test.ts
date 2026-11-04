@@ -51,7 +51,7 @@ part("Said in the studio");
 is("open, made out to one person, never claimed to be only theirs, with the time zone said", linkStateWords(link, MADE, "America/New_York"), "Made out to ana@example.com; anyone with the link can use it once, until November 10, 2026 at 10:00 AM EST.");
 is("held: a checkout is open on it", linkStateWords(held, MADE, "America/New_York").startsWith("A checkout is open on it now. Made out to ana@example.com"), true);
 is("held past its day: a checkout is open, and the link expired, never 'until' a day gone", linkStateWords(held, MADE + 8 * DAY, "America/New_York"), "A checkout is open on it now. The link expired on November 10, 2026 at 10:00 AM EST, so no new checkout opens.");
-is("paying: said so", linkStateWords(paying, MADE, "America/New_York"), "A payment made from it is on its way. The call is booked when it arrives.");
+is("paying: said so", linkStateWords(paying, MADE, "America/New_York"), "A payment made from it is on its way. The call is booked when it arrives, if the time is still free. Otherwise the payment is refunded.");
 is("with no address, anyone with the link", linkStateWords({ ...link, email: undefined }, MADE, "America/New_York").startsWith("Anyone with the link can use it once, until"), true);
 is("used and expired say it no longer opens", [linkStateWords(used, MADE + DAY, "America/New_York"), linkStateWords(link, MADE + 8 * DAY, "America/New_York")], ["Used: booked on November 3, 2026 at 10:10 AM EST. It no longer opens.", "Expired on November 10, 2026 at 10:00 AM EST. It no longer opens."]);
 is("in UTC when the time zone kept is not one", linkStateWords(link, MADE, "Not/AZone").endsWith("UTC."), true);

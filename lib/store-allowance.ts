@@ -25,7 +25,12 @@ import { type AllowanceKind, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, 
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
 
-export type Taken = { ok: true; left: number } | { ok: false; reason: "used" | "unknown" | "pool"; limit: number; message: string };
+/**
+ * What taking from a figure answered. A refusal for being used says, when
+ * the count was read, how many were `left` before this asked (from the
+ * figure's own count, never read again) and when they come back (`reset`).
+ */
+export type Taken = { ok: true; left: number } | { ok: false; reason: "used" | "unknown" | "pool"; limit: number; message: string; left?: number; reset?: string };
 
 const key = (kind: AllowanceKind, id: string, window: string) => `nl:allow:${kind}:${id}:${window}`;
 
@@ -88,10 +93,26 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
     if (counted <= limit) return { ok: true, left: limit - counted };
     // Over: what this asked for is given back, so a refused use costs the figure nothing.
     await redisPipeline([["DECRBY", k, n]]).catch(() => {});
-    return refuse("used", usedWords(kind, limit, resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")));
+    const reset = resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0);
+    return { ok: false, reason: "used", limit, message: usedWords(kind, limit, reset, standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")), left: Math.max(0, limit - (counted - n)), reset };
   } catch {
     return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   }
+}
+
+/**
+ * Gives back `n` of a kind that this same use took at `now` and did not need
+ * (lib/api-guard.ts, holdMoreApi: a reading set aside at its most, then
+ * measured). Only ever what was taken a moment before, in the same window;
+ * best effort: a give-back that fails leaves the figure counted higher, never
+ * lower.
+ */
+export async function giveAllowance(store: AllowanceStore, kind: AllowanceKind, n: number, now = Date.now()): Promise<void> {
+  if (!Number.isSafeInteger(n) || n < 1) return;
+  const window = allowanceWindow(store, now);
+  const id = idOf(store);
+  if (!window || !id || !isRedisConfigured()) return;
+  await redisPipeline([["DECRBY", key(kind, id, window.id), n]]).catch(() => {});
 }
 
 /** Fixed-size own-data reply from the existing SET NX + INCRBY pipeline. */

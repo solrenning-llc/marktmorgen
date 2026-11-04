@@ -122,6 +122,7 @@ const MESSAGES: Record<string, string> = {
   quote_link: "Each thing said elsewhere needs the full https address of where it was said, so visitors can check it. Add it, or remove that one.",
   shape: "Something in the page could not be read. Reload the studio and try again.",
   row: `A row holds 1 to ${MAX_ROW_COLUMNS} columns and up to ${MAX_ROW_ELEMENTS} parts, each in plain words. Each picture needs words that describe it, or a mark that it is decoration, and each button with a link needs words and a full https address. Nothing was saved.`,
+  booking: `A page holds one booking block, with one of your calls chosen and a heading of up to ${MAX_HEADING} characters. Nothing was saved.`,
   same_version: "Version B shows just what version A does, or one of them has no blocks. Change something in version B, or end the test.",
   too_big: "The page is too long to save. Shorten some of the text.",
   placeholder: "This page still has parts marked ⟦like this⟧ for you to write. Replace each one with your own words, or keep the page hidden, before saving. Nothing was saved.",
@@ -151,8 +152,8 @@ function fromLocalField(value: string): number {
 /** Below this many visitors a share would say more about chance than about the page. */
 const MIN_DEPTH_VISITORS = 30;
 
-// A row of columns (375 [TB1]) is not in the gallery yet, so its name is given here.
-const kindLabel = (kind: BlockKind) => (kind === "row" ? "Columns" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
+// A row of columns (375 [TB1]) and a booking block (552 [BB1]) are not in the gallery yet, so their names are given here.
+const kindLabel = (kind: BlockKind) => (kind === "row" ? "Columns" : kind === "booking" ? "Booking" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
 
 export type EditorProduct = {
   id: string;
@@ -1509,6 +1510,12 @@ export function PageEditor({
             This row is shown on your page as it is. You can move it, hide it on some screens or remove it here; its columns cannot be changed in this editor.
           </p>
         );
+      case "booking":
+        return (
+          <p className="text-sm text-ink-soft">
+            This booking block is shown on your page as it is: your call&apos;s name, length and place, and a link to pick a time. You can move it, hide it on some screens or remove it here; its call cannot be changed in this editor yet.
+          </p>
+        );
       case "facts": {
         const chosen = new Set(block.show);
         return (
@@ -1649,6 +1656,10 @@ export function PageEditor({
       case "row": {
         const parts = block.columns.reduce((n, column) => n + column.length, 0);
         return `${block.columns.length} ${block.columns.length === 1 ? "column" : "columns"} · ${parts} ${parts === 1 ? "part" : "parts"}`;
+      }
+      case "booking": {
+        const chosen = featurable.find((p) => p.id === block.product);
+        return `${block.heading ? `${block.heading} · ` : ""}${chosen ? chosen.card.title : "A call from your store"}`;
       }
       case "facts": {
         const live = block.show.filter((key) => facts[key]).length;

@@ -137,7 +137,8 @@ async function main() {
   is("a store with one person's tasks counts nothing beyond its page; 1,000 people count at most AGENDA_UNITS", [agendaReadUnits(1), agendaReadUnits(3), agendaReadUnits(1_000), AGENDA_UNITS], [0, 1, 2, 5]);
   await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio") - 3)]]);
   const tooMany = await countUnits(realStore, 5);
-  is("asking more than are left says this needs more than is left, not that all are spent (round 5, L4)", [tooMany.ok, !tooMany.ok && tooMany.message.startsWith("This needs 5 of your studio requests, more than are left.")], [false, true]);
+  is("asking more than are left says how many this needs and how many are left, not that all are spent (round 5, L4)", [tooMany.ok, !tooMany.ok && tooMany.message], [false, "This needs 5 of your studio requests, and 3 are left."]);
+  is("one sentence, with how many this needs and how many are left (round 6, L1); a refusal keeps its reason", [!tooMany.ok && tooMany.reason], ["used"]);
   await redisPipeline([["SET", studioCount()!, "0"]]);
 
   part("A store selling with PayPal (round 5, H1)");
@@ -157,6 +158,12 @@ async function main() {
   is("its PayPal sales and refunds are counted from how many are kept, before they are read, with no Stripe part (the 50 refunded are not buyers)", [paypalAsked, paypalLedger.buyers.size], [[ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 50 }))], 250]);
   is("which counts more than what was read: 300 records and 50 refunds of about 5 KB", ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 50 })) * 1_000_000 >= 350 * 5_300, true);
   is("the refunds are read in one MGET, never one GET each", [watch.filter((c) => c[0] === "GET" && c[1].startsWith("nl:ppsell:paid:")).length, watch.filter((c) => c[0] === "MGET").length], [0, 2]);
+  // A creator who sold through PayPal and disconnected it keeps those sales, read with the Stripe sales (round 6, H1).
+  const stripeOnly = { statsId: "ppstats", handle: "ppshop", previousHandles: [], currency: "usd", stripeAccountId: "acct_pp" } as unknown as Store;
+  await redisPipeline([["DEL", "nl:stats:ppstats:ledger"]]);
+  const stripeAsked: number[] = [];
+  const stripeRead = await buyerLedger(stripeOnly, async (units) => { stripeAsked.push(units); return false; }).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
+  is("with Stripe on and PayPal off, the PayPal sales kept are still counted, and their refunds are not read", [stripeRead, stripeAsked], ["not counted", [BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 0 }))]]);
   redis.pipeline = pipe;
 
   part("The deals page's day (edge review)");

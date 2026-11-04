@@ -8,11 +8,13 @@
  * buyers (tests/plan-cost-registry.ts, AGENDA_READ). Server only.
  */
 import { readAllTasks, tasksKept } from "@/lib/crm";
-import { type AgendaDayGroup, agendaForDays, agendaReadUnits, daysAround, personAddresses } from "@/lib/person-agenda";
+import { AGENDA_ROW_MARKUP_BYTES, type AgendaDayGroup, agendaForDays, agendaReadUnits, daysAround, personAddresses } from "@/lib/person-agenda";
 import { sentBytes, sentUnits } from "@/lib/sent-bytes";
 import type { DueTask } from "@/lib/person-tasks";
 import type { Store } from "@/lib/store";
 import { countStudio, studioPath } from "@/lib/studio-route";
+import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceFor } from "@/lib/store-allowance-rules";
 
 /**
  * Counts reading the store's buyers, with the studio requests buyerLedger
@@ -36,12 +38,17 @@ export function countLedger(store: Store): { count: (units: number) => Promise<b
  * are left, that this needs more than is left, never that they are all spent
  * (round 5, L4).
  */
-export async function countUnits(store: Store, units: number): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function countUnits(store: Store, units: number): Promise<{ ok: true } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string }> {
   if (units <= 0) return { ok: true };
   const counted = await countStudio(store, null, units);
   if (counted.ok) return { ok: true };
-  if (counted.reason === "used" && units > 1) return { ok: false, message: `This needs ${units} of your studio requests, more than are left. ${counted.message}` };
-  return { ok: false, message: counted.message };
+  if (counted.reason === "used" && units > 1) {
+    // One sentence, with how many this needs and how many are left (round 6, L1).
+    const left = Math.max(0, allowanceFor(store, "studio") - (await allowanceUsed(store, "studio").catch(() => Number.POSITIVE_INFINITY)));
+    const leftWords = Number.isFinite(left) ? `${left === 0 ? "none is" : left === 1 ? "1 is" : `${left} are`} left` : "fewer are left";
+    return { ok: false, reason: "used", message: `This needs ${units} of your studio requests, and ${leftWords}.` };
+  }
+  return { ok: false, reason: counted.reason, message: counted.message };
 }
 
 export type AgendaRowShown = DueTask & { email: string | null; href: string };
@@ -77,7 +84,8 @@ export async function agendaData(store: Store, today: string): Promise<AgendaDat
     return { ...row, email, href: email ? studioPath(store, `who=${row.person}`, "people") : "" };
   });
   // What is sent on, measured before it is drawn (round 5, M1).
-  const sending = await countUnits(store, sentUnits(sentBytes(JSON.stringify({ rows, days: agenda.days })))).catch(() => null);
+  // Each row's own markup too (its line, date, teammate and link around the words; round 6, L3).
+  const sending = await countUnits(store, sentUnits(sentBytes(JSON.stringify({ rows, days: agenda.days })) + rows.length * AGENDA_ROW_MARKUP_BYTES)).catch(() => null);
   if (!sending?.ok) return { state: "refused", message: sending && !sending.ok ? sending.message : "" };
   return { state: "ok", rows, days: agenda.days, open: all.filter((entry) => !entry.task.done).length, found: found ? { partial: found.partial } : null, ledgerMessage: ledger.said.message };
 }

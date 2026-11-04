@@ -135,7 +135,9 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   // Stripe's pages (when there is a Stripe account), and the imported buyers and the PayPal sales and refunds by
   // how many are kept, at the most each weighs: counted before any is read.
   const [imported] = store.statsId && isRedisConfigured() ? await redisPipeline([["HLEN", importedWhoKey(store.statsId)]]) : [0];
-  const paypal = store.paypalSeller ? await paypalKept(store.statsId) : { sales: 0, refunds: 0 };
+  // The PayPal sales kept are read with the store's sales whatever is connected now (a creator who sold with
+  // PayPal and disconnected it keeps them, lib/stats.ts readPaidSales); the refunds only while PayPal is (round 6, H1).
+  const paypal = await paypalKept(store.statsId, Boolean(store.paypalSeller));
   const moved = ledgerReadBytes({ imported: Number(imported || 0), paypalSales: paypal.sales, paypalRefunds: paypal.refunds });
   if (!(await counted((store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(moved)))) throw new LedgerNotCounted();
   // Checkouts and offers after paying; and, on a Stripe account, the renewals

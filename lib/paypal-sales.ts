@@ -786,14 +786,16 @@ export const PAYPAL_REFUNDS_READ = 500;
 export const MAX_PAID_BYTES = 20 * (40 + 6 + 6 * 200) + 2_000;
 
 /**
- * How many PayPal sales and refunds the store keeps (ZCARD, ZCOUNT): what a
- * reading of them all (readPayPalSales, readPayPalRefundsWithCoverage) moves
- * is counted from these before it reads (lib/segments.ts, buyerLedger).
+ * How many PayPal sales the store keeps, and its refunds when `refunds` (ZCARD):
+ * what a reading of them all (readPayPalSales, readPayPalRefundsWithCoverage)
+ * moves is counted from these before it reads (lib/segments.ts, buyerLedger).
+ * The sales are read whenever the store's sales are (lib/stats.ts,
+ * readPaidSales), PayPal connected or not; the refunds only while it is.
  */
-export async function paypalKept(statsId: string | null): Promise<{ sales: number; refunds: number }> {
+export async function paypalKept(statsId: string | null, refunds: boolean): Promise<{ sales: number; refunds: number }> {
   if (!statsId || !isRedisConfigured()) return { sales: 0, refunds: 0 };
-  const [sales, refunds] = await redisPipeline([["ZCARD", salesKey(statsId)], ["ZCARD", refundedKey(statsId)]]);
-  return { sales: Number(sales) || 0, refunds: Number(refunds) || 0 };
+  const [sold, refunded] = await redisPipeline([["ZCARD", salesKey(statsId)], ...(refunds ? [["ZCARD", refundedKey(statsId)]] : [])]);
+  return { sales: Number(sold) || 0, refunds: refunds ? Number(refunded) || 0 : 0 };
 }
 
 /**

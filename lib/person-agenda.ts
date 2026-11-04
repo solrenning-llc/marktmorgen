@@ -19,6 +19,8 @@ export const AGENDA_SHOWN = 50;
 export const AGENDA_MAX_ROWS = 3 * 4 * AGENDA_SHOWN;
 /** The most one task weighs as kept, in bytes: its words at three bytes a character, its teammate's address, its id, date and times. */
 export const MAX_TASK_RECORD_BYTES = 3 * MAX_TASK_TEXT + 254 + 160;
+/** The agenda's own markup around one row (its line, date, teammate and link), in bytes at the most, beside what the row says. */
+export const AGENDA_ROW_MARKUP_BYTES = 600;
 /** The most every task of a store weighs, all read for the agenda (lib/crm.ts, readAllTasks). */
 export const AGENDA_TASKS_BYTES = MAX_STORE_TASKS * MAX_TASK_RECORD_BYTES;
 /**
@@ -41,7 +43,7 @@ export function agendaReadUnits(peopleWithTasks: number): number {
 }
 
 /** The most the agenda's reading and sending count together (every task, every row): held against AGENDA_READ. */
-export const AGENDA_UNITS = agendaReadUnits(MAX_STORE_TASKS) + Math.ceil((AGENDA_MAX_ROWS * AGENDA_ROW_SENT_BYTES) / 1_000_000);
+export const AGENDA_UNITS = agendaReadUnits(MAX_STORE_TASKS) + Math.ceil((AGENDA_MAX_ROWS * (AGENDA_ROW_SENT_BYTES + AGENDA_ROW_MARKUP_BYTES)) / 1_000_000);
 /** A person's key, as in the address of their page from the agenda. */
 export const PERSON_KEY = /^[0-9a-f]{32}$/;
 

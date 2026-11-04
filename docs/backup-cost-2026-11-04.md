@@ -126,7 +126,7 @@ The monthly and annual intervals have the same worst month (one run a day either
 7. **Per-store key count and per-store Vercel time** for a backup in parts (section 4).
 8. **Repository bundles** (item 4 of BK1): not built; sizes not measured (this session has a shallow clone and no GitHub API access to the three repositories).
 9. **Second copy of sold files** (item 3 of BK1): not built. For scale only, one extra copy of a full Scale store's 80 GiB would be 85.9 GB → 86 GB-month × $0.015 = $1.29 a month per store, before operations. Not a proposal.
-10. **No fixed-cost line exists**: `LLC_FIXED_COST_IDS` in `lib/llc-fixed-costs.ts` has no backup or R2-rounding entry, and `tests/plan-cost-registry.ts` has no backup line. Adding them is a code change for a later unit; `lib/llc-fixed-costs.ts` is reserved by Codex (docs/reservations.md, #1492) on 4 November 2026.
+10. **Fixed-cost line: added** (inbox C4-44, after #1492 merged): `backup` in `LLC_FIXED_COST_IDS` (`lib/llc-fixed-costs.ts`), priced by `backupWorstMonth` in `lib/backup-cost.ts` from a review's caps (section 5c). Its reviewed ceiling stays unknown while `BACKUP_COST_UNKNOWNS` are open and the owner has not approved a monthly cost.
 
 ## 5a. The owner's setup (inbox C4-25, 4 November 2026) and the retention to set
 
@@ -166,3 +166,31 @@ The lines above that use 31 copies for a 30-day retention are taken at **32** (3
 - R2 storage, 30 days, one object a run = 32 × 4,259,840 = 136,314,880 bytes = 0.1363 GB × $0.015 = **$0.0020** (unchanged at four decimals); per store in parts, storage × 32/31 (+3.2%).
 - R2 operations, one object a run = 31 × (2 × $4.50 + $0.36) / 1,000,000 = **$0.000290**; in parts, 31 × (parts + 1) × (2 × $4.50 + $0.36) / 1,000,000.
 - Matching review figures: `retentionDays` 30, `maxStoredBytes` ≥ (30 + 2) × the run's stored bound; `validReview` holds the extra day (#2219).
+
+## 5c. The fixed-cost line in code (inbox C4-44, 4 November 2026)
+
+`lib/backup-cost.ts` (`backupWorstMonth(review, routeSeconds)`) prices the worst month from the caps of a review the run would accept, with the rates in `lib/spend-cost-table.ts`; `tests/backup-cost.test.ts` holds every line against figures worked out by hand. It is the `backup` line of the LLC fixed costs (`lib/llc-fixed-costs.ts`, 100% Marktmorgen under FX275), whose reviewed ceiling stays unknown, never zero, while anything in `BACKUP_COST_UNKNOWNS` is open.
+
+What changed from sections 3 and 5b, each toward more cost:
+
+- **R2 storage:** retention + 2 sets at the daily peak (30 days + the lifecycle rule's day + the day being written = 32), each at the stored bound of a set in parts (`runStoredBound`: the copy, each part's seal room and the manifest), plus one GB-month of rounding.
+- **R2 operations:** one Class A for each object written and one more for its lifecycle deletion, one Class B for its read-back, plus one million of each class of rounding.
+- **Upstash bytes:** every command the caps allow taken as a full `SCAN` page (500 names of 1,024 bytes), since `COUNT` is a hint and the shared database holds other products' keys; every copied byte as read (`maxRunBytes` counts the base64 `DUMP`s the run keeps, so the 1.7 × logical bytes measured in item 6 decides how much data fits under the cap, not what the cap lets be billed); each key's name sent twice.
+- **No free quota** is credited anywhere (R2's 10 GB-month and million operations, Upstash's free GB and bandwidth).
+
+Worst month of the design as built (one part of 4 MiB, 10,000 keys, 20,202 commands, 30 days, `maxStoredBytes` 138,417,152, a 300 s route):
+
+| Line | Per month |
+| --- | ---: |
+| R2 storage (32 sets + 1 GB-month of rounding) | $0.0171 |
+| R2 Class A (124 operations + 1 million of rounding) | $4.5006 |
+| R2 Class B (62 operations + 1 million of rounding) | $0.3600 |
+| Upstash commands (31 × 20,204) | $1.2526 |
+| Upstash bytes (31 × 10.37 GB, almost all of it the `SCAN` pages taken as full) | $9.6429 |
+| Vercel (31 calls of 300 s at 2 GB) | $0.3855 |
+| Provider allowance, 10% | $1.6159 |
+| **Total** | **$17.7746** |
+
+A year: 12 × $17.7746 = **$213.29**. More than half is the `SCAN` reading: a cap on the pages the walk may read (for example 200, as section 3 assumed) would bring the Upstash bytes to about $0.12 and the month to about $7.30; that is a code change for a later unit, not made here.
+
+Still open, so the line is not reviewed (`BACKUP_COST_UNKNOWNS`): the route and its maximum duration (300 s assumed), the Vercel rates of 7 October 2026, whether Vercel bills the bytes sent to R2 and Upstash, the last batch of `DUMP`s read before the cap refuses it (a key's size is not capped by the backup), and the `SCAN` names of other products. Nothing is switched on: `BACKUP_COST_REVIEW` stays `null` until the owner approves the monthly cost.

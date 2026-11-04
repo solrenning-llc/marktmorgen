@@ -150,6 +150,16 @@
  *   - On every move, set `kept` with keptOnMove from the charge worked
  *     out for the new start, before anything else, so a paid session the
  *     buyer moved inside its deadline stays kept whatever moves it later.
+ *   - Send capture_method explicitly on every create (manual or automatic;
+ *     Stripe's default is automatic_async since API 2024-12) and off_session
+ *     "recurring"; read a listed capture_method with readCapture.
+ *   - Close before creating: send the cancels chargeAttempt lists, list
+ *     again, and create only when chargeAttempt, asked again, finds nothing
+ *     open left; never a create while an old PaymentIntent may still be
+ *     confirmed.
+ *   - On every move, run afterMove first (kept, attemptFailed cleared).
+ *   - Store the PaymentIntent a 402 decline carries (createErrorStep
+ *     "record_intent"), never attemptFailed for it.
  *   - Start each attempt with startAttempt (its parameters on the
  *     allow-list, attemptKeyRefused and attemptFailed back to false); read
  *     a create's error with createErrorStep and a refund's with
@@ -422,23 +432,42 @@ export const ATTEMPT_BODY_KEYS = [
   "return_url",
   "automatic_payment_methods[enabled]",
   "automatic_payment_methods[allow_redirects]",
+  "error_on_requires_action",
 ] as const;
+
+/** A PaymentIntent's capture_method as these rules read it: manual (a hold), or automatic, whether Stripe says automatic or automatic_async. */
+export function readCapture(raw: string): "manual" | "automatic" {
+  return raw === "manual" ? "manual" : "automatic";
+}
+
+/** Parameters Stripe accepts only with confirm=true (docs.stripe.com/api/payment_intents/create, read 4 November 2026). */
+export const CONFIRM_ONLY_KEYS = ["off_session", "return_url", "mandate", "error_on_requires_action"] as const;
+
+/** Most retries of the pay link's unconfirmed PaymentIntent after Stripe refused it for good; then the creator is told (chargeAttempt "report", link_failed). */
+export const MAX_LINK_TRIES = 3;
 
 /**
  * The record as a new attempt starts, written under the lock before its
  * create is sent: the next attempt, its time, exactly the parameters it is
  * sent with, and attemptKeyRefused and attemptFailed back to false (they
  * belong to the attempt). Throws on a parameter outside ATTEMPT_BODY_KEYS,
- * payment_method_types[] or metadata[mm_*]. The list is the parameters an
- * off-session charge on a saved card needs as read from Stripe's API
- * reference for PaymentIntents (create); not yet checked against its dated
- * page in this unit: to verify against the dated docs before the first
- * real charge.
+ * allowed_payment_method_types[] (payment_method_types[] on API versions
+ * before it), metadata[mm_*], on a confirm-only parameter (CONFIRM_ONLY_KEYS)
+ * without confirm=true, or without an explicit capture_method (manual or
+ * automatic: never Stripe's default, automatic_async since API 2024-12).
+ * Read on docs.stripe.com/api/payment_intents/create (version
+ * 2026-10-28.endive) and the save-and-reuse guide on 4 November 2026:
+ * off_session takes true, "one_off" or "recurring", and these series send
+ * "recurring" (merchant-initiated charges on a schedule the buyer agreed
+ * to). Check the integration's pinned API version before the first real
+ * charge.
  */
 export function startAttempt(record: ChargeRecord, now: number, body: Readonly<Record<string, string>>): ChargeRecord {
   for (const key of Object.keys(body)) {
-    if (!(ATTEMPT_BODY_KEYS as readonly string[]).includes(key) && !/^metadata\[mm_[a-z_]+\]$/.test(key) && !/^payment_method_types\[\d*\]$/.test(key)) throw new Error(`startAttempt: ${key} is not a parameter an attempt may carry`);
+    if (!(ATTEMPT_BODY_KEYS as readonly string[]).includes(key) && !/^metadata\[mm_[a-z_]+\]$/.test(key) && !/^(allowed_)?payment_method_types\[\d*\]$/.test(key)) throw new Error(`startAttempt: ${key} is not a parameter an attempt may carry`);
+    if ((CONFIRM_ONLY_KEYS as readonly string[]).includes(key) && body.confirm !== "true") throw new Error(`startAttempt: ${key} can only be sent with confirm=true`);
   }
+  if (body.capture_method !== "manual" && body.capture_method !== "automatic") throw new Error("startAttempt: capture_method must be sent, manual or automatic");
   return { ...record, attempt: record.attempt + 1, attemptAt: now, attemptBody: { ...body }, attemptKeyRefused: false, attemptFailed: false };
 }
 
@@ -447,12 +476,17 @@ export function startAttempt(record: ChargeRecord, now: number, body: Readonly<R
  * idempotency_key_in_use (409, the first request still in flight): wait,
  * list again and decide again; idempotency_error (the key was used with
  * other parameters): it was processed, so set attemptKeyRefused and let
- * the list decide; anything else: the attempt failed (set attemptFailed
- * when Stripe made no PaymentIntent, then failedCharge decides).
+ * the list decide; an error that carries a PaymentIntent (an off-session
+ * decline, 402, with it in requires_payment_method): `record_intent`, store
+ * it as the attempt's and let failedCharge decide, never attemptFailed;
+ * anything else: the attempt failed (set attemptFailed, since Stripe made no
+ * PaymentIntent, then failedCharge decides).
  */
-export function createErrorStep(code: string | undefined): "wait" | "decide_from_list" | "failed" {
+export function createErrorStep(code: string | undefined, intentInError = false): "wait" | "decide_from_list" | "record_intent" | "failed" {
   if (code === "idempotency_key_in_use") return "wait";
   if (code === "idempotency_error") return "decide_from_list";
+  // An off-session decline (402) carries the PaymentIntent, in requires_payment_method: stored, never attemptFailed; failedCharge decides.
+  if (intentInError) return "record_intent";
   return "failed";
 }
 
@@ -523,13 +557,24 @@ export function keptOnMove(series: SeriesKey, record: ChargeRecord, found: reado
 }
 
 /**
+ * The record once a session is moved, before anything else is decided for
+ * it: `kept` from keptOnMove, and attemptFailed back to false (a refusal
+ * belongs to the plan it was made for; the new plan tries again).
+ */
+export function afterMove(series: SeriesKey, record: ChargeRecord, found: readonly FoundIntent[], charge: SeriesCharge): ChargeRecord {
+  return { ...record, kept: keptOnMove(series, record, found, charge), attemptFailed: false };
+}
+
+/**
  * A PaymentIntent as listed on the connected account (with
  * expand[]=data.latest_charge): `amount`, `currency` and `application` as
  * Stripe lists them; `amountReceived` and `amountRefunded` its latest
  * charge's amounts (amount_received, amount_refunded), and `disputed` that
  * charge's dispute flag.
  */
-export type FoundIntent = Intent & {
+export type FoundIntent = Omit<Intent, "capture"> & {
+  /** As Stripe lists it: automatic_async (the default since API 2024-12) is read as automatic (readCapture). */
+  capture: "manual" | "automatic" | "automatic_async";
   metadata: Record<string, string | undefined>;
   amount: number;
   currency: string;
@@ -577,7 +622,7 @@ function allIntents(series: SeriesKey, record: ChargeRecord, found: readonly Fou
     mine.set(f.id, {
       id: f.id,
       status: f.status,
-      capture: f.capture,
+      capture: readCapture(f.capture),
       created: f.created,
       heldAt: f.heldAt ?? stored?.heldAt ?? null,
       captureBefore: f.captureBefore ?? stored?.captureBefore ?? null,
@@ -695,12 +740,20 @@ function closeOf(i: Live, record: ChargeRecord, stale: boolean): Close | null {
  *     closed (one processing is waited on, never counted paid).
  *   - A failed one (waiting on the buyer) from an earlier plan: before the
  *     session's planned time it is canceled and the session waits for that
- *     time (moved later); a failed hold for a session now charged at once
- *     (the buyer moved it inside its deadline) is canceled and the session
- *     charged now, off-session; otherwise it is reused, for its pay link.
- *   - After a create refused for good with no PaymentIntent
- *     (attemptFailed): `link`, one unconfirmed PaymentIntent for the pay
- *     link, never the same request again.
+ *     time (moved later); after the buyer moved the session inside its
+ *     deadline, any failed one (a hold or a charge) is canceled and the
+ *     session charged now, off-session; a failed charge where the plan now
+ *     holds (the hold due, the deadline still ahead) is canceled and a hold
+ *     placed, so no payment is ever taken before the deadline and refunded;
+ *     otherwise it is reused, for its pay link. Order: the cancel is sent,
+ *     the list read again, and the create sent only once the list shows the
+ *     old one canceled (chargeAttempt is asked again, and answers create
+ *     only when nothing open is left).
+ *   - After a create refused for good with no PaymentIntent for this plan
+ *     (attemptFailed, a refusal made at or after charge.at): `link`, one
+ *     unconfirmed PaymentIntent for the pay link, never the same request
+ *     again; after MAX_LINK_TRIES (ChargeRecord.tries "link:<session>"), a
+ *     report to the creator instead.
  *   - With none left, nothing new before the session's planned time
  *     (`wait`, at that time, never earlier); from it, one is created under
  *     the next attempt's key, only once the latest attempt's PaymentIntent
@@ -715,7 +768,7 @@ export function chargeAttempt(
 ):
   | { do: "stop" }
   | { do: "repeat"; attempt: number; key: string; body: Readonly<Record<string, string>> }
-  | { do: "report"; why: Blocked["why"]; ids: string[] }
+  | { do: "report"; why: Blocked["why"] | "link_failed"; ids: string[] }
   | { do: "reuse"; id: string; close: Close[] }
   | { do: "wait"; at: number; close: Close[] }
   | { do: "create"; attempt: number; key: string; capture: "manual" | "automatic"; close: Close[] }
@@ -745,14 +798,22 @@ export function chargeAttempt(
   if (best && open) {
     // A failed one from an earlier plan (the session moved later): canceled, and the session planned again at its time.
     if (input.now < input.charge.at) return { do: "wait", at: input.charge.at, close: close([]) };
-    // A failed hold and the session now charged at once (the buyer moved it inside its deadline): canceled, and charged now.
-    if (input.charge.way === "charge" && best.capture === "manual") return { do: "create", attempt, key: chargeKey(series.id, record.index, attempt), capture: "automatic", close: close([]) };
+    // From an earlier plan, and the new plan is not what it was made for: charged now after the buyer moved the session inside its deadline (whatever failed before), or a hold now where a charge failed: canceled, and made as the plan says.
+    if (best.created < input.charge.at && (buyerInside(input.charge) || best.capture !== capture)) return { do: "create", attempt, key: chargeKey(series.id, record.index, attempt), capture, close: close([]) };
   }
   if (best) return { do: "reuse", id: best.id, close: close([best.id]) };
   if (input.now < input.charge.at) return { do: "wait", at: input.charge.at, close: close([]) };
-  // Refused for good with no PaymentIntent made: one unconfirmed, for the pay link (failedCharge).
-  if (record.attemptFailed) return { do: "link", attempt, key: chargeKey(series.id, record.index, attempt), capture, close: close([]) };
+  // Refused for good with no PaymentIntent made, for this plan (a refusal before a move belongs to the earlier plan): one unconfirmed, for the pay link (failedCharge), at most MAX_LINK_TRIES times.
+  if (record.attemptFailed && record.attemptAt !== null && record.attemptAt >= input.charge.at) {
+    if ((record.tries[`link:${record.index}`] ?? 0) >= MAX_LINK_TRIES) return { do: "report", why: "link_failed", ids: [] };
+    return { do: "link", attempt, key: chargeKey(series.id, record.index, attempt), capture, close: close([]) };
+  }
   return { do: "create", attempt, key: chargeKey(series.id, record.index, attempt), capture, close: close([]) };
+}
+
+/** Whether a charge is for a session the buyer moved inside its deadline: charged at once, kept. */
+function buyerInside(charge: SeriesCharge): boolean {
+  return charge.movedBy === "buyer" && charge.way === "charge" && !charge.refundFee;
 }
 
 /**
@@ -808,11 +869,15 @@ export type Refund = { id: string; index: number; key: string; cents: number };
  * charge at once when it was made from the cancelBy on. Only a charge made
  * before `at` (the moment the cancellation was accepted under the series'
  * lock) counts: one made after it never keeps a stop accepted in time.
+ * A PaymentIntent never stored needs its charge's time (heldAt, from
+ * latest_charge) to count as kept: without it, it is refunded.
  */
 function keptCharge(i: Live, record: ChargeRecord, cancelBy: number, at: number): boolean {
   if (holdTime(i) >= at) return false;
   if (record.intent?.id === i.id) return record.kept;
-  return i.capture === "manual" || holdTime(i) >= cancelBy;
+  // Never stored: kept only when its charge's own time is known (heldAt, from latest_charge); a PaymentIntent's creation proves nothing about when it was paid.
+  if (i.heldAt === null) return false;
+  return i.capture === "manual" || i.heldAt >= cancelBy;
 }
 
 export type StopSteps = {
@@ -994,10 +1059,13 @@ export function moveCase(series: SeriesKey, record: ChargeRecord, found: readonl
   // Moved by the creator to a start whose deadline had passed: its cancelBy is its start.
   const creatorInside = charge.movedBy === "creator" && charge.way === "hold" && deadlineHours > 0 && charge.captureAt === start && charge.cancelBy === start;
   const best = live[0];
+  // A refusal with no PaymentIntent belongs to the plan before the move (afterMove clears it): the new plan is tried again, as said below.
   if (best && best.status !== "requires_capture" && best.status !== "processing") {
-    // A failed payment: charged now when the buyer moved it inside the deadline; planned again when its time is later; otherwise its pay link, until payBy of the step that failed.
-    if (charge.way === "charge" && !charge.refundFee) return at("charged_now");
+    // A failed payment (chargeAttempt): charged now when the buyer moved it inside the deadline; planned again when its time is later, or when a hold now replaces a failed charge; otherwise its pay link, until payBy of the step that failed.
+    if (buyerInside(charge)) return at("charged_now");
     if (charge.at > movedAt) return at("planned");
+    const want = charge.way === "hold" && movedAt < charge.captureAt ? "manual" : "automatic";
+    if (best.capture !== want) return creatorInside ? at("held_until_start") : at("planned");
     const step = best.capture === "manual" ? "hold" : "charge";
     return at("pay_by_link", payBy(start, creatorInside ? 0 : deadlineHours, step));
   }

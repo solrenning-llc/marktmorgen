@@ -19,6 +19,8 @@ import {
   holdGoodUntil,
   keptOnCharge,
   keptOnMove,
+  afterMove as recordAfterMove,
+  readCapture,
   startAttempt,
   createErrorStep,
   refundOutcome,
@@ -187,7 +189,7 @@ is("a second payment for the same session (a retry that made another) is refunde
 is("after a late stop the buyer keeps paying for one payment only, the one stored; any other is refunded", toStop([2], [rec(2, "succeeded")], by("buyer", late, [listed("pi_2", "succeeded", 2), listed("pi_dup", "succeeded", 2)])), S({ refund: [refund("pi_dup", 2)] }));
 // The PaymentIntent was created and paid, and the process stopped before its id was stored.
 is("a payment whose id was never stored is found on the list and refunded", toStop([2], [rec(2, null, { attempt: 1 })], by("creator", ended, [listed("pi_z", "succeeded", 2, auto)])), S({ never: [2], refund: [refund("pi_z", 2)] }));
-is("never stored, the buyer stopping in time: a charge made before the deadline is refunded; a captured hold (captured only at or after its deadline) is kept", [toStop([2], [rec(2, null, { attempt: 1 })], by("buyer", ended, [listed("pi_z", "succeeded", 2, { ...auto, created: BOOKED })])).refund, toStop([2], [rec(2, null, { attempt: 1 })], by("buyer", ended, [listed("pi_z", "succeeded", 2)])).refund], [[refund("pi_z", 2)], []]);
+is("never stored, the buyer stopping in time: a charge made before the deadline is refunded; a captured hold (captured only at or after its deadline) is kept", [toStop([2], [rec(2, null, { attempt: 1 })], by("buyer", ended, [listed("pi_z", "succeeded", 2, { ...auto, created: BOOKED })])).refund, toStop([2], [rec(2, null, { attempt: 1 })], by("buyer", ended, [listed("pi_z", "succeeded", 2, { heldAt: BOOKED + HOUR })])).refund], [[refund("pi_z", 2)], []]);
 is("another series' or session's payments are never refunded here", toStop([2], [rec(2, null)], by("creator", ended, [listed("pi_a", "succeeded", 3), listed("pi_b", "succeeded", 2, { heldAt: null }, "s2")])).refund, []);
 is("a payment refunded already, on the list or on the record, is never refunded again", [toStop([2], [rec(2, null, { attempt: 1 })], by("creator", ended, [listed("pi_z", "succeeded", 2, auto, "s1", true)])).refund, toStop([2], [rec(2, "succeeded", { refunded: true })], by("creator", ended)).refund], [[], []]);
 const many = toStop([2, 3], [rec(2, "succeeded"), rec(3, "succeeded")], by("creator", ended, [listed("pi_d2", "succeeded", 2), listed("pi_d3", "succeeded", 3)]));
@@ -379,10 +381,10 @@ const buyerInside = sessionCharge(2, NOW + 30 * HOUR, BOOKED, 8000, 48, NOW, "bu
 is("the buyer moves it inside its deadline: the failed hold is canceled and the session charged now, said so", [chargeAttempt(SER, failedHold, [], go(buyerInside, NOW)), mc(buyerInside, failedHold, NOW + 30 * HOUR, 48)], [{ do: "create", attempt: 2, key: "series:s1:2:2", capture: "automatic", close: [cancel("pi_2")] }, "charged_now"]);
 const laterPlan = sessionCharge(2, starts[2] + 7 * DAY, BOOKED, 8000, 48, NOW);
 is("moved later: the failed one is canceled and the session planned again at its time, said so", [chargeAttempt(SER, failedHold, [], go(laterPlan, NOW)), mc(laterPlan, failedHold, starts[2] + 7 * DAY, 48)], [{ do: "wait", at: laterPlan.at, close: [cancel("pi_2")] }, "planned"]);
-is("the pay link's time is payBy of the step that failed, never a cancelBy already passed", [moveCase(SER, failedHold, [], { charge: creatorMoved, start: NOW + 30 * HOUR, deadlineHours: 48, movedAt: NOW }), moveCase(SER, rec(2, "requires_payment_method", {}, auto), [], { charge: sessionCharge(2, NOW + 60 * HOUR, BOOKED, 8000, 48, NOW, "creator"), start: NOW + 60 * HOUR, deadlineHours: 48, movedAt: NOW })], [{ case: "pay_by_link", until: NOW + 30 * HOUR }, { case: "pay_by_link", until: NOW + 60 * HOUR }]);
+is("the pay link's time is payBy of the step that failed, never a cancelBy already passed", [moveCase(SER, failedHold, [], { charge: creatorMoved, start: NOW + 30 * HOUR, deadlineHours: 48, movedAt: NOW }), moveCase(SER, rec(2, "requires_payment_method", {}, auto), [], { charge: sessionCharge(2, NOW + 60 * HOUR, BOOKED, 8000, 48, NOW, "creator"), start: NOW + 60 * HOUR, deadlineHours: 48, movedAt: NOW })], [{ case: "pay_by_link", until: NOW + 30 * HOUR }, { case: "planned", until: NOW + 12 * HOUR }]);
 
 part("A create refused for good with no PaymentIntent");
-is("never sent again, never waited on: an unconfirmed PaymentIntent for the pay link, and the non-payment cancel runs", [chargeAttempt(SER, sent({ attemptFailed: true }), [], go()), unpaidCancel(SER, sent({ attemptFailed: true }), [], held.at).do, startAttempt(sent({ attemptFailed: true }), held.at, body).attemptFailed], [{ do: "link", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [] }, "cancel", false]);
+is("never sent again, never waited on: an unconfirmed PaymentIntent for the pay link, and the non-payment cancel runs", [chargeAttempt(SER, sent({ attemptFailed: true, attemptAt: held.at }), [], go()), unpaidCancel(SER, sent({ attemptFailed: true }), [], held.at).do, startAttempt(sent({ attemptFailed: true }), held.at, body).attemptFailed], [{ do: "link", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [] }, "cancel", false]);
 is("the parameters an off-session charge on a saved card needs are allowed", (() => { try { startAttempt(sent(), held.at, { ...body, return_url: "https://example.com/r", "automatic_payment_methods[enabled]": "true", "automatic_payment_methods[allow_redirects]": "never", "payment_method_types[0]": "card" }); return true; } catch { return false; } })(), true);
 
 part("Never canceled as unpaid what the creator refunded");
@@ -396,6 +398,29 @@ is("each try its own key", [toStop([2], [rec(2, "requires_capture", { tries: { "
 
 part("A move reads the PaymentIntents listed");
 is("a payment found only on the list keeps a session the buyer moved inside its deadline", keptOnMove(SER, rec(0, null, { attempt: 1 }), [listed("pi_z", "succeeded", 0, auto)], buyerIn), true);
+
+part("The buyer moving a session inside its deadline after a failed payment");
+const failedCharge2 = rec(2, "requires_payment_method", {}, auto);
+is("a failed charge (its link open until the start): canceled, and the session charged now, as said", [chargeAttempt(SER, failedCharge2, [], go(buyerInside, NOW)), mc(buyerInside, failedCharge2, NOW + 30 * HOUR, 48)], [{ do: "create", attempt: 2, key: "series:s1:2:2", capture: "automatic", close: [cancel("pi_2")] }, "charged_now"]);
+const refusedBefore = rec(2, null, { attempt: 1, attemptAt: NOW - HOUR, attemptBody: body, attemptFailed: true });
+is("a create refused before the move: the new plan is tried, charged now, as said; the move clears the refusal", [chargeAttempt(SER, refusedBefore, [], go(buyerInside, NOW)), mc(buyerInside, refusedBefore, NOW + 30 * HOUR, 48), recordAfterMove(SER, refusedBefore, [], buyerInside).attemptFailed], [{ do: "create", attempt: 2, key: "series:s1:2:2", capture: "automatic", close: [] }, "charged_now", false]);
+const holdDue = sessionCharge(2, NOW + 60 * HOUR, BOOKED, 8000, 48, NOW, "buyer");
+is("a failed charge moved to where a hold is due and the deadline still ahead: canceled, a hold placed now, never a payment before the deadline", [holdDue.way, chargeAttempt(SER, failedCharge2, [], go(holdDue, NOW)), mc(holdDue, failedCharge2, NOW + 60 * HOUR, 48)], ["hold", { do: "create", attempt: 2, key: "series:s1:2:2", capture: "manual", close: [cancel("pi_2")] }, "planned"]);
+
+part("The pay link's PaymentIntent refused again and again");
+is("after MAX_LINK_TRIES, the creator is told instead", chargeAttempt(SER, sent({ attemptAt: held.at, attemptFailed: true, tries: { "link:2": 3 } }), [], go()), { do: "report", why: "link_failed", ids: [] });
+
+part("What a create may carry, as Stripe's dated reference says");
+const throws = (f: () => unknown) => { try { f(); return false; } catch { return true; } };
+is("confirm-only parameters without confirm=true, or no explicit capture_method: refused; allowed_payment_method_types[] accepted", [throws(() => startAttempt(sent(), held.at, { ...body, confirm: "false" })), throws(() => startAttempt(sent(), held.at, { ...body, confirm: "true", error_on_requires_action: "true", off_session: "recurring" })), throws(() => startAttempt(sent(), held.at, Object.fromEntries(Object.entries(body).filter(([k]) => k !== "capture_method")))), throws(() => startAttempt(sent(), held.at, { ...body, "allowed_payment_method_types[0]": "card" }))], [true, false, true, false]);
+is("automatic_async is read as automatic: a failed one after a late stop stays owed", [readCapture("automatic_async"), readCapture("manual"), toStop([2], [rec(2, null, { attempt: 1 })], by("buyer", late, [{ ...listed("pi_a", "requires_payment_method", 2, auto), capture: "automatic_async" }])).owed], ["automatic", "manual", ["pi_a"]]);
+is("an off-session decline carries its PaymentIntent: stored, never a refusal with none", [createErrorStep("card_declined", true), createErrorStep("card_declined")], ["record_intent", "failed"]);
+
+part("A PaymentIntent never stored needs its charge's time to be kept");
+is("no heldAt: refunded to a buyer stopping in time, never kept on its creation alone", toStop([2], [rec(2, null, { attempt: 1 })], by("buyer", ended, [listed("pi_z", "succeeded", 2, { heldAt: null })])).refund, [refund("pi_z", 2)]);
+
+part("The creator is never told a charge happened before it did");
+is("being charged, not charged", seriesMoveMessage("en", "creator", "charged_now", moveInput).includes("so the buyer is being charged now."), true);
 
 part("Not with a deposit, a code or a package");
 is("refused, each said", [seriesBillingProblem({ deposit: true, code: false, fromPackage: false }), seriesBillingProblem({ deposit: false, code: true, fromPackage: false }), seriesBillingProblem({ deposit: false, code: false, fromPackage: true }), seriesBillingProblem({ deposit: false, code: false, fromPackage: false })], ["deposit", "code", "package", null]);

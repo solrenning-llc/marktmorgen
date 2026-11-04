@@ -249,13 +249,17 @@ export const SITEMAP_LINE_BYTES = 300;
 /**
  * Working out an affiliate program's book, besides what scales: the book
  * counted (eight), the seven hashes, the PayPal refunds' set, two reads of
- * listings, the lock taken and let go, and the parts written back.
+ * listings, the lock taken, read and let go, the kept book's state read
+ * again under it and its previous marks, and the parts written to a draft
+ * that is renamed into place.
  */
-export const AFFILIATE_PAGE_COMMANDS = 40;
+export const AFFILIATE_PAGE_COMMANDS = 50;
 /** And what it reads whatever the size: the store record's share. */
 export const AFFILIATE_PAGE_BYTES = 64_000;
 /** What one line of the kept book takes, written as it is kept (lib/affiliate-book-snapshot.ts): two per field (a sale and a second tier's line of it), one per record read and per invoice, at the most. */
 export const BOOK_LINE_BYTES = 1_024;
+/** And each affiliate's whole part around their lines: its row with their record (address, PayPal address and note left out) and its wrapping. */
+export const BOOK_PART_BYTES = 2_048;
 /** One load of an affiliate's page, besides a later page's own commands: the kept book's time and length, the codes counted, its part read. */
 export const AFFILIATE_LOAD_COMMANDS = 4;
 /** Working through a body past what a request's shape holds: a heavy request's CPU and wait for each megabyte. */
@@ -274,7 +278,8 @@ const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_S
 export function affiliatePageRead(size: AffiliatePageSize): number {
   const rows = Math.min(size.rows, AFFILIATE_ROW_CAP);
   const bytes = AFFILIATE_PAGE_BYTES + size.fields * AFFILIATE_FIELD_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
-  const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES);
+  // Every field could be an affiliate with a part of their own; every part its lines.
+  const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES + size.fields * BOOK_PART_BYTES);
   const writes = Math.ceil(kept / 512_000) + 1;
   return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + 2 * writes, bytes + kept) + perMegabyte(bytes + kept)
     + size.stripePages * stripePage();

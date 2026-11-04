@@ -36,6 +36,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { readMoves } from "@/lib/call-records";
+import { forgetBookSnapshot } from "@/lib/affiliate-book-snapshot";
 import { affiliateCookieName, affiliatesOn, attributedAffiliate, canonicalEmail, payAddress, readAffiliate } from "@/lib/affiliates";
 import { creditsContacts, viaCookieName } from "@/lib/affiliate-setting";
 import {
@@ -325,6 +326,8 @@ export async function forgetLeadPerson(store: Store, email: string): Promise<num
     if (!lead || !lead.email) return 0;
     const json = JSON.stringify({ ...lead, email: "" });
     await redisPipeline([["HSET", leadsKey(statsId), id, json]]);
+    // The program's kept book shows the address masked (lib/affiliate-book-snapshot.ts): deleted whole, worked out again at the next load.
+    await forgetBookSnapshot(statsId);
     const freed = dataBytes([id, String(raw)], 1) - dataBytes([id, json], 1);
     if (freed > 0) await giveData(store, [{ slot: LEADS_SLOT, bytes: freed }]);
     return 1;

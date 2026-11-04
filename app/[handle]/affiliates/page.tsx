@@ -99,7 +99,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   // Paid for before anything that grows with the store is read (lib/affiliate-page-admission.ts):
   // past the window, the resting page, and nothing more is read.
   // An approved affiliate's figures come from the program's book, worked out for all its affiliates
-  // at most once a day (lib/affiliate-book-snapshot.ts); the page says when they are from.
+  // at most once a day (lib/affiliate-book-snapshot.ts); the page says when they are from, in UTC, spelled out.
   const admission = await admitAffiliatePage(store, affiliate);
   if (!admission.admitted) return <StoreResting store={store} buyer={affiliate !== null} />;
   const kept = admission.book;
@@ -108,7 +108,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   const terms = store.affiliates;
   const book = kept && kept !== "soon" ? kept.book : null;
   const asOf = kept && kept !== "soon"
-    ? new Date(kept.at * 1000).toLocaleString(lang.locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })
+    ? new Date(kept.at * 1000).toLocaleString(lang.locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })
     : "";
   const row = book?.rows[0] ?? null;
   // The products a partner shares in, by name, so their own page can say what
@@ -354,7 +354,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     ))}
                   </dl>
                   <p className="st-muted mt-3 text-sm" data-figures-as-of="">
-                    {a.figuresAsOf(asOf)}
+                    {`${a.figuresAsOf(asOf)} ${kept && kept !== "soon" && !kept.daily ? a.figuresShort : a.figuresDaily}`}
                   </p>
                   <p className="st-muted mt-3 text-sm">
                     {a.paidSoFar(money(row.paid, book.currency), store.name)}

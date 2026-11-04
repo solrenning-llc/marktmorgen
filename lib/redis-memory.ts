@@ -634,6 +634,18 @@ export class MemoryRedis {
       }
       case "EXISTS":
         return this.data.has(key) ? 1 : 0;
+      case "RENAME": {
+        // RENAME source destination: the destination is replaced, with the source's expiry.
+        this.live(args[0]);
+        if (!this.data.has(key)) throw new Error("ERR no such key");
+        this.data.set(args[0], this.data.get(key) as Entry);
+        this.data.delete(key);
+        const ends = this.until.get(key);
+        this.until.delete(key);
+        if (ends === undefined) this.until.delete(args[0]);
+        else this.until.set(args[0], ends);
+        return "OK";
+      }
       case "DUMP": {
         // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key
         // name or its time to live, as DUMP's is; RESTORE below is the only reader of it. Null for a missing key.

@@ -1,4 +1,5 @@
 import { absoluteImageUrl, servedImageUrl, servedSrcSet } from "@/lib/picture-served";
+import { listedLengths } from "@/lib/call-lengths";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { StickyBuy } from "@/components/sticky-buy";
 import { RecentSales } from "@/components/recent-sales";
@@ -180,8 +181,20 @@ function productData(store: Store, product: Listing, description: string, soldOu
   const url = `${SITE_URL}${productPath(store, product)}`;
   const options = sellableOptions(product);
   const availability = `https://schema.org/${preorder ? "PreOrder" : soon ? "OutOfStock" : soldOut ? "SoldOut" : "InStock"}`;
+  // A call with several lengths (lib/call-lengths.ts): each length's own price, as its checkout charges it.
+  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
   const offers = !sellable || product.recurring
     ? null
+    : lengths.length
+      ? {
+          "@type": "AggregateOffer",
+          priceCurrency: store.currency.toUpperCase(),
+          lowPrice: moneyField(Math.min(...lengths.map((l) => l.cents)), store.currency),
+          highPrice: moneyField(Math.max(...lengths.map((l) => l.cents)), store.currency),
+          offerCount: lengths.length,
+          availability,
+          url,
+        }
     : options.length > 1
       ? {
           "@type": "AggregateOffer",

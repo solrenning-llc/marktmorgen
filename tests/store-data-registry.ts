@@ -70,7 +70,7 @@ import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
 import { MAX_TEAM, LOG_LINES } from "@/lib/team";
-import { MAX_ENDPOINTS, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
+import { GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
 import { MAX_DEVICES } from "@/lib/phone-alerts";
 import { MAX_FEEDS } from "@/lib/calendar-sync";
@@ -879,12 +879,22 @@ export const FAMILIES: Record<string, Family> = {
   "nl:watch:sec:@lib/watch.ts": { what: "Seconds watched in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:hooks:anchor:@lib/webhooks.ts": { what: "The last Stripe event read", parts: [capped(KEY, "One a store.")] },
   "nl:hooks:cfg:@lib/webhooks.ts": { what: "The store's endpoints", parts: [capped(MAX_ENDPOINTS * 2 * KB, "MAX_ENDPOINTS endpoints.", src("lib/webhooks.ts", "MAX_ENDPOINTS"))] },
-  "nl:hooks:d:@lib/webhooks.ts": short("One delivery and how it went, a week", "webhook", 7, 4 * KB),
-  "nl:hooks:evt:@lib/webhooks.ts": { what: "An event already sent", parts: [per("order", 30, MARK, "A sale."), per("webhook", 30, MARK, "Any other.")] },
+  "nl:hooks:d:@lib/webhooks.ts": { what: "One delivery and how it went, a week", parts: [
+    per("webhook", 7, 4 * KB, "One delivery and how it went, a week"),
+    // A passed-over Stripe event leaves its line without taking a delivery: per endpoint, GIVEN_UP_LINES_PER_DAY events a day
+    // (counted in code) get their own, every later one that day only rewrites the endpoint's summary line; at most MAX_ENDPOINTS
+    // endpoints a store a day (counted in code, nl:hooks:wait:<id>:eps:<day>), each line kept a week.
+    capped(7 * (GIVEN_UP_LINES_PER_DAY + 1) * MAX_ENDPOINTS * 2 * KB, "Lines of passed-over Stripe events: GIVEN_UP_LINES_PER_DAY a day and one summary, one an endpoint, a week.", src("lib/webhooks.ts", "GIVEN_UP_LINES_PER_DAY", "MAX_ENDPOINTS")),
+  ] },
+  "nl:hooks:evt:@lib/webhooks.ts": { what: "An event already sent", parts: [
+    per("order", 30, MARK, "A sale."), per("webhook", 30, MARK, "Any other."),
+    capped(30 * (288 / 3) * MARK, "The mark of a passed-over Stripe event, kept thirty days. Not counted in code: bounded by the five-minute cron's calls, 288 visits a day and at least STRIPE_REFUSED_RUNS failed visits before an event is passed over.", src("lib/webhooks.ts", "STRIPE_REFUSED_RUNS", "STRIPE_WAIT_RUNS")),
+  ] },
   "nl:hooks:log:@lib/webhooks.ts": { what: "The store's last deliveries", parts: [capped(HOOK_LOG * 64, "The newest LOG_SIZE.", src("lib/webhooks.ts", "LOG_SIZE"))] },
   "nl:hooks:pos@lib/webhooks.ts": company("Where the webhook job stopped", "One key, the company's job."),
   "nl:hooks:q@lib/webhooks.ts": company("Deliveries waiting for a try", "One sorted set, members gone within a week: each a webhook's."),
   "nl:hooks:stores@lib/webhooks.ts": company("Stores with any endpoint", "One set for every store."),
+  "nl:hooks:wait:@lib/webhooks.ts": { what: "The Stripe event the store's reading waits on, and for how many runs", parts: [capped(KEY, "One a store, for thirty days at most."), capped(2 * (MAX_ENDPOINTS * (288 / 3) * 128 + MAX_ENDPOINTS * 64), "The day's passed-over events said to each endpoint (a sorted set an endpoint, at most MAX_ENDPOINTS endpoints a store a day in a set of their own, all gone at the end of the next UTC day: two days at most). Not counted in code: bounded by the five-minute cron's calls, 288 visits a day and at least STRIPE_REFUSED_RUNS failed visits before an event is passed over.", src("lib/webhooks.ts", "STRIPE_REFUSED_RUNS", "STRIPE_WAIT_RUNS"))] },
   "nl:rl:hooks:test:@lib/webhooks.ts": short("Tests counted", "studio", 1, 128),
   "nl:wo:due@lib/welcome-offer-send.ts": company("Welcome offers due", "One sorted set for every store, each a sign-up's."),
   "nl:wo:n:@lib/welcome-offer-send.ts": short("Welcome offers counted", "day", 62, 128),

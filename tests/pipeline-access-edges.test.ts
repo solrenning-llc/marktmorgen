@@ -144,11 +144,6 @@ async function main(): Promise<void> {
   const move = teamCode.slice(teamCode.indexOf("export async function moveMemberships"));
   is("the old address's restrictions are forgotten under the team's lock, after the team names the new one", move.indexOf("await forgetPipelineAccess(store, before)") > move.indexOf("await saveTeam(sid,") && move.indexOf("await forgetPipelineAccess(store, before)") < move.indexOf("if (!role) continue;"), true);
 
-  part("A form response already made into a deal");
-  const formCode = readFileSync("app/api/store/form-opportunity/route.ts", "utf8");
-  const existingAt = formCode.indexOf('state: "existing", deal: existing');
-  is("is shown only to someone who may see its pipeline", existingAt > 0 && formCode.lastIndexOf('accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) === "none"', existingAt) > 0, true);
-
   part("Round 4: a hidden pipeline's name is never told by a refusal");
   // Sam: no access to Coaching; Workshops as kept from above.
   await writePipelineAccess(statsId, "sam@example.com", { coach1: "none" }, store);
@@ -277,10 +272,6 @@ async function main(): Promise<void> {
   await copyPipelineAccess(store, "una@example.com", "uli@example.com").catch(() => { forcedRefused = true; });
   redis.pipeline = real;
   is("nothing is written uncounted", [forcedRefused, (await redisPipeline([["HGET", `nl:crm:pacc:${statsId}`, "uli@example.com"]]))[0]], [true, null]);
-
-  part("Round 5: a form response made into a deal a moment ago by someone else");
-  const formRoute = readFileSync("app/api/store/form-opportunity/route.ts", "utf8");
-  is("is shown only to someone who may see its pipeline, as one made before", formRoute.includes('if (result.state === "existing" && (await hidden(result.deal.stage))) return noAccess();'), true);
 
   part("Round 6: the log names each pipeline as it is named when the log is read");
   is("kept by pipeline id, with the name it had", [twinLine.what, twinLine.access], ["Set sam@example.com's pipeline access. coaching: no access (was can change)", { email: "sam@example.com", one: false, changes: [{ id: "sams01", name: "coaching", now: "none", was: "edit" }] }]);

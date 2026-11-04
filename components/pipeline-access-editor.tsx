@@ -35,7 +35,9 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
   const nameOf = (p: { id: string; name: string }) => names.get(p.id) ?? p.name;
 
   const chosen = (email: string, pipelineId: string): PipelineAccess => draft[email]?.[pipelineId] ?? currentOf(access[email], pipelineId);
-  const changed = (email: string) => pipelines.some((p) => chosen(email, p.id) !== currentOf(access[email], p.id));
+  // A record that could not be read is always something to save: Save writes it whole, even when every
+  // choice is left at No access, so it never stays unreadable.
+  const changed = (email: string) => access[email] === null || pipelines.some((p) => chosen(email, p.id) !== currentOf(access[email], p.id));
 
   async function save(email: string) {
     if (busy) {
@@ -91,7 +93,9 @@ export function PipelineAccessEditor({ members, pipelines, initial }: { members:
                         <select
                           className="field mt-1"
                           value={chosen(member.email, pipeline.id)}
-                          aria-invalid={message?.kind === "error" || undefined}
+                          // Never aria-invalid: every choice offered is a valid one, and no refusal (busy, changed
+                          // elsewhere, no room, no connection) says a chosen value is wrong; the error is tied to
+                          // the choices by aria-describedby instead (WCAG 3.3.1, 4.1.2).
                           aria-describedby={message?.kind === "error" ? errorId : undefined}
                           onChange={(event) => {
                             const value = event.target.value as PipelineAccess;

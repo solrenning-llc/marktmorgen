@@ -126,9 +126,11 @@ async function main(): Promise<void> {
   is("refusals said in an alert", html.includes('role="alert"'), true);
   const unread = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }], pipelines: [{ id: "sales0", name: "Sales" }], initial: { "sam@example.com": null } }));
   is("a record that cannot be read is said to show nothing, and what saving does", unread.includes("they see no pipeline. Choose what they may do with each one and save; the others stay at No access until you do.") && /<option value="none" selected="">/.test(unread), true);
+  is("a record that cannot be read can be saved as it shows, at No access for every pipeline: it is something to save, never \"Nothing to save\"", [unread.includes("Not saved yet."), html.includes("Not saved yet.")], [true, false]);
   is("nobody to restrict, said why", renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [], pipelines: [], initial: {} })).includes("only Support people can"), true);
   const editorCode = readFileSync("components/pipeline-access-editor.tsx", "utf8");
   is("a choice saves nothing by itself: each teammate has a Save that names them, and what happened is said in their own group", [/<select[^>]*disabled/.test(html), html.includes('role="status"'), html.includes(">Save<span class=\"sr-only\"> the access of sam@example.com</span>"), editorCode.includes("onChange={(event) => void choose"), editorCode.includes("body: JSON.stringify({ email, choices, was })")], [false, true, true, false, true]);
+  is("a choice is never marked invalid: every one offered is valid, and a refusal (busy, changed elsewhere, no room, no connection) is not about the value chosen", /aria-invalid=/.test(editorCode) || html.includes("aria-invalid"), false);
   is("an error is tied to that teammate's choices, and the Save button is never disabled (it says why instead)", [editorCode.includes("aria-describedby={message?.kind === \"error\" ? errorId : undefined}"), editorCode.includes("aria-disabled={busy !== null || undefined}"), editorCode.includes("Another teammate's access is being saved. Press Save again in a moment.")], [true, true, true]);
 
   part("On the team page");

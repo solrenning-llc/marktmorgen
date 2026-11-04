@@ -49,6 +49,8 @@ import { updatesWords } from "@/lib/buyer-words/updates";
 import { type Listing, type Store, saleHandles, storeForHandle } from "@/lib/store";
 import { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuyers } from "@/lib/product-updates-rules";
 import { noteForErasure } from "@/lib/erasure-index";
+import { countStudio } from "@/lib/studio-route";
+import { UPDATE_READ_UNITS } from "@/lib/read-ceilings";
 import { orderWrite } from "@/lib/order-data";
 import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
 
@@ -129,7 +131,8 @@ export function buyersFrom(rows: Record<string, unknown>[], handles: ReadonlySet
 
 export type StartResult =
   | { ok: true; job: UpdateJob }
-  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe"; until?: number };
+  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe"; until?: number }
+  | { ok: false; reason: "used"; message: string; until?: undefined };
 
 /** When this product's buyers may next be told, in seconds; 0 when they may now. */
 export async function nextUpdateAt(store: Store, productId: string): Promise<number> {
@@ -145,6 +148,13 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   if (!canTellBuyers(product)) return { ok: false, reason: "kind" };
   const next = await nextUpdateAt(store, product.id);
   if (next > nowSeconds) return { ok: false, reason: "soon", until: next };
+  // Finding the buyers reads every paid sale the store has (both Stripe lists,
+  // ALL_TIME_PAGES pages each, and its PayPal sales), and a press that finds
+  // none claims nothing, so it can be pressed again: each reading takes
+  // UPDATE_READ_UNITS of the store's studio requests before it starts
+  // (owner's rule MR; lib/read-ceilings.ts, UPDATE_READ_SHAPE).
+  const counted = await countStudio(store, null, UPDATE_READ_UNITS).catch(() => null);
+  if (!counted?.ok) return { ok: false, reason: "used", message: counted?.message ?? "This can't be counted just now. Try again in a minute." };
   let rows: Record<string, unknown>[];
   try {
     rows = (await readPaidSales(store, 0, ALL_TIME_PAGES)).sales.filter((s) => !s.upsell).map((s) => s.row);

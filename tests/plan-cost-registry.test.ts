@@ -27,6 +27,12 @@ import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
 import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
+import { readShapeCost } from "./plan-cost-registry";
+import {
+  CALENDAR_BUILD_SHAPE, CALENDAR_BUILD_UNITS, CALENDAR_READ_SHAPE, CALENDAR_READ_UNITS, SEARCH_DM_SHAPE, SEARCH_DM_UNITS, SEARCH_REQUEST_UNITS,
+  SEARCH_ROOM_SHAPE, SEARCH_ROOM_UNITS, SEARCH_SECONDS, SEARCH_SHAPE, TOTALS_STORE_SHAPE, TOTALS_STORE_UNITS, UPDATE_READ_SHAPE, UPDATE_READ_UNITS,
+  WALK_STEP_SHAPE, WALK_STEP_UNITS,
+} from "@/lib/read-ceilings";
 import { SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TIERS } from "@/lib/plan";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
@@ -209,6 +215,30 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
   assert.ok(UNIT_COST.buyer >= UNIT_COST.integration && UNIT_COST.buyer >= UNIT_COST.webhook);
+});
+
+test("the four reads of C4-4 take at least their worst before reading (lib/read-ceilings.ts)", () => {
+  // The community search takes public requests from a member and studio requests from the creator: held at the cheaper of the two.
+  const either = Math.min(laterPageCost(), UNIT_COST.studio);
+  const held: [string, number, number, number][] = [
+    ["community search", SEARCH_REQUEST_UNITS, either, readShapeCost(SEARCH_SHAPE)],
+    ["its room", SEARCH_ROOM_UNITS, either, readShapeCost(SEARCH_ROOM_SHAPE)],
+    ["its messages", SEARCH_DM_UNITS, either, readShapeCost(SEARCH_DM_SHAPE)],
+    ["a step of its one-time walk", WALK_STEP_UNITS, either, readShapeCost(WALK_STEP_SHAPE)],
+    ["the booking calendar's answer", CALENDAR_READ_UNITS, UNIT_COST.studio, readShapeCost(CALENDAR_READ_SHAPE)],
+    ["the booking calendar made again", CALENDAR_BUILD_UNITS, UNIT_COST.studio, readShapeCost(CALENDAR_BUILD_SHAPE)],
+    ["a product update's reading of every sale", UPDATE_READ_UNITS, UNIT_COST.studio, readShapeCost(UPDATE_READ_SHAPE)],
+    ["one store's numbers on the totals page", TOTALS_STORE_UNITS, UNIT_COST.studio, readShapeCost(TOTALS_STORE_SHAPE)],
+  ];
+  for (const [what, units, each, worst] of held) {
+    assert.ok(units * each >= worst, `${what}: ${units} x ${each} < ${worst}`);
+    console.log(`${what}: $${worst.toFixed(6)} at most, taken first as ${units} units at $${each.toFixed(6)}`);
+  }
+  // The search page's time limit is the one its shape is priced at; a page cut at it has spent no more.
+  assert.equal(SEARCH_SHAPE.seconds, SEARCH_SECONDS);
+  assert.ok(read("app/[handle]/community/search/page.tsx").includes(`export const maxDuration = ${SEARCH_SECONDS};`));
+  // A totals reading costs more than a page, so it is no longer the page's units.
+  assert.ok(TOTALS_STORE_UNITS >= STUDIO_PAGE_UNITS);
 });
 
 test("a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced", () => {

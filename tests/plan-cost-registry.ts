@@ -99,6 +99,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
+import type { ReadShape } from "@/lib/read-ceilings";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -271,6 +272,17 @@ export const REQUEST_COMMANDS = 1 + SHARE_COMMANDS_PER_REQUEST;
 export function request(shape: keyof typeof SHAPES, commands: number, bytes = 0): number {
   const { seconds, cpu } = SHAPES[shape];
   return CALL + cpu * CPU_SECOND + seconds * MEMORY_SECOND + commands * COMMAND + bytes * DB_BYTE;
+}
+
+/**
+ * One of lib/read-ceilings.ts's worst reads, in dollars (C4-4, 4 November 2026):
+ * its call, CPU, memory for its wall time and for each Stripe page waited on
+ * (EXPORT_PAGE_SECONDS, as the export prices them), its commands, the bytes it
+ * moves through the database and those it sends on.
+ */
+export function readShapeCost(shape: ReadShape): number {
+  return CALL + shape.cpu * CPU_SECOND + (shape.seconds + shape.stripePages * EXPORT_PAGE_SECONDS) * MEMORY_SECOND
+    + shape.commands * COMMAND + shape.dbBytes * DB_BYTE + shape.outBytes * ORIGIN_PER_BYTE;
 }
 
 /**
@@ -562,8 +574,13 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
+      // A member's community search takes its worst first, the room and messages where on, and each step of the one-time walk (C4-4, 4 November 2026; lib/read-ceilings.ts, held in tests/plan-cost-registry.test.ts).
+      { file: "app/[handle]/community/search/page.tsx", names: ["takeCommunityRead(store, owner, units)", "searchUnits({ chat: config.chat.on, dm: config.dm.on })", "take(WALK_STEP_UNITS)", "export const maxDuration = 30;"] },
+      { file: "lib/community-page.ts", names: ["takePublicRequest(store, \"buyer\", Date.now(), units)"] },
+      { file: "lib/read-ceilings.ts", names: ["SEARCH_REQUEST_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_DM_UNITS", "WALK_STEP_UNITS", "SEARCH_SECONDS = 30;"] },
+      { file: "lib/community-walk.ts", names: ["walkStep", "WALK_MEMBER_PAGE"] },
     ],
-    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
+    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count. A member's community search, which reads far more than a page, takes as many of them as its worst costs at a later page each before it reads anything, the room, the messages and each step of the one-time walk their own (lib/read-ceilings.ts; held in tests/plan-cost-registry.test.ts).",
   },
   {
     id: "studio",
@@ -590,8 +607,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/path-reminder.ts", names: ["sendPathReminder", "PATH_REMINDER_UNITS"] },
       { file: "lib/path-facts.ts", names: ["PATH_SALE_PAGES", "PATH_REFUND_PAGES", "PATH_MONEY_SECONDS"] },
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
+      // Four reads take their worst first (C4-4, 4 November 2026; lib/read-ceilings.ts, held in tests/plan-cost-registry.test.ts):
+      // the creator's own community search, the private booking calendar (each answer, and each file made again), a product
+      // update's reading of every paid sale, and each store's numbers on the totals page.
+      { file: "lib/community-page.ts", names: ["countStudio(store, null, units)"] },
+      { file: "app/api/store/calendar/[token]/route.ts", names: ["countStudio(store, null, CALENDAR_READ_UNITS)", "countStudio(store, null, CALENDAR_BUILD_UNITS)"] },
+      { file: "lib/calendar-sync.ts", names: ["CALENDAR_MAX_EVENTS", ".slice(0, CALENDAR_MAX_EVENTS)"] },
+      { file: "lib/product-updates.ts", names: ["countStudio(store, null, UPDATE_READ_UNITS)"] },
+      { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, TOTALS_STORE_UNITS)"] },
+      { file: "lib/read-ceilings.ts", names: ["CALENDAR_READ_UNITS", "CALENDAR_BUILD_UNITS", "UPDATE_READ_UNITS", "TOTALS_STORE_UNITS"] },
     ],
-    basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead.",
+    basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. The creator's community search, the private booking calendar, a product update's reading of every sale and each store's numbers on the totals page take as many studio requests as their worst read costs, before reading (lib/read-ceilings.ts; held in tests/plan-cost-registry.test.ts).",
   },
   {
     id: "rest-api",

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { countStudio, studioPath, studioView } from "@/lib/studio-route";
-import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { TOTALS_STORE_UNITS } from "@/lib/read-ceilings";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { can } from "@/lib/team-roles";
@@ -24,14 +24,19 @@ const WINDOW_NAMES = { d7: "Last 7 days", d30: "Last 30 days", d90: "Last 90 day
 const count = (n: number) => n.toLocaleString("en-US");
 const moneyLines = (lines: Money[]) => (lines.length ? lines.map((m) => formatMoney(m.cents, m.currency)).join(" + ") : formatMoney(0, "USD"));
 
-/** One store's figures, read the way its own studio reads them, inside its own allowance. */
-async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean): Promise<StoreRead> {
+/**
+ * One store's figures, read the way its own studio reads them, inside its own
+ * allowance: its sales, renewals, refunds, disputes and memberships are read
+ * from Stripe, so each store's reading takes TOTALS_STORE_UNITS of its studio
+ * requests before it starts (owner's rule MR; lib/read-ceilings.ts,
+ * TOTALS_STORE_SHAPE), the store this page is drawn for too, whose page
+ * itself was counted by studioView.
+ */
+async function readStore(store: Store, mayRead: boolean): Promise<StoreRead> {
   if (!mayRead) return { state: "no_access" };
-  if (!alreadyCounted) {
-    const counted = await countStudio(store, null, STUDIO_PAGE_UNITS).catch(() => null);
-    if (!counted) return { state: "error" };
-    if (!counted.ok) return { state: "paused" };
-  }
+  const counted = await countStudio(store, null, TOTALS_STORE_UNITS).catch(() => null);
+  if (!counted) return { state: "error" };
+  if (!counted.ok) return { state: "paused" };
   try {
     const [data, club] = await Promise.all([readNumbers(store), membershipNumbers(store).catch(() => null)]);
     return { state: "ok", data, members: club ? { currency: club.currency, paying: club.paying, trialing: club.trialing, mrr: club.mrr } : null };
@@ -62,7 +67,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
           sid: entry.store.sid,
           name: entry.store.name,
           handle: entry.store.handle,
-          read: await readStore(entry.store, can(entry.role, "stats"), entry.store.sid === store.sid),
+          read: await readStore(entry.store, can(entry.role, "stats")),
         })),
       )
     : [];

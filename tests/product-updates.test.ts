@@ -24,11 +24,14 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { windowId } from "@/lib/allowance-window";
 import { ROOM } from "./data-room";
+import { takeAllowance } from "@/lib/store-allowance";
+import { UPDATE_READ_UNITS } from "@/lib/read-ceilings";
 
 const OWNER = "owner@example.com";
 type Message = { to: string; subject: string; text: string; headers?: Record<string, string> };
 const batches: Message[][] = [];
 let sessions: Record<string, unknown>[] = [];
+let stripeReads = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
@@ -36,6 +39,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return new Response(JSON.stringify({ id: "email_1", data: [] }));
   }
   const path = url.pathname.replace(/^\/v1/, "");
+  stripeReads += 1;
   const list = (data: unknown[]) => new Response(JSON.stringify({ object: "list", data, has_more: false }));
   if (path === "/checkout/sessions") return list(sessions);
   return list([]);
@@ -123,6 +127,26 @@ async function main(): Promise<void> {
   const token = (mail.text.match(/\/unsubscribe\?u=([0-9a-f]{40})/) ?? [])[1] ?? "";
   is("the link knows whose it is", (await readUpdateStop(token))?.email, "ana@example.com");
   is("one press stops them", [await stopUpdates(token), (await readUpdateStop(token))?.stopped], [true, true]);
+
+  // C4-4 (4 November 2026; owner's rule MR): a press that finds nobody claims nothing, so it can be pressed again, and each
+  // reads every paid sale of the store. Each reading takes UPDATE_READ_UNITS studio requests first, and none past them.
+  part("Every reading of the sales is paid for before it starts");
+  const nobody = { ...unsold, id: "nothing02" };
+  const left = async () => {
+    const taken = await takeAllowance(await load(), "studio", 1);
+    return taken.ok ? taken.left : -1;
+  };
+  const start = await left();
+  const readsBefore = stripeReads;
+  is("a reading that finds nobody takes its units", [await startUpdate(await load(), nobody, "").then((r) => (r.ok ? "started" : r.reason)), start - (await left())], ["none", UPDATE_READ_UNITS + 1]);
+  is("and reads Stripe", stripeReads > readsBefore, true);
+  // Spend what is left of the window.
+  const rest = await left();
+  if (rest > 0) await takeAllowance(await load(), "studio", rest);
+  const readsSpent = stripeReads;
+  const refused = await startUpdate(await load(), nobody, "");
+  is("past the window it is refused, with the window's own words", [refused.ok ? "started" : refused.reason, !refused.ok && refused.reason === "used" && refused.message.length > 10], ["used", true]);
+  is("and reads nothing", stripeReads - readsSpent, 0);
 
   done();
 }

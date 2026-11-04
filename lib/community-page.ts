@@ -9,11 +9,24 @@
  */
 import { type Viewer, communityViewer } from "@/lib/community-access";
 import { countDay } from "@/lib/day-visit";
-import { isResting } from "@/lib/traffic";
+import { isResting, takePublicRequest } from "@/lib/traffic";
+import { countStudio } from "@/lib/studio-route";
 import { redirect } from "next/navigation";
 import type { Store } from "@/lib/store";
 
 type CookieJar = Parameters<typeof communityViewer>[1];
+
+/**
+ * `units` of the store's window for a read a community page does past the
+ * page itself (the search, lib/read-ceilings.ts), taken before it reads:
+ * a member's from the buyers' requests, the creator's from the studio's.
+ * `why` is what the studio's paused page is told when the creator's is refused.
+ */
+export async function takeCommunityRead(store: Store, owner: boolean, units: number): Promise<{ ok: true } | { ok: false; why: string }> {
+  if (!owner) return (await takePublicRequest(store, "buyer", Date.now(), units)) ? { ok: true } : { ok: false, why: "used" };
+  const counted = await countStudio(store, null, units).catch(() => null);
+  return counted?.ok ? { ok: true } : { ok: false, why: counted && !counted.ok ? counted.reason : "unknown" };
+}
 
 export async function communityVisitor(store: Store, cookies: CookieJar): Promise<Viewer> {
   const viewer = await communityViewer(store, cookies);

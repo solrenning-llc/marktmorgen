@@ -55,6 +55,13 @@ export const FEED_MAX_BYTES = 2_000_000;
 export const FEED_TIMEOUT_MS = 8_000;
 /** How long the subscription file is reused before it is made again. */
 const OUT_SECONDS = 300;
+/**
+ * Events the subscription file holds at the most, the soonest first (4
+ * November 2026, C4-4): so the file kept, read on every answer and sent on,
+ * has a size its feed's ceiling can be priced at (lib/read-ceilings.ts).
+ * Past it, the furthest sessions wait until nearer ones are over.
+ */
+export const CALENDAR_MAX_EVENTS = 1_000;
 /** The longest address accepted. Google's secret addresses are about 150 characters. */
 export const MAX_FEED_URL = 1000;
 
@@ -439,7 +446,7 @@ export function bookedCalendar(
     "REFRESH-INTERVAL;VALUE=DURATION:PT15M",
     "X-PUBLISHED-TTL:PT15M",
   ];
-  for (const slot of [...slots.values()].sort((a, b) => a.start - b.start)) {
+  for (const slot of [...slots.values()].sort((a, b) => a.start - b.start).slice(0, CALENDAR_MAX_EVENTS)) {
     const product = listings.find((p) => p.id === slot.product);
     const title = product?.title ?? "A call that is no longer listed";
     const setup = product?.call ?? null;

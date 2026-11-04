@@ -111,6 +111,8 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "GET store/bundle": row("products", read),
   "POST store/bundle": row("products", draft),
   "POST store/calendar": row("connections", never(CONNECT)),
+  // The creator's private booking feed, read by their own calendar app at its secret address (C4-4: counted in the studio's requests since 4 November 2026).
+  "GET store/calendar/[token]": row("calls", never(SECRET)),
   "POST store/call": row("calls", draft),
   "POST store/call-package": row("calls", draft),
   "GET store/call-team": row("calls", read),

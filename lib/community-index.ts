@@ -83,6 +83,25 @@ export async function reindexCourse(communityId: string, product: Listing, cours
   );
 }
 
+/**
+ * Writes one lesson, by its place in the course, as reindexCourse writes each:
+ * for the one-time walk (lib/community-walk.ts), which goes a lesson at a
+ * time so that no search pays for a whole course. False past the last lesson.
+ */
+export async function indexLessonAt(communityId: string, product: Listing, course: Course, at: number): Promise<boolean> {
+  const entry = lessonsInOrder(course)[at];
+  if (!entry) return false;
+  const body = await readBody(course.id, entry.lesson.id).catch(() => "");
+  await index(
+    communityId,
+    "lesson",
+    lessonRef(product.id, entry.lesson.id),
+    LESSON_CEILING - at,
+    [entry.lesson.title, entry.unit.title, product.title, body],
+  ).catch(() => {});
+  return true;
+}
+
 /** Takes one lesson out: it was deleted, or its course was. */
 export async function unindexLesson(communityId: string, productId: string, lessonId: string): Promise<void> {
   await unindex(communityId, "lesson", lessonRef(productId, lessonId)).catch(() => {});

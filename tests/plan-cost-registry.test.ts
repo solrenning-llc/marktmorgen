@@ -4,6 +4,12 @@ import { AGENDA_READ, BUYER_LEDGER } from "./plan-cost-registry";
 import { AGENDA_UNITS } from "@/lib/person-agenda";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
+import { ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
+import {
+  API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
+  BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
+} from "@/lib/api-read-rules";
+import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import { PATH_REMINDER_UNITS } from "@/lib/path-reminder-rules";
 /**
@@ -19,15 +25,18 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING } from "./plan-cost-registry";
+import { ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS } from "@/lib/buyer-orders-rules";
 import { assessCustomerWorstCase } from "@/lib/net-margin-rules";
 import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
+import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
 import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
@@ -200,6 +209,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.
   assert.ok(PICTURE_REQUEST_UNITS * laterPageCost() >= PICTURE_READ, `${PICTURE_REQUEST_UNITS} x ${laterPageCost()} < ${PICTURE_READ}`);
+  // A certificate's PDF is CERTIFICATE_PDF_UNITS public requests, all taken before it is drawn: more than its CPU, its time and its bytes cost.
+  assert.ok(CERTIFICATE_PDF_UNITS * laterPageCost() >= CERTIFICATE_PDF_READ, `${CERTIFICATE_PDF_UNITS} x ${laterPageCost()} < ${CERTIFICATE_PDF_READ}`);
+  console.log(`a certificate's PDF: $${CERTIFICATE_PDF_READ.toFixed(6)} at most, counted as ${CERTIFICATE_PDF_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
   console.log(`next product after a purchase: $${NEXT_OFFER_READ.toFixed(6)} at most, counted as ${NEXT_OFFER_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
@@ -209,6 +221,12 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // An opening of a buyer's orders page is ORDERS_OPEN_UNITS public requests before anything is read: more than its time, its fixed reads and
+  // its page cost; and each request its meter takes pays for ORDERS_UNIT_COMMANDS commands, a listing counted as ORDERS_LISTING_COMMANDS.
+  assert.ok(ORDERS_OPEN_UNITS * laterPageCost() >= ORDERS_OPEN_READ, `${ORDERS_OPEN_UNITS} x ${laterPageCost()} < ${ORDERS_OPEN_READ}`);
+  assert.ok(laterPageCost() >= ORDERS_UNIT_COMMANDS * ORDERS_METERED_COMMAND, `${laterPageCost()} < ${ORDERS_UNIT_COMMANDS} x ${ORDERS_METERED_COMMAND}`);
+  assert.ok(ORDERS_LISTING_COMMANDS * ORDERS_METERED_COMMAND >= ORDERS_METERED_LISTING, `${ORDERS_LISTING_COMMANDS} x ${ORDERS_METERED_COMMAND} < ${ORDERS_METERED_LISTING}`);
+  console.log(`an opening of the orders page: $${ORDERS_OPEN_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}; ${ORDERS_UNIT_COMMANDS} metered commands a request`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
@@ -288,4 +306,78 @@ test("bounded post-sale evidence fits its separately reserved studio requests",(
  assert.ok(PATH_GROWTH_READ<=PATH_GROWTH_READ_UNITS*UNIT_COST.studio);
  const source=read("lib/path-growth-facts.ts");
  assert.ok(source.indexOf("await charge(PATH_GROWTH_READ_UNITS)")<source.indexOf("readProductsStrict(store,ids)"));
+});
+
+test("an API reading that reads more than a page takes further requests that cover it, at every size, before it reads", () => {
+  const work = (w: Partial<ReadWork>): ReadWork => ({ commands: 0, bytes: 0, sent: 0, stripePages: 0, roundTrips: 0, ...w });
+  // Each thing one further request pays for, alone, costs no more than a request.
+  for (const one of [{ commands: API_UNIT_COMMANDS }, { bytes: API_UNIT_BYTES }, { sent: API_UNIT_SENT_BYTES }, { stripePages: API_UNIT_STRIPE_PAGES }, { roundTrips: API_UNIT_ROUND_TRIPS }]) {
+    assert.ok(apiReadCost(work(one)) <= UNIT_COST.api, `${JSON.stringify(one)}: ${apiReadCost(work(one))} > ${UNIT_COST.api}`);
+  }
+  assert.equal(MORE_TAKE_COMMANDS, TAKE_COMMANDS);
+  assert.ok(ROUND_TRIP_SECONDS >= 0.25);
+  const covers = (w: ReadWork, what: string) => {
+    const units = apiReadUnits(w);
+    // Taking them is counted too: its commands, the one that gives them back, and its trips to the database.
+    const cost = apiReadCost(units > 0 ? withTaking(w) : w);
+    assert.ok(units === 0 || (withTaking(w).commands === w.commands + MORE_TAKE_COMMANDS + 1 && withTaking(w).roundTrips >= w.roundTrips + 2), `${what}: taking is priced`);
+    assert.ok(Number.isSafeInteger(units) && units * UNIT_COST.api >= cost, `${what}: ${units} x ${UNIT_COST.api} < ${cost}`);
+    if (apiReadCost(w) > 0) assert.ok(units >= 1, `${what} costs something and takes nothing`);
+  };
+  // A course's page: every count of students a page can hold and more (HSCAN's COUNT is a hint), whatever is blocked.
+  for (let rows = 0; rows <= 2_000; rows += 1) for (const blocked of [0, 1, 199, 200, 201, 50_000]) covers(studentsPageWork(rows, blocked), `students ${rows}/${blocked}`);
+  // The affiliate program at every size, with and without Stripe, PayPal refunds, leads and products.
+  for (const entries of [0, 1, 7, 100, 1_000, 10_000, 100_000, 1_000_000]) {
+    for (const share of [0, 0.1, 1]) {
+      const people = Math.floor(entries * share);
+      for (const leads of [0, 50, 200, 5_000]) for (const paypalRefunds of [0, 3, 500, 20_000]) for (const products of [0, 10, 2_000]) for (const stripe of [false, true]) {
+        const sizes: BookSizes = { kept: true, entries, people, leads: Math.min(leads, entries), paypalRefunds, stripe, products };
+        covers(bookWork(sizes, BOOK_STRIPE_PAGES), `affiliates ${JSON.stringify(sizes)}`);
+      }
+    }
+  }
+  assert.equal(apiReadUnits(bookWork({ kept: false, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 9 }, BOOK_STRIPE_PAGES)), 0);
+  // Shares that are not whole: just under, at and just over each whole number, in every figure and mixed, and a seeded spread.
+  const caps: [keyof ReadWork, number][] = [["commands", API_UNIT_COMMANDS], ["bytes", API_UNIT_BYTES], ["sent", API_UNIT_SENT_BYTES], ["stripePages", API_UNIT_STRIPE_PAGES], ["roundTrips", API_UNIT_ROUND_TRIPS]];
+  for (const [field, cap] of caps) for (const whole of [1, 2, 7, 40]) for (const off of [-1e-6, -0.01, -0.3, 0, 1e-9, 0.01, 0.3]) {
+    const amount = cap * (whole + off);
+    covers(work({ [field]: amount }), `${field} ${whole}${off >= 0 ? "+" : ""}${off}`);
+  }
+  let seed = 7;
+  const next = () => ((seed = (seed * 48_271) % 2_147_483_647) / 2_147_483_647);
+  for (let i = 0; i < 5_000; i += 1) {
+    covers(work({ commands: next() * 3 * API_UNIT_COMMANDS, bytes: next() * 2 * API_UNIT_BYTES, sent: next() * API_UNIT_SENT_BYTES, stripePages: next() * 2 * API_UNIT_STRIPE_PAGES, roundTrips: next() * API_UNIT_ROUND_TRIPS }), `mixed ${i}`);
+  }
+  // The bookings at their most; nothing without Stripe.
+  covers(bookingsWork(true), "bookings");
+  assert.equal(apiReadUnits(bookingsWork(false)), 0);
+  // A size that could not be read is never priced low.
+  assert.equal(apiReadUnits({ commands: Number.NaN }), Number.POSITIVE_INFINITY);
+  assert.equal(apiReadUnits({ bytes: -1 }), Number.POSITIVE_INFINITY);
+
+  // The sizes priced are the code's own.
+  const calls = read("lib/calls.ts");
+  assert.ok(calls.includes(`const MAX_PAGES = ${BOOKING_PAGES};`) && calls.includes("/checkout/sessions?limit=100"), "the bookings' pages");
+  const paypal = read("lib/paypal-sales.ts");
+  assert.ok(paypal.includes(`"LIMIT", "0", "${BOOK_PAYPAL_REFUNDS + 1}"`) && paypal.includes(`Math.min(flat.length, ${BOOK_PAYPAL_REFUNDS * 2})`), "PayPal refunds read");
+  const book = read("lib/affiliates.ts");
+  assert.ok(book.includes(`.slice(0, ${BOOK_MOVES})`) && book.includes(`const INVOICE_PAGES = ${BOOK_INVOICES / 100};`) && book.includes('limit: "100"'), "the book's moves and invoices");
+  assert.ok(BOOK_STRIPE_PAGES >= BOOK_INVOICES / 100);
+
+  // Each takes them before it reads.
+  const before = (file: string, first: string, then: string) => {
+    const source = read(file);
+    const at = source.indexOf(first);
+    assert.ok(at >= 0 && source.indexOf(then, at) > at, `${file}: ${first} before ${then}`);
+  };
+  before("lib/learn.ts", "if (!(await allow(rows.length, blockedAll))) return null;", '["SMEMBERS", doneKey(course.id, row.e)]');
+  before("lib/api-read.ts", "said.refused = await charge(apiReadUnits(studentsPageWork(rows, blocked)));", "data: page.students.map");
+  before("lib/api-read.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store);");
+  before("lib/api-read.ts", "const refused = await charge(apiReadUnits(bookingsWork(Boolean(store.stripeAccountId))));", "const rows = await paidCalls(store);");
+  before("lib/mcp-tools.ts", "const refused = await chargeBook(store, charge);", "const book = await readBook(store);");
+  for (const route of ["app/api/v1/students/route.ts", "app/api/v1/affiliates/route.ts", "app/api/v1/bookings/route.ts", "app/api/mcp/route.ts"]) {
+    assert.ok(read(route).includes("(more) => takeMoreApi(store, more)"), `${route} takes them from the store's API requests`);
+  }
+  const page = apiReadUnits(studentsPageWork(200, 0));
+  console.log(`API readings: a page of 200 students takes ${page} more, the bookings ${apiReadUnits(bookingsWork(true))} more, an empty program ${apiReadUnits(bookWork({ kept: true, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 0 }, BOOK_STRIPE_PAGES))} more`);
 });

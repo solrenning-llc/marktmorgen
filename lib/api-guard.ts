@@ -162,6 +162,25 @@ async function apiKeyed(
   return { store, keyId: found.id, write: found.write, agent: found.agent };
 }
 
+/**
+ * Takes `more` of the store's API requests, beyond the one the request already
+ * took at the door, before a reading that costs more than one request
+ * (lib/api-read-rules.ts): null when taken, or when there is nothing more to
+ * take; else the refusal to send as it is, and nothing more is read. Refused,
+ * none of them is kept (lib/store-allowance.ts gives back what did not fit).
+ * A count that is not one (a size that could not be read) is refused too.
+ */
+export async function takeMoreApi(store: Store, more: number): Promise<Response | null> {
+  if (more === 0) return null;
+  if (!Number.isSafeInteger(more) || more < 0) return apiError(502, "unavailable", "This could not be read just now. Try again in a moment.");
+  const taken = await takeAllowance(store, "api", more);
+  if (taken.ok) return null;
+  if (taken.reason === "used") {
+    return apiError(429, "monthly_limit", `This read takes ${(more + 1).toLocaleString("en-US")} of your store's API requests, more than your store has left, so nothing was read.`);
+  }
+  return apiError(429, taken.reason === "pool" ? "no_place" : "unavailable", taken.message);
+}
+
 /** Most a write request's body may weigh. */
 const MAX_BODY_BYTES = 4_000;
 

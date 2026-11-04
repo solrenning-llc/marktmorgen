@@ -1,4 +1,4 @@
-import { apiStore } from "@/lib/api-guard";
+import { apiStore, takeMoreApi } from "@/lib/api-guard";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { readNumbers, summaryOf } from "@/lib/stats-report";
@@ -111,7 +111,13 @@ export async function POST(request: Request) {
     }
     if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
     if (params.name === "get_emails") return result(id, said(await emailsTool(store)));
-    if (params.name === "get_affiliates") return result(id, said(await affiliatesTool(store)));
+    if (params.name === "get_affiliates") {
+      // Its further API requests are taken before the program is read; refused, its own sentence.
+      const read = await affiliatesTool(store, (more) => takeMoreApi(store, more));
+      if (!(read instanceof Response)) return result(id, said(read));
+      const refusal = (await read.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof refusal?.message === "string" ? refusal.message : "That could not be read just now. Try again in a moment.");
+    }
     if (params.name === "list_products") {
       const cursor = typeof params.arguments?.cursor === "string" ? params.arguments.cursor.slice(0, 200) : null;
       return result(id, said(await products(store, cursor)));

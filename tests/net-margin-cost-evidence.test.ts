@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assessCustomerWorstCase, CUSTOMER_COST_CATEGORIES, type CustomerWorstCase } from '../lib/net-margin-rules';
 import { txCustomerFixture } from './customer-tax-review-fixture';
+import { reviewedResourceEnvelope } from '../lib/reviewed-resource-envelope';
+import { assessFundedExposure, fundedExposureDetails, EXPOSURE_SCOPES } from '../lib/funded-exposure-rules';
+import { zeroExposureFixture } from './margin-test-fixtures';
 
 const review = (): CustomerWorstCase => ({ ...txCustomerFixture(10000, 0), taxesCeilingCents: 3000 });
 const unknown = (value: CustomerWorstCase) => {
@@ -74,4 +77,55 @@ test('complete JSON, frozen and null-prototype costs keep the same exact net res
  }
  const costly = review(); costly.costCeilings.other = 100000;
  assert.equal(assessCustomerWorstCase(costly).approved, false);
+});
+
+const decorate = (kind: string, costs: object) => {
+ if (kind === 'additional') Object.assign(costs, { unreviewedSupplier: 100000 });
+ if (kind === 'unknown') Object.assign(costs, { unreviewedSupplier: null });
+ if (kind === 'hidden') Object.defineProperty(costs, 'unreviewedSupplier', { value: 100000 });
+ if (kind === 'symbol') Object.defineProperty(costs, Symbol('unreviewedSupplier'), { value: 100000 });
+ if (kind === 'derived') Object.setPrototypeOf(costs, { unreviewedSupplier: 100000 });
+ if (kind === 'required-hidden') Object.defineProperty(costs, 'ai', { value: 0, enumerable: false });
+};
+const decorations = ['additional', 'unknown', 'hidden', 'symbol', 'derived', 'required-hidden'];
+
+test('resource planning cannot erase a cost before assessing the customer', () => {
+ for (const kind of decorations) {
+  const value = review(); decorate(kind, value.costCeilings);
+  assert.deepEqual(reviewedResourceEnvelope(value, 1, 1), { approved: false, reason: 'unknown', remainingMicroUsd: null, affordableUnits: null });
+ }
+});
+
+test('every exposure scope rejects a discarded cost even with no occurrences', () => {
+ for (const scope of EXPOSURE_SCOPES) for (const count of [0, 1]) for (const kind of decorations) {
+  const value = zeroExposureFixture(); value.cases[scope].maximumMonthlyCases = count;
+  decorate(kind, value.cases[scope].worstCase!.costCeilings);
+  assert.deepEqual(assessFundedExposure(value), { approved: false, reason: 'unknown', requiredBudgetCents: null, monthlyBudgetCents: null });
+ }
+});
+
+test('the exposure funding snapshot cannot make omitted liabilities disappear', () => {
+ for (const scope of EXPOSURE_SCOPES) for (const kind of decorations) {
+  const value = zeroExposureFixture(); value.cases[scope].maximumMonthlyCases = 1;
+  decorate(kind, value.cases[scope].worstCase!.costCeilings);
+  assert.equal(fundedExposureDetails(value), null);
+ }
+});
+
+test('valid resource headroom and exact exposure allocations are unchanged', () => {
+ const expected = reviewedResourceEnvelope(review(), 1, 1);
+ assert.equal(expected.remainingMicroUsd, 69990000);
+ for (const nullPrototype of [false, true]) {
+  const unit = review(), exposure = zeroExposureFixture();
+  exposure.cases.trial.maximumMonthlyCases = 3;
+  exposure.cases.trial.worstCase!.costCeilings.ai = 100;
+  exposure.monthlyBudgetCents = 300;
+  if (nullPrototype) {
+   unit.costCeilings = Object.assign(Object.create(null), unit.costCeilings);
+   for (const scope of EXPOSURE_SCOPES) exposure.cases[scope].worstCase!.costCeilings = Object.assign(Object.create(null), exposure.cases[scope].worstCase!.costCeilings);
+  }
+  assert.deepEqual(reviewedResourceEnvelope(unit, 1, 1), expected);
+  assert.equal(assessFundedExposure(exposure).requiredBudgetCents, 300);
+  assert.deepEqual(fundedExposureDetails(exposure)!.allocations.trial, { slots: 3, cents: 100 });
+ }
 });

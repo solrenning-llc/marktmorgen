@@ -49,6 +49,7 @@ import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
 import { forgetCredit } from "@/lib/closing-credit";
+import { paidYearHeld } from "@/lib/yearly-switch-rules";
 import {
   HOLD_PAGES_PER_RUN,
   type HeldSub,
@@ -167,6 +168,18 @@ export function paidPeriodOf(invoice: Record<string, unknown>, email: string, in
   return { inv: invoice.id, ...(pi ? { pi } : {}), amt: line.amt, tot, cur, ps: line.ps, pe: line.pe, e: email };
 }
 
+/**
+ * The payment a member's time past the closing is worked out from: its last paid invoice that holds its membership
+ * (Stripe lists them newest first). But a member held on the monthly price with nothing to pay until the end of a
+ * year they paid (lib/yearly-fallback-sweep.ts, paidYearHeld) is owed for that year: the newer month beside it was
+ * refunded by the sweep, so reading it would give the member nothing back for the year (review rev28).
+ */
+export function lastPaidPeriod(paid: Record<string, unknown>[], sub: HeldSub & { trial_end?: unknown }, email: string): PaidPeriod | null {
+  const periods = paid.map((invoice) => paidPeriodOf(invoice, email)).filter((p): p is PaidPeriod => p !== null);
+  const year = paidYearHeld(sub) ? periods.find((p) => p.inv === sub.metadata?.yearly_paid) : undefined;
+  return year ?? periods[0] ?? null;
+}
+
 const listOf = (reply: Record<string, unknown>) => (Array.isArray(reply.data) ? (reply.data as Record<string, unknown>[]) : []);
 
 /**
@@ -199,7 +212,7 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
     const query = new URLSearchParams({ subscription: id, status: "paid", limit: "10" });
     query.append("expand[]", "data.payments");
     const paid = listOf(await onAccount("GET", account, `/invoices?${query}`));
-    const period = paid.map((invoice) => paidPeriodOf(invoice, email)).find((p): p is PaidPeriod => p !== null) ?? null;
+    const period = lastPaidPeriod(paid, sub, email);
     // The first reading is the one before any hold (HSETNX).
     if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(period)]]);
   }

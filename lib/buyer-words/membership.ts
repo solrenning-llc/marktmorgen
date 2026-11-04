@@ -193,6 +193,8 @@ const en = {
 
   // ---- Switching to another plan ------------------------------------------------------
   switchProblems: {
+    // A year paid and held until it ends (lib/yearly-fallback-sweep.ts): no switch before then.
+    held: { title: "This membership is paid for the whole year", body: "You paid for a full year that is still running, so its plan can be switched only after that year ends. Nothing was changed." },
     expired: { title: "This link has expired", body: "A link to your membership works for one hour. Ask for a new one on your membership page." },
     gone: { title: "This membership cannot switch", body: "It may be canceled, set to end, waiting on a payment, or no longer yours on this link. Nothing was changed." },
     tier: { title: "That plan is not offered anymore", body: "Go back to your membership page to see the plans you can switch to now. Nothing was changed." },
@@ -542,6 +544,8 @@ const es: MembershipWords = {
   askReply: (store) => `¿Dudas? Responde a este correo y le llegará a ${store}.`,
 
   switchProblems: {
+    // A year paid and held until it ends (lib/yearly-fallback-sweep.ts): no switch before then.
+    held: { title: "Esta membresía está pagada por todo el año", body: "Pagaste un año completo que sigue en curso, así que su plan solo se puede cambiar cuando termine ese año. No se cambió nada." },
     expired: { title: "Este enlace ha expirado", body: "Un enlace a tu membresía funciona durante una hora. Pide uno nuevo en la página de tu membresía." },
     gone: {
       title: "Esta membresía no se puede cambiar",
@@ -885,6 +889,8 @@ const fr: MembershipWords = {
   askReply: (store) => `Des questions ? Répondez à cet e-mail et ${store} le recevra.`,
 
   switchProblems: {
+    // A year paid and held until it ends (lib/yearly-fallback-sweep.ts): no switch before then.
+    held: { title: "Cet abonnement est payé pour toute l'année", body: "Vous avez payé une année complète qui est toujours en cours, donc sa formule ne pourra changer qu'à la fin de cette année. Rien n'a été modifié." },
     expired: { title: "Ce lien a expiré", body: "Un lien vers votre abonnement fonctionne pendant une heure. Demandez-en un nouveau sur la page de votre abonnement." },
     gone: {
       title: "Cet abonnement ne peut pas changer de formule",
@@ -1230,6 +1236,8 @@ const de: MembershipWords = {
   askReply: (store) => `Fragen? Antworten Sie auf diese E-Mail, sie erreicht ${store}.`,
 
   switchProblems: {
+    // A year paid and held until it ends (lib/yearly-fallback-sweep.ts): no switch before then.
+    held: { title: "Diese Mitgliedschaft ist für das ganze Jahr bezahlt", body: "Sie haben ein ganzes Jahr bezahlt, das noch läuft. Der Tarif kann erst nach dem Ende dieses Jahres gewechselt werden. Es wurde nichts geändert." },
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Ein Link zu Ihrer Mitgliedschaft funktioniert eine Stunde lang. Fordern Sie auf der Seite Ihrer Mitgliedschaft einen neuen an.",
@@ -1588,6 +1596,8 @@ const it: MembershipWords = {
   askReply: (store) => `Domande? Rispondi a questa email e arriverà a ${store}.`,
 
   switchProblems: {
+    // A year paid and held until it ends (lib/yearly-fallback-sweep.ts): no switch before then.
+    held: { title: "Questo abbonamento è pagato per tutto l'anno", body: "Hai pagato un anno intero che è ancora in corso, quindi il piano si può cambiare solo quando quell'anno finisce. Non è stato modificato nulla." },
     expired: { title: "Questo link è scaduto", body: "Un link al tuo abbonamento funziona per un'ora. Chiedine uno nuovo dalla pagina del tuo abbonamento." },
     gone: {
       title: "Questo abbonamento non può cambiare piano",
@@ -1931,6 +1941,8 @@ const nl: MembershipWords = {
   askReply: (store) => `Vragen? Beantwoord deze e-mail en het komt bij ${store}.`,
 
   switchProblems: {
+    // A year paid and held until it ends (lib/yearly-fallback-sweep.ts): no switch before then.
+    held: { title: "Dit lidmaatschap is betaald voor het hele jaar", body: "Je hebt een heel jaar betaald dat nog loopt, dus je kunt pas overstappen als dat jaar voorbij is. Er is niets gewijzigd." },
     expired: { title: "Deze link is verlopen", body: "Een link naar je lidmaatschap werkt een uur. Vraag een nieuwe aan op de pagina van je lidmaatschap." },
     gone: {
       title: "Dit lidmaatschap kan niet overstappen",
@@ -2272,6 +2284,8 @@ const pt: MembershipWords = {
   askReply: (store) => `Dúvidas? Responda a este email e chega a ${store}.`,
 
   switchProblems: {
+    // A year paid and held until it ends (lib/yearly-fallback-sweep.ts): no switch before then.
+    held: { title: "Esta subscrição está paga pelo ano inteiro", body: "Pagou um ano completo que ainda está a decorrer, por isso o plano só pode mudar quando esse ano terminar. Nada foi alterado." },
     expired: { title: "Esta ligação expirou", body: "Uma ligação para a sua subscrição funciona durante uma hora. Peça uma nova na página da sua subscrição." },
     gone: {
       title: "Esta subscrição não pode mudar de plano",

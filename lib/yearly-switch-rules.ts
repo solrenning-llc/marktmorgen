@@ -26,6 +26,22 @@
 import { RECURRING_ALWAYS } from "@/lib/affiliate-setting";
 import { type YearlyCandidate, type Yearly, activeYearly } from "@/lib/yearly-price";
 
+/**
+ * A membership held with nothing to pay until the end of a year its member paid while moving to the monthly price
+ * (lib/yearly-fallback-sweep.ts, holdBody): Stripe calls it "trialing", but nothing about it is free. Every reader
+ * that treats a trial as unpaid (a tier switch charging nothing, the numbers counting no revenue, the member's own
+ * page saying "trial") reads it as paid instead, or refuses a change until the year ends. Only while the trial is
+ * the one the hold set: it ends on the day marked with the year (metadata[yearly_paid_until]), so a mark left from
+ * a year that ended, under a trial given since for another reason, is never read as a paid year.
+ */
+export function paidYearHeld(sub: { status?: unknown; trial_end?: unknown; metadata?: Record<string, string> | null } | null | undefined): boolean {
+  if (!sub || sub.status !== "trialing") return false;
+  const meta = sub.metadata ?? {};
+  if (!/^in_[A-Za-z0-9]{6,64}$/.test(meta.yearly_paid ?? "")) return false;
+  const until = /^\d{9,11}$/.test(meta.yearly_paid_until ?? "") ? Number(meta.yearly_paid_until) : 0;
+  return until > 0 && sub.trial_end === until;
+}
+
 /** The parts of a Stripe subscription these rules read. */
 export type YearlySub = {
   status?: unknown;
@@ -89,7 +105,7 @@ export function yearlyChoice(
   const status = String(sub.status ?? "");
   if (status !== "active" && status !== "trialing") return null;
   // A year paid and held as a "trial" until it ends (lib/yearly-fallback-sweep.ts): nothing to move to before then.
-  if (status === "trialing" && /^in_[A-Za-z0-9]{6,64}$/.test(sub.metadata?.yearly_paid ?? "")) return null;
+  if (paidYearHeld(sub)) return null;
   if (num(sub.cancel_at) > 0 || sub.cancel_at_period_end === true) return null;
   if (sub.pause_collection && typeof sub.pause_collection === "object") return null;
   const meta = sub.metadata ?? {};

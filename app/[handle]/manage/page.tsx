@@ -64,7 +64,7 @@ export default async function ManagePage({ params, searchParams }: Params) {
     token && !live
       ? m.manageNotices.expired
       : m.manageNotices[status] ??
-        (pauseNotice[status] ? m.pauseNotices[pauseNotice[status]] : status === "offer-expired" ? m.switchProblems.yearlyExpired : null);
+        (pauseNotice[status] ? m.pauseNotices[pauseNotice[status]] : status === "offer-expired" ? m.switchProblems.yearlyExpired : status === "held" ? m.switchProblems.held : null);
   const nowSeconds = secondsNow();
   const hours = Math.round(MANAGE_LINK_SECONDS / 3600);
   // Out loud, the way a member thinks about what they pay: "$29 a month".

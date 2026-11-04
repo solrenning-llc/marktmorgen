@@ -173,12 +173,12 @@ export type Preview = {
   at: number;
 };
 
-export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "error" };
+export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "held" | "tier" | "currency" | "error" };
 
 type Found = { grant: NonNullable<Awaited<ReturnType<typeof grantOf>>>; itemId: string; from: Listing; to: Listing; trialing: boolean };
 
 /** Checks one switch against the link, the membership and the tiers, asking Stripe only what it must. */
-async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" }> {
+async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "held" | "tier" | "currency" }> {
   if (!SUB_PATTERN.test(subscription)) return { reason: "gone" };
   const grant = await grantOf(store, token);
   if (!grant) return { reason: "expired" };
@@ -186,8 +186,8 @@ async function find(store: Store, token: string, subscription: string, target: s
   // Not this member's, not this store's, or no longer running: one answer for all.
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
   // A year paid and held as a "trial" until it ends (lib/yearly-fallback-sweep.ts): a switch now would be charged
-  // nothing, as a trial's is, so none is made until the year ends.
-  if (paidYearHeld(sub as Parameters<typeof paidYearHeld>[0])) return { reason: "gone" };
+  // nothing, as a trial's is, so none is made until the year ends; the member is told why, in their own words.
+  if (paidYearHeld(sub as Parameters<typeof paidYearHeld>[0])) return { reason: "held" };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription
@@ -231,7 +231,7 @@ export async function previewSwitch(store: Store, token: string, subscription: s
 
 export type SwitchResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "stale" | "declined" | "busy" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "held" | "tier" | "currency" | "stale" | "declined" | "busy" | "error" };
 
 /**
  * Makes the switch, at the second the preview was worked out for. The card on

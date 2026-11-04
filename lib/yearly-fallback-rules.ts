@@ -35,7 +35,7 @@
  * so the member never owes both (the next unit, with its test).
  */
 import { type Yearly, type YearlyCandidate, activeYearly } from "@/lib/yearly-price";
-import { type YearlySub, affiliateMonthsLeft, discounted } from "@/lib/yearly-switch-rules";
+import { type YearlySub, affiliateMonthsLeft, discounted, paidYearHeld } from "@/lib/yearly-switch-rules";
 
 /** The parts of a Stripe subscription these rules read: yearly-switch-rules' own, how it is collected and with what. */
 export type FallbackSub = Omit<YearlySub, "items"> & {
@@ -74,15 +74,8 @@ export const PENDING_UPDATE_METHODS: ReadonlySet<string> = new Set([
   "paypal", "payto", "pix", "promptpay", "revolut_pay", "satispay", "swish", "twint", "wechat_pay",
 ]);
 
-/**
- * A membership held with nothing to pay until the end of a year its member paid while moving to the monthly price
- * (lib/yearly-fallback-sweep.ts, moveBack): Stripe calls it "trialing", but nothing about it is free. Every reader
- * that treats a trial as unpaid (a tier switch charging nothing, the numbers counting no revenue, the member's own
- * page saying "trial") reads it as paid instead, or refuses a change until the year ends.
- */
-export function paidYearHeld(sub: { status?: unknown; metadata?: Record<string, string> | null } | null | undefined): boolean {
-  return Boolean(sub && sub.status === "trialing" && /^in_[A-Za-z0-9]{6,64}$/.test(sub.metadata?.yearly_paid ?? ""));
-}
+/** Read from lib/yearly-switch-rules.ts, which owns it (that file is read by this one, never the other way). */
+export { paidYearHeld };
 
 const typeOf = (method: unknown) => (method && typeof method === "object" ? (method as { type?: unknown }).type : undefined);
 

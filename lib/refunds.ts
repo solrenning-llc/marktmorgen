@@ -57,6 +57,7 @@
  * only the creator can close it there.
  */
 import { onAccount } from "@/lib/stripe-account";
+import { redisPipeline } from "@/lib/redis";
 
 type ChargeLike = {
   id?: unknown;
@@ -192,16 +193,84 @@ export const LOST_DISPUTE_PAGES = 3;
  * caller keeps its place and reads them again next time. Throws when Stripe
  * cannot be asked; the jobs use lostDisputesOrRetry().
  */
+/**
+ * Where a job left off in a store's closing events when there were more than
+ * it may read in one run (review of #2129, inbox C4-15 (3)(c)): Stripe lists
+ * them newest first, so without this a store with more lost disputes in the
+ * window than LOST_DISPUTE_PAGES pages would read the same newest pages every
+ * run and its job's place would never move. Kept with the `since` it was read
+ * from, so a cursor of another window is never followed; 30 days, the time
+ * Stripe keeps the events.
+ */
+export const lostCursorKey = (job: string, id: string) => `nl:lostdispute:cursor:${job}:${id}`;
+const CURSOR_SECONDS = 30 * 86_400;
+
+/**
+ * What lostDisputesSince() read: its rows, whether it reached the end, the
+ * newest closing of the whole sweep, whether it went on from a place kept
+ * by an earlier run, and `commit`, which keeps the place for the next run.
+ */
+export type LostRead = { rows: GivenBackRow[]; complete: boolean; newest: number; resumed: boolean; commit: () => Promise<void> };
+
+/**
+ * Keeps a job's place in the lost disputes only when every row it read was
+ * handled, that is, is in the job's set of rows already read (one SMISMEMBER):
+ * a row passed over for the run's lookups, its time or an error leaves the
+ * place where it was, and the next run reads it again. True when kept.
+ */
+export async function confirmLostRead(read: LostRead, seenKey: string): Promise<boolean> {
+  const ids = read.rows.map((row) => row.id).filter((id): id is string => typeof id === "string");
+  if (ids.length) {
+    const [flags] = await redisPipeline([["SMISMEMBER", seenKey, ...ids]]);
+    if (!Array.isArray(flags) || flags.length !== ids.length || flags.some((flag) => Number(flag) !== 1)) return false;
+  }
+  await read.commit();
+  return true;
+}
+
+/** The cursor of this window, and the newest closing the sweep has seen so far (0 when there is none). */
+async function readCursor(key: string | undefined, since: number): Promise<{ after: string; newest: number }> {
+  if (!key) return { after: "", newest: 0 };
+  const [value] = await redisPipeline([["GET", key]]);
+  if (typeof value !== "string") return { after: "", newest: 0 };
+  const [at, id, top] = value.split("|");
+  const newest = Number(top);
+  return at === String(since) && /^evt_[A-Za-z0-9]{6,255}$/.test(id ?? "") && Number.isSafeInteger(newest) && newest >= 0
+    ? { after: id as string, newest }
+    : { after: "", newest: 0 };
+}
+
 export async function lostDisputesSince(
   account: string,
   since: number,
   deadline = Number.POSITIVE_INFINITY,
   pages = LOST_DISPUTE_PAGES,
-): Promise<{ rows: GivenBackRow[]; complete: boolean }> {
+  cursor?: string,
+): Promise<LostRead> {
   const found: GivenBackRow[] = [];
-  let after = "";
+  const window = Math.max(0, Math.floor(since));
+  // Older pages a run before could not reach come first; the newest ones were handled then (each job keeps what it has read).
+  const kept = await readCursor(cursor, window);
+  let after = kept.after;
+  let newest = kept.newest;
+  // `newest`: the latest closing of the whole sweep, so a job that reaches the end moves its place past every page it read,
+  // not only past this run's older ones (which would read the same newest pages again, run after run).
+  // Nothing is written here (review of #2158, inbox C4-24): the job confirms the place with confirmLostRead() only once
+  // it has handled every row read, so a row skipped for its lookups, its time or an error is read again next run.
+  const leave = (complete: boolean): LostRead => {
+    const place: (string | number)[] | null = !cursor ? null : complete || !after ? ["DEL", cursor] : ["SET", cursor, `${window}|${after}|${newest}`, "EX", CURSOR_SECONDS];
+    return {
+      rows: found,
+      complete,
+      newest,
+      resumed: kept.after !== "",
+      commit: async () => {
+        if (place) await redisPipeline([place]);
+      },
+    };
+  };
   for (let page = 0; page < Math.min(pages, LOST_DISPUTE_PAGES); page += 1) {
-    if (Date.now() >= deadline) return { rows: found, complete: false };
+    if (Date.now() >= deadline) return leave(false);
     const query = new URLSearchParams({ type: "charge.dispute.closed", limit: "100", "created[gte]": String(Math.max(0, Math.floor(since))) });
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/events?${query}`);
@@ -211,6 +280,7 @@ export async function lostDisputesSince(
       if (typeof event.id !== "string" || !dispute || dispute.status !== "lost") continue;
       const chargeId = idOf(dispute.charge);
       if (!CHARGE_ID.test(chargeId)) continue;
+      if (typeof event.created === "number") newest = Math.max(newest, event.created);
       found.push({
         object: "dispute",
         id: event.id,
@@ -221,10 +291,10 @@ export async function lostDisputesSince(
       });
     }
     const last = events[events.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { rows: found, complete: true };
+    if (listed.has_more !== true || !last || typeof last.id !== "string") return leave(true);
     after = last.id;
   }
-  return { rows: found, complete: false };
+  return leave(false);
 }
 
 /**
@@ -238,12 +308,13 @@ export async function lostDisputesOrRetry(
   account: string,
   since: number,
   deadline = Number.POSITIVE_INFINITY,
-): Promise<{ rows: GivenBackRow[]; complete: boolean }> {
+  cursor?: string,
+): Promise<LostRead> {
   try {
-    return await lostDisputesSince(account, since, deadline);
+    return await lostDisputesSince(account, since, deadline, LOST_DISPUTE_PAGES, cursor);
   } catch (error) {
     console.error("reading the disputes closed as lost failed", error);
-    return { rows: [], complete: false };
+    return { rows: [], complete: false, newest: 0, resumed: false, commit: async () => {} };
   }
 }
 

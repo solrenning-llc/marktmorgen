@@ -7,7 +7,8 @@ import { letterIdFor, publishLetter, unpublishLetter } from "@/lib/letters";
  * Publishing a sent email on the store, or taking it off (lib/letter-rules.ts),
  * for a role that may email people for the store ("send"):
  *
- *   { action: "publish" | "unpublish", id }   id: the sent email's own id
+ *   { action: "publish" | "unpublish", id, products? }   id: the sent email's own id;
+ *   products: the ids of this store's products that open its words, none for everyone
  *
  * Answers `{ ok, path? }` or `{ ok: false, error, message }`.
  */
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest) {
     if (action === "publish") {
       const broadcast = await readBroadcast(id);
       if (!broadcast || broadcast.listId !== store.listId) return refuse("gone", "That email is not one of this store's. Reload the page.", 404);
-      const done = await publishLetter(store, broadcast);
+      const done = await publishLetter(store, broadcast, Date.now(), body.products ?? []);
       if (!done.ok) return refuse(done.reason, done.message, done.reason === "unavailable" ? 503 : 409);
       return Response.json({ ok: true, path: `/@${store.handle}/letters/${done.letter.id}` });
     }

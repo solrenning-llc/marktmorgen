@@ -13,7 +13,8 @@ import type { Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
 import type { Broadcast } from "@/lib/broadcasts";
-import { LETTER_ID, LETTER_KEEP_DAYS, MAX_PUBLISHED_LETTERS, type Letter, parseLetter } from "@/lib/letter-rules";
+import { itemFor } from "@/lib/catalog";
+import { LETTER_ID, LETTER_KEEP_DAYS, MAX_LETTER_PRODUCTS, MAX_PUBLISHED_LETTERS, type Letter, letterProducts, parseLetter } from "@/lib/letter-rules";
 
 const DAY = 86_400_000;
 const listKey = (sid: string) => `nl:letters:s:${sid}`;
@@ -31,16 +32,23 @@ export function letterRoomBytes(letter: Letter): number {
   return dataBytes([JSON.stringify(letter), letter.id], 2);
 }
 
-export type Published = { ok: true; letter: Letter } | { ok: false; reason: "not_sent" | "full" | "too_many" | "unavailable"; message: string };
+export type Published = { ok: true; letter: Letter } | { ok: false; reason: "not_sent" | "products" | "full" | "too_many" | "unavailable"; message: string };
 
 /**
  * Publishes one email the store sent: a copy of its subject and words as
  * they were sent, written once, at its own address. Publishing it again
- * writes the copy again and starts its days afresh.
+ * writes the copy again and starts its days afresh, with the products given
+ * this time: none is for everyone, some keep its words for their holders
+ * (lib/letter-rules.ts, membersOnly).
  */
-export async function publishLetter(store: Store, broadcast: Broadcast, now = Date.now()): Promise<Published> {
+export async function publishLetter(store: Store, broadcast: Broadcast, now = Date.now(), products: unknown = []): Promise<Published> {
   if (!isRedisConfigured() || !store.sid) return { ok: false, reason: "unavailable", message: "This can't be saved right now. Try again in a minute." };
   if (!store.listId || broadcast.listId !== store.listId || broadcast.status !== "sent") return { ok: false, reason: "not_sent", message: "Only an email this store has sent can be published." };
+  const ids = letterProducts(products);
+  const asked = Array.isArray(products) ? products.length : 0;
+  if (ids.length !== asked || asked > MAX_LETTER_PRODUCTS || ids.some((id) => !itemFor(store, id))) {
+    return { ok: false, reason: "products", message: `Check up to ${MAX_LETTER_PRODUCTS} of this store's products. Reload the page if one was just deleted.` };
+  }
   const letter: Letter = {
     id: letterIdFor(store.sid, broadcast.id),
     sid: store.sid,
@@ -48,6 +56,7 @@ export async function publishLetter(store: Store, broadcast: Broadcast, now = Da
     body: broadcast.body,
     sentAt: broadcast.finishedAt ? broadcast.finishedAt * 1000 : broadcast.sendAt * 1000,
     publishedAt: now,
+    ...(ids.length ? { products: ids } : {}),
   };
   try {
     // Entries whose copy has gone by itself leave the count first.

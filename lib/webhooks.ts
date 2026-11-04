@@ -25,8 +25,14 @@
  * The first four about money, and these last two, are read from the creator's own Stripe account,
  * which is the ledger, by the five-minute job (watchStripe): its events are
  * walked from where the last run stopped, so a refund made in the Stripe
- * dashboard is noticed on the next run, within about five minutes. The other
- * three happen in our own code and are sent the moment they happen.
+ * dashboard is noticed on the next run, within about five minutes. A refund
+ * or a dispute names only a payment: whose it is is read off the payment,
+ * or, for a membership's or a payment plan's charge, off the invoice it paid
+ * (paymentMeta), within a bounded number of calls per run. An event whose
+ * store could not be told in a run (a call failed, or the run's calls ran
+ * out) is not passed over: the anchor stays before it, and the next run reads
+ * it again. The other three happen in our own code and are sent the moment
+ * they happen.
  *
  * Every event has an id made from what it is about — the checkout, the
  * subscription, the refund — so however many times the same thing is noticed
@@ -851,8 +857,90 @@ const iso = (seconds: unknown) => (typeof seconds === "number" && seconds > 0 ? 
 const str = (value: unknown) => (typeof value === "string" && value ? value : null);
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
-/** Turns one Stripe event of this store into ours, if it is one we send. */
-async function fromStripe(store: Store, event: StripeEvent, lookups: { left: number; disputes: number }): Promise<void> {
+/**
+ * Calls to the creator's Stripe account one store's run of the five-minute
+ * job may make to tell whose a refunded charge is and to read a canceled
+ * member's address (`left`), and, a budget of their own, whose a disputed
+ * payment is (`disputes`). Every call counts, so a membership's charge, three
+ * calls, uses three: the job asks no more of Stripe per run than before.
+ */
+export const STRIPE_LOOKUPS_PER_STORE = 10;
+export const DISPUTE_LOOKUPS_PER_STORE = 10;
+type Lookups = { left: number; disputes: number };
+
+/**
+ * The API version the lookups below are read in, whatever the creator's
+ * account defaults to: in it a payment names no invoice (Stripe moved that
+ * to the invoice payments in 2025) and an invoice keeps its subscription's
+ * metadata under `parent.subscription_details`. The same version
+ * lib/affiliates.ts reads invoices in.
+ */
+const LOOKUP_STRIPE_VERSION = "2026-08-26.dahlia";
+
+/** The metadata of the subscription an invoice is for, where either of Stripe's API versions keeps it (as lib/stats.ts reads it). */
+function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
+  const parent = invoice.parent as { subscription_details?: { metadata?: unknown } | null } | null | undefined;
+  const newer = parent?.subscription_details?.metadata;
+  const older = (invoice.subscription_details as { metadata?: unknown } | null | undefined)?.metadata;
+  const meta = (newer && typeof newer === "object" ? newer : older && typeof older === "object" ? older : {}) as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(meta).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
+class OutOfLookups extends Error {}
+
+/**
+ * The metadata that tells whose a payment is: the payment's own, which a
+ * one-off checkout writes (payment_intent_data); or, when it carries no
+ * store, its subscription's, which a membership's or a payment plan's
+ * checkout writes only there (subscription_data, lib/store-checkout.ts), read
+ * off the invoice the payment paid. At most three calls, each taken from
+ * the run's `budget`. {} when Stripe says there is no such payment (nothing
+ * to send); null when it could not be told now: the budget is used up or a
+ * call failed. The caller then leaves the event for the next run.
+ */
+async function paymentMeta(store: Store, intent: string, lookups: Lookups, budget: keyof Lookups): Promise<Record<string, string> | null> {
+  const account = store.stripeAccountId;
+  if (!account) return {};
+  const get = async (path: string) => {
+    if (lookups[budget] <= 0) throw new OutOfLookups();
+    lookups[budget] -= 1;
+    return onAccount("GET", account, path, undefined, LOOKUP_STRIPE_VERSION);
+  };
+  try {
+    const payment = await get(`/payment_intents/${encodeURIComponent(intent)}`);
+    const own = Object.fromEntries(Object.entries((payment.metadata ?? {}) as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+    if (own.store) return own;
+    const listed = await get(`/invoice_payments?${new URLSearchParams({ "payment[type]": "payment_intent", "payment[payment_intent]": intent, limit: "1" })}`);
+    if (!Array.isArray(listed.data)) throw new Error("Stripe invoice payments are not a list");
+    const invoice = str((listed.data as Record<string, unknown>[])[0]?.invoice);
+    // No invoice paid by it: a payment no subscription made, so its own metadata is all there is.
+    if (!invoice || !/^in_[A-Za-z0-9]+$/.test(invoice)) return own;
+    return invoiceMeta(await get(`/invoices/${encodeURIComponent(invoice)}`));
+  } catch (error) {
+    if (error instanceof OutOfLookups) {
+      console.error(budget === "disputes"
+        ? "a store had more disputes in one run than are read; the rest wait for the next run"
+        : "a store had more refunds to look up in one run than are read; the rest wait for the next run", store.handle);
+      return null;
+    }
+    // Stripe has no such payment or invoice: asking again would not change it.
+    if (error instanceof StripeError && (error.status === 400 || error.status === 404)) {
+      console.error("a payment Stripe does not know could not be told whose it is; nothing is sent for it", store.handle, intent);
+      return {};
+    }
+    console.error("telling whose a payment is failed; it is read again next run", store.handle, intent, error);
+    return null;
+  }
+}
+
+/**
+ * Turns one Stripe event of this store into ours, if it is one we send.
+ * True once the event is done with (sent, or not one of ours); false when
+ * whose it is could not be told in this run (a lookup that failed, or the
+ * run's lookups used up): the caller then stops before it and keeps the
+ * anchor there, so the next run reads it again instead of losing it.
+ */
+async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups): Promise<boolean> {
   const object = event.data?.object ?? {};
   const previous = event.data?.previous_attributes ?? {};
   const handles = saleHandles(store);
@@ -864,9 +952,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
   const created = typeof event.created === "number" ? event.created * 1000 : Date.now();
 
   if (event.type === "checkout.session.completed") {
-    if (!handles.has(meta.store ?? "") || !isSettled(object)) return;
+    if (!handles.has(meta.store ?? "") || !isSettled(object)) return true;
     const session = str(object.id);
-    if (!session) return;
+    if (!session) return true;
     const details = (object.customer_details ?? {}) as { email?: unknown; name?: unknown };
     const buyer = { email: str(details.email) ?? str(object.customer_email), name: str(details.name) };
     const membership = object.mode === "subscription" && meta.kind !== "plan";
@@ -912,13 +1000,13 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
         buyer,
       }, created);
     }
-    return;
+    return true;
   }
 
   if (event.type === "payment_intent.succeeded") {
-    if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) return;
+    if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) return true;
     const intent = str(object.id);
-    if (!intent) return;
+    if (!intent) return true;
     await emitEvent(store, "sale.completed", intent, {
       payment_intent: intent,
       kind: "upsell",
@@ -938,13 +1026,13 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
       buyer: { email: str(object.receipt_email), name: null },
       paid_at: iso(event.created),
     }, created);
-    return;
+    return true;
   }
 
   if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
-    if (!handles.has(meta.store ?? "") || meta.kind === "plan") return;
+    if (!handles.has(meta.store ?? "") || meta.kind === "plan") return true;
     const id = str(object.id);
-    if (!id) return;
+    if (!id) return true;
     const ended = event.type === "customer.subscription.deleted";
     // A move to another price or quantity (an upgrade, a downgrade, another
     // interval) is its own event, said once per change; the same update may
@@ -969,7 +1057,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
       const ending = object.cancel_at_period_end === true || num(object.cancel_at) > 0;
       const wasEnding = previous.cancel_at_period_end === true || num(previous.cancel_at) > 0;
       const changed = "cancel_at_period_end" in previous || "cancel_at" in previous;
-      if (!ending || wasEnding || !changed || meta.ends_after) return;
+      if (!ending || wasEnding || !changed || meta.ends_after) return true;
     }
     const item = ((object.items as { data?: { current_period_end?: unknown }[] } | undefined)?.data ?? [])[0];
     const endsAt = num(object.cancel_at) || num(object.current_period_end) || num(item?.current_period_end);
@@ -992,25 +1080,24 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
       reason: ended && meta.ends_after ? "completed" : str(details.reason) ?? "cancellation_requested",
       buyer: { email, customer },
     }, created);
-    return;
+    return true;
   }
 
   if (event.type === "charge.refunded") {
     const charge = str(object.id);
-    if (!charge) return;
+    if (!charge) return true;
     const intent = str(object.payment_intent);
     // A charge made by a checkout carries the store in its own metadata; one
-    // that does not is asked about through its payment, a bounded number of
-    // times per run.
-    if (!meta.store && intent && lookups.left > 0 && store.stripeAccountId) {
-      lookups.left -= 1;
-      try {
-        meta = ((await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(intent)}`)).metadata ?? {}) as Record<string, string>;
-      } catch {
-        return;
-      }
+    // that does not is asked about through its payment and, for a
+    // membership's or a payment plan's charge, the invoice it paid
+    // (paymentMeta), from the run's bounded lookups. One that cannot be told
+    // in this run waits for the next.
+    if (!meta.store && intent) {
+      const found = await paymentMeta(store, intent, lookups, "left");
+      if (!found) return false;
+      meta = found;
     }
-    if (!handles.has(meta.store ?? "")) return;
+    if (!handles.has(meta.store ?? "")) return true;
     const total = num(object.amount_refunded);
     const before = num(previous.amount_refunded);
     const billing = (object.billing_details ?? {}) as { email?: unknown; name?: unknown };
@@ -1026,28 +1113,23 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
       buyer: { email: str(billing.email) ?? str(object.receipt_email), name: str(billing.name) },
       refunded_at: iso(event.created),
     }, created);
-    return;
+    return true;
   }
 
   if (event.type === "charge.dispute.created") {
     const dispute = str(object.id);
-    if (!dispute) return;
+    if (!dispute) return true;
     const intent = str(object.payment_intent);
     // A dispute carries no store of its own: it is asked about through its
-    // payment, from a budget of its own, so refunds in the same run never
-    // leave a dispute unread. One past that budget is said in the log.
-    if (!intent || !store.stripeAccountId) return;
-    if (lookups.disputes <= 0) {
-      console.error("a store had more disputes in one run than are read; the rest are not sent", store.handle);
-      return;
-    }
-    lookups.disputes -= 1;
-    try {
-      meta = ((await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(intent)}`)).metadata ?? {}) as Record<string, string>;
-    } catch {
-      return;
-    }
-    if (!handles.has(meta.store ?? "")) return;
+    // payment and, for a membership's or a payment plan's charge, the
+    // invoice it paid (paymentMeta), from a budget of its own, so refunds in
+    // the same run never leave a dispute unread. One past that budget, or
+    // whose lookup failed, is said in the log and waits for the next run.
+    if (!intent || !store.stripeAccountId) return true;
+    const found = await paymentMeta(store, intent, lookups, "disputes");
+    if (!found) return false;
+    meta = found;
+    if (!handles.has(meta.store ?? "")) return true;
     const evidence = (object.evidence_details ?? {}) as { due_by?: unknown };
     await emitEvent(store, "dispute.opened", dispute, {
       dispute,
@@ -1063,6 +1145,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
       opened_at: iso(event.created),
     }, created);
   }
+  return true;
 }
 
 /** A subscription's first item as a membership's plan: its price, amount, interval and quantity; null when it has none. */
@@ -1101,14 +1184,20 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
   const types = STRIPE_TYPES.map((t, i) => `types[${i}]=${encodeURIComponent(t)}`).join("&");
   const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
   const anchor = typeof anchorRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(anchorRaw) ? anchorRaw : "";
-  const lookups = { left: 10, disputes: 10 };
+  const lookups: Lookups = { left: STRIPE_LOOKUPS_PER_STORE, disputes: DISPUTE_LOOKUPS_PER_STORE };
   let handled = 0;
-  const send = async (rows: StripeEvent[]) => {
+  // The newest event done with: the anchor is moved only up to it, never
+  // past an event that waits (fromStripe), so a lookup that failed or ran
+  // out is read again next run and nothing is lost.
+  let last = "";
+  const send = async (rows: StripeEvent[]): Promise<boolean> => {
     // Stripe lists newest first; they are sent in the order they happened.
     for (const event of [...rows].reverse()) {
-      await fromStripe(store, event, lookups);
+      if (!(await fromStripe(store, event, lookups))) return false;
       handled += 1;
+      last = str(event.id) ?? last;
     }
+    return true;
   };
 
   if (!anchor) {
@@ -1132,9 +1221,8 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
       if (page === FIRST_RUN_PAGES - 1) console.error("a store has more Stripe events than one first run reads; the oldest are left", store.handle);
     }
     if (!pages.length) return 0;
-    for (const rows of [...pages].reverse()) await send(rows);
-    const newest = str(pages[0][0].id);
-    if (newest) await redisPipeline([["SET", anchorKey(statsId), newest, "EX", 30 * 86400]]);
+    for (const rows of [...pages].reverse()) if (!(await send(rows))) break;
+    if (last) await redisPipeline([["SET", anchorKey(statsId), last, "EX", 30 * 86400]]);
     return handled;
   }
 
@@ -1158,13 +1246,12 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
     }
     const rows = stripeEventPage(list);
     if (!rows.length) break;
-    await send(rows);
-    const newest = str(rows[0].id);
-    if (newest) {
-      after = newest;
+    const whole = await send(rows);
+    if (last && last !== after) {
+      after = last;
       await redisPipeline([["SET", anchorKey(statsId), after, "EX", 30 * 86400]]);
     }
-    if (list.has_more !== true) break;
+    if (!whole || list.has_more !== true) break;
   }
   return handled;
 }

@@ -548,7 +548,59 @@ test('DeletedCustomer released evidence uses dense own data without extra access
  }finally{globalThis.fetch=old;}
 });
 
-test('subscription search refuses unknown or truncated handle coverage before the provider',async()=>{
+test('canceled DeletedCustomer under a proven released handle cannot block a store without a customer',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:null,previousHandles:[],releasedHandles:['released-harbor']} as Store;
+ const terminal={id:'sub_Deleted001',created:1,status:'canceled',metadata:{store:'released-harbor'},customer:{id:'cus_Foreign001',object:'customer',deleted:true}};
+ let writes=0;
+ globalThis.fetch=async(_input,init)=>{if(init?.method!=='GET')writes++;return Response.json({data:[terminal],has_more:false});};
+ try{assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});assert.equal(writes,0);}
+ finally{globalThis.fetch=old;}
+});
+
+test('subscription search covers every handle in complete batches of at most ten clauses',async()=>{
+ const old=globalThis.fetch,now=Math.floor(Date.now()/1000);
+ let writes=0;
+ try{
+  for(const count of [1,10,11,21,40]){
+   const handles=Array.from({length:count},(_,index)=>'harbor-'+index);
+   const owner={...store,stripeCustomerId:'cus_Test000001',handle:handles[0],previousHandles:handles.slice(1,6),releasedHandles:handles.slice(6)} as Store;
+   const live={id:'sub_LastBatch001',created:now,status:'active',metadata:{store:handles.at(-1)},customer:{id:owner.stripeCustomerId,email:owner.email},items:{data:[{quantity:1,...sourcePeriod(),price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
+   let reads=0;
+   globalThis.fetch=async(input,init)=>{
+    if(init?.method!=='GET')writes++;
+    const query=new URL(String(input)).searchParams;
+    const chunk=handles.slice(reads*10,(reads+1)*10);reads++;
+    assert.ok(chunk.length>0 && chunk.length<=10);
+    assert.equal(query.get('query'),chunk.map(handle=>`metadata['store']:'${handle}'`).join(' OR '));
+    assert.equal(query.get('limit'),'100');
+    return Response.json({data:chunk.includes(handles.at(-1)!)?[live]:[],has_more:false});
+   };
+   assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,live.id,String(count));
+   assert.equal(reads,Math.ceil(count/10));
+  }
+  assert.equal(writes,0);
+ }finally{globalThis.fetch=old;}
+});
+
+test('every search batch must be complete before a funded subscription is activated',async()=>{
+ const old=globalThis.fetch,created=Math.floor(Date.now()/1000);
+ const handles=Array.from({length:11},(_,index)=>'harbor-'+index);
+ const owner={...store,stripeCustomerId:'cus_Test000001',handle:handles[0],previousHandles:[],releasedHandles:handles.slice(1)} as Store;
+ const subscription={id:'sub_Test000001',customer:{id:owner.stripeCustomerId,email:owner.email},created,status:'active',metadata:{store:owner.handle,funding_grant:'ctr_metadata',funding_review:'test_only'},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
+ let reads=0,writes=0,complete=false;
+ globalThis.fetch=async(_input,init)=>{reads++;if(init?.method!=='GET')writes++;return Response.json(reads%2===1?{data:[subscription],has_more:false}:{data:[],has_more:!complete});};
+ try{
+  activationObservations.calls.length=0;activationObservations.accept=true;
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search page is incomplete/);
+  assert.equal(reads,2);assert.equal(activationObservations.calls.length,0);
+  complete=true;
+  assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,subscription.id);
+  assert.equal(reads,4);assert.equal(activationObservations.calls.length,1);assert.equal(writes,0);
+ }finally{globalThis.fetch=old;activationObservations.accept=false;}
+});
+
+test('subscription search refuses unknown handle coverage before the provider',async()=>{
  const old=globalThis.fetch;
  let reads=0,writes=0;
  const handles=Array.from({length:11},(_,index)=>'harbor-'+index);
@@ -565,7 +617,6 @@ test('subscription search refuses unknown or truncated handle coverage before th
   for(const owner of [
    {...store,handle:'',previousHandles:[],releasedHandles:[]},
    {...store,previousHandles:['invalid handle'],releasedHandles:[]},
-   {...store,handle:handles[0],previousHandles:handles.slice(1,6),releasedHandles:handles.slice(6)},
   ]){
    await assert.rejects(findStoreSubscriptions(owner as Store),/Subscription search handle coverage/);
    assert.equal(reads,0,'incomplete query coverage reaches no provider');

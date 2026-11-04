@@ -449,6 +449,56 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {
+          // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step.
+          const [, target, person, read, value, added, start, field] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          if ((held instanceof Map ? held.get(person) ?? "" : "") !== read) return -1;
+          const hash = this.hash(target);
+          if (value === "") hash.delete(person);
+          else hash.set(person, value);
+          const kept = hash.get(field);
+          const n = kept !== undefined && /^\d+$/.test(kept) ? Number(kept) : null;
+          if (n !== null) hash.set(field, String(Math.max(0, n + Number(added))));
+          else if (start !== "") hash.set(field, start);
+          else if (kept !== undefined) hash.delete(field);
+          if (hash.size === 0) this.data.delete(target);
+          return n === null && kept !== undefined ? 2 : 1;
+        }
+        if (key.startsWith("-- marktmorgen:crm-tasks-count-save:v1\n") && args[0] === "1" && args.length === 4) {
+          // lib/crm.ts SAVE_TASK_COUNT: the count saved once made, never over a whole number.
+          const [, target, field, value] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const kept = held instanceof Map ? held.get(field) : undefined;
+          if (kept !== undefined && /^\d+$/.test(kept)) return 0;
+          this.hash(target).set(field, value);
+          return kept === undefined ? 1 : 2;
+        }
+        if (key.startsWith("-- marktmorgen:crm-tasks-forget:v1\n") && args[0] === "1" && args.length === 6) {
+          // lib/crm.ts FORGET_PERSON_TASKS: a person's tasks deleted, the count moved with them or dropped.
+          const [, target, person, read, gone, field] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held === undefined) return ["", 0];
+          if (!(held instanceof Map)) throw new Error("WRONGTYPE");
+          const value = held.get(person);
+          if (value === undefined) return ["", 0];
+          held.delete(person);
+          const kept = held.get(field);
+          const n = kept !== undefined && /^\d+$/.test(kept) ? Number(kept) : null;
+          let dropped = 0;
+          if (n !== null && value === read) held.set(field, String(Math.max(0, n - Number(gone))));
+          else if (kept !== undefined) {
+            held.delete(field);
+            dropped = 1;
+          }
+          if (held.size === 0) this.data.delete(target);
+          return [value, dropped];
+        }
         if (key.startsWith("-- marktmorgen:crm-value-take:v1\n") && args[0] === "1" && args.length === 3) {
           const target = args[1];
           this.live(target);

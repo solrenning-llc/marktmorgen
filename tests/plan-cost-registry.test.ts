@@ -30,6 +30,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
+import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
@@ -259,6 +261,15 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   console.log(`an opening of the orders page: $${ORDERS_OPEN_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}; ${ORDERS_UNIT_COMMANDS} metered commands a request`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
+  // Making a store's count of its tasks again reads every task once, after tasksRecountUnits(people) studio requests are taken:
+  // more than four commands and what that many people can keep cost, at a whole studio request's shape (lib/crm.ts).
+  for (const people of [1, 3, 49, 50, 51, MAX_STORE_TASKS]) {
+    const read = request("studio", 4, Math.min(people * MAX_PERSON_TASKS, MAX_STORE_TASKS) * (TASK_KEPT_BYTES + 64));
+    assert.ok(tasksRecountUnits(people) * UNIT_COST.studio >= read, `${people} people: ${tasksRecountUnits(people)} x ${UNIT_COST.studio} < ${read}`);
+    assert.ok(tasksRecountUnits(people) <= TASKS_RECOUNT_UNITS);
+  }
+  assert.ok(TASKS_RECOUNT_UNITS * UNIT_COST.studio >= request("studio", 4, TASKS_RECOUNT_BYTES));
+  console.log(`a recount of a store's tasks: ${TASKS_RECOUNT_BYTES} bytes at most, ${TASKS_RECOUNT_UNITS} studio requests at most, once a store`);
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
   assert.ok(UNIT_COST.buyer >= UNIT_COST.integration && UNIT_COST.buyer >= UNIT_COST.webhook);
 });

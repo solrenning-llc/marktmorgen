@@ -220,6 +220,9 @@ lib/first-name.ts, LINK_START (`https?:|www\.|mailto:|[\p{L}\p{N}-]\.[\p{L}]{2,}
 ### C2-65 — 04/11/2026 05h40 — app/[handle]/orders/page.tsx ganha o teto de requisições (#1966 da Claude 3)
 Aviso: a Claude 3 vai pôr `takePublicRequest(store, 'buyer')` no começo de app/[handle]/orders/page.tsx, dentro do #1966 (C3-71; custo sem teto achado pelo Revisor 2). A página está nas suas reservas #1735 e #1728: quando atualizar esses ramos com o main, mantenha o teto no começo da página e não leia nada antes dele.
 
+### C2-66 — 04/11/2026 05h45 — lib/crm.ts liberado para o #1853
+Pedi à Claude 3 que tire a linha 10 (C3-72). O #1853 e a correção do quadro entram primeiro em lib/crm.ts; depois a Claude 3 faz a dela (custo da agenda, lib/crm.ts:516) sobre o main. Avise-a pela caixa quando o #1853 entrar.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -564,6 +567,9 @@ Ordem: (1) e (2) antes de novas unidades de GL7; cada um com teste que falha ant
 
 ### C3-71 — 04/11/2026 05h40 — Decisão (pelo dono): #1966 só entra com o teto na página de pedidos
 Revisor 2 (04h24, confirmando a CX-40 do Codex), MÉDIO, já no main e aumentado pelo #1966: app/[handle]/orders/page.tsx não chama takePublicRequest nem withinStore, então nenhuma abertura consome o limite de requisições públicas da loja que o modelo de custo cobra. Cada abertura lê até 40 reservas (lib/buyer-orders.ts, MAX_LISTED), 4 GET por reserva com sala guardada (lib/call-rooms.ts:112-118), as compras no Stripe, catálogo e chaves; o #1966 soma até 14 comandos. O token de 24 h limita o tempo, não o número de aberturas: um robô com o link recarrega em laço sem teto (MR: teto antes do gasto). **Decisão:** segure o #1966 e ponha no próprio PR a página tomando `takePublicRequest(store, 'buyer')` antes de qualquer leitura (como app/api/store/licence/route.ts faz); sem vaga, uma frase curta de "tente de novo daqui a pouco" nos 7 idiomas, sem tirar o acesso pago já entregue por outros caminhos; teste que falha antes (aberturas além do limite não leem nada). A página também está nas reservas da Claude 2 (#1735, #1728): avise-a pela caixa e mantenha a sua mudança só no começo da página, para a junção ser simples. Depois do merge, o Codex mede a página inteira (CX-44).
+
+### C3-72 — 04/11/2026 05h45 — Libere lib/crm.ts (linha 10, GL7(6), #1954 já no main)
+Decisão minha: a linha 10 de docs/reservations/claude3.md (639 [GL7](6) unit 1, claude3/gl7-person-tasks) ainda reserva lib/crm.ts inteiro e trava o #1853 da Claude 2 e a correção do quadro (C2-62). **Tire a linha agora**, num PR só de documento. Ordem em lib/crm.ts: o #1853 da Claude 2 entra primeiro; a sua correção do custo da agenda (C3-70 item 2, lib/crm.ts:516) vem depois, atualizada com o main, numa reserva nova só para essa unidade. As outras correções da C3-70 (cópia com as tarefas, apagamento) não dependem dele.
 
 ## Codex
 

@@ -97,9 +97,9 @@ async function main(): Promise<void> {
 
   part("On the orders page");
   const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
-  is("an opening with a link takes one of the store's buyer requests before anything is read", page.indexOf('takePublicRequest(store, "buyer")') > 0 && page.indexOf('takePublicRequest(store, "buyer")') < page.indexOf("ordersGrant(store, token)") && page.includes("token && admitted ? await ordersGrant(store, token) : null"), true);
-  is("without room, the page says it is busy and reads nothing", page.includes("token && !admitted ? NOTICES.busy"), true);
-  is("a token not shaped like one takes nothing from the store", page.includes('token && ORDERS_TOKEN_PATTERN.test(token) ? await takePublicRequest(store, "buyer") : true'), true);
+  // What an opening takes, and that a refused one reads nothing, are run in tests/orders-open.test.ts (lib/buyer-orders.ts, openOrders).
+  is("an opening with a link is opened by openOrders, which takes the store's buyer requests before anything is read", [page.includes("const opened = token ? await openOrders(store, token) : null;"), /ordersGrant|takePublicRequest/.test(page)], [true, false]);
+  is("without room, the page says it is busy and reads nothing", [page.includes("token && !admitted ? NOTICES.busy"), page.includes("if (email && meter) {"), page.includes("if (error instanceof OrdersBusy) admitted = false;")], [true, true, true]);
   is("the notice says only what is true: kept, try later, ask for a new link", [ORDERS_WORDS.en.notices.busy.title, /minutes|many people/i.test(ORDERS_WORDS.en.notices.busy.body)], ["This store can't show your purchases right now", false]);
   is("the busy notice in every language", Object.values(ORDERS_WORDS).every((w) => !!w.notices.busy?.title && !!w.notices.busy?.body), true);
   is("each request's amount in its own currency, never the store's now", (page.match(/speechFor\(store\.language, request\.currency\)\.money\(request\.total\)/g) ?? []).length, 2);

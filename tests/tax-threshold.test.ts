@@ -164,3 +164,43 @@ test("detached ledger evidence does not invoke an inherited ledger setter", asyn
   assert.deepEqual([reads, writes], [0, 0]);
   assert.deepEqual(result, { status: "treatment-required", projectedApplicableMinor: 5_000_000 });
 });
+
+
+test("a threshold snapshot cannot hide fiscal fields or extra symbol evidence", () => {
+  for (const key of Object.keys(row("ca-specified-supplies", 0))) {
+    const value = row("ca-specified-supplies", 0);
+    Object.defineProperty(value, key, { enumerable: false });
+    assert.equal(assessTaxThreshold(value, NOW).status, "unknown", `hidden ${key}`);
+  }
+  const symbolic = { ...row("ca-specified-supplies", 0), [Symbol("unclassified supply")]: null };
+  const derived = Object.assign(Object.create({ source: "unreviewed" }), row("ca-specified-supplies", 0));
+  for (const value of [symbolic, derived]) assert.equal(assessTaxThreshold(value, NOW).status, "unknown");
+});
+
+test("ledger threshold evidence must survive its serialized capture at every layer", async () => {
+  const { assessTaxSalesThreshold } = await import("@/lib/tax-threshold");
+  const evidence = () => ({
+    ruleId: "ca-specified-supplies",
+    completeRollingCoverage: true, applicableScopeReviewed: true,
+    ledger: {
+      place: { country: "CA", state: null }, currency: "CAD",
+      periodStart: "2025-10-28", periodEnd: "2026-10-27",
+      coverageFrom: "2025-10-28", coverageThrough: "2026-10-27", complete: true,
+      entries: [{ id: "own", country: "CA", state: "ON", currency: "CAD", supplyOn: "2026-10-27", position: "settled", amountMinor: 3_000_001, applicable: true }],
+    },
+  });
+  for (const key of Object.keys(evidence())) {
+    const value = evidence();
+    Object.defineProperty(value, key, { enumerable: false });
+    assert.equal(assessTaxSalesThreshold(value, NOW).status, "unknown", `hidden evidence ${key}`);
+  }
+  const hiddenSupply = evidence();
+  Object.defineProperty(hiddenSupply.ledger.entries[0], "amountMinor", { enumerable: false });
+  assert.equal(assessTaxSalesThreshold(hiddenSupply, NOW).status, "unknown");
+  const ordinary = evidence();
+  const frozen = Object.freeze(ordinary);
+  const nullPrototype = Object.assign(Object.create(null), ordinary);
+  for (const value of [frozen, nullPrototype]) {
+    assert.deepEqual(assessTaxSalesThreshold(value, NOW), { status: "treatment-required", projectedApplicableMinor: 3_000_001 });
+  }
+});

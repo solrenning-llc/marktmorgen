@@ -160,3 +160,33 @@ test("detached own sales fields do not invoke inherited setters or replacement g
     }
   }
 });
+
+
+test("hidden ledger, place and supply fields are unknown at every evidence layer", () => {
+  for (const key of Object.keys(ledger())) {
+    const value = ledger([entry("kept")]);
+    Object.defineProperty(value, key, { enumerable: false });
+    assert.deepEqual(countTaxSales(value), { status: "unknown" }, `hidden ledger ${key}`);
+  }
+  for (const key of ["country", "state"]) {
+    const value = ledger([entry("kept")]);
+    Object.defineProperty(value.place, key, { enumerable: false });
+    assert.deepEqual(countTaxSales(value), { status: "unknown" }, `hidden place ${key}`);
+  }
+  for (const key of Object.keys(entry("shape"))) {
+    const value = ledger([entry("kept")]);
+    Object.defineProperty(value.entries[0], key, { enumerable: false });
+    assert.deepEqual(countTaxSales(value), { status: "unknown" }, `hidden supply ${key}`);
+  }
+});
+
+test("a hidden array slot is not a persistable complete sales ledger", () => {
+  const entries = [entry("kept")];
+  Object.defineProperty(entries, "0", { enumerable: false });
+  assert.deepEqual(countTaxSales(ledger(entries)), { status: "unknown" });
+  const ordinary = ledger([entry("kept")]);
+  const frozen = Object.freeze({ ...ordinary, entries: Object.freeze([...ordinary.entries]) });
+  const nullPrototype = Object.assign(Object.create(null), ordinary);
+  assert.deepEqual(countTaxSales(frozen), countTaxSales(ordinary));
+  assert.deepEqual(countTaxSales(nullPrototype), countTaxSales(ordinary));
+});

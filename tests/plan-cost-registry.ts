@@ -87,6 +87,8 @@ import { MAX_POSTS } from "@/lib/store-blog";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
+import { ALL_TIME_PAGES } from "@/lib/stats";
+import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes } from "./store-data-registry";
 import {
@@ -287,6 +289,24 @@ export const PATH_REMINDER_PUSH = request("wait", 45, 500_000);
 export const PATH_STUDIO_PAGE = request("heavy", 81, 404_096);
 export const PATH_PAGE = request("heavy", 54, 120_000);
 export const PATH_BOARD_JOIN = request("heavy",70,30_000);
+/**
+ * One reading of a store's buyers from the creator's Stripe account at the
+ * most (lib/segments.ts, buyerLedger), when its ten-minute copy ran out: its
+ * pages of sales, renewals, refunds, disputes and invoice payments read side
+ * by side, the longest ALL_TIME_PAGES pages one after another, each waited
+ * on at 2 GB (EXPORT_PAGE_SECONDS); and the copy of up to two rows a sale
+ * and a renewal read (320 bytes each) written and read back. Counted as
+ * BUYER_LEDGER_UNITS studio requests by a page that reads it, just before.
+ */
+export const BUYER_LEDGER_BYTES = 2 * ALL_TIME_PAGES * 100 * 320;
+export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
+/**
+ * The tasks agenda on the buyers page at the most (app/studio/people/page.tsx,
+ * TasksAgenda; 639 [GL7](6)): every task of the store read and its rows sent
+ * on. Counted as AGENDA_UNITS studio requests besides the page's own, taken
+ * before it reads; its reading of the buyers is BUYER_LEDGER, counted apart.
+ */
+export const AGENDA_READ = request("heavy", 6 + TAKE_COMMANDS, AGENDA_TASKS_BYTES) + AGENDA_MAX_ROWS * AGENDA_ROW_SENT_BYTES * ORIGIN_PER_BYTE;
 export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
 
 export const PATH_READ = request("heavy", 26, LIFE_WRITE_MAX * 96 + 20_480) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;

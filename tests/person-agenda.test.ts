@@ -11,6 +11,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { type AgendaListRow, TasksAgendaList, agendaDay, agendaLinkWords, staleWords } from "@/components/tasks-agenda";
 import { AGENDA_SHOWN, PERSON_KEY, addressForPerson, addressesOf, agendaForDays, agendaGroups, daysAround } from "@/lib/person-agenda";
 import { personKey } from "@/lib/person-key";
+import { redisPipeline } from "@/lib/redis";
+import { LedgerNotCounted, buyerLedger } from "@/lib/segments";
 import type { DueTask, PersonTask } from "@/lib/person-tasks";
 import type { Store } from "@/lib/store";
 import { done, is, part } from "./check";
@@ -67,16 +69,30 @@ async function main() {
 
   part("A page left open, and its links (edge review)");
   is("a day the server made the groups for is drawn as it is", agendaDay(agenda.days, "2026-11-05", "2026-11-04"), { today: "2026-11-05", stale: false });
-  is("two midnights later the groups are out of date, and it is said, never guessed", [agendaDay(agenda.days, "2026-11-06", "2026-11-04"), agendaDay(agenda.days, "__proto__", "2026-11-04").stale], [{ today: "2026-11-04", stale: true }, true]);
+  is("two midnights later the groups are out of date, and it is said, never guessed; the latest day made is shown (round 3, L4)", [agendaDay(agenda.days, "2026-11-07", "2026-11-04"), agendaDay(agenda.days, "__proto__", "2026-11-04").stale], [{ today: "2026-11-05", stale: true }, true]);
   is("the creator is offered to read them again, never moved by the page on its own", list.includes("onClick={() => window.location.reload()}") && !list.includes("router.refresh()"), true);
   // Drawn for a day the groups were not made for, as a page left open two midnights later is.
   const late = drawn("2026-11-09");
   is("a status region is there before anything is said (round 2, B-M)", /^<div role="status"><\/div>/.test(fortaleza), true);
-  is("then it says which day the groups show and that a new one started (round 2, B-L)", late.includes('<div role="status" class="notice notice-info mt-4">Showing the tasks as of Nov 9, 2026, the day this page was opened. A new day has started since, so some may be past their date now.</div>'), true);
+  is("then it says which day the groups show and that a new one started (round 2, B-L), never that this is the day the page was opened (round 3, L4)", late.includes('<div role="status" class="notice notice-info mt-4">Showing the tasks as of Nov 5, 2026. A new day has started since, so some may be past their date now.</div>') && !late.includes("opened"), true);
   is("with the button to read them again outside the region, tall enough to tap (btn-sm, 44 px)", /<\/div><button type="button" class="btn btn-secondary btn-sm mt-3">Reload the tasks<\/button>/.test(late) && !/role="status"[^>]*>[^<]*<button/.test(late), true);
   is("the person's day moves on at midnight on its own (components/person-tasks.tsx, watchDay)", readFileSync("components/person-tasks.tsx", "utf8").includes("useSyncExternalStore(watchBrowserDay,"), true);
-  is("the sentence names the day, in words", staleWords("2026-11-04").startsWith("Showing the tasks as of Nov 4, 2026,"), true);
+  is("the sentence names the day, in words", staleWords("2026-11-04").startsWith("Showing the tasks as of Nov 4, 2026."), true);
   is("a link's own words say where it goes, not an address alone", [agendaLinkWords("ann@example.com"), fortaleza.includes(">Open the buyer page of ann@example.com</a>")], ["Open the buyer page of ann@example.com", true]);
+
+  part("What the agenda costs, counted before it reads (round 3, M2)");
+  // The reading of the buyers is counted just before Stripe is read, never when its ten-minute copy answers.
+  const shop = { statsId: "ledgerstats", currency: "usd", stripeAccountId: "acct_ledger" } as Store;
+  let asked = 0;
+  const refusedCount = async () => { asked += 1; return false; };
+  const notCounted = await buyerLedger(shop, refusedCount).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
+  is("a reading that could not be counted reads nothing from Stripe and says so", [notCounted, asked], ["not counted", 1]);
+  await redisPipeline([["SET", "nl:stats:ledgerstats:ledger", JSON.stringify({ c: "usd", p: false, r: [["ann@example.com", 100, 1, "", 1]], v: 6 }), "EX", 600]]);
+  const kept = await buyerLedger(shop, refusedCount);
+  is("the ten-minute copy answers without counting anything", [kept.buyers.has("ann@example.com"), asked], [true, 1]);
+  const buyersPage = readFileSync("app/studio/people/page.tsx", "utf8");
+  is("the agenda counts AGENDA_UNITS studio requests before it reads every task, and says so when they cannot be", buyersPage.includes("const counted = await countStudio(store, null, AGENDA_UNITS).catch(() => null);") && buyersPage.indexOf("countStudio(store, null, AGENDA_UNITS)") < buyersPage.indexOf("readAllTasks(store.statsId)"), true);
+  is("a reading of the buyers from Stripe is counted only when it happens, there and from a task's link", buyersPage.includes("const countLedger = (store: Store) => async () => (await countStudio(store, null, BUYER_LEDGER_UNITS)).ok;") && buyersPage.includes("personAddresses(store, persons, countLedger(store))") && buyersPage.includes("addressForPerson(store, who, countLedger(store))"), true);
 
   part("The deals page's day (edge review)");
   const board = readFileSync("components/deals-board.tsx", "utf8");
@@ -88,7 +104,7 @@ async function main() {
   is("a named section, waited for without holding the page", page.includes('<Suspense fallback={<TasksAgendaWaiting />}>') && page.includes('aria-labelledby="agenda-title"') && page.includes('aria-busy="true"'), true);
   is("each group under its own heading with its count", list.includes("<h3 className=\"text-base font-semibold text-ink\">{`${group.title} (${group.rows.length + group.more})`}</h3>"), true);
   is("a row opens the person's page by their key", page.includes("studioPath(store, `who=${row.person}`, \"people\")"), true);
-  is("the page reads that key again among the buyers, and says when it is not there", page.includes("addressForPerson(store, who)") && page.includes("That person is not among the buyers read from your Stripe account just now."), true);
+  is("the page reads that key again among the buyers, and says when it is not there", page.includes("addressForPerson(store, who, countLedger(store))") && page.includes("That person is not among the buyers read from your Stripe account just now."), true);
   is("someone not found is said to be so", list.includes("About a person we could not find among your Stripe buyers"), true);
   is("the agenda says what a person's page lets you do: mark done or remove, not change", page.includes("Open a person to mark one done or remove it.") && !page.includes("mark one done or change it"), true);
   is("when the tasks or Stripe cannot be read, it says so", page.includes("tasks could not be read just now. Nothing was changed.") && page.includes("Stripe could not be read just now, so who each task is about is not shown."), true);

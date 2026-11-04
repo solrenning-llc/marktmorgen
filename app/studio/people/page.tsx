@@ -3,7 +3,8 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
+import { BUYER_LEDGER_UNITS } from "@/lib/segments";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PersonFind } from "@/components/person-find";
@@ -13,7 +14,7 @@ import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
 import { readAllTasks, readFields, readPersonTasks, readValues } from "@/lib/crm";
-import { PERSON_KEY, addressForPerson, agendaForDays, daysAround, personAddresses } from "@/lib/person-agenda";
+import { AGENDA_UNITS, PERSON_KEY, addressForPerson, agendaForDays, daysAround, personAddresses } from "@/lib/person-agenda";
 import type { PersonTask } from "@/lib/person-tasks";
 import { TasksAgendaList } from "@/components/tasks-agenda";
 import { readTeam } from "@/lib/team";
@@ -100,7 +101,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       return null;
     });
   } else if (who) {
-    email = await addressForPerson(store, who).catch((error) => {
+    email = await addressForPerson(store, who, countLedger(store)).catch((error) => {
       console.error("reading a task's buyer failed", error);
       lookupFailed = true;
       return null;
@@ -187,6 +188,13 @@ function TasksAgendaWaiting() {
 }
 
 /**
+ * Counts reading the store's buyers from Stripe again (BUYER_LEDGER_UNITS
+ * studio requests, tests/plan-cost-registry.ts, BUYER_LEDGER), asked only
+ * when the ten-minute copy ran out (lib/segments.ts, buyerLedger).
+ */
+const countLedger = (store: Store) => async () => (await countStudio(store, null, BUYER_LEDGER_UNITS)).ok;
+
+/**
  * Everyone's open tasks (lib/person-tasks.ts), past their date first, each
  * opening the page of the person it is about (lib/person-agenda.ts). The
  * server knows only its own (UTC) day, so the groups are made for each day
@@ -194,6 +202,16 @@ function TasksAgendaWaiting() {
  */
 async function TasksAgenda({ store }: { store: Store }) {
   const today = new Date().toISOString().slice(0, 10);
+  // Every task of the store and its rows sent on: AGENDA_UNITS studio requests, counted first (tests/plan-cost-registry.ts, AGENDA_READ).
+  const counted = await countStudio(store, null, AGENDA_UNITS).catch(() => null);
+  if (!counted?.ok) {
+    return (
+      <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
+        <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
+        <p className="notice notice-warn mt-4">{counted && !counted.ok && counted.message ? counted.message : "Your team's tasks could not be read just now. Nothing was changed. Try again in a moment."}</p>
+      </section>
+    );
+  }
   const all = await readAllTasks(store.statsId).catch((error) => {
     console.error("reading the tasks agenda failed", error);
     return null;
@@ -209,7 +227,7 @@ async function TasksAgenda({ store }: { store: Store }) {
   const agenda = agendaForDays(all, daysAround(today));
   // Only the people of the tasks shown, on any of those days, are looked up.
   const persons = new Set(agenda.rows.map((row) => row.person));
-  const found = await personAddresses(store, persons).catch((error) => {
+  const found = await personAddresses(store, persons, countLedger(store)).catch((error) => {
     console.error("reading the agenda's buyers failed", error);
     return null;
   });

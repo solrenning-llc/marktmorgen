@@ -21,18 +21,21 @@ export function agendaLinkWords(email: string): string {
 
 /**
  * The day the agenda's groups are drawn for: the creator's own when the
- * server made them for it (agendaForDays), and the server's otherwise, said
- * to be `stale` (a page left open two midnights later, whose groups the
+ * server made them for it (agendaForDays), and otherwise the latest day they
+ * were made for, said to be `stale` (a page left open two midnights later, whose groups the
  * server never made): the creator is told and offered to read them again,
  * never moved by the page on its own.
  */
 export function agendaDay(days: Readonly<Record<string, unknown>>, creatorDay: string, serverDay: string): { today: string; stale: boolean } {
-  return Object.prototype.hasOwnProperty.call(days, creatorDay) ? { today: creatorDay, stale: false } : { today: serverDay, stale: true };
+  if (Object.prototype.hasOwnProperty.call(days, creatorDay)) return { today: creatorDay, stale: false };
+  // The latest day the groups were made for: the nearest to the creator's, past now (round 3, L4).
+  const made = Object.keys(days).sort();
+  return { today: made[made.length - 1] ?? serverDay, stale: true };
 }
 
 /** What the agenda says when its groups are for a day that is over: which day they show, and that a new one started. */
 export function staleWords(shownDay: string): string {
-  return `Showing the tasks as of ${dayWords(shownDay)}, the day this page was opened. A new day has started since, so some may be past their date now.`;
+  return `Showing the tasks as of ${dayWords(shownDay)}. A new day has started since, so some may be past their date now.`;
 }
 
 /** A task in the agenda, with the address and page of the person it is about when found. */

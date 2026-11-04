@@ -1,5 +1,8 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
+import { AGENDA_READ, BUYER_LEDGER } from "./plan-cost-registry";
+import { AGENDA_UNITS } from "@/lib/person-agenda";
+import { BUYER_LEDGER_UNITS } from "@/lib/segments";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import { PATH_REMINDER_UNITS } from "@/lib/path-reminder-rules";
 /**
@@ -240,6 +243,16 @@ test("the uses the owner named on October 18, 2026 have left the open list, the 
 
 test("Path page and its actual usage count fit its reserved studio page", () => {
  assert.ok(PATH_PAGE <= UNIT_COST.studio * STUDIO_PAGE_UNITS);
+});
+
+test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {
+ assert.ok(BUYER_LEDGER <= UNIT_COST.studio * BUYER_LEDGER_UNITS, `${BUYER_LEDGER} > ${BUYER_LEDGER_UNITS} x ${UNIT_COST.studio}`);
+ assert.ok(BUYER_LEDGER > UNIT_COST.studio * (BUYER_LEDGER_UNITS - 1), `${BUYER_LEDGER} <= ${BUYER_LEDGER_UNITS - 1} x ${UNIT_COST.studio}: lower BUYER_LEDGER_UNITS`);
+});
+
+test("the tasks agenda fits the studio requests it counts, and no fewer would do", () => {
+ assert.ok(AGENDA_READ <= UNIT_COST.studio * AGENDA_UNITS, `${AGENDA_READ} > ${AGENDA_UNITS} x ${UNIT_COST.studio}`);
+ assert.ok(AGENDA_READ > UNIT_COST.studio * (AGENDA_UNITS - 1), `${AGENDA_READ} <= ${AGENDA_UNITS - 1} x ${UNIT_COST.studio}: lower AGENDA_UNITS`);
 });
 
 test("Path push fits its reserved studio requests", () => {

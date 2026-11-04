@@ -17,6 +17,10 @@ import {
   chargeAttempt,
   holdGoodUntil,
   keptOnCharge,
+  keptOnMove,
+  startAttempt,
+  createErrorStep,
+  refundOutcome,
   moveCase,
   keptWhen,
   unpaidCancel,
@@ -303,7 +307,7 @@ is("the buyer canceling before the start: the hold is released, nothing charged,
 is("the change message follows the charge: held until the start, charged now, kept, or as before", [moveCase(creatorMoved, rec(2, null), NOW + 30 * HOUR, 48), moveCase(sessionCharge(2, NOW + 30 * HOUR, BOOKED, 8000, 48, NOW, "buyer"), rec(2, null), NOW + 30 * HOUR, 48), moveCase(creatorMoved, rec(2, "succeeded", { kept: true }), NOW + 30 * HOUR, 48), moveCase(sessionCharge(2, NOW + 5 * DAY, BOOKED, 8000, 48, NOW, "creator"), rec(2, null), NOW + 5 * DAY, 48), moveCase(sessionCharge(2, NOW + 10 * HOUR, BOOKED, 8000, 0, NOW, "creator"), rec(2, null), NOW + 10 * HOUR, 0)], ["held_until_start", "charged_now", "kept", "planned", "planned"]);
 
 part("The change message, in every store language");
-const moveCases = ["held_until_start", "planned", "kept", "charged_now", "paid_refundable_until"] as const;
+const moveCases = ["held_until_start", "planned", "kept", "charged_now", "paid_refundable_until", "pay_by_link"] as const;
 const moveInput = { date: "Friday, November 20 at 9:00 AM EST", store: "Lena Coaching", hours: 48, by: "creator" as const, until: "Friday, November 20 at 8:59 AM EST" };
 is("the buyer told in plain words what the creator's move inside the deadline does", seriesMoveMessage("en", "buyer", "held_until_start", moveInput), "Lena Coaching moved your session to Friday, November 20 at 9:00 AM EST. That is less than 48 hours away, so your card is only reserved now. It is charged when the session starts. Cancel any time before then and you pay nothing for it.");
 is("the creator told the same, without the buyer's name", seriesMoveMessage("en", "creator", "held_until_start", moveInput), "You moved the session to Friday, November 20 at 9:00 AM EST. That is inside your 48-hour cancellation deadline, so the buyer's card is only reserved. It is charged when the session starts. If the buyer cancels before then, the reservation is released and nothing is charged.");
@@ -330,6 +334,42 @@ part("The change message for a session paid already");
 is("paid and not kept: refundable until its cancelBy; paid with its cancelBy passed: kept", [moveCase(creatorMoved, refundFeeRec, NOW + 30 * HOUR, 48), moveCase(sessionCharge(0, NOW + 30 * HOUR, BOOKED, 8000, 48, NOW, "buyer"), refundFeeRec, NOW + 30 * HOUR, 48), moveCase(sessionCharge(0, NOW + 5 * DAY, BOOKED, 8000, 48, NOW, "creator"), refundFeeRec, NOW + 5 * DAY, 48)], ["paid_refundable_until", "kept", "paid_refundable_until"]);
 is("said to the buyer and the creator", [seriesMoveMessage("en", "buyer", "paid_refundable_until", moveInput), seriesMoveMessage("en", "creator", "paid_refundable_until", moveInput)], ["Lena Coaching moved your session to Friday, November 20 at 9:00 AM EST. This session was already charged. Cancel by Friday, November 20 at 8:59 AM EST and it is refunded in full.", "You moved the session to Friday, November 20 at 9:00 AM EST. The buyer was already charged for it. If the buyer cancels by Friday, November 20 at 8:59 AM EST, they get a full refund."]);
 is("a kept charge is said as already charged, however it was made", seriesMoveMessage("en", "buyer", "kept", moveInput).includes("This session was already charged. That charge stays"), true);
+
+part("A mismatch is read before anything else");
+const other = listed("pi_m", "succeeded", 2, auto, "s1", false, { amount: 9000, amountReceived: 9000 });
+is("a good hold beside a paid mismatch is never reused or captured: reported", chargeAttempt(SER, goodHold, [other], go()), { do: "report", why: "mismatch", ids: ["pi_m"] });
+is("a late stop with a good hold beside a mismatch: the hold is neither captured nor released, both reported", toStop([2], [rec(2, "requires_capture", {}, { heldAt: with48[2].at })], by("buyer", late, [other])), S({ postpone: [{ id: "pi_2", index: 2, until: holdGoodUntil(with48[2].at, null) }], blocked: [{ index: 2, why: "mismatch", ids: ["pi_m"] }] }));
+is("never canceled as unpaid beside a mismatch: reported", unpaidCancel(SER, rec(2, "requires_payment_method"), [other], BOOKED), { do: "report", why: "mismatch", ids: ["pi_m"] });
+is("a mismatch refunded in full, or canceled, stops blocking", [chargeAttempt(SER, rec(2, null), [listed("pi_m", "succeeded", 2, auto, "s1", false, { amount: 9000, amountReceived: 9000, amountRefunded: 9000 })], go()).do, chargeAttempt(SER, rec(2, null), [listed("pi_m", "canceled", 2, auto, "s1", false, { amount: 9000 })], go()).do], ["create", "create"]);
+
+part("A buyer's move inside the deadline keeps a paid session kept");
+const paidFirst = rec(0, "succeeded", {}, auto);
+const movedStarts0 = [...starts];
+movedStarts0[0] = NOW + 30 * HOUR;
+const buyerIn = sessionCharge(0, NOW + 30 * HOUR, BOOKED, 8000, 48, NOW, "buyer");
+const afterBuyer = { ...paidFirst, kept: keptOnMove(paidFirst, buyerIn) };
+const creatorOut = sessionCharge(0, NOW + 10 * DAY, BOOKED, 8000, 48, NOW + HOUR, "creator");
+const laterStarts = [...starts];
+laterStarts[0] = NOW + 10 * DAY;
+is("moved in by the buyer: kept; moved out by the creator: still kept, said so; canceled then by the buyer: not refunded", [afterBuyer.kept, keptOnMove(afterBuyer, creatorOut), moveCase(creatorOut, afterBuyer, NOW + 10 * DAY, 48), toStop([0], [afterBuyer], by("buyer", NOW + 2 * DAY, [], laterStarts)).refund], [true, true, "kept", []]);
+is("the creator moving a paid session inside the deadline never makes it kept", keptOnMove(paidFirst, sessionCharge(0, NOW + 30 * HOUR, BOOKED, 8000, 48, NOW, "creator")), false);
+
+part("Never a pay link for what the creator refunded");
+is("an open PaymentIntent beside a payment refunded in full outside these rules: reported, never reused", chargeAttempt(SER, rec(2, "requires_payment_method", {}, auto), [listed("pi_r", "succeeded", 2, auto, "s1", true)], go()), { do: "report", why: "refunded", ids: ["pi_r"] });
+
+part("A failed payment when the session is moved");
+is("its payment failed: the pay link message, never \"only reserved\"", [moveCase(creatorMoved, rec(2, "requires_payment_method"), NOW + 30 * HOUR, 48), moveCase(creatorMoved, rec(2, "requires_action"), NOW + 30 * HOUR, 48)], ["pay_by_link", "pay_by_link"]);
+is("said to the buyer", seriesMoveMessage("en", "buyer", "pay_by_link", moveInput), "Lena Coaching moved your session to Friday, November 20 at 9:00 AM EST. Your payment for it has not gone through yet. Pay with the link by Friday, November 20 at 8:59 AM EST. If it is not paid by then, the session is canceled and you are not charged.");
+
+part("Attempts and their keys");
+const flagged = { ...sent({ attemptKeyRefused: true }) };
+const next = startAttempt(flagged, held.at, body);
+is("a new attempt: the next number, its time, exactly its parameters, attemptKeyRefused back to false", [next.attempt, next.attemptAt, next.attemptBody, next.attemptKeyRefused], [2, held.at, body, false]);
+is("a parameter off the allow-list is refused (no mandate_data with an IP address)", (() => { try { startAttempt(flagged, held.at, { ...body, "mandate_data[customer_acceptance][online][ip_address]": "1.2.3.4" }); return false; } catch { return true; } })(), true);
+is("in flight (409) waits; other parameters let the list decide; anything else failed", [createErrorStep("idempotency_key_in_use"), createErrorStep("idempotency_error"), createErrorStep("card_declined")], ["wait", "decide_from_list", "failed"]);
+
+part("A refund's answer");
+is("already refunded is done; a dispute or a request error refused for good; a passing error tried again", [refundOutcome(null), refundOutcome({ code: "charge_already_refunded", status: 400 }), refundOutcome({ code: "charge_disputed", status: 400 }), refundOutcome({ code: "parameter_invalid_integer", status: 400 }), refundOutcome({ status: 500 }), refundOutcome({ code: "rate_limit", status: 429 }), refundOutcome({ code: "lock_timeout", status: 400 }), refundOutcome({})], ["done", "done", "refused", "refused", "retry", "retry", "retry", "retry"]);
 
 part("Not with a deposit, a code or a package");
 is("refused, each said", [seriesBillingProblem({ deposit: true, code: false, fromPackage: false }), seriesBillingProblem({ deposit: false, code: true, fromPackage: false }), seriesBillingProblem({ deposit: false, code: false, fromPackage: true }), seriesBillingProblem({ deposit: false, code: false, fromPackage: false })], ["deposit", "code", "package", null]);

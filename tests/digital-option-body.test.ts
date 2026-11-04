@@ -5,7 +5,7 @@ import { digitalOptionBodyMatches } from "@/lib/digital-option-body";
 const option = { id: "edition01", label: "Original PDF", priceCents: 6500, file: { pathname: "stores/synthetic/edition01/book.pdf", name: "Book.pdf", bytes: 1200, contentType: "application/pdf", addedAt: "2026-11-01T00:00:00.000Z" }, link: null, details: [], best: false };
 function fixture() {
   const product = structuredClone({ options: [option] });
-  const identity = { storeHandle: "original.store", productId: "product01", title: "Original book", currency: "usd", consent: "original-consent-snapshot" };
+  const identity = { storeHandle: "original.store", productId: "product01", title: "Original book", currency: "usd", consent: "original-consent-snapshot", summary: "" };
   const name = `${identity.title} (${option.label})`;
   const form = new URLSearchParams({ mode: "payment", "metadata[store]": identity.storeHandle, "metadata[product]": identity.productId,
     "metadata[option]": option.id, "metadata[title]": name, "metadata[dc]": identity.consent,
@@ -46,4 +46,11 @@ test("a digital option cannot silently inherit any of the three checkout bump sl
     f.form.set(key, "coupled-extra-entitlement");
     assert.equal(f.match(), false, key);
   }
+});
+
+test("description is bound to the original summary, including absence and substituted copies",()=>{
+ const f=fixture();f.identity.summary="Original summary";f.form.set("line_items[0][price_data][product_data][description]",f.identity.summary);assert.equal(f.match(),true);
+ f.form.set("line_items[0][price_data][product_data][description]","Changed summary");assert.equal(f.match(),false);
+ f.form.delete("line_items[0][price_data][product_data][description]");assert.equal(f.match(),false);
+ f.identity.summary="";assert.equal(f.match(),true);f.form.set("line_items[0][price_data][product_data][description]","");assert.equal(f.match(),false);
 });

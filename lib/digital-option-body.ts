@@ -1,17 +1,18 @@
 /** Pure original-wire comparison, not catalog authentication, valid consent,
  * admission, a funding review, a persisted source or paid-access permission. */
+import { MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 import { selectedDigitalOptionForFolder } from "@/lib/digital-option-confirmation";
 
 function original(value: unknown): Record<string, string> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   try {
     if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return null;
-    const names = ["storeHandle", "productId", "title", "currency", "consent"];
+    const names = ["storeHandle", "productId", "title", "currency", "consent", "summary"];
     if (Reflect.ownKeys(value).length !== names.length) return null;
     const out: Record<string, string> = Object.create(null);
     for (const name of names) {
       const d = Object.getOwnPropertyDescriptor(value, name);
-      if (!d || !Object.hasOwn(d, "value") || typeof d.value !== "string" || !d.value || d.value.length > 500 || /[\u0000-\u001f\u007f]/.test(d.value)) return null;
+      if (!d || !Object.hasOwn(d, "value") || typeof d.value !== "string" || (name !== "summary" && !d.value) || d.value.length > (name === "summary" ? MAX_SUMMARY_LENGTH : 500) || /[\u0000-\u001f\u007f]/.test(d.value)) return null;
       out[name] = d.value;
     }
     return /^[a-z]{3}$/.test(out.currency) && /^[A-Za-z0-9_-]{1,40}$/.test(out.productId) ? out : null;
@@ -34,6 +35,7 @@ export function digitalOptionBodyMatches(body: unknown, product: unknown, option
     "line_items[0][price_data][currency]": o.currency, "line_items[0][price_data][product_data][name]": name,
     "payment_intent_data[metadata][dc]": o.consent,
   };
+  if (o.summary) expected["line_items[0][price_data][product_data][description]"] = o.summary;
   return Object.entries(expected).every(([k, v]) => form.get(k) === v) &&
     !entries.some(([k]) => /^metadata\[bump(?:2|3)?(?:_|\])/.test(k) || (k.startsWith("line_items[") && !Object.hasOwn(expected, k)) || /^line_items\[(?!0\])/.test(k) || /^(discounts|custom_fields|optional_items|subscription_data|shipping_options|shipping_address_collection)\[/.test(k)) &&
     !["gift", "group", "people", "preorder", "upsell_key", "bundle", "ship"].some(k => form.has(`metadata[${k}]`));

@@ -76,7 +76,8 @@ export async function POST(request: NextRequest) {
   const { body, store } = guarded;
   const statsId = store.statsId;
   if (!statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
-  const id = typeof body.id === "string" ? body.id.slice(0, 20) : "";
+  // Taken as sent, never cut: a record that cannot be read is deleted by the exact id the page showed (round 4, L3).
+  const id = typeof body.id === "string" && body.id.length <= 512 ? body.id : "";
   const person = typeof body.person === "string" ? body.person : "";
   const refuse = (error: CompanyRefusal) => Response.json({ ok: false, error, message: COMPANY_REFUSALS[error] }, { status: error === "unknown" ? 404 : error === "busy" ? 409 : 400 });
   try {

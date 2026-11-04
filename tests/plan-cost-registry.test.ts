@@ -1,7 +1,7 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan-cost-registry";
-import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, companiesSentUnits } from "@/lib/crm-companies-rules";
+import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, SENT_TIMES, STUDIO_UNIT_SENT_BYTES, sentBytes } from "@/lib/crm-companies-rules";
 import { AGENDA_READ, BUYER_LEDGER } from "./plan-cost-registry";
 import { AGENDA_UNITS } from "@/lib/person-agenda";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT } from "@/lib/segments";
@@ -256,7 +256,10 @@ test("a companies request fits its studio requests, and each page that reads eve
  assert.ok(STUDIO_UNIT_SENT <= UNIT_COST.studio, `${STUDIO_UNIT_SENT} > ${UNIT_COST.studio}`);
  // The companies page at its most (every company, every person at them with an address of 254 characters): the
  // records written in the page and again for React, and the markup around them.
- const sent = companiesSentUnits(MAX_COMPANIES_BYTES + MAX_COMPANIES * MAX_COMPANY_PEOPLE * 320, MAX_COMPANIES * COMPANY_MARKUP_BYTES + MAX_COMPANIES * MAX_COMPANY_PEOPLE * COMPANY_PERSON_MARKUP_BYTES);
+ const sent = Math.ceil((SENT_TIMES * (MAX_COMPANIES_BYTES + MAX_COMPANIES * MAX_COMPANY_PEOPLE * 320) + MAX_COMPANIES * COMPANY_MARKUP_BYTES + MAX_COMPANIES * MAX_COMPANY_PEOPLE * COMPANY_PERSON_MARKUP_BYTES) / STUDIO_UNIT_SENT_BYTES);
+ // One byte of JSON is never sent as more than SENT_TIMES bytes: a name of "&" and "<" signs, measured as Next sends it.
+ const amp = JSON.stringify({ name: "&<>\"".repeat(20) });
+ assert.ok(sentBytes(amp) <= SENT_TIMES * amp.length && sentBytes(amp) >= 8 * amp.length, `${sentBytes(amp)} for ${amp.length}`);
  assert.ok(sent >= 17, `the fullest companies page sends ${sent} studio requests' worth: never less than the review's 17`);
  console.log(`the fullest companies page: ${STUDIO_PAGE_UNITS} + ${COMPANIES_READ_UNITS} + ${sent} studio requests, and its reading of the buyers when Stripe is read`);
 });

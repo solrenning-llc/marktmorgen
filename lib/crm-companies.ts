@@ -91,6 +91,13 @@ const unreadableOf = (stored: Stored) => {
   return [...stored.weights.keys()].filter((id) => !read.has(id)).sort();
 };
 
+/** How many records the store's companies hash holds (one HLEN), so a page with none reads and counts nothing more. */
+export async function companiesKept(statsId: string | null): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [n] = await redisPipeline([["HLEN", companiesKey(statsId)]]);
+  return Number(n) || 0;
+}
+
 /** Every company of the store, oldest first; none when they cannot be read. */
 export async function readCompanies(statsId: string | null): Promise<Company[]> {
   if (!statsId || !isRedisConfigured()) return [];

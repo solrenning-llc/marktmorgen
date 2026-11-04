@@ -283,16 +283,15 @@ export function CompaniesEditor({
           </span>
         </p>
       </form>
-      <div role="status">
+      {/* Only words in the status region, so a screen reader says them; the Undo button stays outside it (round 4, L4). */}
+      <div>
+        <p role="status" className="text-sm text-ink [overflow-wrap:anywhere]">
+          {gone ? `Deleted ${gone.name}. Its people are still in your store.` : putBack}
+        </p>
         {gone ? (
-          <p className="flex flex-wrap items-center gap-3 text-sm text-ink">
-            <span className="[overflow-wrap:anywhere]">{`Deleted ${gone.name}. Its people are still in your store.`}</span>
-            <button ref={undoButton} type="button" className="btn btn-secondary btn-sm" aria-disabled={busy || undefined} onClick={() => void undo()}>
-              Undo
-            </button>
-          </p>
-        ) : putBack ? (
-          <p className="text-sm text-ink [overflow-wrap:anywhere]">{putBack}</p>
+          <button ref={undoButton} type="button" className="btn btn-secondary btn-sm mt-2" aria-disabled={busy || undefined} onClick={() => void undo()}>
+            Undo
+          </button>
         ) : null}
       </div>
       <section aria-labelledby="companies-title">

@@ -49,19 +49,34 @@ export const COMPANY_OPTION_MARKUP_BYTES = 150;
 /** The page's own markup around one person at a company (their line, link and button), in bytes at the most. */
 export const COMPANY_PERSON_MARKUP_BYTES = 250;
 /**
- * How many times what the page shows is sent: written in the page, then
- * again, escaped, in what React reads to take it over (each quote and
- * backslash written twice there).
+ * The most bytes one byte of the records' JSON becomes on its way to the
+ * browser (round 4, M1): written in the page as text (an "&" is "&amp;", five
+ * bytes) and again in what React reads to take it over, a JSON string inside
+ * the page whose "<", ">" and "&" are written as six-byte \u escapes, a quote
+ * as two. Used for the worst case in tests/plan-cost-registry.ts.
  */
-export const SENT_TIMES = 3;
+export const SENT_TIMES = 12;
+
+const utf8 = (text: string) => new TextEncoder().encode(text).length;
+
+/**
+ * What the records' JSON is sent as, in bytes, measured as Next writes it:
+ * the page's text, HTML-escaped, and React's copy, a JSON string with "<",
+ * ">", "&", U+2028 and U+2029 escaped as \uXXXX.
+ */
+export function sentBytes(json: string): number {
+  const page = json.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const react = JSON.stringify(json).replace(/[<>&\u2028\u2029]/g, "\\u0000");
+  return utf8(page) + utf8(react);
+}
 
 /**
  * Studio requests what a page sends on costs, counted before it is drawn:
- * the records it shows (`jsonBytes`, as JSON) SENT_TIMES over, and its own
+ * the records it shows (`json`) as Next sends them (sentBytes), and its own
  * markup around them.
  */
-export function companiesSentUnits(jsonBytes: number, markupBytes: number): number {
-  const sent = SENT_TIMES * Math.max(0, jsonBytes) + Math.max(0, markupBytes);
+export function companiesSentUnits(json: string, markupBytes: number): number {
+  const sent = sentBytes(json) + Math.max(0, markupBytes);
   return Math.max(1, Math.ceil(sent / STUDIO_UNIT_SENT_BYTES));
 }
 const PERSON = PERSON_KEY;
@@ -88,12 +103,12 @@ export type CompanyResult = { ok: true; companies: Company[] } | { ok: false; er
  * Characters that change how the text around them is drawn without being
  * seen: the bidirectional embeddings, overrides and isolates (a name that
  * reads backwards from where it is shown, Unicode Technical Report 36), the
- * byte order mark and the invisible "function" signs. The marks that only
- * set a direction (U+200E, U+200F, U+061C) stay, since Arabic or Hebrew text
- * mixed with Latin needs them, as do the joiners (U+200C, U+200D) that some
- * scripts and emoji need.
+ * byte order mark, the invisible "function" signs, the soft hyphen, the
+ * zero-width space and the direction marks U+200E and U+200F: one rule with
+ * the tasks' words (lib/person-tasks.ts) and lib/sequence-import.ts (round 4,
+ * L6). The joiners (U+200C, U+200D) that some scripts and emoji need stay.
  */
-const UNSEEN = /[\u202a-\u202e\u2066-\u2069\ufeff\u2060-\u2064]/g;
+const UNSEEN = /[\u00ad\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
 /**
@@ -121,7 +136,9 @@ const seen = (value: string) => /[^\s\p{C}\p{M}\u115f\u1160\u3164\uffa0\u2800]/u
  * What a company's name is compared by, so one name is kept once: the
  * compatibility form (NFKC: wide letters are the usual ones), without the
  * signs that are not drawn (a zero-width space), and with case folded fully
- * (sharp s is "ss", a final sigma is a sigma).
+ * (sharp s is "ss", a final sigma is a sigma). Names that only look alike
+ * across scripts (a Cyrillic "а" for a Latin "a") are not merged: a warning
+ * on a name that mixes scripts is left for later (round 4, L2, noted).
  */
 export function companyNameKey(name: string): string {
   // Fillers drawn as blank are a space; every sign Unicode says to ignore when drawing (zero-width signs, the

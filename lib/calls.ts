@@ -740,7 +740,8 @@ export function callCheckoutBody(input: {
     "payment_intent_data[metadata][kind]": "call",
     "payment_intent_data[metadata][start]": String(start),
     success_url: `${origin}/@${store.handle}/thanks?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
+    // Back from Stripe's page, the length chosen is still chosen (3.3.7).
+    cancel_url: `${origin}/@${store.handle}/book/${product.id}${length && length.minutes !== product.call?.minutes ? `?length=${length.minutes}` : ""}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
   // The creator's cancellation deadline (lib/call-setup.ts, cancelHours): said before paying; never for a session from a package, which pays nothing here.

@@ -30,7 +30,8 @@ export async function POST(request: NextRequest) {
     if (!email) return away("/signin?status=expired");
     // An address in the middle of a move, or left by one that broke, takes no login without a second step until
     // the move is over or repaired (lib/auth.ts isMoving, lib/move-repair.ts; review of 1daa9131e).
-    if ((await isMoving(email)) && !((await repairMove(email)) && !(await isMoving(email)))) return away("/signin?status=move-busy");
+    // With the app, the login waits for its code as always (below); without it, it is refused.
+    if ((await isMoving(email)) && !((await repairMove(email)) && !(await isMoving(email))) && !(await twoStepOn(email))) return away("/signin?status=move-busy");
     // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
     await pendingRemoval(email).catch((error) => console.error("applying a passkey removal failed", error));
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";

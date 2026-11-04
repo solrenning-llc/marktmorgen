@@ -444,6 +444,9 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
  * When it has, two-step login is turned off here, and the link logs in alone.
  */
 export async function resetIfDue(email: string, now = Date.now()): Promise<boolean> {
+  // Never during a move, or while one is left broken (lib/auth.ts isMoving): the app is one of the ways in
+  // being carried, and the owner's way back in while the move cannot be read.
+  if (await isMoving(email)) return false;
   const backup = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0 || now < record.reset) return null;

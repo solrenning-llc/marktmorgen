@@ -68,14 +68,23 @@ export async function describeMove(email: string): Promise<Record<string, unknow
 
 /**
  * Clears a broken move's record without repairing it, for a person who has
- * looked (scripts/move-repair.mjs, with the address typed again). Its two
- * addresses are logged out.
+ * looked (scripts/move-repair.mjs, with the address typed again). Refused
+ * while the state is split, the store on one address and its ways in on the
+ * other: clearing it would let a login by the emailed link into the store
+ * with no second step again. Its two addresses are logged out.
  */
-export async function clearBrokenMoveByHand(email: string, confirm: string): Promise<boolean> {
+export async function clearBrokenMoveByHand(email: string, confirm: string): Promise<"cleared" | "none" | "confirm" | "split"> {
   const broken = await readBrokenMove(email);
-  if (!broken || confirm.trim().toLowerCase() !== email.trim().toLowerCase()) return false;
+  if (!broken) return "none";
+  if (confirm.trim().toLowerCase() !== email.trim().toLowerCase()) return "confirm";
+  const holds = async (address: string) => ({
+    store: Boolean(await storeForEmail(address)),
+    ways: (await listPasskeys(address)).length > 0 || (await pendingNow(address)) !== null || (await twoStepOn(address)),
+  });
+  const [a, b] = await Promise.all([holds(broken.from), holds(broken.to)]);
+  if ((a.store && !a.ways && b.ways) || (b.store && !b.ways && a.ways)) return "split";
   await clearBrokenMove(broken.from, broken.to);
   await endAllSessions(broken.from);
   await endAllSessions(broken.to);
-  return true;
+  return "cleared";
 }

@@ -15,7 +15,7 @@ import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
 import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingRemoval, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
 import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
-import { RESET_DAYS, cancelReset, checkCode, finishSetup, lockedUntil, moveTwoStep, replaceCodes, resetIfDue, spendRescue, startSetup, turnOff, twoStepStatus } from "@/lib/two-step";
+import { RESET_DAYS, cancelReset, checkCode, finishSetup, lockedUntil, moveTwoStep, replaceCodes, resetIfDue, spendRescue, startSetup, turnOff, twoStepOn, twoStepStatus } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
@@ -28,7 +28,7 @@ import { POST as twoStepRoute } from "@/app/api/auth/two-step/route";
 import { makePasskey } from "./passkey-world";
 import { POST as addressRoute } from "@/app/api/store/address/route";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
-import { claimHandle, storeForEmail } from "@/lib/store";
+import { accountStores, claimHandle, createStore, ensureStoreId, storeForEmail } from "@/lib/store";
 import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
 import { endMoving, isMoving, markBrokenMove, markMoving, readBrokenMove, sendMoveLink } from "@/lib/auth";
 import { clearBrokenMoveByHand, describeMove } from "@/lib/move-repair";
@@ -840,7 +840,13 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenNone}`).slice(0, 40)}`, NONE1, "EX", 900]]);
   is("with no store on either address, a login by the emailed link is refused", (await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenNone }))).headers.get("location"), `${ORIGIN}/signin?status=move-busy`);
   is("the support script shows the state", ((await describeMove(NONE1)) as { broken: unknown }).broken, { from: NONE1, to: NONE2 });
-  is("and clears it only with the address typed again", [await clearBrokenMoveByHand(NONE1, "someone-else@example.com"), await clearBrokenMoveByHand(NONE1, NONE1), await isMoving(NONE1), await isMoving(NONE2)], [false, true, false, false]);
+  is("and clears it only with the address typed again", [await clearBrokenMoveByHand(NONE1, "someone-else@example.com"), await clearBrokenMoveByHand(NONE1, NONE1), await isMoving(NONE1), await isMoving(NONE2)], ["confirm", "cleared", false, false]);
+  const SPA = "split-a@example.com";
+  const SPB = "split-b@example.com";
+  await claimHandle(SPA, "split-a", "Split", "");
+  await makePasskey(SPB, "cred-split").keep();
+  await markBrokenMove(SPA, SPB);
+  is("never while the store is on one address and its passkey on the other: that would let the emailed link in", await clearBrokenMoveByHand(SPA, SPA), "split");
   is("the support script is there", existsSync("scripts/move-repair.mjs") && existsSync("scripts/move-repair-run.ts"), true);
 
   part("Undoing a move forgets two-step login the old address gained midway, and gives back the owner's");
@@ -941,6 +947,90 @@ async function main(): Promise<void> {
   const cpyAnswer = (await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: cpyToken }))).headers.get("location");
   redis.pipeline = cPipe;
   is("refused, the app stays on the old address, and its copy at the new one is gone", [cpyAnswer, (await twoStepStatus(CPY)).on, (await twoStepStatus(CPYD)).on], [`${ORIGIN}/signin?status=move-has-login`, true, false]);
+
+  part("A passkey login repairs a broken move before any session opens (review of 682c8d6bd)");
+  const PKF = "pkf-from@example.com";
+  const PKT = "pkf-dest@example.com";
+  await claimHandle(PKF, "pkf-from", "Pkf", "");
+  const pkfKey = makePasskey(PKT, "cred-pkf");
+  // The passkey went to the new address; the store stayed; the move broke.
+  await pkfKey.keep();
+  await markBrokenMove(PKF, PKT);
+  const pkfFirst = await signInWithPasskey(pkfKey);
+  is("the first try repairs it and asks to try again: no session on the copy", [pkfFirst, (await listPasskeys(PKF)).map((p) => p.id), await isMoving(PKF), await isMoving(PKT)], ["", ["cred-pkf"], false, false]);
+  const pkfSecond = await signInWithPasskey(pkfKey);
+  is("the next one lands on the address with the store", await emailForSession(pkfSecond), PKF);
+
+  part("A store left on both addresses goes back with its other stores, unless one copy was edited");
+  const EXF = "exf-from@example.com";
+  const EXT = "exf-dest@example.com";
+  await claimHandle(EXF, "exf-from", "Exf", "");
+  const exfMain = (await ensureStoreId(EXF))!;
+  const extraMade = await createStore(EXF, "exf-extra", "Exf Extra", "");
+  await makePasskey(EXF, "cred-exf").keep();
+  const exfOwner = await openSession(EXF, "passkey", "cred-exf");
+  mails.length = 0;
+  await sendMoveLink(EXF, EXT, ORIGIN, exfOwner);
+  const exfToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === EXT)?.text ?? "")?.[1] ?? "";
+  const exfOwnerKey = `nl:store:owner:${hex(`nimbus-store:${EXF}`).slice(0, 40)}`;
+  const xPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((x) => x[0] === "DEL" && x.includes(exfOwnerKey))) throw new Error("down for a moment");
+    return xPipe(commands);
+  }) as typeof redis.pipeline;
+  await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: exfToken }));
+  redis.pipeline = xPipe;
+  is("the store is on both, and its other store was rewritten for the new address", [Boolean(await storeForEmail(EXF)), Boolean(await storeForEmail(EXT)), extraMade.ok ? (await accountStores(EXT)).length : -1], [true, true, 1]);
+  const tokenExf = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenExf}`).slice(0, 40)}`, EXF, "EX", 900]]);
+  await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenExf }));
+  is("the repair keeps the address the handle points to, with its other store back under it", [Boolean(await storeForEmail(EXF)), Boolean(await storeForEmail(EXT)), (await accountStores(EXF)).length, (await accountStores(EXT)).length, exfMain.handle], [true, false, 2, 0, "exf-from"]);
+
+  const EDF = "edf-from@example.com";
+  const EDT = "edf-dest@example.com";
+  await claimHandle(EDF, "edf-from", "Edf", "");
+  await makePasskey(EDF, "cred-edf").keep();
+  const edfOwner = await openSession(EDF, "passkey", "cred-edf");
+  mails.length = 0;
+  await sendMoveLink(EDF, EDT, ORIGIN, edfOwner);
+  const edfToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === EDT)?.text ?? "")?.[1] ?? "";
+  const edfOwnerKey = `nl:store:owner:${hex(`nimbus-store:${EDF}`).slice(0, 40)}`;
+  const edtOwnerKey = `nl:store:owner:${hex(`nimbus-store:${EDT}`).slice(0, 40)}`;
+  const ePipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((x) => x[0] === "DEL" && x.includes(edfOwnerKey))) throw new Error("down for a moment");
+    return ePipe(commands);
+  }) as typeof redis.pipeline;
+  await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: edfToken }));
+  redis.pipeline = ePipe;
+  // The owner edited the copy at the new address meanwhile.
+  const [copyRaw] = await redis.pipeline([["GET", edtOwnerKey]]);
+  await redis.pipeline([["SET", edtOwnerKey, JSON.stringify({ ...JSON.parse(String(copyRaw)), name: "Edited On The Copy" })]]);
+  const tokenEdf = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenEdf}`).slice(0, 40)}`, EDF, "EX", 900]]);
+  is("an edited copy is never deleted: the login waits, and the record stays for a person", [(await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenEdf }))).headers.get("location"), (await storeForEmail(EDT))?.name, await isMoving(EDF)], [`${ORIGIN}/signin?status=move-busy`, "Edited On The Copy", true]);
+
+  part("A request to turn the app off never ends during a move");
+  const RSF = "rsf-owner@example.com";
+  await turnOnApp(RSF, "rsf-backup@example.org");
+  const rsfRecord = `nl:2fa:${hex(`nimbus-2fa:${RSF}`).slice(0, 40)}`;
+  const [rsfRaw] = await redis.pipeline([["GET", rsfRecord]]);
+  await redis.pipeline([["SET", rsfRecord, JSON.stringify({ ...JSON.parse(String(rsfRaw)), reset: Date.now() - 1_000 })]]);
+  const rsfMark = await markMoving(RSF, "rsf-elsewhere@example.com");
+  const tokenRsf = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenRsf}`).slice(0, 40)}`, RSF, "EX", 900]]);
+  is("its days are over, yet the emailed link still waits for the code and the app stays on", [(await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenRsf }))).headers.get("location"), await twoStepOn(RSF)], [`${ORIGIN}/signin/code`, true]);
+  is("nor does the studio's look at it turn it off meanwhile", [(await twoStepStatus(RSF)).on, await twoStepOn(RSF)], [true, true]);
+  await endMoving(RSF, "rsf-elsewhere@example.com", rsfMark!);
+
+  part("The recovery address's link waits for the app's code during a move, as the emailed link does");
+  const LCA = "lca-owner@example.com";
+  await turnOnApp(LCA, "lca-backup@example.org");
+  const lcaMark = await markMoving(LCA, "lca-elsewhere@example.com");
+  await sendLostEmailLink(LCA, "203.0.113.78", ORIGIN);
+  const lcaToken = /token=([0-9a-f]{64})/.exec([...mails].reverse().find((m) => m.to === "lca-backup@example.org" && /token=/.test(m.text))?.text ?? "")?.[1] ?? "";
+  is("it goes to the code page", (await lostConfirm(form(`${ORIGIN}/api/auth/lost/confirm`, { token: lcaToken }))).headers.get("location"), `${ORIGIN}/signin/code`);
+  await endMoving(LCA, "lca-elsewhere@example.com", lcaMark!);
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";

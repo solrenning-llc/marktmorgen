@@ -5,8 +5,8 @@
  * with the application's real Redis client and runs it with the arguments.
  *
  *   node scripts/move-repair.mjs someone@example.com
- *   node scripts/move-repair.mjs someone@example.com --repair
- *   node scripts/move-repair.mjs someone@example.com --clear=someone@example.com
+ *   node scripts/move-repair.mjs someone@example.com --repair --yes-production
+ *   node scripts/move-repair.mjs someone@example.com --clear=someone@example.com --yes-production
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

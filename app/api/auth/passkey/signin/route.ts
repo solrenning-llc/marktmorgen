@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { LockBusyError } from "@/lib/redis-lock";
+import { repairMove } from "@/lib/move-repair";
 import { isRedisConfigured } from "@/lib/redis";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { PASSKEY_COOKIE, listPasskeys, pendingRemoval, signInOptions, signInWith, unlessSetToGo } from "@/lib/passkeys";
@@ -52,6 +53,11 @@ export async function POST(request: NextRequest) {
       const signed = answer && typeof answer === "object" ? await signInWith(nonce, answer) : null;
       const email = signed?.email ?? null;
       if (!signed || !email) return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
+      // A move left broken is repaired before any session opens, as at every other login (lib/move-repair.ts):
+      // nobody gets into a copy of the store the repair is about to settle. When the repair moved this passkey
+      // to the address that holds the store, the person is asked to try again, and lands there.
+      await repairMove(email).catch((error) => console.error("repairing a broken move failed", error));
+      if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) return Response.json({ ok: false, error: "busy" }, { status: 503 });
 
       // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
       const id = await openSession(email, "passkey", signed.id);

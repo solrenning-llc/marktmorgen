@@ -1,6 +1,6 @@
 import { HEALTH_WINDOW_DAYS } from "@/lib/mail-health-rules";
-import { healthLevels, type HealthCounts } from "@/lib/mail-health-levels";
-import { SOFT_BOUNCE_NOTE, TERMS, healthRows, levelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
+import type { HealthCounts } from "@/lib/mail-health-levels";
+import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, healthRows, levelWords, pauseLevelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
 
 /**
  * The list's health as a table, inside the email studio's health section
@@ -12,8 +12,10 @@ import { SOFT_BOUNCE_NOTE, TERMS, healthRows, levelWords, roomBeforePause, roomL
  * already read for KB20 (lib/mail-health.ts, listHealth), so the page makes
  * no second reading. The level comes from KB20's healthLevels and the shares
  * from its shareWords, so this table and the sentence above it never
- * disagree. At the level, the distance sentence is left out: KB20's advice
- * already says what happens then.
+ * disagree. Each row says the level that pauses (count and share, both
+ * needed). At the level, both room cells say the next notice of either kind
+ * pauses (pauseIfOver runs after every one counted), and the distance
+ * sentence is left out: KB20's advice already says so.
  *
  * Nothing here says an email was delivered, opened, put in the inbox or sent
  * to spam: no sender can know that, and the one sentence that names those
@@ -25,18 +27,20 @@ export function ListHealthTable({ health }: { health: HealthCounts }) {
   }
   const rows = healthRows(health);
   if (!rows) return null;
-  const distance = healthLevels(health).worst === "over" ? "" : roomLine(roomBeforePause(health));
+  const room = roomBeforePause(health);
+  const distance = room.atLevel ? "" : roomLine(room);
   return (
     <>
       <div className="mt-4 overflow-x-auto" role="region" aria-label="Bounces and spam reports, and how far they are from a pause" tabIndex={0}>
         <table className="w-full text-left text-sm text-ink">
-          <caption className="pb-2 text-left font-semibold">{`Email to your list in the last ${HEALTH_WINDOW_DAYS} days, and how far it is from a pause`}</caption>
+          <caption className="pb-2 text-left font-semibold">{`Email to your list, and the one email to buyers you brought over, in the last ${HEALTH_WINDOW_DAYS} days (counting starts again when a pause ends): how far it is from a pause`}</caption>
           <thead>
             <tr className="border-b border-line">
-              <td />
+              <th scope="col" className="py-2 pr-3 font-semibold">Measure</th>
               <th scope="col" className="px-3 py-2 text-right font-semibold">Count</th>
               <th scope="col" className="px-3 py-2 text-right font-semibold">{`Share of the ${health.sent.toLocaleString("en-US")} sent`}</th>
               <th scope="col" className="px-3 py-2 font-semibold">Level</th>
+              <th scope="col" className="px-3 py-2 font-semibold">Level that pauses it</th>
               <th scope="col" className="py-2 pl-3 text-right font-semibold">More that would pause it</th>
             </tr>
           </thead>
@@ -47,13 +51,15 @@ export function ListHealthTable({ health }: { health: HealthCounts }) {
                 <td className="px-3 py-2 text-right tabular-nums">{row.count.toLocaleString("en-US")}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{row.share}</td>
                 <td className="px-3 py-2">{levelWords(row.level)}</td>
-                <td className="py-2 pl-3 text-right tabular-nums">{roomWords(row.room)}</td>
+                <td className="px-3 py-2 tabular-nums">{pauseLevelWords(row.measure)}</td>
+                <td className="py-2 pl-3 text-right tabular-nums">{roomWords(row.room, row.atLevel)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {distance ? <p className="mt-3 text-sm">{distance}</p> : null}
+      <p className="mt-3 text-sm text-ink-soft">{BOTH_NEEDED}</p>
+      {distance ? <p className="mt-2 text-sm">{distance}</p> : null}
       <h3 className="mt-4 text-base font-semibold">What these words mean</h3>
       <dl className="mt-2 text-sm">
         <dt className="font-semibold">Bounce</dt>

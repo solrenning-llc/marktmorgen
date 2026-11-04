@@ -44,28 +44,39 @@ function lineAt(sent: number, floor: number, rate: number): number {
   return need;
 }
 
-export type Room = { bounces: number | null; complaints: number | null };
+export type Room = {
+  bounces: number | null;
+  complaints: number | null;
+  /**
+   * A count is already at its line (overTheLine) while no pause is set. Then
+   * heardFromSender's pauseIfOver, run after every notice it counts, pauses
+   * on the next one of either kind, so both rooms are 1.
+   */
+  atLevel: boolean;
+};
 
 /**
  * How many more bounces for good, and how many more spam reports, at the
  * number already sent in these seven days, would pause the store's list
- * email: the next one past this many is counted (lib/mail-health.ts,
- * heardFromSender) and the pause follows at once. 0 when a count is already
- * at its line (the pause has then already been taken). Null only when
- * nothing was sent in these days or the counts cannot be read. The counts
- * are not held under what was sent: a bounce or a spam report can arrive
- * days after its email, and counting starts again after a pause, so a few
- * emails can already carry more of either than were sent in the window, and
- * the line stays reachable. Each address counts once a week, so these are
- * more addresses, not more emails to the same ones. More sending moves both.
+ * email: each one is counted (lib/mail-health.ts, heardFromSender), and
+ * pauseIfOver, run after every count, pauses once the seven days are over a
+ * line. Bounces and spam reports are added on their own here, the other
+ * count staying where it is. At the level (atLevel), shown only while no
+ * pause is set, the next notice of either kind pauses, whichever line was
+ * reached: 1 for both. Null only when nothing was sent in these days or the
+ * counts cannot be read. The counts are not held under what was sent: a
+ * bounce or a spam report can arrive days after its email, and counting
+ * starts again after a pause, so a few emails can already carry more of
+ * either than were sent in the window, and the line stays reachable. Each
+ * address counts once a week, so these are more addresses, not more emails
+ * to the same ones. More sending moves both.
  */
 export function roomBeforePause(last7: Health | null | undefined): Room {
-  if (!readable(last7) || last7.sent <= 0) return { bounces: null, complaints: null };
-  const one = (count: number, floor: number, rate: number): number | null => {
-    const need = lineAt(last7.sent, floor, rate);
-    return Math.max(0, need - count);
-  };
-  return { bounces: one(last7.bounced, BOUNCE_FLOOR, BOUNCE_RATE), complaints: one(last7.complained, COMPLAINT_FLOOR, COMPLAINT_RATE) };
+  if (!readable(last7) || last7.sent <= 0) return { bounces: null, complaints: null, atLevel: false };
+  const bounces = lineAt(last7.sent, BOUNCE_FLOOR, BOUNCE_RATE);
+  const complaints = lineAt(last7.sent, COMPLAINT_FLOOR, COMPLAINT_RATE);
+  if (last7.bounced >= bounces || last7.complained >= complaints) return { bounces: 1, complaints: 1, atLevel: true };
+  return { bounces: bounces - last7.bounced, complaints: complaints - last7.complained, atLevel: false };
 }
 
 const n = (x: number) => x.toLocaleString("en-US");
@@ -81,8 +92,8 @@ export function roomLine(room: Room): string {
   if (room.bounces !== null) parts.push(plural(room.bounces, "more bounce", "more bounces"));
   if (room.complaints !== null) parts.push(plural(room.complaints, "more spam report", "more spam reports"));
   if (!parts.length) return "";
-  // At 0 the count that reached the line has already paused the list's email (lib/mail-health.ts): say that, never "the next one".
-  if (room.bounces === 0 || room.complaints === 0) return "Email to your list has reached the level that pauses it.";
+  // At the level with no pause set, the next counted notice of either kind pauses (pauseIfOver), as KB20's advice says.
+  if (room.atLevel) return "Email to your list is at the level that pauses it, so the next bounce or spam report we hear about pauses it.";
   return `At this many emails, ${parts.join(" or ")} would pause it.`;
 }
 
@@ -121,10 +132,22 @@ export function levelWords(level: HealthLevel): string {
   return LEVEL_WORDS[level];
 }
 
-/** The room as its cell says it: a number, or that the line is reached. */
-export function roomWords(room: number): string {
-  return room === 0 ? "None: at the level" : n(room);
+/** The room as its cell says it: a number, or, at the level, that the next notice of either kind pauses. */
+export function roomWords(room: number, atLevel: boolean): string {
+  return atLevel ? "The next one of either kind" : n(room);
 }
+
+const percent = (rate: number) => `${Number((rate * 100).toFixed(2))}%`;
+
+/** The level that pauses, as its cell says it: the count and the share, both needed (overTheLine). */
+export function pauseLevelWords(measure: HealthMeasure): string {
+  return measure === "bounces"
+    ? `${n(BOUNCE_FLOOR)} or more, and ${percent(BOUNCE_RATE)} or more of those sent`
+    : `${n(COMPLAINT_FLOOR)} or more, and ${percent(COMPLAINT_RATE)} or more of those sent`;
+}
+
+/** Said under the table, so a high share beside a low level reads as it should. */
+export const BOTH_NEEDED = "A level is reached only when the count and the share both reach it.";
 
 export type HealthRow = {
   measure: HealthMeasure;
@@ -134,6 +157,8 @@ export type HealthRow = {
   share: string;
   level: HealthLevel;
   room: number;
+  /** Room.atLevel: the next notice of either kind pauses. */
+  atLevel: boolean;
 };
 
 /**
@@ -146,7 +171,7 @@ export function healthRows(last7: Health | null | undefined): HealthRow[] | null
   if (!readable(last7) || room.bounces === null || room.complaints === null) return null;
   const levels = healthLevels(last7);
   return [
-    { measure: "bounces", label: "Bounced for good", count: last7.bounced, share: shareWords(last7.bounced, last7.sent), level: levels.bounces, room: room.bounces },
-    { measure: "complaints", label: "Reported as spam", count: last7.complained, share: shareWords(last7.complained, last7.sent), level: levels.complaints, room: room.complaints },
+    { measure: "bounces", label: "Bounced for good", count: last7.bounced, share: shareWords(last7.bounced, last7.sent), level: levels.bounces, room: room.bounces, atLevel: room.atLevel },
+    { measure: "complaints", label: "Reported as spam", count: last7.complained, share: shareWords(last7.complained, last7.sent), level: levels.complaints, room: room.complaints, atLevel: room.atLevel },
   ];
 }

@@ -7,8 +7,11 @@
  *   - each row's level said in words, from KB20's own healthLevels, never
  *     only by colour; the room from roomBeforePause; the shares from
  *     shareWords, rounded down as KB20 rounds them;
- *   - at the level, the room cell says so and the distance sentence is not
- *     shown (KB20's advice already says what happens then);
+ *   - each row says the level that pauses, count and share both needed, so
+ *     a high share beside a low level reads as it should;
+ *   - at the level, both room cells say the next notice of either kind
+ *     pauses (pauseIfOver runs after every one counted), and the distance
+ *     sentence is not shown (KB20's advice already says so);
  *   - nothing sent: no table, one sentence;
  *   - no word that claims an outcome no sender can know, outside the one
  *     honest sentence that says so;
@@ -20,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { healthLevels, shareWords, type HealthLevel } from "@/lib/mail-health-levels";
-import { SOFT_BOUNCE_NOTE, TERMS, healthRows, levelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
+import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, healthRows, levelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
 import { ListHealthTable } from "@/components/list-health-table";
 import { done, is, part } from "./check";
 
@@ -44,9 +47,10 @@ const WORDS: Record<HealthLevel, string> = {
 function main(): void {
   part("A table with its headers");
   const html = render(h(1000, 4, 1));
-  is("caption", html.includes("<caption") && html.includes("Email to your list in the last 7 days, and how far it is from a pause</caption>"), true);
-  is("four column headers, scoped", count(html, /<th scope="col"/g), 4);
-  is("the column headers, the share naming how many were sent", [...html.matchAll(/<th scope="col"[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]), ["Count", "Share of the 1,000 sent", "Level", "More that would pause it"]);
+  is("caption: what is counted, as KB20's healthLine says it", /<caption[^>]*>Email to your list, and the one email to buyers you brought over, in the last 7 days \(counting starts again when a pause ends\): how far it is from a pause<\/caption>/.test(html), true);
+  is("six column headers, scoped, the corner one named", count(html, /<th scope="col"/g), 6);
+  is("the column headers, the share naming how many were sent", [...html.matchAll(/<th scope="col"[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]), ["Measure", "Count", "Share of the 1,000 sent", "Level", "Level that pauses it", "More that would pause it"]);
+  is("no empty header cell", /<td><\/td>|<td\/>|<th[^>]*><\/th>/.test(html), false);
   is("two row headers, scoped", [...html.matchAll(/<th scope="row"[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]), ["Bounced for good", "Reported as spam"]);
   is("scrolls by keyboard at 320 px and 400%: a named, focusable region", /<div[^>]*class="[^"]*overflow-x-auto[^"]*"[^>]*role="region"[^>]*aria-label="[^"]+"[^>]*tabindex="0"/.test(html) || /<div(?=[^>]*overflow-x-auto)(?=[^>]*role="region")(?=[^>]*aria-label="[^"]+")(?=[^>]*tabindex="0")/.test(html), true);
   is("numbers in tabular figures", count(html, /tabular-nums/g) >= 4, true);
@@ -74,8 +78,10 @@ function main(): void {
     const b = cells(html, "Bounced for good");
     const c = cells(html, "Reported as spam");
     if (b[2] !== WORDS[levels.bounces] || c[2] !== WORDS[levels.complaints]) levelOk = false;
-    if (b[3] !== roomWords(room.bounces ?? -1) || c[3] !== roomWords(room.complaints ?? -1)) roomOk = false;
-    if (b[3] !== (room.bounces === 0 ? "None: at the level" : room.bounces?.toLocaleString("en-US"))) roomOk = false;
+    if (b[4] !== roomWords(room.bounces ?? -1, room.atLevel) || c[4] !== roomWords(room.complaints ?? -1, room.atLevel)) roomOk = false;
+    if (b[4] !== (room.atLevel ? "The next one of either kind" : room.bounces?.toLocaleString("en-US"))) roomOk = false;
+    if (room.atLevel !== (levels.worst === "over")) roomOk = false;
+    if (b[3] !== "25 or more, and 2% or more of those sent" || c[3] !== "5 or more, and 0.08% or more of those sent") levelOk = false;
     if (b[1] !== shareWords(health.bounced, health.sent) || c[1] !== shareWords(health.complained, health.sent)) shareOk = false;
     if (b[0] !== health.bounced.toLocaleString("en-US") || c[0] !== health.complained.toLocaleString("en-US")) countOk = false;
   }
@@ -85,16 +91,20 @@ function main(): void {
   is("each count as counted", countOk, true);
   is("the cases cover all four levels", [...new Set(cases.map(([, x]) => healthLevels(x).worst))].sort(), ["fine", "near", "over", "watch"]);
   is("a rate just under the line never reads as it: 196 of 10,000 is 1.9%", cells(render(h(10000, 196)), "Bounced for good")[1], "1.9%");
-  is("thousands written as thousands", cells(render(h(100000, 1200)), "Bounced for good"), ["1,200", "1.2%", "Half or more of the level that pauses", "800"]);
-  is("the level and the room agree: 0 only at the level", healthRows(h(1000, 25, 4))?.map((r) => [r.level, r.room]), [["over", 0], ["near", 1]]);
+  is("thousands written as thousands", cells(render(h(100000, 1200)), "Bounced for good"), ["1,200", "1.2%", "Half or more of the level that pauses", "25 or more, and 2% or more of those sent", "800"]);
+  is("at the level: the next of either kind, on both rows", healthRows(h(1000, 25, 4))?.map((r) => [r.level, r.room, r.atLevel]), [["over", 1, true], ["near", 1, true]]);
+  const share = render(h(10, 10, 0));
+  is("a high share beside a low level makes sense: the level that pauses is said, both needed", [cells(share, "Bounced for good"), share.includes(BOTH_NEEDED)], [["10", "100.0%", "Under half of the level that pauses", "25 or more, and 2% or more of those sent", "15"], true]);
 
   part("The distance sentence, only short of the level");
   is("short of it: roomLine under the table", render(h(1000, 4, 1)).includes(roomLine(roomBeforePause(h(1000, 4, 1)))), true);
   is("near: still said", render(h(1000, 21, 0)).includes("At this many emails, 4 more bounces or 5 more spam reports would pause it."), true);
   const over = render(h(1000, 30, 0));
-  is("at the level: the room cell says so", cells(over, "Bounced for good")[3], "None: at the level");
+  is("at the level: both room cells say the next notice of either kind pauses", [cells(over, "Bounced for good")[4], cells(over, "Reported as spam")[4]], ["The next one of either kind", "The next one of either kind"]);
+  const bounceLine = render(h(1000, 25, 1));
+  is("at the bounce line with 1 spam report: the next spam report pauses too (overTheLine answers bounces)", [cells(bounceLine, "Bounced for good")[4], cells(bounceLine, "Reported as spam")[4]], ["The next one of either kind", "The next one of either kind"]);
   is("at the level: no distance sentence, nothing that contradicts KB20's advice", over.includes("At this many emails") || over.includes(roomLine(roomBeforePause(h(1000, 30, 0)))), false);
-  is("at the level by spam reports alone, the same", [cells(render(h(5000, 0, 5)), "Reported as spam")[3], render(h(5000, 0, 5)).includes("At this many emails")], ["None: at the level", false]);
+  is("at the level by spam reports alone, the same", [cells(render(h(5000, 0, 5)), "Bounced for good")[4], render(h(5000, 0, 5)).includes("At this many emails")], ["The next one of either kind", false]);
 
   part("Nothing sent");
   const none = render(h(0));

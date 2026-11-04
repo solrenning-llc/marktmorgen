@@ -262,8 +262,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
           ) : null}
           {chooses ? (
             <p className="mt-4">
-              {/* A team the buyer picks from opens the booking page in a new tab, and says so (G201). */}
-              <a href={tag(`/@${store.handle}/book/${product.id}`)} {...aside} className="btn st-btn btn-block">
+              {/* A team the buyer picks from opens the booking page in a new tab, and says so (G201); the listed site and the way back go along (unit 6b). */}
+              <a href={toBuyBox(tag(`/@${store.handle}/book/${product.id}`))} {...aside} className="btn st-btn btn-block">
                 {label}
                 <NewTab language={store.language} />
               </a>

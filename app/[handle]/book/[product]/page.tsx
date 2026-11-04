@@ -219,6 +219,9 @@ export default async function BookPage({ params, searchParams }: Params) {
                   // A plain form: the times are drawn again for the person chosen, only when the buyer asks (3.2.2).
                   <form method="get" className="mt-6" data-host-pick="">
                     {fromPackage ? <input type="hidden" name="pkg" value={pkgToken} /> : null}
+                    {/* From the embedded calendar: the listed site and the way back stay with the pick (unit 6b). */}
+                    {embed ? <input type="hidden" name="site" value={embed.site} /> : null}
+                    {embed?.back ? <input type="hidden" name="return" value={embed.back} /> : null}
                     <label htmlFor={`host-${product.id}`} className="block font-bold" style={{ color: "var(--st-text)" }}>{b.hostPick}</label>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <select id={`host-${product.id}`} name="with" defaultValue={pickedHost?.key ?? ""} className="st-field min-w-0 flex-1">

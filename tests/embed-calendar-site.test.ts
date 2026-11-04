@@ -68,4 +68,6 @@ is("the site and the way back go with the time", [framed.includes('name="site" v
 is("never with a move, which pays nothing", moving.includes('name="site"'), false);
 is("the embedded calendar hands its open's site and way back to its form", readFileSync("app/embed/[handle]/[product]/page.tsx", "utf8").includes("embed={open.site ? { site: open.site, back: open.back ?? null } : null}"), true);
 
+is("a team the buyer picks from keeps the listed site and the way back, on the card's link and on the pick", [readFileSync("app/embed/[handle]/[product]/page.tsx", "utf8").includes("<a href={toBuyBox(tag(`/@${store.handle}/book/${product.id}`))} {...aside}"), readFileSync("app/[handle]/book/[product]/page.tsx", "utf8").includes('{embed ? <input type="hidden" name="site" value={embed.site} /> : null}'), readFileSync("app/[handle]/book/[product]/page.tsx", "utf8").includes('{embed?.back ? <input type="hidden" name="return" value={embed.back} /> : null}')], [true, true, true]);
+
 done();

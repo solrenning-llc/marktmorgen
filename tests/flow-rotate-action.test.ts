@@ -113,6 +113,27 @@ async function main(): Promise<void> {
   const again = await readDealExact(statsId, "racedeal01", stages);
   is("over the record as it is now, it is written", await writeDealOver(statsId, { ...again.deal!, assignee: PAT, updatedAt: 6 }, again.raw!, ROOM), "saved");
   is("a deal that is gone is never made again by a write over it", await writeDealOver(statsId, { ...again.deal!, id: "gonedeal01" }, again.raw!, ROOM), "changed");
+  // The script that refuses the write says how long the record there now is, so its room is sized in the same step:
+  // no second read, and so no gap where that read fails and the slot keeps the size of a copy never written.
+  const stale = await readDealExact(statsId, "racedeal01", stages);
+  await writeDeal(statsId, { ...stale.deal!, note: "Typed again on the board. ".repeat(15), updatedAt: 7 }, ROOM);
+  const seen: string[] = [];
+  const plain = redis.pipeline;
+  redis.pipeline = ((commands: (string | number)[][]) => {
+    for (const c of commands) seen.push(`${c[0]} ${String(c[1]).split("\n")[0]}`);
+    return plain.call(redis, commands);
+  }) as typeof redis.pipeline;
+  let lostRace: string;
+  try {
+    lostRace = await writeDealOver(statsId, { ...stale.deal!, assignee: PAT, updatedAt: 8 }, stale.raw!, ROOM);
+  } finally {
+    redis.pipeline = plain;
+  }
+  is(
+    "a write that lost the race sizes the room from the script's answer, without reading the deal again",
+    [lostRace, seen.some((c) => c.startsWith("HGET nl:crm:deals:")), await slotNow("racedeal01")],
+    ["changed", false, dealBytes((await readDealExact(statsId, "racedeal01", stages)).deal!)],
+  );
 
   part("One run shares at a time");
   // Another run sharing deals in this store holds the lock: this one waits, writes nothing, and shares on a later run.

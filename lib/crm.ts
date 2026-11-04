@@ -16,7 +16,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
 import {
   type CrmField,
   CRM_ID,
@@ -204,9 +204,12 @@ async function dealSnapshot(statsId: string): Promise<{ id: string; before: stri
 }
 
 /** Saves the pipelines only over the exact record read before (one key, compare and set): a concurrent change is never overwritten. */
-export const SAVE_CRM_PIPELINES = `-- marktmorgen:crm-pipelines-save:v1
+export const SAVE_CRM_PIPELINES = `-- marktmorgen:crm-pipelines-save:v2
 local current = redis.call("GET", KEYS[1])
-if (current or "") ~= ARGV[1] then return -1 end
+if (current or "") ~= ARGV[1] then
+  if current then return {-1, string.len(current)} end
+  return {-1}
+end
 redis.call("SET", KEYS[1], ARGV[2])
 return 1`;
 
@@ -223,12 +226,11 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
   try {
     saved = await redisPipeline([["EVAL", SAVE_CRM_PIPELINES, 1, pipesKey(statsId), snapshotRaw, record]]);
   } catch { throw new CrmSchemaWriteUnconfirmed(); }
-  if (Array.isArray(saved) && saved.length === 1 && saved[0] === -1) {
-    // Nothing was written: the room goes back to what the record kept there now weighs, read again, since the write
-    // that changed it meanwhile sized the room to itself (never to the snapshot this request read).
-    const reply = await redisPipeline([["GET", pipesKey(statsId)]]).catch(() => null);
-    const now = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
-    if (now === null || typeof now === "string") await giveData(room, [{ slot: PIPES_SLOT, bytes: typeof now === "string" ? dataBytes([now], 1) : 0, set: true }]).catch(() => {});
+  const lost = changedLength(Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined);
+  if (lost !== undefined) {
+    // Nothing was written: the room goes back to what the record kept there now weighs, as the script measured it in
+    // the same step (the write that changed it meanwhile sized the room to itself, never to the snapshot read here).
+    await giveData(room, [{ slot: PIPES_SLOT, bytes: lost === null ? 0 : dataBytesOfLength(lost, 1), set: true }]).catch(() => {});
     throw new CrmSchemaConflict();
   }
   if (!Array.isArray(saved) || saved.length !== 1 || saved[0] !== 1) throw new CrmSchemaWriteUnconfirmed();
@@ -263,11 +265,21 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
   return result;
 }
 
+/**
+ * A compare-and-set script's "changed" answer (SAVE_CRM_PIPELINES, MOVE_CRM_DEAL): the UTF-8 length of the record
+ * there now, null when there is none, undefined for any other answer.
+ */
+function changedLength(answer: unknown): number | null | undefined {
+  if (!Array.isArray(answer) || answer[0] !== -1) return undefined;
+  if (answer.length === 1) return null;
+  return answer.length === 2 && Number.isSafeInteger(answer[1]) && answer[1] >= 0 ? answer[1] : undefined;
+}
+
 /** Move only the exact snapshot reviewed; never resurrect a deleted opportunity. */
-export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v1
+export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v2
 local current = redis.call("HGET", KEYS[1], ARGV[1])
 if not current then return 0 end
-if current ~= ARGV[2] then return -1 end
+if current ~= ARGV[2] then return {-1, string.len(current)} end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])
 return 1`;
 
@@ -404,17 +416,14 @@ export async function writeDealOver(statsId: string, deal: Deal, before: string,
   try {
     saved = await redisPipeline([["EVAL", MOVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, before, JSON.stringify(deal)]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
-  if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 1 && saved[0] !== 0 && saved[0] !== -1)) throw new CrmDealWriteUnconfirmed();
-  if (saved[0] === 1) return "saved";
+  const answer = Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined;
+  const lost = changedLength(answer);
+  if (answer !== 1 && answer !== 0 && typeof lost !== "number") throw new CrmDealWriteUnconfirmed();
+  if (answer === 1) return "saved";
   // Nothing written: its room put back to what the record kept there now weighs (the board's own write sized it to
-  // that), or none when it is gone. Read again, so a record the board made bigger is never counted at its old size.
-  let now: unknown = null;
-  if (saved[0] === -1) {
-    const reply = await redisPipeline([["HGET", dealsKey(statsId), deal.id]]).catch(() => null);
-    now = Array.isArray(reply) && reply.length === 1 ? reply[0] : null;
-  }
-  if (saved[0] === 0 || typeof now === "string") await giveData(room, [{ slot: dealSlot(deal.id), bytes: typeof now === "string" ? dataBytes([deal.id, now], 1) : 0, set: true }]);
-  // Unreadable: the slot keeps the size this write took, never less than the record could weigh.
+  // that), as the script measured it in the same step, or none when it is gone. So a record the board made bigger is
+  // never counted at its old size, and no second read can fail in between.
+  await giveData(room, [{ slot: dealSlot(deal.id), bytes: typeof lost === "number" ? dataBytesOfLength(utf8Length(deal.id) + lost, 1) : 0, set: true }]);
   return "changed";
 }
 

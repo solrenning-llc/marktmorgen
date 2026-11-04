@@ -164,6 +164,17 @@ const QUEUE = "nl:mail:flowq";
  */
 const LEASE = "nl:mail:flowq:lease";
 const LEASE_SECONDS = 15 * 60;
+/**
+ * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
+ * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
+ * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
+ */
+const QUEUE_IF_LEASED = `-- marktmorgen:flow-queue-if-leased:v1
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
+  redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
+  return 1
+end
+return 0`;
 const flowsKey = (listId: string) => `nl:mail:flows:${listId}`;
 const enrolledKey = (flowId: string, email: string) =>
   `nl:mail:enr:${flowId}:${createHash("sha256").update(`nimbus-flow:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
@@ -634,8 +645,8 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
           continue;
         }
         if (fromLease > 0) {
-          // A step of it is being done right now. Its lease entry, now gone, is what that run reads before its attempt
-          // and again before the next step is queued (sendGroup, leased): it ends there, so nothing after it is sent.
+          // A step of it is being done right now. Its lease entry, now gone, is what that run reads before its attempt,
+          // and what every later queueing of it needs (sendGroup, QUEUE_IF_LEASED): it ends there, so nothing after it is sent.
           ended.push(email);
           out.push({ email, state: "confirmed", changed: true, note: `Taken out of “${target.name}”. A step of it that was under way for them may still finish; nothing after it is sent.` });
           continue;
@@ -1014,10 +1025,6 @@ export async function resolveHeldRun(store: Store, flowId: string, person: strin
 }
 
 /**
- * Sends every step that is due, and lines up the next one. For the scheduled
- * job. Everyone due for the same email of the same sequence goes in one batch.
- */
-/**
  * A wait for someone taken out by another workflow meanwhile (act, "stop") ends their run at this step, as "ended",
  * written over the stop's own note; never left "waiting" with nothing queued. Pure, so it is tested on its own.
  */
@@ -1025,6 +1032,10 @@ export function endedIfTakenOut(outcomes: Settled[], stay: ReadonlySet<string>):
   return outcomes.map((o) => (stay.has(o.email) ? o : { ...o, status: "ended" as const, to: -1, note: "Taken out by another workflow before this step was done, so the run ended here." }));
 }
 
+/**
+ * Sends every step that is due, and lines up the next one. For the scheduled
+ * job. Everyone due for the same email of the same sequence goes in one batch.
+ */
 export async function sendDueSteps(
   load: (handle: string) => Promise<Store | null>,
   deadline: number,
@@ -1060,20 +1071,27 @@ export async function sendDueSteps(
     });
 
     for (const [group, emails] of groups) {
-      const release = [["ZREM", LEASE, ...emails.map((email) => `${group}|${email}`)]];
+      // Back in the queue for a later run, but only for whoever still holds this step's lease entry: a stop step of
+      // another workflow, done earlier in this batch, removes it (act, "stop"), and that run stays ended. As with the
+      // orphans above, whoever removes the lease entry is the one who puts it back.
+      const putBack = async (at: number) => {
+        const back = await redisPipeline(emails.map((email) => ["ZREM", LEASE, `${group}|${email}`]));
+        const held = emails.filter((_, i) => Number(back[i]) === 1);
+        if (held.length) await redisPipeline(held.map((email) => ["ZADD", QUEUE, at, `${group}|${email}`]));
+      };
       if (Date.now() > deadline) {
         // Out of time: back in the queue for the next run, untouched.
-        await redisPipeline([...emails.map((email) => ["ZADD", QUEUE, now, `${group}|${email}`]), ...release]);
+        await putBack(now);
         continue;
       }
       try {
         await sendGroup(group, emails);
-        await redisPipeline(release);
+        await redisPipeline([["ZREM", LEASE, ...emails.map((email) => `${group}|${email}`)]]);
       } catch (error) {
         // Put back for a later run rather than lost; the send's own key keeps
         // anybody it already reached from getting it twice.
         console.error("sending a sequence step failed", error);
-        await redisPipeline([...emails.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]), ...release]).catch(() => {});
+        await putBack(now + 600).catch(() => {});
       }
     }
   }
@@ -1083,11 +1101,23 @@ export async function sendDueSteps(
     const now = Math.floor(Date.now() / 1000);
     const [listId, handle, flowId, stepRaw] = group.split("|");
     const index = Number(stepRaw);
-    // Who of these still holds this step's lease entry: a stop step of another workflow removes it (act, "stop").
-    const leased = async (people: string[]): Promise<Set<string>> => {
-      if (!people.length) return new Set();
-      const scores = await redisPipeline(people.map((email) => ["ZSCORE", LEASE, `${group}|${email}`]));
-      return new Set(people.filter((_, i) => scores[i] !== null && scores[i] !== undefined));
+    // A stop step of another workflow takes someone out of this one by removing this step's lease entry (act,
+    // "stop"). Every attempt queued from here goes through QUEUE_IF_LEASED, so a run taken out is never queued again,
+    // however late the stop lands. The commands are ZADDs of QUEUE: [ZADD, QUEUE, score, member].
+    const personIn = (command: (string | number)[]) => String(command[3]).split("|").slice(4).join("|");
+    const queueHeld = async (commands: (string | number)[][], extra: (string | number)[][] = []): Promise<Set<string>> => {
+      const out = new Set<string>();
+      if (!commands.length && !extra.length) return out;
+      const sent = [...commands.map((c) => ["EVAL", QUEUE_IF_LEASED, 2, LEASE, QUEUE, `${group}|${personIn(c)}`, c[2], String(c[3])]), ...extra];
+      const reply = await redisPipeline(sent);
+      if (!Array.isArray(reply) || reply.length !== sent.length) throw new FlowWriteUnconfirmed();
+      commands.forEach((c, i) => {
+        const answer = Number(reply[i]);
+        if (answer === 0) out.add(personIn(c));
+        else if (answer !== 1) throw new FlowWriteUnconfirmed();
+      });
+      // Who was taken out: nothing was queued for them.
+      return out;
     };
     if (!stores.has(handle)) stores.set(handle, await load(handle));
     const store = stores.get(handle);
@@ -1107,8 +1137,13 @@ export async function sendDueSteps(
       }
       return;
     }
-    const [rows] = await redisPipeline([["HMGET", leadsKey(listId), ...emails]]);
+    // With the rows, who still holds this step's lease entry. Taken out by another workflow's step since this batch was
+    // taken (act, "stop"): the stop wrote the run's end, so nothing is queued, noted or attempted for them, whatever
+    // the step's condition says.
+    const [rows, ...scores] = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
     const found = Array.isArray(rows) ? rows : [];
+    const held = new Set(emails.filter((_, i) => scores[i] !== null && scores[i] !== undefined));
+    counts.dropped += emails.length - held.size;
     // Who is still on the list, and of them, who has reached the sequence's
     // end and who this step is not for (lib/flow-rules.ts) — read from the
     // same rows, so a condition costs no read of its own.
@@ -1127,6 +1162,7 @@ export async function sendDueSteps(
     let done = 0;
     let left = 0;
     emails.forEach((email, i) => {
+      if (!held.has(email)) return;
       const contact = parseContact(found[i]);
       if (!contact || !mailable(contact)) {
         counts.dropped += 1;
@@ -1154,18 +1190,14 @@ export async function sendDueSteps(
     // Skipped: on to where the condition sends them, its wait counted from
     // now, as if this step had been done.
     const moved: (string | number)[][] = onward.map(({ email, to }) => ["ZADD", QUEUE, now + flow.steps[to].delayHours * 3600, `${listId}|${handle}|${flowId}|${to}|${email}`]);
-    if (done) moved.push(["HINCRBY", statsKey(flow.id), "reached", done]);
-    if (left + onward.length) moved.push(["HINCRBY", statsKey(flow.id), "skipped", left + onward.length]);
-    if (moved.length) await redisPipeline(moved);
-    await noteRuns(flow.id, notes, now).catch((error) => console.error("writing workflow history failed", error));
+    const tallies: (string | number)[][] = [];
+    if (done) tallies.push(["HINCRBY", statsKey(flow.id), "reached", done]);
+    if (left + onward.length) tallies.push(["HINCRBY", statsKey(flow.id), "skipped", left + onward.length]);
+    const skippedOut = await queueHeld(moved, tallies);
+    counts.dropped += skippedOut.size;
+    await noteRuns(flow.id, notes.filter((n) => !skippedOut.has(n.email)), now).catch((error) => console.error("writing workflow history failed", error));
     if (!still.length) return;
-
-    // Taken out by another workflow's step since this batch was taken (act, "stop"): its lease entry is gone, and the
-    // stop wrote the run's end. Nothing is attempted for them.
-    const held = await leased(still);
-    counts.dropped += still.length - held.size;
-    const mine = still.filter((email) => held.has(email));
-    if (!mine.length) return;
+    const mine = still;
 
     // The attempt is written down before anything is done (lib/flow-runs.ts).
     // Whoever already has an attempt open here is held, never tried again.
@@ -1173,9 +1205,10 @@ export async function sendDueSteps(
     try {
       claim = await claimAttempts(flow.id, mine, index, step.id, kind, now);
     } catch {
-      // Nothing was attempted: back in the queue, as before history existed.
-      await redisPipeline(mine.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]));
-      counts.later += mine.length;
+      // Nothing was attempted: back in the queue, as before history existed, unless taken out meanwhile.
+      const out = await queueHeld(mine.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]));
+      counts.later += mine.length - out.size;
+      counts.dropped += out.size;
       return;
     }
     if (claim.open.length) {
@@ -1188,8 +1221,6 @@ export async function sendDueSteps(
       to < 0 ? [] : people.map((email) => ["ZADD", QUEUE, now + flow.steps[to].delayHours * 3600, `${listId}|${handle}|${flowId}|${to}|${email}`]);
     const settled = (people: Acted[], stay: Set<string>): Settled[] =>
       people.map((p) => (stay.has(p.email) || p.state === "deferred" ? { ...p, to: p.state === "deferred" ? index : to } : { ...p, to: -1, status: "ended" as const, note: `${p.note} Taken out by another workflow, so nothing after this step is sent.` }));
-    // Who is still in this run once the step is done: a stop that landed meanwhile took them out, so nothing after it is queued.
-    const onlyStaying = (commands: (string | number)[][], stay: Set<string>) => commands.filter((c) => stay.has(String(c[3]).slice(group.length + 1)));
     // The next step is queued before the attempt is cleared. If clearing then
     // fails, the attempt stays open and the next step holds the run rather
     // than letting anything happen twice; if queueing fails, the run is held here.
@@ -1206,10 +1237,8 @@ export async function sendDueSteps(
         // A failed action is written down and the run goes on: one missing deal does not stop the emails after it.
         const onwards = all.filter((o) => o.state === "confirmed" || o.state === "failed").map((o) => o.email);
         const waiting = await waitOrStop(flow.id, group, index, all.filter((o) => o.state === "deferred").map((o) => ({ email: o.email, reason: o.wait ?? "retry", note: o.note })), now);
-        const stay = await leased(going);
-        const after: (string | number)[][] = [...queueNext(onwards.filter((email) => stay.has(email))), ...onlyStaying(waiting.queue, stay)];
-        if (confirmed.length) after.push(["HINCRBY", statsKey(flow.id), "acted", confirmed.length]);
-        if (after.length) await redisPipeline(after);
+        const out = await queueHeld([...queueNext(onwards), ...waiting.queue], confirmed.length ? [["HINCRBY", statsKey(flow.id), "acted", confirmed.length]] : []);
+        const stay = new Set(going.filter((email) => !out.has(email)));
         queued = true;
         await settleAttempts(listId, flow.id, index, step.id, kind, [...settled(all.filter((o) => o.state !== "deferred"), stay), ...endedIfTakenOut(waiting.outcomes, stay)], now);
         return;
@@ -1223,21 +1252,15 @@ export async function sendDueSteps(
         return;
       }
       const uncertain = new Set(result.uncertain ?? []);
-      const stay = await leased(going);
-      const outcomes: Settled[] = [
-        ...result.done.map((email) =>
-          stay.has(email)
-            ? { email, state: "confirmed" as const, note: "Handed to the sender.", to }
-            : { email, state: "confirmed" as const, note: "Handed to the sender. Taken out by another workflow, so nothing after this step is sent.", to: -1, status: "ended" as const },
-        ),
-        ...[...uncertain].map((email) => ({ email, state: "uncertain" as const, note: "The sender's answer was lost: this email may or may not have gone out, so it is not sent again by itself.", to: index })),
-      ];
       const rest = result.rest.filter((email) => !uncertain.has(email));
-      const commands: (string | number)[][] = [];
+      const refused: Settled[] = [];
+      let waiting: { queue: (string | number)[][]; outcomes: Settled[] } | null = null;
+      const onQueue: (string | number)[][] = [];
+      const tallies: (string | number)[][] = [];
       if (rest.length) {
         if (result.stopped === "refused") {
           counts.dropped += rest.length;
-          outcomes.push(...rest.map((email) => ({ email, state: "failed" as const, note: "The sender refused this email as it is, so the run ended.", to: -1, status: "failed" as const })));
+          refused.push(...rest.map((email) => ({ email, state: "failed" as const, note: "The sender refused this email as it is, so the run ended.", to: -1, status: "failed" as const })));
         } else {
           // Tried again later rather than lost: when the month turns, at the next day, at the pause's end, or after
           // a growing delay; and at most MAX_WAITS_PER_RUN times a run (lib/flow-retry.ts).
@@ -1245,19 +1268,33 @@ export async function sendDueSteps(
           const why =
             result.stopped === "allowance" ? "Waiting: this month's emails ran out. It goes out when the month turns." : result.stopped === "day" || result.stopped === "portion" || result.stopped === "sender" ? "Waiting for room to send; it goes out by itself." : result.stopped === "paused" ? "Waiting: email to your list is paused for now." : "Waiting to be tried again later; it was not sent.";
           const window = allowanceWindow(store, now * 1000);
-          const waiting = await waitOrStop(flow.id, group, index, rest.map((email) => ({ email, reason, note: why })), now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null });
-          const later = onlyStaying(waiting.queue, stay);
-          commands.push(...later);
-          outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));
-          counts.later += later.length;
-          counts.dropped += waiting.outcomes.length - later.length;
+          waiting = await waitOrStop(flow.id, group, index, rest.map((email) => ({ email, reason, note: why })), now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null });
+          onQueue.push(...waiting.queue);
         }
       }
       if (result.done.length) {
         counts.sent += result.done.length;
-        commands.push(["HINCRBY", statsKey(flow.id), "sent", result.done.length], ...queueNext(result.done.filter((email) => stay.has(email))));
+        tallies.push(["HINCRBY", statsKey(flow.id), "sent", result.done.length]);
+        onQueue.push(...queueNext(result.done));
       }
-      if (commands.length) await redisPipeline(commands);
+      // Queued only for whoever is still in this run: a stop that landed meanwhile took them out.
+      const out = await queueHeld(onQueue, tallies);
+      const stay = new Set(going.filter((email) => !out.has(email)));
+      const outcomes: Settled[] = [
+        ...result.done.map((email) =>
+          stay.has(email)
+            ? { email, state: "confirmed" as const, note: "Handed to the sender.", to }
+            : { email, state: "confirmed" as const, note: "Handed to the sender. Taken out by another workflow, so nothing after this step is sent.", to: -1, status: "ended" as const },
+        ),
+        ...[...uncertain].map((email) => ({ email, state: "uncertain" as const, note: "The sender's answer was lost: this email may or may not have gone out, so it is not sent again by itself.", to: index })),
+        ...refused,
+      ];
+      if (waiting) {
+        const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
+        outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));
+        counts.later += later;
+        counts.dropped += waiting.outcomes.length - later;
+      }
       queued = true;
       await settleAttempts(listId, flow.id, index, step.id, kind, outcomes, now);
     } catch (error) {

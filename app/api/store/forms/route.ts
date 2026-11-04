@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { refusedJson } from "@/lib/studio-route";
+import { requestLocked } from "@/lib/two-step";
 import { FORM_ID, badPoints, newFormId, parseForm, tierIssueText, tierIssues } from "@/lib/forms";
 import { SENSITIVE_WHY, sensitiveFieldOf } from "@/lib/form-sensitive";
 import { dropForm, readForm, writeForm } from "@/lib/form-store";
@@ -38,6 +40,8 @@ export async function POST(request: NextRequest) {
     if (body.action === "remove") {
       const id = text(body.id, 12);
       if (!FORM_ID.test(id)) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+      // Every answer people sent goes with it, for good: not while the session is locked (lib/two-step.ts).
+      if (await requestLocked(request)) return refusedJson("locked");
       return (await dropForm(statsId, id, store)) ? Response.json({ ok: true }) : Response.json({ ok: false, error: "unknown" }, { status: 404 });
     }
 

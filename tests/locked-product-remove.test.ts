@@ -34,6 +34,9 @@ import { POST as courseRoute } from "@/app/api/store/course/route";
 import { POST as podcastRoute } from "@/app/api/store/podcast/route";
 import { POST as attachRoute } from "@/app/api/store/file/attach/route";
 import { POST as sitePageRoute } from "@/app/api/store/site-page/route";
+import { POST as formsRoute } from "@/app/api/store/forms/route";
+import { addResponse, readForm, readResponses, writeForm } from "@/lib/form-store";
+import { parseForm } from "@/lib/forms";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -197,6 +200,16 @@ async function main(): Promise<void> {
   is("the page is still there", (await storeForEmail(OWNER))?.sitePages.map((p) => p.id), [pageId]);
   is("a full session deletes it", (await sitePage(full, { action: "remove", id: pageId })).status, 200);
   is("and it is gone", (await storeForEmail(OWNER))?.sitePages.length, 0);
+
+  part("A form and the answers people sent are not deleted by a locked session");
+  const forms = asStore(formsRoute, "forms");
+  const statsId = (await storeForEmail(OWNER))!.statsId as string;
+  await writeForm(statsId, parseForm({ id: "lockform01", name: "Garden survey", fields: [{ id: "q1what", type: "short", label: "What do you grow?", required: true }] })!);
+  await addResponse(statsId, "lockform01", { id: "a".repeat(16), at: 1_790_000_000, page: "/@locked-product/form/survey", answers: { q1what: "Tomatoes" }, outcome: "", joined: false }, (await storeForEmail(OWNER))!);
+  is("refused as locked", await forms(locked, { action: "remove", id: "lockform01" }), LOCKED);
+  is("the form and its answer are still there", [(await readForm(statsId, "lockform01"))?.id, (await readResponses(statsId, "lockform01")).total], ["lockform01", 1]);
+  is("a full session deletes it", (await forms(full, { action: "remove", id: "lockform01" })).status, 200);
+  is("and it is gone", await readForm(statsId, "lockform01"), null);
 
   done();
 }

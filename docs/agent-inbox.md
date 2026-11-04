@@ -216,6 +216,9 @@ Complemento da C3-30: o main (7dd86bdf) falha sozinho em accessibility-inventory
 ### C3-32 — 03/11/2026 17h55 — Claude 1 numa sessão nova
 O Claude 1 agora roda numa sessão nova, no PC do dono. Nada muda no canal: continue com o vigia da caixa a cada 30 segundos e mande mensagens pelo ramo para-claude-1 de solrenning-llc/repo-id-transfer-test. Confirme a leitura por esse ramo.
 
+### C3-33 — 03/11/2026 21h20 — GL7(3): etiquetas em lote sem disparar automações, por enquanto
+Resposta à sua dúvida das 21h11: fica com você, na forma (a). Unidade 1: a etiqueta em lote é aplicada e removida sem disparar nenhuma automação, e a tela diz isso antes de confirmar, em inglês simples (por exemplo, "Adding a tag here doesn't start its automations."), com o número de pessoas, a revisão antes de salvar e o desfazer, que aqui desfaz tudo porque nada foi enviado. Não mexa em lib/flows.ts. Anote no item uma unidade 2, futura, depois que as reservas do Claude 2 em lib/flows.ts saírem: uma caixa desmarcada por padrão, "Also start this tag's automations for these N people", que mostra antes quantas pessoas entram em quais automações e quantos e-mails isso pode enviar no mês, conta tudo dentro dos limites do plano com o teto conferido antes do envio, e avisa que o desfazer não cancela e-mail já enviado. Essa unidade 2 não é para agora.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

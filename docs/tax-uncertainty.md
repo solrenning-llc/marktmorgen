@@ -1,3 +1,54 @@
+<!-- TX6-RESIDUAL-RISKS:START -->
+# Current residual tax risks — 476 [TX6]
+
+Read on: 2026-11-04. Scope: the risks left by the legally supported TX reading, not a new tax calculation. The [current TX policy](../AGENTS.md#tx--política-tributária-vigente-dono27102026-12h34-fortaleza) takes precedence over the historical readings below. The aggravating facts and design measures in this register are project-specific inferences from the cited texts; they are not findings that those facts exist or that the measures have been implemented.
+
+A foreign LLC's registration, the owner's label as administrator, a creator's direct Stripe charge, or a foreign customer address does not by itself prove every applicable tax treatment. The evidence column is deliberately separate from the proposed mitigation. No conclusion of tax exemption, compliance, profit or opening readiness is made here.
+
+| Risk | Aggravating facts to check | Design mitigation to retain or implement | Evidence still needed; residual uncertainty | Primary sources |
+| --- | --- | --- | --- | --- |
+| BR-ENTITY | The actual business has a Brazilian economic/professional unit, local service operations or contracts inconsistent with the foreign LLC being the supplier. | Keep the actual contracting entity, invoices, receipts, company accounts and operating records consistent; record where work and decisions occur. Never replace real facts with a nominal foreign address. | The actual contracts, payment flows and operating substance have not been audited here. The cited general rules do not by themselves determine corporate residence or which Brazilian taxes apply. | [R1], [R4] |
+| BR-PERSON | Customers contract with or pay the owner personally for work; withdrawals described as dividends lack supporting company profit records. | Identify the owner in the capacity actually held, keep company and personal transactions distinct, and reconcile distributions to company accounts and profit records. | The owner's actual activities, remuneration and supporting accounts remain unverified. The foreign-profit regime is conditional; it is not a general exemption for personal service income. | [R2], [R3] |
+| INSS | The owner receives amounts for work, or performs remunerated activity on their own account, even if a payment has a different label. | Separate and document remuneration, distributions and reimbursements according to their substance; retain the activity and payment records needed to evaluate contribution liability. | No actual payroll, compensation or distribution evidence is certified. An absent formal pro-labore entry alone does not settle the remuneration question; no presumed contribution amount is invented. | [R3] |
+| ISS | A Brazilian economic/professional establishment provides the service, or a service developed in Brazil has its result there; foreign payment alone is relied upon as proof of export. | Keep contracts and delivery records identifying the supplier, service, customer and actual place of the result; assess the real establishment and service category separately. | Establishment, place of result, municipal classification and applicable rate are not established by this register. Neither zero ISS nor a universal 5% rate is certified. | [R4] |
+| US-CLOUD | U.S. infrastructure or personnel contributes to providing the cloud service, or the facts include a U.S. office/agent; the owner's work location is treated as the sole sourcing fact. | Maintain an accurate supplier/region and activity inventory. Future European hosting under SV can reduce the U.S. infrastructure fact, while keeping other sourcing and business-presence facts under review. | The production footprint and sourcing allocation have not been verified. A U.S. server alone is not declared an office or an ECI determination. Moving a server does not settle personnel, intangible-property or other relevant facts. | [R5], [R6] |
+| FACILITATOR | A destination's rules reach the platform's actual control of ordering, delivery or transaction terms, even though a third party processes payment; local product/recipient conditions are met. | Maintain a jurisdiction-and-product treatment matrix, evidence for recipient/supplier status, auditable sales counts and records, and consistent supplier identification. Preserve the existing direct-charge separation without treating it as an exemption. | Washington and Canada provide concrete counterexamples to a payment-only test, not a worldwide classification. Country/state scope, thresholds, exceptions, actual platform functions, records and compliance costs still require their own evidence. | [R7], [R8], [R9] |
+
+## What the primary texts establish, and what they do not
+
+All sources in this section were read on 2026-11-04. They support the limited propositions stated here; they do not certify Marktmorgen's actual circumstances.
+
+- **R1 — Brazil, CTN (Lei 5.172/1966), arts. 126 III and 127 II.** The official consolidated text treats tax capacity independently of regular legal constitution and addresses an establishment's tax domicile. This supports checking the real economic unit, not a determination that the LLC is Brazilian or that every Brazilian tax applies.
+- **R2 — Brazil, Lei 14.754/2023, art. 5 caput, §§5, 10 and 11.** The official consolidated text governs qualifying foreign-controlled profits and their accounts/distribution history. It does not turn a person's actual remuneration into company profit merely by naming it a dividend.
+- **R3 — Brazil, Lei 8.212/1991, arts. 12 V f–h, 21 and 28 III.** The official consolidated text identifies individual-contributor categories and the remuneration basis. Actual work, remuneration and applicable classification must be established; this register computes no contribution or annual ceiling. The Planalto `l8212cons.htm` address was blocked; the complete official Chamber text was used instead.
+- **R4 — Brazil, LC 116/2003, arts. 2 I and sole paragraph, 3, 4 and 5.** The official consolidated text distinguishes export/result, establishment and service provider. A foreign payer is not the sole export test; the establishment test concerns the actual economic/professional unit, regardless of its name. No municipal rate is inferred.
+- **R5 — United States, 26 CFR §1.861-19(b), (c), (d) and (e).** The eCFR publisher displayed Title 26 updated through 2026-11-02. The text classifies qualifying cloud transactions as services; its paragraph (d) contains examples, not a final sourcing rule. Classification alone does not settle the source of this SaaS's income. The eCFR is the government's continuously updated, unofficial legal edition.
+- **R6 — United States, IRS Internal Revenue Bulletin 2025-08, T.D. 10022 and REG-107420-24.** The classification decision is final; REG-107420-24 is proposed sourcing guidance, discussing personnel, intangible property and tangible property. The proposed formula is not adopted here as law or as a numerical tax input. A rulemaking timetable is not proof that a final rule took effect.
+- **R7 — Washington, WAC 458-20-282(104)(a), (201)(a) and (201) Example 2.** The official rule requires a combination of activities; its example still treats the platform as facilitator when a third party processes payment. This defeats an automatic direct-charge exemption, without establishing Marktmorgen's actual classification, nexus or liability.
+- **R8 — Canada, Excise Tax Act §211.1(1), distribution platform operator and excluded operator definitions.** The official consolidation displayed current to 2026-10-19. Essential transaction control and exclusions require their own factual analysis; payment routing alone does not settle the operator definition.
+- **R9 — Canada, Excise Tax Act §211.13(1)–(2).** Under its specified supplier, recipient, platform and registration/business conditions, this section deems the operator to make the supply. It does not make every platform the supplier of every transaction. Registration thresholds and territorial/product scope are not determined here.
+
+[R1]: https://www2.camara.leg.br/legin/fed/lei/1960-1969/lei-5172-25-outubro-1966-358971-normaatualizada-pl.html
+[R2]: https://www2.camara.leg.br/legin/fed/lei/2023/lei-14754-12-dezembro-2023-795058-normaatualizada-pl.html
+[R3]: https://www2.camara.leg.br/legin/fed/lei/1991/lei-8212-24-julho-1991-363647-normaatualizada-pl.html
+[R4]: https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp116.htm
+[R5]: https://www.ecfr.gov/current/title-26/section-1.861-19
+[R6]: https://www.irs.gov/irb/2025-08_IRB
+[R7]: https://app.leg.wa.gov/WAC/default.aspx?cite=458-20-282
+[R8]: https://laws-lois.justice.gc.ca/eng/acts/E-15/section-211.1.html
+[R9]: https://laws-lois.justice.gc.ca/eng/acts/E-15/section-211.13.html
+
+## Decision boundary and remaining work
+
+European hosting is risk reduction, not an opening gate. SV remains after opening under the owner's decision; this document neither changes a region nor makes a foreign server proof of zero tax. No tax consultation is required or prepared. No registration, account, contract acceptance, payment or external contact is performed or authorized by this register.
+
+Unknown costs remain UNKNOWN, never zero. Any later financial review needs the applicable treatment, evidence and full costs; this matrix supplies no finite minimum customer base or new price, limit, commission, tax parameter, flag or opening condition. The worldwide facilitator/product review remains incomplete; no universal threshold or zero-tax rule is inferred. The EU consolidated text attempted in this session returned an anti-bot page, so no new full-current-EU-text verification is claimed; the existing EU review remains separately scoped.
+
+VR: documented and checked in a PR, not a deployed product change. The register makes aggravating facts, design measures and missing evidence explicit. It does not implement the measures, verify actual company/provider records, finish TX1/TX3/TX4/TX5/TX7, or certify a legal or financial outcome. Research/CI and compliance costs remain unknown where not evidenced, allocated 100% to Marktmorgen under FX275. No interface or user action changes; no accessibility certification is claimed.
+
+Historical material below remains unchanged; its old dates, consultation plans and incompatible readings are historical, not current instructions. The new register above does not adopt them.
+<!-- TX6-RESIDUAL-RISKS:END -->
+
 ## TX1 — Conferência oficial parcial e divergências (27/10/2026)
 
 Fonte de autoridade desta política: pedido do dono27/10/2026 12h34Fortaleza, integral em docs/codex-queue.md,471–477. As seções antigas abaixo, inclusive o título “MORE tax”, regra19 e consultas, são histórico; não comandam a execução atual. A [política TX vigente](../AGENTS.md#tx--política-tributária-vigente-dono27102026-12h34-fortaleza) prevalece. Este registro não adota automaticamente os17pontos nem declara concluídoTX1.

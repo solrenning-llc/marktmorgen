@@ -1600,9 +1600,14 @@ function completeSubscriptionPage(page: unknown): unknown[] {
  * can lag a new subscription by a minute or so; the daily job in
  * lib/billing-sync.ts settles whatever it misses.
  */
-export async function findStoreSubscriptions(
-  store: Store,
-): Promise<{ live: StartedSubscription | null; customerId: string | null; lapsed: string[] }> {
+export type StoreSubscriptionObservation = {
+  find: () => Promise<{ live: StartedSubscription | null; customerId: string | null; lapsed: string[] }>;
+  customerLive: () => Promise<StartedSubscription | null>;
+  customerPlans: () => { id: string; status: string; customerId: string }[];
+};
+/** Both independent observations are read at most once. Closing reuses the
+ * validated customer evidence even when Search is unknown; never a third GET. */
+export async function observeStoreSubscriptions(store: Store): Promise<StoreSubscriptionObservation> {
   // Capture ownership before either awaited read. Released names never enter
   // the Search query: only the captured customer's complete List can recover
   // them, with no number of provider calls proportional to address history.
@@ -1633,72 +1638,101 @@ export async function findStoreSubscriptions(
     limit: String(SEARCH_LIMIT),
   });
   query.append("expand[]", "data.customer");
-  const search = completeSubscriptionPage(await onPlatform("GET", `/subscriptions/search?${query}`));
+  let search: unknown[] | null = null, own: unknown[] | null = ownership.customerId ? null : [];
+  let searchError: unknown = null, ownError: unknown = null;
+  try { search = completeSubscriptionPage(await onPlatform("GET", `/subscriptions/search?${query}`)); }
+  catch (error) { searchError = error instanceof Error ? error : new Error("Subscription search observation is unknown"); }
   const ownQuery = new URLSearchParams({ customer: ownership.customerId ?? "", status: "all", limit: String(SEARCH_LIMIT) });
   ownQuery.append("expand[]", "data.customer");
-  // Both pages must be complete before any row can activate a cash grant.
-  const own = ownership.customerId
-    ? completeSubscriptionPage(await onPlatform("GET", `/subscriptions?${ownQuery}`)) : [];
-  const current = new Set(handles);
-  const all = new Set([...handles, ...ownership.released]);
-  const entries = new Map<string, SearchMember>();
+  if (ownership.customerId) {
+    try { own = completeSubscriptionPage(await onPlatform("GET", `/subscriptions?${ownQuery}`)); }
+    catch (error) { ownError = error instanceof Error ? error : new Error("Subscription customer observation is unknown"); }
+  }
+  const current = new Set(handles), all = new Set([...handles, ...ownership.released]);
+  const ownEntries: SearchMember[] = [], searchEntries: SearchMember[] = [];
   const evidence = ({ subscription, terminalOwn }: SearchMember) => canonicalFinancialSnapshot({
     id: subscription.id, status: subscription.status, created: subscription.created,
     metadata: subscription.metadata, customer: customerOf(subscription), terminalOwn,
     state: stateOf(subscription), trialStart: subscription.trial_start ?? null,
   });
-  const add = (value: unknown, covered: Set<string>) => {
-    const member = searchMember(value, covered, ownership);
-    if (!member) return;
-    const id = member.subscription.id as string;
-    const previous = entries.get(id);
-    if (previous) {
-      // Overlap is one subscription, never two activations. Contradictory
-      // observations are unknown; page order cannot choose paid evidence.
-      const before = evidence(previous);
-      const after = evidence(member);
-      if (before === null || after === null || before !== after) throw new Error("Subscription search overlap is unknown");
-      return;
+  const rowsFor = (entries: SearchMember[]) => {
+    const unique = new Map<string, SearchMember>();
+    for (const entry of entries) {
+      const id = entry.subscription.id as string, previous = unique.get(id);
+      if (previous) {
+        const before = evidence(previous), after = evidence(entry);
+        if (before === null || after === null || before !== after) throw new Error("Subscription search overlap is unknown");
+      } else unique.set(id, entry);
     }
-    entries.set(id, member);
+    return [...unique.values()]
+      .filter(({ subscription, terminalOwn }) => terminalOwn || ownedBy(observedStore, subscription))
+      .map(({ subscription }) => subscription)
+      .sort((a, b) => (b.created as number) - (a.created as number));
   };
-  for (const row of search) add(row, current);
-  for (const value of own) {
-    const row = searchDataRecord(value, "listed member");
-    const metadata = searchDataRecord(row.metadata, "listed metadata");
-    // The same Stripe customer may pay for another store or an add-on. Those
-    // rows are outside this store, even if they have no plan items at all.
-    if (typeof metadata.store !== "string" || !all.has(metadata.store)) continue;
-    const customer = searchDataRecord(row.customer, "listed customer");
-    if (customer.id !== ownership.customerId) throw new Error("Subscription search listed customer is unknown");
-    add(row, all);
-  }
-  const rows = [...entries.values()]
-    .filter(({ subscription, terminalOwn }) => terminalOwn || ownedBy(observedStore, subscription))
-    .map(({ subscription }) => subscription)
-    .sort((a, b) => (b.created as number) - (a.created as number));
+  let ownRows: Record<string, unknown>[] | null = null;
+  try {
+    if (own === null) throw ownError;
+    for (const value of own) {
+      const row = searchDataRecord(value, "listed member");
+      const metadata = searchDataRecord(row.metadata, "listed metadata");
+      if (typeof metadata.store !== "string" || !all.has(metadata.store)) continue;
+      const customer = searchDataRecord(row.customer, "listed customer");
+      if (customer.id !== ownership.customerId) throw new Error("Subscription search listed customer is unknown");
+      const member = searchMember(row, all, ownership);
+      if (member) ownEntries.push(member);
+    }
+    ownRows = rowsFor(ownEntries);
+  } catch (error) { ownError = error instanceof Error ? error : new Error("Subscription customer observation is unknown"); }
+  try {
+    if (search === null) throw searchError;
+    for (const value of search) {
+      const member = searchMember(value, current, ownership);
+      if (member) searchEntries.push(member);
+    }
+  } catch (error) { searchError = error instanceof Error ? error : new Error("Subscription search observation is unknown"); }
+  // No observation can activate the same grant twice, including a caller's
+  // independent positive-customer fallback after a failed Search.
+  const activations = new Map<string, Promise<StartedSubscription | null>>();
+  const liveFrom = async (rows: Record<string, unknown>[]) => {
+    for (const subscription of rows) {
+      if (stateOf(subscription).state !== "active") continue;
+      const id = subscription.id as string;
+      let pending = activations.get(id);
+      if (!pending) { pending = startedFromObservedSubscription(observedStore, subscription); activations.set(id, pending); }
+      const live = await pending;
+      if (!live) throw new Error("Subscription search activation is unknown");
+      return live;
+    }
+    return null;
+  };
+  return Object.freeze({
+    find: async () => {
+      if (searchError) throw searchError;
+      if (ownError) throw ownError;
+      const rows = rowsFor([...searchEntries, ...ownEntries]);
+      const live = await liveFrom(rows);
+      const last = rows.map(subscription => customerOf(subscription).id).find(id => CUSTOMER_PATTERN.test(id));
+      const hourAgo = Date.now() / 1000 - 3600;
+      const lapsed = rows.filter(subscription => !startedFrom(subscription) &&
+        (subscription.status === "past_due" || subscription.status === "incomplete" && (subscription.created as number) < hourAgo))
+        .map(subscription => subscription.id as string);
+      return { live, customerId: last ?? null, lapsed };
+    },
+    customerLive: async () => {
+      if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
+      return liveFrom(ownRows);
+    },
+    customerPlans: () => {
+      if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
+      return ownRows.map(row => ({ id: row.id as string, status: row.status as string, customerId: ownership.customerId! }));
+    },
+  });
+}
 
-  let live: StartedSubscription | null = null;
-  for (const subscription of rows) {
-    if (stateOf(subscription).state !== "active") continue;
-    live = await startedFromObservedSubscription(observedStore, subscription);
-    if (!live) throw new Error("Subscription search activation is unknown");
-    break;
-  }
-  const last = rows.map((subscription) => customerOf(subscription).id).find((id) => CUSTOMER_PATTERN.test(id));
-  // Not paying, but Stripe could still charge them: a card being retried, or
-  // a first payment not finished. Ended before a new one is started.
-  // A first payment still going through (a bank debit) is left alone for an hour.
-  const hourAgo = Date.now() / 1000 - 3600;
-  const lapsed = rows
-    .filter(
-      (subscription) =>
-        !startedFrom(subscription) &&
-        (subscription.status === "past_due" || (subscription.status === "incomplete" && (Number(subscription.created) || 0) < hourAgo)),
-    )
-    .map((subscription) => (typeof subscription.id === "string" ? subscription.id : ""))
-    .filter((id) => SUBSCRIPTION_PATTERN.test(id));
-  return { live, customerId: last ?? null, lapsed };
+/** Checkout needs complete absence; positive closing recovery uses the same
+ * complete customer page through the observation above, with no reread. */
+export async function findStoreSubscriptions(store: Store): Promise<{ live: StartedSubscription | null; customerId: string | null; lapsed: string[] }> {
+  return (await observeStoreSubscriptions(store)).find();
 }
 
 /**

@@ -383,7 +383,7 @@ test('subscription search rejects accessor completeness even when descriptor pro
  try{
   Object.defineProperty(Object.prototype,'value',{value:false,configurable:true});
   await assert.rejects(findStoreSubscriptions(owner),/Subscription search page is incomplete/);
-  assert.equal(getters,0);assert.equal(reads,1);assert.equal(writes,0);
+  assert.equal(getters,0);assert.equal(reads,2);assert.equal(writes,0);
  }finally{
   delete (Object.prototype as {value?:unknown}).value;
   if(prior)Object.defineProperty(Object.prototype,'value',prior);

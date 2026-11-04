@@ -344,9 +344,10 @@ async function main() {
   const handoff = await closingStore("handoff", day);
   const handoffStore = (await storeForEmail(handoff.email))!;
   const originalFetch = globalThis.fetch;
-  let refusedEnd = "";
+  let refusedEnd = "", planReads = 0;
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
+    if (url.pathname === "/v1/subscriptions/search" || url.pathname === "/v1/subscriptions") planReads++;
     if (refusedEnd && url.pathname === `/v1/subscriptions/${refusedEnd}` && init?.method === "DELETE") return Response.json({ error: { message: "synthetic cancellation failure" } }, { status: 503 });
     const response = await originalFetch(input, init);
     if (url.pathname === "/v1/subscriptions" && (init?.method ?? "GET") === "GET") {
@@ -362,6 +363,7 @@ async function main() {
   try {
     world.refundErrors = 1;
     const closed = await closeOne(storeRef(handoffStore), day + 60_000, noFiles, Number.POSITIVE_INFINITY);
+    is("closing uses the same two observations without a third customer-list read", planReads, 2);
     is("a confirmed stopped plan and self-contained refund queue do not retain the store's files", [world.subs.get(handoff.id)?.status, closed.state], ["canceled", "removed"]);
     is("the failed refund keeps the creator and obligation in its independent queue", [(await undo(handoff.id))?.to, Boolean((await undo(handoff.id))?.done), refundsOf(handoff.pi).length], [handoff.email, false, 0]);
     await prepareStore(handoffStore);

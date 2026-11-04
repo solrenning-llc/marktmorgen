@@ -1,3 +1,4 @@
+import { claimHeldRecheck, heldStoreKnown, heldStoresDue, noteHeldClosing, recordHeldMonth, type HeldFunding } from "@/lib/held-stores";
 /**
  * A store whose plan has ended, and what it still keeps.
  *
@@ -63,7 +64,7 @@
  * every store whose plan ended fits.
  */
 import { createHash } from "node:crypto";
-import { findStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
+import { observeStoreSubscriptions, isBillingConfigured, readSubscription } from "@/lib/billing";
 import { readAllListings } from "@/lib/catalog";
 import { editCourse, filesInCourse, readCourse, saveCourse } from "@/lib/course";
 import { bytesWords } from "@/lib/delivery";
@@ -92,7 +93,7 @@ import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort } from "@/lib/cl
 import { giveBackUnused, unusedRows, unusedSummary } from "@/lib/closing-refunds";
 import { stillToGive, unusedOf, type PaidPeriod } from "@/lib/closing-buyers-rules";
 import { formatMoney } from "@/lib/money";
-import { CLOSING_CHECKOUT_SECONDS, expirePlanCheckouts, lastPlanMoment, liveByCustomer, markShut, plansByCustomer, refusePlanIfClosing } from "@/lib/closing-plan-guard";
+import { CLOSING_CHECKOUT_SECONDS, expirePlanCheckouts, lastPlanMoment, markShut, refusePlanIfClosing } from "@/lib/closing-plan-guard";
 
 export { CLOSING_DAYS, RECHECK_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS };
 
@@ -764,15 +765,16 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     }
     // Stripe's search can lag about a minute; its list by the store's customer does not, so a plan paid just
     // before this check still keeps the store (the owner's decision: a plan started in time saves it).
+    const observation = await observeStoreSubscriptions(store);
     let searchKnown = true;
-    try { live = (await findStoreSubscriptions(store)).live; }
+    try { live = (await observation.find()).live; }
     catch (error) {
       searchKnown = false;
       console.error("searching for an ended store's plan failed", error);
     }
     // A positive, independent customer observation can still save the store
     // when search is unavailable; an empty list cannot prove unknown absence.
-    live ??= await liveByCustomer(store);
+    live ??= await observation.customerLive();
     if (!live && !searchKnown) return { key, state: "held", note: "Stripe could not be asked" };
   } catch (error) {
     console.error("asking Stripe about an ended plan failed", error);
@@ -883,8 +885,9 @@ async function refuseLatePlans(store: Store): Promise<boolean> {
   if (!isBillingConfigured()) return false;
   let complete = true;
   const ids = new Map<string, string>();
+  const observation = await observeStoreSubscriptions(store);
   try {
-    const found = await findStoreSubscriptions(store);
+    const found = await observation.find();
     if (found.live) ids.set(found.live.subscriptionId, found.live.customerId);
     for (const id of found.lapsed) ids.set(id, found.customerId ?? "");
   } catch (error) {
@@ -894,9 +897,9 @@ async function refuseLatePlans(store: Store): Promise<boolean> {
   // This observation is independent: a rejected address search must never
   // prevent us from finding and stopping a late charge by customer.
   try {
-    for (const row of await plansByCustomer(store)) {
+    for (const row of observation.customerPlans()) {
       if (row.status === "canceled" || row.status === "incomplete_expired") continue;
-      if (!ids.has(String(row.id))) ids.set(String(row.id), store.stripeCustomerId ?? "");
+      if (!ids.has(row.id)) ids.set(row.id, row.customerId);
     }
   } catch (error) {
     complete = false;
@@ -944,24 +947,42 @@ const PAGE = 200;
  * look at is still walked to its end, a part a day. A store is looked at
  * once in a run however many share the moment their plans ended.
  */
-export async function closeEnded(deadline: number, now = Date.now(), hands: Hands = HANDS): Promise<Closing[]> {
+export async function closeEnded(deadline: number, now = Date.now(), hands: Hands = HANDS, funding?: HeldFunding): Promise<Closing[]> {
   if (!isRedisConfigured()) return [];
-  // First the stores whose closing day began and did not finish (queue item 307 [EC1]): a plan started since does not take them out of the line of ended plans' notice, but they are seen through.
   const finals: Closing[] = [];
-  const [finalRefs] = await redisPipeline([["ZRANGEBYSCORE", FINAL_INDEX, "-inf", "+inf", "LIMIT", 0, PAGE]]);
-  for (const ref of Array.isArray(finalRefs) ? (finalRefs as unknown[]).map(String) : []) {
-    if (Date.now() > deadline) return finals;
+  const seen = new Set<string>();
+  const incomplete = async () => { await recordHeldMonth(now, false); return finals; };
+  const visit = async (ref: string, retry = false) => {
+    if (seen.has(ref)) return;
+    seen.add(ref);
+    // A known held store is visited only through its daily due index.
+    if (!retry && await heldStoreKnown(ref)) return;
+    let result: Closing;
     try {
-      finals.push(await closeOne(ref, now, hands, deadline));
+      result = retry && !(await claimHeldRecheck(ref, now, funding))
+        ? { key: ref, state: "held", note: "funding-or-day-budget" }
+        : await closeOne(ref, now, hands, deadline);
     } catch (error) {
       console.error("seeing a closing store through failed", error);
-      finals.push({ key: ref, state: "held", note: "failed" });
+      result = { key: ref, state: "held", note: "failed" };
     }
+    if (retry || result.state === "held") await noteHeldClosing(ref, result.state === "held", now, funding);
+    finals.push(result);
+  };
+  // Oldest due first; each processed entry moves to tomorrow. Reserve and
+  // atomic daily claim precede either provider read, including concurrent runs.
+  for (const ref of await heldStoresDue(now)) {
+    if (Date.now() > deadline) return incomplete();
+    await visit(ref, true);
+  }
+  const [finalRefs] = await redisPipeline([["ZRANGEBYSCORE", FINAL_INDEX, "-inf", "+inf", "LIMIT", 0, PAGE]]);
+  for (const ref of Array.isArray(finalRefs) ? (finalRefs as unknown[]).map(String) : []) {
+    if (Date.now() > deadline) return incomplete();
+    await visit(ref);
   }
   const [saved] = await redisPipeline([["GET", AFTER]]);
   let from: string = typeof saved === "string" && /^\d+$/.test(saved) ? saved : "0";
-  const seen = new Set<string>(finals.map((row) => row.key));
-  const out: Closing[] = [...finals];
+  const out = finals;
   for (;;) {
     const [raw] = await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]);
     const flat = Array.isArray(raw) ? raw : [];
@@ -971,15 +992,9 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
       if (seen.has(row.key)) continue;
       if (Date.now() > deadline) {
         await redisPipeline([["SET", AFTER, String(Math.floor(Number(row.score))), "EX", 30 * 24 * 60 * 60]]);
-        return out;
+        return incomplete();
       }
-      seen.add(row.key);
-      try {
-        out.push(await closeOne(row.key, now, hands, deadline));
-      } catch (error) {
-        console.error("looking at a store whose plan ended failed", error);
-        out.push({ key: row.key, state: "held", note: "failed" });
-      }
+      await visit(row.key);
     }
     if (rows.length < PAGE) break;
     // The next page begins at the last moment of this one, which the page
@@ -988,5 +1003,6 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
     from = last === from.replace("(", "") ? `(${last}` : last;
   }
   await redisPipeline([["DEL", AFTER]]);
+  await recordHeldMonth(now, true);
   return out;
 }

@@ -120,3 +120,15 @@ node scripts/diagnose_platform_subscription_search.mjs --checks
 The diagnostic script uses the repository's actual test aliases and model. The registry integrity tests pass 19/19. A separate exhaustive byte-floor test uses the real handle validator to reject every quoted JSON string smaller than five bytes; it passes. The unchanged plan-margin tests fail 13/39 after adding the profile; this is the expected stop signal, not a passing build. Runtime tests in contract-billing-metadata cover exact GET counts at 1/10/11/21/40 handles, complete-page refusal before activation and the absence of provider writes.
 
 Decision required under CX-55: do not send this diagnosis as a green #1478 correction. Review a tighter enforceable cost/progress design or explicit financing; never hide the added work in visits, use an average history length, invent a zero supplier fee, cut a right, change a price or weaken MR.
+
+
+## CX-67 implementation and review boundary
+
+Closing now reuses one captured subscription observation: Search and the
+customer List are each fetched once; the independent positive customer fallback
+and final customer-plan guard consume that same evidence, not a third List.
+The held-store reconfirmation, company retention exposure and aggregate monthly
+report are documented in `docs/funded-exposure-review.md` under CX-67. The real
+policy, full supplier/tax cost and reviewed global case ceiling stay null.
+The two-read memory component is unchanged in checkout/deletion/closing; extra
+held retries and full retained stores belong to company exposure separately.

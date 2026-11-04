@@ -3,7 +3,9 @@ import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
 import { TEST_SALES_PAGES } from "@/lib/broadcasts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
-import { AGENDA_UNITS } from "@/lib/person-agenda";
+import { AGENDA_UNITS, MAX_TASK_RECORD_BYTES, agendaReadUnits } from "@/lib/person-agenda";
+import { IncludedBytes, PAGE_INCLUDED_BYTES, STUDIO_UNIT_SENT_BYTES, sentUnits } from "@/lib/sent-bytes";
+import { MAX_PERSON_TASKS } from "@/lib/person-tasks";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
 import { ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
@@ -299,7 +301,7 @@ test("what the buyers' copy and the imported buyers weigh is counted a studio re
  assert.ok(IMPORTED_BUYER_BYTES >= 2 * (254 + 10), "an imported buyer is read and written in the copy: never priced as less");
  // BUYER_LEDGER prices Stripe's pages and rows only; the imported are counted by size, so the source must count them.
  const source = read("lib/segments.ts");
- assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };") && !source.includes("store.paypalSeller ? await paypalKept") && source.includes("ledgerUnits(moved)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers and PayPal's sales are counted before they are read");
+ assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };") && !source.includes("store.paypalSeller ? await paypalKept") && source.includes("ledgerUnits(moved, included)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers and PayPal's sales are counted before they are read");
  assert.ok(source.includes('["STRLEN", ledgerKey(store.statsId)]') && source.indexOf("STRLEN") < source.indexOf('["GETRANGE", ledgerKey(store.statsId)'), "the copy is measured and counted before it is read, and read no further");
  // PayPal's reading is counted in full (round 5, H1): what ledgerReadBytes counts for the most PayPal kept covers PAYPAL_LEDGER.
  const paypalUnits = ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: Number.MAX_SAFE_INTEGER, paypalRefunds: Number.MAX_SAFE_INTEGER }));
@@ -322,6 +324,60 @@ test("a scheduled email's readings of the buyers are each paid in studio request
 test("the tasks agenda at its most fits the studio requests it counts", () => {
  assert.ok(AGENDA_READ <= UNIT_COST.studio * AGENDA_UNITS, `${AGENDA_READ} > ${AGENDA_UNITS} x ${UNIT_COST.studio}`);
  // AGENDA_UNITS is what agendaReadUnits and the rows' size count at the most (lib/person-agenda.ts): never less than the cost.
+});
+
+test("the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2))", () => {
+ // UNIT_COST.studio prices one request moving PAGE_INCLUDED_BYTES, no more.
+ assert.equal(request("studio", 20 + TAKE_COMMANDS, PAGE_INCLUDED_BYTES), UNIT_COST.studio);
+ assert.ok(LEDGER_BYTES_PER_UNIT === STUDIO_UNIT_SENT_BYTES && request("light", 2, STUDIO_UNIT_SENT_BYTES) <= UNIT_COST.studio, "a studio request counted past the included bytes covers its megabyte");
+ // The page at its worst: a task's person looked up (?who=) and not there, so the agenda is drawn below; every part
+ // that reads or sends by size at the most it moved without a request of its own before: the lookup's copy of the
+ // buyers and its reading of the imported and PayPal ones, the agenda's tasks (as many people as fit), its own copy
+ // and reading, and what it sends on.
+ const people = Math.floor(PAGE_INCLUDED_BYTES / (MAX_PERSON_TASKS * MAX_TASK_RECORD_BYTES));
+ const taskBytes = people * MAX_PERSON_TASKS * MAX_TASK_RECORD_BYTES;
+ const included = new IncludedBytes();
+ const parts = [
+  ledgerUnits(PAGE_INCLUDED_BYTES, included),
+  ledgerUnits(PAGE_INCLUDED_BYTES, included),
+  agendaReadUnits(people, included),
+  ledgerUnits(PAGE_INCLUDED_BYTES, included),
+  ledgerUnits(PAGE_INCLUDED_BYTES, included),
+  sentUnits(PAGE_INCLUDED_BYTES, included),
+ ];
+ const bytes = 5 * PAGE_INCLUDED_BYTES + taskBytes;
+ const units = parts.reduce((a, b) => a + b, 0);
+ assert.deepEqual(parts, [0, 1, 1, 1, 1, 1], "the first part rides on the page's own request; every later one is counted");
+ // Every byte past the request's own fifty kilobytes is covered by a studio request counted for it, and the
+ // whole page fits in its own request and those counted.
+ assert.ok(bytes - PAGE_INCLUDED_BYTES <= units * LEDGER_BYTES_PER_UNIT, `${bytes} bytes, ${units} counted`);
+ assert.ok(request("studio", 20 + TAKE_COMMANDS, bytes) <= UNIT_COST.studio * (1 + units), `${request("studio", 20 + TAKE_COMMANDS, bytes)} > ${1 + units} x ${UNIT_COST.studio}`);
+ // Any parts in any order: what rides free never passes PAGE_INCLUDED_BYTES, and no part counts less than alone.
+ let seed = 7;
+ const next = () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648);
+ for (let round = 0; round < 500; round++) {
+  const page = new IncludedBytes();
+  let free = 0;
+  for (let part = 0; part < 1 + (next() % 7); part++) {
+   const size = next() % (next() % 2 ? 60_000 : 2_500_000);
+   const shared = page.take(size, LEDGER_BYTES_PER_UNIT);
+   const alone = new IncludedBytes().take(size, LEDGER_BYTES_PER_UNIT);
+   assert.ok(shared.units >= alone.units && shared.covers >= size, `${size}: ${shared.units} < ${alone.units}`);
+   if (shared.units === 0) free += size;
+  }
+  assert.ok(free <= PAGE_INCLUDED_BYTES && page.left === PAGE_INCLUDED_BYTES - free, `${free} bytes rode free`);
+ }
+ // An unknown size is never none.
+ for (const size of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) assert.throws(() => new IncludedBytes().take(size, LEDGER_BYTES_PER_UNIT), RangeError);
+ // The page makes one and hands it to every part; each reading passes it on.
+ const page = read("app/studio/people/page.tsx").replace(/\s+/g, " ");
+ assert.equal(page.match(/new IncludedBytes\(\)/g)?.length, 1, "one budget for the page");
+ assert.ok(page.includes("addressForPerson(store, who, lookupLedger.count, included)") && page.includes("<TasksAgenda store={store} included={included} />") && page.includes("agendaData(store, today, included)"), "the lookup and the agenda draw on the page's budget");
+ const agenda = read("lib/person-agenda-read.ts");
+ assert.ok(agenda.includes("agendaReadUnits(kept, included)") && agenda.includes("personAddresses(store, persons, ledger.count, included)") && agenda.includes("AGENDA_ROW_MARKUP_BYTES, included)"), "the agenda's tasks, buyers and sending draw on it");
+ assert.ok(read("lib/person-agenda.ts").includes("buyerLedger(store, count, included)") && read("lib/person-agenda.ts").includes("personAddresses(store, new Set([person]), count, included)"), "the lookup passes it to the buyers' reading");
+ const ledger = read("lib/segments.ts");
+ assert.ok(ledger.includes("included.take(bytes, LEDGER_BYTES_PER_UNIT)") && ledger.includes('["GETRANGE", ledgerKey(store.statsId), 0, taken.covers - 1]') && ledger.includes("ledgerUnits(moved, included)"), "the copy and the rest of a reading draw on it, and the copy is read no further than counted");
 });
 
 test("Path push fits its reserved studio requests", () => {

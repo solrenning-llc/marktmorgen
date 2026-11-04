@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { changePersonTasks, readAllTasks, readPersonTasks } from "@/lib/crm";
-import { TASK_ID, TASK_REFUSALS, type TaskRefusal, addTask, dropTask, editTask, markTask, readTaskInput, tasksDue } from "@/lib/person-tasks";
+import { TASKS_BUSY, TASK_ID, TASK_REFUSALS, type TaskRefusal, addTask, dropTask, editTask, markTask, readTaskInput, tasksDue } from "@/lib/person-tasks";
+import { LockBusyError } from "@/lib/redis-lock";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
@@ -17,7 +18,9 @@ import { randomBytes } from "node:crypto";
  * "edit", person, id, text, due?, assignee? }`, `{ action: "done", person,
  * id, done }`, `{ action: "remove", person, id }`. The same permission as the
  * deals (orders): owner, Admin, Support. A teammate made responsible must be
- * one who can see deals, as on the deals board.
+ * one who can see deals, as on the deals board. A change that keeps waiting
+ * on another one (lib/crm.ts, changePersonTasks) is answered 409 "busy",
+ * with nothing written.
  */
 
 const NO_STORE = { "Cache-Control": "private, no-store" };
@@ -74,6 +77,7 @@ export async function POST(request: NextRequest) {
     return result.ok ? Response.json({ ok: true, tasks: result.tasks }, { headers: NO_STORE }) : refuse(result.error);
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full" }, { status: 409 });
+    if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy", message: TASKS_BUSY }, { status: 409 });
     console.error("saving a task failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

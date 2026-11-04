@@ -189,14 +189,15 @@ export function PersonCompany({ person, initial }: { person: string; initial: Co
           ) : null}
         </>
       ) : null}
-      <div role="status" className="mt-3">
+      {/* Only words in the status region, so a screen reader says them; the Undo button stays outside it (round 5, L2). */}
+      <div className="mt-3">
+        <p role="status" className="text-sm text-ink [overflow-wrap:anywhere]">
+          {left ? `Taken off ${left.name}.` : ""}
+        </p>
         {left ? (
-          <p className="flex flex-wrap items-center gap-3 text-sm text-ink">
-            <span className="[overflow-wrap:anywhere]">{`Taken off ${left.name}.`}</span>
-            <button ref={undoButton} type="button" className="btn btn-secondary btn-sm" aria-disabled={busy || undefined} onClick={() => void undo()}>
-              Undo
-            </button>
-          </p>
+          <button ref={undoButton} type="button" className="btn btn-secondary btn-sm mt-2" aria-disabled={busy || undefined} onClick={() => void undo()}>
+            Undo
+          </button>
         ) : null}
       </div>
       <form className="mt-4 flex flex-wrap items-end gap-3" onSubmit={create} noValidate>

@@ -250,7 +250,6 @@ test("Path page and its actual usage count fit its reserved studio page", () => 
 
 test("a companies request fits its studio requests, and each page that reads every company fits what it counts", () => {
  assert.ok(COMPANIES_REQUEST <= UNIT_COST.studio * COMPANIES_REQUEST_UNITS, `${COMPANIES_REQUEST} > ${COMPANIES_REQUEST_UNITS} x ${UNIT_COST.studio}`);
- assert.ok(COMPANIES_REQUEST > UNIT_COST.studio * (COMPANIES_REQUEST_UNITS - 1), "fewer studio requests would be enough: lower COMPANIES_REQUEST_UNITS");
  assert.ok(COMPANIES_PAGE_READ <= UNIT_COST.studio * COMPANIES_READ_UNITS, `${COMPANIES_PAGE_READ} > ${COMPANIES_READ_UNITS} x ${UNIT_COST.studio}`);
  assert.ok(COMPANIES_PAGE_READ > UNIT_COST.studio * (COMPANIES_READ_UNITS - 1), "fewer studio requests would be enough: lower COMPANIES_READ_UNITS");
  // What a page sends on is counted by its size: one studio request for each STUDIO_UNIT_SENT_BYTES.

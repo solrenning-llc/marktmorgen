@@ -3,6 +3,7 @@
  * studio's screen and the server (lib/crm-companies.ts). Browser-safe.
  */
 import { crmUrl } from "@/lib/crm-rules";
+import { PAGE_INCLUDED_BYTES, sentBytes, sentUnits } from "@/lib/sent-bytes";
 
 export const MAX_COMPANIES = 300;
 export const MAX_COMPANY_NAME = 80;
@@ -23,25 +24,29 @@ export const MAX_COMPANY_RECORD_BYTES = 3 * (MAX_COMPANY_NAME + MAX_COMPANY_NOTE
 /** The most a store's companies weigh, every record and its id: what reading them all moves at the most. */
 export const MAX_COMPANIES_BYTES = MAX_COMPANIES * (MAX_COMPANY_RECORD_BYTES + 10);
 /**
- * Studio requests a companies request counts, its own included: each one
- * reads every company (MAX_COMPANIES_BYTES, about a megabyte at the most)
- * and sends them on, more than one studio request is priced at
- * (tests/plan-cost-registry.ts, COMPANIES_REQUEST).
+ * Studio requests reading `kept` company records costs beyond the page or
+ * request that asked (round 5, M1): each at the most a record weighs, none
+ * within the request's own fifty kilobytes (PAGE_INCLUDED_BYTES), then one a
+ * megabyte (tests/plan-cost-registry.ts, COMPANIES_PAGE_READ). `kept` is the
+ * hash's length (one HLEN), and one more for the record a change may add.
  */
-export const COMPANIES_REQUEST_UNITS = 3;
+export function companiesReadUnits(kept: number): number {
+  const bytes = Math.min(Math.max(0, kept), MAX_COMPANIES + 1) * (MAX_COMPANY_RECORD_BYTES + 10);
+  return bytes <= PAGE_INCLUDED_BYTES ? 0 : Math.ceil(bytes / 1_000_000);
+}
 /**
- * Studio requests a page counts before it reads every company (the
- * companies page, a person's page): about a megabyte from the database at
- * the most (tests/plan-cost-registry.ts, COMPANIES_PAGE_READ). What it then
- * sends on is counted apart, by its size (companiesSentUnits).
+ * Studio requests a companies request counts beyond its own: every company
+ * read (companiesReadUnits), and every company sent back in its answer, as
+ * JSON, at the most each weighs.
  */
-export const COMPANIES_READ_UNITS = 2;
-/**
- * Bytes sent on to the browser that one studio request covers
- * (tests/plan-cost-registry.ts holds it against the price of what a
- * function sends on, ORIGIN_PER_BYTE).
- */
-export const STUDIO_UNIT_SENT_BYTES = 1_000_000;
+export function companiesRequestUnits(kept: number): number {
+  return companiesReadUnits(kept + 1) + sentUnits(Math.min(Math.max(0, kept + 1), MAX_COMPANIES) * MAX_COMPANY_RECORD_BYTES);
+}
+/** The most a companies request counts, its own included: held against COMPANIES_REQUEST in tests/plan-cost-registry.ts. */
+export const COMPANIES_REQUEST_UNITS = 1 + companiesRequestUnits(MAX_COMPANIES);
+/** The most a page's reading of every company counts: held against COMPANIES_PAGE_READ. */
+export const COMPANIES_READ_UNITS = companiesReadUnits(MAX_COMPANIES);
+export { PAGE_INCLUDED_BYTES, STUDIO_UNIT_SENT_BYTES, htmlBytes, sentBytes, sentUnits } from "@/lib/sent-bytes";
 /** The page's own markup around one company (its heading, buttons and lines), in bytes at the most. */
 export const COMPANY_MARKUP_BYTES = 1_500;
 /** A person's page's own markup around one company it offers to choose (an option), in bytes at the most. */
@@ -57,27 +62,13 @@ export const COMPANY_PERSON_MARKUP_BYTES = 250;
  */
 export const SENT_TIMES = 12;
 
-const utf8 = (text: string) => new TextEncoder().encode(text).length;
-
 /**
- * What the records' JSON is sent as, in bytes, measured as Next writes it:
- * the page's text, HTML-escaped, and React's copy, a JSON string with "<",
- * ">", "&", U+2028 and U+2029 escaped as \uXXXX.
- */
-export function sentBytes(json: string): number {
-  const page = json.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const react = JSON.stringify(json).replace(/[<>&\u2028\u2029]/g, "\\u0000");
-  return utf8(page) + utf8(react);
-}
-
-/**
- * Studio requests what a page sends on costs, counted before it is drawn:
- * the records it shows (`json`) as Next sends them (sentBytes), and its own
- * markup around them.
+ * Studio requests what a page sends on costs beyond its own, counted before
+ * it is drawn: the records it shows (`json`) as Next sends them (sentBytes),
+ * and its own markup around them; none within PAGE_INCLUDED_BYTES.
  */
 export function companiesSentUnits(json: string, markupBytes: number): number {
-  const sent = sentBytes(json) + Math.max(0, markupBytes);
-  return Math.max(1, Math.ceil(sent / STUDIO_UNIT_SENT_BYTES));
+  return sentUnits(sentBytes(json) + Math.max(0, markupBytes));
 }
 const PERSON = PERSON_KEY;
 

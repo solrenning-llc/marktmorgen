@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import {
-  COMPANIES_REQUEST_UNITS,
+  companiesKept,
+  companiesRequestUnits,
   COMPANY_REFUSALS,
   type CompanyRefusal,
   MAX_COMPANY_NAME,
@@ -20,7 +21,8 @@ import {
 } from "@/lib/crm-companies";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
-import { countStudio, jsonAccess } from "@/lib/studio-route";
+import { jsonAccess } from "@/lib/studio-route";
+import { countUnits } from "@/lib/person-agenda-read";
 import type { Store } from "@/lib/store";
 
 /**
@@ -38,13 +40,16 @@ const NO_STORE = { "Cache-Control": "private, no-store" };
 const PERSON = /^[0-9a-f]{32}$/;
 /**
  * The studio requests a companies request counts besides the one its access
- * already took (COMPANIES_REQUEST_UNITS): it reads every company, about a
- * megabyte at the most. Null when they are taken, or the refusal to answer.
+ * already took, from how many records are kept (one HLEN; round 5, M1):
+ * every company read and sent back (companiesRequestUnits), none within the
+ * request's own fifty kilobytes. Null when they are taken, or the refusal to
+ * answer, saying when this needs more than is left (countUnits).
  */
 async function countRead(store: Store): Promise<Response | null> {
-  const counted = await countStudio(store, null, COMPANIES_REQUEST_UNITS - 1);
+  const kept = await companiesKept(store.statsId);
+  const counted = await countUnits(store, companiesRequestUnits(kept));
   if (counted.ok) return null;
-  return Response.json({ ok: false, error: counted.reason === "used" ? "studio_used" : "unavailable", message: counted.message }, { status: counted.reason === "used" ? 429 : 503 });
+  return Response.json({ ok: false, error: "studio_used", message: counted.message }, { status: 429 });
 }
 
 const MAX_BODY_BYTES = (MAX_COMPANY_NAME + 200 + MAX_COMPANY_NOTE) * 6 + MAX_COMPANY_PEOPLE * 40 + 1_000;

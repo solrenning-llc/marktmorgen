@@ -12,10 +12,11 @@ import { GET, POST } from "@/app/api/store/companies/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { forgetCrmPerson } from "@/lib/crm";
 import {
-  COMPANIES_READ_UNITS,
-  COMPANIES_REQUEST_UNITS,
+  companiesReadUnits,
+  companiesRequestUnits,
   COMPANY_REFUSALS,
   companiesSentUnits,
+  htmlBytes,
   sentBytes,
   SENT_TIMES,
   readCompaniesAndUnreadable,
@@ -271,6 +272,9 @@ async function main(): Promise<void> {
   is("one kept under an id longer than a company's is deleted by that exact id (round 4, L3)", [longGone.status, (await readCompaniesAndUnreadable(statsId)).unreadable], [200, []]);
   const editor = readFileSync("components/companies-editor.tsx", "utf8");
   is("only words in the editor's status region; the Undo button is outside it (round 4, L4)", /<p role="status"[^>]*>\s*\{gone \? `Deleted \$\{gone\.name\}\. Its people are still in your store\.` : putBack\}\s*<\/p>/.test(editor) && editor.indexOf("onClick={() => void undo()}") > editor.indexOf('<p role="status"'), true);
+  const personScreen = readFileSync("components/person-company.tsx", "utf8");
+  is("only words in a person's company status region too; Undo is outside it (round 5, L2)", /<p role="status"[^>]*>\s*\{left \? `Taken off \$\{left\.name\}\.` : ""\}\s*<\/p>/.test(personScreen) && personScreen.indexOf("onClick={() => void undo()}") > personScreen.indexOf('<p role="status"'), true);
+  is("each company's name written again in the buttons' names is counted in what the page sends (round 5, L3)", readFileSync("lib/companies-read.ts", "utf8").includes("2 * htmlBytes(company.name)") && htmlBytes("A & B") === 9, true);
   is("the companies page shows each such record with a button to delete it", editor.includes("Records that can't be read") && editor.includes("aria-label={`Delete unreadable record ${i + 1}`}") && readFileSync("app/studio/companies/page.tsx", "utf8").includes("unreadable={data.unreadable}"), true);
 
   part("What reading the companies costs (round 2, M2)");
@@ -279,10 +283,10 @@ async function main(): Promise<void> {
   is("the heaviest company kept weighs no more than MAX_COMPANY_RECORD_BYTES", [worst, quoted].map((c) => c !== null && Buffer.byteLength(JSON.stringify(c)) <= MAX_COMPANY_RECORD_BYTES), [true, true]);
   is("so every company weighs no more than MAX_COMPANIES_BYTES", MAX_COMPANIES_BYTES >= MAX_COMPANIES * (MAX_COMPANY_RECORD_BYTES + 10), true);
   const route = readFileSync("app/api/store/companies/route.ts", "utf8");
-  is("every companies request counts COMPANIES_REQUEST_UNITS studio requests before it reads them all", [COMPANIES_REQUEST_UNITS > 1, route.includes("countStudio(store, null, COMPANIES_REQUEST_UNITS - 1)"), (route.match(/if \(\(refused = await countRead\(store\)\)\) return refused;\n(?:\s+\/\/[^\n]*\n)*\s+result = await changeCompanies\(/g) ?? []).length, route.includes("const refused = await countRead(store);\n    if (refused) return refused;\n    const companies = await readCompanies(")], [true, true, 5, true]);
+  is("every companies request counts what reading them costs, from how many are kept, before it reads them all", [companiesRequestUnits(MAX_COMPANIES) > 1, route.includes("const counted = await countUnits(store, companiesRequestUnits(kept));"), (route.match(/if \(\(refused = await countRead\(store\)\)\) return refused;\n(?:\s+\/\/[^\n]*\n)*\s+result = await changeCompanies\(/g) ?? []).length, route.includes("const refused = await countRead(store);\n    if (refused) return refused;\n    const companies = await readCompanies(")], [true, true, 5, true]);
   const reader = readFileSync("lib/companies-read.ts", "utf8");
-  is("the companies page counts its reading first, the buyers only when they are read, and what it sends by its size before drawing it (round 3, M1/M2)", [reader.indexOf("countStudio(store, null, COMPANIES_READ_UNITS)") < reader.indexOf("readCompaniesAndUnreadable(store.statsId)"), reader.includes("personAddresses(store, people, ledger.count)"), reader.includes("const sent = await countStudio(store, null, sending)"), readFileSync("app/studio/companies/page.tsx", "utf8").includes("const data = await companiesPageData(store);")], [true, true, true, true]);
-  is("what is sent is measured as Next sends it, one studio request a megabyte", [companiesSentUnits("", 0), companiesSentUnits("x".repeat(300_000), 100_000), companiesSentUnits("x".repeat(1_000_000), 0)], [1, 1, 3]);
+  is("the companies page counts its reading first, the buyers only when they are read, and what it sends by its size before drawing it (round 3, M1/M2)", [reader.indexOf("countUnits(store, companiesReadUnits(kept))") < reader.indexOf("readCompaniesAndUnreadable(store.statsId)"), reader.includes("personAddresses(store, people, ledger.count)"), reader.includes("const sent = await countUnits(store, sending)"), readFileSync("app/studio/companies/page.tsx", "utf8").includes("const data = await companiesPageData(store);")], [true, true, true, true]);
+  is("what is sent is measured as Next sends it: nothing within the page's own 50 KB, then one studio request a megabyte (round 5, M1)", [companiesSentUnits("", 0), companiesSentUnits("x".repeat(20_000), 0), companiesSentUnits("x".repeat(300_000), 100_000), companiesSentUnits("x".repeat(1_000_000), 0)], [0, 0, 1, 3]);
   const ampName = JSON.stringify({ name: "&".repeat(80) });
   is("a name full of & is sent as more than ten bytes each (round 4, M1)", [sentBytes(ampName) > 10 * 80, sentBytes(ampName) <= SENT_TIMES * ampName.length], [true, true]);
   const slim = companiesForPerson([{ ...base("aaaaaaaaaa", "North"), note: "Big note", website: "https://north.example.com/", people: [b] }, { ...base("bbbbbbbbbb", "South"), note: "Theirs", people: [a] }], a);
@@ -298,14 +302,18 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   const studioKey = () => redis.keys().find((k) => k.startsWith("nl:allow:studio:"))!;
   const readsAll = () => watched.some((c) => c[0] === "HGETALL" && c[1] === `nl:crm:co:${statsId}`);
-  await redisPipeline([["SET", studioKey(), String(allowanceFor(store, "studio") - 1)]]);
+  // A few companies stay inside the page's own request (round 5, M1); twenty full ones need more.
+  is("reading a few companies counts nothing beyond the page; twenty full ones one more; three hundred two", [companiesReadUnits(3), companiesReadUnits(20), companiesReadUnits(MAX_COMPANIES)], [0, 1, 2]);
+  const fillers = Array.from({ length: 20 }, (_, i) => ({ ...base(`f${i.toString(16).padStart(9, "0")}`, `Filler School ${i}`), note: "n".repeat(MAX_COMPANY_NOTE), website: "https://example.com/" + "w".repeat(150) }));
+  await changeCompanies(statsId, store, (companies) => ({ ok: true, companies: [...companies, ...fillers] }));
+  await redisPipeline([["SET", studioKey(), String(allowanceFor(store, "studio"))]]);
   watched.length = 0;
   const pageSpent = await companiesPageData(store);
   const personSpent = await personCompanies(store, ann);
-  is("with one studio request left, the companies page and a person's page are refused with the allowance's sentence and read no company", [pageSpent.state, pageSpent.state === "refused" && pageSpent.message.length > 0, personSpent.state, readsAll()], ["refused", true, "refused", false]);
+  is("with no studio request left, the companies page and a person's page with twenty companies are refused with the allowance's sentence and read no company", [pageSpent.state, pageSpent.state === "refused" && pageSpent.message.length > 0, personSpent.state, readsAll()], ["refused", true, "refused", false]);
   await redisPipeline([["SET", studioKey(), "0"]]);
   const pageRead = await companiesPageData(store);
-  is("with room, the page reads them and counts its reading and what it sends", [pageRead.state, Number((await redisPipeline([["GET", studioKey()]]))[0]) >= COMPANIES_READ_UNITS + 1], ["ok", true]);
+  is("with room, the page reads them and counts its reading and what it sends", [pageRead.state, Number((await redisPipeline([["GET", studioKey()]]))[0]) >= companiesReadUnits(20) + 1], ["ok", true]);
   const otherOwner = "nocompanies@example.com";
   await claimHandle(otherOwner, "nocompanies", "No Companies", "");
   await ensureStatsId(otherOwner);
@@ -319,21 +327,26 @@ async function main(): Promise<void> {
   is("a store with no company counts nothing and reads no hash (L5)", [barePage.state, barePerson.state === "ok" && barePerson.companies.length, redis.keys().filter((k) => k.startsWith("nl:allow:studio:")).length, watched.some((c) => c[0] === "HGETALL")], ["ok", 0, bareKeysBefore, false]);
   redis.pipeline = realPipe;
 
-  part("The studio requests a companies request takes (round 3, L6)");
+  part("The studio requests a companies request takes (round 3, L6; round 5, M1)");
   const usedKey = () => redis.keys().find((k) => k.startsWith("nl:allow:studio:"));
   const used = async () => { const k = usedKey(); return k ? Number((await redisPipeline([["GET", k]]))[0] ?? 0) : 0; };
+  const kept20 = (await readCompanies(statsId)).length;
   const beforeOne = await used();
   await post({ action: "add", name: "Counted School" });
-  is("one change takes COMPANIES_REQUEST_UNITS studio requests: its own and what reading every company costs", (await used()) - beforeOne, COMPANIES_REQUEST_UNITS);
+  is("with twenty companies, one change takes its own studio request and what reading and sending them costs", (await used()) - beforeOne, 1 + companiesRequestUnits(kept20));
   const beforeGet = await used();
   await get();
-  is("and so does a reading of them", (await used()) - beforeGet, COMPANIES_REQUEST_UNITS);
+  is("and so does a reading of them", (await used()) - beforeGet, 1 + companiesRequestUnits(kept20 + 1));
   const limit = allowanceFor(store, "studio");
   await redisPipeline([["SET", usedKey()!, String(limit - 1)]]);
   const spent = await post({ action: "add", name: "Over School" });
-  is("when only the request itself fits, the change is refused as used, reads nothing and keeps nothing", [spent.status, spent.body.error, (await readCompanies(statsId)).some((c) => c.name === "Over School")], [429, "studio_used", false]);
+  is("when only the request itself fits, the change is refused as used, says it needs more than is left, and keeps nothing", [spent.status, spent.body.error, (await readCompanies(statsId)).some((c) => c.name === "Over School")], [429, "studio_used", false]);
   await redisPipeline([["SET", usedKey()!, "0"]]);
-  for (const c of await readCompanies(statsId)) if (c.name === "Counted School") await post({ action: "remove", id: c.id });
+  for (const c of await readCompanies(statsId)) if (c.name === "Counted School" || c.name.startsWith("Filler School")) await post({ action: "remove", id: c.id });
+  const beforeSmall = await used();
+  await post({ action: "add", name: "Small School" });
+  is("with a few companies, a change takes only its own studio request", (await used()) - beforeSmall, 1);
+  for (const c of await readCompanies(statsId)) if (c.name === "Small School") await post({ action: "remove", id: c.id });
 
   part("An edit through the route keeps what it leaves out (edge review)");
   await post({ action: "edit", id, name: "North School", website: "north.example.com", note: "Pays by invoice" });

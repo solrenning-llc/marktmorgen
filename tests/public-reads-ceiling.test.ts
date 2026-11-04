@@ -111,6 +111,31 @@ const LEAD_EMAIL = "lena.buyer@example.com";
 
 const as = (id: string, status: Affiliate["status"] = "approved") => ({ id, status, share: null }) as Pick<Affiliate, "id" | "status" | "share">;
 
+/**
+ * HSTRLEN and RENAME, which the kept book uses and the in-memory Redis
+ * (lib/redis-memory.ts, reserved elsewhere today) does not answer: done here
+ * with the commands it does, for hashes, as Redis does them.
+ */
+const memory = redis.pipeline.bind(redis);
+redis.pipeline = async (commands) => {
+  const out: unknown[] = [];
+  for (const c of commands) {
+    if (c[0] === "HSTRLEN") {
+      const [value] = await memory([["HGET", c[1], c[2]]]);
+      out.push(typeof value === "string" ? Buffer.byteLength(value, "utf8") : 0);
+    } else if (c[0] === "RENAME") {
+      const [fields, ttl] = await memory([["HGETALL", c[1]], ["PTTL", c[1]]]);
+      const flat = Array.isArray(fields) ? (fields as string[]) : [];
+      if (!flat.length) throw new Error("ERR no such key");
+      await memory([["DEL", c[2]], ["HSET", c[2], ...flat], ...(Number(ttl) > 0 ? [["PEXPIRE", c[2], Number(ttl)]] : []), ["DEL", c[1]]]);
+      out.push("OK");
+    } else {
+      out.push(...(await memory([c])));
+    }
+  }
+  return out;
+};
+
 async function main(): Promise<void> {
   redis.clear();
   answering(null);

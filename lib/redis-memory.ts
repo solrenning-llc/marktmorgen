@@ -181,6 +181,19 @@ export class MemoryRedis {
           this.run(["DEL", target]); removeDue(); return 1;
         }
 
+        // lib/review-ai-summary.ts KEEP_REVIEW_SUMMARY: the summary and its week kept only while the reviews' mark is the one read.
+        if (key.startsWith("-- marktmorgen:review-summary-keep:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, mark, summary, last, lock, expected, value, seconds, at, mine] = args;
+          this.live(mark); this.live(lock);
+          const held = this.data.get(mark), locked = this.data.get(lock);
+          if ((held !== undefined && typeof held !== "string") || (locked !== undefined && typeof locked !== "string")) throw new Error("WRONGTYPE");
+          if ((held ?? "-") !== expected) return 0;
+          if (locked !== mine) return 0;
+          this.run(["SET", summary, value, "EX", seconds]);
+          this.run(["SET", last, at, "EX", seconds]);
+          return 1;
+        }
+
         if (key.startsWith("-- marktmorgen:ab-sale:v1\n") && args[0] === "2" && args.length === 6) {
           const [, target, marker, version, rawCents, rawSquare] = args;
           this.live(target); this.live(marker);
@@ -634,18 +647,6 @@ export class MemoryRedis {
       }
       case "EXISTS":
         return this.data.has(key) ? 1 : 0;
-      case "RENAME": {
-        // RENAME source destination: the destination is replaced, with the source's expiry.
-        this.live(args[0]);
-        if (!this.data.has(key)) throw new Error("ERR no such key");
-        this.data.set(args[0], this.data.get(key) as Entry);
-        this.data.delete(key);
-        const ends = this.until.get(key);
-        this.until.delete(key);
-        if (ends === undefined) this.until.delete(args[0]);
-        else this.until.set(args[0], ends);
-        return "OK";
-      }
       case "DUMP": {
         // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key
         // name or its time to live, as DUMP's is; RESTORE below is the only reader of it. Null for a missing key.
@@ -780,8 +781,6 @@ export class MemoryRedis {
         return [...this.hash(key).values()];
       case "HLEN":
         return this.hash(key).size;
-      case "HSTRLEN":
-        return Buffer.byteLength(this.hash(key).get(args[0]) ?? "", "utf8");
       case "SCAN": {
         // SCAN cursor [MATCH pattern] [COUNT n]: here the "key" is the cursor.
         // Every match at once, with the cursor back at "0", as HSCAN does.

@@ -73,8 +73,8 @@ const LEFT_OUT = ["files", "videos", "community posts", "email sequences", "broa
 const windows = (raw: string): string[] => {
   const text = raw.replace(/",\s*"\s*/g, " ").replace(/\s+/g, " ");
   return [...text.matchAll(/main data|One file: your/g)].map((m) => {
-    const end = text.indexOf("stay in your studio", m.index);
-    return end < 0 ? text.slice(m.index, m.index! + 700) : text.slice(m.index, end + 19);
+    const end = text.slice(m.index).search(/stay in your studio|go when your store closes/);
+    return end < 0 ? text.slice(m.index, m.index! + 700) : text.slice(m.index, m.index! + end + 30);
   });
 };
 const LISTS_PARTS = (name: string) => name !== "lib/plan-refund-words.ts" && name !== "app/mission/page.tsx";
@@ -97,6 +97,9 @@ is("no occurrence promises everything or the whole store", occurrences.map(([, w
 is("no site text uses the old promises", promiseSites.map(([, text]) => /download everything your store|your whole store, as one file|downloaded your whole store|whole store as one file/i.test(text)), promiseSites.map(() => false));
 is("every occurrence says what is left out, as whole words, and never reads as a full list", occurrences.filter(([name]) => LISTS_LEFT_OUT(name)).map(([, w]) => LEFT_OUT_NOW.every((word) => hasWord(w, word)) && /nothing else is in (it|the file)\. for example/i.test(w)), occurrences.filter(([name]) => LISTS_LEFT_OUT(name)).map(() => true));
 is("every occurrence that lists the contents lists all of them", occurrences.filter(([name]) => LISTS_PARTS(name) && LISTS_LEFT_OUT(name)).map(([, w]) => INCLUDED.every((word) => hasWord(w.replace(/blog posts/, "posts"), word))), occurrences.filter(([name]) => LISTS_PARTS(name) && LISTS_LEFT_OUT(name)).map(() => true));
+const CLOSING = ["lib/plan-closing.ts", "lib/plan-refund-words.ts"];
+is("closing texts never say the rest stays in the studio, and say it goes when the store closes", CLOSING.map((file) => [/stay in your studio/.test(read(file)), /are not in it, and go when your store closes/.test(read(file).replace(/",\s*"\s*/g, " ").replace(/\s+/g, " "))]), CLOSING.map(() => [false, true]));
+is("the studio, terms and pages still say the rest stays in the studio", ["app/studio/page.tsx", "app/terms/page.tsx", "lib/feature-pages.ts"].map((file) => /stay in your studio/.test(read(file))), [true, true, true]);
 is("the studio button is not 'Download everything' for the store file", /name="what" value="store"[\s\S]{0,200}Download the file/.test(read("app/studio/page.tsx")), true);
 is("the export is offered from the studio", [/what === "store"/.test(read("app/api/store/export/route.ts")), /export function storeExport/.test(exporter)], [true, true]);
 is("a buyer deletes their own data by an emailed link", [says("Buyers can delete their own data"), words.includes('"href":"/privacy/delete"'), existsSync("app/privacy/delete/page.tsx"), existsSync("app/api/privacy/erase/route.ts")], [true, true, true, true]);

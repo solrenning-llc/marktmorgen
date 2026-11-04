@@ -254,8 +254,14 @@ export async function takeReading(pass: ReadPass, now = Date.now()): Promise<boo
   }
 }
 
-/** A window whose readings went past their ceiling: only the first `counted` were counted, and counting starts again at `opens` (milliseconds). */
-export type ReadingsPartial = { counted: number; opens: number };
+/**
+ * A window whose readings went past their ceiling: only the first `counted`
+ * were counted, and counting starts again at `opens` (milliseconds). When
+ * the plan grew since (`resumed`), counting went on after the change, so
+ * `counted` is the ceiling that was reached, not every reading counted: the
+ * visits between reaching it and the change are the ones left out.
+ */
+export type ReadingsPartial = { counted: number; opens: number; resumed?: true };
 
 /**
  * Whether the store's readings of its current window went past the window's
@@ -281,7 +287,8 @@ export async function readingsPartial(store: WindowFields & { tier?: Tier; stats
     // Past the ceiling now, or once this window (the mark keeps the ceiling passed, if the plan grew since).
     if (!Number.isSafeInteger(n)) return null;
     if (n > cap) return { counted: cap, opens: window.end };
-    if (Number.isSafeInteger(passed) && passed > 0) return { counted: Math.min(n, passed), opens: window.end };
+    // A mark left before the plan grew: the ceiling then was reached, and counting went on after the change.
+    if (Number.isSafeInteger(passed) && passed > 0) return n > passed ? { counted: passed, opens: window.end, resumed: true } : { counted: n, opens: window.end };
     return null;
   } catch {
     return null;

@@ -7,7 +7,7 @@ import { readingsPartialWords } from "@/lib/page-read-sample";
  * average made up from ranges. Shown once enough visitors were measured for
  * a share to mean something; nothing about who they were.
  */
-export function PageTime({ ranges, least, partial = null }: { ranges: { words: string; count: number; share: number }[]; least: number; partial?: { counted: number; opens: number } | null }) {
+export function PageTime({ ranges, least, partial = null }: { ranges: { words: string; count: number; share: number }[]; least: number; partial?: { counted: number; opens: number; resumed?: boolean } | null }) {
   const measured = ranges.reduce((sum, range) => sum + range.count, 0);
   return (
     <section aria-labelledby="page-time-title" className="card mt-6 p-5 sm:p-6">
@@ -17,7 +17,7 @@ export function PageTime({ ranges, least, partial = null }: { ranges: { words: s
       {partial ? (
         // This month's readings went past their ceiling (lib/page-read.ts, readingsPartial): said, never made up.
         <p className="notice notice-info mt-2 text-sm" role="note">
-          {readingsPartialWords(partial.counted, partial.opens)}
+          {readingsPartialWords(partial.counted, partial.opens, partial.resumed === true)}
         </p>
       ) : null}
       {measured < least ? (

@@ -308,6 +308,11 @@ async function main(): Promise<void> {
   // The plan grown since: its ceiling is now above what was counted, but the window still went past the old one.
   const grown = { ...shop, tier: "scale" as const };
   is("a plan grown later in the window still says the window is partial, with the readings counted then", readCeiling(grown) > shopCeiling && (await readingsPartial(grown))?.counted === shopCeiling, true);
+  const grownPartial = await readingsPartial(grown);
+  is("and that counting went on after the change, so the figure is the ceiling reached, not every visit counted", grownPartial?.resumed, true);
+  const grownWords = readingsPartialWords(grownPartial!.counted, grownPartial!.opens, grownPartial!.resumed === true);
+  is("said so: the visits left out are the ones before the change", [grownWords.includes(`counted up to ${shopCeiling.toLocaleString("en-US")} measured visits`), grownWords.includes("before your plan changed are not counted"), grownWords.includes("Visits since the change are counted."), grownWords.includes("until")], [true, true, true, false]);
+  is("a plan not grown says nothing of a change", partial?.resumed, undefined);
   const words = readingsPartialWords(partial!.counted, partial!.opens);
   is("said in plain words, with the real figure and the day it opens again, nothing made up", [words.includes(`up to ${shopCeiling.toLocaleString("en-US")} measured visits a month`), words.includes("Only part of this month is counted."), words.includes("(UTC)"), /\d+%|about|estimated/i.test(words)], [true, true, true, false]);
   const shown = renderToStaticMarkup(createElement(PageTime, { ranges: timeShares({ "@t2": 40 }), least: 20, partial }));
@@ -318,7 +323,7 @@ async function main(): Promise<void> {
   is("and nothing when the readings were within it", studioStats(suspendedShop, (await readStats(suspendedShop))!, null, "none", []).readsPartial, null);
   const panel = readFileSync("components/stats-panel.tsx", "utf8");
   const depthRoute = readFileSync("app/api/store/depth/route.ts", "utf8");
-  is("the screens say it: the store page's numbers and the sales page editor", [panel.includes("readingsPartialWords(data.readsPartial.counted, data.readsPartial.opens)"), depthRoute.includes("readingsPartial(store)"), readFileSync("components/page-editor.tsx", "utf8").includes("partial={partial}")], [true, true, true]);
+  is("the screens say it: the store page's numbers and the sales page editor", [panel.includes("readingsPartialWords(data.readsPartial.counted, data.readsPartial.opens, data.readsPartial.resumed === true)"), depthRoute.includes("readingsPartial(store)"), readFileSync("components/page-editor.tsx", "utf8").includes("partial={partial}")], [true, true, true]);
 
   part("What a page check keeps is bounded");
   for (let i = 0; i < READ_WINDOWS_HELD + 5; i += 1) noteReadStore(`held${String(i).padStart(10, "0")}`, store);

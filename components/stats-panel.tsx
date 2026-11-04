@@ -1192,7 +1192,7 @@ export function StatsPanel({
 
       {reach && reach.visitors > 0 && data.readsPartial ? (
         <p className="notice notice-info mt-6 text-sm" role="note">
-          {readingsPartialWords(data.readsPartial.counted, data.readsPartial.opens)}
+          {readingsPartialWords(data.readsPartial.counted, data.readsPartial.opens, data.readsPartial.resumed === true)}
         </p>
       ) : null}
       {reach && reach.visitors > 0 ? (

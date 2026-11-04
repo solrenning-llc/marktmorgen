@@ -1068,10 +1068,10 @@ export default async function StudioPage({
         keptStats(current, undefined, freshNumbers).then((kept) => kept, () => null),
         readsSales(current)
           ? keptSales(current, undefined, freshNumbers).then(
-              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true }),
-              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed }),
+              (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true, unnamed: kept.unnamed === true }),
+              (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed, unnamed: false }),
             )
-          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false }),
+          : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false }),
         readNotes(current.statsId).catch(() => []),
         readSpends(current.statsId).catch(() => []),
         heardOff(current.handle).catch(() => false),
@@ -1092,6 +1092,9 @@ export default async function StudioPage({
         refreshHref: studioPath(current, "numbers=fresh"),
         backAt: readingsBackAt(),
         salesUsed: salesRead?.used === true,
+        // Its biggest buyers left out for lack of a list (lib/store-readings.ts, listForNaming): back on their own, or
+        // after the next saved change of a store not yet moved to product records.
+        buyersLater: salesRead?.unnamed ? (current.catalog.id ? ("on-their-own" as const) : ("after-change" as const)) : undefined,
         // A reading that failed after calling Stripe was counted (inbox C4-53): said, with what is left of the day.
         failed: salesRead?.failed === true || visitsKept?.failed === true,
         left: readsSales(current) ? left.heavyLeft : left.anyLeft,
@@ -1817,7 +1820,14 @@ export default async function StudioPage({
               </section>
             ) : null}
 
-            {calendar ? <CalendarEditor view={calendar} weekly={callProducts.some((p) => p.call?.kind === "weekly")} /> : null}
+            {calendar ? (
+              <CalendarEditor
+                view={calendar}
+                weekly={callProducts.some((p) => p.call?.kind === "weekly")}
+                // No list yet: its file names nobody (lib/store-readings.ts, listForNaming), said on the card.
+                namesLater={current && !current.listId ? (current.catalog.id ? "on-their-own" : "after-change") : undefined}
+              />
+            ) : null}
 
             {may("page") ? <div id="links" className="scroll-mt-32"><LinkEditor links={store.links} folder={pictures} /></div> : null}
 

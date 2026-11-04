@@ -162,8 +162,12 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
   }
 }
 
-/** A reading kept: its value, when it was read, whether it is older than the day's budget let it be, and whether the last try failed (counted). */
-export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean };
+/**
+ * A reading kept: its value, when it was read, whether it is older than the day's budget let it be, whether the last
+ * try failed (counted), and whether who it would name was left out for lack of a list to look them up in (keptReading;
+ * the studio says so, never inferring it from an empty list).
+ */
+export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; unnamed?: boolean };
 
 /**
  * The copy kept only when nobody it names was deleted from the store, in one
@@ -218,8 +222,8 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   try {
     const [raw] = await redisPipeline([["GET", key]]);
     if (typeof raw === "string" && raw) {
-      const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown };
-      if (typeof parsed.at === "number" && parsed.value !== undefined) kept = { value: parsed.value as T, at: parsed.at, stale: false };
+      const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown; unnamed?: unknown };
+      if (typeof parsed.at === "number" && parsed.value !== undefined) kept = { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
     }
   } catch {
     kept = null;
@@ -253,8 +257,8 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   // is never one an erasure has to undo.
   if (!guard.listId) {
     const unnamed = guard.without(value, new Set(names));
-    await redisPipeline([["SET", key, JSON.stringify({ at: now, value: unnamed }), "EX", READING_KEEP_SECONDS]]).catch(() => {});
-    return { value: unnamed, at: now, stale: false };
+    await redisPipeline([["SET", key, JSON.stringify({ at: now, value: unnamed, unnamed: true }), "EX", READING_KEEP_SECONDS]]).catch(() => {});
+    return { value: unnamed, at: now, stale: false, unnamed: true };
   }
   // Kept only when nobody it names was deleted meanwhile, checked where it is written (READING_COPY). Someone was:
   // shown without them and not kept; the next reading is made again without them. The step could not be run:

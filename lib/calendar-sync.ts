@@ -546,6 +546,8 @@ export function bookedCalendar(
         : `${title} (no one booked yet)`;
     const description = [
       ...(slot.people.length ? [slot.people.length === 1 ? "Booked by:" : "Booked:", ...slot.people.map(who)] : ["Nobody has booked this yet."]),
+      // Unnamed for lack of a list (never a deleted person's booking): said, and that the names come back.
+      ...(slot.people.some((p) => p.unnamed) ? ["", "Names show here once your store's details are up to date."] : []),
       ...(place ? ["", `In person, at: ${placeLine(place)}`] : room ? ["", `Join: ${room}`] : []),
       ...(video ? [VIDEO_ROOM_NOTE] : []),
       ...(!room && setup?.video ? ["", "A private video room is made for it when the first person books."] : []),

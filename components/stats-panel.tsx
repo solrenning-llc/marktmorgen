@@ -415,6 +415,8 @@ export type NumbersReading = {
   backAt: number;
   /** None of the sales kept and none may be read today. */
   salesUsed: boolean;
+  /** The biggest buyers left out of the kept sales for lack of a list (components/buyer-numbers.tsx says when they come back). */
+  buyersLater?: "on-their-own" | "after-change";
   /** The last try failed after calling Stripe, and was counted (inbox C4-53). */
   failed?: boolean;
   /** Readings of this kind left today. */
@@ -1014,7 +1016,7 @@ export function StatsPanel({
       ) : null}
 
       {range !== "all" && data.buyers ? (
-        <BuyerNumbers windows={data.buyers} range={range} span={span} currency={data.currency ?? "usd"} top={data.topBuyers} />
+        <BuyerNumbers windows={data.buyers} range={range} span={span} currency={data.currency ?? "usd"} top={data.topBuyers} buyersLater={reading?.buyersLater} />
       ) : null}
 
       {salesKnown && data.hours ? <BuyingHours hours={data.hours.sales} /> : null}

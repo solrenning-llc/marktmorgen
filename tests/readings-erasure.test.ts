@@ -334,6 +334,8 @@ async function main(): Promise<void> {
   is(`the numbers still shown on every call, from the copy kept once the day's readings are used (${JSON.stringify(salesStates)})`, salesStates.includes("ReadingsUsed"), false);
   is("a copy is kept, with its totals, naming nobody", [salesKept !== "", /"cents":\d/.test(salesKept), salesKept.includes(shy), salesKept.includes(bold)], [true, true, false, false]);
   is("and nothing shown names them either", [salesShown.includes(shy), salesShown.includes(bold)], [false, false]);
+  const flagged = await keptSales(busyStore, Date.now() + 5, true).catch(() => null);
+  is("and the studio is told the biggest buyers were left out for lack of a list, from the copy kept too (not from an empty list)", [flagged?.stale, flagged?.unnamed], [true, true]);
 
   redis.run(["DEL", listTry]);
   const shyCaller = normaliseEmail("shy.caller@example.com");

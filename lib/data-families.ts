@@ -213,8 +213,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:cal:builds:": E, "nl:cal:pace:": E, "nl:cal:refused:": E, "nl:cal:chg:": X(40),
   // A store's readings of its numbers (lib/store-readings.ts, C4-4): by its id, gone with it.
   "nl:reading:": E, "nl:reading:day:": E,
-  // A store with no list: its one try of the day to be given one (lib/store-readings.ts, listForNaming).
-  "nl:list:try:": X(2),
+  // A store with no list: its one try of the day to be given one (lib/store-readings.ts, listForNaming). By its id,
+  // gone with it, as its readings' counts are (it also expires in two days).
+  "nl:list:try:": E,
   "nl:call:busy:": E, "nl:call:confirmed:": X(430), "nl:call:creator-reminded:": E, "nl:call:lock:": E,
   "nl:call:moved:": X(200), "nl:call:reminded:": X(430), "nl:call:remindq": I, "nl:call:room:": E, "nl:call:series:": E,
   "nl:callteam:": E, "nl:callteam:rr:": E,

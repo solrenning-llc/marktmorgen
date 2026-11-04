@@ -230,32 +230,36 @@ export const HANDOFF_WORDS =
  * #2084): "promote" and the Portuguese and Spanish "promover" ("promovemos",
  * "promoveu"), not "promo", "promoção" or "promocional"; the Dutch
  * "afkorting" (abbreviation), "verkorting" and "inkorting" (shortening), not
- * "zomerkorting" or "kortingscode"; the verbs to guarantee and the French
- * "remise" as handing over (GUARANTEE_NOUNS, REMISE_AS_DISCOUNT).
+ * "zomerkorting" or "kortingscode"; a verb to guarantee that only says how
+ * access works and the French "remise" as handing over (GUARANTEE_WORDS,
+ * REMISE_AS_DISCOUNT).
  */
 /**
- * The guarantee stem shared by Spanish, Portuguese, French, German, Italian
- * and Dutch: its nouns ("garantía", "garantia", "garantie", "Garantie",
- * "Garantiezeit") and the participles that promise ("garantizado",
- * "garantido", "garanti", "garantiert", "garantito"), but not the verbs that
- * say what a store does ("garantizar el acceso", "garantimos", "garante",
- * "garantit", "garantire", "garantisce", "garantieren"). "garanzia" is the
- * Italian term below, "gegarandeerd" the Dutch one. English keeps the whole
- * stem: there the noun and the verb are one word ("a guarantee", "we
- * guarantee"), so a reply that guarantees is refused either way.
+ * The guarantee stem shared by Spanish, Portuguese, French, German and
+ * Italian, every form, as in English: a noun ("garantía", "Garantie"), a
+ * participle ("garantizado", "garanti") and a verb that promises
+ * ("Garantizamos que vas a duplicar tus ventas", "Garantimos resultados",
+ * "Nous garantissons des résultats", "Wir garantieren Ergebnisse",
+ * "Garantiamo risultati"). Only the phrases that say how access works pass:
+ * the word followed by access ("garantizar el acceso", "garantir o acesso",
+ * "garantit l'accès", "garantire l'accesso", "garantieren den Zugang") or
+ * after it ("den Zugang zu garantieren"); "l'" may be joined, as the
+ * deal-word check reads a split word joined. In doubt it is refused; a store
+ * that wrote the same word allows it, as with any term (C3-107).
  */
-const GUARANTEE_NOUNS = "garant(?:[ií]as?|izad[oa]s?|id[oa]s?|is?|ie(?!r(?:e|en|st)(?!\\p{L}))\\p{L}*|it[oaie])";
+const GUARANTEE_WORDS =
+  "(?<!zugang (?:zu )?)garant\\p{L}*(?! (?:el |o |l'?|den )?(?:acceso|acesso|acc[eè]s|accesso|zugang)(?!\\p{L}))";
+/** The Dutch verb ("Wij garanderen resultaten"), but for access ("garanderen de toegang", "de toegang te garanderen"). */
+const GUARANTEE_WORDS_NL = "(?<!toegang (?:te )?)garande\\p{L}*(?! (?:de |het )?toegang(?!\\p{L}))";
 /**
- * The French "remise" is a discount only where its neighbours say so: after
- * "une" or "des", after a percentage ("20 % de remise"), or before an amount
- * ("remise de 20 %"), "sur" or a discount adjective ("remises
- * exceptionnelles", "remise spéciale", "remise immédiate", "de bienvenue",
- * "de fidélité"). Any other "remise" is handing over ("remise en main
- * propre", "la remise du certificat", "date de remise") and passes; a figure
- * in it is still held to the facts like any number.
+ * The French "remise" is a discount ("la remise exclusive", "une remise de
+ * 20 %"), but for the phrases of handing over, which pass: "remise en"
+ * ("remise en main propre", "remise en forme"), "remise du", "de la", "de
+ * l'", "des" (not "des frais", a waiver of fees), "de" before a possessive
+ * ("remise de votre certificat") and "date de remise" (C3-107).
  */
 const REMISE_AS_DISCOUNT =
-  "(?:une|des) remises?|\\d+[- ]?% de remises?|remises? (?:(?:de |d')?\\d+|sur|exceptionnelles?|sp[ée]ciales?|imm[ée]diates?|de bienvenue|de fid[ée]lit[ée])";
+  "(?<!dates? de )remises?(?! (?:(?:en|du|de la|des(?! frais)|de (?:votre|vos|ton|ta|tes|son|sa|ses|leur|leurs|notre|nos))(?!\\p{L})|de l'))";
 const DEAL_TERMS = [
   // English
   "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|u?v\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
@@ -264,7 +268,7 @@ const DEAL_TERMS = [
   "five[- ]stars?", "5[- ]stars?",
   // Spanish
   "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promociona(?:l|les|is)", "rebaj\\p{L}*", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad",
-  "date prisa", "s[oó]lo hoy", GUARANTEE_NOUNS, "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
+  "date prisa", "s[oó]lo hoy", GUARANTEE_WORDS, "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
   // French
   "r[ée]ductions?", REMISE_AS_DISCOUNT, "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
   "livraison gratuite", "soldes", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
@@ -277,7 +281,7 @@ const DEAL_TERMS = [
   "garanz\\p{L}*", "saldi", "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
   // Dutch
   "korting\\p{L}*", "\\p{L}+(?<!(?<!\\p{L})(?:af|ver|in))korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
-  "gegarandeerd\\p{L}*", "\\p{L}*uitverkoop\\p{L}*", "vijf sterren",
+  "gegarandeerd\\p{L}*", GUARANTEE_WORDS_NL, "\\p{L}*uitverkoop\\p{L}*", "vijf sterren",
   // Portuguese
   "descontos?", "cup(?:om|ons)", "cup(?:[aã]o|[oõ]es)", "ofertas? limitadas?", "[uú]ltima oportunidade", "s[oó] hoje", "frete gr[aá]tis", "depoimentos?",
   "testemunhos?", "cinco estrelas", "mais vendid[oa]s?",

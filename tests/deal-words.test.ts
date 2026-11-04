@@ -189,20 +189,25 @@ is("while a site in any case is still refused", [
 part("Review of #2084: honest words that only share letters with a deal word pass");
 const course = "Pottery course. Lessons online.";
 is("the Portuguese and Spanish verb promover", ["Nós promovemos o acesso aos cursos.", "O curso promove a criatividade.", "Ela promoveu o evento.", "Vamos promover o curso.", "El curso promueve la creatividad."].filter((reply) => !heldToFacts(reply, course)), []);
-is("the verbs to guarantee, in the store languages that have a noun of their own", [
+is("a verb to guarantee that only says how access works", [
   "Para garantizar el acceso, inicia sesión.", "Garantizamos el acceso al curso.", "El curso garantiza el acceso de por vida.",
   "Para garantir o acesso, entre na sua conta.", "Garantimos o acesso ao curso.", "O curso garante o acesso.",
   "Pour garantir l'accès, connectez-vous.", "Le cours garantit l'accès.", "Per garantire l'accesso, accedi.", "Il corso garantisce l'accesso.",
-  "Wir garantieren den Zugang.",
+  "Wir garantieren den Zugang.", "Um den Zugang zu garantieren, melden Sie sich an.", "Wij garanderen de toegang tot de cursus.",
 ].filter((reply) => !heldToFacts(reply, course)), []);
+is("but a verb that promises is refused, in every language (C3-107)", [
+  "Garantizamos que vas a duplicar tus ventas.", "Garantimos resultados.", "Nous garantissons des résultats.", "Wir garantieren Ergebnisse.", "Garantiamo risultati.", "Wij garanderen resultaten.",
+].filter((reply) => heldToFacts(reply, course)), []);
+is("unless the store wrote the same word", heldToFacts("Garantizamos resultados.", "Curso de cerámica. Garantizamos resultados o te devolvemos el dinero."), true);
 is("Dutch words for an abbreviation or a shortening", ["Een afkorting staat in de lijst.", "De afkortingen worden uitgelegd.", "Een verkorting van de les.", "De inkorting van het programma."].filter((reply) => !heldToFacts(reply, course)), []);
-is("French remise as handing over", ["La remise en main propre est possible.", "La remise du certificat a lieu en juin.", "La date de remise est sur la page.", "La remise des diplômes est en juin."].filter((reply) => !heldToFacts(reply, course)), []);
+is("French remise as handing over", ["La remise en main propre est possible.", "La remise du certificat a lieu en juin.", "La date de remise est sur la page.", "La remise des diplômes est en juin.", "La remise de votre certificat se fait en ligne.", "Un cours de remise en forme."].filter((reply) => !heldToFacts(reply, course)), []);
+is("any other remise is a discount and is refused (C3-107)", ["Profitez de la remise exclusive pour les abonnés.", "La remise réservée aux membres.", "La remise des frais d'inscription."].filter((reply) => heldToFacts(reply, course)), []);
 is("while the deal words are still caught", caught([
   "promoção", "promo", "promocional", "promoción", "código promocional", "promo code",
   "garantía", "garantías", "garantia", "garantias", "garantizado", "garantido", "garantie", "Garantie", "Garantiezeit", "garantiert", "garantito", "garanzia", "gegarandeerd",
   "guarantee", "guaranteed", "guarantees",
   "zomerkorting", "kortingscode", "extra korting", "prijskorting",
-  "une remise", "des remises", "remise de 20 %", "remises exceptionnelles", "une remise spéciale", "20 % de remise", "remise sur tout",
+  "une remise", "des remises", "remise de 20 %", "remises exceptionnelles", "une remise spéciale", "20 % de remise", "remise sur tout", "remise", "remises", "Wij garanderen",
 ]), []);
 is("and in English, where the noun and the verb are one word, a reply that guarantees is still refused", heldToFacts("We guarantee access.", course), false);
 done();

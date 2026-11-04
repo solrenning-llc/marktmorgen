@@ -38,7 +38,7 @@ import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
 import { twoStepOn } from "@/lib/two-step";
-import { listPasskeys } from "@/lib/passkeys";
+import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
@@ -191,7 +191,9 @@ export async function teamTwoStepBlocks(store: Store, email: string, role: Role,
  */
 export type SecondStepWay = "passkey" | "app" | "set_up";
 
-export async function secondStepWay(email: string): Promise<SecondStepWay> {
+export async function secondStepWay(email: string, now = Date.now()): Promise<SecondStepWay> {
+  // A passkey whose wait to be removed has run out goes first, so it is never offered (lib/passkeys.ts).
+  await pendingRemoval(email, now);
   const [app, keys] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
   return keys.length > 0 ? "passkey" : app ? "app" : "set_up";
 }

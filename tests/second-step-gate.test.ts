@@ -5,7 +5,8 @@
  * on no app; a session opened with the passkey or the app's code does. An
  * account with neither still adds its first from the link. A passkey removed
  * from a link session waits REMOVAL_DAYS with an email (the way back for a
- * lost passkey), and a login with a passkey or a code calls it off; once it
+ * lost passkey); logging in with that very passkey does not call it off
+ * (owner C3-88), another passkey or the app's code does; once it
  * has gone, the link adds a new one. Synthetic records; no email leaves.
  */
 import { createHash } from "node:crypto";
@@ -19,6 +20,7 @@ import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
 import { hasSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
+import { secondStepWay } from "@/lib/team";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { POST as passkeyRoute } from "@/app/api/auth/passkey/route";
 import { POST as passkeySignIn } from "@/app/api/auth/passkey/signin/route";
@@ -50,8 +52,10 @@ async function linkSession(email: string): Promise<string> {
   const response = await callback(new NextRequest(`${ORIGIN}/api/auth/callback`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token }) }));
   return (response.headers.get("set-cookie") ?? "").match(/nl_session=([^;]*)/)?.[1] ?? "";
 }
+// Each test browser its own address, so the sign-in's tries per address (app/api/auth/passkey/signin) never run out here.
+let browsers = 0;
 const asJson = (url: string, body: unknown, cookie: string) =>
-  new NextRequest(url, { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify(body) });
+  new NextRequest(url, { method: "POST", headers: { "content-type": "application/json", cookie, "x-forwarded-for": `198.51.100.${Math.floor(browsers++ / 2) % 250}` }, body: JSON.stringify(body) });
 const passkeys = async (session: string, body: Record<string, unknown>) => {
   const r = await passkeyRoute(asJson(`${ORIGIN}/api/auth/passkey`, body, `nl_session=${session}`));
   return { status: r.status, ...((await r.json()) as { ok: boolean; error?: string; removeOn?: number }) };
@@ -117,12 +121,23 @@ async function main(): Promise<void> {
   is("the account is told at once", mails.some((m) => m.to === KAI && m.subject === "A passkey is set to be removed from your Marktmorgen account"), true);
   is("asking again does not move the day", (await passkeys(byLink, { action: "remove", id: "cred-kai-1" })).removeOn, removed.removeOn);
   is("still no passkey from the link meanwhile", (await passkeys(byLink, { action: "options" })).error, "second_step");
-  await signInWithPasskey(kai);
-  is("a login with the passkey calls it off", [await pendingRemoval(KAI), (await listPasskeys(KAI)).length], [null, 1]);
+  const stillIn = await signInWithPasskey(kai);
+  is("logging in with that very passkey within the days works", stillIn.length, 64);
+  is("but does not keep it: the removal still waits", [(await pendingRemoval(KAI))?.ids, (await listPasskeys(KAI)).length], [["cred-kai-1"], 1]);
+  is("and nothing says it stays", mails.some((m) => m.to === KAI && m.subject === "Your passkeys stay on your Marktmorgen account"), false);
+  const kaiB = makePasskey(KAI, "cred-kai-b");
+  await kaiB.keep();
+  const byOther = await signInWithPasskey(kaiB);
+  is("logging in with another passkey calls it off", [byOther.length, await pendingRemoval(KAI), (await listPasskeys(KAI)).length], [64, null, 2]);
   is("and says so", mails.some((m) => m.to === KAI && m.subject === "Your passkeys stay on your Marktmorgen account"), true);
+  await passkeys(byOther, { action: "remove", id: "cred-kai-b" });
   await passkeys(byLink, { action: "remove", id: "cred-kai-1" });
-  const after = Date.now() + (REMOVAL_DAYS * 86_400_000) + 60_000;
-  is("waiting its days, it goes", [await pendingRemoval(KAI, after), (await listPasskeys(KAI)).length, await hasSecondStep(KAI, after)], [null, 0, false]);
+  const dropKai = `nl:pk:drop:${hex(`nimbus-passkey-drop:${KAI}`).slice(0, 40)}`;
+  const [rawDrop] = await redis.pipeline([["GET", dropKai]]);
+  await redis.pipeline([["SET", dropKai, JSON.stringify({ ...JSON.parse(String(rawDrop)), at: Date.now() - 1_000 })]]);
+  is("once its days are over, it does not log in", await signInWithPasskey(kai), "");
+  const after = Date.now() + 60_000;
+  is("it is gone", [await pendingRemoval(KAI, after), (await listPasskeys(KAI)).length, await hasSecondStep(KAI, after)], [null, 0, false]);
   const back = await linkSession(KAI);
   is("then the link adds a new one", (await passkeys(back, { action: "options" })).ok, true);
 
@@ -132,6 +147,25 @@ async function main(): Promise<void> {
   const withKey = await signInWithPasskey(kai2);
   is("removed now", [(await passkeys(withKey, { action: "remove", id: "cred-kai-2" })).removeOn, (await listPasskeys(KAI)).length], [undefined, 0]);
   is("the session that removed it stays, without its mark", [await emailForSession(withKey), await sessionSecondStep(withKey, KAI)], [KAI, null]);
+
+  part("A team member is never offered a passkey whose days are over");
+  const ADA = "ada-overdue@example.com";
+  const ada = makePasskey(ADA, "cred-ada-1");
+  await ada.keep();
+  await scheduleRemoval(ADA, "cred-ada-1", "f".repeat(64), Date.now() - (REMOVAL_DAYS * 86_400_000) - 60_000);
+  is("the way offered is to set one up, and the passkey is gone", [await secondStepWay(ADA), (await listPasskeys(ADA)).length], ["set_up", 0]);
+
+  part("The app's code calls a removal off too");
+  const ZOE = "zoe-code@example.com";
+  const zoe = makePasskey(ZOE, "cred-zoe-1");
+  await zoe.keep();
+  const zoeApp = await turnOnApp(ZOE, "zoe-backup@example.org");
+  is("asked from a session without the step", typeof (await passkeys(await openSession(ZOE), { action: "remove", id: "cred-zoe-1" })).removeOn, "number");
+  const tokenZoe = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenZoe}`).slice(0, 40)}`, ZOE, "EX", 900]]);
+  const heldZoe = await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenZoe }));
+  await codeRoute(form(`${ORIGIN}/api/auth/code`, { code: zoeApp.codes[0] }, `nl_2fa=${cookieOf(heldZoe, "nl_2fa")}`));
+  is("logging in with a recovery code keeps the passkey", [await pendingRemoval(ZOE), (await listPasskeys(ZOE)).length], [null, 1]);
 
   part("What a removed passkey or a turned-off app opened goes with it");
   const LEA = "lea-two-keys@example.com";

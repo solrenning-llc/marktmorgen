@@ -4,7 +4,7 @@ import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, ses
 import { LockBusyError } from "@/lib/redis-lock";
 import { isRedisConfigured } from "@/lib/redis";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { PASSKEY_COOKIE, cancelRemoval, listPasskeys, signInOptions, signInWith } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, cancelRemoval, listPasskeys, pendingRemoval, signInOptions, signInWith } from "@/lib/passkeys";
 import { cancelReset, endRecoveryAccess } from "@/lib/two-step";
 
 const MAX_BODY_BYTES = 16_000;
@@ -55,8 +55,9 @@ export async function POST(request: NextRequest) {
 
       // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
       const id = await openSession(email, "passkey", signed.id);
-      // Removed between its check and this session (its wait ran out, or it was removed in the studio):
-      // the session it would have opened is closed again, as the removal closes what it opened.
+      // Removed between its check and this session (its wait ran out, applied here first, or it was removed
+      // in the studio): the session it would have opened is closed again, as the removal closes what it opened.
+      const waiting = await pendingRemoval(email);
       if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) {
         await endSession(id);
         return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
@@ -65,11 +66,17 @@ export async function POST(request: NextRequest) {
       // is closed, and only the new one is kept.
       const previous = request.cookies.get(SESSION_COOKIE)?.value;
       if (previous && previous !== id) await endSession(previous);
-      // A passkey is the second step: a pending request to turn two-step login off is called off (lib/two-step.ts).
-      await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
-      await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
-      // And the passkeys set to be removed from a session without it stay (lib/passkeys.ts scheduleRemoval).
-      await cancelRemoval(email).catch((error) => console.error("calling off a passkey removal failed", error));
+      // A passkey is the second step: a pending request to turn two-step login off is called off, and what
+      // the recovery address opened is closed (lib/two-step.ts). Not by a passkey that is itself set to be
+      // removed (owner C3-88): whoever holds it may not be its owner, so it calls off nothing that asked
+      // for its removal, the recovery path and the way in without the second step included.
+      const doomed = waiting?.ids.includes(signed.id) === true;
+      if (!doomed) {
+        await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
+        await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
+      }
+      // And the other passkeys set to be removed stay; this one does not keep itself (lib/passkeys.ts cancelRemoval, owner C3-88).
+      await cancelRemoval(email, { except: signed.id }).catch((error) => console.error("calling off a passkey removal failed", error));
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));
       response.headers.append("Set-Cookie", `${PASSKEY_COOKIE}=; Path=/api/auth/passkey; Max-Age=0; HttpOnly; SameSite=Strict${secure}`);

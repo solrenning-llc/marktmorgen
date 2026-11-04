@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "keep") {
       const id = typeof body.id === "string" ? body.id.slice(0, 1_400) : "";
-      return (await cancelRemoval(email, id)) ? Response.json({ ok: true }) : Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      return (await cancelRemoval(email, { only: id })) ? Response.json({ ok: true }) : Response.json({ ok: false, error: "unknown" }, { status: 404 });
     }
     if (body.action === "options") {
       return Response.json({ ok: true, options: await registrationOptions(email, session) }, { headers: { "Cache-Control": "no-store" } });

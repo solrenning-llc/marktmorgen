@@ -71,6 +71,13 @@ export type TermsCheckInput = {
   realDeadline: boolean;
   /** Whether the product has a real stock or seat limit set in the studio. */
   realStockLimit: boolean;
+  /**
+   * Read as an ad (lib/ad-creative-check.ts): the wider urgency phrases and
+   * "from $X" as a price. Terms, policies and descriptions keep the narrower
+   * set, where "Support ends in 30 days" or "the last day of the course" are
+   * plain facts, not urgency.
+   */
+  asAd?: boolean;
   /** Whether the creator has said they hold a license to sell this content (the Terms' resale rule). */
   resaleLicense: boolean;
 };
@@ -153,12 +160,22 @@ function fastMoneyExcused(text: string, index: number, length: number): boolean 
 /** Between the words of a phrase: spaces or a hyphen ("last-chance", "limited  time"). */
 const W = String.raw`[\s-]+`;
 const MONTH = String.raw`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?`;
+/** The phrases read in terms, policies and descriptions: the narrower set, with spaces or a hyphen between words. */
 const URGENCY_TIME = new RegExp(
+  String.raw`\b(limited${W}time|ends${W}(?:today(?!['’])|tonight|soon|at${W}midnight|(?:this${W})?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))|today${W}only|only${W}today|last${W}chance|price${W}(?:goes|will${W}go)${W}up|before${W}the${W}timer${W}(?:runs${W}out|ends)|act${W}now|hurry(?![\s-]*(?:less|up[\s-]+and)))\b`,
+  "gi",
+);
+const URGENCY_STOCK = new RegExp(
+  String.raw`\b(only${W}\d+${W}(?:left(?![\s-]*(?:handed|turns?|side|over))|spots?|seats?|copies|places)|limited${W}(?:spots|seats|copies|places)|selling${W}fast(?![\s-]*food)|almost${W}sold${W}out)\b`,
+  "gi",
+);
+/** The phrases read in an ad: the wider set. */
+const AD_URGENCY_TIME = new RegExp(
   String.raw`\b(limited${W}time|ends${W}(?:on${W})?(?:today(?!['’])|tonight|soon|at${W}midnight|midnight|in${W}\d+${W}(?:hours?|days?|minutes?)|(?:this${W})?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|${MONTH}${W}\d{1,2}|\d{1,2}/\d{1,2})|expires${W}(?:today|tonight|soon)|final${W}hours|last${W}day|today${W}only|only${W}today|last${W}chance|price${W}(?:goes|will${W}go|is${W}going)${W}up|price${W}will${W}rise|prices?${W}(?:will${W})?(?:increase|rise|go${W}up)(?:${W}soon)?|before${W}the${W}timer${W}(?:runs${W}out|ends)|act${W}(?:now|fast|today)|hurry(?![\s-]*(?:less|up[\s-]+and))|don['’]?t${W}miss${W}out)\b`,
   "gi",
 );
 const HOW_MANY = String.raw`(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|a${W}few)`;
-const URGENCY_STOCK = new RegExp(
+const AD_URGENCY_STOCK = new RegExp(
   String.raw`\b((?:only|just)${W}${HOW_MANY}${W}(?:left(?![\s-]*(?:handed|turns?|side|over))|remaining)|${HOW_MANY}${W}(?:spots?|seats?|places|copies)${W}(?:left|remaining)|only${W}${HOW_MANY}${W}(?:spots?|seats?|copies|places)|limited${W}(?:spots|seats|copies|places)|last${W}few${W}(?:spots|seats|copies|places)|selling${W}(?:out${W})?fast(?![\s-]*food)|sells${W}fast|almost${W}(?:sold${W}out|gone)|nearly${W}sold${W}out|while${W}supplies${W}last)\b`,
   "gi",
 );
@@ -167,7 +184,9 @@ const RESALE = /\b(resell(?:ing)? rights?|resale rights?|master resell(?:ing)? r
 
 const MONEY = /\$\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))?(?!\d)/g;
 /** A word saying what follows is the price, just before the amount. */
-const PRICE_WORD = /\b(price|priced|costs?|pay|paying|only|just|for|now|today|sale|from|starting at|starts at)\b[^.!?;\n$]{0,12}$/i;
+const PRICE_WORD = /\b(price|priced|costs?|pay|paying|only|just|for|now|today|sale)\b[^.!?;\n$]{0,12}$/i;
+/** In an ad, "from $X" and "starting at $X" say a price too. */
+const AD_PRICE_WORD = /\b(price|priced|costs?|pay|paying|only|just|for|now|today|sale|from|starting at|starts at)\b[^.!?;\n$]{0,12}$/i;
 /** A word saying what follows is an earlier price ("was $49", "instead of $49"): only true while a sale is running. */
 const WAS_PRICE_WORD = /\b(was|were|instead of|regularly|originally|normally|usually|reg)\b\.?[^.!?;\n$]{0,8}$/i;
 /** An amount that is not the product's price: shipping, tax, a fee, a stated value, a saving. */
@@ -275,7 +294,7 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
         }
         continue;
       }
-      if (!PRICE_WORD.test(before)) continue;
+      if (!(input.asAd ? AD_PRICE_WORD : PRICE_WORD).test(before)) continue;
       const cents = Number(m[1].replace(/,/g, "")) * 100 + (m[2] ? Number(m[2]) : 0);
       if (cents === input.priceCents) continue;
       add("price_mismatch", index, m[0].length,
@@ -323,7 +342,7 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
   }
 
   if (!input.realDeadline) {
-    for (const m of text.matchAll(URGENCY_TIME)) {
+    for (const m of text.matchAll(input.asAd ? AD_URGENCY_TIME : URGENCY_TIME)) {
       if (negated(text, m.index ?? 0, m[0].length)) continue;
       add("false_urgency", m.index ?? 0, m[0].length,
         "This says time is running out, but no end date or sale deadline is set for this product.",
@@ -331,7 +350,7 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
     }
   }
   if (!input.realStockLimit) {
-    for (const m of text.matchAll(URGENCY_STOCK)) {
+    for (const m of text.matchAll(input.asAd ? AD_URGENCY_STOCK : URGENCY_STOCK)) {
       if (negated(text, m.index ?? 0, m[0].length)) continue;
       add("false_urgency", m.index ?? 0, m[0].length,
         "This says few are left, but no stock or seat limit is set for this product.",

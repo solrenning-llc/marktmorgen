@@ -65,4 +65,11 @@ is("and a line of hidden characters only is no headline", rules({ headline: "\u2
 is("ordinary words in other alphabets are not a disguise", [rules({ headline: "Хлеб дома" }).includes("disguised"), rules({ headline: "Ψωμί at home" }).includes("disguised")], [false, false]);
 is("the check says it reads English words only", AD_NOT_CHECKED.some((line) => line.includes("English words only")), true);
 
+part("Review of the edge fixes: emoji, right-to-left text and Greek brand letters are not disguises");
+is("emoji made with joiners", [rules({ headline: "Family 👨\u200d👩\u200d👧 yoga course" }), rules({ headline: "Love ❤️\u200d🔥 baking course" }), rules({ headline: "Flag 🏳️\u200d🌈 pride guide" })].map((r) => r.includes("disguised")), [false, false, false]);
+is("Arabic and Hebrew with their direction marks", [rules({ headline: "دورة الخبز\u200f في البيت" }), rules({ headline: "קורס אפייה\u200f בבית" })].map((r) => r.includes("disguised")), [false, false]);
+is("Greek letters in a brand name", [rules({ headline: "Δelta Yoga" }), rules({ headline: "Ωmega 3 guide" })].map((r) => r.includes("disguised")), [false, false]);
+is("a Greek look-alike inside a Latin word is", rules({ headline: "Lαst chance" }).includes("disguised"), true);
+is("the creator is shown where a hidden character is", checkAdText(ad({ headline: "Bread\u200b at home" }), context).refusals.find((r) => r.rule === "disguised")?.excerpt, "Bread[hidden character] at home");
+
 done();

@@ -72,12 +72,34 @@ export function adPlain(text: string): string {
   return text.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/gu, " ").trim();
 }
 
-/** A word that mixes Latin letters with Cyrillic or Greek ones ("Lаst" with a Cyrillic "а"): a disguise, never a real word. */
+/**
+ * Greek capitals and small letters that look like Latin ones: a Latin word
+ * holding one is a disguise. Other Greek letters (Δ, Ω, π, μ) are ordinary
+ * in brand names ("Δelta Yoga", "Ωmega 3") and are let through.
+ */
+const GREEK_LOOKALIKES = /[ΑΒΕΖΗΙΚΜΝΟΡΤΥΧαικνορτυχ]/u;
+
+/** A word that mixes Latin letters with Cyrillic ones, or with Greek look-alikes ("Lаst" with a Cyrillic "а"): a disguise, never a real word. */
 function mixedScriptWord(text: string): string | null {
   for (const [word] of text.normalize("NFKC").matchAll(/\p{L}+/gu)) {
-    if (/\p{Script=Latin}/u.test(word) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(word)) return word;
+    if (!/\p{Script=Latin}/u.test(word)) continue;
+    if (/\p{Script=Cyrillic}/u.test(word) || GREEK_LOOKALIKES.test(word)) return word;
   }
   return null;
+}
+
+/**
+ * Characters that hide inside words and change nothing a reader sees: zero
+ * width space, word joiner, byte order mark, soft hyphen, and the bidi
+ * overrides and embeddings. Not the joiners emoji and some scripts are made
+ * of (U+200C, U+200D), nor the direction marks Arabic and Hebrew text use.
+ */
+const HIDDEN = /[\u200B\u2060\uFEFF\u00AD\u202A-\u202E]/u;
+/** Where a hidden character is, with the words around it, for the creator to find it. */
+function hiddenAt(text: string): string {
+  const at = text.search(HIDDEN);
+  if (at < 0) return "";
+  return `${text.slice(Math.max(0, at - 20), at)}[hidden character]${text.slice(at + 1, at + 21)}`.replace(new RegExp(HIDDEN.source, "gu"), "");
 }
 
 const normal = (words: string) => words.toLowerCase().replace(/[\s ]+/g, " ").replace(/[.!?,;:]+$/, "").trim();
@@ -102,11 +124,11 @@ export function checkAdText(ad: AdText, context: AdContext): AdCheck {
     if (!text) continue;
     // Hidden characters or letters of another alphabet inside a word: refused, whatever the words say.
     const mixed = mixedScriptWord(raw);
-    if (/\p{Cf}/u.test(raw) || mixed) {
+    if (HIDDEN.test(raw) || mixed) {
       refusals.push({
         field,
         rule: "disguised",
-        excerpt: mixed ?? "",
+        excerpt: mixed ?? hiddenAt(raw),
         why: mixed ? `"${mixed}" mixes letters of two alphabets, which looks the same as another word but is not.` : "This line has hidden characters in it.",
         fix: "Type the line again with ordinary letters and spaces.",
       });
@@ -121,6 +143,8 @@ export function checkAdText(ad: AdText, context: AdContext): AdCheck {
       realDeadline: context.realDeadline,
       realStockLimit: context.realStockLimit,
       resaleLicense: true,
+      // The wider urgency phrases and "from $X" as a price; positions are in the read line, not the raw one.
+      asAd: true,
     });
     for (const w of found) {
       const finding = { field, rule: w.kind, excerpt: w.excerpt, why: w.why, fix: w.fix };

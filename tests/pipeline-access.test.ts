@@ -95,6 +95,22 @@ async function main(): Promise<void> {
   await moveMemberships("sam2@example.com", "sam@example.com");
   cookies.sam = `${SESSION_COOKIE}=${await openSession("sam@example.com")}`;
 
+  part("Moving one's sign-in when the database fails");
+  await writePipelineAccess(statsId, "sam@example.com", { sales0: "none" }, store);
+  const realPipeline = redis.pipeline.bind(redis);
+  // Both the read of the restrictions and any write of them fail while the sign-in moves.
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => (c[0] === "HGET" || c[0] === "HSET") && String(c[1]).startsWith("nl:crm:pacc:"))) throw new Error("stand-in failure");
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  await moveMemberships("sam@example.com", "sam3@example.com");
+  redis.pipeline = realPipeline;
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam3@example.com")}`;
+  is("the new address never gets the store without its restrictions: it is not on the team at all", (await deal("sam", "wnew01")).status >= 400, true);
+  is("and the old address keeps its membership and its restrictions", [await readPipelineAccess(statsId, "sam@example.com"), (await readPipelineAccess(statsId, "sam3@example.com"))], [{ sales0: "none" }, {}]);
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam@example.com")}`;
+  is("the old address still works, still restricted", [(await deal("sam", "wnew01")).status, (await deal("sam", "lead00")).status], [200, 403]);
+
   part("Leaving the team");
   await writePipelineAccess(statsId, "sam@example.com", { wkshp1: "view" }, store);
   await removeMember(store, "sam@example.com");

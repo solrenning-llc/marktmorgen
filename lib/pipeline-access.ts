@@ -67,27 +67,23 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
 }
 
 /**
- * A teammate who moved their sign-in to another address keeps exactly the
- * restrictions they had: the field is moved as it is, unreadable or not. If
- * it cannot be moved, the new address gets a field that cannot be read, which
- * opens nothing (accessOf), never one that reads as no restriction.
+ * The first step of a teammate moving their sign-in to another address
+ * (lib/team.ts, moveMemberships): their restrictions are copied, as they
+ * are, unreadable or not, to the new address BEFORE the team record names
+ * it. Throws when the copy cannot be confirmed; the caller then leaves that
+ * store's membership on the old address, so the new one never has a store
+ * without its restrictions. The old field is deleted only once the team
+ * record has moved (forgetPipelineAccess).
  */
-export async function movePipelineAccess(statsId: string | null, from: string, to: string): Promise<void> {
+export async function copyPipelineAccess(statsId: string | null, from: string, to: string): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
   if (before === after) return;
-  try {
-    const [raw] = await redisPipeline([["HGET", accessKey(statsId), before]]);
-    if (raw === null || raw === undefined || raw === "") return;
-    await redisPipeline([
-      ["HSET", accessKey(statsId), after, String(raw)],
-      ["HDEL", accessKey(statsId), before],
-    ]);
-  } catch (error) {
-    await redisPipeline([["HSET", accessKey(statsId), after, "unreadable"]]).catch(() => {});
-    throw error;
-  }
+  const [raw] = await redisPipeline([["HGET", accessKey(statsId), before]]);
+  if (raw === null || raw === undefined || raw === "") return;
+  const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]);
+  if (written !== 0 && written !== 1) throw new Error("copying a teammate's pipeline access could not be confirmed");
 }
 
 /** A teammate who left: their restrictions go with them. */

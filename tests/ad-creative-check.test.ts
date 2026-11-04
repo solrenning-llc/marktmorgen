@@ -72,4 +72,9 @@ is("Greek letters in a brand name", [rules({ headline: "Δelta Yoga" }), rules({
 is("a Greek look-alike inside a Latin word is", rules({ headline: "Lαst chance" }).includes("disguised"), true);
 is("the creator is shown where a hidden character is", checkAdText(ad({ headline: "Bread\u200b at home" }), context).refusals.find((r) => r.rule === "disguised")?.excerpt, "Bread[hidden character] at home");
 
+part("Second review: more Greek look-alikes and invisible marks that are not format characters");
+is("Greek epsilon and lunate sigma inside a Latin word", [rules({ headline: "Limit\u03b5d time" }), rules({ headline: "Last \u03f2hance" })].map((r) => r.includes("disguised")), [true, true]);
+is("a combining grapheme joiner, a Hangul filler or a tag character", [rules({ headline: "Li\u034Fmited time" }), rules({ headline: "Bread\u3164 at home" }), rules({ headline: "Bread\u{E0041} at home" })].map((r) => r.includes("disguised")), [true, true, true]);
+is("and the rules still read the words behind a combining grapheme joiner", rules({ text: "Li\u034Fmited time offer." }).includes("false_urgency"), true);
+
 done();

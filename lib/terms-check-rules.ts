@@ -162,7 +162,7 @@ const W = String.raw`[\s-]+`;
 const MONTH = String.raw`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?`;
 /** The phrases read in terms, policies and descriptions: the narrower set, with spaces or a hyphen between words. */
 const URGENCY_TIME = new RegExp(
-  String.raw`\b(limited${W}time|ends${W}(?:today(?!['’])|tonight|soon|at${W}midnight|(?:this${W})?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))|today${W}only|only${W}today|last${W}chance|price${W}(?:goes|will${W}go)${W}up|before${W}the${W}timer${W}(?:runs${W}out|ends)|act${W}now|hurry(?![\s-]*(?:less|up[\s-]+and)))\b`,
+  String.raw`\b(limited${W}time|ends${W}(?:today(?!['’])|tonight|soon|at${W}midnight)|today${W}only|only${W}today|last${W}chance|price${W}(?:goes|will${W}go)${W}up|before${W}the${W}timer${W}(?:runs${W}out|ends)|act${W}now|hurry(?![\s-]*(?:less|up[\s-]+and)))\b`,
   "gi",
 );
 const URGENCY_STOCK = new RegExp(

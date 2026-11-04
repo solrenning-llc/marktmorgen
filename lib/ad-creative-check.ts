@@ -69,7 +69,7 @@ const QUOTE = /["“]([^"”]{8,400})["”],? ?(?:[-–—] ?|said |says )[A-Z]/
  * one space, so nothing can hide a price, a promise or urgency from the rules.
  */
 export function adPlain(text: string): string {
-  return text.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/gu, " ").trim();
+  return text.normalize("NFKC").replace(/\p{Cf}|[\u034F\u115F\u1160\u3164\u180B-\u180F]/gu, "").replace(/\s+/gu, " ").trim();
 }
 
 /**
@@ -77,11 +77,12 @@ export function adPlain(text: string): string {
  * holding one is a disguise. Other Greek letters (Δ, Ω, π, μ) are ordinary
  * in brand names ("Δelta Yoga", "Ωmega 3") and are let through.
  */
-const GREEK_LOOKALIKES = /[ΑΒΕΖΗΙΚΜΝΟΡΤΥΧαικνορτυχ]/u;
+const GREEK_LOOKALIKES = /[ΑΒΕΖΗΙΚΜΝΟΡΤΥΧαβγεηικνορτυχωϲϹϳͿ]/u;
 
 /** A word that mixes Latin letters with Cyrillic ones, or with Greek look-alikes ("Lаst" with a Cyrillic "а"): a disguise, never a real word. */
 function mixedScriptWord(text: string): string | null {
-  for (const [word] of text.normalize("NFKC").matchAll(/\p{L}+/gu)) {
+  // Read as typed and as folded: some look-alikes (the lunate sigma "ϲ") fold into other letters.
+  for (const [word] of `${text} ${text.normalize("NFKC")}`.matchAll(/\p{L}+/gu)) {
     if (!/\p{Script=Latin}/u.test(word)) continue;
     if (/\p{Script=Cyrillic}/u.test(word) || GREEK_LOOKALIKES.test(word)) return word;
   }
@@ -90,11 +91,13 @@ function mixedScriptWord(text: string): string | null {
 
 /**
  * Characters that hide inside words and change nothing a reader sees: zero
- * width space, word joiner, byte order mark, soft hyphen, and the bidi
- * overrides and embeddings. Not the joiners emoji and some scripts are made
+ * width space, word joiner and the invisible operators, byte order mark,
+ * soft hyphen, combining grapheme joiner, Hangul fillers, Mongolian
+ * variation selectors, tag characters, and the bidi overrides and
+ * embeddings. Not the joiners emoji and some scripts are made
  * of (U+200C, U+200D), nor the direction marks Arabic and Hebrew text use.
  */
-const HIDDEN = /[\u200B\u2060\uFEFF\u00AD\u202A-\u202E]/u;
+const HIDDEN = /[\u200B\u2060-\u2064\uFEFF\u00AD\u034F\u115F\u1160\u3164\u180B-\u180F\u202A-\u202E]|[\u{E0000}-\u{E007F}]/u;
 /** Where a hidden character is, with the words around it, for the creator to find it. */
 function hiddenAt(text: string): string {
   const at = text.search(HIDDEN);

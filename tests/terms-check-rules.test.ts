@@ -153,5 +153,6 @@ is("none of these warn in terms", plainFacts.filter((text) => kinds(text).includ
 is("but the same sentences in an ad are urgency where they are", ["Act today.", "Last day!", "Prices increase soon."].filter((text) => !kinds(text, { asAd: true }).includes("false_urgency")), []);
 is("'from $10' is a price only in an ad", [kinds("Plans start from $10 per month.").includes("price_mismatch"), kinds("Courses from $10.", { asAd: true }).includes("price_mismatch")], [false, true]);
 is("the old phrases still warn in terms, spaced or hyphenated", ["Last-chance offer.", "Limited  time only.", "Hurry!"].filter((text) => !kinds(text).includes("false_urgency")), []);
+is("a weekday in terms is a fact, not urgency; in an ad it is", [kinds("Support ends Friday.").includes("false_urgency"), kinds("Sale ends Friday.", { asAd: true }).includes("false_urgency")], [false, true]);
 
 done();

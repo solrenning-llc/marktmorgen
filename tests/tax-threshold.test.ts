@@ -91,6 +91,21 @@ test("uninspectable threshold evidence is unknown instead of below the threshold
   });
   assert.deepEqual(assessTaxThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null });
 });
+test("revoked direct threshold evidence returns unknown without an exception", () => {
+  for (const value of [{}, []]) {
+    const { proxy, revoke } = Proxy.revocable(value, {});
+    revoke();
+    assert.deepEqual(assessTaxThreshold(proxy, NOW), { status: "unknown", projectedApplicableMinor: null });
+  }
+});
+test("revoked ledger threshold evidence returns unknown without an exception", async () => {
+  const { assessTaxSalesThreshold } = await import("@/lib/tax-threshold");
+  for (const value of [{}, []]) {
+    const { proxy, revoke } = Proxy.revocable(value, {});
+    revoke();
+    assert.deepEqual(assessTaxSalesThreshold(proxy, NOW), { status: "unknown", projectedApplicableMinor: null });
+  }
+});
 test("exact plain and null-prototype snapshots keep their complete own amounts", () => {
   for (const id of ["ca-specified-supplies", "no-remote-services"] as const) {
     const value = row(id, TAX_THRESHOLD_RULES[id].thresholdMinor + 1);

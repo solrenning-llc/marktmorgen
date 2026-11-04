@@ -54,9 +54,9 @@ const money = (value: unknown): value is number =>
  */
 export function assessTaxThreshold(value: unknown, now = Date.now()): TaxThresholdAssessment {
   if (!Number.isSafeInteger(now) || now < 0 || now > 253_402_300_799_999) return stop("invalid");
-  if (!value || typeof value !== "object" || Array.isArray(value)) return stop("unknown");
   let data: Record<string, unknown>;
   try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return stop("unknown");
     if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return stop("unknown");
     // The snapshot must be exactly the reviewed own data, as for ledger evidence.
     // String-only enumeration would silently ignore additional symbol fields.
@@ -98,8 +98,8 @@ export type TaxSalesThresholdEvidence = {
  * accepting caller-provided totals. This is still an assessment of evidence,
  * never a nexus decision, registration or permission to complete a sale. */
 export function assessTaxSalesThreshold(value: unknown, now = Date.now()): TaxThresholdAssessment {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return stop("unknown");
   try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return stop("unknown");
     if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return stop("unknown");
     const keys = ["ruleId", "ledger", "completeRollingCoverage", "applicableScopeReviewed"] as const;
     if (Reflect.ownKeys(value).length !== keys.length) return stop("unknown");

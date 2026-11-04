@@ -19,6 +19,7 @@ is("a Persian name keeps its joiner", firstNameOf(`نیما${ch(0x200c)}ی`), `�
 
 part("When the first word may not be the first name: the fallback");
 is("a title or initial with a period, a surname typed first", [firstNameOf("Dr. Ana"), firstNameOf("J. Smith"), firstNameOf("Souza, Ana")], ["", "", ""]);
+is("a title typed without its period is never the name", [firstNameOf("Mr Smith"), firstNameOf("Mrs Jones"), firstNameOf("Dr Ana"), firstNameOf("dra Ana"), firstNameOf("Sr João"), firstNameOf("Herr Müller"), firstNameOf("Prof"), firstNameOf("Mira Smith")], ["", "", "", "", "", "", "", "Mira"]);
 is("one letter", [firstNameOf("J"), firstNameOf("A Lee")], ["", ""]);
 is("a small word that starts a surname, or the first half of a joined name", [firstNameOf("de Souza"), firstNameOf("van Dijk"), firstNameOf("bin Salman"), firstNameOf("Abd al-Rahman"), firstNameOf("عبد الله")], ["", "", "", "", ""]);
 is("Chinese, Japanese or Korean written in parts: the first is usually the family name", [firstNameOf("李 小龙"), firstNameOf("김 민준"), firstNameOf("小龙")], ["", "", "小龙"]);
@@ -43,6 +44,9 @@ is("braces around more than a word are left alone", [otherFields("a set {1, 2}")
 is("a near spelling is said as such", [firstNameProblem(["Hi {First_Name}"], "there"), firstNameProblem(["Hi { first_name }"], "there"), firstNameProblem(["Hi {firstname}"], "there"), firstNameProblem(["Hi {last_name}"], "there")], ["spelling", "spelling", "spelling", "unknown"]);
 is("refused in any part", firstNameProblem(["Subject", "Hi *|FNAME|*"], "there"), "unknown");
 is("never inside a web address", [firstNameProblem([`See https://shop.example/r?n=${T}`], "there"), firstNameProblem([`[Open](https://x.example/${T})`], "there"), firstNameProblem([`${T}, see https://shop.example`], "there")], ["in_link", "in_link", null]);
+is("nor inside one typed without https or www", [firstNameProblem([`See example.com/p?n=${T}`], "there"), firstNameProblem([`See shop.example.co/${T}`], "there"), firstNameProblem([`Thanks, ${T}. See example.com/p`], "there"), firstNameProblem([`Hi ${T}.`], "there")], ["in_link", "in_link", null, null]);
+is("a long run before the token is read at once", (() => { const t = Date.now(); firstNameProblem([("a".repeat(5000) + T + " ").repeat(10)], "there"); return Date.now() - t < 50; })(), true);
+is("a course's code or a path is not taken for another service's field", [otherFields("function f() {return}"), otherFields("open %APPDATA% first"), otherFields("const o = {a}"), firstNameProblem(["Run: function f() {return x}"], "there")], [[], [], [], null]);
 is("at most so many times in each part", [firstNameProblem([T.repeat(MAX_TOKENS)], "there"), firstNameProblem([T.repeat(MAX_TOKENS + 1)], "there")], [null, "too_many"]);
 
 part("The fallback");

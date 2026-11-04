@@ -79,6 +79,8 @@ const NAME = /^[\p{L}\p{M}\p{N}\u200c\u200d]+(?:['’\-\u2010·][\p{L}\p{M}\p{N}
 // Small words that start many surnames, typed in small letters.
 const PARTICLES = new Set(["de", "da", "do", "dos", "das", "del", "della", "di", "du", "van", "von", "der", "den", "la", "le", "bin", "ibn", "al", "el"]);
 // The first half of a joined name ("Abd al-Rahman").
+// Titles a reader may type before a name, in the store's languages, without the period; never a first name to greet them by.
+const TITLES = new Set(["mr", "mrs", "ms", "miss", "mx", "dr", "dra", "prof", "profa", "sr", "sra", "srta", "sir", "rev", "herr", "frau", "mme", "mlle", "m", "dhr", "mevr", "sig", "sig.ra", "dott"]);
 const FIRST_HALVES = new Set(["abd", "abdul", "abdel", "عبد"]);
 const FAMILY_FIRST = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+$/u;
 
@@ -91,6 +93,8 @@ export function firstNameOf(raw: unknown): string {
   const typed = words[0];
   // "Dr.", "J.", "Souza,": a title, an initial or a surname typed first.
   if (/[.,]$/.test(typed)) return "";
+  // A title typed without its period: "Mr Smith", "Dra Ana".
+  if (TITLES.has(typed.toLowerCase())) return "";
   // The punctuation around it goes: "(Ana)" gives "Ana".
   const word = typed.replace(/^[^\p{L}\p{M}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu, "");
   if (!NAME.test(word) || !/\p{L}/u.test(word) || !fits(word, MAX_FIRST_NAME)) return "";
@@ -101,14 +105,30 @@ export function firstNameOf(raw: unknown): string {
 }
 
 // Another service's merge fields, as lib/sequence-import.ts takes them out of an imported email (VARIABLE there): Mailchimp *|X|*,
-// Liquid {{ x }} and {% x %}, MailerLite {$x} and %X%. Then one word in curly braces, {name}, taken for a field too. Each bounded and on one line.
-const OTHER_FIELD = /\*\|[^|*\n]{1,60}\|\*|\{\{[^{}\n]{1,80}\}\}|\{%[^%\n]{0,80}%\}|\{\$[^{}\n]{1,60}\}|%[A-Z][A-Z0-9_]{1,40}%|\{[ \t]*[\p{L}_][\p{L}\p{N}_.]{0,40}[ \t]*\}/gu;
+// Liquid {{ x }} and {% x %}, MailerLite {$x}, each always a field. Each bounded and on one line.
+const OTHER_FIELD = /\*\|[^|*\n]{1,60}\|\*|\{\{[^{}\n]{1,80}\}\}|\{%[^%\n]{0,80}%\}|\{\$[^{}\n]{1,60}\}/gu;
+// One word in curly braces, {name}, or between percent signs, %NAME%: a field only when the word names a person's details, so a course's
+// code ("function f() {return}") or a path ("%APPDATA%") is never refused.
+const MAYBE_FIELD = /%([A-Za-z][A-Za-z0-9_]{1,40})%|\{[ \t]*([\p{L}_][\p{L}\p{N}_. ]{0,40}?)[ \t]*\}/gu;
+const PERSON_WORD = /^(?:(?:first|last|full|sur|given|family|user|nick)?[ _.-]?name|[fl]name|e[ _-]?mail|nome|primeiro[ _]?nome|nombre|nom|pr[ée]nom|vorname|nachname|voornaam|achternaam|cognome|名前|氏名|이름|subscriber|contact)$/iu;
 const NEAR_TOKEN = /^\{[ \t]*first[ _]?name[ \t]*\}$/i;
-const IN_LINK = /(?:https?:\/\/|www\.|mailto:)[^\s<>()]*\{first_name\}/i;
+// Where a web address can start: a scheme, "www." or a host with a dot and a slash after it ("example.com/p?n=").
+const LINK_START = /https?:|www\.|mailto:|[\p{L}\p{N}-]\.[\p{L}]{2,}\//iu;
+
+/** Whether the token is inside a web address: the run of characters before it, up to a space or a bracket, reads as one. Linear: each token looks back once, at most 300 characters. */
+function inLink(text: string): boolean {
+  for (let at = text.indexOf(FIRST_NAME_TOKEN); at >= 0; at = text.indexOf(FIRST_NAME_TOKEN, at + 1)) {
+    let from = at;
+    while (from > 0 && at - from < 300 && !/[\s<>()]/.test(text[from - 1])) from -= 1;
+    if (LINK_START.test(text.slice(from, at))) return true;
+  }
+  return false;
+}
 
 /** Any merge field in the words but the token itself; empty when there is none. */
 export function otherFields(text: string): string[] {
-  return [...text.matchAll(OTHER_FIELD)].map((m) => m[0]).filter((found) => found !== FIRST_NAME_TOKEN);
+  const maybe = [...text.matchAll(MAYBE_FIELD)].filter((m) => PERSON_WORD.test((m[1] ?? m[2] ?? "").trim())).map((m) => m[0]);
+  return [...[...text.matchAll(OTHER_FIELD)].map((m) => m[0]), ...maybe].filter((found) => found !== FIRST_NAME_TOKEN);
 }
 
 /** The fallback as kept, or why it is refused. */
@@ -131,7 +151,7 @@ export function firstNameProblem(texts: string[], fallback: unknown): FirstNameP
     const others = otherFields(text);
     if (others.some((found) => NEAR_TOKEN.test(found))) return "spelling";
     if (others.length) return "unknown";
-    if (IN_LINK.test(text)) return "in_link";
+    if (inLink(text)) return "in_link";
     if (tokensIn(text) > MAX_TOKENS) return "too_many";
   }
   if (!texts.some((text) => text.includes(FIRST_NAME_TOKEN))) return null;

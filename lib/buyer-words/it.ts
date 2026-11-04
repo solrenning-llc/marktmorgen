@@ -304,4 +304,9 @@ export const it: BuyerWords = {
   cardTestMode: "Modalità di prova: nessuna carta reale viene addebitata.",
   cardCheckout: "Pagamento sicuro con Stripe, in una nuova scheda.",
   cardOpens: (store) => `Si apre nel negozio di ${store}, in una nuova scheda.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} o più`,
+  plusTax: "+ imposte, se dovute",
+  salePriceUntil: (price, when) => `Prezzo scontato: ${price}, fino al ${when}`,
 };

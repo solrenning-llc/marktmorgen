@@ -1,3 +1,4 @@
+import { readSequenceCsv } from "@/lib/sequence-import";
 import { type NextRequest, after } from "next/server";
 import { rfmSummary } from "@/lib/rfm-rules";
 import { StoreFullError } from "@/lib/store-full";
@@ -52,6 +53,8 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
   broadcast: "send",
   cancel: "send",
   flow: "send",
+  // Reading a file of emails into a sequence's steps (lib/sequence-import.ts): nothing is saved, so it needs what saving one needs.
+  "flow-import": "send",
   "flow-remove": "send",
   // Switching a workflow on is its own, explicit step (lib/flows.ts, setFlowActive).
   "flow-activate": "send",
@@ -137,11 +140,12 @@ export async function POST(request: NextRequest) {
       if (emails.length === 0) return fail("no_addresses");
       if (emails.length > MAX_IMPORT) return fail("too_many");
       store = (await ensureListId(ref)) ?? store;
-      const { added, already, full } = await importContacts(store.listId as string, emails, store);
+      const { added, already, full, roomFull } = await importContacts(store.listId as string, emails, store);
       // A hundred addresses or more, pasted in: of unknown age, so the next
-      // emails go out in portions that double (lib/mail-health.ts).
+      // emails go out in portions that double (lib/mail-health.ts), also
+      // when the store's data room filled up partway and only some went in.
       await startRamp(healthId(store), added);
-      return Response.json({ ok: true, added, already, skipped, full, counts: await listCounts(store.listId) });
+      return Response.json({ ok: true, added, already, skipped, full, roomFull: roomFull ?? null, counts: await listCounts(store.listId) });
     }
 
     if (action === "count") {
@@ -266,6 +270,14 @@ export async function POST(request: NextRequest) {
       const raw = body.flow && typeof body.flow === "object" ? (body.flow as Record<string, unknown>) : {};
       const result = await saveFlow(store, raw);
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason);
+    }
+
+    if (action === "flow-import") {
+      // Only read: the steps come back to the studio's editor, where the creator picks what starts it,
+      // reviews every email and saves it, paused (544 [SQ9]). Nothing is saved or sent here.
+      const csv = typeof body.csv === "string" ? body.csv : "";
+      const read = readSequenceCsv(csv);
+      return Response.json(read.ok ? { ok: true, steps: read.steps, report: read.report } : { ok: false, error: `import_${read.why}`, report: read.report }, { status: read.ok ? 200 : 400 });
     }
 
     if (action === "flow-activate") {

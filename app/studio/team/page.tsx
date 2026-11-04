@@ -9,7 +9,7 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { TeamManager } from "@/components/team-manager";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { MAX_TEAM, readLog, readTeam } from "@/lib/team";
-import { ROLE_NAMES } from "@/lib/team-roles";
+import { ROLE_NAMES, can } from "@/lib/team-roles";
 
 export const metadata: Metadata = {
   title: "Team — Marktmorgen",
@@ -47,8 +47,8 @@ export default async function StudioTeamPage({
     readPipelines(store.statsId).catch(() => null),
     readAllPipelineAccess(store.statsId).catch(() => null),
   ]);
-  // Only Editors and Support can be restricted: the owner and Admins always see and change every pipeline (639 [GL7](7)).
-  const restrictable = team.members.flatMap((m) => (m.role === "editor" || m.role === "support" ? [{ email: m.email, role: m.role }] : []));
+  // Only a role that opens Deals and is not Admin can be restricted (639 [GL7](7)): the owner and Admins always see and change every pipeline, and a role without Deals (Editor) sees none.
+  const restrictable = team.members.flatMap((m) => ((m.role === "editor" || m.role === "support") && can(m.role, "orders") ? [{ email: m.email, role: m.role }] : []));
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -81,7 +81,7 @@ export default async function StudioTeamPage({
               Who sees each sales pipeline
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-ink-soft">
-              Under Deals, each Editor and Support person can change every pipeline unless you choose otherwise here. Can only see shows its deals without changing them; No access hides it. Admins and you always see and change every pipeline.
+              Under Deals, each Support person can change every pipeline unless you choose otherwise here. Can only see shows its deals without changing them; No access hides it. Admins and you always see and change every pipeline; Editors do not open Deals at all.
             </p>
             {pipelines && access ? (
               <PipelineAccessEditor members={restrictable} pipelines={pipelines.map(({ id, name }) => ({ id, name }))} initial={Object.fromEntries(restrictable.map((m) => [m.email, access[m.email] === undefined ? {} : access[m.email]]))} />

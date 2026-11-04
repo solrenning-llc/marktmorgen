@@ -3,6 +3,7 @@
  * rules in lib/pipeline-access-rules.ts):
  *
  *   nl:crm:pacc:<statsId>   hash: <teammate's address> -> their AccessMap, as JSON
+ *   nl:crm:pacc:lock:<statsId>:<address>   held for at most 10 seconds while one change to that teammate is written
  *
  * Only restrictions are written; a teammate with none has no field, and
  * every pipeline is "edit" for them, as before. The record takes, or gives
@@ -10,14 +11,24 @@
  * the store. A teammate's field is deleted when they leave the team
  * (forgetPipelineAccess).
  */
+import { randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
-import { type AccessMap, parseAccessMap } from "@/lib/pipeline-access-rules";
+import { type AccessMap, type PipelineAccess, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const accessKey = (statsId: string) => `nl:crm:pacc:${statsId}`;
 const ACCESS_SLOT = "crm:pacc";
+const lockKey = (statsId: string, who: string) => `nl:crm:pacc:lock:${statsId}:${who}`;
+const LOCK_SECONDS = 10;
+
+/** Someone else is changing the same teammate's access at this moment; nothing was written. */
+export class PipelineAccessBusyError extends Error {
+  constructor() {
+    super("Someone else is changing this person's access right now. Try again in a moment.");
+  }
+}
 
 /** A field as stored: none is no restriction; one that cannot be read is null, which opens nothing (accessOf). */
 function mapOf(raw: unknown): AccessMap | null {
@@ -90,4 +101,29 @@ export async function copyPipelineAccess(statsId: string | null, from: string, t
 export async function forgetPipelineAccess(statsId: string | null, email: string): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   await redisPipeline([["HDEL", accessKey(statsId), normaliseEmail(email)]]);
+}
+
+/**
+ * One teammate's access to one pipeline set to `access`, the rest of their
+ * restrictions kept. One change per teammate at a time (a short lock), so
+ * two people saving at once never write over each other's choice: the
+ * second is refused with PipelineAccessBusyError and nothing is written. A
+ * record that cannot be read opens nothing, so the change starts from "no
+ * access" to every pipeline the store has, never from no restriction.
+ */
+export async function setPipelineAccess(statsId: string, email: string, pipelineIds: readonly string[], pipelineId: string, access: PipelineAccess, room: DataStore): Promise<AccessMap> {
+  const who = normaliseEmail(email);
+  const token = randomBytes(12).toString("hex");
+  const [claimed] = await redisPipeline([["SET", lockKey(statsId, who), token, "NX", "EX", LOCK_SECONDS]]);
+  if (claimed !== "OK") throw new PipelineAccessBusyError();
+  try {
+    const before = await readPipelineAccess(statsId, who);
+    const next: AccessMap = before === null ? Object.fromEntries(pipelineIds.map((id) => [id, "none" as const])) : { ...before };
+    if (access === "edit") delete next[pipelineId];
+    else next[pipelineId] = access;
+    return await writePipelineAccess(statsId, who, next, room);
+  } finally {
+    const [held] = await redisPipeline([["GET", lockKey(statsId, who)]]).catch(() => [null]);
+    if (held === token) await redisPipeline([["DEL", lockKey(statsId, who)]]).catch(() => {});
+  }
 }

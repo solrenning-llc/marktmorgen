@@ -14,7 +14,7 @@ import { POST } from "@/app/api/store/pipeline-access/route";
 import { POST as CRM } from "@/app/api/store/crm/route";
 import { PipelineAccessEditor } from "@/components/pipeline-access-editor";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { readPipelineAccess } from "@/lib/pipeline-access";
+import { readPipelineAccess, setPipelineAccess } from "@/lib/pipeline-access";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { putMember, readLog } from "@/lib/team";
 import { store as redis } from "./redis-stub";
@@ -34,6 +34,7 @@ async function main(): Promise<void> {
   const store = (await storeForEmail(owner))!;
   await putMember(store, "sam@example.com", "support");
   await putMember(store, "ada@example.com", "admin");
+  await putMember(store, "eve@example.com", "editor");
   const cookie = (email: string) => openSession(email).then((s) => `${SESSION_COOKIE}=${s}`);
   const post = async (who: string, body: Record<string, unknown>) => {
     const response = await POST(new NextRequest("https://marktmorgen.com/api/store/pipeline-access", { method: "POST", headers: { "content-type": "application/json", cookie: await cookie(who) }, body: JSON.stringify(body) }));
@@ -55,18 +56,58 @@ async function main(): Promise<void> {
   const self = await post("sam@example.com", { email: "sam@example.com", pipeline: "sales0", access: "edit" });
   is("a Support person cannot choose, not even for themselves", self.status >= 400 && self.status < 500, true);
 
+  const editor = await post(owner, { email: "eve@example.com", pipeline: "sales0", access: "view" });
+  is("an Editor, whose role does not open Deals, is not offered a restriction that would do nothing", [editor.status, editor.body.error, await readPipelineAccess(store.statsId, "eve@example.com")], [400, "no_deals", {}]);
+
+  part("A record that cannot be read");
+  const crmPost = async (body: Record<string, unknown>) => CRM(new NextRequest("https://marktmorgen.com/api/store/crm", { method: "POST", headers: { "content-type": "application/json", cookie: await cookie(owner) }, body: JSON.stringify(body) }));
+  const added = await crmPost({ action: "pipeline", pipeline: { id: "wkshp1", name: "Workshops", stages: [{ id: "wnew01", name: "New", kind: "open" }, { id: "wwon01", name: "Won", kind: "won" }, { id: "wlost1", name: "Lost", kind: "lost" }] }, moves: {} });
+  is("(a second pipeline)", added.status, 200);
+  await redis.pipeline([["HSET", `nl:crm:pacc:${store.statsId}`, "sam@example.com", "{not json"]]);
+  is("(sam's record cannot be read)", await readPipelineAccess(store.statsId, "sam@example.com"), null);
+  const fixed = await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "view" });
+  is("saving one pipeline never opens the others: they stay at no access", [fixed.status, fixed.body.access], [200, { sales0: "view", wkshp1: "none" }]);
+  await redis.pipeline([["HSET", `nl:crm:pacc:${store.statsId}`, "sam@example.com", "{not json"]]);
+  is("even when the one chosen is set to change", (await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "edit" })).body.access, { wkshp1: "none" });
+
+  part("Two saves at once");
+  await post(owner, { email: "sam@example.com", pipeline: "wkshp1", access: "edit" });
+  const both = await Promise.all([post(owner, { email: "sam@example.com", pipeline: "sales0", access: "view" }), post(owner, { email: "sam@example.com", pipeline: "wkshp1", access: "none" })]);
+  const kept = await readPipelineAccess(store.statsId, "sam@example.com");
+  const applied = both.filter((r) => r.status === 200).map((r) => r.body.access);
+  is("never write over each other: what is kept is exactly what the last save that went through said", JSON.stringify(kept), JSON.stringify(applied[applied.length - 1]));
+  is("one that cannot go through says so and writes nothing", both.filter((r) => r.status !== 200).every((r) => r.status === 409 && r.body.error === "busy" && r.body.message === "Someone else is changing this person's access right now. Try again in a moment."), true);
+  await redis.pipeline([["SET", `nl:crm:pacc:lock:${store.statsId}:sam@example.com`, "someone", "EX", 10]]);
+  const held = await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "none" });
+  is("while another change to the same person is being written, a save is refused", [held.status, held.body.error], [409, "busy"]);
+  is("and nothing of it is kept", (await readPipelineAccess(store.statsId, "sam@example.com"))?.sales0 !== "none", true);
+  await redis.pipeline([["DEL", `nl:crm:pacc:lock:${store.statsId}:sam@example.com`]]);
+  await setPipelineAccess(store.statsId!, "sam@example.com", ["sales0", "wkshp1"], "sales0", "view", store);
+  const [lock] = await redis.pipeline([["GET", `nl:crm:pacc:lock:${store.statsId}:sam@example.com`]]);
+  is("the lock is let go once the change is written", lock, null);
+  const pipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HSET" && String(c[1]).startsWith("nl:crm:pacc:"))) throw new Error("down");
+    return pipe(commands);
+  }) as typeof redis.pipeline;
+  const failed = await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "none" });
+  redis.pipeline = pipe;
+  const [after] = await redis.pipeline([["GET", `nl:crm:pacc:lock:${store.statsId}:sam@example.com`]]);
+  is("and also when the write fails, so the next save is not refused", [failed.status, after, (await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "none" })).status], [500, null, 200]);
+
   part("The screen");
   const html = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }], pipelines: [{ id: "sales0", name: "Sales" }, { id: "coach0", name: "Coaching" }], initial: { "sam@example.com": { coach0: "none" } } }));
   is("each teammate a group named by their address", html.includes("<fieldset") && html.includes(">sam@example.com</legend>"), true);
   is("each pipeline a labeled choice, as it stands", html.includes(">Sales</span>") && html.includes(">Coaching</span>") && /<option value="none" selected="">No access<\/option>/.test(html) && /<option value="edit" selected="">Can change<\/option>/.test(html), true);
   is("refusals said in an alert", html.includes('role="alert"'), true);
   const unread = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }], pipelines: [{ id: "sales0", name: "Sales" }], initial: { "sam@example.com": null } }));
-  is("a record that cannot be read is said to show nothing", unread.includes("see no pipeline until it is saved again") && /<option value="none" selected="">/.test(unread), true);
-  is("nobody to restrict, said why", renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [], pipelines: [], initial: {} })).includes("only Editors and Support can"), true);
+  is("a record that cannot be read is said to show nothing, and what saving does", unread.includes("they see no pipeline. Choose what they may do with each one; the others stay at No access until you do.") && /<option value="none" selected="">/.test(unread), true);
+  is("nobody to restrict, said why", renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [], pipelines: [], initial: {} })).includes("only Support people can"), true);
+  is("the choices stay enabled while saving, so the focus never leaves the one changed; the save is said in a status line", [/<select[^>]*disabled/.test(html), html.includes('role="status"'), readFileSync("components/pipeline-access-editor.tsx", "utf8").includes("if (busy) return;")], [false, true, true]);
 
   part("On the team page");
   const page = readFileSync("app/studio/team/page.tsx", "utf8");
-  is("a named section, only Editors and Support offered", page.includes('aria-labelledby="pipeline-access-title"') && page.includes('m.role === "editor" || m.role === "support"'), true);
+  is("a named section, only roles that open Deals offered, never an Admin", page.includes('aria-labelledby="pipeline-access-title"') && page.includes('(m.role === "editor" || m.role === "support") && can(m.role, "orders")'), true);
   is("said when it cannot be read", page.includes("Your pipelines or your team&apos;s access could not be read just now."), true);
 
   done();

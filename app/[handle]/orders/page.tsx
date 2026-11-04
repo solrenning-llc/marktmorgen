@@ -31,6 +31,10 @@ import { BundleDelivery } from "@/components/bundle-delivery";
 import { speech } from "@/lib/buyer-words";
 import { type OrdersWords, ordersWords } from "@/lib/buyer-words/orders";
 import { NewTab } from "@/components/new-tab";
+import { type Waiting, waitingFor } from "@/lib/buyer-waiting";
+import { requestWords } from "@/lib/buyer-words/requests";
+import { agreementWords } from "@/lib/buyer-words/agreements";
+import { requestsOpen } from "@/lib/payment-requests";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -174,10 +178,13 @@ export default async function OrdersPage({ params, searchParams }: Params) {
 
   let purchases: Purchase[] | null = null;
   let calls: BookedCall[] = [];
+  let waiting: Waiting = { requests: [], agreements: [] };
   let failed = false;
   if (email) {
     try {
-      [purchases, calls] = await Promise.all([purchasesFor(store, email), callsFor(store, email)]);
+      [purchases, calls, waiting] = await Promise.all([purchasesFor(store, email), callsFor(store, email), waitingFor(store, email).catch(() => waiting)]);
+      // A request is shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen).
+      if (!requestsOpen(store)) waiting = { ...waiting, requests: [] };
     } catch (error) {
       console.error("listing purchases failed", error);
       failed = true;
@@ -346,6 +353,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
               <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">
                 {words.pageTitle}
               </h1>
+              {waiting.requests.length + waiting.agreements.length > 0 ? <WaitingList waiting={waiting} store={store} words={words} /> : null}
               {calls.length > 0 ? (
                 <section aria-labelledby="calls-title" className="mt-6">
                   <h2 id="calls-title" className="font-display text-xl font-semibold">
@@ -358,7 +366,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                   </ul>
                 </section>
               ) : null}
-              {purchases.length === 0 && calls.length > 0 ? null : purchases.length === 0 ? (
+              {purchases.length === 0 && calls.length + waiting.requests.length + waiting.agreements.length > 0 ? null : purchases.length === 0 ? (
                 <p className="st-muted mt-4 text-lg leading-relaxed">{words.nothingToOpen(store.name)}</p>
               ) : (
                 <>
@@ -536,5 +544,44 @@ export default async function OrdersPage({ params, searchParams }: Params) {
         </div>
       </main>
     </div>
+  );
+}
+
+/**
+ * What the store waits on from this buyer (lib/buyer-waiting.ts): each open
+ * payment request and each proposal or agreement still to sign, linked to
+ * the page that was emailed to them.
+ */
+function WaitingList({ waiting, store, words }: { waiting: Waiting; store: Store; words: OrdersWords }) {
+  const said = speech(store);
+  const rw = requestWords(store.language);
+  const aw = agreementWords(store.language);
+  const day = (d: string) => said.date(Date.parse(`${d}T12:00:00Z`));
+  return (
+    <section aria-labelledby="waiting-title" className="mt-6">
+      <h2 id="waiting-title" className="font-display text-xl font-semibold">
+        {words.waiting}
+      </h2>
+      <ul className="mt-4 space-y-4">
+        {waiting.requests.map((request) => (
+          <li key={request.id} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
+            <p className="font-semibold">{`${rw.pageTitle}: ${said.money(request.total)}`}</p>
+            <p className="st-muted mt-1 text-sm">{request.dueDate ? rw.due(day(request.dueDate)) : rw.until(said.date(request.expiresAt))}</p>
+            <Link href={`/@${store.handle}/pay/${request.id}`} className="btn st-btn mt-3 inline-flex min-h-11 items-center">
+              {words.openRequest}
+            </Link>
+          </li>
+        ))}
+        {waiting.agreements.map((agreement) => (
+          <li key={agreement.id} className="rounded-2xl p-5" style={{ border: "1px solid var(--st-line)" }}>
+            <p className="font-semibold [overflow-wrap:anywhere]">{`${aw.pageTitle(agreement.kind)}: ${agreement.title}`}</p>
+            <p className="st-muted mt-1 text-sm">{aw.until(said.date(agreement.expiresAt))}</p>
+            <Link href={`/@${store.handle}/sign/${agreement.id}`} className="btn st-btn mt-3 inline-flex min-h-11 items-center">
+              {words.openToSign}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

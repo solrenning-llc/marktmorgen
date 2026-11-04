@@ -70,6 +70,10 @@ const en = {
 
   // ---- The list of purchases -------------------------------------------------------
   bookedCalls: (count: number): string => (count === 1 ? "Your booking" : "Your bookings"),
+  /** What the store waits on from them: payment requests and agreements still open (lib/buyer-waiting.ts). */
+  waiting: "Waiting for you",
+  openRequest: "Open the payment request",
+  openToSign: "Read it and sign",
   nothingToOpen: (store: string) =>
     `There is nothing to open here anymore. A purchase that was refunded in full is no longer listed. If something is missing, reply to the order confirmation you were emailed when you paid, and it reaches ${store}.`,
   everythingSold: (store: string) =>
@@ -304,6 +308,9 @@ const es: OrdersWords = {
   nothingArrived: "¿No te llegó nada? Puede que hayas pagado con otra dirección: la que escribiste al pagar. Prueba con esa abajo.",
 
   bookedCalls: (count) => (count === 1 ? "Tu reserva" : "Tus reservas"),
+  waiting: "Te espera",
+  openRequest: "Abrir la solicitud de pago",
+  openToSign: "Leer y firmar",
   nothingToOpen: (store) =>
     `Aquí ya no hay nada que abrir. Una compra reembolsada por completo deja de aparecer. Si falta algo, responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
   everythingSold: (store) =>
@@ -514,6 +521,9 @@ const fr: OrdersWords = {
   nothingArrived: `Rien reçu${S}? Vous avez peut-être payé avec une autre adresse${S}: celle saisie lors du paiement. Essayez-la ci-dessous.`,
 
   bookedCalls: (count) => (count < 2 ? "Votre réservation" : "Vos réservations"),
+  waiting: "Ce qui vous attend",
+  openRequest: "Ouvrir la demande de paiement",
+  openToSign: "Lire et signer",
   nothingToOpen: (store) =>
     `Il n'y a plus rien à ouvrir ici. Un achat remboursé en totalité n'apparaît plus. S'il manque quelque chose, répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
   everythingSold: (store) =>
@@ -722,6 +732,9 @@ const de: OrdersWords = {
   nothingArrived: "Nichts angekommen? Vielleicht haben Sie mit einer anderen Adresse bezahlt: der, die Sie beim Bezahlen eingegeben haben. Versuchen Sie es unten mit dieser.",
 
   bookedCalls: (count) => (count === 1 ? "Ihre Buchung" : "Ihre Buchungen"),
+  waiting: "Wartet auf Sie",
+  openRequest: "Zahlungsanfrage öffnen",
+  openToSign: "Lesen und unterschreiben",
   nothingToOpen: (store) =>
     `Hier gibt es nichts mehr zu öffnen. Ein vollständig erstatteter Kauf wird nicht mehr aufgeführt. Wenn etwas fehlt, antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
   everythingSold: (store) =>
@@ -935,6 +948,9 @@ const it: OrdersWords = {
   nothingArrived: "Non è arrivato nulla? Forse hai pagato con un altro indirizzo: quello che hai inserito al momento del pagamento. Prova con quello qui sotto.",
 
   bookedCalls: (count) => (count === 1 ? "La tua prenotazione" : "Le tue prenotazioni"),
+  waiting: "Ti aspetta",
+  openRequest: "Apri la richiesta di pagamento",
+  openToSign: "Leggi e firma",
   nothingToOpen: (store) =>
     `Qui non c'è più nulla da aprire. Un acquisto rimborsato per intero non compare più. Se manca qualcosa, rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
   everythingSold: (store) =>
@@ -1144,6 +1160,9 @@ const nl: OrdersWords = {
   nothingArrived: "Niets ontvangen? Misschien heb je met een ander adres betaald: het adres dat je bij het afrekenen hebt ingevuld. Probeer dat hieronder.",
 
   bookedCalls: (count) => (count === 1 ? "Je boeking" : "Je boekingen"),
+  waiting: "Wacht op jou",
+  openRequest: "Het betaalverzoek openen",
+  openToSign: "Lezen en ondertekenen",
   nothingToOpen: (store) =>
     `Hier valt niets meer te openen. Een aankoop die volledig is terugbetaald, staat er niet meer bij. Mist er iets, beantwoord dan de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
   everythingSold: (store) =>
@@ -1352,6 +1371,9 @@ const pt: OrdersWords = {
   nothingArrived: "Não recebeu nada? Talvez tenha pago com outro endereço: o que introduziu no pagamento. Experimente esse abaixo.",
 
   bookedCalls: (count) => (count === 1 ? "A sua marcação" : "As suas marcações"),
+  waiting: "À sua espera",
+  openRequest: "Abrir o pedido de pagamento",
+  openToSign: "Ler e assinar",
   nothingToOpen: (store) =>
     `Já não há nada para abrir aqui. Uma compra reembolsada na totalidade deixa de aparecer. Se faltar alguma coisa, responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
   everythingSold: (store) =>

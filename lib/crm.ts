@@ -802,14 +802,21 @@ return {value, redis.call("HDEL", KEYS[1], ARGV[4])}`;
  * that is there is moved by the change. KEYS[2] is the person's deletion mark,
  * ARGV[7] when the change was prepared and ARGV[8] ERASED_CLOCK_MS: 3, with
  * nothing written, for a change prepared before the deletion (erasedGuard).
+ * ARGV[9] is MAX_STORE_TASKS: 4, with nothing written, for a change that adds
+ * past it, checked against the count as it is in the same step. With the
+ * comparison of the person's tasks as read, nothing a change read can be
+ * stale when it writes, so no hold of the lock is asked for before it.
+ * Inside: the mark read (and taken away), the tasks and the count read, the
+ * tasks and the count written (WRITE_TASKS_CALLS).
  */
 export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v2
 ${erasedGuard(2, 7, "3")}
 local before = redis.call("HGET", KEYS[1], ARGV[1]) or ""
 if before ~= ARGV[2] then return -1 end
-if ARGV[3] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[3]) end
 local kept = redis.call("HGET", KEYS[1], ARGV[6])
 local n = kept and string.match(kept, "^%d+$") and tonumber(kept)
+if n and tonumber(ARGV[4]) > 0 and n + tonumber(ARGV[4]) > tonumber(ARGV[9]) then return 4 end
+if ARGV[3] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[3]) end
 if n then
   redis.call("HSET", KEYS[1], ARGV[6], tostring(math.max(0, n + tonumber(ARGV[4]))))
 elseif ARGV[5] ~= "" then
@@ -820,6 +827,9 @@ elseif kept then
   return 2
 end
 return 1`;
+
+/** What WRITE_PERSON_TASKS runs inside, at the most, which Upstash bills one by one beside the EVAL. */
+export const WRITE_TASKS_CALLS = ERASED_GUARD_CALLS + 4;
 
 /**
  * The store's count saved on its own, once every task was read to make it:
@@ -998,24 +1008,24 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   if (added > 0 && (count ?? 0) + added > MAX_STORE_TASKS) return { result: { ok: false, error: "store_full" } };
   const value = result.tasks.length ? JSON.stringify(result.tasks) : "";
   const grown = taskWeight(person, value) - taskWeight(person, before) + (start ? TASK_COUNT_WEIGHT : 0);
-  // A lock that ran out meanwhile (a stalled request) may have let another
-  // change in: what was read may be stale, so nothing is counted or written.
-  if (!(await holdLock(held))) throw new LockBusyError();
+  // A lock that ran out meanwhile (a stalled request) may have let another change in: the script writes only over the
+  // tasks as read (-1 otherwise) and checks the cap against the count as it is (4), so nothing stale is counted or written.
   // Room is taken before a write that grows, and given back only after a
   // write that shrinks is confirmed: one that may not have landed keeps it.
   if (grown > 0) await needData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
   let written: unknown;
   try {
-    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 2, tasksKey(statsId), erasedKey(statsId, person), person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD, prepared, ERASED_CLOCK_MS]]);
-    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 1 && response[0] !== 2 && response[0] !== -1 && response[0] !== 3)) throw new CrmValueWriteUnconfirmed();
+    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 2, tasksKey(statsId), erasedKey(statsId, person), person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD, prepared, ERASED_CLOCK_MS, MAX_STORE_TASKS]]);
+    if (!Array.isArray(response) || response.length !== 1 || ![1, 2, 3, 4, -1].includes(response[0] as number)) throw new CrmValueWriteUnconfirmed();
     written = response[0];
   } catch {
     throw new CrmValueWriteUnconfirmed();
   }
-  if (written === 3) {
-    // The person was deleted after this change was prepared: nothing written about them, the room taken goes back.
+  if (written === 3 || written === 4) {
+    // The person was deleted after this change was prepared, or the store filled meanwhile: nothing written, the room
+    // taken for it goes back.
     if (grown > 0) await giveData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
-    return { result: { ok: false, error: "gone" } };
+    return { result: { ok: false, error: written === 3 ? "gone" : "store_full" } };
   }
   if (written === -1) {
     // Nothing was written: the room taken for it goes back, and the change is refused as busy.

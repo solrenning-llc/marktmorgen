@@ -462,19 +462,21 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-tasks-write:v2\n") && args[0] === "2" && args.length === 11) {
-          // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step, unless they were deleted after it was prepared.
-          const [, target, erased, person, read, value, added, start, field, prepared, clock] = args;
+        if (key.startsWith("-- marktmorgen:crm-tasks-write:v2\n") && args[0] === "2" && args.length === 12) {
+          // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step, unless they were deleted after it
+          // was prepared, or it adds past the store's cap.
+          const [, target, erased, person, read, value, added, start, field, prepared, clock, most] = args;
           if (this.erasedRefuses(erased, prepared, clock)) return 3;
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
           if ((held instanceof Map ? held.get(person) ?? "" : "") !== read) return -1;
+          const kept = held instanceof Map ? held.get(field) : undefined;
+          const n = kept !== undefined && /^\d+$/.test(kept) ? Number(kept) : null;
+          if (n !== null && Number(added) > 0 && n + Number(added) > Number(most)) return 4;
           const hash = this.hash(target);
           if (value === "") hash.delete(person);
           else hash.set(person, value);
-          const kept = hash.get(field);
-          const n = kept !== undefined && /^\d+$/.test(kept) ? Number(kept) : null;
           if (n !== null) hash.set(field, String(Math.max(0, n + Number(added))));
           else if (start !== "") hash.set(field, start);
           else if (kept !== undefined) hash.delete(field);

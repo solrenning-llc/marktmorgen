@@ -1,6 +1,8 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
-import { AGENDA_READ, BUYER_LEDGER } from "./plan-cost-registry";
+import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
+import { TEST_SALES_PAGES } from "@/lib/broadcasts";
+import { ALL_TIME_PAGES } from "@/lib/stats";
 import { AGENDA_UNITS } from "@/lib/person-agenda";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
@@ -32,8 +34,9 @@ import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_P
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
-import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING } from "./plan-cost-registry";
-import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS } from "@/lib/buyer-orders-rules";
+import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES } from "./plan-cost-registry";
+import { DOWNLOAD_LOOKUP_UNITS, ORDERS_BUNDLE_UNITS, ORDERS_CALL_MOVES, ORDERS_MOVES_READ_COMMANDS, ORDERS_OLDER_UNITS, ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
+import { MOVES_PER_MGET, moveReads } from "@/lib/call-moves-read";
 
 /** What an opening of the orders page, a bundle's products and a batch of older purchases keep above what they cost: a tenth (C3-83, 4 November 2026). */
 const ORDERS_SPARE = 1.1;
@@ -247,6 +250,12 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   console.log(`a bundle's products: $${ORDERS_BUNDLE_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_BUNDLE_UNITS} requests`);
   console.log(`a batch of older purchases: $${ORDERS_OLDER_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OLDER_UNITS} requests`);
   console.log(`a download's lookup of its purchase: $${DOWNLOAD_LOOKUP_READ.toFixed(6)} at most before its metered reads, counted as ${DOWNLOAD_LOOKUP_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // A read of a hundred bookings' moves, one MGET with its keys and moves (C3-82): counted as ORDERS_MOVES_READ_COMMANDS, above what it
+  // costs; a hundred at a command, as readMoves reads them; and the most taken before the bookings are read covers five pages of them.
+  assert.ok(ORDERS_MOVES_READ_COMMANDS * ORDERS_METERED_COMMAND >= ORDERS_METERED_MOVES, `${ORDERS_MOVES_READ_COMMANDS} x ${ORDERS_METERED_COMMAND} < ${ORDERS_METERED_MOVES}`);
+  assert.ok(read("lib/call-records.ts").includes(`const perRead = ${MOVES_PER_MGET};`), "readMoves reads MOVES_PER_MGET moves at a command");
+  assert.deepEqual([moveReads(0), moveReads(1), moveReads(100), moveReads(101), moveReads(500), moveReads(Number.NaN)], [0, 1, 1, 2, 5, Number.POSITIVE_INFINITY]);
+  assert.deepEqual([ordersMovesCommands(40), ordersMovesCommands(500), ORDERS_CALL_MOVES], [2, 10, 10]);
   console.log(`an opening of the orders page: $${ORDERS_OPEN_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}; ${ORDERS_UNIT_COMMANDS} metered commands a request`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
@@ -303,6 +312,18 @@ test("what the buyers' copy and the imported buyers weigh is counted a studio re
  const paypalUnits = ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: Number.MAX_SAFE_INTEGER, paypalRefunds: Number.MAX_SAFE_INTEGER }));
  assert.ok(PAYPAL_LEDGER <= UNIT_COST.studio * paypalUnits, `${PAYPAL_LEDGER} > ${paypalUnits} x ${UNIT_COST.studio}`);
  assert.ok(ledgerReadBytes({ imported: 0, paypalSales: 3_000, paypalRefunds: 500 }) >= PAYPAL_LEDGER_BYTES, "every PayPal record read is counted");
+});
+
+test("a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads)", () => {
+ assert.equal(SCHEDULED_READS.id, "scheduled-reads");
+ assert.ok(SCHEDULED_READS.each <= UNIT_COST.studio * BUYER_LEDGER_UNITS, `${SCHEDULED_READS.each} > ${BUYER_LEDGER_UNITS} x ${UNIT_COST.studio}`);
+ const source = read("lib/broadcasts.ts").replace(/\s+/g, " ");
+ // The only reading of the buyers in the scheduled job goes through the draw, which holds or takes before it says yes.
+ assert.deepEqual(source.match(/keepFor\([^)]*\)/g), ["keepFor(store, narrow, count)", "keepFor(store, b.narrow, draw)"], "every reading of the buyers in lib/broadcasts.ts is counted");
+ assert.ok(source.includes('const taken = await takeAllowance(current, "studio", rest, now * 1000)') && source.includes("return true;") && !source.includes("over += units"), "what the hold does not cover is taken from the month it is read in, never read over it");
+ assert.ok(source.includes('await holdAllowanceAt(await refreshPeriod(store), "studio", units, sendAt * 1000)'), "the hold is taken from the month it goes out");
+ // A subject test decided by sales reads TEST_SALES_PAGES pages of sales, paid as a reading of every sale (ALL_TIME_PAGES of them) first.
+ assert.ok(TEST_SALES_PAGES <= ALL_TIME_PAGES, `${TEST_SALES_PAGES} > ${ALL_TIME_PAGES}`);
 });
 
 test("the tasks agenda at its most fits the studio requests it counts", () => {
@@ -399,6 +420,9 @@ test("an API reading that reads more than a page takes further requests that cov
   covers(codesWork(), "codes");
   // The bookings at their most; nothing without Stripe.
   covers(bookingsWork(true), "bookings");
+  // Their moves read a hundred at an MGET (C3-82): five commands, not five hundred, so the request and five more, not thirty.
+  assert.equal(bookingsWork(true).commands, 5);
+  assert.equal(1 + apiReadUnits(bookingsWork(true)), 6);
   assert.equal(apiReadUnits(bookingsWork(false)), 0);
   // A size that could not be read is never priced low.
   assert.equal(apiReadUnits({ commands: Number.NaN }), Number.POSITIVE_INFINITY);

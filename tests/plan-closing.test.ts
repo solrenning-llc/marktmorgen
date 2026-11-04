@@ -377,7 +377,7 @@ async function main(): Promise<void> {
   const V = await endedAt(eve.email);
   for (const day of [0, M, W]) await closeOne(eve.email, V + day * DAY, hands);
   is("told three times, like anybody", mailTo(eve.email).map((m) => m.subject.slice(0, 7)), ["Eve Stu", "14 days", "7 days "]);
-  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, items: { data: [{ price: { unit_amount: 9900, recurring: { interval: "month" } } }] } });
+  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] } });
   const repaired = await closeOne(eve.email, V + C * DAY, hands);
   const eveNow = (await storeForEmail(eve.email))!;
   is("Stripe says the plan runs: nothing is removed and nobody is told it was", [repaired.state, repaired.note, objects.has((await readListing(eveNow, evesFile))!.file!.pathname), mailTo(eve.email).length], ["running", "Stripe says the plan runs", true, 3]);

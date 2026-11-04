@@ -100,9 +100,6 @@ async function main(): Promise<void> {
   const ben = (await tokensFor(store.listId as string, ["ben@example.com"], store.handle)).get("ben@example.com");
   if (ben) await unsubscribe(ben);
 
-  // The search above that found nobody used the day's own search (lib/store-readings.ts, UPDATE_SEARCHES_PER_DAY,
-  // inbox C4-33): the next day's.
-  redis.run(["DEL", `nl:reading:update:${(await load()).statsId}:${new Date().toISOString().slice(0, 10)}`]);
   const started = await startUpdate(await load(), product, "Ten new recipes.\r\n\r\n\r\nAnd one-page shopping lists.");
   if (!started.ok) throw new Error(`not started: ${started.reason}`);
   is("started for every buyer", started.job.total, 2);

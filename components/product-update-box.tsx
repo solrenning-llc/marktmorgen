@@ -4,7 +4,6 @@ import { useState } from "react";
 import { toast } from "@/components/toast";
 import type { Product } from "@/lib/store";
 import { MAX_UPDATE_NOTE, canTellBuyers } from "@/lib/product-updates-rules";
-import { browserZone, nextUtcMidnight, utcAndLocal } from "@/lib/local-clock";
 
 const MESSAGES: Record<string, string> = {
   plan: "Emails to your buyers are on Pro, with your store's email set up under Email.",
@@ -74,9 +73,8 @@ export function ProductUpdateBox({ product }: { product: Product }) {
           setError(
             data.error === "soon" && data.until
               ? `This product's buyers were told of an update in the last 7 days. The next one can go on ${when(data.until)}.`
-              : data.error === "readings_used" && data.message
-                ? // The day's searches come back at 00:00 UTC, said also on the creator's own clock (inbox C4-33 (3)).
-                  `${data.message.replace("00:00 UTC", utcAndLocal(nextUtcMidnight(Date.now()), browserZone()))} Nothing was sent.`
+              : data.error === "studio_used" && typeof data.message === "string" && data.message
+                ? data.message
                 : (MESSAGES[data.error ?? ""] ?? "Something went wrong on our side. Nothing was sent. Try again in a moment."),
           );
         } catch {

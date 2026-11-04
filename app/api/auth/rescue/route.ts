@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { pendingRemoval } from "@/lib/passkeys";
 import { originFrom } from "@/lib/request-origin";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { TWO_STEP_COOKIE, spendRescue } from "@/lib/two-step";
@@ -33,6 +34,8 @@ export async function POST(request: NextRequest) {
   const previous = request.cookies.get(SESSION_COOKIE)?.value;
   if (previous) await endSession(previous);
   const sessionId = await openSession(email);
+  // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
+  await pendingRemoval(email).catch((error) => console.error("applying a passkey removal failed", error));
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   const response = away("/studio#two-step");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));

@@ -41,7 +41,7 @@ import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, rel
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
-import { ALL_TIME_PAGES, readPaidSales } from "@/lib/stats";
+import { ALL_TIME_PAGES, readPaidSales, readsSales } from "@/lib/stats";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -49,9 +49,11 @@ import { updatesWords } from "@/lib/buyer-words/updates";
 import { type Listing, type Store, saleHandles, storeForHandle } from "@/lib/store";
 import { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuyers } from "@/lib/product-updates-rules";
 import { noteForErasure } from "@/lib/erasure-index";
-import { UPDATE_SEARCHES_PER_DAY, takeUpdateSearch } from "@/lib/store-readings";
 import { orderWrite } from "@/lib/order-data";
 import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { BUYER_LEDGER_UNITS, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
+import { paypalKept } from "@/lib/paypal-sales";
+import { countUnits } from "@/lib/person-agenda-read";
 
 export { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuyers };
 
@@ -128,13 +130,23 @@ export function buyersFrom(rows: Record<string, unknown>[], handles: ReadonlySet
   return [...seen];
 }
 
-/** Said when the day's searches for buyers are used; the page adds when they come back, in the creator's own time. */
-export const UPDATE_SEARCHES_USED = `Your store can look up ${UPDATE_SEARCHES_PER_DAY === 1 ? "one product's buyers" : `${UPDATE_SEARCHES_PER_DAY} products' buyers`} a day, and has done so today. You can tell them after 00:00 UTC.`;
-
 export type StartResult =
   | { ok: true; job: UpdateJob }
   | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe"; until?: number }
-  | { ok: false; reason: "used"; message: string; until?: undefined };
+  | { ok: false; reason: "studio_used"; message: string; until?: undefined };
+
+/**
+ * Studio requests reading every paid sale of the store costs, before it is
+ * read (lib/stats.ts, readPaidSales): when Stripe is read (a Stripe account),
+ * as much as a reading of its buyers from Stripe (lib/segments.ts,
+ * BUYER_LEDGER_UNITS, which reads these pages and more); and the PayPal sales
+ * kept (`paypalSales`), read whenever the store reads sales, by their weight.
+ * Nothing when it reads no sales.
+ */
+export function updateReadUnits(store: Pick<Store, "stripeAccountId" | "paypalSeller">, paypalSales: number): number {
+  if (!readsSales(store)) return 0;
+  return (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales, paypalRefunds: 0 }));
+}
 
 /** When this product's buyers may next be told, in seconds; 0 when they may now. */
 export async function nextUpdateAt(store: Store, productId: string): Promise<number> {
@@ -150,16 +162,11 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   if (!canTellBuyers(product)) return { ok: false, reason: "kind" };
   const next = await nextUpdateAt(store, product.id);
   if (next > nowSeconds) return { ok: false, reason: "soon", until: next };
-  // Finding the buyers reads every paid sale the store has (both Stripe lists,
-  // ALL_TIME_PAGES pages each, and its PayPal sales), and a press that finds
-  // none claims nothing, so it can be pressed again: each search is one of
-  // the store's own searches of the day, from a count of their own, never the
-  // studio's readings, taken before it starts (lib/store-readings.ts; owner's
-  // rule MR and decisions of 4 November 2026, inbox C4-18 and C4-33). The
-  // studio's requests count only the press itself.
-  if (!(await takeUpdateSearch(store, Date.now()))) {
-    return { ok: false, reason: "used", message: UPDATE_SEARCHES_USED };
-  }
+  // Every paid sale, read again from Stripe each time: counted in the studio's requests first, nothing read when not.
+  const kept = await paypalKept(store.statsId, false).catch(() => null);
+  if (!kept) return { ok: false, reason: "stripe" };
+  const counted = await countUnits(store, updateReadUnits(store, kept.sales)).catch(() => null);
+  if (!counted?.ok) return { ok: false, reason: "studio_used", message: counted && !counted.ok ? counted.message : "" };
   let rows: Record<string, unknown>[];
   try {
     rows = (await readPaidSales(store, 0, ALL_TIME_PAGES)).sales.filter((s) => !s.upsell).map((s) => s.row);

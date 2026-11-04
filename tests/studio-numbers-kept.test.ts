@@ -17,7 +17,7 @@
 import { readFileSync } from "node:fs";
 import { ReadingsUsed, STORE_READINGS_PER_DAY, HEAVY_READINGS_PER_DAY, keptReading, readingsBackAt, readingsLeft } from "@/lib/store-readings";
 import { clockWords, nextUtcMidnight, utcAndLocal } from "@/lib/local-clock";
-import { READINGS_RULE_WORDS, UPDATE_RULE_WORDS } from "@/lib/store-reading-rules";
+import { READINGS_RULE_WORDS } from "@/lib/store-reading-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   is("a store whose sales are used and none kept is said so, not as an error", studio.includes("used: error instanceof ReadingsUsed"), true);
 
   part("The rule, in words ready for the help (lib/help-content.ts is another agent's file today; inbox C4-33 (5))");
-  is("in plain words, with the figures", [READINGS_RULE_WORDS.includes(`up to ${STORE_READINGS_PER_DAY} times a day (UTC), ${HEAVY_READINGS_PER_DAY} of them with your sales`), READINGS_RULE_WORDS.includes("00:00 UTC"), UPDATE_RULE_WORDS.includes("one product's buyers a day")], [true, true, true]);
+  is("in plain words, with the figures", [READINGS_RULE_WORDS.includes(`up to ${STORE_READINGS_PER_DAY} times a day (UTC), ${HEAVY_READINGS_PER_DAY} of them with your sales`), READINGS_RULE_WORDS.includes("00:00 UTC")], [true, true]);
   done();
 }
 

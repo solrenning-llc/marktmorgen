@@ -13,7 +13,7 @@
  * was already emailed to them.
  */
 import { type Agreement, type AgreementKind, latestOf, statusOf as agreementStatus } from "@/lib/agreement-rules";
-import { agreementsOfPerson, readVersion } from "@/lib/agreement-store";
+import { agreementsOfPerson, readVersion, versionExists } from "@/lib/agreement-store";
 import { type PaymentRequest, statusOf as requestStatus } from "@/lib/payment-request-rules";
 import { requestsOfPerson } from "@/lib/payment-request-store";
 import type { Store } from "@/lib/store";
@@ -64,7 +64,12 @@ export async function waitingFor(store: Store, email: string, now = Date.now(), 
     allAgreements.slice(0, WAITING_SHOWN).map(async (agreement) => {
       const latest = latestOf(agreement);
       // The title is kept in the record's mark of the version: the version's whole text is read only for one kept before that.
-      if (latest?.title) return { id: agreement.id, kind: agreement.kind, title: latest.title, expiresAt: agreement.expiresAt };
+      // Its text is only checked to be there (one EXISTS), as its page needs it: one that is gone is not listed and is said as not read.
+      if (latest?.title) {
+        const there = await versionExists(agreement, latest.n).catch(() => false);
+        if (!there) unread = true;
+        return there ? { id: agreement.id, kind: agreement.kind, title: latest.title, expiresAt: agreement.expiresAt } : null;
+      }
       const version = latest ? await readVersion(agreement, latest.n).catch(() => null) : null;
       // An agreement whose text cannot be read is not listed (its page could not show it either), and the page says something could not be read.
       if (!version) unread = true;

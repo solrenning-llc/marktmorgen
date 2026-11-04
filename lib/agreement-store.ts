@@ -215,6 +215,13 @@ export async function agreementOf(store: Pick<Store, "sid">, id: string): Promis
  * what is stored is still the fingerprint recorded for it, so a page never
  * shows, and nobody signs, a text that is not the one recorded.
  */
+/** Whether a version's own key is there, without reading its text: for a list that shows only its title. */
+export async function versionExists(a: Pick<Agreement, "id" | "versions">, n: number): Promise<boolean> {
+  if (!a.versions.some((m) => m.n === n) || !isRedisConfigured()) return false;
+  const [there] = await redisPipeline([["EXISTS", versionKey(a.id, n)]]);
+  return Number(there) === 1;
+}
+
 export async function readVersion(a: Pick<Agreement, "id" | "versions">, n: number): Promise<AgreementVersion | null> {
   const mark = a.versions.find((m) => m.n === n);
   if (!mark || !isRedisConfigured()) return null;

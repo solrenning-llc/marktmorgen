@@ -79,22 +79,28 @@ async function main(): Promise<void> {
   const marked = agreement("b7", { sid: titledSid, versions: [{ n: 1, sha256: "a".repeat(64), title: "Website redesign", createdAt: NOW - DAY, signature: null }] });
   await redis.pipeline([
     ["SET", `nl:agree:r:${marked.id}`, JSON.stringify(marked)],
+    ["SET", `nl:agree:v:${marked.id}:1`, "x".repeat(12_000)],
     ["SADD", `nl:agree:p:${titledSid}:${personKey(titledSid, "ana@example.com")}`, marked.id],
   ]);
   let versionReads = 0;
   redis.pipeline = (async (list: (string | number)[][]) => {
-    versionReads += list.filter((c) => String(c[1] ?? "").startsWith("nl:agree:v:")).length;
+    versionReads += list.filter((c) => c[0] === "GET" && String(c[1] ?? "").startsWith("nl:agree:v:")).length;
     return keep(list);
   }) as typeof redis.pipeline;
   const titled = await waitingFor({ sid: titledSid, statsId: null } as unknown as Store, "ana@example.com", NOW, false);
   redis.pipeline = keep;
-  is("shown with the title kept in the record, though its version's text is not there", [titled.agreements.map((a) => a.title), titled.unread], [["Website redesign"], false]);
-  is("no version's text read", versionReads, 0);
+  is("shown with the title kept in the record", [titled.agreements.map((a) => a.title), titled.unread], [["Website redesign"], false]);
+  is("its version's text is never read, only checked to be there", versionReads, 0);
+  await redis.pipeline([["DEL", `nl:agree:v:${marked.id}:1`]]);
+  const gone = await waitingFor({ sid: titledSid, statsId: null } as unknown as Store, "ana@example.com", NOW, false);
+  is("one whose text is gone is not listed, and is said as not read", [gone.agreements.length, gone.unread], [0, true]);
 
   part("On the orders page");
   const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
   is("an opening with a link takes one of the store's buyer requests before anything is read", page.indexOf('takePublicRequest(store, "buyer")') > 0 && page.indexOf('takePublicRequest(store, "buyer")') < page.indexOf("ordersGrant(store, token)") && page.includes("token && admitted ? await ordersGrant(store, token) : null"), true);
   is("without room, the page says it is busy and reads nothing", page.includes("token && !admitted ? NOTICES.busy"), true);
+  is("a token not shaped like one takes nothing from the store", page.includes('token && ORDERS_TOKEN_PATTERN.test(token) ? await takePublicRequest(store, "buyer") : true'), true);
+  is("the notice says only what is true: kept, try later, ask for a new link", [ORDERS_WORDS.en.notices.busy.title, /minutes|many people/i.test(ORDERS_WORDS.en.notices.busy.body)], ["This store can't show your purchases right now", false]);
   is("the busy notice in every language", Object.values(ORDERS_WORDS).every((w) => !!w.notices.busy?.title && !!w.notices.busy?.body), true);
   is("each request's amount in its own currency, never the store's now", (page.match(/speechFor\(store\.language, request\.currency\)\.money\(request\.total\)/g) ?? []).length, 2);
   is("a named section with its heading, before the bookings", page.includes('aria-labelledby="waiting-title"') && page.includes('<h2 id="waiting-title"') && page.indexOf("<WaitingList") < page.indexOf('aria-labelledby="calls-title"'), true);

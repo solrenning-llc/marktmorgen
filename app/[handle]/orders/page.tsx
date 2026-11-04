@@ -16,7 +16,7 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { linkHost } from "@/lib/product-link";
-import { type AddedPurchase, type BookedCall, type Delivery, type Purchase, callsFor, canRecover, ordersGrant, purchasesFor } from "@/lib/buyer-orders";
+import { type AddedPurchase, type BookedCall, type Delivery, type Purchase, ORDERS_TOKEN_PATTERN, callsFor, canRecover, ordersGrant, purchasesFor } from "@/lib/buyer-orders";
 import type { BumpKey } from "@/lib/bundle-rules";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
@@ -176,7 +176,8 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   const status = typeof query.status === "string" ? query.status : "";
   // Each opening with a link takes one of the store's buyer requests before anything is read (lib/traffic.ts),
   // so a link reloaded in a loop has a ceiling; without room, nothing is read and the page says to come back.
-  const admitted = token ? await takePublicRequest(store, "buyer") : true;
+  // A token that is not shaped like one takes nothing: it is said as expired, with no read.
+  const admitted = token && ORDERS_TOKEN_PATTERN.test(token) ? await takePublicRequest(store, "buyer") : true;
   const email = token && admitted ? await ordersGrant(store, token) : null;
   const available = canRecover(store);
 

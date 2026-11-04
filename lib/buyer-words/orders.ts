@@ -52,8 +52,8 @@ const en = {
       body: "A link to your purchases works for 24 hours. Ask for a new one below; it takes a few seconds.",
     },
     busy: {
-      title: "This page is busy right now",
-      body: "Too many people opened this store's pages in the last few minutes. Nothing is lost: open your link again in a few minutes.",
+      title: "This store can't show your purchases right now",
+      body: "What you bought is kept. Try again later. If your link has expired by then, ask for a new one below.",
     },
   } as Record<string, { title: string; body: string }>,
 
@@ -299,8 +299,8 @@ const es: OrdersWords = {
       body: "Un enlace a tus compras funciona durante 24 horas. Pide uno nuevo abajo; tarda unos segundos.",
     },
     busy: {
-      title: "Esta página está ocupada ahora mismo",
-      body: "Demasiadas personas abrieron las páginas de esta tienda en los últimos minutos. No se ha perdido nada: vuelve a abrir tu enlace dentro de unos minutos.",
+      title: "Esta tienda no puede mostrar tus compras ahora mismo",
+      body: "Lo que compraste se conserva. Vuelve a intentarlo más tarde. Si para entonces tu enlace ha caducado, pide uno nuevo abajo.",
     },
   },
 
@@ -518,8 +518,8 @@ const fr: OrdersWords = {
       body: `Un lien vers vos achats est valable 24${S}heures. Demandez-en un nouveau ci-dessous${S}; cela ne prend que quelques secondes.`,
     },
     busy: {
-      title: "Cette page est occupée pour le moment",
-      body: "Trop de personnes ont ouvert les pages de cette boutique ces dernières minutes. Rien n'est perdu : rouvrez votre lien dans quelques minutes.",
+      title: "Cette boutique ne peut pas afficher vos achats pour le moment",
+      body: "Ce que vous avez acheté est conservé. Réessayez plus tard. Si votre lien a expiré d'ici là, demandez-en un nouveau ci-dessous.",
     },
   },
 
@@ -735,8 +735,8 @@ const de: OrdersWords = {
       body: "Ein Link zu Ihren Käufen gilt 24 Stunden. Fordern Sie unten einen neuen an; das dauert nur ein paar Sekunden.",
     },
     busy: {
-      title: "Diese Seite ist gerade ausgelastet",
-      body: "In den letzten Minuten haben zu viele Leute die Seiten dieses Shops geöffnet. Es geht nichts verloren: Öffne deinen Link in ein paar Minuten noch einmal.",
+      title: "Dieser Shop kann Ihre Käufe gerade nicht anzeigen",
+      body: "Was Sie gekauft haben, bleibt erhalten. Versuchen Sie es später noch einmal. Wenn Ihr Link bis dahin abgelaufen ist, fordern Sie unten einen neuen an.",
     },
   },
 
@@ -957,8 +957,8 @@ const it: OrdersWords = {
       body: "Un link ai tuoi acquisti funziona per 24 ore. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
     },
     busy: {
-      title: "Questa pagina è occupata in questo momento",
-      body: "Troppe persone hanno aperto le pagine di questo negozio negli ultimi minuti. Non si è perso nulla: riapri il tuo link tra qualche minuto.",
+      title: "Questo negozio non può mostrare i tuoi acquisti in questo momento",
+      body: "Ciò che hai acquistato è conservato. Riprova più tardi. Se nel frattempo il tuo link è scaduto, chiedine uno nuovo qui sotto.",
     },
   },
 
@@ -1175,8 +1175,8 @@ const nl: OrdersWords = {
       body: "Een link naar je aankopen werkt 24 uur. Vraag hieronder een nieuwe aan; dat duurt maar een paar seconden.",
     },
     busy: {
-      title: "Deze pagina is nu druk",
-      body: "De afgelopen minuten hebben te veel mensen de pagina's van deze winkel geopend. Er gaat niets verloren: open je link over een paar minuten opnieuw.",
+      title: "Deze winkel kan je aankopen nu niet tonen",
+      body: "Wat je hebt gekocht, blijft bewaard. Probeer het later opnieuw. Is je link tegen die tijd verlopen, vraag dan hieronder een nieuwe aan.",
     },
   },
 
@@ -1392,8 +1392,8 @@ const pt: OrdersWords = {
       body: "Uma ligação para as suas compras funciona durante 24 horas. Peça uma nova abaixo; demora apenas alguns segundos.",
     },
     busy: {
-      title: "Esta página está ocupada neste momento",
-      body: "Demasiadas pessoas abriram as páginas desta loja nos últimos minutos. Nada se perdeu: volte a abrir a sua ligação dentro de alguns minutos.",
+      title: "Esta loja não pode mostrar as suas compras neste momento",
+      body: "O que comprou fica guardado. Tente novamente mais tarde. Se entretanto a sua ligação expirar, peça uma nova abaixo.",
     },
   },
 

@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
-import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingNow, pendingRemoval, repointPasskeys, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, discardPasskeys, listPasskeys, movePasskeys, pendingNow, pendingRemoval, repointPasskeys, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
 import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
 import { RESET_DAYS, cancelReset, checkCode, finishSetup, lockedUntil, moveTwoStep, replaceCodes, resetIfDue, spendRescue, startSetup, turnOff, twoStepOn, twoStepStatus } from "@/lib/two-step";
@@ -1181,6 +1181,31 @@ async function main(): Promise<void> {
   // An index left on the other address all the same (as before this fix) is pointed back by the repair.
   await redis.pipeline([["SET", gidxCred, GIT]]);
   is("the repair points an index left on an address with no list back at the list's", [await repointPasskeys(GIF), (await redis.pipeline([["GET", gidxCred]]))[0], (await signInWithPasskey(gidx)).length], [1, GIF, 64]);
+
+  part("An old list gone while the new index write was not applied is never a finished move (C3-120)");
+  const DXF = "dx-from@example.com";
+  const DXT = "dx-dest@example.com";
+  const dx = makePasskey(DXF, "cred-dx");
+  await dx.keep();
+  const dxCred = `nl:pk:cred:${hex("nimbus-passkey-id:cred-dx").slice(0, 40)}`;
+  const dxLock = `nl:pk:lock:${hex(`nimbus-passkey-lock:${DXF}`).slice(0, 40)}`;
+  const dxPipe = redis.pipeline.bind(redis);
+  let dxDone = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!dxDone && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-set:") && c.includes(dxCred) && c.includes(DXT))) {
+      dxDone = true;
+      // The old address's lock runs out meanwhile; a valid clean-up takes it and forgets that address's passkeys.
+      await dxPipe([["DEL", dxLock]]);
+      redis.pipeline = dxPipe;
+      await discardPasskeys(DXF);
+      // The index write to the new address is not applied, and fails.
+      throw new Error("not applied");
+    }
+    return dxPipe(commands);
+  }) as typeof redis.pipeline;
+  const dxMoved = await movePasskeys(DXF, DXT).then(() => "moved", () => "refused");
+  redis.pipeline = dxPipe;
+  is("refused, and nothing is left at the new address: never said to be moved", [dxMoved, (await listPasskeys(DXF)).length, (await listPasskeys(DXT)).length, (await redis.pipeline([["GET", dxCred]]))[0]], ["refused", 0, 0, null]);
 
   part("Small items of C3-110");
   const KRA = "kra-owner@example.com";

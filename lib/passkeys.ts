@@ -793,35 +793,51 @@ export async function movePasskeys(from: string, to: string, now = Date.now()): 
       due = (await removeDue(heldFrom, source, now)) ?? NONE;
       const list = await listPasskeys(source);
       const pending = await readDrop(source);
-      const copied: string[] = [];
+      // Tried: every write that may have been applied, put back by the undo even when its answer was lost (C3-117).
+      // Confirmed: every write that answered as applied, the only ones that may say the move went through (C3-120).
+      const tried: string[] = [];
+      const confirmed: string[] = [];
+      let listWritten = false;
+      let dropWritten = !pending;
       try {
         if (list.length) {
           await fencedSet(heldTo, listKey(address), JSON.stringify(list));
+          listWritten = true;
           for (const p of list) {
-            // Counted as written before it is awaited: a write whose answer is lost may have been applied, so the
-            // undo puts its index back too (Codex G on 4bb50dcf, C3-117). Putting back one never written is harmless.
-            copied.push(p.id);
+            tried.push(p.id);
             await fencedSet(heldTo, credKey(p.id), address);
+            confirmed.push(p.id);
           }
         }
-        if (pending) await writeDrop(heldTo, address, pending);
+        if (pending) {
+          await writeDrop(heldTo, address, pending);
+          dropWritten = true;
+        }
         await fencedDel(heldFrom, [listKey(source), dropKey(source)]);
       } catch (error) {
-        // The old address's list already gone (the answer of the last step was lost, not the step): the move
-        // happened, and the new address keeps it all (security review C3-110).
-        if (list.length && copied.length === list.length && (await listPasskeys(source)).length === 0) return;
-        // A lock lost midway: what was copied goes back, fenced, so the passkeys are never on both addresses or
-        // neither; when even that cannot be done, the move is left for the repair (MoveSplitError).
-        try {
-          for (const id of copied) await fencedSet(heldFrom, credKey(id), source);
-          // The new address's lock is the one that may have run out: taken again for the undo when it did.
-          await fencedDel(heldTo, [listKey(address), dropKey(address)]).catch(() =>
-            withPasskeys(address, (again) => fencedDel(again, [listKey(address), dropKey(address)])),
-          );
-        } catch (undo) {
-          console.error("putting passkeys back failed", undo);
-          throw new MoveSplitError();
+        // The old address's list already gone and every write to the new one confirmed: the answer of the last step
+        // (the old address's delete) was lost, not the step, and the new address keeps it all (security review
+        // C3-110). An old list gone while a write to the new address is unconfirmed proves nothing (a lock that ran
+        // out, and another change took it): never "moved" then (Codex D, C3-120).
+        if (list.length && listWritten && dropWritten && confirmed.length === list.length && (await listPasskeys(source)).length === 0) return;
+        // A lock lost midway: what may have been written goes back, fenced, so the passkeys are never on both
+        // addresses or neither; each step is tried even when another failed, and when any cannot be done, the
+        // move is left for the repair (MoveSplitError).
+        let undone = true;
+        // The new address's lock is the one that may have run out: taken again for the undo when it did.
+        await fencedDel(heldTo, [listKey(address), dropKey(address)])
+          .catch(() => withPasskeys(address, (again) => fencedDel(again, [listKey(address), dropKey(address)])))
+          .catch((undo) => {
+            console.error("taking passkeys off the new address failed", undo);
+            undone = false;
+          });
+        for (const id of tried) {
+          await fencedSet(heldFrom, credKey(id), source).catch((undo) => {
+            console.error("putting a passkey's index back failed", undo);
+            undone = false;
+          });
         }
+        if (!undone) throw new MoveSplitError();
         throw error;
       }
     }),

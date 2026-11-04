@@ -12,7 +12,8 @@
  *   nl:crm:tasks:<statsId>           hash  person -> their tasks (JSON, lib/person-tasks.ts), gone with the person;
  *                                    and TASK_COUNT_FIELD -> how many tasks the store keeps in all
  *   nl:crm:tasklock:<statsId>        one change of the store's tasks at a time (lib/redis-lock.ts), ten seconds at the most
- *   nl:crm:erased:<statsId>:<person> when a person was deleted (ms), ERASED_MARK_SECONDS: a value prepared before is refused
+ *   nl:crm:erased:<statsId>:<person> a person deleted and not come back (server time), ERASED_MARK_SECONDS: no value is set
+ *   nl:crm:gen:<statsId>:<person>    a person's generation, one more at each deletion: a page read before one is refused
  *   nl:crm:taskrecount:<statsId>     one paid recount of the store's tasks at a time (lib/redis-lock.ts), thirty seconds at the most
  *
  * A value is kept under the person's key, never the address (as a note
@@ -20,6 +21,7 @@
  * however long the list is.
  */
 import { createHash } from "node:crypto";
+import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
@@ -152,31 +154,63 @@ const PERSON = /^[0-9a-f]{32}$/;
 /**
  * A person deleted from the store (forgetCrmPerson): one key under their
  * person key (lib/person-key.ts, a one-way hash, never the address), holding
- * only the time of the deletion in milliseconds. A value set by a request
- * prepared before that time (a page opened, a workflow step taken) is refused
- * in the same step as its write (SET_CRM_VALUE); one prepared after it, for
- * someone who came back, is written and takes the mark away.
+ * only the server's time of the deletion. While it is there, nothing is set
+ * about them (SET_CRM_VALUE refuses, whatever a request says). Only the
+ * server takes it away, when the person comes back on their own: a paid
+ * order, a confirmed sign-up, a free product claimed, a form they sent
+ * (personReturned). A request's own word never does (C3-125).
  */
 const erasedKey = (statsId: string, person: string) => `nl:crm:erased:${statsId}:${person}`;
 /**
- * How long that mark is kept: at least the longest a request prepared before
- * the deletion can still arrive, which is the longest of
- *   - a studio page opened before the deletion (the person's page carries
- *     their key and the time it was drawn) and saved while its session
+ * The person's generation: 0 until they are first deleted, one more at each
+ * deletion. A page reads it with the person, and a save from it carries it:
+ * one read before a deletion differs, and is refused, even after the person
+ * came back (SET_CRM_VALUE). Kept ERASED_MARK_SECONDS from the last deletion.
+ */
+const generationKey = (statsId: string, person: string) => `nl:crm:gen:${statsId}:${person}`;
+/**
+ * How long the mark and the generation are kept: at least the longest a page
+ * read before the deletion can still save, which is the longest of
+ *   - a studio page opened before the deletion and saved while its session
  *     lasts: SESSION_TTL_SECONDS, 30 days (lib/auth.ts);
  *   - a workflow step already taken when the deletion removed the person's
  *     queued and waiting steps (lib/flows.ts, forgetWorkflowPerson): its
  *     lease, LEASE_SECONDS, 15 minutes; it is never tried again after.
  * Thirty days, and one more: 31 days (tests/crm-person-room.test.ts holds it
- * above each).
+ * above each). A mark left there that long (they never came back) goes by
+ * itself, and a value set after it is a new one, as for anyone.
  */
 export const ERASED_MARK_SECONDS = 31 * 86_400;
+
+/** The person's generation as it is now (generationKey): what a page reads with them, and a save from it carries. */
+export async function readGeneration(statsId: string | null, person: string): Promise<number> {
+  if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
+  const [raw] = await redisPipeline([["GET", generationKey(statsId, person)]]);
+  const n = Number(raw ?? 0);
+  return Number.isSafeInteger(n) && n >= 0 ? n : 0;
+}
+
+/** Several people's generations at once, in one trip: what a workflow step reads when it starts, before it sets their values. */
+export async function readGenerations(statsId: string, persons: string[]): Promise<number[]> {
+  if (!persons.length || !isRedisConfigured()) return persons.map(() => 0);
+  const replies = await redisPipeline(persons.map((person) => ["GET", generationKey(statsId, person)]));
+  return persons.map((_, i) => {
+    const n = Number(replies[i] ?? 0);
+    return Number.isSafeInteger(n) && n >= 0 ? n : -1;
+  });
+}
+
 /**
- * Clocks differ between the servers that draw a page and that delete a
- * person: a request prepared less than this after a deletion is taken as
- * prepared before it (refused, never written).
+ * The person came back on their own (a paid order, a confirmed sign-up, a
+ * free product claimed, a form they sent): the mark of their deletion goes,
+ * so the store may keep fields about them again. Their generation stays, so
+ * a page read before the deletion is still refused. Server paths only; never
+ * throws (a mark that stays only refuses more).
  */
-export const ERASED_CLOCK_MS = 5_000;
+export async function personReturned(statsId: string | null, email: string): Promise<void> {
+  if (!statsId || !email || !isRedisConfigured()) return;
+  await redisPipeline([["DEL", erasedKey(statsId, personKey(statsId, email))]]).catch((error: unknown) => console.error("clearing a deletion mark failed", error));
+}
 /** Where people's field values are counted in the store's data room (lib/store-data.ts). */
 const VALUES_SLOT = "crm:v";
 /** Where the pipelines are counted in it: one slot, at what their record weighs. */
@@ -240,33 +274,43 @@ export async function readValues(statsId: string | null, person: string, fields:
  * line), at three bytes a UTF-16 unit, the most any takes.
  */
 export const CRM_VALUE_MOST_BYTES = 3 * Math.max(MAX_FIELD_VALUE, MAX_FIELD_OPTIONS * MAX_FIELD_OPTION + MAX_FIELD_OPTIONS - 1);
+/** What SET_CRM_VALUE runs inside, at the most, which Upstash bills one by one beside the EVAL: the mark and the generation read, the value read and written. */
+export const CRM_VALUE_SCRIPT_CALLS = 4;
 /**
- * What setValue sends to the database, at the most, one trip each: the room
- * taken, the write (SET_CRM_VALUE), the room given back. No lock, no wait.
+ * A field saved from the studio (app/api/store/crm/route.ts, "value"), at the
+ * most, measured through the real route in tests/crm-contact-writes.test.ts
+ * as the studio sends it (the store named by every request,
+ * components/studio-store-pin.tsx): the trips to the database one after
+ * another (the session, the store and its team, the studio's count with
+ * both its requests, a teammate's line in the log, the fields, the room
+ * taken, the write, the room given back: 9 for the owner, 12 for a
+ * teammate), the commands sent with what the scripts run inside, and the
+ * bytes.
  */
-export const CRM_VALUE_SET_COMMANDS = 3;
+export const CRM_VALUE_SAVE_TRIPS = 12;
+export const CRM_VALUE_SAVE_COMMANDS = 30;
+export const CRM_VALUE_SAVE_BYTES = 2 * CRM_VALUE_MOST_BYTES + 16_384;
 /**
- * The bytes it moves through the database, at the most: the value written
- * and the one it replaced read back (CRM_VALUE_MOST_BYTES each), with the
- * script, its two keys, the person's key and the times (1,024); and the
- * room's two scripts, with their keys and answers (1,024 each).
+ * Studio requests a field saved from the studio is counted as, all taken
+ * with the first, before anything else is read (guardStoreWrite's `units`):
+ * its trips at the review ceiling of a trip do not fit in one studio
+ * request's 1.5 s, and never more than two (C3-123, C3-125;
+ * tests/plan-cost-registry.test.ts holds the figures).
  */
-export const CRM_VALUE_SET_BYTES = 2 * CRM_VALUE_MOST_BYTES + 3 * 1_024;
+export const CRM_VALUE_SAVE_UNITS = 2;
 
 /**
  * Sets one person's value of one field, or clears it with "", in one step on
- * the Redis side: 2, and nothing written, when the person was deleted at or
- * after the time the request was prepared (ARGV[3], less ERASED_CLOCK_MS);
- * otherwise the mark of an earlier deletion goes (they came back), the value
- * is written, and the answer is {1, before} with what it replaced, or {1}.
+ * the Redis side: 2, and nothing written, while the person's deletion mark is
+ * there (KEYS[2]) or when the save carries another generation than theirs
+ * (KEYS[3], ARGV[3]: the page was read before a deletion); otherwise the
+ * value is written, and the answer is {1, before} with what it replaced, or
+ * {1}. It never takes the mark away. Inside: the mark and the generation
+ * read, the value read and written (CRM_VALUE_SCRIPT_CALLS).
  */
-export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v3
-local erased = redis.call("GET", KEYS[2])
-if erased then
-  local at = tonumber(erased)
-  if not at or tonumber(ARGV[3]) < at + tonumber(ARGV[4]) then return 2 end
-  redis.call("DEL", KEYS[2])
-end
+export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v4
+if redis.call("EXISTS", KEYS[2]) == 1 then return 2 end
+if tonumber(redis.call("GET", KEYS[3]) or "0") ~= tonumber(ARGV[3]) then return 2 end
 local before = redis.call("HGET", KEYS[1], ARGV[1])
 if ARGV[2] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[2]) end
 if before then return {1, before} end
@@ -275,34 +319,35 @@ return {1}`;
 /**
  * Sets one value for one person; "" clears it. False when it is not a value the field keeps.
  *
- * `preparedAt` is when the request was prepared, in milliseconds: when the studio drew the person's page, or when a
- * workflow took the step. A person deleted at or after it (forgetCrmPerson) is refused in the same step as the write
- * (CrmPersonGone), so a request prepared before a deletion never puts anything about them back; one prepared after it,
- * for someone who came back (a new purchase, a new sign-up, the creator adding them again), is written as for anyone.
- * The deletion leaves its mark before it takes the values away, and each value is taken in one script that answers
- * what it removed, so a write is either refused or deleted with the rest. The new value's whole room is taken first
- * (DataRoomError, and nothing written, when it does not fit); the write answers what it replaced, in the same step,
- * and that room is given back after. So what is counted is exactly what is kept, whatever ran at the same time.
+ * `generation` is the person's generation as the page read it (readGeneration), or as a workflow step read it when
+ * it started. While the person's deletion mark is there, or for a save that carries another generation (a page read
+ * before a deletion, even if they came back since), nothing is written (CrmPersonGone, with the room taken given
+ * back), in the same step as the write. The deletion leaves its mark before it takes the values away, and each value
+ * is taken in one script that answers what it removed, so a write is either refused or deleted with the rest. The new
+ * value's whole room is taken first (DataRoomError, and nothing written, when it does not fit); the write answers what
+ * it replaced, in the same step, and that room is given back after. So what is counted is exactly what is kept.
  *
- * Its three trips fit in the request that asked (tests/plan-cost-registry.ts, CRM_VALUE_SET, held in
- * tests/plan-cost-registry.test.ts and measured in tests/crm-person-room.test.ts and tests/crm-contact-writes.test.ts).
+ * From the studio it is counted as CRM_VALUE_SAVE_UNITS studio requests, taken before anything is read
+ * (app/api/store/crm/route.ts; tests/plan-cost-registry.ts, CRM_VALUE_SAVE).
  */
-export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore, preparedAt: number): Promise<boolean> {
+export async function setValue(statsId: string, person: string, field: CrmField, raw: unknown, room: DataStore, generation: number): Promise<boolean> {
   if (!PERSON.test(person)) return false;
   const value = fieldValue(field, raw);
   if (value === null) return false;
-  // A time that is not one is the oldest there is: refused wherever a deletion was.
-  const prepared = Number.isSafeInteger(preparedAt) && preparedAt > 0 ? Math.min(preparedAt, Date.now()) : 0;
+  // Not a generation: none the person can have, so refused wherever they were deleted, and written for anyone else
+  // only when they were never deleted (0).
+  const carried = Number.isSafeInteger(generation) && generation >= 0 ? generation : -1;
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([person, v], 1) : 0);
   const charged = weight(value);
   if (charged > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: charged }]);
   let answer: unknown;
   try {
-    const response = await redisPipeline([["EVAL", SET_CRM_VALUE, 2, valuesKey(statsId, field.id), erasedKey(statsId, person), person, value, prepared, ERASED_CLOCK_MS]]);
+    const response = await redisPipeline([["EVAL", SET_CRM_VALUE, 3, valuesKey(statsId, field.id), erasedKey(statsId, person), generationKey(statsId, person), person, value, carried]]);
     answer = Array.isArray(response) && response.length === 1 ? response[0] : undefined;
   } catch { throw new CrmValueWriteUnconfirmed(); }
   if (answer === 2) {
-    // The person was deleted after this request was prepared: nothing was written, so the room taken goes back.
+    // The person was deleted (and has not come back), or the page was read before a deletion: nothing was written, so
+    // the room taken goes back.
     if (charged > 0) await giveData(room, [{ slot: VALUES_SLOT, bytes: charged }]).catch(() => {});
     throw new CrmPersonGone();
   }
@@ -680,11 +725,15 @@ return value`;
  */
 export async function forgetCrmPerson(statsId: string | null, person: string, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
-  // First the mark of when they were deleted, before anything is taken away: a value set from here on by a request
-  // prepared before now (a page opened, a workflow step taken) is refused (SET_CRM_VALUE), and one written before the
-  // mark is taken away below. An erasure whose mark is not confirmed fails, to be run again.
-  const marked = await redisPipeline([["SET", erasedKey(statsId, person), String(Date.now()), "EX", ERASED_MARK_SECONDS]]);
-  if (!Array.isArray(marked) || marked.length !== 1 || marked[0] !== "OK") throw new CrmValueWriteUnconfirmed();
+  // First the mark that they were deleted, and their next generation, before anything is taken away: a value set from
+  // here on is refused until they come back on their own, and from a page read before now for good (SET_CRM_VALUE); one
+  // written before is taken away below. An erasure whose mark is not confirmed fails, to be run again.
+  const marked = await redisPipeline([
+    ["SET", erasedKey(statsId, person), String(Date.now()), "EX", ERASED_MARK_SECONDS],
+    ["INCR", generationKey(statsId, person)],
+    ["EXPIRE", generationKey(statsId, person), ERASED_MARK_SECONDS],
+  ]);
+  if (!Array.isArray(marked) || marked.length !== 3 || marked[0] !== "OK" || typeof marked[1] !== "number" || marked[2] !== 1) throw new CrmValueWriteUnconfirmed();
   const fields = await readFields(statsId);
   const address = email.trim().toLowerCase();
   const [raw] = await redisPipeline([["HGETALL", dealsKey(statsId)]]);

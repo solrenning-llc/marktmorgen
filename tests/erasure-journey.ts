@@ -55,9 +55,9 @@ const ALLOWED: { pattern: RegExp; why: string }[] = [
  * mark that they were deleted, under their person key (a one-way hash), gone by itself after ERASED_MARK_SECONDS, so a
  * field saved late never puts anything about them back (lib/crm.ts; lib/person-data.ts says so).
  */
-const KEPT_ON_PURPOSE = [/^nl:recover:off:/, /^nl:upd:off:/, /^nl:rev:off:/, /^nl:crm:erased:/];
+const KEPT_ON_PURPOSE = [/^nl:recover:off:/, /^nl:upd:off:/, /^nl:rev:off:/, /^nl:crm:(erased|gen):/];
 /** The CRM's mark of a deletion: kept, with an end, and holding nothing but that it happened. */
-const CRM_ERASED = /^nl:crm:erased:/;
+const CRM_ERASED = /^nl:crm:(erased|gen):/;
 
 function changes(before: Map<string, string>, after: Map<string, string>): string[] {
   const out: string[] = [];
@@ -124,10 +124,10 @@ export async function runJourney(is: Check, sent: Sent[], counted: { commands: n
   const changed = changes(before, after).filter((key) => !ALLOWED.some((a) => a.pattern.test(key)) && !CRM_ERASED.test(key));
   is("everything is as it was before them, but what is allowed to change", changed, []);
   const left = [...after].filter(([key, value]) => marks(statsId, tess).some((m) => key.includes(m) || value.includes(m)));
-  is("no key or value names them, by address or by any key made from it, but the CRM's mark that they were deleted", left.map(([key]) => key).filter((key) => !CRM_ERASED.test(key)), []);
+  is("no key or value names them, by address or by any key made from it, but the CRM's mark that they were deleted and its count of deletions", left.map(([key]) => key).filter((key) => !CRM_ERASED.test(key)), []);
   const crmMarks = left.filter(([key]) => CRM_ERASED.test(key));
-  is("that mark holds nothing but when it happened, never the address", [crmMarks.length, crmMarks.every(([, value]) => /^"\d{13}"$/.test(value))], [1, true]);
-  is("and goes by itself within ERASED_MARK_SECONDS", await Promise.all(crmMarks.map(async ([key]) => { const [ttl] = await redisPipeline([["TTL", key]]); return typeof ttl === "number" && ttl > 0 && ttl <= ERASED_MARK_SECONDS; })), [true]);
+  is("the mark and the count hold nothing but a time and a number, never the address", [crmMarks.length, crmMarks.every(([, value]) => /^"\d{1,13}"$/.test(value))], [2, true]);
+  is("and goes by itself within ERASED_MARK_SECONDS", await Promise.all(crmMarks.map(async ([key]) => { const [ttl] = await redisPipeline([["TTL", key]]); return typeof ttl === "number" && ttl > 0 && ttl <= ERASED_MARK_SECONDS; })), [true, true]);
   const suppressionOnly = [...after].filter(([key]) => /^nl:erased:/.test(key));
   is("only a fingerprint is kept, under the store's list", suppressionOnly.map(([key, value]) => [key, (JSON.parse(value) as string[]).length]), [[`nl:erased:${listId}`, 1]]);
   is("which cannot be read back to the address", suppressionOnly.some(([, value]) => value.includes(tess) || value.includes("@")), false);

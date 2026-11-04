@@ -13,6 +13,7 @@ import { leadAffiliate, visitCookies } from "@/lib/affiliate-leads";
 import { funnelMark } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
 import { isStorePeople } from "@/lib/visit";
+import { personReturned } from "@/lib/crm";
 
 /** A form's answers, with room to spare: twelve questions, two of them long. */
 const MAX_BODY_BYTES = 40_000;
@@ -88,6 +89,8 @@ export async function POST(request: NextRequest) {
       joined = asked === "sent";
     }
     await addResponse(statsId, def.id, { id: randomBytes(16).toString("hex"), at: Math.floor(Date.now() / 1000), page: page?.id ?? "", answers: read.answers, outcome: outcome?.id ?? "", joined, ...(measured ? { score: measured.total, scores: measured.categories } : {}) }, store);
+    // A form they sent: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125).
+    if (read.email) await personReturned(statsId, read.email);
     // Somebody already on the list: the sequences that start with this form start now (lib/flows.ts checks they may be written to).
     if (read.email) await enroll(store, read.email, { joined: false, form: def.id, formOutcome: outcome?.id ?? "" });
 

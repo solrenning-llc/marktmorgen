@@ -67,7 +67,7 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CrmDealReadUnavailable, CrmPersonGone, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { CrmDealReadUnavailable, CrmPersonGone, readGenerations, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
 import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
@@ -611,7 +611,7 @@ const each = (emails: string[], state: Acted["state"], note: string): Acted[] =>
  * sequence that starts with it, and nobody is started twice. A write whose
  * answer is lost is "uncertain": the run is held, never repeated by itself.
  */
-async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number; takenAt: number }): Promise<Acted[]> {
+async function act(store: Store, flows: Flow[], action: FlowAction, emails: string[], at: { flow: Flow; step: FlowStep; index: number }): Promise<Acted[]> {
   const listId = store.listId;
   if (!listId || !emails.length) return [];
   if (action.do === "wait") return each(emails, "confirmed", "Waited.");
@@ -732,7 +732,7 @@ async function actOnPeople(
   store: Store,
   action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" | "rotate" }>,
   emails: string[],
-  at: { flow: Flow; step: FlowStep; index: number; takenAt: number },
+  at: { flow: Flow; step: FlowStep; index: number },
 ): Promise<Acted[]> {
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
@@ -740,13 +740,21 @@ async function actOnPeople(
     const field = (await readFields(statsId)).find((f) => f.id === action.field);
     if (!field) return each(emails, "failed", "The field was removed from your store.");
     const out: Acted[] = [];
-    for (const email of emails) {
+    // Their generations, read once as the step starts (lib/crm.ts): one deleted since is never written about, even if
+    // they came back meanwhile; one deleted and not come back is refused whatever it reads.
+    let generations: number[];
+    try {
+      generations = await readGenerations(statsId, emails.map((email) => personKey(statsId, email)));
+    } catch {
+      return each(emails, "failed", `“${field.name}” was not set: the people could not be read just now.`);
+    }
+    for (const [i, email] of emails.entries()) {
       try {
-        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store, at.takenAt * 1000)) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
+        out.push((await setValue(statsId, personKey(statsId, email), field, action.value, store, generations[i])) ? { email, state: "confirmed", changed: true, note: `“${field.name}” set to “${action.value}”.` } : { email, state: "failed", note: `“${field.name}” does not keep the value “${action.value}” any more.` });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: `“${field.name}” was not set: the store's data room is full.` });
-        // The person was deleted from the store after this step was taken (lib/crm.ts, setValue): nothing about them is written again.
+        // The person was deleted from the store, and has not come back, or since this step started (lib/crm.ts, setValue).
         else if (error instanceof CrmPersonGone) out.push({ email, state: "failed", note: `“${field.name}” was not set: this person was deleted from your store.` });
         else out.push({ email, state: "uncertain", note: `Whether “${field.name}” was set could not be confirmed.` });
       }
@@ -828,7 +836,7 @@ async function actOnDeals(
   statsId: string,
   action: Extract<FlowAction, { do: "deal" | "assign" | "next" | "rotate" }>,
   emails: string[],
-  at: { flow: Flow; step: FlowStep; index: number; takenAt: number },
+  at: { flow: Flow; step: FlowStep; index: number },
   held: Held | null,
 ): Promise<Acted[]> {
   const pipelines = await readPipelines(statsId);
@@ -1239,7 +1247,7 @@ export async function sendDueSteps(
       // A step that acts instead of writing: done for everyone it is for, then
       // on to where it leads, its wait counted from now.
       if (step.action) {
-        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index, takenAt: now }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
         // Anybody act did not answer for has no known outcome.
         const answered = new Set(outcomes.map((o) => o.email));
         const all = [...outcomes, ...each(going.filter((e) => !answered.has(e)), "uncertain", "The outcome of this action could not be confirmed.")];

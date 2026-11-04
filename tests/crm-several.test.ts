@@ -35,7 +35,7 @@ is("one of its choices passes", flowConfigurationIssues(step("Course"), context)
 is("one that is not is named", flowConfigurationIssues(step("Webinar"), context).some((i) => i.includes("incompatible with contact field “Interested in”")), true);
 
 part("On the contact's record");
-const html = renderToStaticMarkup(createElement(PersonFields, { person: "p".repeat(16), fields: [field], initial: { int001: "Coaching\nTemplates" }, preparedAt: 1 }));
+const html = renderToStaticMarkup(createElement(PersonFields, { person: "p".repeat(16), fields: [field], initial: { int001: "Coaching\nTemplates" }, generation: 0 }));
 is("a group named by the field", /<fieldset[^>]*>\s*<legend[^>]*>Interested in<\/legend>/.test(html), true);
 is("one box each, named by its choice", (html.match(/type="checkbox"/g) ?? []).length === 3 && ["Coaching", "Course", "Templates"].every((o) => html.includes(`<span>${o}</span>`)), true);
 is("the picked ones checked", (html.match(/checked=""/g) ?? []).length, 2);

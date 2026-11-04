@@ -73,6 +73,10 @@ export async function POST(request: NextRequest) {
         // A new pipeline is anyone's to add; one that exists, and where a removed one's deals go, need edit.
         if (changing !== null && !mayEdit(changing)) return noAccess();
         if (removing && !mayEdit(pipelineOfStage(pipelines, moveTo))) return noAccess();
+        // Deals of a removed stage may be sent to another pipeline's stage: that one must be theirs to change too.
+        const targets = !removing && body.moves && typeof body.moves === "object" ? Object.values(body.moves as Record<string, unknown>).filter((v): v is string => typeof v === "string") : [];
+        const sentStages = body.pipeline && typeof body.pipeline === "object" && Array.isArray((body.pipeline as { stages?: unknown }).stages) ? ((body.pipeline as { stages: { id?: unknown }[] }).stages.map((st) => st?.id).filter((v): v is string => typeof v === "string")) : [];
+        if (targets.some((stage) => !sentStages.includes(stage) && !mayEdit(pipelineOfStage(pipelines, stage)))) return noAccess();
       }
       const result = await savePipelineChange(statsId, removing ? { remove: id } : { pipeline: body.pipeline }, moves, pipelineLimit(store), store);
       return result.ok ? Response.json({ ok: true, pipelines: result.pipelines, moved: Object.keys(result.moves).length }) : refuse(result.error, result.error === "unknown" ? 404 : 400);

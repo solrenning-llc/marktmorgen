@@ -17,9 +17,11 @@ import { createRequest, changeRequest } from "@/lib/payment-request-store";
 import { readDraft as readRequestDraft } from "@/lib/payment-request-rules";
 import { COMMANDS, COMMAND } from "./traffic-cost";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS, bundleMeta } from "@/lib/bundle-rules";
+import { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
+import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 
 const OWNER = "buyer-page-cost@example.test", BUYER = "buyer@example.test", ACCOUNT = "acct_1TestLoom00001";
-async function world(pending = false, purchases = false, installments = false, bundles = false) {
+async function world(pending = false, purchases = false, installments = false, bundles = false, fullFields = false) {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_tax_journey_only";
   process.env.RESEND_API_KEY = "re_SYNTHETIC_ACCESS_ONLY";
@@ -31,18 +33,22 @@ async function world(pending = false, purchases = false, installments = false, b
   const setup = readSetup({ kind: "weekly", minutes: 30, tz: "UTC", weekly: [[], [[540,1020]], [[540,1020]], [[540,1020]], [[540,1020]], [[540,1020]], []],
     noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "", video: true, meet: null, seats: 1, sessions: [] });
   assert.ok(setup && typeof setup === "object"); await setProductCall(OWNER, added.product.id, setup);
-  const digitalTitles = Array.from({ length: purchases ? (bundles ? 1999 : 600) : 0 }, (_, i) => `${i<600?"Cost digital":"Bundle content"} ${String(i).padStart(6, "0")}`);
+  const shortDelivery = "https://example.test/paid-digital";
+  const parsedDelivery = readLink(fullFields ? shortDelivery + "x".repeat(MAX_LINK_LENGTH-shortDelivery.length) : shortDelivery);
+  assert.ok(parsedDelivery.ok); const deliveryLink=parsedDelivery.url;
+  if(fullFields)assert.equal(deliveryLink.length,MAX_LINK_LENGTH);
+  const digitalTitles = Array.from({ length: purchases ? (bundles ? MAX_PRODUCTS-1 : 600) : 0 }, (_, i) => { const title=`${i<600?"Cost digital":"Bundle content"} ${String(i).padStart(6, "0")}`; return fullFields?title.padEnd(MAX_TITLE_LENGTH,"x"):title; });
   let digitalIds: string[] = [];
   if (purchases) {
-    const drafts = await addDraftProducts(OWNER, digitalTitles.map((title,i) => ({ title, summary: "Historical paid delivery", priceCents: 1000, link: bundles && i<600 ? null : "https://example.test/paid-digital" })));
-    assert.ok(drafts.ok); digitalIds = drafts.ids; assert.equal(digitalIds.length, bundles?1999:600);
+    const drafts = await addDraftProducts(OWNER, digitalTitles.map((title,i) => ({ title, summary: fullFields?"s".repeat(MAX_SUMMARY_LENGTH):"Historical paid delivery", priceCents: 1000, link: bundles && i<600 ? null : deliveryLink })));
+    assert.ok(drafts.ok); digitalIds = drafts.ids; assert.equal(digitalIds.length, bundles?MAX_PRODUCTS-1:600);
   }
   const contentsFor = (index: number) => Array.from({length:MAX_BUNDLE_ITEMS}, (_, i) => digitalIds[600+(index*MAX_BUNDLE_ITEMS+i)%(digitalIds.length-600)]);
   if(bundles) for(let i=0;i<600;i++) {
     const saved=await setProductBundle(OWNER,digitalIds[i],contentsFor(i)); assert.ok(saved.ok);
   }
   const store = (await storeForEmail(OWNER))!; assert.ok(store.callsId);
-  if(bundles)assert.equal(store.catalog.items.length,2000,"the actual public catalogue ceiling, including the call product");
+  if(bundles)assert.equal(store.catalog.items.length,MAX_PRODUCTS,"the actual public catalogue ceiling, including the call product");
   const requestIds: string[] = [], agreementIds: string[] = [];
   if (pending) {
     const requestDraft = readRequestDraft({ email: BUYER, name: "Synthetic Buyer", consent: true, lines: [{ text: "A private session", quantity: 1, amount: "10" }], note: "", dueDate: "", autoReminders: 0 }, "usd");
@@ -123,11 +129,11 @@ async function world(pending = false, purchases = false, installments = false, b
   const link=await ordersLinkFor(store,BUYER,`https://example.test/@${store.handle}`); assert.ok(link);
   const params={params:Promise.resolve({handle:"@"+store.handle}),searchParams:Promise.resolve({token:new URL(link).searchParams.get("token")!})};
   const visit=async()=>{await generateMetadata(params);return renderToStaticMarkup(await OrdersPage(params));};
-  return { provider,visit,sessions,requestIds,agreementIds,digitalTitles: digitalTitles.slice(0,600) };
+  return { provider,visit,sessions,requestIds,agreementIds,digitalTitles: digitalTitles.slice(0,600),deliveryLink };
 }
-for(const scenario of ["calls", "waiting", "purchases", "installments", "bundles"] as const) for(const warm of [false,true]) test(`real buyer page cost baseline (${scenario}): ${warm?"existing":"new"} rooms`,async()=>{
-  const pending=scenario!=="calls", purchases=scenario!=="calls" && scenario!=="waiting", installments=scenario==="installments", bundles=scenario==="bundles";
-  const w=await world(pending,purchases,installments,bundles); if(warm)await w.visit();
+for(const scenario of ["calls", "waiting", "purchases", "installments", "bundles", "bundle-fields"] as const) for(const warm of [false,true]) test(`real buyer page cost baseline (${scenario}): ${warm?"existing":"new"} rooms`,async()=>{
+  const pending=scenario!=="calls", purchases=scenario!=="calls" && scenario!=="waiting", installments=scenario==="installments", bundles=scenario==="bundles" || scenario==="bundle-fields", fullFields=scenario==="bundle-fields";
+  const w=await world(pending,purchases,installments,bundles,fullFields); if(warm)await w.visit();
   Object.assign(w.provider,{calls:0,callPages:0,returned:0,purchaseRows:0,intentPages:0,intentRows:0,invoiceGets:0,invoicePaymentPages:0,refundIntentGets:0,responseBytes:0});
   const actual=redis.pipeline.bind(redis),commands:(string|number)[][]=[];let requestBytes=0,responseBytes=0;
   redis.pipeline=async list=>{commands.push(...list);requestBytes+=Buffer.byteLength(JSON.stringify(list));const replies=await actual(list);responseBytes+=Buffer.byteLength(JSON.stringify(replies));return replies;};
@@ -140,7 +146,7 @@ for(const scenario of ["calls", "waiting", "purchases", "installments", "bundles
     const topTitles=[...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><p class="font-semibold">([^<]+)<\/p>/g)].map(m=>m[1]).filter(title=>title.startsWith("Cost digital "));
     const expected=w.digitalTitles.slice(bundles?60:560,bundles?100:600).reverse();
     assert.deepEqual(topTitles,expected,"only the newest forty primary paid records render, preserving their order even with nested bundle/addition titles");
-    if(bundles)assert.equal(html.split('href="https://example.test/paid-digital"').length-1,40*(1+BUMP_KEYS.length)*MAX_BUNDLE_ITEMS,"all twenty deliveries in the main bundle and each of three added bundles remain available");
+    if(bundles)assert.equal(html.split(`href="${w.deliveryLink}"`).length-1,40*(1+BUMP_KEYS.length)*MAX_BUNDLE_ITEMS,"all twenty deliveries in the main bundle and each of three added bundles remain available");
   }
   assert.equal(html.split("Coaching cost baseline").length-1,40,"the actual page renders forty of the buyer's calls");
   for(const s of w.sessions.slice(0,40))assert.ok(html.includes(s.id));
@@ -156,9 +162,9 @@ for(const scenario of ["calls", "waiting", "purchases", "installments", "bundles
     assert.equal(w.agreementIds.filter(id=>html.includes(id)).length,10);
   }
   const catalogReads=commands.filter(c=>c[0]==="GET" && /^nl:catalog:[^:]+:l:/.test(String(c[1]))).length;
-  if(purchases)assert.ok(catalogReads>=(bundles?1999:600),"all distinct historical paid products actually reach the catalogue reader");
+  if(purchases)assert.ok(catalogReads>=(bundles?MAX_PRODUCTS-1:600),"all distinct historical paid products actually reach the catalogue reader");
   const modeled=COMMANDS.laterPage+COMMANDS.laterCount;
-  const profile={source:"actual OrdersPage+generateMetadata+render",scenario:warm?"existing-rooms":"new-rooms",pending,purchases,installments,bundles,catalogReads,waitingCommands,redisCommands:commands.length,moves,roomReads,roomWrites,
+  const profile={source:"actual OrdersPage+generateMetadata+render",scenario:warm?"existing-rooms":"new-rooms",pending,purchases,installments,bundles,fullFields,catalogReads,waitingCommands,redisCommands:commands.length,moves,roomReads,roomWrites,
     logicalRedisRequestBytes:requestBytes,logicalRedisResponseBytes:responseBytes,htmlBytes:Buffer.byteLength(html),provider:w.provider,
     modeledCommands:modeled,redisCommandCostOnly:commands.length*COMMAND,financialApproval:false,completeWorstCase:false};
   console.log(JSON.stringify(profile));

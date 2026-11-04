@@ -106,3 +106,20 @@ The actual page shows the forty newest checkout purchases, in order, each retain
 The public writers and product/bundle limits are part of fixture setup, outside the measured entry; all actual page, metadata and rendering work is counted. Catalogue memoization while assembling historical purchases does not remove the per-delivery key eligibility reads or the later reviewability reads for the forty rendered purchases and their contents. At the recorded command input alone these observations amount to 0.014042 and 0.013882 dollars. They are not a verified supplier bill, byte ceiling, function-duration bound or complete cost.
 
 All ten cases retain the original actual-command <= eighteen-command comparison and reject it, after passing functional/privacy/provider checks. This broader valid scenario supersedes the simple purchase scenario as a lower bound for command and response work, not as a complete worst case. Imports, feeds, active licence keys, larger record fields, provider error/oversize behavior, caches and the missing actual-entry request budget still need coverage and coordination. No cost table, runtime, price, visible limit, commission or flag is changed, no MR approval is granted, and this rejected study has no PR.
+
+
+## Valid full-length text and delivery-link fields follow-up
+
+The sixth scenario keeps the same maximum catalogue, four twenty-item bundles per shown purchase and 3200 delivered links. The actual readLink validator accepts and normalizes the synthetic HTTPS delivery URL at MAX_LINK_LENGTH=2000 characters. Public catalogue writers store titles padded to MAX_TITLE_LENGTH=80 and summaries of MAX_SUMMARY_LENGTH=300 ordinary ASCII characters. The test still checks the complete top-level purchase order, every delivery link, buyer isolation, waiting records and provider query/account boundaries before the cost comparison.
+
+| Measured full-length-field bundle entry | New rooms | Existing rooms |
+| --- | ---: | ---: |
+| Redis commands | 7021 | 6941 |
+| Logical JSON Redis request bytes | 477611 | 468050 |
+| Logical JSON Redis response bytes | 17075744 | 17075343 |
+| Synthetic Stripe JSON response bytes | 674784 | 674784 |
+| Rendered HTML bytes | 14191912 | 14191912 |
+
+The identical command counts hide roughly 17.08 MB of observed Redis JSON responses and 14.19 MB of rendered HTML, compared with the short-field fixture. The delivery URL appears both as an href and as readable text; it is not silently removed to make the page smaller. These are logical, uncompressed fixture bytes, not wire billing, a supplier charge, a deployment payload allowance or an upper bound on Unicode/escaping and all other product shapes. No actual external link is opened.
+
+All twelve scenarios pass the functional/provider/privacy checks and then fail only the unchanged eighteen-command ceiling. The larger valid fixture reinforces that command counts alone cannot certify the financed route: byte transfer, rendering and function duration need their own verified accounting. This remains an incomplete rejected study with no PR and no product, cost-table, request-limit, margin-gate or activation changes.

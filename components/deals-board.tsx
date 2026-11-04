@@ -1,6 +1,7 @@
 "use client";
 
 import { useLeaveGuard } from "@/components/leave-guard";
+import { PIPELINE_ACCESS_REFUSAL } from "@/lib/pipeline-access-rules";
 import { dealActionFilter, filterDeals, type DealActionFilter } from "@/lib/crm-deal-filter";
 import { dealOrder, orderDeals, dealWorklistCsv, type DealOrder, type DealView } from "@/lib/crm-deal-worklist";
 import { DealAgenda } from "@/components/deal-agenda";
@@ -15,6 +16,7 @@ import {
   type CrmField,
   type Deal,
   FIELD_TYPES,
+  hasChoices,
   type FieldType,
   MAX_CRM_FIELDS,
   MAX_DEAL_NOTE,
@@ -33,6 +35,7 @@ import {
   pipelineTotals,
   stageLabel,
   starterStages,
+  copyPipeline,
 } from "@/lib/crm-rules";
 
 const MESSAGES: Record<string, string> = {
@@ -46,10 +49,12 @@ const MESSAGES: Record<string, string> = {
   fields: "Each field needs a name of its own, and a choice needs at least two options.",
   stages: "Keep at least one open stage, one won and one lost, each with a name.",
   pipelines: "Give the pipeline a name no other pipeline has, and keep at least one open stage, one won and one lost, each with a name.",
-  pipeline_limit: "Your plan has as many pipelines as it can keep. Remove one, or move to a larger plan.",
+  pipeline_limit: "Your store has all the pipelines it can keep now. Remove one to make another.",
   pipeline_last: "A store keeps at least one pipeline.",
   moves: "Choose where the deals of each stage you remove go.",
   crm_conflict: "Somebody else changed your pipelines a moment ago, so nothing was saved. Reload the page and make your change again.",
+  // A refused change by access (639 [GL7](7)): nothing was saved, and the board stays usable.
+  pipeline_access: PIPELINE_ACCESS_REFUSAL,
   server_error: "The change could not be confirmed. Check the saved CRM data before trying again.",
   crm_schema_read_unavailable: "The saved CRM configuration could not be checked before this change. Your current work is still here. Try again shortly.",
   crm_deal_read_unavailable: "Saved deals could not be checked before this change. Your current work is still here. Try again shortly.",
@@ -88,11 +93,15 @@ function StageOptions({ pipelines, except }: { pipelines: readonly Pipeline[]; e
   return <>{shown.map(p => <optgroup key={p.id} label={p.name}>{p.stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</optgroup>)}</>;
 }
 
-export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipelines, pipelineMax = 1, fields, currency, assignees, today, initialFilter = "all", requestHref }: { deals: Deal[]; stages: Stage[]; /** The store's pipelines (lib/crm-rules.ts); the first holds the board it always had. */ pipelines?: Pipeline[]; /** How many pipelines the store's plan may have. */ pipelineMax?: number; fields: CrmField[]; currency: string; assignees: string[]; today: string; initialFilter?: DealActionFilter; /** The payment requests page, for a role that may send them; a deal with a person links to it, filled in. */ requestHref?: string }) {
+export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipelines, pipelineMax = 1, fields, currency, assignees, today, initialFilter = "all", requestHref, viewOnly, someHidden = false }: { deals: Deal[]; stages: Stage[]; /** The store's pipelines (lib/crm-rules.ts); the first holds the board it always had. */ pipelines?: Pipeline[]; /** How many pipelines the store's plan may have. */ pipelineMax?: number; fields: CrmField[]; currency: string; assignees: string[]; today: string; initialFilter?: DealActionFilter; /** The payment requests page, for a role that may send them; a deal with a person links to it, filled in. */ requestHref?: string; /** Pipelines this person may see but not change (639 [GL7](7)): their deals are shown without the controls that change them. */ viewOnly?: string[]; /** Someone who may not see every pipeline (639 [GL7](7)): the store's pipeline count is never said, so it cannot tell how many are hidden. */ someHidden?: boolean }) {
   const router = useRouter();
   const pipelines: Pipeline[] = savedPipelines?.length ? savedPipelines : [firstPipeline(everyStage)];
   const [pipelineId, setPipelineId] = useState(pipelines[0].id);
   const pipeline = pipelines.find(p => p.id === pipelineId) ?? pipelines[0];
+  // What this person may change (lib/pipeline-access-rules.ts): a pipeline marked view shows its deals and nothing that changes them.
+  const readOnly = new Set(viewOnly ?? []);
+  const canChange = !readOnly.has(pipeline.id);
+  const editable = pipelines.filter(p => !readOnly.has(p.id));
   // This pipeline's stages and deals: what the board, its filters, its agenda and its file show.
   const stages = pipeline.stages;
   const here = new Set(stages.map(s => s.id));
@@ -133,7 +142,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
     const answer = await call(body);
     setBusy(false);
     if (answer.ok) {
-      toast(answer.workflows === "not_checked" ? `${done} Your studio requests for this month are used up, so the workflow its stage starts was not checked.` : done);
+      toast(answer.workflows === "not_checked" ? `${done} The workflow for this stage was not started for this person.` : done);
       after?.();
       startRefresh(() => router.refresh());
       return;
@@ -225,11 +234,14 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               {`People you are talking to about something sold outside a checkout: a coaching package, a custom project.${pipelines.length > 1 ? ` In ${pipeline.name}:` : ""} ${open.reduce((n, t) => n + t.count, 0)} open, worth ${money(open.reduce((n, t) => n + t.cents, 0))}; won so far, ${money(won.reduce((n, t) => n + t.cents, 0))}.`}
             </p>
           </div>
-          {draft === null ? (
+          {draft === null && canChange ? (
             <button type="button" className="btn btn-primary" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); setDraft({ id: "", title: "", email: "", value: "", stage: firstOpen, note: "", nextAction: "", dueDate: "", assignee: "" }); }}>
               <Icon name="plus" size={18} />
               New deal
             </button>
+          ) : !canChange ? (
+            // Said where "New deal" would be, so nobody wonders where it went (639 [GL7](7)).
+            <p className="max-w-xs text-sm text-ink-soft">You can see this pipeline but not change it. Ask the store&apos;s owner to change your access.</p>
           ) : null}
         </div>
 
@@ -239,12 +251,20 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               <button key={t.pipeline.id} type="button" aria-pressed={t.pipeline.id === pipeline.id} disabled={editing && t.pipeline.id !== pipeline.id} className={`btn btn-sm ${t.pipeline.id === pipeline.id ? "btn-primary" : "btn-secondary"}`} onClick={() => { setPipelineId(t.pipeline.id); setError(null); }}>
                 {t.pipeline.name}
                 <span className="tabular-nums opacity-80">{` · ${t.open.count} open`}</span>
+                {readOnly.has(t.pipeline.id) ? <span className="opacity-80"> · view only</span> : null}
               </button>
             ))}
             {pipelines.length < pipelineMax ? (
               <button type="button" className="btn btn-ghost btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); setPipelineDraft({ id: newCrmId(), name: "", stages: starterStages(), isNew: true, moves: {}, removeTo: "" }); }}>
                 <Icon name="plus" size={16} />
                 New pipeline
+              </button>
+            ) : null}
+            {pipelines.length < pipelineMax && canChange ? (
+              /* 639 [GL7](8): the same stages under a new name, none of its deals; opened to read and save, nothing saved yet. */
+              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); const copy = copyPipeline(pipeline, pipelines); setPipelineDraft({ ...copy, isNew: true, moves: {}, removeTo: "" }); }}>
+                <Icon name="plus" size={16} />
+                {`Duplicate “${pipeline.name}”`}
               </button>
             ) : null}
           </div>
@@ -260,7 +280,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               ))}</tbody>
             </table>
           </div>
-          <p className="mt-2 text-xs text-ink-mute">{`Each total adds up the values recorded on its deals, in ${currency.toUpperCase()}. Nothing is weighted or forecast. You have ${pipelines.length} of the ${pipelineMax} ${pipelineMax === 1 ? "pipeline" : "pipelines"} your plan keeps.`}</p>
+          <p className="mt-2 text-xs text-ink-mute">{`Each total adds up the values recorded on its deals, in ${currency.toUpperCase()}. Nothing is weighted or forecast. ${someHidden ? (pipelines.length < pipelineMax ? "Your store can add another pipeline." : "Your store has no room for another pipeline.") : `You have ${pipelines.length} of the ${pipelineMax} ${pipelineMax === 1 ? "pipeline" : "pipelines"} your store can keep.`}`}</p>
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="block"><span className="field-label">Find a deal</span><input type="search" className="field mt-2" maxLength={80} value={search} onChange={e => setSearch(e.target.value)} placeholder="Name, email, next action or note" /></label><label className="block"><span className="field-label">Responsible teammate</span><select className="field mt-2" value={responsible} onChange={e => setResponsible(e.target.value)}><option value="all">Everyone</option><option value="unassigned">Unassigned</option>{responsibleChoices.map(email => <option key={email} value={"person:" + email}>{email}{assignees.includes(email) ? "" : " (no longer eligible)"}</option>)}</select></label></div>
@@ -301,7 +321,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               </label>
               <label className="block">
                 <span className="field-label">Their email (optional)</span>
-                <input className="field mt-2" type="email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
+                <input className="field mt-2" type="email" autoComplete="off" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
               </label>
               <label className="block">
                 <span className="field-label">{`What it is worth, in ${currency.toUpperCase()} (optional)`}</span>
@@ -310,7 +330,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               <label className="block">
                 <span className="field-label">{pipelines.length > 1 ? "Pipeline and stage" : "Stage"}</span>
                 <select className="field mt-2" value={draft.stage} onChange={(e) => setDraft({ ...draft, stage: e.target.value })}>
-                  <StageOptions pipelines={pipelines} />
+                  <StageOptions pipelines={editable} />
                 </select>
               </label>
               <label className="block sm:col-span-2">
@@ -350,7 +370,13 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
           </fieldset>
         ) : null}
 
-        {view === "agenda" ? <DealAgenda deals={visibleDeals} stages={stages} currency={currency} today={today} disabled={locked || editing || writeUnconfirmed} onEdit={deal => { setError(null); setDraft(draftFromDeal(deal, currency)); }} /> : (
+        {/* An empty board says what it is for and how to start (487 [IT4], pattern 5). */}
+        {pipelineDeals.length === 0 && draft === null ? (
+          <p className="mt-6 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
+            {canChange ? <>No deals yet. When someone asks about something you sell outside a checkout, press &ldquo;New deal&rdquo; and move it across the stages as the talk goes on.</> : "No deals in this pipeline yet. You can see it but not change it."}
+          </p>
+        ) : null}
+        {view === "agenda" ? <DealAgenda deals={visibleDeals} stages={stages} currency={currency} today={today} disabled={locked || editing || writeUnconfirmed} onEdit={canChange ? deal => { setError(null); setDraft(draftFromDeal(deal, currency)); } : undefined} /> : (
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {columns.map(({ stage, count, cents }) => (
             <section key={stage.id} aria-label={stage.name} className="min-w-0 rounded-2xl bg-paper p-4 ring-1 ring-line">
@@ -379,6 +405,8 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                       {deal.assignee ? <p className="mt-1 text-xs text-ink-soft [overflow-wrap:anywhere]">Responsible: {deal.assignee}</p> : null}
                       {deal.note ? <p className="mt-2 whitespace-pre-line text-ink-soft [overflow-wrap:anywhere]">{deal.note}</p> : null}
                       <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {canChange ? (
+                          <>
                         <label className="min-w-0 flex-1">
                           <span className="sr-only">{pipelines.length > 1 ? `Move ${deal.title} to a stage or another pipeline` : `Move ${deal.title}`}</span>
                           <select
@@ -387,7 +415,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                             disabled={locked || editing || writeUnconfirmed}
                             onChange={(e) => void run({ action: "deal", deal: { ...deal, stage: e.target.value } }, here.has(e.target.value) ? "Deal moved." : `Deal moved to ${pipelines.find(p => p.stages.some(st => st.id === e.target.value))?.name ?? "another pipeline"}.`)}
                           >
-                            <StageOptions pipelines={pipelines} />
+                            <StageOptions pipelines={editable} />
                           </select>
                         </label>
                         <button
@@ -401,6 +429,8 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                         <button type="button" className="btn btn-secondary btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => void run({ action: "undeal", id: deal.id }, "Deal removed.")} aria-label={`Remove ${deal.title}`}>
                           <Icon name="minus" size={16} />
                         </button>
+                          </>
+                        ) : null}
                         {requestHref && deal.email ? (
                           <a
                             className="btn btn-secondary btn-sm"
@@ -435,12 +465,20 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               <ol className="mt-3 space-y-3">
                 {pipelineDraft.stages.map((stage, i) => (
                   <li key={stage.id} className="flex flex-wrap items-center gap-2">
-                    <input className="field min-w-0 flex-1" aria-label={`Stage ${i + 1}`} maxLength={MAX_STAGE_NAME} value={stage.name} onChange={(e) => setPipelineDraft({ ...pipelineDraft, stages: pipelineDraft.stages.map((s, j) => (j === i ? { ...s, name: e.target.value } : s)) })} />
-                    <select className="field w-auto" aria-label={`What stage ${i + 1} means`} value={stage.kind} onChange={(e) => setPipelineDraft({ ...pipelineDraft, stages: pipelineDraft.stages.map((s, j) => (j === i ? { ...s, kind: e.target.value as StageKind } : s)) })}>
-                      <option value="open">Open</option>
-                      <option value="won">Won</option>
-                      <option value="lost">Lost</option>
-                    </select>
+                    {/* A visible name of its own (487 [IT4], item 4). */}
+                    {/* The whole line on a phone, so its name and field are never squeezed by the controls beside them. */}
+                    <label className="flex min-w-0 basis-full items-center gap-2 sm:basis-0 sm:flex-1">
+                      <span className="shrink-0 text-sm text-ink-soft">{`Stage ${i + 1}`}</span>
+                      <input className="field min-w-0 flex-1" maxLength={MAX_STAGE_NAME} value={stage.name} onChange={(e) => setPipelineDraft({ ...pipelineDraft, stages: pipelineDraft.stages.map((s, j) => (j === i ? { ...s, name: e.target.value } : s)) })} />
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-ink-soft">
+                      Counts as
+                      <select className="field w-auto" aria-label={`Counts as, for stage ${i + 1}`} value={stage.kind} onChange={(e) => setPipelineDraft({ ...pipelineDraft, stages: pipelineDraft.stages.map((s, j) => (j === i ? { ...s, kind: e.target.value as StageKind } : s)) })}>
+                        <option value="open">Open</option>
+                        <option value="won">Won</option>
+                        <option value="lost">Lost</option>
+                      </select>
+                    </label>
                     <button type="button" className="btn btn-secondary btn-sm" disabled={i === 0} onClick={() => moveStage(i, i - 1)} aria-label={`Move stage ${i + 1} up`}>Up</button>
                     <button type="button" className="btn btn-secondary btn-sm" disabled={i === pipelineDraft.stages.length - 1} onClick={() => moveStage(i, i + 1)} aria-label={`Move stage ${i + 1} down`}>Down</button>
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPipelineDraft({ ...pipelineDraft, stages: pipelineDraft.stages.filter((_, j) => j !== i) })} aria-label={`Remove stage ${i + 1}`}>
@@ -462,7 +500,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                 const gone = pipeline.stages.filter(s => !kept.has(s.id) && dealsIn(s.id) > 0);
                 if (!gone.length) return null;
                 // Where they can go: a stage kept in this pipeline (named), or any stage of another one.
-                const targets: Pipeline[] = [{ ...pipeline, stages: pipelineDraft.stages.filter(s => s.name.trim()) }, ...pipelines.filter(p => p.id !== pipeline.id)];
+                const targets: Pipeline[] = [{ ...pipeline, stages: pipelineDraft.stages.filter(s => s.name.trim()) }, ...editable.filter(p => p.id !== pipeline.id)];
                 return (
                   <div className="mt-4 space-y-3 rounded-xl bg-paper p-4 ring-1 ring-line">
                     <p className="text-sm font-semibold text-ink">The stages you removed still hold deals. Choose where each one&apos;s deals go; none is deleted.</p>
@@ -495,7 +533,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                       <span className="field-label">{`Its ${pipelineDeals.length} ${pipelineDeals.length === 1 ? "deal goes" : "deals go"} to`}</span>
                       <select className="field mt-2" value={pipelineDraft.removeTo} onChange={e => setPipelineDraft({ ...pipelineDraft, removeTo: e.target.value })}>
                         <option value="">Choose a stage of another pipeline</option>
-                        <StageOptions pipelines={pipelines.filter(p => p.id !== pipeline.id)} />
+                        <StageOptions pipelines={editable.filter(p => p.id !== pipeline.id)} />
                       </select>
                     </label>
                   ) : <p className="text-sm text-ink-soft">It holds no deals.</p>}
@@ -506,11 +544,11 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               ) : null}
               {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
             </fieldset>
-          ) : (
+          ) : canChange ? (
             <button type="button" className="btn btn-secondary btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); setPipelineDraft({ id: pipeline.id, name: pipeline.name, stages: structuredClone(pipeline.stages), isNew: false, moves: {}, removeTo: "" }); }}>
               {pipelines.length > 1 ? `Change ${pipeline.name} and its stages` : "Change the pipeline and its stages"}
             </button>
-          )}
+          ) : null}
         </div>
       </section>
 
@@ -522,30 +560,39 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
           {`Up to ${MAX_CRM_FIELDS} things you keep about each person: their company, a date, which offer interests them. Filled in on each person's page under Buyers, and written into your list's file as columns of their own. Removing a field removes every answer to it.`}
         </p>
         {fieldDraft ? (
-          <fieldset disabled={locked} aria-busy={locked} className="min-w-0 mt-6 rounded-2xl border border-line bg-white p-4 sm:p-6">
-            <legend className="sr-only">Custom fields</legend>
+          <fieldset disabled={locked} aria-busy={locked} aria-labelledby="crm-fields-title" className="min-w-0 mt-6 rounded-2xl border border-line bg-white p-4 sm:p-6">
+            {/* Named by its visible heading, "Your fields", rather than a name only a screen reader hears. */}
             <ol className="space-y-3">
               {fieldDraft.map((field, i) => (
-                <li key={field.id} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem_auto]">
-                  <input className="field" aria-label={`Field ${i + 1}`} maxLength={MAX_FIELD_NAME} placeholder="Company" value={field.name} onChange={(e) => setFieldDraft(fieldDraft.map((f, j) => (j === i ? { ...f, name: e.target.value } : f)))} />
-                  <select className="field" aria-label={`Kind of field ${i + 1}`} value={field.type} onChange={(e) => setFieldDraft(fieldDraft.map((f, j) => (j === i ? { ...f, type: e.target.value as FieldType } : f)))}>
-                    {FIELD_TYPES.map((t) => (
-                      <option key={t.type} value={t.type}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
+                <li key={field.id} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem_auto] sm:items-end">
+                  <label className="block min-w-0">
+                    <span className="text-sm text-ink-soft">{`Field ${i + 1}`}</span>
+                    <input className="field mt-1" maxLength={MAX_FIELD_NAME} placeholder="Company" value={field.name} onChange={(e) => setFieldDraft(fieldDraft.map((f, j) => (j === i ? { ...f, name: e.target.value } : f)))} />
+                  </label>
+                  <label className="block min-w-0">
+                    <span className="text-sm text-ink-soft">Kind</span>
+                    <select className="field mt-1" aria-label={`Kind of field ${i + 1}`} value={field.type} onChange={(e) => setFieldDraft(fieldDraft.map((f, j) => (j === i ? { ...f, type: e.target.value as FieldType } : f)))}>
+                      {FIELD_TYPES.map((t) => (
+                        <option key={t.type} value={t.type}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => setFieldDraft(fieldDraft.filter((_, j) => j !== i))} aria-label={`Remove field ${i + 1}`}>
                     <Icon name="minus" size={16} />
                   </button>
-                  {field.type === "choice" ? (
-                    <input
-                      className="field sm:col-span-3"
-                      aria-label={`Choices for field ${i + 1}, separated by commas`}
-                      placeholder="Coaching, Course, Not sure yet"
-                      value={field.optionsText}
-                      onChange={(e) => setFieldDraft(fieldDraft.map((f, j) => (j === i ? { ...f, optionsText: e.target.value } : f)))}
-                    />
+                  {hasChoices(field.type) ? (
+                    <label className="block min-w-0 sm:col-span-3">
+                      <span className="text-sm text-ink-soft">Choices, separated by commas</span>
+                      <input
+                        className="field mt-1"
+                        aria-label={`Choices, separated by commas, for field ${i + 1}`}
+                        placeholder="Coaching, Course, Not sure yet"
+                        value={field.optionsText}
+                        onChange={(e) => setFieldDraft(fieldDraft.map((f, j) => (j === i ? { ...f, optionsText: e.target.value } : f)))}
+                      />
+                    </label>
                   ) : null}
                 </li>
               ))}
@@ -563,7 +610,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                 disabled={locked || writeUnconfirmed}
                 onClick={() =>
                   void run(
-                    { action: "fields", fields: fieldDraft.map(({ optionsText, ...f }) => ({ ...f, options: f.type === "choice" ? optionsText.split(",").map((o) => o.trim()).filter(Boolean) : [] })) },
+                    { action: "fields", fields: fieldDraft.map(({ optionsText, ...f }) => ({ ...f, options: hasChoices(f.type) ? optionsText.split(",").map((o) => o.trim()).filter(Boolean) : [] })) },
                     "Fields saved.",
                     () => setFieldDraft(null),
                   )

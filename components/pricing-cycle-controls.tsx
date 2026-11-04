@@ -28,7 +28,7 @@ export function PricingCycleControls({ saving }: { saving: string }) {
   });
   setYearly(next);
  }
- return <div className="mb-10 flex flex-col items-center gap-3">
+ return <div className="mb-6 flex flex-col items-center gap-2">
   <div className="seg" role="group" aria-label="How often you pay">
    <button type="button" className="seg-item" aria-pressed={!yearly} onClick={event => select(event, false)}>Monthly</button>
    <button type="button" className="seg-item" aria-pressed={yearly} onClick={event => select(event, true)}>

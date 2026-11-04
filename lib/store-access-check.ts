@@ -20,6 +20,8 @@
  */
 import { KIND, STORE_PAGE_SIZE } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
+import { isHeader } from "@/lib/store-link";
+import { vagueLinkTitle } from "@/lib/link-purpose";
 
 export type AccessCheck = {
   /**
@@ -30,12 +32,21 @@ export type AccessCheck = {
    * missing and none was left unchecked.
    */
   pictures: { done: boolean; missing: string[]; unchecked: number };
+  /**
+   * The links on the store's page whose words do not say where they go (AX274 Part A item 6; WCAG 2.4.4, and
+   * 2.4.9 at AAA: a link's purpose from its own words). Headings between links are not links. Never changed here.
+   */
+  links: { vague: { id: string; title: string }[] };
 };
 
-/** The check for a store with something on it; null for an empty one, which has its first steps first. */
+export { vagueLinkTitle } from "@/lib/link-purpose";
+
+/** The check for a store with products or links on it; null for an empty one, which has its first steps first. */
 export function accessCheck(store: Store): AccessCheck | null {
   const first = store.catalog.items.filter((item) => (item.kind & KIND.hidden) === 0).slice(0, STORE_PAGE_SIZE);
-  if (first.length === 0) return null;
+  const links = store.links.filter((link) => !isHeader(link));
+  if (first.length === 0 && links.length === 0) return null;
+  const vague = links.filter((link) => vagueLinkTitle(link.title)).map((link) => ({ id: link.id, title: link.title }));
   const cards = new Map(store.catalog.head.map((listing) => [listing.id, listing]));
   const missing: string[] = [];
   let unchecked = 0;
@@ -44,7 +55,7 @@ export function accessCheck(store: Store): AccessCheck | null {
     if (!card) unchecked += 1;
     else if (!card.hidden && card.image !== null && card.image.alt.trim().length === 0) missing.push(card.title);
   }
-  return { pictures: { done: missing.length === 0 && unchecked === 0, missing, unchecked } };
+  return { pictures: { done: missing.length === 0 && unchecked === 0, missing, unchecked }, links: { vague } };
 }
 
 /** What every store gets without the creator doing anything, in plain words. */

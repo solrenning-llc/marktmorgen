@@ -42,6 +42,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: `/@${HOUSE_HANDLE}`, priority: 0.5 },
     { path: "/terms", priority: 0.3 },
     { path: "/privacy", priority: 0.3 },
+    { path: "/accessibility", priority: 0.3 },
     { path: "/refunds", priority: 0.3 },
     { path: "/copyright", priority: 0.2 },
   ];

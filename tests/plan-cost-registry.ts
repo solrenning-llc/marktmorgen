@@ -374,6 +374,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/purchase-email.ts", names: ["confirmRequest", "countOrder"] },
       // An affiliate's lead for a free product or a booked call is written inside that order (18 October 2026).
       { file: "lib/calls.ts", names: ["recordLead"] },
+      // A cart's checkout reads the offers of each of its products, and what each bundle in it hands over, at most MAX_CART of each, to know whose offers follow it (556 [CT1], 1 and 2 November 2026): reads only, inside that order.
+      { file: "lib/cart-offers.ts", names: ["cartOfferOwner", "liveFunnel"] },
+      { file: "lib/cart-rules.ts", names: ["MAX_CART = 4"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
     ],
     basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE.",
@@ -553,6 +556,12 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
+      // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
+      { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A signed proposal or agreement takes one more before the workflows that start on signing are checked (635 [GL3], 2 November 2026).
+      { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
+      // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
+      { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
     ],
     basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count.",
   },
@@ -612,7 +621,7 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration"),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
-      { file: "lib/metered-limits.ts", names: ["withinService"] },
+      { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
     ],
     basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart.",
   },
@@ -851,8 +860,8 @@ export type AddOnLine = {
   revenueUsd: number;
   /** Everything one payment of it can cost at full use, in dollars: its use, its payment's fees and its reserves. */
   monthlyUsd: () => number;
-  /** The most it may cost and keep 60% after the 27.5% tax. */
-  allowedUsd: number;
+  /** Maximum total cost after reviewed TX taxes and a positive net cent; null without evidence. */
+  allowedUsd: number | null;
   /** Whether it can be bought today: one that costs past its allowance may not be. */
   onSale: boolean;
   sources: Source[];
@@ -866,7 +875,7 @@ export const ADD_ON_LINES: AddOnLine[] = [
     feature: "The Store assistant add-on, $49 a month per store: the AI chat on a store's pages, its pool of replies, its conversations and its list of unanswered questions (17 October 2026); the next product after a purchase, from the same pool (function 2); one checkout reminder asked for at checkout, its AI line from the same pool (function 3)",
     revenueUsd: assistant.revenueCents / 100,
     monthlyUsd: () => assistant.totalCents / 100,
-    allowedUsd: assistant.allowedCents / 100,
+    allowedUsd: assistant.allowedCents === null ? null : assistant.allowedCents / 100,
     onSale: ASSISTANT_ON_SALE,
     sources: [
       { file: "lib/store-assistant-rules.ts", names: ["ASSISTANT_PRICE_CENTS", "ASSISTANT_MESSAGES_MONTHLY", "ASSISTANT_INPUT_BYTES", "ASSISTANT_OUTPUT_TOKENS", "ASSISTANT_MESSAGE_COMMANDS", "ASSISTANT_MESSAGE_DB_BYTES", "ASSISTANT_PER_TEN_MINUTES", "ASSISTANT_PER_DAY", "ASSISTANT_STORE_PER_MINUTE", "ADD_ON_FEES", "DISPUTE_RESERVE_BPS", "REFUND_RESERVE_BPS", "REMITTANCE_BPS", "assistantMonthWorst"] },
@@ -890,6 +899,7 @@ export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
+  FREE_CALL_HOLDS_PER_DAY: "A pace on how often one email address may hold a free intro call's time in one store in a day (lib/free-call-rules.ts, 551 [FB1]): every hold is first taken from the plan's own monthly orders as FREE_CALL_ORDER_UNITS, before any email, so it adds no cost and only refuses.",
   BUYER_CAP_MONTHS: "Queue item 307 EC1: the cap on one closing's buyers (lib/closing-buyers-rules.ts, buyerNoticeCap), a post-cancellation funded exposure of docs/funded-exposure-review.md (closingBuyersCost above), the company's, not a plan's line.",
   BUYER_PAGES_PER_RUN: "Pages of a closing store's checkouts read in one run of the daily closing job (lib/closing-buyers.ts): inside the same exposure, bounded by its cap.",
   HOLD_PAGES_PER_RUN: "Pages of a closing store's memberships held, released or ended in one run (lib/closing-holds.ts): inside the same exposure.",
@@ -902,6 +912,7 @@ export const NOT_A_COST: Record<string, string> = {
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   MAX_PAGES_PER_STORE: "Pages of Stripe sessions the five-minute job reads per store per run: a scheduled job, bounded by its schedule (a company fixed cost).",
+  TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   QUIET_PER_HOUR: "Sale notifications to the creator's phone: one per counted order at most, inside the order's compute.",
   VERCEL_CPU_MICRO_USD_PER_HOUR: "A rate, not a cap.",
   ASKS_PER_TEN_MINUTES: "A burst limit under ANSWERS_MONTHLY (line ai).",
@@ -947,7 +958,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "<dynamic:scope: string>": guard("The definitions of withinLimit, withinMonth, withinStore and withinService themselves (lib/request-guard.ts, lib/metered-limits.ts)."),
   api: line("rest-api"), "studio-essential": line("studio"), "studio-paused": line("studio"), "bundle-picker": line("studio"),
   // Sign-in and account security.
-  join: ACCOUNT, passkey: ACCOUNT, "passkey-change": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
+  join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
   "two-step-rescue": ACCOUNT, "recovery-address": ACCOUNT, "recovery-address-change": ACCOUNT, "lost-email": ACCOUNT, "lost-email-ip": ACCOUNT,
   "discord-return": ACCOUNT, "metaads-return": ACCOUNT, "meet-return": ACCOUNT, report: guard("Takedown reports, per connection: a company cost."),
   "mail-ses": guard("The email provider's own notices: a company cost."), "mail-inbound": guard("The email provider's inbound notices, per connection: a company cost; what is sent on to a creator is one of their store's emails (lib/inbound-mail.ts)."),

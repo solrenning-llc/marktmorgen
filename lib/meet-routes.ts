@@ -10,7 +10,7 @@
  * provider on.
  */
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { withinService } from "@/lib/metered-limits";
+import { serviceRefusalCode, withinServiceWhy } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { noticeCreator } from "@/lib/account-notice";
@@ -53,10 +53,11 @@ export async function startConnect(request: NextRequest, provider: MeetProvider)
   // 232 [CA1] 4b3: no new connection while the plan's costs are paused (lib/integration-pause.ts).
   const paused = integrationPauseWord(store);
   if (paused) return back(`meet=${paused}&p=${provider}`);
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(`meet=limited&p=${provider}`);
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(`meet=funding&p=${provider}`);
   const named = store.statsId ? store : await ensureStatsId(ref);
   if (!named?.statsId || !store.sid) return back(`meet=error&p=${provider}`);
-  if (!(await withinService("meet-start", named.statsId, STARTS_PER_TEN_MINUTES, 600, named))) return back(`meet=limited&p=${provider}`);
+  const refused = await withinServiceWhy("meet-start", named.statsId, STARTS_PER_TEN_MINUTES, 600, named);
+  if (refused) return back(`meet=${serviceRefusalCode(refused, "limited")}&p=${provider}`);
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   try {
     const url = await beginConsent(provider, { statsId: named.statsId, sid: store.sid, sessionCookie: cookie, email });
@@ -82,10 +83,11 @@ export async function startHostConnect(request: NextRequest): Promise<Response> 
   const back = (query: string) => away(origin, studioPath(store, query, "calendar"));
   const paused = integrationPauseWord(store);
   if (paused) return back(`cal=${paused}`);
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("cal=limited");
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("cal=funding");
   const named = store.statsId ? store : await ensureStatsId(ref);
   if (!named?.statsId || !store.sid) return back("cal=error");
-  if (!(await withinService("meet-start", `${named.statsId}|${email}`, STARTS_PER_TEN_MINUTES, 600, named))) return back("cal=limited");
+  const refused = await withinServiceWhy("meet-start", `${named.statsId}|${email}`, STARTS_PER_TEN_MINUTES, 600, named);
+  if (refused) return back(`cal=${serviceRefusalCode(refused, "limited")}`);
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   try {
     const url = await beginConsent("google", { statsId: named.statsId, sid: store.sid, sessionCookie: cookie, email, host: hostId(email), scopes: GOOGLE_HOST_SCOPES });
@@ -114,7 +116,7 @@ async function finishHostConnect(
   if (code.length > 2048 || !/^[A-Za-z0-9._~/+=-]+$/.test(code)) return back("cal=error");
   const paused = integrationPauseWord(store);
   if (paused) return back(`cal=${paused}`);
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("cal=limited");
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back("cal=funding");
   try {
     const result = await finishConsent("google", {
       statsId: taken.statsId,
@@ -173,7 +175,7 @@ export async function finishConnect(request: NextRequest, provider: MeetProvider
   // Paused while the person was on the provider's page: the code is not exchanged.
   const paused = integrationPauseWord(store);
   if (paused) return back(`meet=${paused}&p=${provider}`);
-  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(`meet=limited&p=${provider}`);
+  if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return back(`meet=funding&p=${provider}`);
 
   try {
     const result = await finishConsent(provider, {

@@ -97,15 +97,24 @@ async function main() {
     subs.sub_monthly0001 = subscription("sub_monthly0001", "month");
     const store = await seller("monthly@example.com", "monthlystore", "sub_monthly0001");
     earlier = [];
-    const first = await noteFirstSale(store, [sale(NOW - 60, { metadata: { store: store.handle } })]);
+    const first = await noteFirstSale(store, [sale(NOW - 60, { metadata: { store: store.handle } })], true);
     is("it is noted as the first sale", first, true);
     is("with its own date", await firstSaleAt(store), NOW - 60);
     is("one email, to the creator", emails.map((e) => e.to), ["monthly@example.com"]);
 
-    const again = await noteFirstSale(store, [sale(NOW, { metadata: { store: store.handle } })]);
+    const again = await noteFirstSale(store, [sale(NOW, { metadata: { store: store.handle } })], true);
     is("a later sale is not a first sale", again, false);
     is("still one email", emails.length, 1);
     is("the date stays the first one", await firstSaleAt(store), NOW - 60);
+  }
+
+  part("While no plan is on sale, no switch is offered");
+  {
+    subs.sub_closed0001 = subscription("sub_closed0001", "month");
+    const closed = await seller("closed@example.com", "closedstore", "sub_closed0001");
+    const before = emails.length;
+    const noted = await noteFirstSale(closed, [sale(NOW, { metadata: { store: closed.handle } })], false);
+    is("the first sale is noted, and no email offers a yearly switch the studio would refuse", [noted, await firstSaleAt(closed), emails.length - before], [true, NOW, 0]);
   }
 
   part("A store that sold before this was built");
@@ -113,7 +122,7 @@ async function main() {
     subs.sub_oldseller01 = subscription("sub_oldseller01", "month");
     const store = await seller("old@example.com", "oldseller", "sub_oldseller01");
     earlier = [sale(NOW - 90 * 86_400, { metadata: { store: store.handle } })];
-    const first = await noteFirstSale(store, [sale(NOW, { metadata: { store: store.handle } })]);
+    const first = await noteFirstSale(store, [sale(NOW, { metadata: { store: store.handle } })], true);
     is("is not told it made its first sale", first, false);
     is("its earlier sale is noted instead", await firstSaleAt(store), NOW - 90 * 86_400);
     is("and nothing is sent", emails.length, 1);
@@ -124,17 +133,17 @@ async function main() {
   {
     subs.sub_yearly00001 = subscription("sub_yearly00001", "year");
     const yearly = await seller("yearly@example.com", "yearlystore", "sub_yearly00001");
-    await noteFirstSale(yearly, [sale(NOW, { metadata: { store: yearly.handle } })]);
+    await noteFirstSale(yearly, [sale(NOW, { metadata: { store: yearly.handle } })], true);
     is("a yearly plan is not written to", emails.length, 1);
     is("but its first sale is noted", (await firstSaleAt(yearly)) > 0, true);
 
     subs.sub_stopping001 = subscription("sub_stopping001", "month", { cancel_at_period_end: true });
     const stopping = await seller("stopping@example.com", "stoppingstore", "sub_stopping001");
-    await noteFirstSale(stopping, [sale(NOW, { metadata: { store: stopping.handle } })]);
+    await noteFirstSale(stopping, [sale(NOW, { metadata: { store: stopping.handle } })], true);
     is("a plan set to stop is not written to", emails.length, 1);
 
     const none = await seller("none@example.com", "noplanstore", null);
-    await noteFirstSale(none, [sale(NOW, { metadata: { store: none.handle } })]);
+    await noteFirstSale(none, [sale(NOW, { metadata: { store: none.handle } })], true);
     is("a store with no plan is not written to", emails.length, 1);
   }
 
@@ -143,10 +152,10 @@ async function main() {
     subs.sub_outage00001 = subscription("sub_outage00001", "month");
     const store = await seller("outage@example.com", "outagestore", "sub_outage00001");
     stripeDown = true;
-    const down = await noteFirstSale(store, [sale(NOW, { metadata: { store: store.handle } })]);
+    const down = await noteFirstSale(store, [sale(NOW, { metadata: { store: store.handle } })], true);
     is("nothing is noted", [down, await firstSaleAt(store)], [false, 0]);
     stripeDown = false;
-    const up = await noteFirstSale(store, [sale(NOW, { metadata: { store: store.handle } })]);
+    const up = await noteFirstSale(store, [sale(NOW, { metadata: { store: store.handle } })], true);
     is("the next pass notes it and writes", [up, emails.length], [true, 2]);
   }
 

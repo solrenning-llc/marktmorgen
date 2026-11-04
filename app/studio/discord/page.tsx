@@ -1,3 +1,4 @@
+import { serviceAllowanceWords } from "@/lib/store-allowance";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -21,6 +22,8 @@ const NOTICES: Record<string, { tone: "ok" | "error"; text: string }> = {
   declined: { tone: "error", text: "Nothing was connected: the bot was not added on Discord's page." },
   error: { tone: "error", text: "The server could not be connected just now. Nothing was changed; try again in a moment." },
   limited: { tone: "error", text: "That is a lot of tries in a few minutes. Wait a little and try again." },
+  // The paid period's resources could not be reserved (lib/contract-resource-window.ts): not a matter of tries.
+  funding: { tone: "error", text: "Connections can't be made just now. Nothing was changed; try again later." },
 };
 
 type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
@@ -48,7 +51,9 @@ export default async function StudioDiscordPage({ searchParams }: Params) {
     server ? membersOf(room, 200) : Promise.resolve([]),
     readTitles(store),
   ]);
-  const notice = typeof query.discord === "string" ? NOTICES[query.discord] ?? null : null;
+  // The store's calls to connected services used, no place this month, or not counted (lib/metered-limits.ts).
+  const allowance = typeof query.discord === "string" ? serviceAllowanceWords(store, query.discord) : null;
+  const notice = allowance ? { tone: "error" as const, text: allowance } : typeof query.discord === "string" ? NOTICES[query.discord] ?? null : null;
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -58,7 +63,7 @@ export default async function StudioDiscordPage({ searchParams }: Params) {
           <p className="eyebrow">Discord</p>
           <h1 className="t-h2 mt-3">Your Discord server, opened by what people buy</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            {`Choose which products give which roles in your server. A buyer presses “Join the Discord” after paying, says yes on Discord's own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded, the roles are taken back within ${CHECK_HOURS} hours.`}
+            {`Choose which products give which roles in your server. A buyer presses “Join the Discord” after paying, says yes on Discord's own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded in full, the roles are taken back at the next check, which comes about every ${CHECK_HOURS} hours. While Stripe or Discord cannot be reached, or Discord will not let the bot remove a role, nothing is taken until it can be.`}
           </p>
           {notice ? (
             <p className={`notice ${notice.tone === "ok" ? "notice-success" : "notice-error"} mt-6`} role={notice.tone === "ok" ? "status" : "alert"}>

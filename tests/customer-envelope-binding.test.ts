@@ -1,13 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { boundCustomerEnvelope, type CustomerEnvelopeBinding } from '../lib/customer-envelope-binding';
-import { CUSTOMER_COST_CATEGORIES } from '../lib/net-margin-rules';
+import {txCustomerFixture} from './customer-tax-review-fixture';
 
 function binding(): CustomerEnvelopeBinding {
   return { customerKey: 'store-a', termsSnapshot: 'current-terms', validFrom: 100, expiresAt: 200,
-    review: { collectedRevenueCents: 10000, refundableRevenueCents: 0, taxesCeilingCents: 3000,
-      costCeilings: Object.fromEntries(CUSTOMER_COST_CATEGORIES.map(key => [key, 0])),
-      allCostsBounded: true, allTaxesReviewed: true, revenueCollected: true } };
+    review: { ...txCustomerFixture(10000,0), taxesCeilingCents:3000 } };
 }
 const run = (value: CustomerEnvelopeBinding | null, now = 150, customer = 'store-a', terms = 'current-terms') =>
   boundCustomerEnvelope(value, customer, terms, now, 10000, 1);

@@ -135,7 +135,7 @@ export default function Home() {
               <li className="hm-tile hm-bg-sky">
                 <div>
                   <h3 className="hm-h3">Calls</h3>
-                  <p>Buyers pick a time in their own time zone and pay first. You both get the invitation.</p>
+                  <p>Buyers pick a time in their own time zone and pay first. Then they and you each get an email.</p>
                 </div>
                 <ExampleTimes />
               </li>
@@ -242,7 +242,7 @@ export default function Home() {
         </section>
       </main>
 
-      <div className="hm-foot"><Suspense fallback={null}><SiteFooter morning /></Suspense></div>
+      <div className="hm-foot"><Suspense fallback={null}><SiteFooter morning variant="home" /></Suspense></div>
       <HomeData questions={questions} />
     </div>
   );

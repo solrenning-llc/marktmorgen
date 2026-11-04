@@ -39,6 +39,7 @@ import { type ShipProblem, type Shipping, shipProblem, readShippingSku } from "@
 import { type CartDeal, NO_DEAL, parseCartDeal } from "@/lib/cart-rules";
 import { type Video, parseVideo } from "@/lib/sales-page";
 import { type FaqItem, parseFaq } from "@/lib/store-faq";
+import { type FaqAddRefusal, faqAddition } from "@/lib/faq-from-inbox";
 import { type StoreQuote, parseQuotes } from "@/lib/store-quotes-rules";
 import { type Social, parseSocials } from "@/lib/store-socials";
 import type { CallPackage } from "@/lib/call-package-rules";
@@ -154,6 +155,7 @@ import {
   hasProduct,
 } from "@/lib/catalog";
 import { type Announcement, type StoreSection, parseAnnouncement, parseSections, sectionsWithout } from "@/lib/store-sections";
+import { type VisitUs, parseVisitUs, readVisitUs } from "@/lib/visit-us";
 import { noteData, takeData } from "@/lib/store-data";
 import { DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
 import { PRODUCT_SIDE_BYTES } from "@/lib/store-data-rules";
@@ -684,6 +686,12 @@ export type Store = {
   /** One line of the creator's own news across the top of the store page, or null. */
   announcement: Announcement | null;
   /**
+   * "Visit us" under the products, for a business with an address (521
+   * [LB2], lib/visit-us.ts): its address, opening hours and phone, as the
+   * creator typed them; null on every store until its creator writes one.
+   */
+  visitUs: VisitUs | null;
+  /**
    * Whether visitors' questions about a product are answered from its page
    * (lib/answers-rules.ts), and the creator's notes for those answers. Off on
    * every store until its creator switches it on.
@@ -818,6 +826,24 @@ export type HandleProblem = "shape" | "reserved" | null;
 export function handleProblem(handle: string): HandleProblem {
   if (!HANDLE_PATTERN.test(handle)) return "shape";
   if (RESERVED.has(handle)) return "reserved";
+  return null;
+}
+
+/**
+ * Addresses that could pass for Marktmorgen's own (568 [GD2] (j)): never claimed, never taken in a rename. Only
+ * taking an address is refused here; a store that already holds one keeps working (storeForHandle reads
+ * handleProblem), so no creator's store goes dark.
+ */
+const IMPERSONATING = new Set([
+  "official", "security", "secure", "billing", "payments", "checkout", "staff", "team", "moderator", "verify",
+  "verified", "trust", "safety", "abuse", "press", "status", "noreply", "no-reply", "helpdesk",
+]);
+
+/** What stops an address from being claimed or taken: its shape, the site's own names, or passing for ours. */
+export function newAddressProblem(handle: string): HandleProblem {
+  const problem = handleProblem(handle);
+  if (problem) return problem;
+  if (IMPERSONATING.has(handle) || handle.includes("marktmorgen") || handle.includes("solrenning")) return "reserved";
   return null;
 }
 
@@ -1022,6 +1048,7 @@ function parseStore(raw: unknown): Store | null {
       collections: parseCollections(value.collections),
       sitePages: parseSitePages(value.sitePages),
       announcement: parseAnnouncement(value.announcement),
+      visitUs: parseVisitUs(value.visitUs),
       answers: parseAnswers(value.answers),
       assistant: parseAssistant(value.assistant),
       assistantPlan: parseAssistantPlan(value.assistantPlan),
@@ -1326,6 +1353,7 @@ async function freshStore(fields: {
     collections: [],
     sitePages: [],
     announcement: null,
+    visitUs: null,
     answers: { ...NO_ANSWERS },
     assistant: { ...NO_ASSISTANT },
     assistantPlan: null,
@@ -1678,7 +1706,7 @@ export async function claimHandle(
   rawBio: string,
 ): Promise<ClaimResult> {
   const handle = normaliseHandle(rawHandle);
-  const problem = handleProblem(handle);
+  const problem = newAddressProblem(handle);
   if (problem) return { ok: false, reason: problem };
 
   const existing = await storeForEmail(email);
@@ -1725,7 +1753,7 @@ export async function createStore(
   rawBio: string,
 ): Promise<CreateResult> {
   const handle = normaliseHandle(rawHandle);
-  const problem = handleProblem(handle);
+  const problem = newAddressProblem(handle);
   if (problem) return { ok: false, reason: problem };
   if (!(await storeForEmail(email))) return { ok: false, reason: "first" };
 
@@ -1849,7 +1877,7 @@ export async function renameHandle(
   rawHandle: string,
 ): Promise<RenameResult> {
   const handle = normaliseHandle(rawHandle);
-  const problem = handleProblem(handle);
+  const problem = newAddressProblem(handle);
   if (problem) return { ok: false, reason: problem };
 
   const result = await withStore<RenameResult>(email, async (store, save) => {
@@ -2712,10 +2740,11 @@ export type CurrencyShortfall = {
   title: string;
   /**
    * What it is: the product's price, the floor of a price the buyer chooses,
-   * a price option, the offer at checkout, an offer after paying, or one
-   * payment of a payment plan.
+   * a price option, the offer at checkout, an offer after paying, one
+   * payment of a payment plan, or the deposit on an in-person booking
+   * (lib/call-deposit.ts).
    */
-  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan";
+  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan" | "deposit";
   /** The option's label, or the title of the product offered; "" otherwise. */
   label: string;
   /** In the smallest unit, the same number in either currency. */
@@ -2741,6 +2770,8 @@ export function chargesBelow(products: Product[], currency: Currency): CurrencyS
     for (const bump of p.bumps) if (bump.priceCents < least) on("bump", titles.get(bump.productId) ?? "", bump.priceCents);
     for (const step of p.funnel?.steps ?? []) if (step.priceCents < least) on("offer", titles.get(step.productId) ?? "", step.priceCents);
     if (p.plan && p.plan.amountCents < least) on("plan", "", p.plan.amountCents);
+    // A deposit below the smallest charge would quietly become the whole price (lib/call-deposit.ts, chargeNow): said instead.
+    if (p.call?.deposit && p.call.deposit < least) on("deposit", "", p.call.deposit);
   }
   return out;
 }
@@ -3725,6 +3756,18 @@ export async function setFaq(email: string, raw: unknown): Promise<Store | null>
   return patchStore(email, () => ({ faq }));
 }
 
+/** Adds one question and its answer at the end of the store's own (lib/faq-from-inbox.ts), read and written as one change. */
+export async function addFaq(email: string, raw: unknown): Promise<{ ok: true; faq: FaqItem[] } | { ok: false; reason: FaqAddRefusal | "none" }> {
+  let refused: FaqAddRefusal | null = null;
+  const store = await patchStore(email, (current) => {
+    const added = faqAddition(current.faq, raw);
+    refused = added.ok ? null : added.reason;
+    return added.ok ? { faq: added.faq } : null;
+  });
+  if (!store) return { ok: false, reason: "none" };
+  return refused ? { ok: false, reason: refused } : { ok: true, faq: store.faq };
+}
+
 /** Switches the store page's contact form and saves its words (lib/store-contact.ts). */
 export async function setContact(email: string, raw: unknown): Promise<Store | null> {
   const contact = parseJoin(raw);
@@ -4247,6 +4290,17 @@ export async function setFair(email: string, raw: unknown): Promise<Store | null
 /** Sets the language the store speaks to its buyers in (lib/store-language.ts). */
 export async function setLanguage(email: string, raw: unknown): Promise<Store | null> {
   return patchStore(email, () => ({ language: parseLanguage(raw) }));
+}
+
+/**
+ * Sets the "Visit us" block (lib/visit-us.ts), or takes it away when
+ * nothing is in it. Says which part cannot be kept, and changes nothing then.
+ */
+export async function setVisitUs(email: string, raw: unknown): Promise<{ ok: true; store: Store } | { ok: false; reason: "place" | "hours" | "phone" | "none" }> {
+  const read = readVisitUs(raw);
+  if (typeof read === "string") return { ok: false, reason: read };
+  const store = await patchStore(email, () => ({ visitUs: read }));
+  return store ? { ok: true, store } : { ok: false, reason: "none" };
 }
 
 /** Sets the line of news across the top of the store page, or takes it away (null or empty). */

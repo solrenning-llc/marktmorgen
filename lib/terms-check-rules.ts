@@ -41,7 +41,14 @@ export const MAX_WARNINGS = 30;
 /** Characters shown on each side of a passage. */
 const AROUND = 40;
 
-export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "false_urgency" | "resale_rights";
+export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "fast_money" | "false_urgency" | "resale_rights";
+
+/**
+ * The kinds that stop a product from being published, not only warn (567 [GD1] (d)): what the Terms already forbid.
+ * "What you may not sell" (app/terms/page.tsx) includes "anything that promises fast or easy money, or income for
+ * little effort". Every other kind is a warning the creator may act on or not.
+ */
+export const BLOCKING_KINDS: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money"]);
 
 /**
  * `at` and `length` place the words in the text read (the first MAX_TEXT characters), for the studio to offer the
@@ -109,6 +116,39 @@ const EARNINGS: readonly RegExp[] = [
   /\breplace your (?:job|income|salary)\b/gi,
   /\b(?:six|seven)[- ]figures?\b/gi,
 ];
+
+/**
+ * A promise of fast or easy money, or income for little effort: forbidden by the Terms, so it blocks publication.
+ * Only a promise blocks: a verb that offers the money ("make easy money", "earn quick cash", "make money while you
+ * sleep", "get rich quick with…", "income with no effort"). The bare words ("Easy Money Habits", "quick cash register
+ * course", "avoid get-rich-quick schemes") are not stopped: see FAST_MONEY_MENTION and fastMoneyExcused.
+ */
+const FAST_MONEY: readonly RegExp[] = [
+  /\b(?:make|makes|making|earn|earns|earning|get|gets|getting|generate|generates|generating|bring in|pull in)\s+(?:some\s+|real\s+|serious\s+|extra\s+|more\s+)?(?:easy|quick|fast)\s+(?:money|cash|income|profits?)\b/gi,
+  /\b(?:make|earn|making|earning)\s+(?:money|cash|income)\s+(?:fast|quickly|overnight|while you sleep|in your sleep|on autopilot)\b/gi,
+  /\bget[- ]rich[- ]quick\b(?=\s+(?:with|by|using|from|today|now|in)\b)/gi,
+  /\b(?:make|earn|making|earning|get|getting)\s+(?:money|cash|income|profits?)\s+(?:with|for)\s+(?:no|little|zero|minimal)\s+(?:effort|work)\b/gi,
+  /\b(?:income|money|cash|profits?)\s+(?:with|for)\s+(?:no|little|zero|minimal)\s+(?:effort|work)\b/gi,
+  /\beffortless\s+(?:income|money|cash|profits?)\b/gi,
+];
+/** The words alone, without a verb that promises them: a warning to reread, never a block. */
+const FAST_MONEY_MENTION = /\b(?:easy|quick|fast)\s+(?:money|cash|income|profits?)\b|\bget[- ]rich[- ]quick\b|\b(?:overnight)\s+(?:income|riches|wealth)\b/gi;
+/** Words after the phrase that make it something else: cash flow, a cash register, income tax, money habits, a scheme to avoid. */
+const NOT_A_PROMISE_AFTER = /^[\s"'\u201d\u2019-]*(?:flows?|registers?|management|managing|habits?|tax(?:es)?|tips|mindset|schemes?|myths?|scams?|offers?|promises?|traps?|claims?|lies|ads?|sellers?|gurus?)\b/i;
+/** Words before it that warn against it: avoid, spot, beware, scam, fake, myth, why … fail. */
+const WARNS_AGAINST = /\b(?:avoid|avoiding|spot|spotting|beware|scams?|scammers?|fake|fraud|myths?|warning|truth about|why)\b/i;
+
+/** The phrase is quoted, followed by a word that makes it something else, asked as a question, or warned against. */
+function fastMoneyExcused(text: string, index: number, length: number): boolean {
+  const before = text.slice(Math.max(0, index - 80), index);
+  const after = text.slice(index + length, index + length + 40);
+  if (/["\u201c\u2018']\s*$/.test(before) && /^\s*["\u201d\u2019']/.test(after)) return true;
+  if (NOT_A_PROMISE_AFTER.test(after)) return true;
+  if (/^\s*\?/.test(after)) return true;
+  const clause = before.split(/[.!?;\n]/).pop() ?? "";
+  return WARNS_AGAINST.test(clause);
+}
+
 
 const URGENCY_TIME = /\b(limited time|ends (?:today|tonight|soon|at midnight)|today only|last chance|price (?:goes|will go) up|before the timer (?:runs out|ends)|act now|hurry)\b/gi;
 const URGENCY_STOCK = /\b(only \d+ (?:left|spots?|seats?|copies|places)|limited (?:spots|seats|copies|places)|selling fast|almost sold out)\b/gi;
@@ -242,6 +282,24 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
     }
   }
 
+  const promised: [number, number][] = [];
+  for (const pattern of FAST_MONEY) {
+    for (const m of text.matchAll(pattern)) {
+      const at = m.index ?? 0;
+      if (negated(text, at, m[0].length) || fastMoneyExcused(text, at, m[0].length)) continue;
+      promised.push([at, at + m[0].length]);
+      add("fast_money", at, m[0].length, FAST_MONEY_WHY, FAST_MONEY_FIX);
+    }
+  }
+  for (const m of text.matchAll(FAST_MONEY_MENTION)) {
+    const at = m.index ?? 0;
+    if (promised.some(([from, to]) => at >= from && at < to)) continue;
+    if (negated(text, at, m[0].length) || fastMoneyExcused(text, at, m[0].length)) continue;
+    add("earnings_claim", at, m[0].length,
+      "This mentions fast or easy money. If it promises the buyer fast or easy money, the Terms do not allow it; if it only names the subject, it is fine.",
+      "Reread it: say what the product contains and teaches, without promising money for little effort.");
+  }
+
   if (!input.realDeadline) {
     for (const m of text.matchAll(URGENCY_TIME)) {
       if (negated(text, m.index ?? 0, m[0].length)) continue;
@@ -322,4 +380,55 @@ export function withoutSentence(text: string, at: number, expected?: string): st
 export function replaceWords(text: string, at: number, length: number, expected: string, replacement: string): string {
   if (text.slice(at, at + length) !== expected) return text;
   return `${text.slice(0, at)}${replacement}${text.slice(at + length)}`;
+}
+
+const FAST_MONEY_WHY =
+  "This promises fast or easy money, or income for little effort. The Terms do not allow selling anything that promises fast or easy money, so the product cannot be published with it.";
+const FAST_MONEY_FIX = "Remove this promise, and say what the product contains and teaches, and the work it takes.";
+
+/** Where a product is stopped: the field, the passage, why and the fix. */
+export type FastMoneyRefusal = { field: "title" | "summary" | "about" | "page" | "option"; excerpt: string; why: string; fix: string; product?: string };
+
+/**
+ * The first promise of fast or easy money in what a buyer reads of a product (its title, summary and description),
+ * or null. The product route refuses to publish a product, or to save a published one, while there is one; the
+ * creator's words are never changed for them.
+ */
+export function fastMoneyRefusal(product: { title: string; summary: string; about: string }): FastMoneyRefusal | null {
+  for (const field of ["title", "summary", "about"] as const) {
+    const found = checkCreatorTerms({ text: product[field] ?? "", ownHosts: [], priceCents: null, currency: "usd", immediateAccessConsent: true, realDeadline: true, realStockLimit: true, resaleLicense: true })
+      .find((warning) => BLOCKING_KINDS.has(warning.kind));
+    if (found) return { field, excerpt: found.excerpt, why: found.why, fix: found.fix };
+  }
+  return null;
+}
+
+/**
+ * The same check over a product's sales page: every word a reader reads on it, its second version and its search
+ * title and description included (lib/page-translate.ts, pageWords). The page is on the store with its product, so
+ * it is refused the same way (567 [GD1] (d), unit 2).
+ */
+export function fastMoneyOnPage(words: readonly string[]): FastMoneyRefusal | null {
+  for (const text of words) {
+    const found = fastMoneyRefusal({ title: text, summary: "", about: "" });
+    if (found) return { ...found, field: "page" };
+  }
+  return null;
+}
+
+/**
+ * Why a product was not published or saved (567 [GD1] (d)): the words, where they are, why and the fix, from the
+ * server's own check (lib/terms-check-rules.ts, fastMoneyRefusal). Nothing the creator wrote was changed.
+ */
+const FIELD_NAMES: Record<string, string> = { title: "the name", summary: "the short description", about: "the description", page: "the sales page", option: "a price's name or its lines" };
+export function fastMoneyMessage(passage: unknown, mode: "add" | "save" | "publish" = "save"): string {
+  const p = passage && typeof passage === "object" ? (passage as Record<string, unknown>) : {};
+  const where = FIELD_NAMES[String(p.field)] ?? "the product's words";
+  const words = typeof p.excerpt === "string" ? p.excerpt.trim().replace(/[.,;:!?]+$/, "") : "";
+  const quoted = words ? `: \u201c${words}\u201d` : "";
+  const why = typeof p.why === "string" && p.why ? p.why : "The Terms do not allow selling anything that promises fast or easy money.";
+  const fix = typeof p.fix === "string" && p.fix ? p.fix : "Remove the promise and say what the product contains.";
+  const named = typeof p.product === "string" && p.product.trim() ? `\u201c${p.product.trim()}\u201d` : "This product";
+  const lead = mode === "publish" ? `${named} was not published` : mode === "add" ? "It was not added" : "Your changes were not saved";
+  return `${lead}. In ${where}${quoted}. ${why} ${fix} Nothing you wrote was changed.`;
 }

@@ -12,7 +12,9 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { IMPORTS_PAUSED } from "@/lib/import-limits";
 import { type DateOrder, datesInFile, letteredDate, readRenewal } from "@/lib/move-rules";
 
-export type ImportKind = "contacts" | "products" | "purchases" | "members";
+import { IMPORT_LEFT_WORDS, IMPORT_WORDS as WORDS, OUTCOME_WORDS, type ImportKind, type Outcome } from "@/lib/import-words";
+
+export type { ImportKind } from "@/lib/import-words";
 
 /** An import as the server reports it (app/api/store/import). */
 export type ImportView = {
@@ -147,9 +149,10 @@ const MESSAGES: Record<string, string> = {
   state: "This import is no longer taking rows. Start it again.",
   unknown: "That import is no longer here. Start it again.",
   slow: "That was a lot in a short time. Wait a while and try again.",
-  rows_month: "Your plan's imported rows for this month are used. The rest of the file can come in when the month turns, or on a larger plan.",
-  starts_month: "Your plan's imports for this month are started. More can start when the month turns, or on a larger plan.",
-  checks_month: "Your plan's dry runs for this month are used. You can still import the file; dry runs open again when the month turns.",
+  rows_month: "Your store has brought in all the rows its figure allows for now. The rest of the file can come in when that figure opens again.",
+  starts_month: "Your store has started all the imports it can for now. More can start when that figure opens again.",
+  // A ClickFunnels file is imported only after a finished check (dryFresh), so it waits; any other file can go in.
+  checks_month: "Your store has used all its dry runs for now. Any other file can still be imported; a ClickFunnels file waits until a check can finish again.",
   signed_out: "Your session ended. Log in again.",
   role: "Only the store's owner and Admins can import.",
   unavailable: "Imports are not switched on yet.",
@@ -158,13 +161,6 @@ const MESSAGES: Record<string, string> = {
   // 232 [CA1] unit 4b2: in place of the studio's words about uploads.
   renewal_unpaid: IMPORTS_PAUSED.renewal_unpaid,
   plan_disputed: IMPORTS_PAUSED.plan_disputed,
-};
-
-const WORDS: Record<ImportKind, { added: string; already: string; noun: string }> = {
-  contacts: { added: "added to your list", already: "already on it", noun: "contacts" },
-  products: { added: "made as drafts", already: "already there", noun: "products" },
-  purchases: { added: "given to buyers", already: "already had it", noun: "rows" },
-  members: { added: "invited to move", already: "already invited", noun: "members" },
 };
 
 const running = (state: ImportView["state"]) => state === "receiving" || state === "queued" || state === "running" || state === "mailing";
@@ -228,11 +224,11 @@ export function ImportProgress({
           <dd className="font-bold tabular-nums text-ink">{job.counts.already.toLocaleString("en-US")}</dd>
         </div>
         <div className="rounded-xl bg-paper px-3 py-2">
-          <dt className="text-xs font-semibold text-ink-soft">left out</dt>
+          <dt className="text-xs font-semibold text-ink-soft">{IMPORT_LEFT_WORDS.skipped}</dt>
           <dd className="font-bold tabular-nums text-ink">{job.counts.skipped.toLocaleString("en-US")}</dd>
         </div>
         <div className={`rounded-xl px-3 py-2 ${job.counts.errors ? "bg-danger-soft" : "bg-paper"}`}>
-          <dt className={`text-xs font-semibold ${job.counts.errors ? "text-danger" : "text-ink-soft"}`}>could not be read</dt>
+          <dt className={`text-xs font-semibold ${job.counts.errors ? "text-danger" : "text-ink-soft"}`}>{IMPORT_LEFT_WORDS.errors}</dt>
           <dd className="font-bold tabular-nums text-ink">{job.counts.errors.toLocaleString("en-US")}</dd>
         </div>
         {job.kind === "contacts" && (job.counts.contacts || job.counts.stopped) ? (
@@ -799,7 +795,7 @@ export function ImportTool({
                       <span className="block text-ink-soft">
                         {canEmail
                           ? `One email per buyer, from your store's name, with how to open what they have. Nothing else is sent. On Studio and Scale they count in your monthly emails; on Store, up to ${IMPORT_ALLOWANCES.creator.movedEmails} a month.`
-                          : "Needs your store's plan to be active."}
+                          : "Needs your store's plan to be active and paid up, and our email sending switched on."}
                       </span>
                     </span>
                   </label>
@@ -857,7 +853,6 @@ export function ImportTool({
 
 /** One row of a dry run, as the server answers it (lib/imports.ts, PreviewRow). */
 type PreviewRow = [line: number, outcome: Outcome, column: string, note: string, value: string, key: string, fresh: 0 | 1];
-type Outcome = "added" | "contact" | "already" | "stopped" | "left" | "skipped" | "error";
 
 /** A whole file's dry run, added up here from the server's answers for each batch. */
 type DryRun = { signature: string; complete: boolean; rows: PreviewRow[]; counts: Record<Outcome, number> };
@@ -893,20 +888,6 @@ function tally(kind: ImportKind, collected: PreviewRow[], room: number | null, s
   for (const row of rows) counts[row[1]] += 1;
   return { signature, complete: true, rows, counts };
 }
-
-const OUTCOME_WORDS: Record<Exclude<ImportKind, "members">, Partial<Record<Outcome, string>>> = {
-  contacts: {
-    added: "can be emailed",
-    contact: "contacts you cannot email",
-    already: "already on your list",
-    stopped: "no longer emailed",
-    left: "unsubscribed here, left alone",
-    skipped: "left out",
-    error: "cannot be read",
-  },
-  products: { added: "made as drafts", already: "already in your store", skipped: "left out", error: "cannot be read" },
-  purchases: { added: "given what they bought", skipped: "left out", error: "cannot be read" },
-};
 
 const NO_WORDS: Partial<Record<Outcome, string>> = {};
 

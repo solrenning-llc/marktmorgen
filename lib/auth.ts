@@ -10,6 +10,8 @@
  * hash so the raw token and the raw session id never rest anywhere:
  *
  *   nl:auth:link:<hash>     -> email, 15 minutes, deleted the moment it is used
+ *                              (and, under its own salt, a login with Google
+ *                              on its way, 10 minutes, lib/google-signin.ts)
  *   nl:auth:session:<hash>  -> email, 30 days, deleted on sign-out
  *   nl:auth:fresh:<hash>    -> that the session was opened in the last 15
  *                              minutes, for the few changes that ask for a
@@ -310,6 +312,37 @@ export async function takeSignInLink(token: string): Promise<string | null> {
   return typeof email === "string" && email ? email : null;
 }
 
+const googleKey = async (state: string) =>
+  `nl:auth:link:${(await sha256Hex(`nimbus-auth-google:${state}`)).slice(0, 40)}`;
+
+/** How long Google's page may stay open before the login it started is gone. */
+export const GOOGLE_STATE_SECONDS = 10 * 60;
+
+/**
+ * Keeps what a login with Google needs when Google sends the person back
+ * (lib/google-signin.ts): the PKCE verifier and the nonce, nothing about the
+ * person. Under the sign-in link's own family and salted apart from it, so
+ * neither can ever be read as the other.
+ */
+export async function keepGoogleState(state: string, value: string): Promise<void> {
+  await redisPipeline([["SET", await googleKey(state), value, "EX", GOOGLE_STATE_SECONDS]]);
+}
+
+/** Spends it, once: two answers that arrive together cannot both read it. */
+export async function takeGoogleState(state: string): Promise<string | null> {
+  if (!isRedisConfigured()) return null;
+  const key = await googleKey(state);
+  let value: unknown;
+  try {
+    [value] = await redisPipeline([["GETDEL", key]]);
+  } catch {
+    const [read] = await redisPipeline([["GET", key]]);
+    const [removed] = await redisPipeline([["DEL", key]]);
+    value = Number(removed) === 1 ? read : null;
+  }
+  return typeof value === "string" && value ? value : null;
+}
+
 /**
  * Spends a sign-in link and opens a session. The link is deleted first, so a
  * link that leaks after the fact is already worthless.
@@ -403,12 +436,13 @@ const devicesKey = async (email: string) =>
   `nl:auth:devices:${(await sha256Hex(`nimbus-auth-devices:${normaliseEmail(email)}`)).slice(0, 40)}`;
 
 /** How a session was opened, for the email that tells the creator about it. */
-export type SignInWay = "link" | "passkey" | "invitation";
+export type SignInWay = "link" | "passkey" | "invitation" | "google";
 
 const WAY_WORDS: Record<SignInWay, string> = {
   link: "with a login link sent to this address",
   passkey: "with a passkey",
   invitation: "by accepting an invitation to a store's team",
+  google: "with Google, which confirmed this address",
 };
 
 /** "Chrome on macOS", or as near as a user agent says. Never more than that. */

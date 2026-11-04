@@ -7,7 +7,7 @@ const review=(fixed=100):CommercialMarginReview=>({
  companyBase:{monthlyFixedCostsCeilingCents:fixed,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:"TEST ONLY: complete full LLC ceilings",fixedTaxEvidence:"TEST ONLY: explicit hypothetical taxes",reviewedPayingCustomers:100},
  planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,taxEvidence:"TEST ONLY",costAndLimitEvidence:"TEST ONLY",
  allocatedFixedCostsVerified:true,fundedExposure:zeroExposureFixture(),prepaidUsageEnforced:true,
- scenarios:Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key=>{const gross=BASE_PLAN_REVENUE_CEILINGS[key]??10000;return[key,fundedCustomerWithAi(gross,Math.floor(gross*.7))];})),
+ scenarios:Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key=>{const gross=BASE_PLAN_REVENUE_CEILINGS[key]??10000;return[key,fundedCustomerWithAi(gross,Math.floor(gross*.7),12,key)];})),
 });
 test("actual commercial gate includes the complete full LLC inventory before exposure",()=>{
  assert.equal(commercialMarginReady(review(100)),true,"known hypothetical nonzero retention is fully included");

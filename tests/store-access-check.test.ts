@@ -52,14 +52,14 @@ async function main(): Promise<void> {
   is("both described: done", (await check())?.pictures, { done: true, missing: [], unchecked: 0 });
 
   part("What the studio shows");
-  const shown = renderToStaticMarkup(StoreAccessCheck({ check: { pictures: { done: false, missing: ["Bread Book", "Cake & Co"], unchecked: 0 } } }));
+  const shown = renderToStaticMarkup(StoreAccessCheck({ check: { pictures: { done: false, missing: ["Bread Book", "Cake & Co"], unchecked: 0 }, links: { vague: [] } } }));
   is("a heading, each product named, the field's own label, and where to go", [shown.includes("Can everyone use your store?"), shown.includes("<li>Bread Book</li>"), shown.includes("Cake &amp; Co"), shown.includes("What the picture shows, for people who cannot see it"), shown.includes('href="#products"'), shown.includes("Go to your products to check descriptions")], [true, true, true, true, true, true]);
   is("never a conformity claim", /fully accessible|ADA compliant|WCAG AAA certified|most accessible/i.test(shown), false);
   is("says it is not a full review", shown.includes("It is not a full accessibility review."), true);
-  is("done: said so, no list", renderToStaticMarkup(StoreAccessCheck({ check: { pictures: { done: true, missing: [], unchecked: 0 } } })).includes('data-access-pictures="done"'), true);
+  is("done: said so, no list", renderToStaticMarkup(StoreAccessCheck({ check: { pictures: { done: true, missing: [], unchecked: 0 }, links: { vague: [] } } })).includes('data-access-pictures="done"'), true);
   is("an empty store: nothing", renderToStaticMarkup(StoreAccessCheck({ check: null })), "");
 
-  const partly = renderToStaticMarkup(StoreAccessCheck({ check: { pictures: { done: false, missing: [], unchecked: 2 } } }));
+  const partly = renderToStaticMarkup(StoreAccessCheck({ check: { pictures: { done: false, missing: [], unchecked: 2 }, links: { vague: [] } } }));
   is("unchecked products are said, and not called done", [partly.includes("2 products on your first page could not be checked here"), partly.includes('data-access-pictures="done"')], [true, false]);
   is("the heading states, it does not order (a decorative picture may stay empty)", [shown.includes("2 product pictures have no description"), shown.includes("an empty description is right")], [true, true]);
 

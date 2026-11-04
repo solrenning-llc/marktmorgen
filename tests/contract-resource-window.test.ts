@@ -6,11 +6,13 @@ import {contractFundingConfiguration} from '@/lib/contract-funding-rules';
 import {allowanceWindow} from '@/lib/allowance-window';
 import {reserveStoreUpload,reserveUploadControl} from '@/lib/upload-budget';
 import {contractFixture} from './contract-funding-fixture';
+import {applyContractTaxCoverage} from './contract-tax-fixture';
 import {reset,seed,ledger,calls,resourceSettings} from './contract-resource-redis';
 const ledgerKey='nl:contract-reserve:v1',statsId='a'.repeat(32);
-async function setup(cycle:'month'|'year'='month',options:{admissionMs?:number;durationSeconds?:number}={}){
+async function setup(cycle:'month'|'year'='month',options:{admissionMs?:number;durationSeconds?:number;taxCoverage?:boolean}={}){
  reset();resourceSettings({lost:false,failure:false,response:null,afterAck:null,acknowledge:null});const f=contractFixture();
  f.policy.admissionsUntil=new Date(Date.now()+(options.admissionMs??10*86400000)).toISOString();
+ applyContractTaxCoverage(f);
  const config=contractFundingConfiguration(f.policy,f.context)!;assert.ok(config);seed(config);
  assert.ok(await reserveContractFunding(statsId,'creator',cycle,'checkout',f.policy,f.context,'ctr_resources'));
  const created=Math.floor(Date.now()/1000),end=created+(options.durationSeconds??(cycle==='year'?365:30)*86400);
@@ -18,6 +20,42 @@ async function setup(cycle:'month'|'year'='month',options:{admissionMs?:number;d
  const store={statsId,tier:'creator' as const,cycle,subscriptionId:'sub_ResourceWindow001',subscriptionActive:true,trialEnds:0,planEndedAt:'',period:{start:created,end,renews:true,funded:true as const}};
  return{...f,config,store,h:ledger.get(ledgerKey)!};
 }
+test('paid resource clones cannot discard original fiscal presence or hidden executable evidence',async()=>{
+ let reads=0;
+ for(const field of ['taxReview','taxContext'])for(const kind of ['hidden','getter','inherited','proxy']){
+  const f=await setup(),row=f.review.scenarios.creator_month_full!,before=[...f.h],count=calls.length;
+  if(kind==='inherited')Object.setPrototypeOf(row,{[field]:null});
+  else Object.defineProperty(row,field,kind==='getter'?{enumerable:false,get(){reads++;throw Error('must not execute');}}:{value:null,enumerable:false,configurable:true});
+  if(kind==='proxy')f.review.scenarios.creator_month_full=new Proxy(row,{has(){return false;}});
+  assert.equal(await reservePaidResourceWindow(f.store,f.policy,f.context),false);
+  assert.equal(calls.length,count);assert.deepEqual([...f.h],before);
+  assert.equal(f.h.has('resource:ctr_resources:0'),false);
+ }
+ assert.equal(reads,0);
+});
+test('paid resources use the same fully bound TX contract rather than a test-only approval path',async()=>{
+ const f=await setup('year',{taxCoverage:true}),before=new Map(f.h);
+ assert.equal(await reservePaidResourceWindow(f.store,f.policy,f.context),true);
+ assert.ok(f.h.has('resource:ctr_resources:0'));
+ assert.ok(new TextEncoder().encode(JSON.stringify(calls.at(-1))).length<=12288);
+ for(const [key,value] of before)assert.equal(f.h.get(key),value);
+ const callsBefore=calls.length;f.policy.liabilitiesThrough=new Date(Date.parse(f.policy.liabilitiesThrough)+1).toISOString();
+ assert.equal(await reservePaidResourceWindow(f.store,f.policy,f.context),false);assert.equal(calls.length,callsBefore);
+});
+test('paid resources reject a policy whose captured tail outlives its fiscal books before any ledger call',async()=>{
+ const f=await setup('year',{taxCoverage:true});f.policy.reservedFundsCents=1e12;
+ const last=Reflect.ownKeys(f.policy).at(-1);let copying=false;
+ const proxy=new Proxy(f.policy,{ownKeys(target){copying=true;return Reflect.ownKeys(target);},getOwnPropertyDescriptor(target,key){
+  const descriptor=Reflect.getOwnPropertyDescriptor(target,key);if(!descriptor)return descriptor;
+  const capture=copying;if(key===last)copying=false;
+  if(capture&&key==='reviewedLiabilityTailDays')return {...descriptor,value:descriptor.value+400};
+  if(capture&&key==='liabilitiesThrough')return {...descriptor,value:new Date(Date.parse(descriptor.value)+800*86400000).toISOString()};
+  return descriptor;
+ }});
+ const count=calls.length,before=[...f.h];
+ assert.equal(await reservePaidResourceWindow(f.store,proxy,f.context),false);
+ assert.equal(calls.length,count);assert.deepEqual([...f.h],before);assert.equal(f.h.has('resource:ctr_resources:0'),false);
+});
 test('64 resource observations share one paid monthly cohort and retain every cent, grant and slot',async()=>{
  const f=await setup(),before=new Map(f.h);
  assert.equal((await Promise.all(Array.from({length:64},()=>reservePaidResourceWindow(f.store,f.policy,f.context)))).every(Boolean),true);

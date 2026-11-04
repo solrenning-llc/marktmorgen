@@ -18,8 +18,9 @@ export async function generateMetadata({
   const page = findPage(SECTION, slug);
   if (!page) return {};
   return {
-    title: `${page.title} ${page.highlight} — Marktmorgen`,
-    description: page.intro,
+    // The page's own search title and description when it has them (271 [SEO1]), as /proof pages already do.
+    title: page.seo?.title ?? `${page.title} ${page.highlight} — Marktmorgen`,
+    description: page.seo?.description ?? page.intro,
   };
 }
 

@@ -233,7 +233,7 @@ export function DiscordStudio({
 
       <section className="card mt-8 p-6 sm:p-8" aria-labelledby="discord-people">
         <h2 id="discord-people" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Who joined · ${members.length}`}</h2>
-        <p className="mt-2 max-w-2xl text-ink-soft">{`Everyone given roles by a purchase, checked again every ${limits.hours} hours. Somebody whose access ended is taken off this list once their roles are taken back.`}</p>
+        <p className="mt-2 max-w-2xl text-ink-soft">{`Everyone given roles by a purchase, checked again about every ${limits.hours} hours. Somebody whose access ended is taken off this list once their roles are taken back.`}</p>
         {members.length === 0 ? (
           <p className="mt-5 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">Nobody has joined yet. Buyers see “Join the Discord” after paying, and on their orders.</p>
         ) : (

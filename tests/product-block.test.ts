@@ -25,7 +25,7 @@ async function main(): Promise<void> {
 
   part("The coach");
   const page = (product: string) => parsePage({ blocks: [{ id: "prod0003", kind: "product", heading: "", product, note: "" }] });
-  const filled = (product: string) => coachChecks({ page: page(product), productTitle: "Bread", free: false, picture: false, facts: {} }).length;
+  const filled = (product: string) => coachChecks({ page: page(product), productTitle: "Bread", free: false, picture: false, pictureAlt: "", facts: {} }).length;
   is("reads it without failing, chosen or not", [filled("knife00001") > 0, filled("") > 0], [true, true]);
 
   part("Where cards come from");

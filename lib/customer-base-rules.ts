@@ -43,7 +43,7 @@ export function assessMinimumCustomerBase(units: CustomerBaseUnit[], fixed: Cust
   let minimum = BigInt(1);
   for (const unit of units) {
     if (!unit || (unit.months !== 1 && unit.months !== 12)) return stopped('invalid');
-    const result = assessCustomerWorstCase(unit.scenario);
+    const result = assessCustomerWorstCase(unit.scenario,unit.months);
     if (!result.approved) return stopped(result.reason === 'below_floor' || result.reason === 'no_revenue' ? 'below_unit_floor' : 'unknown');
     // Headroom in cents*basis-points for the full paid period. Keep months
     // in the denominator until integer ceiling division; never round revenue.

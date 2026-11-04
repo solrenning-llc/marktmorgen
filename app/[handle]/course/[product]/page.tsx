@@ -1,3 +1,4 @@
+import { EmailField } from "@/components/email-field";
 import { countDay } from "@/lib/day-visit";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
 import { isResting } from "@/lib/traffic";
@@ -27,6 +28,7 @@ import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { productSegment } from "@/lib/product-slug";
 import { noteIfOpened } from "@/lib/course-finish";
+import { exampleTitlesLeft } from "@/lib/course-templates";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -71,6 +73,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const open = access.state === "open";
   const start = open ? access.start : null;
   const studying = open && !access.learner.owner;
+  // A course still holding a ready structure's example titles is hidden and shown to its owner only (540 [CU1]).
+  if (product.hidden && exampleTitlesLeft(course) > 0 && !(open && access.learner.owner)) redirect(`/@${store.handle}`);
   const who = studying ? emailKey(access.learner.email) : "";
   const [done, passed, certificate] = studying
     ? await Promise.all([
@@ -278,8 +282,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 <input type="hidden" name="product" value={product.id} />
                 <label htmlFor="course-email" className="st-label">{w.alreadyBought}</label>
                 <p className="st-muted mt-1 text-sm">{w.alreadyBoughtNote}</p>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <input id="course-email" name="email" type="email" required autoComplete="email" placeholder={said.w.emailPlaceholder} className="st-field min-w-0 flex-1" />
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
+                  <EmailField id="course-email" name="email" className="st-field w-full" wrapClassName="min-w-0 flex-1" required autoComplete="email" placeholder={said.w.emailPlaceholder} language={store.language} />
                   <button type="submit" className="btn st-btn">{w.sendLink}</button>
                 </div>
               </form>

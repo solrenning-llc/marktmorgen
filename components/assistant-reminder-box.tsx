@@ -1,3 +1,4 @@
+import { EmailField } from "@/components/email-field";
 import { assistReminderWords } from "@/lib/buyer-words/assistant-reminder";
 import { ASSIST_REMIND_VERSION } from "@/lib/assistant-reminder-rules";
 
@@ -24,7 +25,7 @@ export function AssistReminderBox({ id, lang, store, className = "" }: { id: str
         <label htmlFor={`${id}-email`} className="st-label">
           {r.emailLabel}
         </label>
-        <input id={`${id}-email`} type="email" name="remind_email" maxLength={254} autoComplete="email" className="st-field" />
+        <EmailField id={`${id}-email`} name="remind_email" className="st-field" autoComplete="email" language={lang} />
       </div>
     </div>
   );

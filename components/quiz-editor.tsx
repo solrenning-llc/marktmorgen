@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { toast } from "@/components/toast";
 import type { Course } from "@/lib/course";
 import {
@@ -16,6 +17,7 @@ import {
   type Quiz,
   type QuizSetup,
 } from "@/lib/quiz";
+import { MAX_WAIT_MINUTES } from "@/lib/quiz-bank-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { AiAssist } from "@/components/ai-assist";
@@ -30,7 +32,8 @@ type DraftQuestion = {
   explanation: string;
 };
 
-type Draft = { passPercent: string; attempts: string; required: boolean; questions: DraftQuestion[] };
+/** `draw` and `waitMinutes` empty: every question, and no wait (630 [HN6](7)). */
+type Draft = { passPercent: string; attempts: string; required: boolean; draw: string; shuffle: boolean; waitMinutes: string; questions: DraftQuestion[] };
 
 const blankQuestion = (): DraftQuestion => ({ id: "", text: "", kind: "single", choices: ["", ""], correct: [], explanation: "" });
 
@@ -80,11 +83,16 @@ export function QuizEditor({
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [draftCount, setDraftCount] = useState<number>(DEFAULT_QUIZ_DRAFT);
+  // The quiz as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
+  const [opened, setOpened] = useState("");
+  useLeaveGuard(draft !== null && JSON.stringify(draft) !== opened && !busy);
 
   async function open() {
     setError(null);
     if (!setup) {
-      setDraft({ passPercent: String(DEFAULT_PASS_PERCENT), attempts: String(DEFAULT_ATTEMPTS), required: false, questions: [blankQuestion()] });
+      const fresh = { passPercent: String(DEFAULT_PASS_PERCENT), attempts: String(DEFAULT_ATTEMPTS), required: false, draw: "", shuffle: false, waitMinutes: "", questions: [blankQuestion()] };
+      setDraft(fresh);
+      setOpened(JSON.stringify(fresh));
       return;
     }
     setLoading(true);
@@ -96,12 +104,17 @@ export function QuizEditor({
         setError("The quiz could not be read just now. Close this and open it again before changing it.");
         return;
       }
-      setDraft({
+      const read = {
         passPercent: String(quiz.passPercent),
         attempts: String(quiz.attempts),
         required: quiz.required,
+        draw: quiz.draw ? String(quiz.draw) : "",
+        shuffle: quiz.shuffle === true,
+        waitMinutes: quiz.waitMinutes ? String(quiz.waitMinutes) : "",
         questions: quiz.questions.map((q) => ({ ...q, choices: [...q.choices], correct: [...q.correct] })),
-      });
+      };
+      setDraft(read);
+      setOpened(JSON.stringify(read));
     } catch {
       setError("The quiz could not be read just now. Try again in a moment.");
     } finally {
@@ -175,6 +188,9 @@ export function QuizEditor({
           passPercent: draft.passPercent,
           attempts: draft.attempts,
           required: draft.required,
+          draw: draft.draw,
+          shuffle: draft.shuffle,
+          waitMinutes: draft.waitMinutes,
           questions: draft.questions,
         });
         if (saved) {
@@ -216,6 +232,46 @@ export function QuizEditor({
           certificate needs it passed.
         </span>
       </label>
+
+      <fieldset className="mt-4">
+        <legend className="field-label">Question bank (optional)</legend>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="field-label">Questions per try</span>
+            <input
+              className="field mt-2"
+              inputMode="numeric"
+              placeholder={`All ${draft.questions.length}`}
+              value={draft.draw}
+              onChange={(e) => setDraft({ ...draft, draw: e.target.value.replace(/[^0-9]/g, "").slice(0, 2) })}
+              aria-describedby={`${prefix}-draw`}
+            />
+            <span id={`${prefix}-draw`} className="mt-1 block text-xs text-ink-soft">
+              {`Fewer than the ${draft.questions.length} questions below, and each try picks that many for each student. Empty, or ${draft.questions.length} or more, shows every question.`}
+            </span>
+          </label>
+          <label className="block">
+            <span className="field-label">Minutes to wait between tries</span>
+            <input
+              className="field mt-2"
+              inputMode="numeric"
+              placeholder="No wait"
+              value={draft.waitMinutes}
+              onChange={(e) => setDraft({ ...draft, waitMinutes: e.target.value.replace(/[^0-9]/g, "").slice(0, 4) })}
+              aria-describedby={`${prefix}-wait`}
+            />
+            <span id={`${prefix}-wait`} className="mt-1 block text-xs text-ink-soft">
+              {`1 to ${MAX_WAIT_MINUTES.toLocaleString("en-US")} minutes (one day). Empty means a student can try again at once.`}
+            </span>
+          </label>
+        </div>
+        <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-3 text-sm text-ink">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-violet-brand" checked={draft.shuffle} onChange={(e) => setDraft({ ...draft, shuffle: e.target.checked })} />
+          <span>
+            <span className="font-semibold">Show the questions in a different order on each try.</span> The answers stay in the order you wrote them.
+          </span>
+        </label>
+      </fieldset>
 
       <div className="mt-5">
         <AiAssist<DraftedQuestion[]>

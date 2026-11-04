@@ -69,8 +69,8 @@ export async function POST(request: NextRequest) {
   if (!cycle || !tier) return away(origin, studio("billing=error"));
   if (tier !== "creator" && !PRO_ON_SALE) return away(origin, studio("billing=pro-closed"));
 
-  // Stripe not answering the question does not stop a first payment: the
-  // daily job still finds anything this misses.
+  // An unreadable search cannot establish that no subscription exists.
+  // Wait before reserving cash or creating another payment obligation.
   let customerId = store.stripeCustomerId;
   let lapsed: string[] = [];
   try {
@@ -83,6 +83,7 @@ export async function POST(request: NextRequest) {
     lapsed = found.lapsed;
   } catch (error) {
     console.error("looking for this store's subscriptions failed", error);
+    return away(origin, studio("billing=error"));
   }
   // One whose card failed, or whose first payment never finished, is ended
   // first: otherwise a retry that goes through later would charge beside the

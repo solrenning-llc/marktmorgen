@@ -1,3 +1,4 @@
+import { copyAttachedPicture } from "@/lib/picture-r2-copy";
 import type { NextRequest } from "next/server";
 import { del, head } from "@/lib/blob";
 import { firstBytes } from "@/lib/uploaded-image";
@@ -116,6 +117,10 @@ export async function POST(request: NextRequest) {
         }
       }
       image = { path, width, height, alt, bytes: found.size, small };
+      // Copied to the pictures' own bucket when it is on (313 [CV1] unit 4b); off, nothing is read. A failed copy
+      // never refuses the picture: it is kept where it always was, unmarked.
+      const mirrored = await copyAttachedPicture(imagePaths(image)).catch(() => false);
+      if (mirrored) image = { ...image, r2: true };
     }
 
     const result = await setProductImage(ref, id, image);

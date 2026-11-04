@@ -1,4 +1,6 @@
+import { readSequenceCsv } from "@/lib/sequence-import";
 import { type NextRequest, after } from "next/server";
+import { rfmSummary } from "@/lib/rfm-rules";
 import { StoreFullError } from "@/lib/store-full";
 import {
   MAX_MAIL_ADDRESS,
@@ -9,7 +11,7 @@ import {
   storeForHandle,
 } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses } from "@/lib/contacts";
+import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
 import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
@@ -51,6 +53,8 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
   broadcast: "send",
   cancel: "send",
   flow: "send",
+  // Reading a file of emails into a sequence's steps (lib/sequence-import.ts): nothing is saved, so it needs what saving one needs.
+  "flow-import": "send",
   "flow-remove": "send",
   // Switching a workflow on is its own, explicit step (lib/flows.ts, setFlowActive).
   "flow-activate": "send",
@@ -76,7 +80,7 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
  *   { action: "settings", fromName, address }
  *   { action: "import", text, confirm: true }
  *   { action: "count", productId, notProductId, who, narrow? }   who: "all" | "buyers" | "leads";
- *                            narrow: { minSpent, channel, quietDays } (lib/segments.ts); answers the
+ *                            narrow: { minSpent, channel, quietDays, group?, activeDays? } (lib/segments.ts); answers the
  *                            channels the store's buyers first came from too, when it reads them
  *   { action: "segment-save", name, who, productId, notProductId, narrow }  /  { action: "segment-remove", id }
  *   { action: "test", subject, body }
@@ -149,21 +153,27 @@ export async function POST(request: NextRequest) {
       const notProductId = text(body.notProductId, 40) || undefined;
       const who = WHO.includes(body.who as Who) ? (body.who as Who) : "all";
       const narrow = readNarrow(body.narrow);
+      // Only people with this label (99 [E2-TAG-BROADCAST]), cleaned as an email keeps it; empty is none.
+      const label = readTags([text(body.label, 80)])[0] || undefined;
       // The store's sales are read only when an email narrows by them, or
       // when the composer opens the choices that do (lib/segments.ts).
       if (!isNarrowed(narrow) && body.channels !== true) {
-        return Response.json({ ok: true, count: (await audience(store.listId, productId, notProductId, whoOf(store, who))).length });
+        return Response.json({ ok: true, count: (await audience(store.listId, productId, notProductId, whoOf(store, who), undefined, label)).length });
       }
       const ledger = await buyerLedger(store).catch((error) => {
         console.error("reading a store's buyers for an email failed", error);
         return null;
       });
       if (!ledger) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
-      const keep = isNarrowed(narrow) ? keeps(narrow, ledger) : undefined;
+      // One moment for the kinds counted and the kind kept, so a buyer at a boundary is the same kind in both.
+      const now = Date.now();
+      const keep = isNarrowed(narrow) ? keeps(narrow, ledger, now) : undefined;
       return Response.json({
         ok: true,
-        count: (await audience(store.listId, productId, notProductId, whoOf(store, who), keep)).length,
+        count: (await audience(store.listId, productId, notProductId, whoOf(store, who), keep, label)).length,
         channels: ledgerChannels(ledger),
+        // How many of the store's buyers are of each kind (270 [GR1], unit 3c), from the same ledger: no extra read.
+        kinds: Object.fromEntries(rfmSummary(ledger.buyers.values(), now).map((k) => [k.id, k.buyers])),
         partial: ledger.partial,
       });
     }
@@ -229,6 +239,7 @@ export async function POST(request: NextRequest) {
         notProductId: text(body.notProductId, 40),
         who: text(body.who, 10),
         narrow: body.narrow,
+        label: text(body.label, 80),
         sendAt: typeof body.sendAt === "number" ? body.sendAt : undefined,
         // A second subject line to try against the first; what it may be is
         // decided where the email is written down (lib/mail-test.ts).
@@ -258,6 +269,14 @@ export async function POST(request: NextRequest) {
       const raw = body.flow && typeof body.flow === "object" ? (body.flow as Record<string, unknown>) : {};
       const result = await saveFlow(store, raw);
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason);
+    }
+
+    if (action === "flow-import") {
+      // Only read: the steps come back to the studio's editor, where the creator picks what starts it,
+      // reviews every email and saves it, paused (544 [SQ9]). Nothing is saved or sent here.
+      const csv = typeof body.csv === "string" ? body.csv : "";
+      const read = readSequenceCsv(csv);
+      return Response.json(read.ok ? { ok: true, steps: read.steps, report: read.report } : { ok: false, error: `import_${read.why}`, report: read.report }, { status: read.ok ? 200 : 400 });
     }
 
     if (action === "flow-activate") {

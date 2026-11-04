@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -21,7 +22,16 @@ export function FaqEditor({ faq, ai }: { faq: FaqItem[]; ai: { on: boolean; left
   const [drafting, setDrafting] = useState(false);
   const [note, setNote] = useState("");
   const [left, setLeft] = useState(ai.left);
-  const changed = JSON.stringify(rows.map(({ q, a }) => ({ q, a }))) !== JSON.stringify(faq);
+  // What is saved: the page's list, or, once a save is confirmed, what was saved, until the page brings the new list.
+  const [base, setBase] = useState<FaqItem[]>(faq);
+  const [seen, setSeen] = useState(faq);
+  if (seen !== faq) {
+    setSeen(faq);
+    setBase(faq);
+  }
+  const changed = JSON.stringify(rows.map(({ q, a }) => ({ q, a }))) !== JSON.stringify(base);
+  // Answers written or drafted and not saved are never lost to a click away (487 [IT4], item 6).
+  useLeaveGuard(changed && !saving);
 
   const add = (items: FaqItem[], dropEmpty = true) => {
     let key = next;
@@ -75,6 +85,10 @@ export function FaqEditor({ faq, ai }: { faq: FaqItem[]; ai: { on: boolean; left
           && item.q === expected[i].q && item.a === expected[i].a);
       if (response.ok && data.ok === true && data.error === undefined && matches) {
         toast(expected.length ? "Questions saved." : "Questions removed from your store page.");
+        // The rows as they were saved (tidied by the server's own reading), so nothing reads as unsaved after it.
+        setRows(expected.map((item, key) => ({ ...item, key })));
+        setNext(expected.length);
+        setBase(expected);
         router.refresh();
         return;
       }

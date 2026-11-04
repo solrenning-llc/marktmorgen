@@ -1,5 +1,6 @@
 import { remainingResourceCostCents } from './cost-envelope';
-import { assessCustomerWorstCase, CUSTOMER_COST_CATEGORIES, MINIMUM_NET_PROFIT_CENTS, PLANNING_PROFIT_TAX_FLOOR_BPS, type CustomerWorstCase } from './net-margin-rules';
+import { customerTaxReviewFields, type CustomerTaxReview, type TaxContext } from './customer-tax-review';
+import { assessCustomerWorstCase, CUSTOMER_COST_CATEGORIES, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from './net-margin-rules';
 
 export type ReviewedResourceEnvelope = { approved: boolean; reason: string; remainingMicroUsd: number | null; affordableUnits: number | null };
 const denied = (reason: string): ReviewedResourceEnvelope => ({ approved: false, reason, remainingMicroUsd: null, affordableUnits: null });
@@ -18,7 +19,9 @@ function ownData(record: unknown, key: string): unknown {
 function snapshot(review: unknown): CustomerWorstCase | null {
   if (!review || typeof review !== 'object' || Array.isArray(review)) return null;
   const costs = ownData(review, 'costCeilings');
+  const fiscal = customerTaxReviewFields(review);
   return {
+    ...(fiscal.present ? { taxReview: fiscal.taxReview as CustomerTaxReview, taxContext: fiscal.taxContext as TaxContext } : {}),
     collectedRevenueCents: ownData(review, 'collectedRevenueCents') as number | null,
     refundableRevenueCents: ownData(review, 'refundableRevenueCents') as number | null,
     taxesCeilingCents: ownData(review, 'taxesCeilingCents') as number | null,
@@ -31,10 +34,10 @@ function snapshot(review: unknown): CustomerWorstCase | null {
 
 /** A conservative planning bound, NOT a reservation or proof of supplier funding.
  * Cost ceilings must include all contractual consumption and pending reservations.
- * Taxes remain reserved in full; do not replace them with the planning tax floor.
+ * Taxes remain reserved in full at their explicit reviewed absolute ceiling.
  * Use the same period for revenue, refunds, costs, and requested units.
  * The result never exceeds lib/cost-envelope.ts's remaining resource cost for the
- * same revenue net of refunds, costs and the planning tax floor.
+ * same revenue net of refunds, costs and the reviewed absolute tax reserve.
  */
 export function reviewedResourceEnvelope(review: CustomerWorstCase | null, unitCeilingMicroUsd: number, requestedUnits: number): ReviewedResourceEnvelope {
   if (!Number.isSafeInteger(unitCeilingMicroUsd) || unitCeilingMicroUsd <= 0 || !Number.isSafeInteger(requestedUnits) || requestedUnits <= 0) return denied('invalid_request');
@@ -50,7 +53,7 @@ export function reviewedResourceEnvelope(review: CustomerWorstCase | null, unitC
   let remaining = gross - minimumNet - refunds - BigInt(value.taxesCeilingCents!) - costs;
   if (remaining < BigInt(0)) return denied('below_floor');
   // Defense in depth: never exceed the shared cost-envelope bound for the same inputs.
-  const shared = remainingResourceCostCents(Number(gross - refunds), PLANNING_PROFIT_TAX_FLOOR_BPS, costList);
+  const shared = remainingResourceCostCents(Number(gross - refunds), value.taxesCeilingCents!, costList);
   if (shared === null) return denied('below_floor');
   if (BigInt(shared) < remaining) remaining = BigInt(shared);
   const remainingMicro = remaining * scale;

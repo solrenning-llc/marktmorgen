@@ -136,10 +136,11 @@ async function main(): Promise<void> {
   await grantImported(store.statsId!, `gift:${"a".repeat(16)}`, [{ email: "gifted@example.com", productId: product.id, items: null }], now, store.sid);
   await redis.pipeline([["DEL", `nl:seg:ledger:${store.statsId}`]]);
   const ledger = await buyerLedger({ ...store, pastBuyers: true });
-  is("in the list's groups, with nothing spent and no purchase here", ledger.buyers.get("old.buyer@example.com"), { cents: 0, last: 0, channel: "imported" });
+  is("in the list's groups, with nothing spent and no purchase here", ledger.buyers.get("old.buyer@example.com"), { cents: 0, last: 0, channel: "imported", orders: 0 });
   is("a gift is not an import", ledger.buyers.has("gifted@example.com"), false);
   is("named for what it is", channelName("imported"), "Brought over from another platform");
-  is("the PayPal buyer is there as a buyer", ledger.buyers.get("buyer@example.com")?.channel, "tiktok");
+  // Refunded in full on PayPal just above: a purchase given back is not a purchase (270 [GR1], unit 2).
+  is("the PayPal buyer refunded in full is not a buyer in the list's groups", ledger.buyers.get("buyer@example.com"), undefined);
 
   done();
 }

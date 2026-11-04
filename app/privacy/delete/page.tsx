@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
@@ -154,7 +155,7 @@ export default async function DeletePage({ searchParams }: Params) {
                 <label htmlFor="erase-email" className="field-label">
                   Your email address
                 </label>
-                <input id="erase-email" type="email" name="email" required maxLength={254} autoComplete="email" className="field mt-2" placeholder="you@example.com" />
+                <EmailField id="erase-email" name="email" required autoComplete="email" className="field mt-2" placeholder="you@example.com" store={false} />
                 {store ? (
                   <fieldset className="mt-5">
                     <legend className="field-label">Delete it from</legend>

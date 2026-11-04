@@ -1,4 +1,6 @@
-/** Owner's planning policy; this is not a legal tax classification or a provider spending control. */
+/** Historical planning model only, superseded by TX and MR. Its old prices,
+ * 27.5% floor and 60% target reproduce prior tests; never import into product
+ * code, a current resource budget or a release/admission decision. */
 export const PLANNING_TAX_FLOOR = 0.275;
 export const NET_MARGIN_FLOOR = 0.60;
 export const LOCKED_PLAN_PRICES = {

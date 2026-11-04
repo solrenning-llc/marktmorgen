@@ -478,20 +478,21 @@ export async function replaceCodes(email: string, typed: string): Promise<{ code
 }
 
 /** A login that has passed the emailed link and now waits for its code: the token for the browser's cookie. */
-export async function holdSignIn(email: string, viaRecovery = false): Promise<string> {
+export async function holdSignIn(email: string, viaRecovery = false, byGoogle = false): Promise<string> {
   const token = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", holdKey(token), JSON.stringify({ e: normaliseEmail(email), n: 0, ...(viaRecovery ? { v: 1 } : {}) }), "EX", HOLD_SECONDS]]);
+  // `g`: the first step was Google (lib/google-signin.ts), so the new-browser email says so.
+  await redisPipeline([["SET", holdKey(token), JSON.stringify({ e: normaliseEmail(email), n: 0, ...(viaRecovery ? { v: 1 } : {}), ...(byGoogle ? { g: 1 } : {}) }), "EX", HOLD_SECONDS]]);
   return token;
 }
 
-export type HoldAnswer = { ok: true; email: string; how: "app" | "recovery" } | { ok: false; reason: "expired" | "wrong" | "unreadable" | "limited" };
+export type HoldAnswer = { ok: true; email: string; how: "app" | "recovery"; byGoogle: boolean } | { ok: false; reason: "expired" | "wrong" | "unreadable" | "limited" };
 
 /** Finishes a waiting login with its code. Five wrong codes end it. */
 export async function finishSignIn(token: string, typed: string, now = Date.now()): Promise<HoldAnswer> {
   if (!/^[0-9a-f]{64}$/.test(token) || !isRedisConfigured()) return { ok: false, reason: "expired" };
   const key = holdKey(token);
   const [raw] = await redisPipeline([["GET", key]]);
-  let hold: { e?: unknown; n?: unknown; v?: unknown } = {};
+  let hold: { e?: unknown; n?: unknown; v?: unknown; g?: unknown } = {};
   try {
     hold = typeof raw === "string" ? (JSON.parse(raw) as typeof hold) : {};
   } catch {
@@ -511,9 +512,9 @@ export async function finishSignIn(token: string, typed: string, now = Date.now(
     // The owner has the second step after all: anything opened without it is called off.
     await cancelReset(hold.e, "login");
     await endRecoveryAccess(hold.e);
-    return { ok: true, email: hold.e, how: checked };
+    return { ok: true, email: hold.e, how: checked, byGoogle: hold.g === 1 };
   }
-  if (checked === "wrong") await redisPipeline([["SET", key, JSON.stringify({ e: hold.e, n: tries + 1, ...(hold.v === 1 ? { v: 1 } : {}) }), "EX", HOLD_SECONDS]]);
+  if (checked === "wrong") await redisPipeline([["SET", key, JSON.stringify({ e: hold.e, n: tries + 1, ...(hold.v === 1 ? { v: 1 } : {}), ...(hold.g === 1 ? { g: 1 } : {}) }), "EX", HOLD_SECONDS]]);
   return { ok: false, reason: checked };
 }
 

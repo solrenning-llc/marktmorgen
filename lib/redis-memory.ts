@@ -554,6 +554,11 @@ export class MemoryRedis {
         if (!this.data.has(key)) return 0;
         this.until.set(key, Number(args[0]) * 1000);
         return 1;
+      case "PEXPIRETIME": {
+        // When the key ends, in ms since the epoch: -1 for none, -2 for a key that is not there (lib/backup-export.ts).
+        if (!this.data.has(key)) return -2;
+        return this.until.get(key) ?? -1;
+      }
       case "PTTL": {
         if (!this.data.has(key)) return -2;
         const ends = this.until.get(key);
@@ -579,7 +584,9 @@ export class MemoryRedis {
       }
       case "GET": {
         const held = this.data.get(key);
-        return typeof held === "string" ? held : null;
+        if (held === undefined) return null;
+        if (typeof held !== "string") throw new Error("WRONGTYPE");
+        return held;
       }
       case "PERSIST":
         // Keeps a key for good: 1 when it had an expiry to take off.
@@ -608,6 +615,33 @@ export class MemoryRedis {
       }
       case "EXISTS":
         return this.data.has(key) ? 1 : 0;
+      case "DUMP": {
+        // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key
+        // name or its time to live, as DUMP's is; RESTORE below is the only reader of it. Null for a missing key.
+        const held = this.data.get(key);
+        if (held === undefined) return null;
+        const t = typeof held === "string" ? "string" : held instanceof Map ? "hash" : held instanceof Set ? "set" : held.length && typeof held[0] === "object" ? "zset" : "list";
+        const v = held instanceof Map || held instanceof Set ? [...held] : held;
+        return `\u0000MMDUMP1${JSON.stringify({ t, v })}`;
+      }
+      case "RESTORE": {
+        // RESTORE key ttl payload [REPLACE] [ABSTTL]: refused for a key that is there without REPLACE (BUSYKEY).
+        const [ttlRaw, payload, ...flags] = args;
+        const options = flags.map((f) => f.toUpperCase());
+        if (this.data.has(key) && !options.includes("REPLACE")) throw new Error("BUSYKEY Target key name already exists.");
+        const ttl = Number(ttlRaw);
+        if (!Number.isSafeInteger(ttl) || ttl < 0 || typeof payload !== "string" || !payload.startsWith("\u0000MMDUMP1")) throw new Error("ERR DUMP payload version or checksum are wrong");
+        const { t, v } = JSON.parse(payload.slice("\u0000MMDUMP1".length)) as { t: string; v: unknown };
+        const entry: Entry =
+          t === "string" ? (v as string)
+          : t === "hash" ? new Map(v as [string, string][])
+          : t === "set" ? new Set(v as string[])
+          : (v as Entry);
+        this.data.set(key, entry);
+        this.until.delete(key);
+        if (ttl > 0) this.until.set(key, options.includes("ABSTTL") ? ttl : this.now() + ttl);
+        return "OK";
+      }
       case "TYPE": {
         // As Redis names them, for a test that walks every key (tests/erasure-world.ts).
         const held = this.data.get(key);

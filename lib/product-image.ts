@@ -69,6 +69,11 @@ export type ProductImage = {
    * were made — those are shown from the one file, as they always were.
    */
   small: SmallCopy | null;
+  /**
+   * The picture and its smaller copy are also in the pictures' own R2 bucket (313 [CV1] unit 4b,
+   * lib/picture-r2-copy.ts). Absent for every picture copied nowhere; nothing serves from there yet.
+   */
+  r2?: true;
 };
 
 export type SmallCopy = { path: string; width: number; bytes: number };
@@ -167,6 +172,7 @@ export function parseProductImage(raw: unknown): ProductImage | null {
     alt: typeof value.alt === "string" ? value.alt.replace(/\s+/g, " ").trim().slice(0, MAX_ALT_LENGTH) : "",
     bytes: typeof value.bytes === "number" && value.bytes > 0 ? value.bytes : 0,
     small: parseSmall(value.small, value.path, width),
+    ...(value.r2 === true ? { r2: true as const } : {}),
   };
 }
 

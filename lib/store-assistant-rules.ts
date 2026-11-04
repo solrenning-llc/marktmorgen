@@ -34,7 +34,7 @@
  *     they type it to be answered, go into the store's inbox.
  *
  * Historical17Oct sizing used60% after the27.5% stress tax; MR27Oct instead
- * requires positive net and unchanged room under the release reading, held in tests/store-assistant.test.ts and
+ * requires positive net and unchanged room under explicit reviewed TX evidence, held in tests/store-assistant.test.ts and
  * tests/plan-cost-registry.ts, ADD_ON_LINES): each message is one request to
  * the cheapest current model, Haiku 5.5, with its input capped at
  * ASSISTANT_INPUT_BYTES and its answer at ASSISTANT_OUTPUT_TOKENS, so its
@@ -48,11 +48,10 @@
  * question for the creator, which costs no AI at all.
  */
 import { AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
-import { gateReading } from "@/lib/tax-gate";
-import { maximumPretaxCostCents } from "@/lib/cost-envelope";
-import { assessCustomerWorstCase, PLANNING_PROFIT_TAX_FLOOR_BPS, type CustomerWorstCase } from "@/lib/net-margin-rules";
+import { assessCustomerWorstCase, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from "@/lib/net-margin-rules";
+import { captureCustomerTaxInput, customerTaxCeiling, type CustomerTaxInput } from "@/lib/customer-tax-review";
 import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
-import { DISPUTE_COUNTER_FEE_CENTS, DISPUTE_FEE_CENTS, DISPUTE_RESERVE_BPS, MOST_TAX_READING, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS, SIZING_READING, STRIPE_TOTAL_BPS, chargedOf, providerFeeCents, receivingOf, unitUnder } from "@/lib/receiving-costs";
+import { DISPUTE_COUNTER_FEE_CENTS, DISPUTE_FEE_CENTS, DISPUTE_RESERVE_BPS, MOST_CORRECT_READING, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS, STRIPE_TOTAL_BPS, chargedOf, providerFeeCents, receivingOf } from "@/lib/receiving-costs";
 
 /** The largest store record (lib/store.ts, MAX_STORE_BYTES), read once a message; held equal in tests/store-assistant.test.ts. */
 export const STORE_RECORD_BYTES = 1_000_000;
@@ -343,7 +342,7 @@ export const ADD_ON_ROOM_CENTS = 25;
 
 /** The dearer provider's fee on one payment of the add-on, on the amount charged, in cents. */
 export function addOnFeeCents(cents = ASSISTANT_PRICE_CENTS): number {
-  return providerFeeCents(chargedOf(cents, SIZING_READING), true);
+  return providerFeeCents(chargedOf(cents, MOST_CORRECT_READING), true);
 }
 
 export type AddOnMonth = {
@@ -355,26 +354,48 @@ export type AddOnMonth = {
   disputeReserveCents: number;
   refundReserveCents: number;
   aiCents: number;
-  /** Most a payment may cost before the 27.5% tax and still keep 60% (lib/cost-envelope.ts). */
-  allowedCents: number;
+  /** Absolute reviewed taxes are reserved before the positive net cent. Unknown is null. */
+  allowedCents: number | null;
   totalCents: number;
-  roomCents: number;
+  roomCents: number | null;
   review: CustomerWorstCase;
 };
 
 /** One month of the add-on, every message used at its worst, every fee and reserve counted, in whole cents rounded up. */
-export function assistantMonthWorst(messages = ASSISTANT_MESSAGES_MONTHLY): AddOnMonth {
-  const received = receivingOf(ASSISTANT_PRICE_CENTS, SIZING_READING, true);
+export function assistantMonthWorst(messages = ASSISTANT_MESSAGES_MONTHLY, input: CustomerTaxInput | null = null, now = new Date()): AddOnMonth {
+  if (!Number.isSafeInteger(messages) || messages < 0) throw new RangeError("Unknown assistant message count");
+  // This reading supplies receiving fees/reserves only. Its profit-tax rate
+  // never substitutes for annual BRL books and actual incoming exchanges.
+  const received = receivingOf(ASSISTANT_PRICE_CENTS, MOST_CORRECT_READING, true);
   const { revenueCents, chargedCents, feeCents, remittanceCents, disputeReserveCents, refundReserveCents } = received;
-  const aiCents = Math.ceil((messages * assistantMessageWorstMicroUsd()) / 10_000);
-  const allowedCents = maximumPretaxCostCents(revenueCents, PLANNING_PROFIT_TAX_FLOOR_BPS) ?? 0;
+  const ai = ceilDiv(BigInt(messages) * BigInt(assistantMessageWorstMicroUsd()), BigInt(10_000));
+  if (ai > BigInt(Number.MAX_SAFE_INTEGER - received.totalCents)) throw new RangeError("Assistant cost exceeds exact cents");
+  const aiCents = Number(ai);
   const totalCents = received.totalCents + aiCents;
   const pretax = revenueCents - totalCents;
+  // One detached pair serves the date check, tax calculator and assessor.
+  // Mutable/proxy input cannot change the fiscal period between those checks.
+  const captured = captureCustomerTaxInput(input);
+  let taxesCeilingCents: number | null = null;
+  try {
+    const context = captured?.taxContext;
+    const at = Date.prototype.getTime.call(now);
+    if (context && context.scenario === "store_assistant_month_full" && context.months === 1 && !Object.hasOwn(context,"contract") &&
+        typeof context.from === "string" && typeof context.through === "string" && Number.isFinite(at) &&
+        Date.parse(context.from + "T00:00:00Z") <= at && at < Date.parse(context.through + "T00:00:00Z")) {
+      taxesCeilingCents = customerTaxCeiling(captured!.taxReview, context, { revenueCents, refundableCents: 0, pretaxCents: BigInt(pretax) });
+    }
+  } catch { /* An unbound fiscal period is unknown, never tax zero. */ }
+  // Reserve the whole reviewed book ceiling, including when an extra cost
+  // consumes room: do not claim a new tax credit for that extra spending.
+  const allowedCents = taxesCeilingCents === null ? null : revenueCents - taxesCeilingCents - MINIMUM_NET_PROFIT_CENTS;
+  const remaining = allowedCents === null ? null : BigInt(allowedCents) - BigInt(totalCents);
+  const roomCents = remaining === null || remaining < -BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(remaining);
   const review: CustomerWorstCase = {
     collectedRevenueCents: revenueCents,
     // Not refunded except where the law requires it: that case is the reserve below, a cost.
     refundableRevenueCents: 0,
-    taxesCeilingCents: pretax > 0 ? Math.ceil((pretax * PLANNING_PROFIT_TAX_FLOOR_BPS) / 10_000) : 0,
+    taxesCeilingCents,
     costCeilings: {
       infrastructure: 0,
       storageDeliveryVideo: 0,
@@ -389,35 +410,36 @@ export function assistantMonthWorst(messages = ASSISTANT_MESSAGES_MONTHLY): AddO
       other: 0,
     },
     allCostsBounded: true,
-    allTaxesReviewed: true,
+    allTaxesReviewed: taxesCeilingCents !== null,
     revenueCollected: true,
+    taxReview: captured?.taxReview ?? null,
+    taxContext: captured?.taxContext ?? null,
   };
-  return { revenueCents, chargedCents, feeCents, remittanceCents, disputeReserveCents, refundReserveCents, aiCents, allowedCents, totalCents, roomCents: allowedCents - totalCents, review };
+  return { revenueCents, chargedCents, feeCents, remittanceCents, disputeReserveCents, refundReserveCents, aiCents, allowedCents, totalCents, roomCents, review };
 }
 
 /** Whether the add-on alone keeps the owner's floor, with its room to spare: what the release gate and the tests read. */
-export function assistantMeetsFloor(messages = ASSISTANT_MESSAGES_MONTHLY): boolean {
+export function assistantMeetsFloor(messages = ASSISTANT_MESSAGES_MONTHLY, input: CustomerTaxInput | null = null, now = new Date()): boolean {
   if (!Number.isSafeInteger(messages) || messages < 0) return false;
-  const month = assistantMonthWorst(messages);
-  // MR27Oct: positive net with the existing 25-cent cost room under the
-  // unchanged release tax reading, not a favorable sizing percentage.
-  const gated = unitUnder(ASSISTANT_PRICE_CENTS, month.aiCents, gateReading(), true);
-  return month.roomCents >= ADD_ON_ROOM_CENTS && assessCustomerWorstCase(month.review).approved
-    && gated.meetsFloor && gated.usageRoomCents - month.aiCents >= ADD_ON_ROOM_CENTS;
+  try {
+    const month = assistantMonthWorst(messages, input, now);
+    return month.roomCents !== null && month.roomCents >= ADD_ON_ROOM_CENTS && assessCustomerWorstCase(month.review).approved;
+  } catch { return false; }
 }
 
-/**
- * The add-on under the most-tax reading of docs/tax-uncertainty.md (rule 19,
- * lib/receiving-costs.ts MOST_TAX_READING): VAT of 27% inside the price, the
- * dearest fee, US federal 37%, California 13.3%, Brazil 27.5% and IOF 0.38%
- * on profit with no credit, ISS at 5% of revenue, and IOF on the money
- * brought home. Its actual modeled net share is returned, including a loss.
- * MR27Oct treats60% as the company monthly actual target, never this unit's gate.
- */
-export function assistantMostTaxNetShare(): number {
-  const month = assistantMonthWorst();
-  const unit = unitUnder(ASSISTANT_PRICE_CENTS, month.aiCents, MOST_TAX_READING, true);
-  return unit.netBps / 10_000;
+/** Reviewed net share at all 700 replies, including a loss. No real tax review
+ * is supplied here. Missing or stale evidence returns null, never zero. */
+export function assistantReviewedNetShare(input: CustomerTaxInput | null = null, now = new Date()): number | null {
+  try {
+    const month = assistantMonthWorst(ASSISTANT_MESSAGES_MONTHLY, input, now);
+    const assessed = assessCustomerWorstCase(month.review);
+    return assessed.netCents === null ? null : assessed.netCents / month.revenueCents;
+  } catch { return null; }
+}
+
+/** Historical export name; it now uses only the same explicit TX evidence. */
+export function assistantMostTaxNetShare(input: CustomerTaxInput | null = null, now = new Date()): number | null {
+  return assistantReviewedNetShare(input, now);
 }
 
 // ----------------------------------------------------------------- public words, from these numbers

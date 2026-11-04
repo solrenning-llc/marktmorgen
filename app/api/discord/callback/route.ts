@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
   // A valid trip can return after its financial approval changed. Recheck the
   // marked creator contract before exchanging credentials or replacing a server.
   // Cancellation and existing buyer access above remain separate.
-  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return back("discord=limited");
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return back("discord=funding");
   const granted = await exchange(code, trip.redirect);
   if (!granted?.serverId) return back("discord=error");
   const room = storeKey(store);

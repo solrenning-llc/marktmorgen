@@ -1320,6 +1320,14 @@
   right: -4rem;
   bottom: -15rem;
 }
+/* On a narrow screen the pricing title's last line (and its demo link) sits
+   on the sun, and the deep blue on #FFB13B is 5.7:1, under the 7:1 of 1.4.6.
+   The sun is decoration: below 40rem it goes, and the text keeps the sky. */
+@media (max-width: 40rem) {
+  .hm-sun-page {
+    display: none;
+  }
+}
 .hm-addon {
   border-radius: 24px;
 }

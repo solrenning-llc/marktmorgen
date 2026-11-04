@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { UrlField } from "@/components/url-field";
+import { HOST_ICS_CHECK } from "@/lib/fetch-url-check";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { HostCalendarView, HostSource, SyncState } from "@/lib/host-calendar";
@@ -250,13 +252,14 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
               className="mt-3"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (url.trim()) void send("ics-add", { url }, "Calendar added and read.");
+                // Trimmed here, as the field checks it: the route cuts at its length before it trims.
+                if (url.trim()) void send("ics-add", { url: url.trim() }, "Calendar added and read.");
               }}
             >
               <label className="field-label" htmlFor="host-ics">
                 Secret address in iCal format
               </label>
-              <input id="host-ics" className="field mt-1 w-full" type="url" inputMode="url" autoComplete="off" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" />
+              <UrlField id="host-ics" className="field mt-1 w-full" autoComplete="off" value={url} onChange={setUrl} check={HOST_ICS_CHECK} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" />
               <p className="mt-1 text-xs text-ink-soft">Read once now, then kept sealed; never shown again, not even to you.</p>
               <button type="submit" className="btn btn-secondary btn-sm mt-3" disabled={busy !== null || !url.trim()} aria-busy={busy === "ics-add"}>
                 {busy === "ics-add" ? "Reading it…" : "Add and use it"}

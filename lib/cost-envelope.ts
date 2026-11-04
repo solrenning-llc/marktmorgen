@@ -1,39 +1,40 @@
-import { MINIMUM_NET_PROFIT_CENTS, PLANNING_PROFIT_TAX_FLOOR_BPS } from './net-margin-rules';
+import { MINIMUM_NET_PROFIT_CENTS } from './net-margin-rules';
 
-/** Exact arithmetic only. A ceiling does not verify vendor costs or tax treatment. */
-export function maximumPretaxCostCents(revenueCents: number, combinedProfitTaxBps: number): number | null {
+/** Exact arithmetic on an explicit absolute tax reserve, not a tax rate or
+ * proof of legal facts. Unknown tax stays null; no percentage floor applies. */
+export function maximumPretaxCostCents(revenueCents: number, taxesCeilingCents: number | null): number | null {
   if (!Number.isSafeInteger(revenueCents) || revenueCents <= 0 ||
-      !Number.isSafeInteger(combinedProfitTaxBps) || combinedProfitTaxBps < 0 || combinedProfitTaxBps >= 10_000) return null;
-  const tax = Math.max(combinedProfitTaxBps, PLANNING_PROFIT_TAX_FLOOR_BPS);
-  const p = BigInt(revenueCents), unit = BigInt(10_000);
-  const minimumNet = BigInt(MINIMUM_NET_PROFIT_CENTS);
-  const retained = BigInt(10_000 - tax);
-  const requiredPretaxProfit = (minimumNet * unit + retained - BigInt(1)) / retained;
-  const available = p - requiredPretaxProfit;
+      taxesCeilingCents === null || !Number.isSafeInteger(taxesCeilingCents) || taxesCeilingCents < 0) return null;
+  const available = BigInt(revenueCents) - BigInt(taxesCeilingCents) - BigInt(MINIMUM_NET_PROFIT_CENTS);
   return available < BigInt(0) ? null : Number(available);
 }
 
-/** All non-resource costs must be explicitly supplied, even when zero.
- * Fixed expenses belong either here as an allocation or in the company base,
- * never both. This result must not be used as proof of prepaid supplier funds.
- */
+/** Every cost and tax must be explicitly supplied, even when zero. A bound
+ * is never evidence of prepaid supplier funds or permission to sell. */
 export function remainingResourceCostCents(
   revenueCents: number,
-  combinedProfitTaxBps: number,
+  taxesCeilingCents: number | null,
   otherCostCeilings: readonly (number | null)[],
 ): number | null {
-  const maximum = maximumPretaxCostCents(revenueCents, combinedProfitTaxBps);
-  if (maximum === null || !Array.isArray(otherCostCeilings) || !otherCostCeilings.length) return null;
-  let remaining = BigInt(maximum);
-  // Array.some/reduce skip holes. Every cost must be an explicit own entry;
-  // missing slots, inherited values and accessors are not reviewed data.
-  for (let index = 0; index < otherCostCeilings.length; index += 1) {
-    const entry = Object.getOwnPropertyDescriptor(otherCostCeilings, index);
-    if (!entry || !Object.prototype.hasOwnProperty.call(entry, 'value')) return null;
-    const cost = entry.value;
-    if (typeof cost !== 'number' || !Number.isSafeInteger(cost) || cost < 0) return null;
-    remaining -= BigInt(cost);
-    if (remaining < BigInt(0)) return null;
-  }
-  return Number(remaining);
+  try {
+    const maximum = maximumPretaxCostCents(revenueCents, taxesCeilingCents);
+    if (maximum === null || !Array.isArray(otherCostCeilings)) return null;
+    const descriptor = Object.getOwnPropertyDescriptor(otherCostCeilings, 'length');
+    const length = descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined;
+    if (!Number.isSafeInteger(length) || length <= 0) return null;
+    const keys = Reflect.ownKeys(otherCostCeilings);
+    if (keys.length !== length + 1 || keys.some(key => typeof key !== 'string')) return null;
+    const present = new Set(keys);
+    let remaining = BigInt(maximum);
+    for (let index = 0; index < length; index += 1) {
+      if (!present.has(String(index))) return null;
+      const entry = Object.getOwnPropertyDescriptor(otherCostCeilings, String(index));
+      if (!entry || !Object.hasOwn(entry, 'value')) return null;
+      const cost = entry.value;
+      if (typeof cost !== 'number' || !Number.isSafeInteger(cost) || cost < 0) return null;
+      remaining -= BigInt(cost);
+      if (remaining < BigInt(0)) return null;
+    }
+    return Number(remaining);
+  } catch { return null; }
 }

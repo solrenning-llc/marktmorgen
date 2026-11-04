@@ -5,7 +5,7 @@ import { API_PAGE } from "@/lib/api-read";
 import { API_RATE } from "@/lib/api-guard";
 import { MAX_KEYS } from "@/lib/api-key-rules";
 import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
-import { API_WRITE_UNITS, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { PLAN_TITLES } from "@/lib/plan";
 
 export const metadata: Metadata = {
@@ -82,19 +82,29 @@ export default function DevelopersPage() {
           {` A page holds up to ${API_PAGE} rows. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
         </p>
         <p>
+          To get only some fields of each row, add <code className="font-mono">?fields=</code> with their names,
+          separated by commas, for example <code className="font-mono">/api/v1/leads?fields=email,agreed</code>. The paging
+          fields beside <code className="font-mono">data</code> always stay. A field no row has is answered 400{" "}
+          <code className="font-mono">unknown_field</code>, with its name. This works on every list above, on
+          Store, on Bookings and on Discount codes.
+        </p>
+        <p>
           {`Each key may make ${API_RATE} requests a minute. Past that, the answer is 429 with `}
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
         <p>
-          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A contact added or a product given counts as ${API_WRITE_UNITS}. Past it, the answer is 429 `}
+          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Past it, the answer is 429 `}
           <code className="font-mono">monthly_limit</code>
-          {" until the next billing month, or at once on a larger plan. Nothing is billed for requests. A write that does not fit the store's data room (its words and records, by plan) is answered 409 "}
+          {", and its message says when the figure opens again, if it does. A trial or a store without a paid plan also needs one of the month's places for such stores; without one, the answer is 429 "}
+          <code className="font-mono">no_place</code>
+          {". Nothing is billed for requests. A write that does not fit the store's data room (its words and records, by plan) is answered 409 "}
           <code className="font-mono">store_full</code>
           {", and nothing is written."}
         </p>
         <Code>{`401  {"error": "unauthorized", "message": "Send your API key as: Authorization: Bearer nl_live_…"}
 429  {"error": "rate_limited", "message": "At most ${API_RATE} requests a minute per key. Try again in a minute."}
-429  {"error": "monthly_limit", "message": "Your store's API requests for this month are used: …"}
+429  {"error": "monthly_limit", "message": "Your store's API requests for this month are used: 2,000 API requests. This opens again with your next billing month, on …"}
+429  {"error": "no_place", "message": "Stores without a paid plan are full for this month, so this can't run right now. …"}
 409  {"error": "store_full", "message": "Your store's data room is full, so nothing was added. …"}
 409  {"error": "paused_unpaid", "message": "Nothing was read: your plan's renewal payment did not go through, …"}
 409  {"error": "paused_unpaid", "message": "Nothing was changed: your plan's renewal payment did not go through, …"}
@@ -464,6 +474,26 @@ export default function DevelopersPage() {
 200  {"data": {"email": "dana@example.com", "labels": ["vip"]}}
 404  {"error": "not_on_list", "message": "Nobody with this address is on your list."}`}</Code>
         <p>{`A store may add ${ADDS_PER_DAY.toLocaleString("en-US")} new people a day through the API; past that, 429 daily_limit until the next day.`}</p>
+      </LegalSection>
+
+      <LegalSection title="Discount codes">
+        <Endpoint path="/api/v1/codes">
+          Your discount codes, read from your own Stripe account as your studio lists them: what each takes off, how many
+          times it was used, its limit, its smallest order and whether it is live.
+        </Endpoint>
+        <Endpoint method="POST" path="/api/v1/codes">
+          Makes a code on your own Stripe account, checked as in your studio. Send{" "}
+          <code className="font-mono">{`{"code": "LAUNCH20", "percent": 20}`}</code>, or{" "}
+          <code className="font-mono">{`{"code": "TENOFF", "kind": "amount", "amount": "10"}`}</code> in your store&apos;s
+          currency; <code className="font-mono">uses</code> and <code className="font-mono">minimum</code> are optional. A
+          code that cannot be made says why, as <code className="font-mono">error</code> and{" "}
+          <code className="font-mono">message</code>; the same letters twice give 409 <code className="font-mono">taken</code>.
+        </Endpoint>
+        <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
+          Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
+          the list, switched off. Making and switching off need a key that writes; all three answer 409{" "}
+          <code className="font-mono">not_selling</code> while your store is not taking payments.
+        </Endpoint>
       </LegalSection>
 
       <LegalSection title="Writing: giving a product">

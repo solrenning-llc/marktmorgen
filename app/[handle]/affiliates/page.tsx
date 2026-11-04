@@ -1,3 +1,4 @@
+import { EmailField } from "@/components/email-field";
 import { SITE_URL } from "@/lib/site-url";
 import type { Metadata } from "next";
 import { readListings, recordListings } from "@/lib/catalog";
@@ -8,7 +9,8 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { formatMoney } from "@/lib/money";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { commissionRate, nextPayday } from "@/lib/affiliate-setting";
+import { IDLE_WARN_DAYS, readIdleDays } from "@/lib/affiliate-idle-rules";
+import { commissionRate, creditsContacts, nextPayday } from "@/lib/affiliate-setting";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { listCodes } from "@/lib/discount";
 import { speech } from "@/lib/buyer-words";
@@ -81,7 +83,9 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
     return a.bonusTitle(Number(sales) || 0, name);
   };
   const promise = (terms: typeof store.affiliates) => a.payoutPromise(store.name, terms.payday, terms.hold);
-  const attribution = (terms: typeof store.affiliates) => a.attribution(terms.days, terms.rule === "first", terms.lifetime);
+  // The rule, and the confirmed-lead credit where the program has it (630 [HN6](1), creditsContacts).
+  const attribution = (terms: typeof store.affiliates) =>
+    creditsContacts(terms) ? `${a.attribution(terms.days, terms.rule === "first", terms.lifetime)} ${a.contactsRule}` : a.attribution(terms.days, terms.rule === "first", terms.lifetime);
 
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token : "";
@@ -135,7 +139,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
       : [];
   const promotionProducts = affiliate ? kitProducts.map(product => ({ ...product, url: productAffiliateLink(store, product, affiliate.code) })) : [];
   const different = (await readListings(store, Object.keys(terms.rates)))
-    .filter((p) => !p.hidden && p.priceCents > 0 && p.recurring === null && commissionRate(terms, p.id) !== terms.percent)
+    .filter((p) => !p.hidden && p.priceCents > 0 && (p.recurring === null || terms.recurring > 0) && commissionRate(terms, p.id) !== terms.percent)
     .map((p) => ({ title: p.title, rate: commissionRate(terms, p.id) }));
 
   const form = (
@@ -151,16 +155,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
       <label htmlFor="aff-email" className="st-label">
         {w.yourEmail}
       </label>
-      <input
-        id="aff-email"
-        type="email"
-        name="email"
-        required
-        maxLength={254}
-        autoComplete="email"
-        placeholder={w.emailPlaceholder}
-        className="st-field"
-      />
+      <EmailField id="aff-email" name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
       <label htmlFor="aff-note" className="st-label pt-2">
         {a.whereShare} <span className="st-muted font-normal">{a.optional}</span>
       </label>
@@ -445,16 +440,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                   <label htmlFor="aff-paypal" className="st-label">
                     {a.payPalLabel}
                   </label>
-                  <input
-                    id="aff-paypal"
-                    type="email"
-                    name="paypal"
-                    maxLength={254}
-                    autoComplete="email"
-                    defaultValue={affiliate.paypal}
-                    placeholder={affiliate.email}
-                    className="st-field"
-                  />
+                  <EmailField id="aff-paypal" name="paypal" className="st-field" autoComplete="email" placeholder={affiliate.email} defaultValue={affiliate.paypal} language={store.language} />
                   <p className="st-muted text-sm">
                     {a.payPalNote(store.name, affiliate.email)}
                   </p>
@@ -529,6 +515,8 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                         ? [lw.term(terms.lead.kind, money(terms.lead.cents, store.currency), store.name), lw.termRules(terms.lead.hold, terms.lead.daily, money(terms.lead.budget, store.currency), store.name)]
                         : []),
                       ...(terms.paidSearch ? [] : [a.termNoPaidSearch(store.name)]),
+                      // Removing affiliates who bring nothing (630 [HN6](3)): said before anyone applies.
+                      ...(readIdleDays(terms.idle) > 0 ? [a.termIdle(readIdleDays(terms.idle), IDLE_WARN_DAYS, terms.lead.kind !== "none")] : []),
                       attribution(terms),
                       a.termRefunds,
                       a.termDisclose,

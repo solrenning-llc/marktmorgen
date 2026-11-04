@@ -1,44 +1,12 @@
-/**
- * What one payment costs to receive, and what it keeps after every tax, in
- * one model for every plan, interval and add-on (18 October 2026).
- *
- * Until that day the base plans were held to 2.9% + 0.7% + 30¢ on the price
- * with no reserve (tests/plan-cost-model.ts), while the Store assistant
- * add-on carried the dearer 6.6% + 30¢, a remittance allowance and refund
- * and dispute reserves: two models in one repository, and the lighter one
- * decided the plans. This file is the one model, aligned with Hazelsong's
- * (lib/owner-margin.ts there, WORST_CASE), the sister product of the same
- * LLC:
- *
- *   - the dearer, per charge, of Stripe with every surcharge (2.9% + 30¢ a
- *     card, + 1.5% international, + 1% currency conversion, + 0.7% Billing,
- *     + 0.5% Tax: 6.6% + 30¢, stripe.com/pricing read 17 October 2026) and
- *     Paddle (5% + 50¢), ON THE AMOUNT CHARGED, which is the price plus the
- *     buyer's sales tax the provider adds on top, at its highest (27%,
- *     Hungary's VAT); a line carried on a renewal invoice pays only the
- *     percentages;
- *   - remittance of 1.5% of revenue (the larger of this repository's
- *     allowance and Hazelsong's 1%);
- *   - a refund reserve of 1% of revenue, and a dispute reserve of
- *     ($30 + the amount charged) x 1% (a disputed payment is lost in full and
- *     Stripe charges $15, and $15 again to answer it);
- *   - a profit tax of at least 27.5% (lib/net-margin-rules.ts,
- *     PLANNING_PROFIT_TAX_FLOOR_BPS), the sizing reading.
- *
- * And the readings of docs/tax-uncertainty.md (owner's rule 19): the
- * most-tax reading, under which no unit reaches 60% at any limit, and the
- * three design choices that could close a gap (EU hosting removing the US
- * tax, ISS at 0% from a Fortaleza consultation, business-only sales with the
- * buyer's tax on top at 15%). Nothing here opens a sale: the release gate is
- * lib/commercial-margin.ts. This file imports nothing so a page, a test and
- * the add-on read the same numbers.
+/** Non-tax receiving fees/reserves and the explicit BRL tax arithmetic primitive.
+ * No review is supplied and no sale is approved here. Superseded percentage
+ * readings live only in tests/historical-receiving-model.ts.
+ * The receiving terms remain the dearer provider on the amount charged,
+ * remittance allowance and full refund/dispute reserves, rounded up.
  */
-
 /** MR27Oct2026: no percentage floor; every unit must retain a positive net cent. */
 export const FLOOR_BPS = 0;
 export const POSITIVE_NET_CENTS = 1;
-/** The profit tax every reading is held to at least (lib/net-margin-rules.ts PLANNING_PROFIT_TAX_FLOOR_BPS). */
-export const STRESS_PROFIT_TAX_BPS = 2_750;
 
 /** The two payment providers' fees, on the amount charged; the dearer is used for every charge. */
 export const PROVIDER_FEES = {
@@ -69,70 +37,100 @@ export type Reading = {
   revenueTaxBps: number;
 };
 
-/** Historical18Oct sizing reading; MR27Oct replaces its60% floor with positive net.
- * This favorable reading never replaces the unchanged most-tax release reading. */
-export const SIZING_READING: Reading = {
-  id: "sizing",
-  label: "Sizing reading: 27.5% on profit, the buyer's tax on top at 27%",
+/** TX metadata alone is never evidence of applicable facts, FX or operations.
+ * reviewed-receiving requires the complete scoped review before calculation. */
+export const MOST_CORRECT_READING: Readonly<Reading & { incomingExchangeIofBps: number }> = Object.freeze({
+  id: "most-correct",
+  label: "TX scenario: annual IRPF 15%; IOF 0.38% per incoming exchange; buyer tax on top up to 27%",
   salesTaxInsideBps: 0,
   salesTaxOnTopBps: 2_700,
   remittanceBps: REMITTANCE_BPS,
-  profitTaxBps: STRESS_PROFIT_TAX_BPS,
+  profitTaxBps: 1_500,
   revenueTaxBps: 0,
+  incomingExchangeIofBps: 38,
+});
+
+/** Evidence-work bound only: larger annual books refuse, never truncate. */
+const MAX_INCOMING_EXCHANGE_ENTRIES = 10_000;
+
+export type MostCorrectTaxBases = {
+  /** Both bases must already be expressed in BRL cents, never USD cents. */
+  currency: "BRL";
+  /** The annual accounting profit at 31 December, after the applicable costs.
+   * A loss gives no IRPF here and never offsets IOF on an actual entry. */
+  annualProfitCents: number | null;
+  /** Each exchange operation separately. An explicit empty list means no
+   * incoming exchange; omitted/unknown operations must not become zero. */
+  incomingExchangeCents: readonly (number | null)[] | null;
+};
+export type MostCorrectTaxes = {
+  currency: "BRL";
+  annualProfitCents: number;
+  incomingExchangeCents: number;
+  irpfCents: number;
+  iofCents: number;
+  totalTaxCents: number;
 };
 
 /**
- * The reading with MORE tax for every open question (rule 19), as in
- * Hazelsong: 27% VAT inside every price; US federal 37% on effectively
- * connected income, California 13.3%, Brazil 27.5% and IOF 0.38% on profit,
- * added, with no credit (78.18%); ISS at 5% of revenue, not deductible; IOF
- * at 3.5% on what is sent home on top of the remittance allowance.
+ * Conservative whole-cent scenario arithmetic, not a tax review or a payment.
+ * IRPF is annual even with no distribution. A distribution of profit already
+ * taxed is not another annual profit; it can still create an exchange entry.
+ * No amount is inferred from another base and no currency conversion is
+ * invented. Every own data field/entry must be explicit; unknown refuses.
  */
-export const MOST_TAX_READING: Reading = {
-  id: "most-tax",
-  label: "Most-tax reading: 27% VAT inside, 78.18% on profit, ISS 5% of revenue",
-  salesTaxInsideBps: 2_700,
-  salesTaxOnTopBps: 0,
-  remittanceBps: REMITTANCE_BPS + 350,
-  profitTaxBps: 3_700 + 1_330 + 2_750 + 38,
-  revenueTaxBps: 500,
-};
+export function mostCorrectTaxesOf(value: MostCorrectTaxBases | null): MostCorrectTaxes | null {
+  try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const own = (record: object, key: string): unknown => {
+      const field = Object.getOwnPropertyDescriptor(record, key);
+      return field && Object.prototype.hasOwnProperty.call(field, "value") ? field.value : undefined;
+    };
+    const currency = own(value, "currency");
+    const annualProfit = own(value, "annualProfitCents");
+    const entries = own(value, "incomingExchangeCents");
+    if (currency !== "BRL" || typeof annualProfit !== "number" ||
+        !Number.isSafeInteger(annualProfit) || !Array.isArray(entries)) return null;
+    const length = own(entries, "length");
+    if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0 ||
+        length > MAX_INCOMING_EXCHANGE_ENTRIES) return null;
+    const ceiling = (cents: bigint, bps: number) =>
+      (cents * BigInt(bps) + BigInt(9_999)) / BigInt(10_000);
+    const maximum = BigInt(Number.MAX_SAFE_INTEGER);
+    let incoming = BigInt(0), iof = BigInt(0);
+    for (let index = 0; index < length; index += 1) {
+      const entry = own(entries, String(index));
+      if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 0) return null;
+      incoming += BigInt(entry);
+      iof += ceiling(BigInt(entry), MOST_CORRECT_READING.incomingExchangeIofBps);
+      if (incoming > maximum || iof > maximum) return null;
+    }
+    const irpf = ceiling(BigInt(Math.max(0, annualProfit)), MOST_CORRECT_READING.profitTaxBps);
+    const total = irpf + iof;
+    if (total > maximum) return null;
+    return { currency, annualProfitCents: annualProfit, incomingExchangeCents: Number(incoming),
+      irpfCents: Number(irpf), iofCents: Number(iof), totalTaxCents: Number(total) };
+  } catch {
+    // Unreadable/proxy-backed evidence is unknown, never a zero-tax result.
+    return null;
+  }
+}
 
-/**
- * EU hosting, so the LLC has no US-source income: Brazil 15% (Lei
- * 14.754/2023) + IOF 0.38% + California 13.3% on profit, on every customer;
- * ISS at 5% of revenue; the buyer's tax on top at 27%.
- */
-export const EU_HOSTING_READING: Reading = {
-  id: "eu-hosting",
-  label: "EU hosting (no US tax): 28.68% on profit, ISS 5% of revenue, tax on top 27%",
-  salesTaxInsideBps: 0,
-  salesTaxOnTopBps: 2_700,
-  remittanceBps: REMITTANCE_BPS,
-  profitTaxBps: 1_500 + 38 + 1_330,
-  revenueTaxBps: 500,
-};
+/** Current metadata only; not a complete review or authorization. */
+export const READINGS: readonly Reading[] = [MOST_CORRECT_READING];
 
-/** EU hosting with ISS at 0% (a Fortaleza consultation answered in the owner's favor). */
-export const EU_HOSTING_ISS_ZERO: Reading = { ...EU_HOSTING_READING, id: "eu-iss0", label: "EU hosting, ISS 0% (Fortaleza consultation)", revenueTaxBps: 0 };
-/** EU hosting with business-only sales: the buyer's tax on top at 15%, the realistic worst (US state tax, BC/SK/MB PST). */
-export const EU_HOSTING_BUSINESS: Reading = { ...EU_HOSTING_READING, id: "eu-b2b", label: "EU hosting, business-only sales (tax on top 15%)", salesTaxOnTopBps: 1_500 };
-/** All three design choices at once. */
-export const EU_HOSTING_ISS_ZERO_BUSINESS: Reading = { ...EU_HOSTING_READING, id: "eu-iss0-b2b", label: "EU hosting, ISS 0% and business-only sales", revenueTaxBps: 0, salesTaxOnTopBps: 1_500 };
-/** Business-only sales under the sizing reading. */
-export const SIZING_BUSINESS: Reading = { ...SIZING_READING, id: "sizing-b2b", label: "Sizing reading, business-only sales (tax on top 15%)", salesTaxOnTopBps: 1_500 };
-
-/** Every reading the alignment report prints, the sizing one first. */
-export const READINGS: readonly Reading[] = [SIZING_READING, SIZING_BUSINESS, MOST_TAX_READING, EU_HOSTING_READING, EU_HOSTING_ISS_ZERO, EU_HOSTING_BUSINESS, EU_HOSTING_ISS_ZERO_BUSINESS];
-
-const pct = (cents: number, bps: number) => Math.ceil((cents * bps) / 10_000);
+const pct = (cents: number, bps: number) => Number.isSafeInteger(cents) && cents >= 0 && Number.isSafeInteger(bps) && bps >= 0
+  ? Number((BigInt(cents) * BigInt(bps) + BigInt(9_999)) / BigInt(10_000))
+  : Math.ceil((cents * bps) / 10_000);
 
 /** What a price brings in once the sales tax inside it is taken out, rounded down. */
-export function revenueOf(priceCents: number, reading: Reading = SIZING_READING): number {
-  return Math.floor((priceCents * 10_000) / (10_000 + reading.salesTaxInsideBps));
+export function revenueOf(priceCents: number, reading: Reading = MOST_CORRECT_READING): number {
+  return Number.isSafeInteger(priceCents) && priceCents >= 0 && Number.isSafeInteger(reading.salesTaxInsideBps) && reading.salesTaxInsideBps >= 0
+    ? Number(BigInt(priceCents) * BigInt(10_000) / BigInt(10_000 + reading.salesTaxInsideBps))
+    : Math.floor((priceCents * 10_000) / (10_000 + reading.salesTaxInsideBps));
 }
 /** What the buyer is charged for a price: the price plus the sales tax added on top, rounded up. */
-export function chargedOf(priceCents: number, reading: Reading = SIZING_READING): number {
+export function chargedOf(priceCents: number, reading: Reading = MOST_CORRECT_READING): number {
   return priceCents + pct(priceCents, reading.salesTaxOnTopBps);
 }
 
@@ -155,7 +153,7 @@ export type Receiving = {
 };
 
 /** What receiving one payment costs, every fee and reserve, in whole cents rounded up. */
-export function receivingOf(priceCents: number, reading: Reading = SIZING_READING, ownTransaction = true): Receiving {
+export function receivingOf(priceCents: number, reading: Reading = MOST_CORRECT_READING, ownTransaction = true): Receiving {
   const revenueCents = revenueOf(priceCents, reading);
   const chargedCents = chargedOf(priceCents, reading);
   const feeCents = providerFeeCents(chargedCents, ownTransaction);
@@ -182,49 +180,3 @@ export type UnitResult = Receiving & {
   /** Most usage may cost while keeping positive net (negative when no use still loses). */
   usageRoomCents: number;
 };
-
-/** The profit and revenue taxes on a pretax profit. The profit tax is never below the stress floor. */
-export function taxOf(revenueCents: number, pretaxCents: number, reading: Reading): number {
-  const profitBps = Math.max(reading.profitTaxBps, STRESS_PROFIT_TAX_BPS);
-  return pct(Math.max(0, pretaxCents), profitBps) + pct(revenueCents, reading.revenueTaxBps);
-}
-
-/** Whether a unit with this non-tax cost keeps the floor under a reading. */
-function keeps(revenueCents: number, costCents: number, reading: Reading): boolean {
-  const pretax = revenueCents - costCents;
-  return pretax - taxOf(revenueCents, pretax, reading) >= POSITIVE_NET_CENTS;
-}
-
-/** Largest non-tax cost preserving a positive net cent under the supplied reading. */
-export function costBudgetCents(revenueCents: number, reading: Reading): number {
-  const profitBps = Math.max(reading.profitTaxBps, STRESS_PROFIT_TAX_BPS);
-  const target = POSITIVE_NET_CENTS + pct(revenueCents, reading.revenueTaxBps);
-  let budget = revenueCents - Math.ceil((target * 10_000) / (10_000 - profitBps));
-  while (budget > -revenueCents && !keeps(revenueCents, budget, reading)) budget -= 1;
-  while (keeps(revenueCents, budget + 1, reading)) budget += 1;
-  return budget;
-}
-
-/** One unit of sale under a reading: its price, its usage at full use (in cents), its receiving, its taxes and its net. */
-export function unitUnder(priceCents: number, usageCents: number, reading: Reading = SIZING_READING, ownTransaction = true): UnitResult {
-  const r = receivingOf(priceCents, reading, ownTransaction);
-  const costCents = r.totalCents + usageCents;
-  const pretaxCents = r.revenueCents - costCents;
-  const taxCents = taxOf(r.revenueCents, pretaxCents, reading);
-  const netCents = pretaxCents - taxCents;
-  const floorCents = POSITIVE_NET_CENTS;
-  const budget = costBudgetCents(r.revenueCents, reading);
-  return {
-    ...r,
-    usageCents,
-    costCents,
-    pretaxCents,
-    taxCents,
-    netCents,
-    netBps: r.revenueCents > 0 ? Math.floor((netCents * 10_000) / r.revenueCents) : 0,
-    floorCents,
-    meetsFloor: netCents >= floorCents,
-    gapCents: Math.max(0, floorCents - netCents),
-    usageRoomCents: budget - r.totalCents,
-  };
-}

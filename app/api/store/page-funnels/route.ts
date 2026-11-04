@@ -1,3 +1,4 @@
+import { SENSITIVE_WHY, sensitiveFieldOf } from "@/lib/form-sensitive";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { idsOfKind, readListings } from "@/lib/catalog";
@@ -58,6 +59,11 @@ export async function POST(request: NextRequest) {
       const pages = pagesOf(type);
       const formDrafts = readFunnelFormDrafts(body.formDrafts, type);
       if (!formDrafts) return Response.json({ ok: false, error: "form_draft" }, { status: 400 });
+      // What a scam asks for is never asked (568 [GD2] (c)): a typed question is refused before anything is made.
+      for (const draft of Object.values(formDrafts)) {
+        const sensitive = sensitiveFieldOf({ fields: draft.fields.map((field) => ({ ...field, label: String((field as { label?: unknown }).label ?? "") })) as never });
+        if (sensitive) return Response.json({ ok: false, error: "form_sensitive", field: sensitive.label, why: SENSITIVE_WHY[sensitive.what] }, { status: 400 });
+      }
       const pageCopy = readFunnelPageCopy(body.pageCopy, type);
       if (!pageCopy) return Response.json({ ok: false, error: "page_copy" }, { status: 400 });
       // A draft's words for the page's other blocks (lib/funnel-ai-rules.ts), held to each block's limits.

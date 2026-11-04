@@ -16,9 +16,8 @@
  *     kept when a timeout may have been billed, and closed when spent;
  *   - what is kept about a buyer: the conversation for a day, by a token,
  *     with no address, deletable at once;
- *   - the add-on alone, every reply used, keeps 60% after the 27.5% tax with
- *     the dearer fee, remittance and reserves; under the most-tax reading it
- *     does not, and it is not on sale;
+ *   - the add-on alone needs explicit annual/FX tax evidence, positive net
+ *     and its existing room; absent actual review it is not on sale;
  *   - the public pages state the code's own numbers.
  */
 import { readFileSync } from "node:fs";
@@ -28,8 +27,6 @@ import { readListing } from "@/lib/catalog";
 import { parsePage } from "@/lib/sales-page";
 import { readInbox } from "@/lib/inbox";
 import { ANTHROPIC_RATES, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
-import { gateReading } from "@/lib/tax-gate";
-import { unitUnder } from "@/lib/receiving-costs";
 import { assessCustomerWorstCase } from "@/lib/net-margin-rules";
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { CURRENT_COMMERCIAL_TERMS } from "@/lib/commercial-margin";
@@ -72,6 +69,7 @@ import { assistantWords } from "@/lib/buyer-words/assistant";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { assistantTaxFixture, ASSISTANT_TAX_TEST_NOW } from "./store-assistant-tax-fixture";
 
 type Sent = { model: string; max_tokens: number; system: string; messages: { role: string; content: string }[] };
 const asked: { body: Sent; bytes: number }[] = [];
@@ -133,27 +131,24 @@ async function main(): Promise<void> {
   console.log(`  one message at its worst: $${(worst / 1e6).toFixed(6)} (model $${((worst - assistantMessageExtraMicroUsd()) / 1e6).toFixed(6)}, the rest $${(assistantMessageExtraMicroUsd() / 1e6).toFixed(6)})`);
   is("the store record read with every message is priced at its largest", STORE_RECORD_BYTES, MAX_STORE_BYTES);
   is("a reply that reports no tokens settles at the worst; a short one at less", [assistantSettledMicroUsd(undefined), assistantSettledMicroUsd({ input_tokens: 3_000, output_tokens: 60 }) < worst, assistantSettledMicroUsd({ input_tokens: 10_000_000, output_tokens: 99_999 })], [worst, true, worst]);
-  const month = assistantMonthWorst();
+  const noReview = assistantMonthWorst();
+  is("no actual review fabricates neither tax, room nor margin", [noReview.review.taxesCeilingCents,noReview.allowedCents,noReview.roomCents,assistantMeetsFloor(),assistantMostTaxNetShare()], [null,null,null,false,null]);
+  const taxInput=assistantTaxFixture();
+  const month = assistantMonthWorst(ASSISTANT_MESSAGES_MONTHLY,taxInput,ASSISTANT_TAX_TEST_NOW);
   is("the dearer provider's fee on the whole amount charged ($69 and the buyer's tax on top at 27%): Stripe at 6.6% + 30 cents", [month.chargedCents, month.feeCents, addOnFeeCents()], [8_763, 611, 611]);
   is("the pool is every message at its worst", assistantPoolMicroUsd(), ASSISTANT_MESSAGES_MONTHLY * worst);
   const assessed = assessCustomerWorstCase(month.review);
-  console.log(`  a month: $${(month.revenueCents / 100).toFixed(2)} in; fee $${(month.feeCents / 100).toFixed(2)}, remittance $${(month.remittanceCents / 100).toFixed(2)}, disputes $${(month.disputeReserveCents / 100).toFixed(2)}, refunds $${(month.refundReserveCents / 100).toFixed(2)}, AI $${(month.aiCents / 100).toFixed(2)}; $${(month.totalCents / 100).toFixed(2)} of $${(month.allowedCents / 100).toFixed(2)} allowed; margin ${(assessed.marginBps! / 100).toFixed(2)}%`);
-  // Since 18 October 2026 every plan and add-on is received in one model (lib/receiving-costs.ts). At $49 and 700
-  // replies it kept 59.06%; the owner set the price instead of cutting anything (11:21): $69 and the same 700 replies keep
-  // 60% with the room (docs/margin-alignment-2026-10-18.md). The floor is never assumed, it is read here.
-  const gatedMonth = unitUnder(ASSISTANT_PRICE_CENTS, month.aiCents, gateReading(), true);
-  const keepsRoom = gatedMonth.usageRoomCents - month.aiCents >= ADD_ON_ROOM_CENTS;
-  is("the add-on uses positive net and unchanged room under the most-tax gate reading",
-    assistantMeetsFloor(), assessed.approved && month.roomCents >= ADD_ON_ROOM_CENTS && gatedMonth.meetsFloor && keepsRoom);
+  is("the synthetic reviewed scenario uses positive net and unchanged room",
+    assistantMeetsFloor(700,taxInput,ASSISTANT_TAX_TEST_NOW), assessed.approved && month.roomCents !== null && month.roomCents >= ADD_ON_ROOM_CENTS);
   is("the published price and reply allowance never change with the criterion", [ASSISTANT_PRICE_CENTS, ASSISTANT_MESSAGES_MONTHLY], [6900, 700]);
-  is("positive modeled economics alone do not open the add-on", [assistantMeetsFloor(), ASSISTANT_ON_SALE], [true, false]);
-  const overRoom = Math.ceil((gatedMonth.usageRoomCents - ADD_ON_ROOM_CENTS + 1) * 10000 / worst);
-  is("spending one cent past its unchanged room is refused", assistantMeetsFloor(overRoom), false);
+  is("positive synthetic economics do not invent an actual review or open the add-on", [assistantMeetsFloor(), ASSISTANT_ON_SALE], [false, false]);
+  const overRoom = Math.ceil((month.allowedCents! - (month.totalCents-month.aiCents) - ADD_ON_ROOM_CENTS + 1) * 10000 / worst);
+  is("spending one cent past its unchanged room is refused", assistantMeetsFloor(overRoom,taxInput,ASSISTANT_TAX_TEST_NOW), false);
   for (const invalid of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
     is("invalid reply counts never pass the financial helper", assistantMeetsFloor(invalid), false);
   }
-  is("the most-tax result is the actual modeled share, not clamped or replaced by the target",
-    assistantMostTaxNetShare(), unitUnder(ASSISTANT_PRICE_CENTS, month.aiCents, gateReading(), true).netBps / 10000);
+  is("the compatibility result uses the same synthetic reviewed net without clamping or a fixed-rate replacement",
+    assistantMostTaxNetShare(taxInput,ASSISTANT_TAX_TEST_NOW), assessed.netCents! / month.revenueCents);
   is("so it is not on sale while the plans are not", [PLANS_ON_SALE, ASSISTANT_ON_SALE], [false, false]);
   is("and its terms are bound into the commercial review's snapshot", [CURRENT_COMMERCIAL_TERMS.storeAssistant.priceCents, CURRENT_COMMERCIAL_TERMS.storeAssistant.messagesMonthly], [ASSISTANT_PRICE_CENTS, ASSISTANT_MESSAGES_MONTHLY]);
 

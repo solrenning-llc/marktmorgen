@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { parseLanguage } from "@/lib/store-language";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
@@ -90,6 +91,8 @@ export default async function StudioBlogPage({ searchParams }: Params) {
                     post={open ? { id: open.id, title: open.title, body: open.body, product: open.product, draft: open.draft, href: open.draft ? null : live(open.id, open.title) } : { id: null, title: "", body: "", product: null, draft: true, href: null }}
                     products={products}
                     back={back}
+                    look={store.look}
+                    language={parseLanguage(store.language)}
                   />
                 </AiOn>
               ) : (

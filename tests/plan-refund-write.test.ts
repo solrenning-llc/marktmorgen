@@ -110,7 +110,7 @@ async function main() {
   part("The refund, once");
   const a = await paidShop();
   const first = await refundPlanPayment(await a.store(), NOW);
-  is("the first payment comes back in full", first, { ok: true, cents: 6_900, currency: "usd", refundId: "re_made1x", status: "succeeded" });
+  is("the first payment comes back in full", first, { ok: true, cents: 6_900, currency: "usd", refundId: "re_made1x", refundIds: ["re_made1x"], status: "succeeded" });
   is("a second click gives nothing more", (await refundPlanPayment(await a.store(), NOW)), { ok: false, reason: "not_owed" });
   is("one refund at Stripe, for the policy's amount", a.refunds().map((r) => r.amount), [6_900]);
   is("the lock is gone", await lockOf(await a.store()), null);
@@ -163,7 +163,7 @@ async function main() {
   is("a refund already pending on the charge: nothing new", [await refundPlanPayment(await e.store(), NOW), e.refunds().length], [{ ok: false, reason: "pending" }, 1]);
 
   part("The lock outlasts the write");
-  is("the lock covers the reading's budget, three time-outs and a minute", [LOCK_SECONDS, WRITE_BY_MS], [145, 65_000]);
+  is("the lock covers the reading's budget, a list and a write for each payment, and a minute", [LOCK_SECONDS, WRITE_BY_MS], [345, 265_000]);
   const late = await paidShop();
   world.jump = WRITE_BY_MS + 1;
   is("past the write's last moment: nothing made, failed, the lock released", [await refundPlanPayment(await late.store(), NOW), late.refunds().length, await lockOf(await late.store())], [{ ok: false, reason: "failed" }, 0, null]);

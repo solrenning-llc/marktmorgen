@@ -3,6 +3,7 @@ import { PUBLISHED_PLAN_PRICES, TRIAL_DAYS, REFUND_DAYS, type Tier, type Cycle }
 import { CLOSING_DAYS } from '@/lib/plan-closing-rules';
 import { LONGEST_PAUSE_MONTHS, PAUSE_EVERY_DAYS, PLAN_BREAKS_ENABLED } from '@/lib/plan-pause-rules';
 import { CUSTOMER_COST_CATEGORIES, assessCustomerWorstCase } from '@/lib/net-margin-rules';
+import { customerTaxCollectionState, customerTaxContractContextState, customerTaxContractContextSupported } from './customer-tax-review';
 import { assessMinimumCustomerBase } from '@/lib/customer-base-rules';
 import { fundedExposureDetails } from '@/lib/funded-exposure-rules';
 import type { CommercialMarginReview, MarginScenario } from '@/lib/commercial-margin';
@@ -37,14 +38,36 @@ export function canonicalFinancialSnapshot(value:unknown):string|null {
   if(typeof v==='number')return Number.isSafeInteger(v)?String(v):null;
   if(!v||typeof v!=='object'||active.has(v))return null;
   const proto=Object.getPrototypeOf(v);if(!Array.isArray(v)&&proto!==Object.prototype&&proto!==null)return null;
-  if(Object.getOwnPropertySymbols(v).length)return null;
+  // Context wrappers are copied before the shared configuration in several
+  // paths. Capture their original fiscal kind before ownKeys can swap review
+  // values, then verify the exact serialized result cannot downgrade TX.
+  const reviewField=Object.getOwnPropertyDescriptor(v,'review');
+  const hasScenarios=reviewField&&Object.hasOwn(reviewField,'value')&&reviewField.value&&typeof reviewField.value==='object'&&Object.getOwnPropertyDescriptor(reviewField.value,'scenarios');
+  const contextKind=hasScenarios?customerTaxCollectionState(reviewField.value):null;
+  if(contextKind==='unknown')return null;
+  const keys=Reflect.ownKeys(v);if(keys.some(key=>typeof key!=='string'))return null;
+  // A snapshot must not turn original fiscal presence into legacy absence.
+  // Read known descriptors even when a Proxy omits them from ownKeys.
+  for(const name of ['taxReview','taxContext']){
+   const d=Object.getOwnPropertyDescriptor(v,name);
+   if(d?!keys.includes(name):name in v)return null;
+  }
+  const descriptors=new Map<string,PropertyDescriptor>();
+  for(const key of keys as string[]){
+   const d=key==='review'?reviewField:Object.getOwnPropertyDescriptor(v,key);
+   if(!d||!Object.hasOwn(d,'value')||(!d.enumerable&&!(Array.isArray(v)&&key==='length')))return null;
+   descriptors.set(key,d);
+  }
   active.add(v);let result:string|null=null;
   if(Array.isArray(v)){
-   const parts:string[]=[];for(let i=0;i<v.length;i++){const d=Object.getOwnPropertyDescriptor(v,String(i));if(!d||!Object.hasOwn(d,'value')){active.delete(v);return null;}const part=encode(d.value,depth+1);if(part===null){active.delete(v);return null;}parts.push(part);}result='['+parts.join(',')+']';
+   const length=descriptors.get('length')?.value;if(!Number.isSafeInteger(length)||length<0||keys.length!==length+1){active.delete(v);return null;}
+   const parts:string[]=[];for(let i=0;i<length;i++){const d=descriptors.get(String(i));if(!d||!Object.hasOwn(d,'value')){active.delete(v);return null;}const part=encode(d.value,depth+1);if(part===null){active.delete(v);return null;}parts.push(part);}result='['+parts.join(',')+']';
   }else{
-   const parts:string[]=[];for(const key of Object.keys(v).sort()){const d=Object.getOwnPropertyDescriptor(v,key);if(!d||!Object.hasOwn(d,'value')){active.delete(v);return null;}const part=encode(d.value,depth+1);if(part===null){active.delete(v);return null;}parts.push(JSON.stringify(key)+':'+part);}result='{'+parts.join(',')+'}';
+   const parts:string[]=[];for(const key of (keys as string[]).sort()){const d=descriptors.get(key);if(!d||!Object.hasOwn(d,'value')){active.delete(v);return null;}const part=encode(d.value,depth+1);if(part===null){active.delete(v);return null;}parts.push(JSON.stringify(key)+':'+part);}result='{'+parts.join(',')+'}';
   }
-  active.delete(v);return result;
+  active.delete(v);
+  if(contextKind!==null&&result!==null&&(result.length>1024*1024||customerTaxContractContextState(JSON.parse(result))!==contextKind))return null;
+  return result;
  }
  try{const result=encode(value,0);return result!==null&&new TextEncoder().encode(result).length<=1024*1024?result:null;}catch{return null;}
 }
@@ -65,13 +88,22 @@ export type ContractFundingConfiguration={reviewId:string;binding:string;cashLim
 /** Pure reserve calculation. The caller must also enforce commercialMarginReady
  * and actual admission coverage before enabling real sales. */
 export function contractFundingConfiguration(policy:ContractFundingPolicy|null,context:ContractFundingContext,now=new Date()):ContractFundingConfiguration|null {
- const contextEncoded=canonicalFinancialSnapshot(context);
- if(!contextEncoded)return null;
- context=JSON.parse(contextEncoded) as ContractFundingContext;
- if(!context||typeof context!=='object'||Array.isArray(context))return null;
- const encoded=canonicalFinancialSnapshot(policy),reviewEncoded=canonicalFinancialSnapshot(context.review);
- if(!encoded||!reviewEncoded||!Number.isFinite(now.getTime())||typeof context?.termsSnapshot!=='string'||!context.termsSnapshot)return null;
- const p=JSON.parse(encoded) as ContractFundingPolicy,review=JSON.parse(reviewEncoded) as CommercialMarginReview|null;
+ // Scoped TX may fund a contract only when it is bound to this exact policy,
+ // the actual admission time and the complete existing liability horizon.
+ // Inspect original data first: the canonical clone must not erase presence.
+ const taxState=customerTaxContractContextState(context);
+ if(taxState==='unknown'||!customerTaxContractContextSupported(context,policy,now))return null;
+ // Stabilize both original inputs together. A Proxy can offer one value to
+ // the precheck and another to serialization; only the captured pair may
+ // decide calculations, financial bindings and the returned liability period.
+ const encoded=canonicalFinancialSnapshot({policy,context});
+ if(!encoded)return null;
+ const captured=JSON.parse(encoded) as {policy:ContractFundingPolicy|null;context:ContractFundingContext};
+ const p=captured.policy;context=captured.context;
+ if(!context||typeof context!=='object'||Array.isArray(context)||customerTaxContractContextState(context)!==taxState||!customerTaxContractContextSupported(context,p,now))return null;
+ const reviewEncoded=canonicalFinancialSnapshot(context.review);
+ if(!reviewEncoded||!Number.isFinite(now.getTime())||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
+ const review=JSON.parse(reviewEncoded) as CommercialMarginReview|null;
  if(!p||!review||p.financialSnapshot!==reviewEncoded||review.priceAndRightsSnapshot!==context.termsSnapshot||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
  const disputes=assessPlanPaymentDisputeCosts(review.planPaymentDisputes);
  if(!disputes)return null;

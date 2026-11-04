@@ -5,7 +5,8 @@
  * Each is there only when it is true and worth saying: a course with no lesson
  * yet has no lessons fact, a product bought fewer than ten times — or on a
  * store whose look hides how many times things were bought — has no buyers
- * fact, a product with no visible review has no rating. The page and the
+ * fact, a product with no review that counts has no rating (showsRating:
+ * hidden reviews count, so hiding every review never takes a rating away). The page and the
  * studio's preview ask this same function, so the preview never promises a
  * number the page would not show.
  *
@@ -49,7 +50,7 @@ export function pageFacts(input: FactInputs): PageFacts {
   if (call && call.kind === "weekly" && call.minutes > 0) out.length = { key: "length", value: number(call.minutes), label: w.minutes(call.minutes) };
   if (input.sold !== null && input.sold > 0) out.buyers = { key: "buyers", value: number(input.sold), label: w.bought(input.sold) };
   const reviews = input.reviews;
-  if (reviews && reviews.visible >= 1 && reviews.count >= 1) {
+  if (reviews && reviews.count >= 1) {
     const average = Math.round((reviews.stars / reviews.count) * 10) / 10;
     const value = new Intl.NumberFormat(input.locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(average);
     out.rating = { key: "rating", value, label: w.rating(reviews.count) };

@@ -5,8 +5,168 @@ import {assessCustomerWorstCase} from '@/lib/net-margin-rules';
 import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,ownedRestartIntentFromAcknowledgement,claimRestartIntent,activateCheckoutContract,activateSwitchContract,type CheckoutContractActivation,reserveContractFunding,reserveSwitchContractFunding,reserveRestartContractFunding} from '@/lib/contract-funding';
 import {contractFixture} from './contract-funding-fixture';
 import {reset,seed,ledger,calls,settings} from './contract-funding-redis';
+import {txCustomerFixture} from './customer-tax-review-fixture';
+import {contractTaxFixture,applyContractTaxCoverage} from './contract-tax-fixture';
+import {CUSTOMER_COST_CATEGORIES} from '@/lib/net-margin-rules';
 const key='nl:contract-reserve:v1';
 function start(){reset();const f=contractFixture(),config=contractFundingConfiguration(f.policy,f.context,f.now)!;assert.ok(config);seed(config);return {...f,config};}
+test('TX assessment does not authorize a contract before admission and liability periods are bound',async()=>{
+ const f=contractFixture();
+ const old=f.review.scenarios.creator_month_full!;
+ const gross=old.collectedRevenueCents!,cost=CUSTOMER_COST_CATEGORIES.reduce((n,k)=>n+old.costCeilings[k]!,0);
+ const tx=txCustomerFixture(gross,cost,{scenario:'creator_month_full',from:'2026-01-01',through:'2026-02-01',months:1});
+ tx.costCeilings={...old.costCeilings};assert.equal(assessCustomerWorstCase(tx).approved,true);
+ f.review.scenarios.creator_month_full=tx;f.policy.reservedFundsCents=1e12;
+ f.policy.financialSnapshot=canonicalFinancialSnapshot(f.review)!;
+ assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);
+ assert.equal(contractFundingConfiguration(f.policy,f.context,new Date('2026-11-01T12:00:00.000Z')),null);
+ reset();assert.equal(await reserveContractFunding('tx-held','creator','month','checkout',f.policy,f.context,'ctr_tx_hold'),null);
+ assert.equal(calls.length,0);
+});
+test('explicit TX calendar coverage funds and activates the same production contract with every tax cent held',async()=>{
+ const f=contractTaxFixture(),config=contractFundingConfiguration(f.policy,f.context,f.now);assert.ok(config);
+ const tx=f.review.scenarios.creator_month_full!;
+ assert.equal(assessCustomerWorstCase(tx).approved,true);assert.ok(tx.taxReview!.books.length>=2);
+ const before=config.grantCents.creator_month;tx.taxesCeilingCents!+=317;f.policy.financialSnapshot=canonicalFinancialSnapshot(f.review)!;f.policy.reservedFundsCents=1e12;
+ const more=contractFundingConfiguration(f.policy,f.context,f.now);assert.ok(more);assert.equal(more.grantCents.creator_month-before,317);
+ reset();seed(more);
+ const grant=await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_activate');assert.ok(grant);
+ assert.equal(await activateCheckoutContract(activation(),f.policy,f.context),true);
+ assert.equal(ledger.get(key)!.get('reserved'),String(more.grantCents.creator_month));
+});
+function expandedOnlyWhileCopying(policy:ReturnType<typeof contractTaxFixture>['policy']){
+ const last=Reflect.ownKeys(policy).at(-1);let copying=false;
+ return new Proxy(policy,{ownKeys(target){copying=true;return Reflect.ownKeys(target);},getOwnPropertyDescriptor(target,key){
+  const descriptor=Reflect.getOwnPropertyDescriptor(target,key);if(!descriptor)return descriptor;
+  const capture=copying;if(key===last)copying=false;
+  if(capture&&key==='reviewedLiabilityTailDays')return {...descriptor,value:descriptor.value+400};
+  if(capture&&key==='liabilitiesThrough')return {...descriptor,value:new Date(Date.parse(descriptor.value)+800*86400000).toISOString()};
+  return descriptor;
+ }});
+}
+test('contract configuration checks fiscal coverage against the policy actually captured, not an earlier Proxy view',()=>{
+ const f=contractTaxFixture();f.policy.reservedFundsCents=1e12;
+ assert.ok(contractFundingConfiguration(f.policy,f.context,f.now));
+ assert.equal(contractFundingConfiguration(expandedOnlyWhileCopying(f.policy),f.context,f.now),null);
+});
+test('a policy changing its effective tail during capture cannot reserve outside the tax books or perform Redis IO',async()=>{
+ const f=contractTaxFixture();f.policy.reservedFundsCents=1e12;const original=contractFundingConfiguration(f.policy,f.context,f.now)!;assert.ok(original);
+ const proxy=expandedOnlyWhileCopying(f.policy),candidate=contractFundingConfiguration(proxy,f.context,f.now);
+ reset();seed(candidate??original);const before=[...ledger.get(key)!];
+ assert.equal(await reserveContractFunding('tx-proxy-policy','creator','year','checkout',proxy,f.context,'ctr_tx_proxy_policy'),null);
+ assert.equal(calls.length,0);assert.deepEqual([...ledger.get(key)!],before);
+});
+test('a context cannot expose TX before capture and silently downgrade to legacy during an outer snapshot',async()=>{
+ const f=contractTaxFixture();f.policy.reservedFundsCents=1e12;
+ for(const row of Object.values(f.review.scenarios)){
+  const pretax=row!.collectedRevenueCents!-row!.refundableRevenueCents!-CUSTOMER_COST_CATEGORIES.reduce((sum,k)=>sum+row!.costCeilings[k]!,0);
+  row!.taxesCeilingCents=Math.ceil(pretax*.4);
+ }
+ f.policy.financialSnapshot=canonicalFinancialSnapshot(f.review)!;
+ assert.ok(contractFundingConfiguration(f.policy,f.context,f.now));
+ const legacy=structuredClone(f.review);for(const row of Object.values(legacy.scenarios)){delete row!.taxReview;delete row!.taxContext;}
+ const legacySnapshot=canonicalFinancialSnapshot(legacy)!;
+ function swapping<T extends object>(target:T,field:string,replacement:unknown):T{
+  const last=Reflect.ownKeys(target).at(-1);let copying=false;
+  return new Proxy(target,{ownKeys(value){copying=true;return Reflect.ownKeys(value);},getOwnPropertyDescriptor(value,key){
+   const d=Reflect.getOwnPropertyDescriptor(value,key);if(!d)return d;const capture=copying;if(key===last)copying=false;
+   return capture&&key===field?{...d,value:replacement}:d;
+  }});
+ }
+ const context=swapping(f.context,'review',legacy),policy=swapping(f.policy,'financialSnapshot',legacySnapshot);
+ const encoded=canonicalFinancialSnapshot(context);assert.ok(encoded);
+ assert.ok(JSON.parse(encoded).review.scenarios.creator_month_full.taxReview,'the first captured TX descriptor is preserved');
+ assert.equal(contractFundingConfiguration(policy,context,f.now),null);
+ reset();assert.equal(await reserveContractFunding('tx-downgrade','creator','year','checkout',policy,context,'ctr_tx_downgrade'),null);assert.equal(calls.length,0);
+});
+test('missing TX cannot authorize any paying contract, including descriptor switches after the first read',async()=>{
+ for(const txReads of [0,1,2,3]){
+  const f=contractTaxFixture();f.policy.reservedFundsCents=1e12;
+  for(const row of Object.values(f.review.scenarios)){
+   const pretax=row!.collectedRevenueCents!-row!.refundableRevenueCents!-CUSTOMER_COST_CATEGORIES.reduce((sum,k)=>sum+row!.costCeilings[k]!,0);
+   row!.taxesCeilingCents=Math.ceil(pretax*.5);
+  }
+  f.policy.financialSnapshot=canonicalFinancialSnapshot(f.review)!;const valid=contractFundingConfiguration(f.policy,f.context,f.now)!;assert.ok(valid);
+  const legacy=structuredClone(f.review);for(const row of Object.values(legacy.scenarios)){delete row!.taxReview;delete row!.taxContext;}
+  f.policy.financialSnapshot=canonicalFinancialSnapshot(legacy)!;let reads=0;
+  const context=new Proxy(f.context,{getOwnPropertyDescriptor(target,key){const d=Reflect.getOwnPropertyDescriptor(target,key);return key==='review'&&d?{...d,value:++reads<=txReads?f.review:legacy}:d;}});
+  reset();seed(valid);const before=[...ledger.get(key)!];
+  assert.equal(await reserveContractFunding('tx-descriptor','creator','year','checkout',f.policy,context,'ctr_tx_descriptor'),null);
+  assert.equal(calls.length,0);assert.deepEqual([...ledger.get(key)!],before);
+ }
+});
+test('actual contract coverage includes every calendar book across a November admission and its existing liability horizon',t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-11-01T12:00:00.000Z')});
+ try{
+  const f=contractTaxFixture(),r=f.review.scenarios.creator_year_full!;
+  assert.deepEqual(r.taxReview!.books.map(book=>book.year),[2026,2027,2028]);
+  assert.equal(r.taxContext!.months,12);assert.equal(r.taxContext!.from,'2026-11-01');
+  assert.equal(r.taxContext!.contract!.liabilitiesThrough,f.policy.liabilitiesThrough);
+  assert.ok(r.taxReview!.fx.through>=f.policy.liabilitiesThrough.slice(0,10));
+  assert.ok(contractFundingConfiguration(f.policy,f.context,f.now));
+  for(const mutate of [
+   ()=>{r.taxContext!.through=r.taxReview!.scope.through='2027-11-01';},
+   ()=>{r.taxReview!.books.pop();},
+  ]){
+   const old=structuredClone(r);mutate();f.policy.financialSnapshot=canonicalFinancialSnapshot(f.review)!;
+   assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);Object.assign(r,old);
+  }
+ }finally{t.mock.timers.reset();}
+});
+test('contract TX cannot authorize expired, future, mismatched or incompletely covered obligations',async()=>{
+ for(const mutate of [
+  (f:ReturnType<typeof contractTaxFixture>)=>{f.policy.reviewId='another';},
+  (f:ReturnType<typeof contractTaxFixture>)=>{f.policy.admissionsUntil=new Date(Date.parse(f.policy.admissionsUntil)+1).toISOString();},
+  (f:ReturnType<typeof contractTaxFixture>)=>{f.policy.liabilitiesThrough=new Date(Date.parse(f.policy.liabilitiesThrough)+1).toISOString();},
+  (f:ReturnType<typeof contractTaxFixture>)=>{f.review.scenarios.creator_month_full!.taxContext!.contract!.admissionsFrom=new Date(f.now.getTime()+1000).toISOString();},
+  (f:ReturnType<typeof contractTaxFixture>)=>{f.review.scenarios.creator_month_full!.taxReview!.fx.through=f.now.toISOString().slice(0,10);},
+  (f:ReturnType<typeof contractTaxFixture>)=>{f.review.scenarios.creator_month_full!.taxReview!.books.pop();},
+  (f:ReturnType<typeof contractTaxFixture>)=>{f.review.scenarios.creator_month_full!.taxReview!.scope={...f.review.scenarios.creator_month_full!.taxReview!.scope,contract:{...f.review.scenarios.creator_month_full!.taxContext!.contract!,reviewId:'another'}};},
+ ]){
+  const f=contractTaxFixture();mutate(f);f.policy.financialSnapshot=canonicalFinancialSnapshot(f.review)!;f.policy.reservedFundsCents=1e12;
+  assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);
+  reset();assert.equal(await reserveContractFunding('tx-invalid-period','creator','month','checkout',f.policy,f.context,'ctr_tx_invalid_period'),null);assert.equal(calls.length,0);
+ }
+ const f=contractTaxFixture();assert.equal(contractFundingConfiguration(f.policy,f.context,new Date(Date.parse(f.policy.admissionsUntil)+1)),null);
+});
+test('contract cash still retains every reviewed tax cent',()=>{
+ const f=contractFixture();f.policy.reservedFundsCents=1e12;
+ const before=contractFundingConfiguration(f.policy,f.context,f.now);assert.ok(before);
+ f.review.scenarios.creator_month_full!.taxesCeilingCents!+=317;
+ f.policy.financialSnapshot=canonicalFinancialSnapshot(f.review)!;
+ const more=contractFundingConfiguration(f.policy,f.context,f.now);assert.ok(more);
+ assert.equal(more.grantCents.creator_month-before.grantCents.creator_month,317);
+});
+test('contract clone cannot discard hidden, inherited or computed TX presence into the legacy path',async()=>{
+ let getters=0;
+ for(const field of ['taxReview','taxContext'])for(const kind of ['hidden','getter','inherited','proxy']){
+  const f=contractFixture();assert.ok(contractFundingConfiguration(f.policy,f.context,f.now));
+  const row=f.review.scenarios.creator_month_full!;
+  if(kind==='inherited')Object.setPrototypeOf(row,{[field]:null});
+  else Object.defineProperty(row,field,kind==='getter'?{enumerable:false,get(){getters++;return null;}}:{value:null,enumerable:false,configurable:true});
+  if(kind==='proxy')f.review.scenarios.creator_month_full=new Proxy(row,{has(){return false;}});
+  // Even the old enumerable-only binding may have omitted the hidden field.
+  const encoded=canonicalFinancialSnapshot(f.review);if(encoded!==null)f.policy.financialSnapshot=encoded;
+  assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);
+  reset();assert.equal(await reserveContractFunding('tx-hidden','creator','month','checkout',f.policy,f.context,'ctr_tx_hidden'),null);
+  assert.equal(calls.length,0);
+  assert.equal(await activateCheckoutContract(activation(),f.policy,f.context),false);
+  assert.equal(await activateSwitchContract(activation(),f.policy,f.context),false);
+  assert.equal(calls.length,0);
+ }
+ assert.equal(getters,0);
+});
+test('TX fields in funded exposures stay closed before the contract clone instead of becoming legacy',async()=>{
+ for(const field of ['taxReview','taxContext']){
+  const f=contractFixture();assert.ok(contractFundingConfiguration(f.policy,f.context,f.now));
+  Object.defineProperty(f.review.fundedExposure!.cases.trial.worstCase!,field,{value:null,enumerable:false});
+  assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);
+  reset();assert.equal(await reserveContractFunding('tx-exposure','creator','month','checkout',f.policy,f.context,'ctr_tx_exposure'),null);
+  assert.equal(await activateCheckoutContract(activation(),f.policy,f.context),false);
+  assert.equal(await activateSwitchContract(activation(),f.policy,f.context),false);
+  assert.equal(calls.length,0);
+ }
+});
 test('annual coverage funds twelve paid months plus the reviewed tail and repeated pause bounds',()=>{assert.equal(contractCoverageDays('month',60),167);assert.equal(contractCoverageDays('year',60),570);assert.equal(contractCoverageDays('year',null as unknown as number),null);assert.equal(contractCoverageDays('month',59),null);});
 test('last admitted monthly and annual obligations keep full coverage after the maximum activation delay',()=>{
  for(const cycle of ['month','year'] as const){
@@ -14,12 +174,12 @@ test('last admitted monthly and annual obligations keep full coverage after the 
   f.policy.fundedGrants=Object.fromEntries(CONTRACT_KEYS.map(key=>[key,key===selected?2:0])) as typeof f.policy.fundedGrants;
   const days=contractCoverageDays(cycle,f.policy.reviewedLiabilityTailDays!);assert.ok(days);
   const admission=Date.parse(f.policy.admissionsUntil);
-  f.policy.liabilitiesThrough=new Date(admission+days*86400000).toISOString();
+  f.policy.liabilitiesThrough=new Date(admission+days*86400000).toISOString();applyContractTaxCoverage(f);
   assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null,'the old boundary omits the permitted activation delay');
   const through=admission+(days+CONTRACT_FUNDING_RULES.activationDelayDays)*86400000;
-  f.policy.liabilitiesThrough=new Date(through-1).toISOString();
+  f.policy.liabilitiesThrough=new Date(through-1).toISOString();applyContractTaxCoverage(f);
   assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null,'one millisecond short cannot approve');
-  f.policy.liabilitiesThrough=new Date(through).toISOString();
+  f.policy.liabilitiesThrough=new Date(through).toISOString();applyContractTaxCoverage(f);
   const approved=contractFundingConfiguration(f.policy,f.context,f.now);assert.ok(approved);
   assert.equal(approved.liabilitiesThroughMs,through);
   assert.equal(approved.coverageDays[cycle],days,'activation delay is additional to the complete reviewed tail');
@@ -29,6 +189,22 @@ test('cash reserve includes the full published refund principal without reducing
 test('one cent under aggregate grants or a quote covering only the paid year cannot approve',()=>{let f=contractFixture();f.policy.reservedFundsCents--;assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);f=contractFixture();f.policy.liabilitiesThrough=new Date(Date.parse(f.policy.admissionsUntil)+365*86400000).toISOString();assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);f=contractFixture();f.policy.allTermCostsAndLiabilitiesBounded=false;assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);});
 test('new trial obligations and missing fixed costs cannot disappear from the quote',()=>{let f=contractFixture();f.policy.fundedGrants.creator_month++;f.policy.reservedFundsCents+=100000;assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);f=contractFixture();f.review.companyBase!.monthlyFixedCostsCeilingCents=null;f.policy.financialSnapshot=canonicalFinancialSnapshot(f.review)!;assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);});
 test('canonical review binding refuses accessors, cycles, changed costs and expired admission',()=>{const f=contractFixture();let reads=0;Object.defineProperty(f.policy,'reservedFundsCents',{get(){reads++;return 1e12;}});assert.equal(contractFundingConfiguration(f.policy,f.context,f.now),null);assert.equal(reads,0);const cyclic:{self?:unknown}={};cyclic.self=cyclic;assert.equal(canonicalFinancialSnapshot(cyclic),null);const g=contractFixture();g.review.scenarios.creator_month_full!.costCeilings.other!++;assert.equal(contractFundingConfiguration(g.policy,g.context,g.now),null);const h=contractFixture();h.policy.admissionsUntil=new Date(h.now.getTime()-1).toISOString();assert.equal(contractFundingConfiguration(h.policy,h.context,h.now),null);});
+test('canonical snapshots preserve exact enumerable legacy bytes and refuse any information loss',()=>{
+ assert.equal(canonicalFinancialSnapshot({z:[3,true,null,{y:'two',a:1}],a:'first'}),'{"a":"first","z":[3,true,null,{"a":1,"y":"two"}]}');
+ let reads=0;
+ for(const kind of ['hidden-data','hidden-getter','array-extra']){
+  const value=kind==='array-extra'?[1,2]:{nested:{}};
+  const target=Array.isArray(value)?value:value.nested;
+  Object.defineProperty(target,'extra',kind==='hidden-getter'?{enumerable:false,get(){reads++;throw Error('must not execute');}}:{value:null,enumerable:kind==='array-extra'});
+  assert.equal(canonicalFinancialSnapshot(value),null);
+ }
+ for(const field of ['taxReview','taxContext']){
+  assert.equal(canonicalFinancialSnapshot(Object.create({[field]:null})),null);
+  const raw={safe:1,[field]:null};
+  assert.equal(canonicalFinancialSnapshot(new Proxy(raw,{ownKeys(t){return Reflect.ownKeys(t).filter(key=>key!==field);},has(){return false;}})),null);
+ }
+ assert.equal(reads,0);
+});
 test('64 concurrent stores cannot reuse two funded grant slots',async()=>{const f=start();const results=await Promise.all(Array.from({length:64},(_,i)=>reserveContractFunding('store'+i,'creator','month','checkout',f.policy,f.context,'ctr_'+i)));assert.equal(results.filter(Boolean).length,2);assert.equal(ledger.get(key)?.get('reserved'),String(f.config.grantCents.creator_month*2));assert.equal(ledger.get(key)?.get('slots:creator_month'),'0');});
 test('one pending store cannot open concurrent obligations under different grant IDs',async()=>{const f=start();const results=await Promise.all(Array.from({length:64},(_,i)=>reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_'+i)));assert.equal(results.filter(Boolean).length,1);assert.equal(ledger.get(key)?.get('reserved'),String(f.config.grantCents.creator_month));assert.equal(await reserveContractFunding('one','creator','year','switch',f.policy,f.context,'ctr_other'),null);});
 test('lost acknowledgement retains cash, slot, nonce and pending store lock',async()=>{const f=start();settings({lostAck:true});assert.equal(await reserveContractFunding('one','creator','year','checkout',f.policy,f.context,'ctr_lost'),null);assert.equal(ledger.get(key)?.get('reserved'),String(f.config.grantCents.creator_year));settings({lostAck:false});assert.equal(await reserveContractFunding('one','creator','year','checkout',f.policy,f.context,'ctr_retry'),null);assert.equal(await reserveContractFunding('two','creator','year','checkout',f.policy,f.context,'ctr_lost'),null);assert.equal(ledger.get(key)?.get('slots:creator_year'),'1');});
@@ -226,7 +402,7 @@ test('switch activation rejects executable data and malformed acknowledgements',
 
 test('committed checkout observations survive the initial deadline only for the exact current period',async(t)=>{
  t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00.000Z')});
- reset();const f=contractFixture();f.policy.admissionsUntil=new Date(Date.now()+10*86400000).toISOString();
+ reset();const f=contractFixture();f.policy.admissionsUntil=new Date(Date.now()+10*86400000).toISOString();applyContractTaxCoverage(f);
  const config=contractFundingConfiguration(f.policy,f.context)!;seed(config);
  assert.ok(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_activate'));
  const input=activation();assert.equal(await activateCheckoutContract(input,f.policy,f.context),true);
@@ -240,7 +416,7 @@ test('committed checkout observations survive the initial deadline only for the 
 });
 test('committed switch observations retain both principals after its initial deadline and cannot roll into renewal',async(t)=>{
  t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-10T12:00:00.000Z')});
- reset();const f=contractFixture();f.policy.admissionsUntil=new Date(Date.now()+10*86400000).toISOString();
+ reset();const f=contractFixture();f.policy.admissionsUntil=new Date(Date.now()+10*86400000).toISOString();applyContractTaxCoverage(f);
  const config=contractFundingConfiguration(f.policy,f.context)!;seed(config);
  assert.ok(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_source'));
  const source=activation('one','ctr_source');assert.equal(await activateCheckoutContract(source,f.policy,f.context),true);
@@ -271,7 +447,7 @@ test('a committed reservation acknowledgement cannot outlive admission, its expo
   t.mock.timers.setTime(new Date(mode==='month'?'2026-10-31T23:59:59.000Z':'2026-10-10T12:00:00.000Z').getTime());
   reset();const f=contractFixture();
   if(mode==='admission')f.policy.admissionsUntil=new Date(Date.now()+1000).toISOString();
-  const config=contractFundingConfiguration(f.policy,f.context)!;assert.ok(config);seed(config);
+  applyContractTaxCoverage(f);const config=contractFundingConfiguration(f.policy,f.context)!;assert.ok(config);seed(config);
   const pending=reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_late_ack');
   const h=ledger.get(key)!;assert.equal(h.get('pending:one'),'ctr_late_ack');
   const committed=[...h];
@@ -294,7 +470,7 @@ test('checkout and switch acknowledgements revalidate admission, exposure, polic
    t.mock.timers.setTime(new Date(mode==='month'?'2026-10-31T23:59:59.000Z':'2026-10-10T12:00:00.000Z').getTime());
    reset();const f=contractFixture();
    if(mode==='admission')f.policy.admissionsUntil=new Date(Date.now()+1000).toISOString();
-   const config=contractFundingConfiguration(f.policy,f.context)!;assert.ok(config);seed(config);
+   applyContractTaxCoverage(f);const config=contractFundingConfiguration(f.policy,f.context)!;assert.ok(config);seed(config);
    assert.ok(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_source'));
    let input=activation('one','ctr_source');
    if(action==='switch'){

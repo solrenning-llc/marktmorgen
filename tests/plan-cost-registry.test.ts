@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
+import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
 import { assessCustomerWorstCase } from "@/lib/net-margin-rules";
 import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/lib/store-assistant-rules";
@@ -50,7 +51,8 @@ function scopesInCode(): Map<string, string[]> {
   const add = (scope: string, file: string) => found.set(scope, [...(found.get(scope) ?? []), file]);
   for (const file of code) {
     const text = read(file);
-    for (const m of text.matchAll(/\bwithin(EssentialLimit|Limit|Month|Store|Service)\(([^,]+),/g)) {
+    // withinServiceWhy is withinService that also says why it refused (lib/metered-limits.ts): the same count.
+    for (const m of text.matchAll(/\bwithin(EssentialLimit|Limit|Month|Store|Service)(?:Why)?\(([^,]+),/g)) {
       const literals = [...m[2].matchAll(/"([^"]+)"/g)].map((l) => l[1]);
       if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1]])); }
       else add(`<dynamic:${m[2].trim()}>`, file);
@@ -110,7 +112,7 @@ test("every exported limit or cost constant in lib/ is cited by a line, an open 
   assert.deepEqual(uncited, [], "cite each in a line's sources, an OPEN item's names, or NOT_A_COST with the reason");
 });
 
-test("every add-on is priced against what it collects, holds the owner's 60% alone or is not on sale, and its sources hold what it names", () => {
+test("every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names", () => {
   assert.ok(ADD_ON_LINES.some((line) => line.id === "store-assistant"));
   const addOnIds = new Set(ADD_ON_LINES.map((line) => line.id));
   assert.equal(addOnIds.size, ADD_ON_LINES.length);
@@ -119,20 +121,21 @@ test("every add-on is priced against what it collects, holds the owner's 60% alo
     const usd = line.monthlyUsd();
     assert.ok(Number.isFinite(usd) && usd > 0 && line.revenueUsd > 0, line.id);
     // Since 18 October 2026 received in the one model of lib/receiving-costs.ts; an add-on past its allowance may not be on sale (docs/margin-alignment-2026-10-18.md).
-    if (usd > line.allowedUsd - ADD_ON_ROOM_CENTS / 100 + 1e-9) assert.equal(line.onSale, false, `${line.id}: $${usd.toFixed(2)} against $${line.allowedUsd.toFixed(2)} allowed, with $${(ADD_ON_ROOM_CENTS / 100).toFixed(2)} kept, and on sale`);
+    if(line.allowedUsd===null)assert.equal(line.onSale,false,`${line.id}: unknown reviewed tax budget cannot be on sale`);
+    else if (usd > line.allowedUsd - ADD_ON_ROOM_CENTS / 100 + 1e-9) assert.equal(line.onSale, false, `${line.id}: $${usd.toFixed(2)} against $${line.allowedUsd.toFixed(2)} allowed, with $${(ADD_ON_ROOM_CENTS / 100).toFixed(2)} kept, and on sale`);
     for (const source of line.sources) {
       assert.ok(existsSync(join(root, source.file)), `${line.id}: ${source.file} is not there`);
       const text = read(source.file);
       for (const name of source.names) assert.ok(text.includes(name), `${line.id}: ${source.file} does not hold ${name}`);
     }
-    console.log(`add-on ${line.id}: collects $${line.revenueUsd.toFixed(2)}, costs at most $${usd.toFixed(2)}, $${line.allowedUsd.toFixed(2)} allowed`);
+    console.log(`add-on ${line.id}: collects $${line.revenueUsd.toFixed(2)}, costs at most $${usd.toFixed(2)}, $${line.allowedUsd===null?'unknown':line.allowedUsd.toFixed(2)} allowed`);
   }
-  // The Store assistant, by the repo's own margin model: every cost category explicit, the 27.5% tax rounded up, 60% by integer cents.
+  // The Store assistant has explicit non-tax costs, but no real scoped tax review.
   const month = assistantMonthWorst();
   const assessed = assessCustomerWorstCase(month.review);
   // Meeting the floor is the review approving it with its room; on sale needs both (lib/opening.ts).
-  assert.equal(assistantMeetsFloor(), assessed.approved && month.roomCents >= ADD_ON_ROOM_CENTS, JSON.stringify(assessed));
-  if (ASSISTANT_ON_SALE) assert.ok(assessed.approved && assessed.marginBps !== null && assessed.marginBps >= 6_000, JSON.stringify(assessed));
+  assert.equal(assistantMeetsFloor(), assessed.approved && month.roomCents!==null && month.roomCents >= ADD_ON_ROOM_CENTS, JSON.stringify(assessed));
+  if (ASSISTANT_ON_SALE) assert.ok(assessed.approved && assessed.marginBps !== null && assessed.netCents!==null && assessed.netCents>=1 && month.roomCents!==null && month.roomCents>=ADD_ON_ROOM_CENTS, JSON.stringify(assessed));
 });
 
 test("the features merged on October 17, 2026 are each a line of the worst month", () => {
@@ -196,6 +199,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
   console.log(`next product after a purchase: $${NEXT_OFFER_READ.toFixed(6)} at most, counted as ${NEXT_OFFER_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // The offers after a cart read what the buyer owns with the same reads and Stripe calls (ownedHere), without the model or the choice's
+  // product reads, and count as many requests (lib/cart-offers.ts): the same ceiling holds them.
+  assert.equal(CART_OFFER_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);

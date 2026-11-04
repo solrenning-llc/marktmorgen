@@ -43,6 +43,7 @@
  *   nl:cm:link:<hash>:opens       how often it was used (at most 10)
  *   nl:rl:cm:ip:<hash>, nl:rl:cm:addr:<hash>   how often a link was asked for
  */
+import { spaceGate } from "@/lib/community-gate";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
@@ -270,9 +271,10 @@ export async function maySeeSpace(
   viewer: { owner: boolean; email: string },
 ): Promise<boolean> {
   if (viewer.owner) return true;
-  if (!space.only.length) return true;
-  const ids = space.only.filter((p) => config.access.includes(p));
-  if (!ids.length) return true;
+  // The same rule the creator's "View as a member" uses (lib/community-gate.ts).
+  const gate = spaceGate(space, config.access);
+  if (gate.open) return true;
+  const ids = gate.needs;
   const id = store.community?.id;
   if (!id) return false;
   return holdsAnyOf(store, ids, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v));

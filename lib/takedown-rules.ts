@@ -65,6 +65,8 @@ export function readReport(raw: Record<string, unknown>): { ok: true; report: Re
     goodFaith: raw.goodFaith === true || raw.goodFaith === "yes",
     accurate: raw.accurate === true || raw.accurate === "yes",
   };
+  // Longer than is kept is refused, never cut: a cut address is a broken one.
+  if (typeof raw.url === "string" && raw.url.trim().length > MAX_REPORT_URL) return { ok: false, problem: "url" };
   if (!/^https?:\/\/\S+$/i.test(report.url)) return { ok: false, problem: "url" };
   if (report.work.length < 20) return { ok: false, problem: "work" };
   if (report.name.length < 2) return { ok: false, problem: "name" };

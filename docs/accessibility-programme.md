@@ -126,3 +126,18 @@ journeys, clipping contexts, screen readers or whole-product AAA certification.
 ## Path post-sale missions
 
 The post-sale section adds one server-rendered component to the inventory. Its six factual mission states, native keyboard disclosures, own-store navigation, no manual completion inputs, 390/1280 layout and AA browser checks are covered by synthetic tests. The browser verification must pass before publication. This adds no screen-reader or whole-product AAA certification; actual assistive-technology work remains ordered Path item 15.
+
+## Store muted text at 7:1 (1 November 2026)
+
+Muted words on store pages (dates, notes, hints, "Unsaved" and similar) are small text, so WCAG 2.2 1.4.6 (AAA) asks 7:1. Measured with `contrast()` from `lib/store-look.ts`:
+
+- **Before:** the "sand" theme's muted color `#5c5244` was 6.51:1 on its page and 6.92:1 on an item. Bands, which are tinted by the accent, were held to 4.5:1 for muted words only: 4.66:1 at worst on "night", 5.59:1 on "sand" and 6.75:1 on "light".
+- **After:**
+  - Sand's muted is `#4f4538`: 7.98:1 on the page, 9.22:1 on a card and 8.48:1 on an item.
+  - A band must now give muted words 7:1. It only grows paler toward the card to pass, which always reaches it: the worst band is now 7.01:1.
+  - The soft accent (behind chosen, selected and highlighted things) also gives muted words 7:1. On "night" it was 4.05–4.3:1.
+  - `tests/page-style.test.ts` checks 7:1 on the page, on cards, on items, on bands and on the soft accent, in every theme and across every accent tested.
+- **Not changed:**
+  - Links on a band stay at 4.5:1. Asking 7:1 there has no solution for some accents the creator may pick, so it stays a recorded gap and needs a design choice.
+  - Large text and non-text contrast were not changed.
+  - Some backgrounds are barely set apart from the card. The soft accent on "night" moved from 1.60:1 to 1.30:1 against the card. Bands were already as close as 1.06:1 for some accents, before and after this change. Text stays readable on them, which is what 1.4.6 asks. A background difference is never the only sign that something is chosen (1.4.1), so a minimum band-to-card difference is a design choice left open.

@@ -3,16 +3,17 @@ import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { REFUND_DAYS, TRIAL_DAYS } from "@/lib/plan";
 import { PLANS_ON_SALE } from "@/lib/opening";
+import { CLOSING_DAYS } from "@/lib/plan-closing-rules";
 
 export const metadata: Metadata = {
   title: "Refund Policy — Marktmorgen",
   description:
-    `Cancel anytime. Your first payment refunded in full on request within ${REFUND_DAYS} days; a yearly plan refunded for the months not yet started, less Stripe's card fee.`,
+    `Cancel anytime. Within ${REFUND_DAYS} days of your first payment, it and every plan payment since for the same store refunded in full on request; a yearly plan refunded for the months not yet started, less Stripe's card fee.`,
 };
 
 export default function RefundsPage() {
   return (
-    <LegalPage title="Refund Policy" lastUpdated="October 30, 2026">
+    <LegalPage title="Refund Policy" lastUpdated="October 31, 2026">
       <p>
         This Refund Policy applies to what you pay Marktmorgen, a product of
         Solrenning, an independent software studio, for the creator store at
@@ -43,13 +44,17 @@ export default function RefundsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection id="guarantee" title={`2. ${REFUND_DAYS}-day money-back guarantee on your first payment`}>
+      <LegalSection id="guarantee" title={`2. ${REFUND_DAYS}-day money-back guarantee from your first payment`}>
         <p>
           If you request a refund within thirty ({REFUND_DAYS}) days of the
-          first payment on your account, we will refund that payment in full.
-          No reason is required and none will be asked for. The first payment
-          is the first charge we make to you, on any plan, monthly or yearly,
-          for any of your stores.
+          first payment on your account, we will refund that payment in full,
+          and in full every other payment for the same store&apos;s plan made
+          since then, within those days, such as a monthly renewal or a charge
+          for switching plans. No reason is required and none will be asked
+          for. The first payment is the first charge we make to you, on any
+          plan, monthly or yearly, for any of your stores. The guarantee is
+          given once per person: a payment is not a first payment when the
+          same person, by email address or by card, has paid us before.
         </p>
         <p>
           This guarantee covers what happens once you have actually been
@@ -60,11 +65,18 @@ export default function RefundsPage() {
           first plan charge.
         </p>
         <p>
-          A refund closes the paid features of the store it was for — your
-          checkout, and on Pro the email sending — from the day it is made.
-          Everything you built stays where it is, and your own Stripe account,
-          its customers and its payout history are untouched: that money was
-          never ours to return.
+          A refund ends the plan of the store it was for on the day it is
+          made: its checkout stops taking payments, and the other paid
+          features of the plan stop with it. The store then stays as it is
+          for {CLOSING_DAYS} days and closes after that, as{" "}
+          <Link href="/terms#closing" className="text-black underline underline-offset-2 hover:no-underline">
+            section 8 of our Terms
+          </Link>{" "}
+          says; starting a plan again before then keeps it. When it closes,
+          the renewals of the memberships and payment plans you sold through
+          it are stopped at Stripe, each at the end of the period already
+          paid. Every sale, refund and payout stays on your own Stripe
+          account: that money was never ours to return.
         </p>
         {!PLANS_ON_SALE ? (
           <p>
@@ -82,17 +94,30 @@ export default function RefundsPage() {
           when a payment is refunded; the rest of what you paid comes back.
           So a yearly plan refunded in its second month costs you two months at
           the monthly price and that fee, and the other ten months come back.
-          Its paid features close from the day of the refund.
+          Its plan ends on the day of the refund, as section 2 says.
         </p>
         <p>
-          If the yearly payment was your first payment to us and you ask within{" "}
-          {REFUND_DAYS} days of it, section 2 applies instead and the whole
+          If the yearly payment was your first payment to us, or was made for
+          the same store&apos;s plan within {REFUND_DAYS} days of it, and you
+          ask within {REFUND_DAYS}{" "}
+          days of your first payment, section 2 applies instead and the whole
           payment comes back.
         </p>
       </LegalSection>
       <LegalSection title="4. How to request a cancellation or refund">
         <p>
-          Email{" "}
+          <strong className="text-black">In your studio.</strong> Under
+          &ldquo;What you pay us,&rdquo; choose &ldquo;Refund my
+          payment.&rdquo; A review page shows the exact amount this policy
+          gives you today and what happens to your store, before anything
+          changes; nothing is refunded until you confirm there, and you can go
+          back without changing anything. Only the store&apos;s owner can ask
+          for it. When you confirm, the payment is refunded, the plan ends, and
+          we email you the amount. If the page says it cannot work out your
+          refund, or you cannot use it, write to us as below.
+        </p>
+        <p>
+          <strong className="text-black">By email.</strong> Email{" "}
           <a
             href="mailto:support@marktmorgen.com"
             className="text-black underline underline-offset-2 hover:no-underline"
@@ -116,19 +141,20 @@ export default function RefundsPage() {
 
       <LegalSection title="5. Renewals and later charges">
         <p>
-          A monthly renewal, a charge made when you switch plans and any
-          charge after your first payment are not refunded, except where
-          applicable consumer law requires it. You may cancel at any time to
+          After the {REFUND_DAYS} days of section 2, a monthly renewal, a
+          charge made when you switch plans and any other later charge are not
+          refunded, except where applicable consumer law requires it. You may cancel at any time to
           stop future charges and keep access until the end of the period you
           have already paid for. The months of a yearly plan that have not
           started are always refunded, as section 3 says.
         </p>
         <p>
-          Why the guarantee is on the first payment: a refund gives back the
-          whole month after it has been used, including what that month cost us
-          to serve. We offer that once, so you can try the paid plan for real;
-          offering it on every month would make every month free for anyone who
-          asked, and the plans would have to cost everyone else more.
+          Why the guarantee is only for your first {REFUND_DAYS} days: a refund
+          gives back the whole month after it has been used, including what
+          that month cost us to serve. We offer that once, so you can try the
+          paid plan for real; offering it on every month would make every month
+          free for anyone who asked, and the plans would have to cost everyone
+          else more.
         </p>
       </LegalSection>
       <LegalSection id="store-assistant" title="5a. The Store assistant add-on">
@@ -136,7 +162,7 @@ export default function RefundsPage() {
           The Store assistant is a subscription of its own, beside your plan.
           Its payments, the first one included, are not refunded, except where
           applicable consumer law requires it: the money-back guarantee above
-          is for your plan&apos;s first payment. You can stop it at any time
+          is for your plan&apos;s payments. You can stop it at any time
           from your studio, and it stays on until the end of the month already
           paid. If your plan ends, it is set to stop at the end of the month
           already paid, and nothing more is charged for it.

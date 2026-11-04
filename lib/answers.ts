@@ -15,6 +15,7 @@
  * nothing twice), and a question the page could not answer, with the product
  * and the day, for the creator to read. Never who asked.
  */
+import { placeLine } from "@/lib/call-place";
 import { windowId } from "@/lib/allowance-window";
 import { SHIP_REGIONS, activeShipping } from "@/lib/shipping";
 import { createHash } from "node:crypto";
@@ -74,6 +75,8 @@ export async function answersUsed(store: Store, now = Date.now()): Promise<numbe
 /** How a product is handed over, in a sentence that is true of every store here. */
 export function deliveryWords(product: Listing, currency = "usd"): string {
   if (isFree(product)) return "It is free: the visitor leaves their email address, confirms it from their inbox, and gets it by email.";
+  // In person (lib/call-place.ts): at the creator's address, said as typed.
+  if (product.call?.place) return `It is booked in person, at ${placeLine(product.call.place)}: the buyer picks a time on the store's calendar before paying, and gets a calendar invite and reminders by email.`;
   if (product.call) return "It is a call: the buyer picks a time on the store's calendar before paying, and gets a calendar invite and reminders by email.";
   if (product.recurring) return "It is a membership: the buyer pays on a schedule and can cancel at any time from a link on the store. Access lasts while the membership runs.";
   if (product.course) return "It is a course: after paying, the buyer opens it on its own page, lesson by lesson, and can come back to it at any time with the email they paid with.";

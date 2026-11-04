@@ -2,13 +2,20 @@
 
 import { useState } from "react";
 import { toast } from "@/components/toast";
-import type { ChatKind } from "@/lib/chat-summary";
+import { UrlField } from "@/components/url-field";
+import { type ChatKind, MAX_CHAT_URL, chatKind } from "@/lib/chat-kind";
+import { type LinkCheck, checkWith } from "@/lib/url-check";
 
 const ANSWERS: Record<string, string> = {
   invalid: "That is not a Slack or Discord webhook address. It starts with https://hooks.slack.com/services/ or https://discord.com/api/webhooks/.",
   refused: "The channel did not take a first message at that address. Check it was copied whole and the webhook is still on.",
   rate_limited: "That is a lot of tries in an hour. Try again later.",
 };
+
+// The address, checked when its field is left by the same reading the server keeps (lib/chat-kind.ts), and required:
+// an empty one sent here would stop the posting, which only "Stop posting" does.
+const CHAT_SHAPE = checkWith((raw) => (chatKind(raw) ? raw.trim() : null), ANSWERS.invalid, MAX_CHAT_URL);
+const CHAT_CHECK: LinkCheck = (raw) => (raw.trim() ? CHAT_SHAPE(raw) : { problem: ANSWERS.invalid, fix: null });
 
 /** Where the weekly and monthly numbers are posted (lib/chat-summary.ts), for whoever may change settings. */
 export function ChatSummaryEditor({ kind: given, sales: salesGiven = false }: { kind: ChatKind | null; sales?: boolean }) {
@@ -39,7 +46,7 @@ export function ChatSummaryEditor({ kind: given, sales: salesGiven = false }: { 
       const response = await fetch("/api/store/chat-summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: value }) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; result?: string; error?: string };
       if (answer.ok) {
-        setKind(answer.result === "saved" ? (value.includes("slack") ? "slack" : "discord") : null);
+        setKind(answer.result === "saved" ? chatKind(value) : null);
         setUrl("");
         toast(answer.result === "saved" ? "Saved: a first message was posted to the channel" : "No longer posted");
       } else {
@@ -61,24 +68,27 @@ export function ChatSummaryEditor({ kind: given, sales: salesGiven = false }: { 
           : "The week's numbers every Monday and the month's on the 1st, in the channel your team already reads. Paste an incoming webhook address: in Slack, Apps, Incoming Webhooks; in Discord, Server settings, Integrations, Webhooks."}
       </p>
       <form
-        className="mt-3 flex flex-wrap items-end gap-2"
+        className="mt-3"
         onSubmit={(event) => {
           event.preventDefault();
-          save(url.trim());
+          // Empty is never sent from here (it would stop the posting), nor an address the server would refuse:
+          // each try counts in the hour's allowance. The field says what is wrong.
+          if (url.trim() && !CHAT_CHECK(url).problem) save(url.trim());
         }}
       >
-        <label className="min-w-0 flex-1 text-sm">
-          <span className="field-label">{kind ? "A different webhook address" : "Webhook address"}</span>
-          <input
-            className="field mt-1 py-2"
-            type="url"
+        <label htmlFor="chat-summary-url" className="field-label text-sm">{kind ? "A different webhook address" : "Webhook address"}</label>
+        {/* The buttons line up with the field, not with its message under it. */}
+        <div className="mt-1 flex flex-wrap items-start gap-2 text-sm">
+          <UrlField
+            id="chat-summary-url"
+            className="field py-2"
+            wrapClassName="min-w-0 flex-1"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={setUrl}
+            check={CHAT_CHECK}
             placeholder="https://hooks.slack.com/services/…"
             autoComplete="off"
-            required
           />
-        </label>
         <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
           Save
         </button>
@@ -87,6 +97,7 @@ export function ChatSummaryEditor({ kind: given, sales: salesGiven = false }: { 
             Stop posting
           </button>
         ) : null}
+      </div>
       </form>
       {kind ? (
         <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-3 text-sm">

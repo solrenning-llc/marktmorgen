@@ -2,7 +2,6 @@ import { TrustChecks } from "@/components/trust-checks";
 import { PricingValue } from "@/components/pricing-value";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Suspense } from "react";
 import { Pricing } from "@/components/home-parts";
 import { isDomainsConfigured } from "@/lib/domains";
 import { feeWords } from "@/lib/fee-words";
@@ -26,17 +25,17 @@ export default function PricingPage() {
     (app/home.css .hm-page, components/morning-header.tsx); every price,
     allowance, term and link below is unchanged. */
  return <div className={`${MORNING_FONTS} hm hm-page`}><MorningHeader current="/pricing" /><main id="content" tabIndex={-1}>
-  <div className="hm-page-hero"><div aria-hidden="true" className="hm-sky-layer"><div className="hm-blob hm-sun-page" /></div><div className="relative mx-auto max-w-6xl px-4 pb-16 pt-12 sm:px-8 sm:pb-20 sm:pt-16">
+  {/* 243 [CF6], owner's complement of 31/10/2026 23h14: the three plans, with price and limits, start on the
+      first screen, right under the title; the tools and the comparison follow them. Whether paid plans are open is
+      said once, here, beside the plans (the top banner of the site says it too). */}
+  <div className="hm-page-hero"><div aria-hidden="true" className="hm-sky-layer"><div className="hm-blob hm-sun-page" /></div><div className="relative mx-auto max-w-6xl px-4 pb-4 pt-6 sm:px-8 sm:pt-6">
   <header className="max-w-3xl">
-   <p className="text-sm font-extrabold uppercase tracking-widest">Plans and allowances</p>
-   <h1 className="t-h1 mt-4">A clear price. Published limits.</h1>
-   <p className="mt-6 text-lg">{feeWords().feesRow} All prices below are in USD.</p>
-   {!PRICING_OPEN && <p className="mt-5 rounded-2xl bg-white p-4 font-semibold">Paid plans and paid selling are not open yet. You can prepare your store and explore the live demo.</p>}
-   <div className="mt-6 flex flex-wrap gap-4"><Link className="btn btn-primary btn-lg btn-wrap" href="/signin">Start your store</Link><Link className="btn btn-secondary btn-lg btn-wrap" href="/demo">See the live demo</Link></div>
+   <h1 className="t-h1">A clear price. Published limits.</h1>
+   <p className="mt-3 text-lg">{feeWords().feesRow} All prices below are in USD.{PRICING_OPEN ? <> <Link className="underline [color:inherit]" href="/demo">See the live demo</Link>.</> : null}</p>
+   {!PRICING_OPEN && <p className="mt-3 font-semibold">Paid plans and paid selling are not open yet. You can prepare your store and explore the <Link className="underline [color:inherit]" href="/demo">live demo</Link>.</p>}
   </header>
   </div></div>
   <div className="mx-auto max-w-6xl px-4 pb-16 sm:px-8">
-  <div className="mt-12"><PricingValue place="plans" /></div>
   {/*
     VS1: the three plan cards with the monthly/yearly switch, moved here from
     the old home page unchanged (components/home-parts.tsx Pricing). Each
@@ -44,12 +43,15 @@ export default function PricingPage() {
     (/signin?plan=…&billing=…); prices come from lib/plan.ts. The home
     page's "Compare Store, Studio and Scale" link points at #plans.
   */}
-  <section id="plans" data-plan-prices aria-labelledby="plans-heading" className="mt-12 scroll-mt-24">
+  <section id="plans" data-plan-prices aria-labelledby="plans-heading" className="mt-2 scroll-mt-24">
    <h2 id="plans-heading" className="sr-only">Plan prices</h2>
-   <Suspense fallback={null}>
-    <Pricing domains={DOMAINS} />
-   </Suspense>
+   {/* No Suspense here: React streams a large boundary after the rest of the page even when it is ready,
+       so the plans arrived after the first paint and pushed everything under them down (layout shift 0.38
+       on a slow phone, 1 November 2026). The cards have none either; only each card's small perks disclosure keeps its own
+       boundary, for hydrating apart (components/home-parts.tsx). Do not wrap the cards again. */}
+   <Pricing domains={DOMAINS} />
   </section>
+  <div className="mt-20"><PricingValue place="plans" /></div>
   <section aria-labelledby="limits-heading" className="mt-20">
    <h2 id="limits-heading" className="t-h2">What each plan includes</h2>
    <p className="mt-4 max-w-3xl">Each store has its own allowances. Count ceilings and storage limits apply together; a store can reach one before another. Annual billing does not turn a monthly allowance into a yearly pool.</p>

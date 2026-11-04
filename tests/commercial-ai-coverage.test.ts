@@ -5,7 +5,7 @@ import { CURRENT_AI_SPEND_POLICY as policy } from "./commercial-ai-approved-poli
 import { commercialMarginReady, commercialPlansMayOpen, CURRENT_COMMERCIAL_MARGIN_REVIEW, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, REQUIRED_MARGIN_SCENARIOS, BASE_PLAN_REVENUE_CEILINGS, type CommercialMarginReview } from "@/lib/commercial-margin";
 import { assessCustomerWorstCase } from "@/lib/net-margin-rules";
 import { fundedCustomerWithAi, zeroFixedCompanyFixture } from "./margin-test-fixtures";
-function review():CommercialMarginReview{return{companyBase:zeroFixedCompanyFixture,planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,taxEvidence:"TEST ONLY",costAndLimitEvidence:"TEST ONLY",allocatedFixedCostsVerified:true, fundedExposure:zeroExposureFixture(),prepaidUsageEnforced:true,scenarios:Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key=>{const gross=BASE_PLAN_REVENUE_CEILINGS[key]??10000;return[key,fundedCustomerWithAi(gross,Math.floor(gross*.65))];}))};}
+function review():CommercialMarginReview{return{companyBase:zeroFixedCompanyFixture,planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,taxEvidence:"TEST ONLY",costAndLimitEvidence:"TEST ONLY",allocatedFixedCostsVerified:true, fundedExposure:zeroExposureFixture(),prepaidUsageEnforced:true,scenarios:Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key=>{const gross=BASE_PLAN_REVENUE_CEILINGS[key]??10000;return[key,fundedCustomerWithAi(gross,Math.floor(gross*.65),12,key)];}))};}
 test("explicitly funded synthetic review remains calculable without opening actual sales",()=>{
   assert.equal(commercialMarginReady(review()),true);
   assert.equal(CURRENT_COMMERCIAL_MARGIN_REVIEW,null);

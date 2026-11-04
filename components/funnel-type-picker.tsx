@@ -33,6 +33,7 @@ const MESSAGES: Record<string, string> = {
   slot_call: "Choose one of your calls for the booking, and no call for the other steps.",
   slot_twice: "Each product can fill one step.",
   form_draft: "Complete each form question and check its email subscription setting before creating the funnel.",
+  form_sensitive: "A form question asks for a password, a card number, a card's security code or an identity number, which a form never may. Change or remove it, then create the funnel. Nothing was made.",
   page_copy: "Check the page titles and introductions, then try again.",
   forms_full: "This store has no room for the required forms. Review Forms before trying again.",
   setup_incomplete: "We could not confirm completion. Some pages, forms or a funnel may already exist. Review them before creating another funnel.",

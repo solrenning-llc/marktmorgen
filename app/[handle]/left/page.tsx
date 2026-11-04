@@ -1,3 +1,4 @@
+import { EmailField } from "@/components/email-field";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -108,16 +109,7 @@ export default async function LeftPage({ params, searchParams }: Params) {
             <label htmlFor="remind-email" className="st-label">
               {w.yourEmail}
             </label>
-            <input
-              id="remind-email"
-              type="email"
-              name="email"
-              required
-              maxLength={254}
-              autoComplete="email"
-              placeholder={w.emailPlaceholder}
-              className="st-field"
-            />
+            <EmailField id="remind-email" name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
             <button type="submit" className="btn st-btn-ghost btn-block">{m.remindMe}</button>
             <p className="st-muted text-xs">
               {m.addressUse(store.name)}
@@ -204,7 +196,7 @@ function leftCart(store: Store, items: Listing[], status: string) {
             <label htmlFor="remind-email" className="st-label">
               {w.yourEmail}
             </label>
-            <input id="remind-email" type="email" name="email" required maxLength={254} autoComplete="email" placeholder={w.emailPlaceholder} className="st-field" />
+            <EmailField id="remind-email" name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
             <button type="submit" className="btn st-btn-ghost btn-block">{m.remindMe}</button>
             <p className="st-muted text-xs">{m.addressUse(store.name)}</p>
           </form>

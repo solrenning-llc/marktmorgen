@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   is("a later page of reviews ignores picks", (await visibleReviews(STATS, PRODUCT, 4, 4, [ids[0]])).map((r) => r.text), ["Review 2", "Review 1"]);
 
   part("Never a hidden or refunded one");
-  await setHidden(STATS, PRODUCT, ids[0], true);
+  await setHidden(STATS, PRODUCT, ids[0], true, "abusive");
   await markOneRefunded(STATS, PRODUCT, ids[1]);
   const after = (await visibleReviews(STATS, PRODUCT, 0, 3, [ids[0], ids[1], "f".repeat(24)])).map((r) => r.text);
   is("hidden, refunded and missing picks are passed over", after, ["Review 6", "Review 5", "Review 4"]);

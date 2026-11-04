@@ -50,7 +50,7 @@ jobs:
     timeout-minutes: 35
     env:
       NEXT_TELEMETRY_DISABLED: "1"
-      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ github.repository == 'viniciussucupira/marktmorgen' && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -138,10 +138,6 @@ jobs:
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_host_claims_redis.py
-      - name: Actual Redis order admission checks
-        env:
-          MARKTMORGEN_REDIS_INTEGRATION: "1"
-        run: python3 scripts/test_order_admission_redis.py
       # Deleting a person runs the application's own code against Redis, so it needs the dependencies.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -150,6 +146,10 @@ jobs:
           # Install from the lockfile without a cache restore or save here.
           package-manager-cache: false
       - run: npm ci
+      - name: Actual Redis order admission checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_order_admission_redis.py
       - name: Synthetic self-hosted HTTP to actual Redis contract
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
@@ -159,7 +159,7 @@ jobs:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_self_hosted_backup_redis.py
       - name: Synthetic two-server Redis migration and private DNS rollback
-        if: ${{ github.repository == 'viniciussucupira/marktmorgen' && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+        if: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
         timeout-minutes: 4
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
@@ -217,7 +217,7 @@ jobs:
       matrix:
         include:
           - label: candidate
-            ref: ${{ github.event.pull_request.head.sha || github.sha }}
+            ref: ${{ github.sha }}
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       MOBILE_RENDER_LABEL: ${{ matrix.label }}
@@ -259,7 +259,7 @@ jobs:
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       E2E_BROWSER: ${{ matrix.browser }}
-      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ github.repository == 'viniciussucupira/marktmorgen' && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

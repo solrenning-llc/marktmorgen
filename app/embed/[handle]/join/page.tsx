@@ -152,6 +152,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
           {w.label}
         </label>
         <div className="flex flex-col gap-2">
+          {/* A plain field here: the frame on the creator's site has a fixed height, and the suggestion line would be cut off in it (308 [TC1]). */}
           <input id="embed-join-email" type="email" name="email" required maxLength={254} autoComplete="email" placeholder={said.w.emailPlaceholder} className="st-field min-w-0" />
           <button type="submit" className="btn st-btn btn-block">
             {w.button}

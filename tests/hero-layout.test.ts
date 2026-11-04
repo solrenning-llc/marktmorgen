@@ -22,7 +22,7 @@ async function main(): Promise<void> {
 
   part("The coach");
   const early = (more: Record<string, unknown>) =>
-    coachChecks({ page: parsePage({ blocks: [{ id: "hero0001", kind: "hero", headline: "Bread", sub: "", media: "none", video: null, ...more }] }), productTitle: "Bread", free: false, picture: false, facts: {} }).find((c) => c.id === "early-button")?.done;
+    coachChecks({ page: parsePage({ blocks: [{ id: "hero0001", kind: "hero", headline: "Bread", sub: "", media: "none", video: null, ...more }] }), productTitle: "Bread", free: false, picture: false, pictureAlt: "", facts: {} }).find((c) => c.id === "early-button")?.done;
   is("a button under the headline is a button near the top", [early({}), early({ button: true })], [false, true]);
 
   part("Pages that start with a button under the headline");

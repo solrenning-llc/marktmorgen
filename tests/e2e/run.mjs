@@ -2044,13 +2044,13 @@ try {
     await open(studio, `${LOCAL}/studio?store=${fresh}`);
     const setup = studio.locator("section#setup-ai");
     is("a store with nothing on it is offered a first draft", await setup.count(), 1);
-    await setup.getByLabel("What you do, and for whom").fill("I teach busy parents to cook a week of dinners in two hours on Sunday.");
+    await setup.getByLabel("What you do, and for whom").fill("I teach busy parents to cook a week of dinners in two hours on Sunday. My planner is $12 and the club is $7 a month.");
     await setup.getByRole("button", { name: "Draft my store" }).click();
     await setup.getByRole("radio", { name: "Cook once, eat all week." }).check();
     is("it shows the products to keep, each editable", [await setup.locator("#setup-title-0").inputValue(), await setup.locator("#setup-price-1").inputValue()], ["Sunday Meal Planner", "7"]);
     await setup.locator("#setup-price-0").fill("14");
     await setup.getByRole("button", { name: "Keep what I chose" }).click();
-    await studio.getByText("Kept: the line under your name, 2 draft products, your questions and answers.").first().waitFor({ timeout: 30_000 });
+    await studio.getByText("Kept: the line under your name, 2 draft products, each with its sales page, your questions and answers.").first().waitFor({ timeout: 30_000 });
     await open(page, `${LOCAL}/@freshshop`);
     const front = await words(page.locator("main"));
     is("the line is under the name, the questions are on the page, and the drafts are not for sale", [front.includes("Cook once, eat all week."), front.includes("How do I get the planner?"), front.includes("Sunday Meal Planner")], [true, true, false]);
@@ -3587,9 +3587,12 @@ try {
     await open(studio, `${LOCAL}/studio`);
     await studio.locator("button[aria-expanded]", { hasText: "Weeknight Dinners" }).first().click();
     await studio.getByRole("button", { name: "Tell buyers about an update" }).first().click();
-    const form = studio.locator("form", { has: studio.getByRole("button", { name: "Email every buyer" }) });
+    const form = studio.locator("form", { has: studio.getByRole("button", { name: "Check before sending" }) });
     await form.getByLabel("What changed (optional)").fill("Ten new recipes.");
-    await form.getByRole("button", { name: "Email every buyer" }).click();
+    // The first press shows what will go out (487 [IT4], pattern 8); only "Yes, email every buyer" sends.
+    await form.getByRole("button", { name: "Check before sending" }).click();
+    await form.getByRole("heading", { name: "Check before it goes out" }).waitFor({ timeout: 30_000 });
+    await form.getByRole("button", { name: "Yes, email every buyer" }).click();
     const said = form.getByRole("alert");
     await said.waitFor({ timeout: 30_000 });
     is("on a store without Pro, it says where it is, and sends nothing", await words(said), "Emails to your buyers are on Pro, with your store's email set up under Email.");

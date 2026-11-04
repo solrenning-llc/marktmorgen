@@ -41,8 +41,63 @@ import { agreedKey, isMailable, leadsKey, unsubKey, upsertContact } from "@/lib/
 import { LIST_TAG, STORE_TAG, forgetHealth, listHealth } from "@/lib/mail-health";
 import { redisPipeline } from "@/lib/redis";
 import { TRUSTED_TOKEN, hostTokenClaims, isSesConfigured, sesConfig, sesState } from "@/lib/ses";
+import { timed, withCutoff } from "@/lib/fetch-timeout";
+import { resendAccountUsage, resendUsageSince, type ResendAccountUsage, type ResendUsage } from "@/lib/resend-usage";
+import { sesProviderUsage, type SesProviderUsage } from "@/lib/ses-provider-usage";
 
 export type Check = { check: string; ok: boolean; detail: string };
+
+/**
+ * Separate provider observations, never send admission or billed units.
+ * SES is a rolling counter observed between its request and response clocks.
+ * Resend's sent metric covers the exact requested UTC range; neither source
+ * proves a simultaneous snapshot or equivalent recipients/billing units.
+ */
+export type MailProviderUsageReport = {
+  basis: "provider_reported_counters";
+  window: { from: string; through: string } | null;
+  ses: SesProviderUsage;
+  resend: ResendUsage;
+  resendAccount: ResendAccountUsage;
+  alignment: {
+    anchor: "collector_start_utc";
+    exactSameWindow: false;
+    billingUnitsComparable: false;
+  };
+};
+
+/**
+ * At most one usage GET per provider plus Resend /usage; a cold SES session
+ * may also borrow credentials. No probe or notification is sent here.
+ * The outer limits also cover credential exchange bodies before GetAccount.
+ */
+export async function verifyProviderUsage(now = Date.now()): Promise<MailProviderUsageReport> {
+  const alignment = {
+    anchor: "collector_start_utc", exactSameWindow: false, billingUnitsComparable: false,
+  } as const;
+  const basis = "provider_reported_counters" as const;
+  const day = 86_400_000;
+  if (!Number.isSafeInteger(now) || now < day || now > 8_640_000_000_000_000) {
+    return {
+      basis, window: null, alignment,
+      ses: { ok: false, reason: "unknown" },
+      resend: { ok: false, reason: "unknown" },
+      resendAccount: { ok: false, reason: "unknown" },
+    };
+  }
+  const from = now - day;
+  return withCutoff(now + 30_000, async () => {
+    const [ses, resend, resendAccount] = await Promise.all([
+      timed(30_000, () => sesProviderUsage(now)).catch((): SesProviderUsage => ({ ok: false, reason: "provider" })),
+      timed(30_000, () => resendUsageSince(from, now)).catch((): ResendUsage => ({ ok: false, reason: "provider" })),
+      timed(30_000, () => resendAccountUsage()).catch((): ResendAccountUsage => ({ ok: false, reason: "provider" })),
+    ]);
+    return {
+      basis, window: { from: new Date(from).toISOString(), through: new Date(now).toISOString() },
+      ses, resend, resendAccount, alignment,
+    };
+  });
+}
 
 type Sender = "resend" | "amazon";
 const NAMES: Record<Sender, string> = { resend: "Resend", amazon: "Amazon SES" };

@@ -1,3 +1,5 @@
+import { fastMoneyOnPage } from "@/lib/terms-check-rules";
+import { pageWords } from "@/lib/page-translate";
 import type { NextRequest } from "next/server";
 import { StoreFullError, imageFolder, isFree, setProductPage } from "@/lib/store";
 import { productIdFor, readListing } from "@/lib/catalog";
@@ -54,6 +56,14 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: false, error: "next" }, { status: 400 });
       }
     }
+  }
+
+  // A page is on the store with its product: what the Terms forbid is refused while the product is published
+  // (567 [GD1] (d), unit 2), with the passage, why and the fix; a draft's page may be saved, and is checked when
+  // the product is published. A product that cannot be read was refused above.
+  if (product.hidden !== true) {
+    const refused = fastMoneyOnPage(pageWords(page));
+    if (refused) return Response.json({ ok: false, error: "fast_money", passage: refused }, { status: 409 });
   }
 
   const has = page.blocks.length > 0 || page.seoTitle !== "" || page.seoDescription !== "" || page.next !== null;

@@ -10,6 +10,7 @@ import { FINAL_COMPARISON_PAGES } from "@/lib/final-comparison-pages";
 import { COMPETITOR_PRICES } from "@/lib/competitor-prices";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { paypalSalesConfigured } from "@/lib/paypal-sales";
+import { PAYPAL_NOT_YET, PAYPAL_WAITS, STAN_AFFILIATES_AHEAD, checkoutQuestionWords } from "@/lib/public-explanations";
 import type { IconName } from "@/components/icons";
 import type { VisualKey } from "@/components/feature-visuals";
 import { CREATOR_PAGES, FEATURE_PAGES } from "@/lib/feature-pages";
@@ -507,7 +508,7 @@ export const PAGES: TopicPage[] = [
           { icon: "bank", title: "Where we are ahead: the money", body: "Sales land in a full Stripe account in your own name, with its own login and payout schedule. Stan's creators get an account Stan manages, and cash out inside Stan." },
           { icon: "tag", title: `Where we are ahead: the ${PLAN_AT.creator} plan`, body: "Several prices on one product, discount codes in percent or dollars, sales and landing pages, offers before and after paying, payment plans, ad pixels and an affiliate program, most of which Stan keeps for its $99 plan. And pay what you want, free trials on memberships, reviews only buyers can write, 15 currencies, a team with roles, bundles that hand over each product as itself, and past buyers brought over from a file, none of which Stan's help center describes. Since September 30: one search box across the whole community, a public API, an offer made once to a member who presses Cancel, and points, levels and a leaderboard in the community, with a course handed over at a level, none of which Stan's help center describes either." },
           { icon: "scale", ...feeWords().sameAsStan },
-          { icon: "info", title: "Where Stan is ahead", body: `${PAYPAL ? "" : "PayPal at checkout, "}affiliates paid with no PayPal account of your own, automatic Instagram replies, Zoom links made for each booking and webinar, an iPhone app, and as many products as you like where we stop at 2,000. If you need those today, Stan is the better tool today.` },
+          { icon: "info", title: "Where Stan is ahead", body: `${PAYPAL ? "" : "PayPal at checkout, "}${STAN_AFFILIATES_AHEAD}, automatic Instagram replies, Zoom links made for each booking and webinar, an iPhone app, and as many products as you like where we stop at 2,000. If you need those today, Stan is the better tool today.` },
         ],
       },
       {
@@ -520,7 +521,7 @@ export const PAGES: TopicPage[] = [
           ["Paid yearly", "$300 and $948 a year", yearlyRow()],
           ["Cut of each sale", "0% platform fee", feeWords().short],
           ["Logging in", "An account with a password. Their own signup asks for name, email and password", "A link sent to your email, or a passkey if you add one. No password to invent, and none kept here to be stolen"],
-          ["Ways to be paid", "Stripe or PayPal, for every creator", PAYPAL ? "Stripe or PayPal, both paying straight into your own account, with the ways to pay you switch on in Stripe: cards, Apple Pay, Google Pay, Link, Klarna, Afterpay, Affirm, iDEAL and more" : "Stripe, with the ways to pay you switch on in it: cards, Apple Pay, Google Pay, Link, Klarna, Afterpay, Affirm, iDEAL and more. No PayPal yet: it is built and waits on PayPal approving us as a platform"],
+          ["Ways to be paid", "Stripe or PayPal, for every creator", PAYPAL ? "Stripe or PayPal, both paying straight into your own account, with the ways to pay you switch on in Stripe: cards, Apple Pay, Google Pay, Link, Klarna, Afterpay, Affirm, iDEAL and more" : `Stripe, with the ways to pay you switch on in it: cards, Apple Pay, Google Pay, Link, Klarna, Afterpay, Affirm, iDEAL and more. ${PAYPAL_NOT_YET}`],
           ["Currency", "One per store, chosen from ten", "Any one of 15 per store, from US dollars and euros to yen and Mexican pesos"],
           ["Whose Stripe account", "One they manage. Their own help center: you cannot connect an existing Stripe account", "A full Stripe account in your own name, opened from your studio, with its own Stripe login. It stays yours"],
           ["Getting paid", "Cash out inside Stan, $10 minimum, whole balance only", "Your own Stripe payout schedule"],
@@ -556,7 +557,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "note",
         title: "Where Stan is ahead, and we say so",
-        body: `Stan has things we do not: ${PAYPAL ? "" : "PayPal at checkout, "}affiliates paid with no PayPal account of your own, automatic Instagram replies, Zoom links made for each booking and webinar, an app for iPhone and iPad, stores with no limit on products, and a support team with years of experience behind it. We now have a community with live events, an affiliate program paid from your own PayPal in one press, sales and landing pages, offers after paying, Google Meet links made on your own Google Calendar and a private video room for each booking and event, but none of those. If you depend on them today, Stan is the better tool today.`,
+        body: `Stan has things we do not: ${PAYPAL ? "" : "PayPal at checkout, "}${STAN_AFFILIATES_AHEAD}, automatic Instagram replies, Zoom links made for each booking and webinar, an app for iPhone and iPad, stores with no limit on products, and a support team with years of experience behind it. We now have a community with live events, an affiliate program paid from your own PayPal in one press, sales and landing pages, offers after paying, Google Meet links made on your own Google Calendar and a private video room for each booking and event, but none of those. If you depend on them today, Stan is the better tool today.`,
       },
     ],
   },
@@ -666,7 +667,7 @@ export const PAGES: TopicPage[] = [
           ["Cut of each sale", "9% on the free and $10 plans. 0% from the $30 plan up", feeWords().short],
           ["Monthly price", "$0, $10, $30 and $100", monthlyRow()],
           ["Whose payment account", "Your own Stripe or PayPal", "Your own Stripe"],
-          ["Ways to be paid", "Stripe or PayPal", PAYPAL ? "Stripe or PayPal, both paying straight into your own account" : "Stripe, with the ways to pay you switch on in it. No PayPal yet: it is built and waits on PayPal approving us as a platform"],
+          ["Ways to be paid", "Stripe or PayPal", PAYPAL ? "Stripe or PayPal, both paying straight into your own account" : `Stripe, with the ways to pay you switch on in it. ${PAYPAL_NOT_YET}`],
           ["When the money reaches you", "At the moment of sale, into your own account", "At the moment of sale, into your own account"],
           ["Card fee", "Stripe's 2.9% + $0.30, on top of their 9%", "Stripe processing fees, plus the published plan share"],
           ["What you are buying", "A whole suite: link in bio, websites, media kit, email, an affiliate network, AI tools", "One store, built to sell: files, courses, memberships, calls, a community for your buyers, and a media kit for brands"],
@@ -845,7 +846,7 @@ export const PAGES: TopicPage[] = [
           ["A come-back offer after a member leaves", "Not in their help center, read September 30, 2026", `Yes, on the ${PLAN_AT.creator} plan: one email 3 to 21 days after a membership ends, with 10% to 50% off one to three payments, only to former members who agreed to hear from you and have not come back, and a link that opens your checkout with the discount applied`],
           ["When a member's card fails", "Reminders for payment plans, by their help center", `One email per failed renewal, on the ${PLAN_AT.creator} plan, with a link that pays it and makes the card that worked the one used next time. It says when the card is tried again, or that it will not be`],
           ["Video link for each booking", "Yes \u2014 Zoom or Google Meet links created automatically", "Google Meet links made automatically once you connect your Google Calendar, or your own meeting link, or a private Jitsi Meet room made for each booking. The first person in a Jitsi room may be asked to sign in to Jitsi to start it. No Zoom link is made for you yet \u2014 Stan is ahead on Zoom"],
-          ["Coaching calls with a calendar", "Yes \u2014 with Google Calendar and reminder emails", "Yes \u2014 your hours in your time zone, times shown to each buyer in theirs, held while they pay, a calendar file emailed to both of you, reminders a day and an hour before, and buyers who move their own booking up to twice. Busy times in up to three Google, Outlook or iCloud calendars hide call times; bookings reach your calendar as a feed you subscribe to, and only calls set to Google Meet are written into your connected Google Calendar as events"],
+          ["Coaching calls with a calendar", "Yes \u2014 with Google Calendar and reminder emails", "Yes \u2014 your hours in your time zone, times shown to each buyer in theirs, held while they pay, an email about each booking to the buyer and to you, reminders a day and an hour before when the booking leaves time for them, and buyers who move their own booking up to twice. Busy times in up to three Google, Outlook or iCloud calendars hide call times; bookings reach your calendar as a feed you subscribe to, and only calls set to Google Meet are written into your connected Google Calendar as events"],
           ["Group calls", "Yes \u2014 a maximum number of attendees", "Yes \u2014 1 to 50 people per time slot, with the seats left shown to buyers"],
           ["Packages of sessions", "Not in their help center: a coaching call product books one call per purchase (article 15, read September 30, 2026)", "Yes \u2014 2 to 20 sessions of a weekly call at one price, with a time limit you choose or none, paid once and booked one at a time from the buyer's own link, each with the reminders, meeting link and moves of any booking. Not for live sessions on dates"],
           ["Live webinars", "Yes", "Yes \u2014 live sessions on dates you set, up to 50 dates per product and 1 to 500 seats each, held in a Google Meet made on your connected Google Calendar, on the meeting service whose link you give, or in a Jitsi Meet room made for each session. And free live events for your community's members. No streaming or recording built in"],
@@ -869,14 +870,14 @@ export const PAGES: TopicPage[] = [
           ["Cut of each sale", "0%", feeWords().short],
           ["Whose Stripe account", "One managed by the platform", "Yours"],
           ["Getting paid", "Manual cash-out, $10 minimum", "Your Stripe payout schedule"],
-          ["PayPal", "Yes, for every creator", PAYPAL ? feeWords().paypal : "Built, and off until PayPal approves us as a platform. Until then, Stan is ahead here"],
+          ["PayPal", "Yes, for every creator", PAYPAL ? feeWords().paypal : `Not yet: ${PAYPAL_WAITS}. Until then, Stan is ahead here`],
           ["Klarna and Afterpay", "Yes, on the $99 plan", `Yes, on the ${PLAN_AT.creator} plan, with Affirm, Apple Pay, Google Pay, Link, iDEAL, Bancontact and more: the ways to pay you switch on in your own Stripe account, where Stripe offers them`],
           ["Currency", "One per store, chosen from ten", "Any one of 15 per store: US, Canadian, Australian, New Zealand, Singapore and Hong Kong dollars, euros, pounds, Swiss francs, Swedish kronor, Norwegian and Danish kroner, Polish zloty, yen and Mexican pesos"],
           ["Private podcast", "Not in their help center: a URL product can link to a podcast elsewhere (searched September 30, 2026)", `Yes, on the ${PLAN_AT.creator} plan: sold once or as a membership, with a private feed for each buyer in their own podcast app, emptied when a refund or the membership ends it`],
           ["A sale across the store", "Discount codes that can expire, on the $99 plan, which buyers have to know and type (article 43, read September 30, 2026). No price crossed out on the store", `Yes, on the ${PLAN_AT.creator} plan: a percentage off from a start to an end you pick, shown with the old price crossed out and when it ends, taken off at checkout with no code, and stopped by itself at the end`],
           ["Discount codes", "Yes, on the $99 plan, a percentage off only", `Yes, on the ${PLAN_AT.creator} plan, a percentage or an amount off \u2014 kept on your own Stripe account`],
           ["Pay what you want", "Not in their help center", `Yes, on the ${PLAN_AT.creator} plan: a minimum of at least $1 and a suggested price. Not with memberships, price options, payment plans, the box at checkout, calls or discount codes`],
-          ["Questions at checkout", "Yes \u2014 including phone number and checkbox", "Up to three: a short answer, a number or a list to choose from. No phone-number or checkbox question"],
+          ["Questions at checkout", "Yes \u2014 including phone number and checkbox", checkoutQuestionWords()],
           ["Order bumps and upsells", "Yes, on the $99 plan. One order bump per product (their blog, updated September 16, 2026)", `Yes, on the ${PLAN_AT.creator} plan: up to three boxes the buyer checks at checkout, each its own product at its own price, and one click after paying, charged to the same card`],
           ["Limited quantity", "Yes, on the $99 plan", "Yes \u2014 the count shown is the real one, and a unit someone is paying for is held so the last one is never sold twice"],
           ["Payment plans", "Yes, on the $99 plan", `Yes, on the ${PLAN_AT.creator} plan: 2 to 12 weekly or monthly payments, ending by themselves after the last`],

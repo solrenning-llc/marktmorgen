@@ -187,9 +187,12 @@ try {
     await form.getByLabel("Line 1: amount each").fill("120");
     await form.getByLabel("I deal with this person, and they expect this from me.").check();
     const before = services.emails().length;
+    // The first press shows what will go out (487 [IT4], pattern 8); only the review's own button sends.
+    await form.getByRole("button", { name: "Check before sending" }).click();
+    await form.getByRole("heading", { name: "Check before it goes out" }).waitFor({ timeout: 30_000 });
     const [answer] = await Promise.all([
       owner.waitForResponse((r) => r.url().endsWith("/api/store/agreements") && r.request().method() === "POST"),
-      form.getByRole("button", { name: "Send for signature" }).click(),
+      form.getByRole("button", { name: "Yes, send for signature" }).click(),
     ]);
     const data = await answer.json();
     await owner.waitForLoadState("networkidle");
@@ -291,9 +294,11 @@ try {
   const edit = owner.locator("form").filter({ hasText: "New version for" });
   await edit.getByLabel("The text").fill("One workshop of three hours, on a date we agree by email. Materials included.");
   const sentBefore = services.emails().length;
+  await edit.getByRole("button", { name: "Check before sending" }).click();
+  await edit.getByRole("heading", { name: "Check before it goes out" }).waitFor({ timeout: 30_000 });
   await Promise.all([
     owner.waitForResponse((r) => r.url().endsWith("/api/store/agreements") && r.request().method() === "POST" && r.request().postDataJSON()?.action === "revise"),
-    edit.getByRole("button", { name: "Send the new version" }).click(),
+    edit.getByRole("button", { name: "Yes, send the new version" }).click(),
   ]);
   const revised = services.emails().slice(sentBefore);
   is("the new version is emailed to the person", revised.map((m) => [[].concat(m.to)[0], m.subject]), [["other@example.com", 'Harbor Coaching Local: version 2 of "Workshop proposal" to sign']]);

@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
@@ -392,11 +393,12 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
           Change how keys are made
         </button>
         {pool && counts.left > 0 ? (
-          <button
-            type="button"
+          <ConfirmAction
             className={quiet}
             disabled={busy}
-            onClick={async () => {
+            question="Remove the keys not yet given? They cannot be brought back; keys already given stay with their buyers."
+            yes="Yes, remove them"
+            onConfirm={async () => {
               const data = await post({ action: "clear" });
               if (!data.ok) return;
               toast("Keys not yet given were removed.");
@@ -404,7 +406,7 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
             }}
           >
             Remove the keys not yet given
-          </button>
+          </ConfirmAction>
         ) : null}
         <button
           type="button"

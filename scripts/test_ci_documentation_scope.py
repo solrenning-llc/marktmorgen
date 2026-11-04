@@ -61,7 +61,7 @@ class DocumentationScopeTests(unittest.TestCase):
     def test_workflow_conditions_stay_inside_jobs_and_are_unique(self):
         names = set()
         workflows = list(Path(".github/workflows").glob("*.yml"))
-        self.assertEqual(len(workflows), 8)
+        self.assertEqual(len(workflows), 9)
         for path in workflows:
             text = path.read_text(encoding="utf-8")
             prefix, jobs = text.split("jobs:\n", 1)

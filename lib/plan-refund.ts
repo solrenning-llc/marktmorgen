@@ -53,13 +53,24 @@ const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,128}$/;
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,128}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,128}$/;
 
+/** One payment the refund gives back: its charge, the amount for it, and when it was paid (seconds). */
+export type PlanRefundPart = { chargeId: string; paymentIntent: string; invoiceId: string; cents: number; paidAtSeconds: number };
 export type PlanRefundFound = {
+  /** `cents` is the whole refund: the sum of `parts`. */
   refund: Extract<PlanRefund, { kind: "guarantee" | "unstarted_months" }>;
+  /** The first part's charge (the payment the refund is for, or the first of them). */
   chargeId: string;
   paymentIntent: string;
   invoiceId: string;
   currency: string;
+  /**
+   * Every payment given back, oldest first. Under the guarantee, the first payment and every plan payment made since
+   * within REFUND_DAYS of it (the owner's decision of 31/10/2026 15h41); otherwise the one payment.
+   */
+  parts: PlanRefundPart[];
 };
+/** The most payments one guarantee gives back (a month's renewal and a few plan switches inside the window). */
+export const MAX_PARTS = 6;
 export type PlanRefundReading =
   | PlanRefundFound
   | { refund: Extract<PlanRefund, { kind: "none" | "unknown" }> }
@@ -163,7 +174,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       if (refund.kind !== "guarantee" && refund.kind !== "unstarted_months") return { refund };
       const paymentIntent = idOf(charge.payment_intent);
       if (!INTENT_ID.test(paymentIntent)) return { refund: { kind: "unknown", reason: "unreadable" } };
-      return { refund, chargeId, paymentIntent, invoiceId, currency: input.currency };
+      return { refund, chargeId, paymentIntent, invoiceId, currency: input.currency, parts: [{ chargeId, paymentIntent, invoiceId, cents: refund.cents, paidAtSeconds: input.paidAtSeconds }] };
     };
 
     // The customer's first succeeded charge, if the list shows them all.
@@ -216,9 +227,39 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         const invoiceId = idOf(first.invoice);
         const own = paid.find((r) => idOf(r.id) === invoiceId);
         if (own) {
-          const reading = await judge(own, true);
-          // Given, or not decidable: that is the answer. A no (refunded already, a dispute) goes on to the latest payment.
-          if (reading.refund.kind !== "none") return reading;
+          // The guarantee covers the first payment and every plan payment of this subscription made since: asked
+          // within REFUND_DAYS of the first, each of them is inside the window too (owner, 31/10/2026 15h41).
+          const firstPaid = num(obj(own.status_transitions)?.paid_at);
+          // Only while the first payment's window is open (the rule's own measure, lib/plan-refund-rules.ts): asked later,
+          // a renewal is never judged as a first payment.
+          const windowOpen = nowSeconds <= firstPaid + REFUND_DAYS * DAY_SECONDS;
+          // A paid invoice whose time cannot be read is never left out silently: less would be refunded and the plan
+          // still ended (independent review, 31/10/2026); the whole is then not decided here.
+          if (windowOpen && paid.some((r) => r !== own && !Number.isFinite(num(obj(r.status_transitions)?.paid_at)))) return { refund: { kind: "unknown", reason: "unreadable" } };
+          const since = windowOpen ? paid.filter((r) => r === own || num(obj(r.status_transitions)?.paid_at) >= firstPaid) : [own];
+          if (!Number.isFinite(firstPaid) || since.length > MAX_PARTS) return { refund: { kind: "unknown", reason: "too_many" } };
+          const parts: PlanRefundPart[] = [];
+          let main: PlanRefundFound | null = null;
+          let ownReading: PlanRefundReading | null = null;
+          for (const invoice of since) {
+            const reading = await judge(invoice, true);
+            if (invoice === own) ownReading = reading;
+            // Not decidable for one of them: not decided for the whole, never a part of it given silently.
+            if (reading.refund.kind === "unknown") return reading;
+            if (reading.refund.kind !== "guarantee" || !("parts" in reading)) continue;
+            if (main && reading.currency !== main.currency) return { refund: { kind: "unknown", reason: "unreadable" } };
+            main ??= reading;
+            parts.push(...reading.parts);
+          }
+          if (main && parts.length) {
+            parts.sort((a, b) => a.paidAtSeconds - b.paidAtSeconds);
+            const cents = parts.reduce((sum, part) => sum + part.cents, 0);
+            const head = parts[0];
+            return { ...main, refund: { kind: "guarantee", cents }, chargeId: head.chargeId, paymentIntent: head.paymentIntent, invoiceId: head.invoiceId, parts };
+          }
+          // Nothing given under the guarantee (refunded already, a dispute): the first payment's answer, as before,
+          // goes on to the latest payment.
+          if (ownReading && ownReading.refund.kind !== "none") return ownReading;
         } else if (paidPage.has_more === true) return { refund: { kind: "unknown", reason: "too_many" } };
         else {
           // Another store's, or the add-on's: the guarantee is there, not here. But one of this store's

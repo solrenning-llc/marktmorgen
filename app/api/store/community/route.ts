@@ -349,7 +349,7 @@ export async function POST(request: NextRequest) {
       if (commentId && !(await readComment(id, post.id, commentId))) return back(postPage, "gone");
       if (!(await within(id, key, "report"))) return back(fromPage, "slow");
       const target = commentId ? ({ kind: "comment", post: post.id, comment: commentId } as const) : ({ kind: "post", post: post.id } as const);
-      const added = await report(id, target, key);
+      const added = await report(id, target, key, store);
       // The creator's phone hears of an item's first report, never of what
       // it says or who sent it (lib/phone-alerts.ts), after this answer.
       if (added === "added") {

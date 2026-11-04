@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 
 type Kind = "download" | "course" | "call" | "membership";
-type Setup = { bios: string[]; products: { title: string; summary: string; kind: Kind; price: string }[]; faq: { q: string; a: string }[] };
+type Setup = { bios: string[]; products: { title: string; summary: string; kind: Kind; price: string }[]; faq: { q: string; a: string }[]; questions?: { q: string; options: string[] }[] };
 type Row = Setup["products"][number] & { keep: boolean };
 
 const KIND_WORDS: Record<Kind, string> = {
@@ -35,16 +35,36 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
   const [bio, setBio] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [keepFaq, setKeepFaq] = useState(!hasFaq);
+  // 219 [OP5] unit 3: the answers pressed for the draft's questions, by question, and those already given,
+  // which go first into every later draft so a long "What you sell" never cuts them off.
+  const [picked, setPicked] = useState<Record<number, string>>({});
+  const [given, setGiven] = useState<{ q: string; a: string }[]>([]);
+  const [announce, setAnnounce] = useState("");
+  const questionsHeading = useRef<HTMLHeadingElement>(null);
+  const draftHeading = useRef<HTMLHeadingElement>(null);
+  // Where the eyes go when something new arrives: the questions, or the draft (2.4.3), and it is said (4.1.3).
+  useEffect(() => {
+    if (!setup) return;
+    if (setup.questions?.length) questionsHeading.current?.focus();
+    else if (setup.bios.length || setup.products.length) draftHeading.current?.focus();
+  }, [setup]);
+  const asking = Boolean(setup?.questions?.length);
 
-  async function draft() {
+  async function draft(answered: { q: string; a: string }[] = []) {
     if (drafting) return;
     setDrafting(true);
     setNote("");
     try {
-      const response = await fetch("/api/store/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "setup", about, notes: selling }) });
+      // The answers travel first, then what the creator sells, in their words, so the next draft starts from them.
+      const all = [...given, ...answered];
+      const notes = [...all.map((x) => `${x.q} ${x.a}`), selling].filter((x) => x.trim()).join("\n");
+      const response = await fetch("/api/store/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "setup", about, notes }) });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: Setup; left?: number; error?: string };
       if (data.ok && data.value) {
         setSetup(data.value);
+        setPicked({});
+        if (answered.length) setGiven(all);
+        setAnnounce(data.value.questions?.length ? "A few questions before the draft." : "Your draft is ready below.");
         setBio(data.value.bios[0] ?? "");
         setRows(data.value.products.map((p) => ({ ...p, keep: true })));
         if (typeof data.left === "number") setLeft(data.left);
@@ -66,6 +86,13 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
 
   async function keep() {
     if (!setup || saving) return;
+    // 219 [OP5]: a price is the creator's. A product kept with an empty price box waits here for one, rather than being lost.
+    const unpriced = rows.findIndex((r) => r.keep && !r.price.trim());
+    if (unpriced >= 0) {
+      setNote(`Type a price for ${rows[unpriced].title.trim() || "each product you keep"}, or uncheck Keep it.`);
+      document.getElementById(`setup-price-${unpriced}`)?.focus();
+      return;
+    }
     setSaving(true);
     setNote("");
     try {
@@ -74,11 +101,11 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ bio, products: rows.filter((r) => r.keep).map(({ title, summary, kind, price }) => ({ title, summary, kind, price })), faq: keepFaq ? setup.faq : [] }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; done?: { bio: boolean; products: number; faq: boolean; refused: string[] } };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; done?: { bio: boolean; products: number; pages?: number; faq: boolean; refused: string[] } };
       if (data.ok && data.done) {
-        const parts = [data.done.bio ? "the line under your name" : "", data.done.products ? `${data.done.products} draft product${data.done.products === 1 ? "" : "s"}` : "", data.done.faq ? "your questions and answers" : ""].filter(Boolean);
+        const parts = [data.done.bio ? "the line under your name" : "", data.done.products ? `${data.done.products} draft product${data.done.products === 1 ? "" : "s"}${data.done.pages ? `, ${data.done.pages === data.done.products ? (data.done.products === 1 ? "with its sales page" : "each with its sales page") : `${data.done.pages} with a sales page`}` : ""}` : "", data.done.faq ? "your questions and answers" : ""].filter(Boolean);
         toast(parts.length ? `Kept: ${parts.join(", ")}.` : "Nothing was kept.");
-        if (data.done.refused.length) setNote(`Not kept, because its price is not one this store can charge: ${data.done.refused.join(", ")}. Add it from Products.`);
+        if (data.done.refused.length) setNote(`Not kept, because it has no price this store can charge yet: ${data.done.refused.join(", ")}. Type its price above and keep it again, or add it from Products.`);
         else setSetup(null);
         router.refresh();
         return;
@@ -99,8 +126,8 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
       </h2>
       {storeName ? <p className="mt-2 font-semibold text-ink">Your store: {storeName}. Keep your name, or edit it in Store details.</p> : null}
       <p className="mt-2 text-ink-soft">
-        Say what you make and for whom. AI drafts the line under your name, up to three products with a summary and a suggested
-        price, and the questions visitors ask, from your words only. You see it all first, change what you like, and keep only what
+        Say what you make and for whom. AI drafts the line under your name, up to three products with a summary (and the price,
+        only where you give one), and the questions visitors ask, from your words only. You see it all first, change what you like, and keep only what
         you want: products stay hidden until you add what each one hands over and choose Publish yourself. Paid selling still follows the sales gates.
       </p>
       <p className="mt-3 text-sm text-ink-soft">One sentence is enough to start. This uses the existing writing allowance; no draft runs automatically. You can also add your first offer manually in Products.</p>
@@ -115,15 +142,47 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
         </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={draft} disabled={drafting || !about.trim()} aria-busy={drafting} className="btn btn-primary">
+        <button type="button" onClick={() => draft()} disabled={drafting || !about.trim() || asking} aria-busy={drafting} className="btn btn-primary">
           <Icon name="sparkle" size={16} />
           {drafting ? "Drafting your store…" : setup ? "Draft it again" : "Draft my store"}
         </button>
         <span className="text-sm text-ink-soft">{`One draft counts once. ${left} left this month.`}</span>
       </div>
 
-      {setup ? (
+      {setup?.questions?.length ? (
+        <section aria-labelledby="setup-questions-title" className="mt-6 rounded-2xl bg-paper p-4 ring-1 ring-line">
+          <h3 id="setup-questions-title" ref={questionsHeading} tabIndex={-1} className="text-base font-semibold text-ink">{setup.questions.length === 1 ? "One question first" : `${setup.questions.length} quick questions first`}</h3>
+          <p className="mt-1 text-sm text-ink-soft">You have not told us this yet. Choose one answer for each, then continue. The next draft counts once.</p>
+          {setup.questions.map((question, i) => (
+            <fieldset key={i} className="mt-4">
+              <legend className="text-sm font-semibold text-ink">{question.q}</legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {question.options.map((option) => (
+                  <label key={option} className={`btn btn-sm cursor-pointer focus-within:outline focus-within:outline-[3px] focus-within:outline-offset-2 focus-within:outline-[var(--ink)] forced-colors:focus-within:outline-[CanvasText] ${picked[i] === option ? "btn-primary" : "btn-secondary"}`}>
+                    <input type="radio" name={`setup-question-${i}`} value={option} checked={picked[i] === option} onChange={() => setPicked({ ...picked, [i]: option })} className="sr-only" />
+                    {/* Chosen is shown by a mark, not by color alone (1.4.1), and stays visible in forced colors. */}
+                    {picked[i] === option ? <Icon name="check" size={14} /> : null}
+                    {option}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ))}
+          <button
+            type="button"
+            className="btn btn-primary mt-4"
+            disabled={drafting || setup.questions.some((_, i) => !picked[i])}
+            aria-busy={drafting}
+            onClick={() => draft((setup.questions ?? []).map((question, i) => ({ q: question.q, a: picked[i] ?? "" })))}
+          >
+            {drafting ? "Drafting your store…" : "Continue"}
+          </button>
+        </section>
+      ) : null}
+
+      {setup && (setup.bios.length || setup.products.length) ? (
         <div className="mt-6 space-y-6">
+          <h3 ref={draftHeading} tabIndex={-1} className="text-base font-semibold text-ink">Your draft</h3>
           {setup.bios.length ? (
             <fieldset>
               <legend className="field-label">The line under your name</legend>
@@ -159,7 +218,8 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
                       </div>
                       <div>
                         <label htmlFor={`setup-price-${i}`} className="text-xs font-semibold text-ink-soft">{`Price, ${currency.toUpperCase()}`}</label>
-                        <input id={`setup-price-${i}`} inputMode="decimal" value={row.price} onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, price: e.target.value } : r)))} className="field mt-1" />
+                        <input id={`setup-price-${i}`} inputMode="decimal" value={row.price} aria-invalid={row.keep && !row.price.trim() ? true : undefined} aria-describedby={row.keep && !row.price.trim() ? `setup-price-${i}-need` : undefined} onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, price: e.target.value } : r)))} className="field mt-1" />
+                        {row.keep && !row.price.trim() ? <p id={`setup-price-${i}-need`} className="mt-1 text-xs font-semibold text-ink">You did not give a price. Type yours.</p> : null}
                       </div>
                     </div>
                     <label htmlFor={`setup-summary-${i}`} className="mt-3 block text-xs font-semibold text-ink-soft">What the buyer gets</label>
@@ -167,7 +227,7 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-sm text-ink-soft">The prices are suggestions. You know your work and your audience; change them before you keep them.</p>
+              <p className="mt-2 text-sm text-ink-soft">A price is filled in only from a price you wrote, in your store&apos;s currency; check that each sits on the right product. Where the box is empty, type your price.</p>
             </fieldset>
           ) : null}
 
@@ -199,6 +259,7 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
         </div>
       ) : null}
       {note ? <p role="status" className="mt-4 text-sm font-semibold text-ink">{note}</p> : null}
+      <p role="status" className="sr-only">{announce}</p>
     </section>
   );
 }

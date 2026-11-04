@@ -1,3 +1,4 @@
+import { VisitUsBlock } from "@/components/visit-us-block";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
 import { StorePagesNav } from "@/components/store-pages-nav";
@@ -308,7 +309,7 @@ export default async function StorePage({ params, searchParams }: Params) {
           </p>
         ) : null}
         <section className={bold ? "st-band" : undefined}>
-          <div className={`mx-auto max-w-xl px-4 text-center ${bold ? "pb-12 pt-14 sm:pt-20" : "pb-2 pt-14 sm:pt-20"}`}>
+          <div className={`mx-auto max-w-xl px-4 text-center ${bold ? "pb-8 pt-8 sm:pt-10" : "pb-1 pt-6 sm:pt-8"}`} data-store-profile="">
             {store.photoId ? (
               // A plain img: the picture is already cropped and sized, and its
               // address never changes, so there is nothing for an optimiser to add.
@@ -316,17 +317,18 @@ export default async function StorePage({ params, searchParams }: Params) {
               <img
                 src={photoUrl(store.photoId)}
                 alt={store.name}
-                width={104}
-                height={104}
+                width={72}
+                height={72}
                 className="st-avatar"
+                style={{ width: 72, height: 72 }}
               />
             ) : (
-              <p aria-hidden="true" className="st-avatar st-avatar-initial">
+              <p aria-hidden="true" className="st-avatar st-avatar-initial" style={{ width: 72, height: 72, fontSize: "1.75rem" }}>
                 {store.name.slice(0, 1).toUpperCase()}
               </p>
             )}
 
-            <h1 className="font-display mt-6 text-3xl font-semibold leading-tight tracking-[-0.02em] sm:text-4xl">
+            <h1 className="font-display mt-3 text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">
               {store.name}
             </h1>
             <p className="st-muted mt-1 text-sm font-semibold">@{store.handle}</p>
@@ -339,10 +341,10 @@ export default async function StorePage({ params, searchParams }: Params) {
             ) : null}
 
             {store.bio ? (
-              <p className="st-muted mx-auto mt-4 max-w-md text-lg leading-relaxed">{store.bio}</p>
+              <p className="st-muted mx-auto mt-2 max-w-md leading-relaxed">{store.bio}</p>
             ) : null}
             <StoreSocialsRow socials={store.socials} name={store.name} words={bw} />
-            <div className="mx-auto mt-3 flex max-w-xs flex-col items-center">
+            <div className="mx-auto mt-2 flex max-w-xs flex-col items-center">
               <StoreShareButton name={store.name} lang={store.language} />
             </div>
             {/* The store's own pages the creator put in the menu (lib/site-page-rules.ts). */}
@@ -356,7 +358,7 @@ export default async function StorePage({ params, searchParams }: Params) {
           </div>
         </section>
 
-        <div className="mx-auto max-w-xl px-4 pb-16 pt-8">
+        <div className="mx-auto max-w-xl px-4 pb-16 pt-5">
           {notice ? (
             <div className="st-note mb-6" role="alert">
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{notice.title}</p>
@@ -662,6 +664,9 @@ export default async function StorePage({ params, searchParams }: Params) {
             </div>
           ))}
 
+          {/* "Visit us" (lib/visit-us.ts): the creator's address, hours and phone, as typed; no map, nothing looked up or tracked. */}
+          {store.visitUs ? <VisitUsBlock visitUs={store.visitUs} language={store.language} /> : null}
+
           <div className="mt-12 text-center">
             {/* The store's blog, once it has a post (lib/store-blog.ts): known from the record, with no read. */}
             {store.posts > 0 ? (
@@ -733,3 +738,4 @@ export default async function StorePage({ params, searchParams }: Params) {
     </div>
   );
 }
+

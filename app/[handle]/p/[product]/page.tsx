@@ -1,3 +1,4 @@
+import { absoluteImageUrl, servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { StickyBuy } from "@/components/sticky-buy";
 import { RecentSales } from "@/components/recent-sales";
@@ -35,10 +36,11 @@ import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from 
 import { moneyField } from "@/lib/money";
 import { productIdFromAddress, readListing, readListings } from "@/lib/catalog";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
+import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { imageUrl, IMAGE_SIZES, imageSrcSet } from "@/lib/product-image";
-import { type Block, type Piece, aboutBlocks, aboutExcerpt, readAbout } from "@/lib/product-about";
+import { IMAGE_SIZES } from "@/lib/product-image";
+import { aboutBlocks, aboutExcerpt, readAbout } from "@/lib/product-about";
 import { activePlan, bumpTargets } from "@/lib/product-extras";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { stockLeft } from "@/lib/stock";
@@ -73,7 +75,7 @@ import { productSegment } from "@/lib/product-slug";
 import { breadcrumbData, faqData } from "@/lib/page-structured-data";
 import { PictureViewer } from "@/components/picture-viewer";
 import { featuredCards } from "@/lib/featured-cards";
-import { NewTab } from "@/components/new-tab";
+import { ProductAbout } from "@/components/product-about-view";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -162,61 +164,23 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   };
 }
 
-/** One line of a description, with its links drawn as links. */
-function Line({ pieces, language }: { pieces: Piece[]; language: unknown }) {
-  return (
-    <>
-      {pieces.map((piece, i) =>
-        piece.href ? (
-          <a key={i} href={piece.href} target="_blank" rel="noopener noreferrer nofollow ugc">
-            {piece.text}
-          <NewTab language={language} /></a>
-        ) : (
-          <span key={i}>{piece.text}</span>
-        ),
-      )}
-    </>
-  );
-}
-
-function About({ blocks, language }: { blocks: Block[]; language: unknown }) {
-  return (
-    <div className="st-about mt-6 leading-relaxed">
-      {blocks.map((block, i) =>
-        block.kind === "list" ? (
-          <ul key={i}>
-            {block.items.map((item, j) => (
-              <li key={j}>
-                <Line pieces={item} language={language} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p key={i}>
-            {block.lines.map((line, j) => (
-              <span key={j}>
-                {j > 0 ? <br /> : null}
-                <Line pieces={line} language={language} />
-              </span>
-            ))}
-          </p>
-        ),
-      )}
-    </div>
-  );
-}
-
 /**
  * What a search engine is told about the offer: nothing the page does not
  * say. A membership's schedule does not fit the simple shape, so it is named
  * and described without an offer rather than with a wrong one. The rating is
  * there only when the page shows one, with the same average and count.
+ *
+ * No offer is told while the product cannot be had here (248 [ST1]): with
+ * paid selling closed, or this product not for sale, "InStock" at a price
+ * would let a search result promise what the page does not do. "Can be had"
+ * is what the page itself offers: a free product while it can be given
+ * (canGiveProduct), a paid one while Stripe or the creator's PayPal takes it.
  */
-function productData(store: Store, product: Listing, description: string, soldOut: boolean, summary: Summary | null, soon = false, preorder = false) {
+function productData(store: Store, product: Listing, description: string, soldOut: boolean, summary: Summary | null, soon = false, preorder = false, sellable = false) {
   const url = `${SITE_URL}${productPath(store, product)}`;
   const options = sellableOptions(product);
   const availability = `https://schema.org/${preorder ? "PreOrder" : soon ? "OutOfStock" : soldOut ? "SoldOut" : "InStock"}`;
-  const offers = product.recurring
+  const offers = !sellable || product.recurring
     ? null
     : options.length > 1
       ? {
@@ -247,7 +211,7 @@ function productData(store: Store, product: Listing, description: string, soldOu
     description,
     url,
     brand: { "@type": "Brand", name: store.name },
-    ...(product.image ? { image: `${SITE_URL}${imageUrl(product.image)}` } : {}),
+    ...(product.image ? { image: absoluteImageUrl(servedImageUrl(product.image), SITE_URL) } : {}),
     ...(offers ? { offers } : {}),
     ...(rated
       ? {
@@ -556,7 +520,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder))} />
+      <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
       <JsonLd data={breadcrumbData({ name: store.name, url: `${SITE_URL}/@${store.handle}` }, { title: product.title, url: `${SITE_URL}${productPath(store, product)}` })} />
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />
@@ -578,8 +542,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
             <div className="px-4 pt-4 sm:px-6 sm:pt-6">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={imageUrl(product.image)}
-                srcSet={imageSrcSet(product.image)}
+                src={servedImageUrl(product.image)}
+                srcSet={servedSrcSet(product.image)}
                 sizes={product.image.small ? IMAGE_SIZES.hero : undefined}
                 alt={product.image.alt}
                 width={product.image.width}
@@ -602,7 +566,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
             {soldLine}
             <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} />
             {product.summary ? <p className="st-muted mt-4 text-lg leading-relaxed">{product.summary}</p> : null}
-            {blocks.length > 0 ? <About blocks={blocks} language={store.language} /> : null}
+            {blocks.length > 0 ? <ProductAbout blocks={blocks} language={store.language} /> : null}
             {bundleList}
 
             <div id={free ? "get" : "buy"} className="mt-8 scroll-mt-6 border-t pt-6" style={{ borderColor: "var(--st-line)" }}>
@@ -629,7 +593,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
     storeName: store.name,
     productTitle: product.title,
     picture: product.image
-      ? { src: imageUrl(product.image), alt: product.image.alt, width: product.image.width, height: product.image.height }
+      ? { src: servedImageUrl(product.image), alt: product.image.alt, width: product.image.width, height: product.image.height }
       : null,
     photo: store.photoId ? photoUrl(store.photoId) : null,
     action,

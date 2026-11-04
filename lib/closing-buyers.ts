@@ -216,6 +216,19 @@ export async function tellStaysOpen(store: Store, until: number): Promise<boolea
 }
 
 /**
+ * While the store is closing: whether the person's address is on the list of
+ * buyers to tell, and when they were told (0 while not yet), for the copy of
+ * their data (619 [SZ3]); null when it is not on it. Only reads.
+ */
+export async function toldOf(store: Store, email: string): Promise<{ toldAt: number } | null> {
+  if (!isRedisConfigured()) return null;
+  const folder = await storeFolder(storeRef(store));
+  const [raw] = await redisPipeline([["HGET", toldKey(folder), normaliseEmail(email)]]);
+  if (raw === null || raw === undefined) return null;
+  return { toldAt: raw === UNTOLD ? 0 : Number(raw) || 0 };
+}
+
+/**
  * The email to members whose refund could not be made on the closing day.
  * Paid for by the follow-up taken when they were told; one who was not told
  * takes it from the store's credit now. True when every one went or was

@@ -1,3 +1,4 @@
+import { EmailField } from "@/components/email-field";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -166,7 +167,7 @@ export default async function GroupPage({ params, searchParams }: Params) {
           <label htmlFor="place-email" className="st-label">
             {said.w.yourEmail}
           </label>
-          <input id="place-email" type="email" name="email" required maxLength={254} autoComplete="email" placeholder={said.w.emailPlaceholder} className="st-field" />
+          <EmailField id="place-email" name="email" className="st-field" required autoComplete="email" placeholder={said.w.emailPlaceholder} language={store.language} />
           <button type="submit" className="btn st-btn btn-block">{g.sendPlaceLink}</button>
           <p className="st-muted text-xs">{g.placeNote(title)}</p>
         </form>

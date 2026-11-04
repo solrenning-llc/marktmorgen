@@ -33,3 +33,9 @@ test('computed cost entries are refused without executing their getters', () => 
   assert.equal(remainingResourceCostCents(22000, 2750, costs), null);
   assert.equal(reads, 0);
 });
+
+test('a Proxy cannot shorten the cost loop to skip an unknown entry',()=>{
+ let reads=0;const costs=new Proxy([null],{get(target,key,receiver){if(key==='length')return ++reads===1?1:0;return Reflect.get(target,key,receiver);}});
+ assert.equal(remainingResourceCostCents(10000,1538,costs),null);
+ assert.equal(reads,0,'length is captured from its own data descriptor, never the get trap');
+});

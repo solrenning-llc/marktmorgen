@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
+import { MemberDiscount } from "@/components/member-discount";
 import { LEAVE_NAMES, STAY_AGES, isLeaveReason, membershipNumbers } from "@/lib/membership-numbers";
 import { channelName } from "@/lib/channel-names";
 import { readListings } from "@/lib/catalog";
@@ -249,7 +250,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     <div className="rounded-xl bg-paper p-4 ring-1 ring-line">
                       <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-mute">Revenue at risk</dt>
                       <dd className="mt-1 text-xl font-semibold tabular-nums text-ink">{money(health.atRisk)}</dd>
-                      <dd className="text-sm text-ink-soft">a month, from members under 40</dd>
+                      <dd className="text-sm text-ink-soft">{`a month, from members under 40${health.atRiskElsewhere ? `. ${health.atRiskElsewhere} of them ${health.atRiskElsewhere === 1 ? "pays" : "pay"} in another currency and ${health.atRiskElsewhere === 1 ? "is" : "are"} not added` : ""}`}</dd>
                     </div>
                   </dl>
                   <div className="mt-5 overflow-x-auto" tabIndex={0} role="region" aria-label="Members, the lowest score first">
@@ -275,7 +276,8 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                             <td className="py-2.5 pr-3 text-ink-soft">
                               {row.factors.length ? row.factors.map((f) => `${HEALTH_WORDS[f.reason]} (\u2212${f.points})`).join(" · ") : "Nothing taken off"}
                             </td>
-                            <td className="py-2.5 text-right tabular-nums">{money(row.monthly)}</td>
+                            {/* In the member's own currency: a membership sold before the store changed its currency pays in the old one (22 [E5], unit 2e). */}
+                            <td className="py-2.5 text-right tabular-nums">{row.own ? formatMoney(row.own.cents, row.own.currency) : money(row.monthly)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -314,6 +316,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                   <p className="mt-3 text-xs text-ink-soft">
                     A renewal counts when it was paid in the last 30 days after Stripe had tried the card more than once, or after
                     the member was emailed that it failed. Read from your own Stripe account, in your store&apos;s currency.
+                    {recovery.elsewhere ? ` ${recovery.elsewhere} more ${recovery.elsewhere === 1 ? "renewal was" : "renewals were"} recovered in a currency other than ${recovery.currency.toUpperCase()}; ${recovery.elsewhere === 1 ? "its amount is" : "their amounts are"} not in these figures.` : ""}
                     {recovery.complete ? "" : " Your account holds more paid invoices than one reading takes, so the oldest of the 30 days may be missing."}
                     {" How many emails go, and the card notice, are set under \u201cWhen a member\u2019s payment fails\u201d in your studio\u2019s settings."}
                   </p>
@@ -518,6 +521,16 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                       </p>
                     </>
                   ) : null}
+                </section>
+              ) : null}
+
+              {/* One member's discount (616 [WP15](8)): for a role that may change the store's codes. */}
+              {can(access.role, "settings") ? (
+                <section aria-labelledby="member-discount-title" className="card mt-8 p-6 sm:p-8">
+                  <h2 id="member-discount-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Give one member a discount</h2>
+                  <div className="mt-3">
+                    <MemberDiscount titles={Object.fromEntries(titles)} />
+                  </div>
                 </section>
               ) : null}
 

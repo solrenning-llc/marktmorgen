@@ -21,6 +21,9 @@ export async function checkShipmentAcknowledgment({browser,LOCAL,fixture,shipmen
   try{
    await context.addCookies([{name:"nl_session",value:fixture.session,url:LOCAL}]);
    const page=await context.newPage();let pending=null,writes=0,otherWrites=0;
+   const pageErrors=[],posts=[];
+   page.on("pageerror",error=>pageErrors.push(String(error).slice(0,2000)));
+   page.on("request",request=>{if(request.method()==="POST"&&new URL(request.url()).pathname==="/api/store/shipped")posts.push(Date.now());});
    await page.route("**/api/**",async route=>{
     if(route.request().method()==="GET"){await route.continue();return;}
     if(new URL(route.request().url()).pathname!=="/api/store/shipped"){otherWrites++;await route.abort();return;}
@@ -36,17 +39,49 @@ export async function checkShipmentAcknowledgment({browser,LOCAL,fixture,shipmen
     const field=form.getByLabel("Tracking link (optional)",{exact:true});
     await field.fill("https://example.test/chosen");
     let release;const held=new Promise(resolve=>{release=resolve;});pending={scenario,release:held};
-    const seen=page.waitForRequest(request=>request.method()==="POST"&&new URL(request.url()).pathname==="/api/store/shipped",{timeout:15000});seen.catch(()=>{});
+    const started=Date.now(),postStart=posts.length,errorStart=pageErrors.length,writesStart=writes;
+    let phase="waiting-request",seenOutcome={state:"pending"},clickOutcome={state:"pending"};
+    const seen=page.waitForRequest(request=>request.method()==="POST"&&new URL(request.url()).pathname==="/api/store/shipped",{timeout:15000});
+    seen.then(()=>{seenOutcome={state:"fulfilled",afterMs:Date.now()-started};},error=>{seenOutcome={state:"rejected",afterMs:Date.now()-started,error:String(error).slice(0,2000)};}).catch(()=>{});
     // Keep the reply held for busy-state assertions without awaiting click completion first.
     // Firefox may wait for effects of the submit action until that reply is released.
-    const click=form.getByRole("button",{name:"Mark as shipped",exact:true}).click({noWaitAfter:true});click.catch(()=>{});
+    const click=form.getByRole("button",{name:"Mark as shipped",exact:true}).click({noWaitAfter:true});
+    // Attach the rejection handler immediately, including when the request
+    // fails first and context cleanup later rejects the pending click.
+    click.then(()=>{clickOutcome={state:"fulfilled",afterMs:Date.now()-started};},error=>{clickOutcome={state:"rejected",afterMs:Date.now()-started,error:String(error).slice(0,2000)};}).catch(()=>{});
+    let failed=false,originalError,failurePhase,failureAfterMs,releasedAfterMs;
     try{
-     const sent=(await seen).postDataJSON();
+     const request=await seen;phase="parsing-request";
+     const sent=request.postDataJSON();phase="checking-pending-state";
      is("shipment request preserves chosen values "+scenario.name+"/"+width,[sent.session,sent.tracking],[shipment,"https://example.test/chosen"]);
      is("shipment tracking locks while waiting "+scenario.name+"/"+width,await field.isDisabled(),true);
      is("shipment button locks while waiting "+scenario.name+"/"+width,await form.getByRole("button").isDisabled(),true);
      is("shipment form announces pending state "+scenario.name+"/"+width,await form.getAttribute("aria-busy"),"true");
-    }finally{release();await click;}
+    }catch(error){failed=true;originalError=error;failurePhase=phase;failureAfterMs=Date.now()-started;}
+    finally{
+     release();phase="reply-released";releasedAfterMs=Date.now()-started;
+     // A secondary click error must not replace the first awaited error.
+     if(!failed){try{phase="awaiting-click";await click;}catch(error){failed=true;originalError=error;failurePhase=phase;failureAfterMs=Date.now()-started;}}
+    }
+    if(failed){
+     try{
+     let timer;
+     const snapshot=Promise.resolve().then(()=>page.evaluate(()=>{
+      const form=[...document.querySelectorAll('#sales form')].find(node=>node.querySelector('input[type="url"]'));
+      return {url:location.href,ready:document.readyState,activeElement:document.activeElement?.tagName,
+       form:form?.outerHTML.slice(0,5000)??null,busy:form?.getAttribute("aria-busy")??null,
+       disabled:form?.querySelector("button")?.disabled??null};
+     })).catch(error=>({captureError:String(error).slice(0,1000)}));
+     let dom;
+     try{dom=await Promise.race([snapshot,new Promise(resolve=>{timer=setTimeout(()=>resolve({captureTimedOut:true}),500);})]);}
+     catch(error){dom={captureError:String(error).slice(0,1000)};}finally{clearTimeout(timer);}
+     console.error("SHIPMENT_ACTION_FAILURE:"+JSON.stringify({scenario:scenario.name,width,phase,failurePhase,failureAfterMs,releasedAfterMs,
+      afterMs:Date.now()-started,url:page.url(),postCount:posts.length-postStart,postAfterMs:posts.slice(postStart).map(at=>at-started),
+      interceptedWrites:writes-writesStart,seenOutcome,clickOutcome,pageErrors:pageErrors.slice(errorStart),dom,
+      originalError:String(originalError).slice(0,3000)}));
+     }catch{/* Best-effort diagnostics never replace the original failure. */}
+     throw originalError;
+    }
     if(scenario.confirmed){
      const status=page.locator("#sales").getByRole("status");await status.waitFor();
      is("confirmed shipment has truthful persistent status "+scenario.name+"/"+width,(await status.innerText()).includes("Marked as shipped on"),true);

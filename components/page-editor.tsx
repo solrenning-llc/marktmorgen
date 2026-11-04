@@ -1,5 +1,6 @@
 "use client";
 
+import { fastMoneyMessage } from "@/lib/terms-check-rules";
 import { TestCountsNotice } from "@/components/test-counts-notice";
 import { pasteExceedsLimit } from "@/lib/paste-limit";
 
@@ -13,7 +14,8 @@ import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
 import { shrink } from "@/components/product-image-editor";
 import { IMAGE_ACCEPT, MAX_ALT_LENGTH, MAX_SOURCE_BYTES, imagePath, imageUrl } from "@/lib/product-image";
-import { Icon, type IconName } from "@/components/icons";
+import { Icon } from "@/components/icons";
+import { KIND_ICONS } from "@/lib/sales-page-icons";
 import { toast } from "@/components/toast";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { TranslatePage } from "@/components/translate-page";
@@ -127,30 +129,6 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
-};
-
-const KIND_ICONS: Record<BlockKind, IconName> = {
-  hero: "sparkle",
-  text: "type",
-  benefits: "check-circle",
-  inside: "list",
-  bio: "user",
-  faq: "chat",
-  guarantee: "shield",
-  cta: "arrow-right",
-  reviews: "star",
-  video: "play",
-  pictures: "camera",
-  countdown: "clock",
-  fit: "target",
-  steps: "ladder",
-  compare: "scale",
-  bonuses: "gift",
-  facts: "chart",
-  feature: "layout",
-  product: "basket",
-  quotes: "quote",
-  form: "list",
 };
 
 /** A moment in seconds as the date-and-time field holds it, in the creator's own time zone. */
@@ -866,7 +844,7 @@ export function PageEditor({
         if (versions !== null) void loadVersions();
         return;
       }
-      setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+      setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
     } catch {
       setError(MESSAGES.server_error);
     } finally {
@@ -1858,9 +1836,11 @@ export function PageEditor({
               productTitle={product.title}
               free={product.free}
               picture={Boolean(product.picture)}
+              pictureAlt={product.picture?.alt ?? ""}
               facts={facts}
-              // The version being edited: what the coach adds goes into it.
-              page={{ ...pageToSend(), blocks: drafts.map((d) => d.block) }}
+              // The version being edited: what the coach adds goes into it. The other version, never this one twice,
+              // is the second one, whose pictures are counted too (independent review, 31/10/2026).
+              page={{ ...pageToSend(), blocks: drafts.map((d) => d.block), variant: other ? { id: "", blocks: other.map((d) => d.block) } : null }}
               reach={reach}
               onAdd={(kind) => (kind === "fit" || kind === "facts" || kind === "steps" ? insertNear(emptyBlock(kind), kind === "facts" ? ["hero"] : ["benefits", "inside"]) : add(kind))}
               onHeadline={putHeadline}

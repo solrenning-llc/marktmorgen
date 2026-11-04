@@ -1,3 +1,4 @@
+import { EmailField } from "@/components/email-field";
 import type { Store } from "@/lib/store";
 import { contactWords } from "@/lib/buyer-words/contact";
 import { speech } from "@/lib/buyer-words";
@@ -28,7 +29,7 @@ export function StoreContactBox({ store }: { store: Store }) {
           </div>
           <div>
             <label htmlFor="contact-email" className="st-label">{w.email}</label>
-            <input id="contact-email" name="email" type="email" required maxLength={254} autoComplete="email" className="st-field mt-1 w-full" />
+            <EmailField id="contact-email" name="email" className="st-field mt-1 w-full" required autoComplete="email" language={store.language} />
           </div>
         </div>
         <div>

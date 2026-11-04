@@ -14,11 +14,14 @@
 import { createHash } from "node:crypto";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { type WindowFields, allowanceWindow, keepSecondsFor, resetWords } from "@/lib/allowance-window";
-import { admitNonPaying } from "@/lib/free-pool";
-import { POOL_FULL_WORDS } from "@/lib/free-pool-rules";
+import { poolPlace } from "@/lib/free-pool";
+import { PLANS_ON_SALE } from "@/lib/opening";
+import { standingOf } from "@/lib/plan-standing";
+import { planAboveSold } from "@/lib/larger-plan";
+import { poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type AllowanceKind, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
+import { type AllowanceKind, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
 
@@ -30,6 +33,18 @@ const key = (kind: AllowanceKind, id: string, window: string) => `nl:allow:${kin
 function idOf(store: AllowanceStore): string | null {
   const raw = store.sid || store.statsId || store.handle || "";
   return raw ? createHash("sha256").update(`allowance:${raw}`).digest("hex").slice(0, 32) : null;
+}
+
+
+/**
+ * The words for a page's "allowance-<reason>" code (lib/metered-limits.ts, serviceRefusalCode): the store's calls
+ * to connected services used, in its own window; no place this month; or not counted just now. Null for any other code.
+ */
+export function serviceAllowanceWords(store: AllowanceStore, code: string, now = Date.now()): string | null {
+  if (code === "allowance-pool") return poolFullWords(PLANS_ON_SALE);
+  if (code === "allowance-unknown") return "This can't be counted right now. Try again in a minute.";
+  if (code !== "allowance-used") return null;
+  return usedWords("integration", allowanceFor(store, "integration", now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended.integration === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
 /**
@@ -46,7 +61,8 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
   if (!Number.isSafeInteger(n) || n < 1) return refuse("unknown", "That could not be counted. Try again.");
   const window = allowanceWindow(store, now);
   if (!window) return refuse("unknown", resetWords(store, now));
-  if (!Number.isSafeInteger(limit) || limit < n) return refuse("used", usedWords(kind, limit, resetWords(store, now)));
+  const standing = standingOf(store, now / 1000);
+  if (!Number.isSafeInteger(limit) || limit < n) return refuse("used", usedWords(kind, limit, resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")));
   const id = idOf(store);
   if (!id || !isRedisConfigured()) return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   // Each outbound webhook attempt creates provider work and needs its paid cohort.
@@ -55,7 +71,10 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
   if (kind === "webhook" && store.period?.funded === true && (!store.tier || !(await reservePaidResourceWindow({ ...store, tier: store.tier, statsId: store.statsId ?? null })))) {
     return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   }
-  if (!(await admitNonPaying(store, now))) return refuse("pool", POOL_FULL_WORDS);
+  // No place this month, or none could be counted: each is said as it is.
+  const place = await poolPlace(store, now);
+  if (place === "full") return refuse("pool", poolFullWords(PLANS_ON_SALE));
+  if (place === "unknown") return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   try {
     const k = key(kind, id, window.id);
     const reply: unknown = await redisPipeline([
@@ -69,7 +88,7 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
     if (counted <= limit) return { ok: true, left: limit - counted };
     // Over: what this asked for is given back, so a refused use costs the figure nothing.
     await redisPipeline([["DECRBY", k, n]]).catch(() => {});
-    return refuse("used", usedWords(kind, limit, resetWords(store, now)));
+    return refuse("used", usedWords(kind, limit, resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standing, PLANS_ON_SALE, planAboveSold(store.tier ?? "creator")));
   } catch {
     return refuse("unknown", "This can't be counted right now. Try again in a minute.");
   }
@@ -87,6 +106,33 @@ function acknowledgedAllowanceCount(reply: unknown, n: number): number | null {
       !count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < n) return null;
   return count.value;
  } catch { return null; }
+}
+
+/**
+ * What has been taken of every kind in the store's window, read strictly for
+ * the studio's checkup (491 [PP2]): one read for all of them, and null when
+ * the window or any count could not be read, so a missing answer is never
+ * taken for nothing used. Each figure is the store's own, beside its count.
+ */
+export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonly AllowanceKind[], now = Date.now()): Promise<{ kind: AllowanceKind; used: number; figure: number }[] | null> {
+  const window = allowanceWindow(store, now);
+  const id = idOf(store);
+  if (!window || !id || !isRedisConfigured() || !kinds.length) return null;
+  try {
+    const reply: unknown = await redisPipeline(kinds.map((kind) => ["GET", key(kind, id, window.id)]));
+    if (!Array.isArray(reply) || reply.length !== kinds.length) return null;
+    const out: { kind: AllowanceKind; used: number; figure: number }[] = [];
+    for (const [i, kind] of kinds.entries()) {
+      const raw: unknown = reply[i];
+      if (raw !== null && typeof raw !== "string" && typeof raw !== "number") return null;
+      const n = raw === null ? 0 : Number(raw);
+      if (!Number.isSafeInteger(n) || n < 0) return null;
+      out.push({ kind, used: n, figure: allowanceFor(store, kind, now / 1000) });
+    }
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 /** What has been taken of a kind in the store's window, for the studio; 0 when it cannot be read. */

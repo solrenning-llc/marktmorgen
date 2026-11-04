@@ -42,7 +42,8 @@ export async function POST(request: NextRequest) {
 
   const id = text(body.id, 40);
   const title = text(body.title, MAX_LINK_TITLE_LENGTH);
-  const raw = text(body.url, MAX_LINK_LENGTH);
+  // One past the length kept, so a longer link is refused as too long rather than cut and kept broken.
+  const raw = text(body.url, MAX_LINK_LENGTH + 1);
 
   if (action !== "add" && !id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });

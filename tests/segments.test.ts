@@ -17,6 +17,9 @@
 import { NO_NARROW, buyerLedger, isNarrowed, keeps, ledgerChannels, listSegments, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { audience, leadsKey } from "@/lib/contacts";
 import type { Store } from "@/lib/store";
+import { readDraftAudience } from "@/lib/mail-draft-audience";
+import { rfmGroup } from "@/lib/rfm-rules";
+import { sameNarrow } from "@/lib/segments-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -50,12 +53,23 @@ const intents = [
   { id: "pi_extra000000001", status: "succeeded", created: now - 120 * DAY, amount: 4000, currency: "usd", receipt_email: "BEN@example.com", metadata: { kind: "upsell", store: "bakery", product: "kit" } },
 ];
 
+// Renewals, refunds and disputes (270 [GR1], unit 2), filled in by their own part below.
+let invoices: Record<string, unknown>[] = [];
+let refunds: Record<string, unknown>[] = [];
+let disputes: Record<string, unknown>[] = [];
+let invoicePayments: Record<string, unknown>[] = [];
+let invoicePaymentsFail = false;
+
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.hostname !== "api.stripe.com") return new Response("{}", { status: 404 });
   stripeCalls += 1;
   if (url.pathname === "/v1/checkout/sessions") return new Response(JSON.stringify({ data: sessions, has_more: false }));
   if (url.pathname === "/v1/payment_intents") return new Response(JSON.stringify({ data: intents, has_more: false }));
+  if (url.pathname === "/v1/invoices") return new Response(JSON.stringify({ data: invoices, has_more: false }));
+  if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ data: refunds, has_more: false }));
+  if (url.pathname === "/v1/disputes") return new Response(JSON.stringify({ data: disputes, has_more: false }));
+  if (url.pathname === "/v1/invoice_payments") return invoicePaymentsFail ? new Response("{}", { status: 500 }) : new Response(JSON.stringify({ data: invoicePayments, has_more: false }));
   return new Response(JSON.stringify({ data: [], has_more: false }));
 }) as typeof fetch;
 
@@ -93,19 +107,30 @@ async function main(): Promise<void> {
     return r ? [r.cents, r.channel] : null;
   };
   is("each address once, all it paid, where it first came from", [row("ana@example.com"), row("ben@example.com"), row("cy@example.com")], [[25000, "instagram"], [7000, "tiktok"], [9000, "direct"]]);
-  is("support, euros and another store's sales are not buyers here", [row("dee@example.com"), row("eve@example.com"), row("fay@example.com")], [null, null, null]);
+  is("how many times each bought: each checkout once, an offer taken after paying not again (270 [GR1])", ["ana@example.com", "ben@example.com", "cy@example.com"].map((e) => ledger.buyers.get(e)?.orders), [2, 1, 1]);
+  is("support and another store's sales are not buyers here", [row("dee@example.com"), row("fay@example.com")], [null, null]);
+  // A sale in euros, from before the store changed its currency (22 [E5], unit 2c): a buyer, with a purchase and its date, but nothing added to "spent".
+  is("a buyer who paid in another currency is a buyer: the order and the date count, the money does not", [row("eve@example.com"), ledger.buyers.get("eve@example.com")?.orders, (ledger.buyers.get("eve@example.com")?.last ?? 0) > 0], [[0, "direct"], 1, true]);
   is("the channels, the most buyers first", ledgerChannels(ledger).sort(), ["direct", "instagram", "tiktok"]);
   const asked = stripeCalls;
   await buyerLedger(store);
   is("read again within ten minutes: nothing asked of Stripe", stripeCalls, asked);
 
   part("Who each narrowing keeps");
-  const keep = (n: Partial<typeof NO_NARROW>) => ["ana@example.com", "ben@example.com", "cy@example.com", "nobody@example.com"].filter(keeps({ ...NO_NARROW, ...n }, ledger, NOW));
-  is("spent at least $80", keep({ minSpent: 8000 }), ["ana@example.com", "cy@example.com"]);
+  const keep = (n: Partial<typeof NO_NARROW>) => ["ana@example.com", "ben@example.com", "cy@example.com", "eve@example.com", "nobody@example.com"].filter(keeps({ ...NO_NARROW, ...n }, ledger, NOW));
+  // eve paid 500 euros three days ago, in another currency than the store's (22 [E5], unit 2c).
+  is("spent at least $80: euros are not added, so not eve", keep({ minSpent: 8000 }), ["ana@example.com", "cy@example.com"]);
   is("first found you through Instagram", keep({ channel: "instagram" }), ["ana@example.com"]);
-  is("first found you directly", keep({ channel: "direct" }), ["cy@example.com"]);
-  is("has not bought in 90 days, but has bought", keep({ quietDays: 90 }), ["ben@example.com"]);
+  is("first found you directly, eve among them", keep({ channel: "direct" }), ["cy@example.com", "eve@example.com"]);
+  is("has not bought in 90 days, but has bought: not eve, who bought three days ago", keep({ quietDays: 90 }), ["ben@example.com"]);
   is("all three at once", keep({ minSpent: 1, channel: "tiktok", quietDays: 30 }), ["ben@example.com"]);
+  // One group of buyers (270 [GR1], unit 3b): ana bought twice, the last 10 days ago; ben once, 120 days ago; cy and eve once, days ago.
+  is("one group of buyers: loyal, bought once, new", [keep({ group: "loyal" }), keep({ group: "once" }), keep({ group: "new" })], [["ana@example.com"], ["ben@example.com"], ["cy@example.com", "eve@example.com"]]);
+  is("a group nobody is in keeps nobody, and never someone who is not a buyer", keep({ group: "best" }), []);
+  const base = { who: "all", notProductId: null, narrow: { minSpent: 0, channel: "", quietDays: 0, group: "loyal" } };
+  is("a draft keeps its group; one that is not a group is refused, never read as everyone", [readDraftAudience(base)?.narrow?.group, readDraftAudience({ ...base, narrow: { ...base.narrow, group: "vip" } })], ["loyal", null]);
+  is("a narrowing with a field this version does not know is refused, never read as a broader group; a null group is none", [sameNarrow({ minSpent: 0, channel: "", quietDays: 0, tier: "gold" }, readNarrow({})), sameNarrow({ minSpent: 0, channel: "", quietDays: 0, group: null }, readNarrow({})), sameNarrow({ minSpent: 0, channel: "", quietDays: 0 }, readNarrow({ group: "new" }))], [false, true, false]);
+  is("a group is read from a request only when it is one of the groups", [readNarrow({ group: "loyal" }).group, "group" in readNarrow({ group: "vip" }), isNarrowed(readNarrow({ group: "new" }))], ["loyal", false, true]);
 
   part("A list narrowed that way");
   await redis.pipeline([
@@ -126,6 +151,91 @@ async function main(): Promise<void> {
   is("the same name replaces it", again.ok ? again.segments.map((s) => [s.name, s.minSpent, s.quietDays]) : again, [["best customers", 0, 180]]);
   const id = (await listSegments("list0001"))[0].id;
   is("and it can be removed", (await removeSegment(store, id)).length, 0);
+
+  part("Renewals, refunds and disputes (270 [GR1], unit 2)");
+  // In a newer API version's shape: the payment among the invoice's payments, not on the invoice.
+  const renewal = (id: string, email: string, daysAgo: number, cents: number, store = "bakery", currency = "usd") => ({ id: `in_${id}`, status: "paid", billing_reason: "subscription_cycle", amount_paid: cents, currency, created: now - daysAgo * DAY, customer_email: email, payments: { data: [{ status: "paid", payment: { payment_intent: `pi_${id.padEnd(14, "0")}` } }] }, parent: { subscription_details: { metadata: { store, channel: "newsletter" } } } });
+  sessions.push(
+    session("gil1", "gil@example.com", 400, 2000),
+    session("hal1", "hal@example.com", 10, 3000),
+    session("ian1", "ian@example.com", 10, 6000),
+    session("jo01", "jo@example.com", 10, 2500),
+    session("max1", "max@example.com", 10, 2500),
+    session("ned1", "ned@example.com", 300, 2500),
+  );
+  invoices = [renewal("gilr", "gil@example.com", 5, 2000), renewal("kimr", "kim@example.com", 2, 1500), renewal("othr", "lou@example.com", 2, 1500, "somebody-else"), renewal("ned2", "ned@example.com", 3, 900, "bakery", "eur"), renewal("olir", "oli@example.com", 4, 1200)];
+  refunds = [
+    { id: "re_hal", status: "succeeded", amount: 3000, currency: "usd", created: now - 9 * DAY, payment_intent: "pi_hal10000000000" },
+    { id: "re_ian", status: "succeeded", amount: 1000, currency: "usd", created: now - 9 * DAY, payment_intent: "pi_ian10000000000" },
+    // A membership payment refunded in full, matched through the invoice's payments.
+    { id: "re_oli", status: "succeeded", amount: 1200, currency: "usd", created: now - 3 * DAY, payment_intent: "pi_olir0000000000" },
+  ];
+  disputes = [
+    { id: "dp_jo", status: "lost", amount: 2500, currency: "usd", created: now - 9 * DAY, payment_intent: "pi_jo010000000000" },
+    // Still open: the money is held, so it does not count either.
+    { id: "dp_max", status: "needs_response", amount: 2500, currency: "usd", created: now - 9 * DAY, payment_intent: "pi_max10000000000" },
+  ];
+  const fresh = await buyerLedger({ ...store, statsId: "t".repeat(32) } as Store);
+  const at = (email: string) => fresh.buyers.get(email);
+  is("a member's renewal moves their last purchase and adds what it paid, and is one more time they bought", [at("gil@example.com")?.cents, at("gil@example.com")?.orders, Math.round(((at("gil@example.com")?.last ?? 0) / 1000 - now) / DAY)], [4000, 2, -5]);
+  is("a renewal with no checkout read is still a buyer, its payment one time they bought", [at("kim@example.com")?.cents, at("kim@example.com")?.orders], [1500, 1]);
+  is("another store's renewal is not", at("lou@example.com"), undefined);
+  is("refunded in full is not a purchase; in part, what was kept counts", [at("hal@example.com"), at("ian@example.com")?.cents], [undefined, 5000]);
+  is("a dispute the buyer won, or one still open, is not a purchase either", [at("jo@example.com"), at("max@example.com")], [undefined, undefined]);
+  is("a renewal in another currency moves the last payment, adding nothing", [at("ned@example.com")?.cents, Math.round(((at("ned@example.com")?.last ?? 0) / 1000 - now) / DAY)], [2500, -3]);
+  is("a buyer known only by a renewal came from the subscription's channel", at("kim@example.com")?.channel, "newsletter");
+  is("a membership payment refunded in full, matched through the invoice's payments, does not count", at("oli@example.com"), undefined);
+  is("all of it read: not partial", fresh.partial, false);
+
+  part("A membership's payment found through the account's invoice payments (270 [GR1], unit 3a)");
+  // A renewal whose invoice names no payment, and a membership sold through checkout (no payment on the session), both refunded.
+  sessions.push({ ...session("pam1", "pam@example.com", 20, 2900), payment_intent: null, mode: "subscription", invoice: "in_pamfirst" } as unknown as ReturnType<typeof session>);
+  invoices = [{ ...renewal("quin", "quin@example.com", 3, 1900), payments: undefined }];
+  invoicePayments = [
+    { id: "inpay_1", object: "invoice_payment", invoice: "in_pamfirst", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_pamfirst00000" } },
+    { id: "inpay_2", object: "invoice_payment", invoice: "in_quin", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_quinpaid00000" } },
+  ];
+  refunds = [
+    { id: "re_pam", status: "succeeded", amount: 2900, currency: "usd", created: now - 19 * DAY, payment_intent: "pi_pamfirst00000" },
+    { id: "re_quin", status: "succeeded", amount: 1900, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_quinpaid00000" },
+  ];
+  disputes = [];
+  const third = await buyerLedger({ ...store, statsId: "u".repeat(32) } as Store);
+  is("a membership's first payment through checkout, refunded, is not a purchase", third.buyers.get("pam@example.com"), undefined);
+  is("nor is a renewal refunded, matched by its invoice", third.buyers.get("quin@example.com"), undefined);
+  is("still read in full", third.partial, false);
+
+  // Paid in two parts, refunded in two: both are taken off.
+  invoices = [{ ...renewal("rae1", "rae@example.com", 3, 3000), payments: undefined }];
+  invoicePayments = [
+    { id: "inpay_3", invoice: "in_rae1", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_raepart100000" } },
+    { id: "inpay_4", invoice: "in_rae1", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_raepart200000" } },
+  ];
+  refunds = [
+    { id: "re_rae1", status: "succeeded", amount: 1000, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_raepart100000" },
+    { id: "re_rae2", status: "succeeded", amount: 500, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_raepart200000" },
+  ];
+  const parts = await buyerLedger({ ...store, statsId: "v".repeat(32) } as Store);
+  is("an invoice paid in parts: each part's refund is taken off", parts.buyers.get("rae@example.com")?.cents, 1500);
+
+  // A member of a year: one checkout and eleven monthly payments, the last ten days ago, is a best customer, not a new one.
+  sessions.push(session("sam1", "sam@example.com", 340, 1000));
+  invoices = Array.from({ length: 11 }, (_, i) => ({ ...renewal(`sam${String(i).padStart(2, "0")}`, "sam@example.com", 10 + i * 30, 1000), payments: undefined, payment_intent: `pi_sam${i}` }));
+  refunds = [];
+  invoicePayments = [];
+  const year = await buyerLedger({ ...store, statsId: "x".repeat(32) } as Store);
+  const sam = year.buyers.get("sam@example.com");
+  is("a member of a year counts every payment, and is a best customer", [sam?.orders, sam ? rfmGroup(sam, NOW) : null], [12, "best"]);
+
+  // The account's invoice payments could not be read: a renewal needing one is unmatched, so the reading is partial.
+  invoicePaymentsFail = true;
+  const unread = await buyerLedger({ ...store, statsId: "w".repeat(32) } as Store);
+  is("an unread list of invoice payments, when one was needed, makes the reading partial", unread.partial, true);
+  invoicePaymentsFail = false;
+  invoicePayments = [];
+  invoices = [];
+  refunds = [];
+  disputes = [];
 
   done();
 }

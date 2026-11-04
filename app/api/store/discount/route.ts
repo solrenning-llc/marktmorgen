@@ -1,15 +1,8 @@
 import type { NextRequest } from "next/server";
 import { setHasDiscounts, storeForEmail } from "@/lib/store";
-import { priceInRange, readMoney } from "@/lib/money";
 import { canSell } from "@/lib/store-checkout";
-import {
-  type Off,
-  codeProblem,
-  createCode,
-  listCodes,
-  readCode,
-  stopCode,
-} from "@/lib/discount";
+import { createCode, listCodes, stopCode } from "@/lib/discount";
+import { readCodeAsked } from "@/lib/discount-input";
 import { guardStoreWrite, text } from "@/lib/store-request";
 
 const ACTIONS = new Set(["list", "add", "stop"]);
@@ -45,51 +38,17 @@ export async function POST(request: NextRequest) {
     const account = store.stripeAccountId;
 
     if (action === "add") {
-      const code = readCode(text(body.code, 40));
-      const problem = codeProblem(code);
-      if (problem) {
+      // Read the same way as the API's (lib/discount-input.ts).
+      const read = readCodeAsked(body, store.currency);
+      if (!read.ok) {
         return Response.json(
-          { ok: false, error: "code", reason: problem },
+          { ok: false, error: "code", reason: read.reason },
           { status: 400 },
         );
       }
+      const { code, off, maxRedemptions, minimum } = read.asked;
 
-      let off: Off;
-      if (text(body.kind, 10) === "amount") {
-        // In the store's currency, and within its price range (lib/money.ts).
-        const cents = readMoney(text(body.amount, 20), store.currency);
-        if (cents === null || !priceInRange(cents, store.currency)) {
-          return Response.json(
-            { ok: false, error: "code", reason: "amount" },
-            { status: 400 },
-          );
-        }
-        off = { kind: "amount", cents, currency: store.currency };
-      } else {
-        const percent = Number(text(body.percent, 10));
-        if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
-          return Response.json(
-            { ok: false, error: "code", reason: "percent" },
-            { status: 400 },
-          );
-        }
-        off = { kind: "percent", percent };
-      }
-
-      const rawUses = text(body.uses, 10);
-      let maxRedemptions: number | null = null;
-      if (rawUses) {
-        const uses = Number(rawUses);
-        if (!Number.isInteger(uses) || uses < 1) {
-          return Response.json(
-            { ok: false, error: "code", reason: "uses" },
-            { status: 400 },
-          );
-        }
-        maxRedemptions = uses;
-      }
-
-      const made = await createCode(account, code, off, maxRedemptions);
+      const made = await createCode(account, code, off, maxRedemptions, minimum);
       if (!made.ok) {
         return Response.json(
           { ok: false, error: made.reason },

@@ -14,6 +14,7 @@ import {
 } from "@/lib/funnel";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { useLeaveGuard } from "@/components/leave-guard";
+import { commonPath, commonPathWords } from "@/lib/funnel-starter";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -29,7 +30,7 @@ const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
-type Offerable = { id: string; title: string; priceCents: number };
+type Offerable = { id: string; title: string; priceCents: number; bundle?: boolean; draft?: boolean };
 type Picture = { id: string; title: string; src: string };
 
 type Draft = {
@@ -137,6 +138,21 @@ export function FunnelEditor({
       ...all,
       { id, productId: pick.id, price: moneyField(pick.priceCents, currency), headline: "", text: "", imageFrom: "", yes: "", no: "" },
     ]);
+  }
+
+  // A ready path (487 [IT4], item 5): an offer and, after "no thanks", one that costs less, from the creator's own products.
+  const starter = steps.length === 0 ? commonPath(offerable) : null;
+  function startCommon() {
+    if (!starter || steps.length) return;
+    const first = newId();
+    const second = newId();
+    setSteps([
+      { id: first, productId: starter.first.id, price: moneyField(starter.first.priceCents, currency), headline: "", text: "", imageFrom: "", yes: "", no: second },
+      { id: second, productId: starter.second.id, price: moneyField(starter.second.priceCents, currency), headline: "", text: "", imageFrom: "", yes: "", no: "" },
+    ]);
+    toast("Two offers added. Not saved yet.");
+    // The button goes once there are offers: the focus moves to the first offer's product.
+    requestAnimationFrame(() => document.getElementById(`step-${first}-p`)?.focus());
   }
 
   function remove(index: number) {
@@ -396,6 +412,16 @@ export function FunnelEditor({
           <p className="text-center text-sm text-ink-soft">{`${MAX_FUNNEL_STEPS} offers is the most one product can have.`}</p>
         )}
       </div>
+
+      {starter ? (
+        <div className="mt-4 rounded-2xl bg-paper p-4 ring-1 ring-line sm:p-5" data-funnel-starter="">
+          <h3 id="funnel-starter-title" className="font-semibold text-ink">Or start from a common path</h3>
+          <p id="funnel-starter-words" className="mt-1 text-sm text-ink-soft">{commonPathWords(starter, (cents) => formatMoney(cents, currency))}</p>
+          <button type="button" className="btn btn-secondary btn-sm mt-3" onClick={startCommon} aria-describedby="funnel-starter-words">
+            Use this path
+          </button>
+        </div>
+      ) : null}
 
       <p className="mt-5 text-xs leading-relaxed text-ink-soft">
         Only the browser that paid sees these offers, for one hour after paying, and each is answered once. An offer of

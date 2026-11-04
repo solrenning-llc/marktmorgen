@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { PLANS_ON_SALE, PREVIEW_LINE, PREVIEW_LINK } from "@/lib/opening";
+import { moveFocus } from "@/lib/menu-keys";
 
 type MenuItem = {
   label: string;
@@ -30,13 +31,13 @@ const PRODUCT_GROUPS: { label: string; items: MenuItem[] }[] = [
   {
     label: "Sell",
     items: [
-      item("Store page", "Your photo, links and products at one address.", "/platform/store-page", "store"),
+      item("Store page", "Your photo, links and products.", "/platform/store-page", "store"),
       item("Price options", "Several prices on one product.", "/platform/price-options", "tag"),
       item("Sales pages", "Built from blocks, with reviews.", "/platform/sales-pages", "layout"),
-      item("Courses", "Video lessons that open over time.", "/platform/courses", "book"),
-      item("Memberships", "Paid every day, week, month or year.", "/platform/memberships", "repeat"),
-      item("Paid calls", "Booked in their time zone, paid first.", "/platform/calls", "calendar"),
-      item("Community", "Posts and comments, for your buyers.", "/platform/community", "chat"),
+      item("Courses", "Modules that open over time.", "/platform/courses", "book"),
+      item("Memberships", "Daily, weekly, monthly or yearly.", "/platform/memberships", "repeat"),
+      item("Paid calls", "Paid first, in their time zone.", "/platform/calls", "calendar"),
+      item("Community", "Posts and comments for buyers.", "/platform/community", "chat"),
       item("Live events", "RSVPs, reminders and replays.", "/platform/live-events", "video"),
     ],
   },
@@ -53,12 +54,12 @@ const PRODUCT_GROUPS: { label: string; items: MenuItem[] }[] = [
   {
     label: "Deliver and grow",
     items: [
-      item("Instant delivery", "On screen when paid, back by email.", "/platform/instant-delivery", "bolt"),
-      item("People, deals and pipelines", "Contact fields and recorded deals, in pipelines you name.", "/platform/crm", "users"),
+      item("Instant delivery", "On screen and by email.", "/platform/instant-delivery", "bolt"),
+      item("People, deals and pipelines", "Contact fields and deal stages.", "/platform/crm", "users"),
       item("Numbers and pixels", "Visits, sources, sales, ad pixels.", "/platform/insights", "chart"),
       item("Affiliates", "A link for each. You pay them.", "/platform/affiliates", "handshake"),
       item("Outreach", "A pitch to a sponsor or a partner.", "/platform/outreach", "target"),
-      item("Email to your list", "Broadcasts and sequences. Studio.", "/platform/email", "mail"),
+      item("Email to your list", "Broadcasts, sequences. Studio.", "/platform/email", "mail"),
       item("Your own domain", "shop.yourname.com. Studio.", "/platform/domain", "globe"),
     ],
   },
@@ -202,10 +203,62 @@ export function SiteNav() {
     setDrawerOpen(false);
   }, []);
 
+  // Arrow keys (lib/menu-keys.ts): a shortcut on top of Tab, never the only way.
+  const focusOnOpen = useRef<"first" | "last" | null>(null);
+  // With Alt, Ctrl, Cmd or Shift the keys are the browser's (Alt+Left goes back), never the menu's.
+  const modified = (event: React.KeyboardEvent<HTMLElement>) => event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
+  const onRowKey = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (modified(event)) return;
+    const items = [...event.currentTarget.querySelectorAll<HTMLElement>(":scope > a, :scope > button")];
+    const at = items.indexOf(event.target as HTMLElement);
+    if (at < 0) return;
+    const control = (event.target as HTMLElement).getAttribute("aria-controls");
+    if (control && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault();
+      const id = control.slice("menu-".length);
+      const end = event.key === "ArrowDown" ? "first" : "last";
+      // Already open (by hover or a click): its links are there now, so the focus goes at once.
+      const links = [...(document.getElementById(control)?.querySelectorAll<HTMLElement>("a[href]") ?? [])];
+      if (openMenu === id && links.length) {
+        (end === "first" ? links[0] : links.at(-1))?.focus();
+        return;
+      }
+      focusOnOpen.current = end;
+      // Opened from the keyboard: no hover timer may close it under the focus, and Enter on its button closes it at once.
+      keepOpen();
+      openedByClick.current = true;
+      setOpenMenu(id);
+      return;
+    }
+    const next = moveFocus(event.key, at, items.length, "row");
+    if (next === null) return;
+    event.preventDefault();
+    items[next].focus();
+  };
+  const onListKey = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (modified(event)) return;
+    const links = [...event.currentTarget.querySelectorAll<HTMLElement>("a[href]")];
+    const at = links.indexOf(event.target as HTMLElement);
+    const next = moveFocus(event.key, at < 0 ? -1 : at, links.length, "list");
+    if (next === null || at < 0) return;
+    event.preventDefault();
+    links[next].focus();
+  };
+  // A menu opened from the keyboard puts the focus on its first or last link once it is drawn.
+  useEffect(() => {
+    if (!openMenu || !focusOnOpen.current) return;
+    const links = [...(document.getElementById(`menu-${openMenu}`)?.querySelectorAll<HTMLElement>("a[href]") ?? [])];
+    (focusOnOpen.current === "first" ? links[0] : links.at(-1))?.focus();
+    focusOnOpen.current = null;
+  }, [openMenu]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (drawerOpen) toggleRef.current?.focus();
+        // From inside an open menu, the focus goes back to the button that opened it, never to the top of the page.
+        const panel = document.activeElement?.closest<HTMLElement>('[id^="menu-"]');
+        if (panel) headerRef.current?.querySelector<HTMLButtonElement>(`button[aria-controls="${panel.id}"]`)?.focus();
         closeAll();
       }
     };
@@ -331,7 +384,7 @@ export function SiteNav() {
             <Logo />
           </Link>
 
-          <nav aria-label="Main" className="hidden items-center gap-0.5 lg:flex" onMouseEnter={keepOpen}>
+          <nav aria-label="Main" className="hidden items-center gap-0.5 lg:flex" onMouseEnter={keepOpen} onKeyDown={onRowKey}>
             {MENUS.map((menu) => (
               <button
                 key={menu.id}
@@ -399,6 +452,7 @@ export function SiteNav() {
             key={menu.id}
             id={`menu-${menu.id}`}
             onMouseEnter={keepOpen}
+            onKeyDown={onListKey}
             className="absolute inset-x-0 top-full hidden lg:block"
           >
             <div className="container-page">
@@ -414,21 +468,32 @@ export function SiteNav() {
                 height — so this costs nothing where there was no problem.
               */}
               <div
-                className={`nb-pop mx-auto mt-2 grid ${menu.groups ? "max-w-6xl grid-cols-[15rem_1fr]" : "max-w-4xl grid-cols-[17rem_1fr]"} max-h-[calc(100dvh-6rem)] overflow-y-auto overflow-x-hidden overscroll-contain rounded-[var(--r-lg)] border border-line bg-white shadow-[var(--shadow-lg)]`}
+                className={`nb-pop mx-auto mt-2 grid ${menu.groups ? "max-w-6xl grid-cols-[15rem_1fr]" : "max-w-4xl grid-cols-[17rem_1fr]"} max-h-[calc(100dvh-8rem)] overflow-y-auto overflow-x-hidden overscroll-contain rounded-[var(--r-lg)] border border-line bg-white shadow-[var(--shadow-lg)]`}
               >
                 <div className="surface-night on-dark flex flex-col justify-between p-6">
                   <div>
                     <p className="text-[0.9375rem] font-semibold text-white">{menu.label}</p>
                     <p className="mt-2 text-[0.9375rem] leading-relaxed text-white/80">{menu.blurb}</p>
                   </div>
-                  <Link href={menu.feature.href} onClick={closeAll} className="group mt-6 block rounded-[var(--r-md)] border border-white/12 bg-white/[0.06] p-4 transition-colors hover:bg-white/[0.1]">
-                    <span className="block font-semibold text-white">{menu.feature.title}</span>
-                    <span className="mt-1 block text-sm leading-relaxed text-white/70">{menu.feature.body}</span>
-                    <span className="link-arrow on-dark mt-3 text-sm">
-                      {menu.feature.cta}
-                      <Icon name="arrow-right" size={16} className="arrow" />
-                    </span>
-                  </Link>
+                  <div>
+                    <Link href={menu.feature.href} onClick={closeAll} className="group mt-6 block rounded-[var(--r-md)] border border-white/12 bg-white/[0.06] p-4 transition-colors hover:bg-white/[0.1]">
+                      <span className="block font-semibold text-white">{menu.feature.title}</span>
+                      <span className="mt-1 block text-sm leading-relaxed text-white/70">{menu.feature.body}</span>
+                      <span className="link-arrow on-dark mt-3 text-sm">
+                        {menu.feature.cta}
+                        <Icon name="arrow-right" size={16} className="arrow" />
+                      </span>
+                    </Link>
+                    {menu.groups ? (
+                      /* The long menu's last link, here so its columns fit the window without scrolling (524 [NV1]). */
+                      <div className="mt-4">
+                        <Link href="/platform" onClick={closeAll} className="link-arrow on-dark text-sm font-semibold">
+                          Every feature on one page, with its plan
+                          <Icon name="arrow-right" size={16} className="arrow" />
+                        </Link>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
                 {menu.groups ? (
                   <div className="p-3">
@@ -442,14 +507,14 @@ export function SiteNav() {
                                 <Link
                                   href={entry.href}
                                   onClick={closeAll}
-                                  className="flex gap-3 rounded-[var(--r-md)] px-3 py-2.5 transition-colors hover:bg-paper"
+                                  className="flex min-h-11 items-center gap-3 rounded-[var(--r-md)] px-3 py-1.5 transition-colors hover:bg-paper"
                                 >
                                   <span className="icon-tile icon-tile-sm">
                                     <Icon name={entry.icon} size={18} />
                                   </span>
                                   <span>
-                                    <span className="block font-semibold text-ink">{entry.label}</span>
-                                    <span className="mt-0.5 block text-sm leading-snug text-ink-mute">{entry.description}</span>
+                                    <span className="block text-[0.9375rem] font-semibold leading-5 text-ink">{entry.label}</span>
+                                    <span className="block text-sm leading-[1.125rem] text-ink-mute">{entry.description}</span>
                                   </span>
                                 </Link>
                               </li>
@@ -458,14 +523,6 @@ export function SiteNav() {
                         </div>
                       ))}
                     </div>
-                    <Link
-                      href="/platform"
-                      onClick={closeAll}
-                      className="mx-3 mb-1 mt-2 flex items-center justify-between rounded-[var(--r-md)] bg-paper px-4 py-3 text-sm font-semibold text-ink transition-colors hover:bg-sand"
-                    >
-                      Every feature on one page, with the plan each is on
-                      <Icon name="arrow-right" size={16} className="text-violet-deep" />
-                    </Link>
                   </div>
                 ) : (
                 <ul className="grid content-start gap-1 p-3 sm:grid-cols-2">

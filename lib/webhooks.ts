@@ -17,8 +17,12 @@
  *   call.booked          a call or a seat in a session booked and paid
  *   call.moved           a buyer moved their booking
  *   refund.issued        a refund made on the creator's Stripe account
+ *   membership.changed   a membership moved to another price or quantity on
+ *                        the creator's Stripe account (630 [HN6](18))
+ *   dispute.opened       a buyer disputed a payment the store's checkout made
+ *                        (630 [HN6](18))
  *
- * The first four about money are read from the creator's own Stripe account,
+ * The first four about money, and these last two, are read from the creator's own Stripe account,
  * which is the ledger, by the five-minute job (watchStripe): its events are
  * walked from where the last run stopped, so a refund made in the Stripe
  * dashboard is noticed on the next run, within about five minutes. The other
@@ -56,16 +60,19 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+// The repository's compare-and-set script (GET equals what was read, then SET), also modelled by lib/redis-memory.ts.
+import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
 import { type Store, storeForHandle, saleHandles } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
-import { WEBHOOK_ADD_PAUSED_WORDS, WEBHOOK_PAUSED_COUNTED, WEBHOOK_PAUSED_NOT_SENT_WORDS, integrationPauseWord } from "@/lib/integration-pause";
+import { WEBHOOK_ADD_PAUSED_WORDS, WEBHOOK_PAUSED_COUNTED, WEBHOOK_PAUSED_NOT_SENT_WORDS, WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { readListing } from "@/lib/catalog";
 import { SITE_URL } from "@/lib/site-url";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
+import { MAX_ENDPOINTS, shortAddress } from "@/lib/webhook-limits";
 
 export const WEBHOOK_EVENTS = [
   "sale.completed",
@@ -77,11 +84,13 @@ export const WEBHOOK_EVENTS = [
   "call.moved",
   "refund.issued",
   "sequence.step",
+  "membership.changed",
+  "dispute.opened",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
-/** Endpoints one store may have. */
-export const MAX_ENDPOINTS = 5;
+/** Endpoints one store may have, and how an address is shown (lib/webhook-limits.ts, which the studio and the feature page read too). */
+export { MAX_ENDPOINTS, shortAddress };
 /** Deliveries a store's studio keeps. */
 export const LOG_SIZE = 50;
 /** Minutes to wait before each try after the first. */
@@ -103,7 +112,16 @@ const MAX_RETRIES_PER_RUN = 100;
 const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
 
-type Endpoint = { id: string; url: string; secret: string; events: WebhookEvent[]; addedAt: string };
+/**
+ * An endpoint. `previous` is the secret it had before the creator replaced
+ * it (378 [TB4]), kept only until `previousUntil` (milliseconds): until then
+ * every message carries a signature under each, so a receiver still holding
+ * the old secret keeps accepting while the creator moves it to the new one.
+ */
+type Endpoint = { id: string; url: string; secret: string; events: WebhookEvent[]; addedAt: string; previous?: string; previousUntil?: number };
+
+/** How long the old secret still signs after it is replaced: one day, then it is gone. */
+export const ROTATION_HOURS = 24;
 type Config = { handle: string; endpoints: Endpoint[]; since: number };
 
 export type Delivery = {
@@ -124,6 +142,10 @@ export type Delivery = {
   createdAt: number;
   /** Set when it was not sent because the plan's costs were paused (232 [CA1] 4b4b2). */
   notSentPaused?: true;
+  /** The failed delivery this one sends again, by the creator's hand (378 [TB4] unit 3). */
+  resentFrom?: string;
+  /** On a failed delivery: the last time it was sent again by hand, so it is sent again only while that one failed. */
+  resentAs?: string;
 };
 
 const cfgKey = (statsId: string) => `nl:hooks:cfg:${statsId}`;
@@ -143,6 +165,15 @@ function isEvent(value: unknown): value is WebhookEvent {
   return typeof value === "string" && (WEBHOOK_EVENTS as readonly string[]).includes(value);
 }
 
+/** An endpoint with its old secret dropped once its day is over, or when it was never well formed. */
+function withoutStalePrevious(endpoint: Endpoint, now = Date.now()): Endpoint {
+  const { previous, previousUntil, ...rest } = endpoint;
+  if (typeof previous === "string" && previous && typeof previousUntil === "number" && Number.isFinite(previousUntil) && previousUntil > now) {
+    return { ...rest, previous, previousUntil };
+  }
+  return rest;
+}
+
 function parseConfig(raw: unknown): Config | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -150,7 +181,7 @@ function parseConfig(raw: unknown): Config | null {
     const endpoints = Array.isArray(value.endpoints)
       ? value.endpoints
           .filter((e): e is Endpoint => Boolean(e) && typeof e.id === "string" && ENDPOINT_ID_PATTERN.test(e.id) && typeof e.url === "string" && typeof e.secret === "string")
-          .map((e) => ({ ...e, events: Array.isArray(e.events) ? e.events.filter(isEvent) : [] }))
+          .map((e) => withoutStalePrevious({ ...e, events: Array.isArray(e.events) ? e.events.filter(isEvent) : [] }))
       : [];
     return {
       handle: typeof value.handle === "string" ? value.handle : "",
@@ -175,6 +206,30 @@ function parseDelivery(raw: unknown): Delivery | null {
 async function readConfig(statsId: string): Promise<Config | null> {
   const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
   return parseConfig(raw);
+}
+
+/** How many times a change is tried again from a fresh read when another one landed first. */
+const CONFIG_WRITE_TRIES = 4;
+
+/**
+ * Changes a store's webhook settings over exactly what was read (378 [TB4]).
+ * Every writer reads the whole settings and writes them back; before this, two
+ * changes at once could undo each other in silence, and a replaced secret
+ * could come back as the old one while the creator was holding the new. Now
+ * the write lands only if the settings are still the text read
+ * (COMPARE_AND_SET); otherwise the change is made again on a fresh read, a
+ * few times, and then refused. `change` returns null to write nothing.
+ */
+async function changeConfig(statsId: string, change: (config: Config | null) => Config | null): Promise<{ before: Config | null; after: Config } | null> {
+  for (let tries = 0; tries < CONFIG_WRITE_TRIES; tries += 1) {
+    const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
+    const before = parseConfig(raw);
+    const after = change(before);
+    if (!after) return null;
+    const [saved] = await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), typeof raw === "string" ? raw : "", JSON.stringify(after)]]);
+    if (Number(saved) === 1) return { before, after };
+  }
+  throw new Error("The webhook settings kept changing while being saved.");
 }
 
 /** The source fields of a sale.completed message, read off the order's metadata; null where it carries none. */
@@ -207,6 +262,20 @@ export function eventIdFor(statsId: string, type: string, seed: string): string 
 export function signature(secret: string, timestamp: number, body: string): string {
   const hex = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
   return `t=${timestamp},v1=${hex}`;
+}
+
+/**
+ * The header an endpoint's message carries: one v1 under its secret and,
+ * while a replaced secret's day lasts, a second v1 under the old one, as
+ * Stripe does during its own secret rolls. A receiver that accepts any v1 its
+ * secret matches works with either, so nothing is refused mid-change, and a
+ * retry still waiting when the secret is replaced goes out signed with both.
+ */
+export function signatureFor(endpoint: Pick<Endpoint, "secret" | "previous" | "previousUntil">, timestamp: number, body: string, now = Date.now()): string {
+  const header = signature(endpoint.secret, timestamp, body);
+  if (!endpoint.previous || typeof endpoint.previousUntil !== "number" || endpoint.previousUntil <= now) return header;
+  const old = createHmac("sha256", endpoint.previous).update(`${timestamp}.${body}`).digest("hex");
+  return `${header},v1=${old}`;
 }
 
 // ---- Sending ----------------------------------------------------------------
@@ -267,7 +336,7 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
         "Marktmorgen-Event-Type": delivery.type,
         "Marktmorgen-Delivery-Id": delivery.id,
         "Marktmorgen-Timestamp": String(timestamp),
-        "Marktmorgen-Signature": signature(endpoint.secret, timestamp, delivery.body),
+        "Marktmorgen-Signature": signatureFor(endpoint, timestamp, delivery.body, now),
       },
       ...(hooksForTests.fetch ?? {}),
     });
@@ -433,26 +502,12 @@ export async function deliverDue(deadline: number, now = Date.now()): Promise<{ 
 
 // ---- The studio ---------------------------------------------------------------
 
-export type EndpointView = { id: string; where: string; events: WebhookEvent[]; addedAt: string };
-export type DeliveryView = Pick<Delivery, "id" | "eventId" | "type" | "state" | "attempts" | "next" | "lastStatus" | "lastError" | "lastAt" | "createdAt" | "notSentPaused"> & {
+/** What the studio sees of an endpoint: never a secret, only until when the old one still signs. */
+export type EndpointView = { id: string; where: string; events: WebhookEvent[]; addedAt: string; oldSecretUntil?: string };
+export type DeliveryView = Pick<Delivery, "id" | "eventId" | "type" | "state" | "attempts" | "next" | "lastStatus" | "lastError" | "lastAt" | "createdAt" | "notSentPaused" | "resentFrom" | "resentAs"> & {
   endpoint: string;
 };
 export type WebhooksView = { endpoints: EndpointView[]; log: DeliveryView[] };
-
-/**
- * An endpoint's address as the studio shows it: the host and enough of the
- * path to tell two apart, never the whole of a secret-bearing path.
- */
-export function shortAddress(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const path = parsed.pathname.replace(/\/+$/, "");
-    const tail = path.length > 24 ? `${path.slice(0, 10)}…${path.slice(-6)}` : path;
-    return `${parsed.host}${tail}`;
-  } catch {
-    return "an endpoint";
-  }
-}
 
 export async function webhooksView(store: Store): Promise<WebhooksView> {
   if (!store.statsId || !isRedisConfigured()) return { endpoints: [], log: [] };
@@ -465,7 +520,13 @@ export async function webhooksView(store: Store): Promise<WebhooksView> {
   const deliveries = ids.length ? await redisPipeline(ids.map((id) => ["GET", deliveryKey(id)])) : [];
   const names = new Map((config?.endpoints ?? []).map((e) => [e.id, shortAddress(e.url)]));
   return {
-    endpoints: (config?.endpoints ?? []).map((e) => ({ id: e.id, where: shortAddress(e.url), events: e.events, addedAt: e.addedAt })),
+    endpoints: (config?.endpoints ?? []).map((e) => ({
+      id: e.id,
+      where: shortAddress(e.url),
+      events: e.events,
+      addedAt: e.addedAt,
+      ...(e.previous && e.previousUntil ? { oldSecretUntil: new Date(e.previousUntil).toISOString() } : {}),
+    })),
     log: deliveries
       .map(parseDelivery)
       .filter((d): d is Delivery => d !== null)
@@ -481,6 +542,8 @@ export async function webhooksView(store: Store): Promise<WebhooksView> {
         lastAt: d.lastAt,
         createdAt: d.createdAt,
         ...(d.notSentPaused === true ? { notSentPaused: true as const } : {}),
+        ...(typeof d.resentFrom === "string" && DELIVERY_ID_PATTERN.test(d.resentFrom) ? { resentFrom: d.resentFrom } : {}),
+        ...(typeof d.resentAs === "string" && DELIVERY_ID_PATTERN.test(d.resentAs) ? { resentAs: d.resentAs } : {}),
         endpoint: names.get(d.endpoint) ?? "a removed endpoint",
       })),
   };
@@ -558,12 +621,20 @@ export async function addEndpoint(store: Store, rawUrl: string, events: unknown,
   const secret = `whsec_${randomBytes(24).toString("base64url")}`;
   const endpoint: Endpoint = { id: `we_${randomBytes(8).toString("hex")}`, url, secret, events: chosen, addedAt: new Date(now).toISOString() };
   // The Stripe pass starts from now for a store's first endpoint: nothing
-  // that happened before it was added is sent to it.
-  const next: Config = { handle: store.handle, endpoints: [...config.endpoints, endpoint], since: config.endpoints.length ? config.since : Math.floor(now / 1000) };
+  // that happened before it was added is sent to it. Checked again on the
+  // settings as they are when written, in case another change landed first.
+  let refused: AddEndpointResult | null = null;
+  const written = await changeConfig(store.statsId, (fresh) => {
+    const current = fresh ?? { handle: store.handle, endpoints: [], since: Math.floor(now / 1000) };
+    if (current.endpoints.length >= MAX_ENDPOINTS) refused = { ok: false, reason: "full", message: `A store can have ${MAX_ENDPOINTS} endpoints. Remove one first.` };
+    else if (current.endpoints.some((e) => e.url === url)) refused = { ok: false, reason: "duplicate", message: "That endpoint is already added." };
+    if (refused) return null;
+    return { handle: store.handle, endpoints: [...current.endpoints, endpoint], since: current.endpoints.length ? current.since : Math.floor(now / 1000) };
+  });
+  if (!written) return refused ?? { ok: false, reason: "unavailable", message: "The endpoint could not be added just now. Try again in a moment." };
   await redisPipeline([
-    ["SET", cfgKey(store.statsId), JSON.stringify(next)],
     ["SADD", STORES_KEY, store.statsId],
-    ...(config.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)]]),
+    ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)]]),
   ]);
   return { ok: true, secret, view: await webhooksView(store) };
 }
@@ -579,23 +650,128 @@ export async function setEndpointEvents(store: Store, id: string, events: unknow
   // A subset removes future work; adding a new event creates a new obligation.
   // Keep retained event removal available without a fresh admission.
   if (chosen.some(event => !endpoint.events.includes(event)) && store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "unavailable";
-  const next: Config = { ...config, handle: store.handle, endpoints: config.endpoints.map((e) => (e.id === id ? { ...e, events: chosen } : e)) };
-  await redisPipeline([["SET", cfgKey(store.statsId), JSON.stringify(next)]]);
+  const written = await changeConfig(store.statsId, (fresh) =>
+    fresh && fresh.endpoints.some((e) => e.id === id) ? { ...fresh, handle: store.handle, endpoints: fresh.endpoints.map((e) => (e.id === id ? { ...e, events: chosen } : e)) } : null,
+  );
+  if (!written) return "missing";
   return webhooksView(store);
+}
+
+export type RotateSecretResult = { ok: true; secret: string; oldSecretUntil: string; view: WebhooksView } | { ok: false; reason: "missing" };
+
+/**
+ * Replaces an endpoint's signing secret (378 [TB4]). The new one is made here
+ * and returned this once, like the first; the one it replaces keeps signing
+ * beside it for ROTATION_HOURS, so the creator has a day to paste the new one
+ * into the receiver, and then is dropped. Replacing it again within that day
+ * keeps only the newest two: the oldest stops at once. No delivery is sent or
+ * counted, and no new work is made, so it never waits on a plan's allowance.
+ */
+export async function rotateSecret(store: Store, id: string, now = Date.now()): Promise<RotateSecretResult> {
+  if (!store.statsId) return { ok: false, reason: "missing" };
+  const secret = `whsec_${randomBytes(24).toString("base64url")}`;
+  const previousUntil = now + ROTATION_HOURS * 3_600_000;
+  // Over the settings as they are when written, so the secret replaced is the one in force then.
+  const written = await changeConfig(store.statsId, (fresh) => {
+    const endpoint = fresh?.endpoints.find((e) => e.id === id);
+    if (!fresh || !endpoint) return null;
+    return { ...fresh, handle: store.handle, endpoints: fresh.endpoints.map((e) => (e.id === id ? { ...e, secret, previous: endpoint.secret, previousUntil } : withoutStalePrevious(e, now))) };
+  });
+  if (!written) return { ok: false, reason: "missing" };
+  return { ok: true, secret, oldSecretUntil: new Date(previousUntil).toISOString(), view: await webhooksView(store) };
 }
 
 /** Removes an endpoint. Anything still waiting to be sent to it is dropped at its next try. */
 export async function removeEndpoint(store: Store, id: string): Promise<WebhooksView> {
   if (!store.statsId) return { endpoints: [], log: [] };
-  const config = await readConfig(store.statsId);
-  if (config && config.endpoints.some((e) => e.id === id)) {
-    const endpoints = config.endpoints.filter((e) => e.id !== id);
-    await redisPipeline([
-      ["SET", cfgKey(store.statsId), JSON.stringify({ ...config, handle: store.handle, endpoints })],
-      ...(endpoints.length ? [] : [["SREM", STORES_KEY, store.statsId]]),
-    ]);
-  }
+  const written = await changeConfig(store.statsId, (fresh) =>
+    fresh && fresh.endpoints.some((e) => e.id === id) ? { ...fresh, handle: store.handle, endpoints: fresh.endpoints.filter((e) => e.id !== id) } : null,
+  );
+  if (written && !written.after.endpoints.length) await redisPipeline([["SREM", STORES_KEY, store.statsId]]);
   return webhooksView(store);
+}
+
+export type ResendResult =
+  | { ok: true; delivery: Delivery; view: WebhooksView }
+  | { ok: false; reason: "missing" | "not_failed" | "not_heard" | "resent" | "limited" | "unavailable" }
+  | { ok: false; reason: "used" | "paused"; message: string };
+
+/**
+ * Sends a failed delivery again, once, now, because the creator asked from
+ * the log (378 [TB4] unit 3). Only a delivery that failed for good, of this
+ * store, to an endpoint it still has: a delivered one is never sent twice by
+ * hand. The message is the same message, with the same event id, so a
+ * receiver that already took it drops the repeat; it is signed afresh, with
+ * the endpoint's secrets as they are now. It is a new line in the log that
+ * names the one it sends again, tried once and not put back on the schedule.
+ * Like a test it is one of the store's webhook deliveries for its month,
+ * taken before the endpoint is called, and it shares the tests' limit a
+ * minute, so a press held down cannot hammer anybody.
+ */
+export async function resendDelivery(store: Store, deliveryId: string, now = Date.now()): Promise<ResendResult> {
+  if (!store.statsId || !DELIVERY_ID_PATTERN.test(deliveryId)) return { ok: false, reason: "missing" };
+  const statsId = store.statsId;
+  // Paused like a test while the plan's costs are paused, whoever calls this.
+  const paused = integrationPauseWord(store, now / 1000);
+  if (paused) return { ok: false, reason: "paused", message: WEBHOOK_TEST_PAUSED_WORDS[paused] };
+  const [raw, ttl] = await redisPipeline([["GET", deliveryKey(deliveryId)], ["PTTL", deliveryKey(deliveryId)]]);
+  const before = parseDelivery(raw);
+  if (typeof raw !== "string" || !before || before.statsId !== statsId || before.type === "test") return { ok: false, reason: "missing" };
+  if (before.state !== "failed") return { ok: false, reason: "not_failed" };
+  // A copy sent by hand is never sent again itself: the original is, so one event has one line of resends.
+  if (before.resentFrom) return { ok: false, reason: "resent" };
+  // Sent again once: while the last resend is delivered or still being tried, not again.
+  if (before.resentAs) {
+    const [rawLast] = await redisPipeline([["GET", deliveryKey(before.resentAs)]]);
+    const last = parseDelivery(rawLast);
+    if (last && last.state !== "failed") return { ok: false, reason: "resent" };
+  }
+  const config = await readConfig(statsId);
+  const endpoint = config?.endpoints.find((e) => e.id === before.endpoint);
+  if (!endpoint) return { ok: false, reason: "missing" };
+  // An endpoint that no longer hears this kind of event is not sent it, by hand either.
+  if (!(endpoint.events as string[]).includes(before.type)) return { ok: false, reason: "not_heard" };
+  const againId = `dlv_${randomBytes(12).toString("hex")}`;
+  // Two presses at once: only the one that marks the original first goes on (COMPARE_AND_SET over the text read).
+  // A press refused below (the minute's limit, the month's deliveries) leaves a mark naming nothing, which allows the next.
+  const [marked] = await redisPipeline([["EVAL", COMPARE_AND_SET, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId })]]);
+  if (Number(marked) !== 1) return { ok: false, reason: "resent" };
+  // The write cleared the original's expiry; it keeps the time it had left, never more.
+  const left = Number(ttl);
+  await redisPipeline([["PEXPIRE", deliveryKey(deliveryId), Number.isFinite(left) && left > 0 ? left : DELIVERY_SECONDS * 1000]]);
+  const [, count] = await redisPipeline([
+    ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
+    ["INCR", testsKey(statsId)],
+  ]);
+  if (Number(count) > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unavailable" };
+  const taken = await takeAllowance(store, "webhook", 1, now);
+  if (!taken.ok) return { ok: false, reason: "used", message: taken.message };
+  const again: Delivery = {
+    id: againId,
+    statsId,
+    endpoint: endpoint.id,
+    eventId: before.eventId,
+    type: before.type,
+    body: before.body,
+    attempts: 0,
+    state: "queued",
+    next: 0,
+    lastStatus: 0,
+    lastError: "",
+    lastAt: 0,
+    createdAt: now,
+    resentFrom: before.id,
+  };
+  const tried = await attempt(again, endpoint, "taken", now);
+  // Tried once, by hand: a failure is shown, never put back on the schedule.
+  const done: Delivery = tried.state === "retrying" ? { ...tried, state: "failed", next: 0 } : tried;
+  await redisPipeline([
+    ["SET", deliveryKey(done.id), JSON.stringify(done), "EX", DELIVERY_SECONDS],
+    ["LPUSH", logKey(statsId), done.id],
+    ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1],
+  ]);
+  return { ok: true, delivery: done, view: await webhooksView(store) };
 }
 
 /**
@@ -660,11 +836,15 @@ const STRIPE_TYPES = [
   "customer.subscription.updated",
   "customer.subscription.deleted",
   "charge.refunded",
+  "charge.dispute.created",
 ];
+
+/** Our events read from the creator's Stripe account, so a store listening for any of them has its account watched. */
+const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened"];
 
 /** Which of the Stripe-read events an endpoint of this store listens for. */
 function wantsStripe(config: Config): boolean {
-  return config.endpoints.some((e) => e.events.some((t) => t === "sale.completed" || t === "membership.started" || t === "membership.canceled" || t === "refund.issued"));
+  return config.endpoints.some((e) => e.events.some((t) => FROM_STRIPE.includes(t)));
 }
 
 const iso = (seconds: unknown) => (typeof seconds === "number" && seconds > 0 ? new Date(seconds * 1000).toISOString() : null);
@@ -672,7 +852,7 @@ const str = (value: unknown) => (typeof value === "string" && value ? value : nu
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
 /** Turns one Stripe event of this store into ours, if it is one we send. */
-async function fromStripe(store: Store, event: StripeEvent, lookups: { left: number }): Promise<void> {
+async function fromStripe(store: Store, event: StripeEvent, lookups: { left: number; disputes: number }): Promise<void> {
   const object = event.data?.object ?? {};
   const previous = event.data?.previous_attributes ?? {};
   const handles = saleHandles(store);
@@ -766,6 +946,23 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
     const id = str(object.id);
     if (!id) return;
     const ended = event.type === "customer.subscription.deleted";
+    // A move to another price or quantity (an upgrade, a downgrade, another
+    // interval) is its own event, said once per change; the same update may
+    // also set an end, which goes on below as a cancellation.
+    if (!ended && "items" in previous) {
+      const from = planOf(previous.items);
+      const to = planOf(object.items);
+      if (from && to && (from.price !== to.price || from.quantity !== to.quantity)) {
+        await emitEvent(store, "membership.changed", `${id}|${num(event.created)}|${to.price}|${to.quantity}`, {
+          subscription: id,
+          product: await product(meta.product),
+          option: meta.option ?? null,
+          from,
+          to,
+          changed_at: iso(event.created),
+        }, created);
+      }
+    }
     if (!ended) {
       // Only the change that sets an end. A membership with a set number of
       // payments is given its end when it is bought; that is not a cancellation.
@@ -829,7 +1026,57 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: { left: num
       buyer: { email: str(billing.email) ?? str(object.receipt_email), name: str(billing.name) },
       refunded_at: iso(event.created),
     }, created);
+    return;
   }
+
+  if (event.type === "charge.dispute.created") {
+    const dispute = str(object.id);
+    if (!dispute) return;
+    const intent = str(object.payment_intent);
+    // A dispute carries no store of its own: it is asked about through its
+    // payment, from a budget of its own, so refunds in the same run never
+    // leave a dispute unread. One past that budget is said in the log.
+    if (!intent || !store.stripeAccountId) return;
+    if (lookups.disputes <= 0) {
+      console.error("a store had more disputes in one run than are read; the rest are not sent", store.handle);
+      return;
+    }
+    lookups.disputes -= 1;
+    try {
+      meta = ((await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(intent)}`)).metadata ?? {}) as Record<string, string>;
+    } catch {
+      return;
+    }
+    if (!handles.has(meta.store ?? "")) return;
+    const evidence = (object.evidence_details ?? {}) as { due_by?: unknown };
+    await emitEvent(store, "dispute.opened", dispute, {
+      dispute,
+      charge: str(object.charge),
+      payment_intent: intent,
+      product: await product(meta.product),
+      option: meta.option ?? null,
+      amount_cents: num(object.amount),
+      currency: str(object.currency) ?? "usd",
+      reason: str(object.reason),
+      status: str(object.status),
+      evidence_due_by: iso(evidence.due_by),
+      opened_at: iso(event.created),
+    }, created);
+  }
+}
+
+/** A subscription's first item as a membership's plan: its price, amount, interval and quantity; null when it has none. */
+function planOf(items: unknown): { price: string | null; amount_cents: number; interval: string | null; interval_count: number; quantity: number } | null {
+  const first = ((items as { data?: unknown } | null | undefined)?.data as Record<string, unknown>[] | undefined)?.[0];
+  const price = (first?.price ?? null) as { id?: unknown; unit_amount?: unknown; recurring?: { interval?: unknown; interval_count?: unknown } | null } | null;
+  if (!first || !price) return null;
+  return {
+    price: str(price.id),
+    amount_cents: num(price.unit_amount),
+    interval: str(price.recurring?.interval),
+    interval_count: num(price.recurring?.interval_count) || 1,
+    quantity: num(first.quantity) || 1,
+  };
 }
 
 /** A partial or malformed observation must not advance past unseen events. */
@@ -854,7 +1101,7 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
   const types = STRIPE_TYPES.map((t, i) => `types[${i}]=${encodeURIComponent(t)}`).join("&");
   const [anchorRaw] = await redisPipeline([["GET", anchorKey(statsId)]]);
   const anchor = typeof anchorRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(anchorRaw) ? anchorRaw : "";
-  const lookups = { left: 10 };
+  const lookups = { left: 10, disputes: 10 };
   let handled = 0;
   const send = async (rows: StripeEvent[]) => {
     // Stripe lists newest first; they are sent in the order they happened.
@@ -992,8 +1239,6 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
 /** Keeps the handle the job looks a store up by current, from the studio. */
 export async function keepHandle(store: Store): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
-  const config = await readConfig(store.statsId);
-  if (config && config.handle !== store.handle) {
-    await redisPipeline([["SET", cfgKey(store.statsId), JSON.stringify({ ...config, handle: store.handle })]]);
-  }
+  // A handle kept in step is housekeeping: a write that keeps meeting other changes is left for the next one.
+  await changeConfig(store.statsId, (fresh) => (fresh && fresh.handle !== store.handle ? { ...fresh, handle: store.handle } : null)).catch((error) => console.error("keeping the webhook handle failed", error));
 }

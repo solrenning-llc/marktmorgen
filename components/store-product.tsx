@@ -1,3 +1,5 @@
+import { EmailField } from "@/components/email-field";
+import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
 import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { activeIntro } from "@/lib/intro-price";
@@ -12,7 +14,7 @@ import { activeBumps, activePlan, planFor } from "@/lib/product-extras";
 import { activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { activePwyw } from "@/lib/pay-what-you-want";
-import { imageUrl, IMAGE_SIZES, imageSrcSet } from "@/lib/product-image";
+import { IMAGE_SIZES } from "@/lib/product-image";
 import type { PageAction } from "@/components/sales-blocks";
 import { RatingLine } from "@/components/review-list";
 import type { Summary } from "@/lib/review-summary";
@@ -139,13 +141,15 @@ export function SaleNote({ store, product }: { store: Store; product: Listing })
 /** What a card says about a call: one person, a group, or dated live sessions. */
 function callLine(store: Store, call: NonNullable<Listing["call"]>, now = Date.now()): string {
   const { w } = speech(store);
+  // In person (lib/call-place.ts): no call and nothing online; the address is on its booking page.
+  const inPerson = Boolean(call.place);
   if (call.kind === "live") {
     const coming = call.sessions.filter((s) => s.start > now).length;
-    if (coming === 0) return w.callLiveNone;
-    return w.callLive(coming);
+    if (coming === 0) return inPerson ? w.inPersonLiveNone : w.callLiveNone;
+    return inPerson ? w.inPersonLive(coming) : w.callLive(coming);
   }
-  if (call.seats > 1) return w.callGroup(call.minutes, call.seats);
-  return w.callOne(call.minutes);
+  if (call.seats > 1) return inPerson ? w.inPersonGroup(call.minutes, call.seats) : w.callGroup(call.minutes, call.seats);
+  return inPerson ? w.inPersonOne(call.minutes) : w.callOne(call.minutes);
 }
 
 /** Whether a call can still be booked: always for weekly hours, and for dated sessions while one is before its notice. */
@@ -299,10 +303,10 @@ export function GiftBox({ store, product, problem = "", consentAgain = false }: 
           <p className="st-note text-sm" role="alert">{problems[problem]}</p>
         ) : null}
         <GivenOptionPicker store={store} product={product} />
-        <label className="block">
-          <span className="st-label">{w.theirEmail}</span>
-          <input className="st-field mt-2" type="email" name="gift_to" required maxLength={254} autoComplete="off" placeholder={w.friendPlaceholder} />
-        </label>
+        <div>
+          <label htmlFor={`gift-to-${product.id}`} className="st-label">{w.theirEmail}</label>
+          <EmailField id={`gift-to-${product.id}`} name="gift_to" className="st-field mt-2" required autoComplete="off" placeholder={w.friendPlaceholder} language={store.language} />
+        </div>
         <label className="block">
           <span className="st-label">{w.yourNameShown}</span>
           <input className="st-field mt-2" name="gift_from" maxLength={60} autoComplete="name" placeholder={w.namePlaceholder} />
@@ -371,10 +375,10 @@ export function RemindBox({ store, product, asked = "", when = "hour" }: { store
               <input type="text" name="website" tabIndex={-1} autoComplete="off" />
             </label>
           </div>
-          <label className="block">
-            <span className="st-label">{w.yourEmail}</span>
-            <input className="st-field mt-2" type="email" name="email" required maxLength={254} autoComplete="email" placeholder={w.emailPlaceholder} />
-          </label>
+          <div>
+            <label htmlFor={`ask-email-${product.id}`} className="st-label">{w.yourEmail}</label>
+            <EmailField id={`ask-email-${product.id}`} name="email" className="st-field mt-2" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
+          </div>
           <label className="block">
             <span className="st-label">{m.askWhen}</span>
             <select className="st-field mt-2" name="when" defaultValue={said}>
@@ -458,16 +462,7 @@ export function WaitlistForm({ store, product, writes = false }: { store: Store;
       <label htmlFor={`w-${product.id}`} className="st-label">
         {w.yourEmail}
       </label>
-      <input
-        id={`w-${product.id}`}
-        type="email"
-        name="email"
-        required
-        maxLength={254}
-        autoComplete="email"
-        placeholder={w.emailPlaceholder}
-        className="st-field"
-      />
+      <EmailField id={`w-${product.id}`} name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
       <label htmlFor={`wc-${product.id}`} className="st-muted flex cursor-pointer items-start gap-3 text-sm">
         <input id={`wc-${product.id}`} type="checkbox" name="consent" value="yes" data-joins="" className="mt-0.5 h-4 w-4 shrink-0" />
         <span>{w.alsoOtherEmails(store.name)}</span>
@@ -634,16 +629,7 @@ export function BuyBox({
         <label htmlFor={`e-${place}${product.id}`} className="st-label">
           {w.yourEmail}
         </label>
-        <input
-          id={`e-${place}${product.id}`}
-          type="email"
-          name="email"
-          required
-          maxLength={254}
-          autoComplete="email"
-          placeholder={w.emailPlaceholder}
-          className="st-field"
-        />
+        <EmailField id={`e-${place}${product.id}`} name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
         <label htmlFor={`c-${place}${product.id}`} className="st-muted flex cursor-pointer items-start gap-3 text-sm">
           <input id={`c-${place}${product.id}`} type="checkbox" name="consent" value="yes" data-joins="" className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{w.alsoEmails(store.name)}</span>
@@ -1149,8 +1135,8 @@ export function ProductCard({
     // and picks between the two itself (lib/product-image.ts, imageSrcSet).
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={imageUrl(image)}
-      srcSet={imageSrcSet(image)}
+      src={servedImageUrl(image)}
+      srcSet={servedSrcSet(image)}
       sizes={image.small ? (style === "preview" ? IMAGE_SIZES.cover : IMAGE_SIZES.thumb) : undefined}
       alt={image.alt}
       width={image.width}

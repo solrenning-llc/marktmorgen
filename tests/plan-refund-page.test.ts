@@ -34,6 +34,9 @@ async function main() {
   const html = await page();
   is("names the store", html.includes(`Refund your payment for ${who.store.name}`), true);
   is("the amount, on the button and in the review", [html.includes("Refund $69 and end the plan for"), html.includes('data-refund-amount="6900"')], [true, true]);
+  // The listed part may be a renewal (the first already given back, or in a dispute): the sentence names the list,
+  // never "your first payment" (independent review, 31/10/2026).
+  is("the amount's sentence names the payments listed, not which one they are", [html.includes("the plan payment listed below, in full"), html.includes("your first payment, in full")], [true, false]);
   is("the pass carries the amount shown", String(await pass(who.store.sid)).endsWith(":6900"), true);
   is("what closing does to the store's data and to its renewals is said", [html.includes("its files are removed"), html.includes("stopped at Stripe"), html.includes("deleted")], [true, true, true]);
   is("never that the creator's own Stripe account is untouched", /not touched/.test(html), false);

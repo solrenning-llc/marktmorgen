@@ -16,7 +16,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { emailKey, storeKey } from "@/lib/learn";
-import { CHECK_HOURS, MAX_PRODUCT_ROLES, assignable, cleanRoles, rolesDiff, rolesFor } from "@/lib/discord-rules";
+import { CHECK_HOURS, KICK_TRIES, MAX_PRODUCT_ROLES, assignable, cleanRoles, rolesDiff, rolesFor } from "@/lib/discord-rules";
 import { authorizeUrl } from "@/lib/discord";
 import { checkMember, joinServer } from "@/lib/discord-access";
 import { accountOf, dueMembers, readMember, readServer, saveServer, setProductRoles, startTrip, takeTrip } from "@/lib/discord-store";
@@ -41,6 +41,8 @@ let handle = "";
 let productId = "";
 const discord: string[] = [];
 const members = new Set<string>();
+// When true, Discord answers a removal from the server with an error, as when the bot lost "Kick Members".
+let kickFails = false;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -56,6 +58,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return new Response(fresh ? "{}" : null, { status: fresh ? 201 : 204 });
     }
     if (member && method === "DELETE") {
+      if (kickFails) return json({ message: "Missing Permissions", code: 50013 }, 403);
       members.delete(member[1]);
       return new Response(null, { status: 204 });
     }
@@ -164,7 +167,30 @@ async function main(): Promise<void> {
   await saveServer(room, { id: SERVER, name: "The Club", at: 1, kick: true });
   stripe = "canceled";
   await redisFlushCache();
-  is("ended, and removed", [await checkMember(store.sid, ANA_TWO), members.has(ANA_TWO)], ["ended", false]);
+  kickFails = true;
+  const notOut = await checkMember(store.sid, ANA_TWO);
+  const kept = await readMember(room, ANA_TWO);
+  is("Discord refusing the removal: kept to try again, never forgotten while still in the server", [notOut, members.has(ANA_TWO), kept?.r, kept?.p, kept?.k], ["later", true, [], [], 1]);
+  const due = await dueMembers(Date.now() + CHECK_HOURS * 3_600_000 + 1_000);
+  is("and back in line for the next check", due.some((d) => d.userId === ANA_TWO), true);
+  discord.length = 0;
+  kickFails = false;
+  await redisFlushCache();
+  is("at the next check: only the removal is tried, then it is forgotten", [await checkMember(store.sid, ANA_TWO), discord, members.has(ANA_TWO), await readMember(room, ANA_TWO)], ["ended", [`DELETE /guilds/${SERVER}/members/${ANA_TWO}`], false, null]);
+
+  // A refusal that lasts: KICK_TRIES more checks, then forgotten as before, so it never keeps a check going.
+  stripe = "active";
+  await redisFlushCache();
+  await joinServer({ store, email: "ana@example.com", accessToken: "t", user: { id: ANA_TWO, name: "Ana" } });
+  stripe = "canceled";
+  kickFails = true;
+  const tries: string[] = [];
+  for (let i = 0; i <= KICK_TRIES; i += 1) {
+    await redisFlushCache();
+    tries.push(await checkMember(store.sid, ANA_TWO));
+  }
+  is(`a lasting refusal: ${KICK_TRIES} tries kept, then forgotten`, [tries, await readMember(room, ANA_TWO)], [[...Array.from({ length: KICK_TRIES }, () => "later"), "ended"], null]);
+  kickFails = false;
 
   part("A funded optional bot-install start refuses before provider consent");
   await claimHandle("funded-discord@example.com", "funded-discord-shop", "Funded Discord Shop", "");
@@ -176,7 +202,7 @@ async function main(): Promise<void> {
   const beforeInstallRequests = discord.length;
   const installStart = await startDiscordInstall(new NextRequest(`https://marktmorgen.com/api/store/discord/connect?store=${fundedDiscord.sid}`, { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", cookie: `${SESSION_COOKIE}=${installSession}` } }));
   const installDestination = new URL(installStart.headers.get("location") ?? "https://none.invalid/");
-  is("the owner stays at the studio instead of Discord consent", [installStart.status, installDestination.hostname, installDestination.searchParams.get("discord")], [303, "marktmorgen.com", "limited"]);
+  is("the owner stays at the studio instead of Discord consent", [installStart.status, installDestination.hostname, installDestination.searchParams.get("discord")], [303, "marktmorgen.com", "funding"]);
   is("no provider request or extra integration allowance", [discord.length, await allowanceUsed(fundedDiscord, "integration")], [beforeInstallRequests, beforeInstallUnits]);
 
 
@@ -189,7 +215,7 @@ async function main(): Promise<void> {
   const beforeReturnRequests=discord.length;
   const returned=await callbackFor(installTrip,"code=synthetic_install_code");
   const returnDestination=new URL(returned.headers.get("location")??"https://none.invalid/");
-  is("unapproved marked return stays at the studio before token exchange",[returned.status,returnDestination.hostname,returnDestination.searchParams.get("discord")],[303,"marktmorgen.com","limited"]);
+  is("unapproved marked return stays at the studio before token exchange",[returned.status,returnDestination.hostname,returnDestination.searchParams.get("discord")],[303,"marktmorgen.com","funding"]);
   is("no provider call, server replacement or extra integration allowance",[discord.length,await readServer(storeKey(fundedDiscord)),await allowanceUsed(fundedDiscord,"integration")],[beforeReturnRequests,retainedServer,beforeInstallUnits]);
   const replay=await callbackFor(installTrip,"code=synthetic_install_code");
   is("the same trip remains single-use",new URL(replay.headers.get("location")!).searchParams.get("discord"),"expired");

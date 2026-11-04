@@ -1,4 +1,5 @@
 import {OfferPlanning} from "@/components/offer-planning";
+import { isBillingConfigured } from "@/lib/billing";
 import { cachedOfferListings, savedOfferIssues } from "@/lib/funnel-offer-review";
 import type { Metadata } from "next";
 import { BUMP_CHOICES, idsOfKind, readCards, readListings, readProduct } from "@/lib/catalog";
@@ -101,6 +102,9 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
       id: p.id,
       title: p.title,
       priceCents: p.priceCents,
+      // For the ready path only (lib/funnel-starter.ts): it never picks a bundle or a draft.
+      bundle: Boolean(p.bundle),
+      draft: p.hidden,
     }));
   const pictures = listings
     .filter((p) => p.image)
@@ -226,7 +230,8 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
             paymentReview={{
               available: canSell(store) || sellsThroughPayPal(store),
               paymentsHref: can(view.role, "payments") ? `${studioPath(store)}#stripe` : null,
-              billingHref: can(view.role, "billing") ? `${studioPath(store)}#billing` : null,
+              // #billing is drawn only where billing is set up (app/studio/page.tsx).
+              billingHref: can(view.role, "billing") && isBillingConfigured() ? `${studioPath(store)}#billing` : null,
             }}
           />
         </div>
@@ -257,7 +262,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
 
         <h2 className="mt-14 text-xl font-semibold tracking-[-0.02em] text-ink">Offers after they pay</h2>
         <p className="mt-3 max-w-2xl text-ink-soft">
-          {`Right after paying, the buyer sees one offer at a time on their thank-you page, up to ${MAX_FUNNEL_STEPS} per product. Each offer has a yes and a no thanks, and you choose where each one leads: another offer, a cheaper one after a no, or the end. Yes charges the card they just used, in one press, on your own Stripe account.`}
+          {`Right after paying, the buyer sees one offer at a time on their thank-you page, up to ${MAX_FUNNEL_STEPS} per product. Each offer has a yes and a no thanks, and you choose where each one leads: another offer, a cheaper one after a no, or the end. Yes charges the card they just used, in one press, on your own Stripe account. The offers also follow a purchase from the cart: those of the first product in the cart that has offers, never something already in the cart or bought before.`}
         </p>
 
         {store.tax.enabled ? (

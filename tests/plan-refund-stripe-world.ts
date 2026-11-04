@@ -25,12 +25,16 @@ export const world = {
   loseAnswer: false,
   /** Refund writes answer 500 before doing anything. */
   refundsDown: false,
+  /** Refund writes that still go through before they start answering 500 (null: no limit). */
+  refundsLeft: null as number | null,
   /** Setting or taking back the stop answers 500 before doing anything. */
   stopDown: false,
   /** Ending a subscription answers 500 before doing anything. */
   endDown: false,
   /** Listing the platform's refunds answers 500. */
   listDown: false,
+  /** Listing one charge's refunds answers 500. */
+  chargeListDown: false,
   /** New refunds come back with this status. */
   refundStatus: "succeeded",
   /** Subscriptions whose updates answer 500. */
@@ -76,7 +80,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ ...row, customer: q.getAll("expand[]").includes("customer") ? { id: customer, email: world.customers.get(customer), balance: 0 } : customer });
   }
   if (method === "POST" && path === "/refunds") {
-    if (world.refundsDown) return fail();
+    if (world.refundsDown || (world.refundsLeft !== null && world.refundsLeft-- <= 0)) return fail();
     const key = new Headers(init?.headers).get("idempotency-key") ?? "";
     const kept = world.replies.get(key);
     if (kept) return new Response(kept, { status: 200, headers: { "content-type": "application/json" } });
@@ -90,7 +94,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json(refund);
   }
   if (method === "GET" && path === "/refunds") {
-    if (q.get("charge")) return page(world.refunds.filter((r) => r.charge === q.get("charge")));
+    if (q.get("charge")) return world.chargeListDown ? fail() : page(world.refunds.filter((r) => r.charge === q.get("charge")));
     if (world.listDown) return fail();
     const since = Number(q.get("created[gte]"));
     const until = Number(q.get("created[lte]") ?? Infinity);
@@ -134,9 +138,19 @@ export async function paidShop(o: { at?: number; stopSet?: boolean } = {}) {
   world.invoices.push({ id: `in_${handle}open`, subscription: subId, status: "open" }, { id: `in_${handle}draft`, subscription: subId, status: "draft" });
   world.charges.push({ id, customer, invoice: `in_${handle}x1`, payment_intent: `pi_${handle}x1`, status: "succeeded", paid: true, currency: "usd", created: at, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { fee: 230, currency: "usd" } });
   const store = async () => (await storeForEmail(email))!;
+  /** Another paid plan invoice and its charge (a renewal by default), `at` seconds. */
+  const addPayment = (paidAt: number, reason = "subscription_cycle") => {
+    const k = world.charges.length + 1;
+    const cid = `ch_${handle}y${k}`;
+    world.invoices.push({ id: `in_${handle}y${k}`, subscription: subId, status: "paid", created: paidAt, total: 6_900, tax: null, billing_reason: reason, charge: cid, status_transitions: { paid_at: paidAt }, lines: { data: [{ type: "subscription", period: { start: paidAt }, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month" } } }] } });
+    world.charges.push({ id: cid, customer, invoice: `in_${handle}y${k}`, payment_intent: `pi_${handle}y${k}`, status: "succeeded", paid: true, currency: "usd", created: paidAt, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { fee: 230, currency: "usd" } });
+    return cid;
+  };
   return {
     subId,
     store,
+    addPayment,
+    allRefunds: () => world.refunds.filter((r) => world.charges.some((c) => c.id === r.charge && c.customer === customer)),
     sub: () => world.subs.get(subId)!,
     refunds: () => world.refunds.filter((r) => r.charge === id),
     invoices: () => world.invoices.filter((i) => i.subscription === subId && i.status !== "paid").map((i) => `${i.id}:${i.status}`),

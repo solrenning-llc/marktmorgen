@@ -55,10 +55,12 @@ export function refusalWords(reading: { refund: { kind: Refusal; reason: string 
     dispute_open: "This payment is in a dispute with your bank. The dispute decides what comes back to you, so we cannot refund it as well.",
     dispute_returned: "Your bank already returned this payment to you through a dispute.",
     already_refunded: "This payment has already been refunded.",
-    guarantee_used: "The money-back guarantee is for the first payment on your account, and it was used before.",
+    guarantee_used: "The money-back guarantee is given once per person, and it was used before.",
     outside_window: `The money-back guarantee is for requests made within ${REFUND_DAYS} days of your first payment, and that time has passed.`,
-    renewal: "A monthly renewal is not refunded. You can cancel your subscription in your studio, and it stops at the end of the month you paid for.",
-    switch_charge: "A charge for switching plans is not refunded. You can cancel your subscription in your studio, and it stops at the end of the period you paid for.",
+    // True in every case that reaches it: a renewal or switch after the guarantee's days, one whose first payment
+    // was not under the guarantee (it was used before, by this person for any store), or one paid on its own.
+    renewal: `The money-back guarantee covers a monthly renewal only together with a first payment it covers, within ${REFUND_DAYS} days of that payment, and once per person. This renewal is not covered. You can cancel your subscription in your studio, and it stops at the end of the month you paid for.`,
+    switch_charge: `The money-back guarantee covers a charge for switching plans only together with a first payment it covers, within ${REFUND_DAYS} days of that payment, and once per person. This charge is not covered. You can cancel your subscription in your studio, and it stops at the end of the period you paid for.`,
     months_used: "Every month of your yearly plan has started, so there are no months left to refund.",
     fee_kept: "What is left of your yearly payment is not more than the card fee we keep, so there is nothing to refund.",
   };
@@ -103,6 +105,22 @@ export function planRefundNotMadeLetter(o: { store: string; undecided: boolean }
   return { subject: `${store}: your refund was not made`, text: lines.join("\n") };
 }
 
+/** When only part of a refund went through and the rest could not be made in GIVE_UP_DAYS: the plan stops at its period's end, support settles the rest. */
+export function planRefundPartLetter(o: { store: string }): { subject: string; text: string } {
+  const store = o.store || "your store";
+  return {
+    subject: `${store}: part of your refund was not made`,
+    text: [
+      `Only part of the refund you asked for on your Marktmorgen plan for ${store} went through; our payment provider did not take the rest.`,
+      "",
+      "Your plan is set to stop at the end of the period you paid for, and nothing more will be charged for it.",
+      `Reply to this email or write to ${SUPPORT_ADDRESS}, and we will settle the rest of your refund.`,
+      "",
+      "Marktmorgen",
+    ].join("\n"),
+  };
+}
+
 /** Days the daily job keeps checking a refund it cannot decide (lib/plan-refund-flow.ts GIVE_UP_DAYS), said on the page. */
 const CHECK_DAYS = 7;
 export const REFUND_CHECK_DAYS = CHECK_DAYS;
@@ -123,6 +141,7 @@ export const REFUND_DONE: Record<string, { tone: "success" | "warn"; title: stri
   error: { tone: "warn", title: "Nothing was refunded", body: `We could not reach our payment provider, and your plan was not changed. Try again in a few minutes. If it happens again, email ${SUPPORT_ADDRESS}.` },
   unsure: { tone: "warn", title: "We could not confirm your refund yet", body: `We did not hear back from our payment provider, so we do not know yet whether the refund went through. ${DECIDED_LATER} Please do not ask again before then. Questions: ${SUPPORT_ADDRESS}.` },
   "error-stop": { tone: "warn", title: "We could not confirm your refund yet", body: `We did not hear back from our payment provider, so we do not know yet whether the refund went through. Until it is decided, your plan is set to stop at the end of the period you paid for; if no refund was made, we take that back. ${DECIDED_LATER} Questions: ${SUPPORT_ADDRESS}.` },
+  partial: { tone: "warn", title: "Part of your refund went through", body: `Part of your refund is on its way to the card or account you paid with, and the rest could not be made just now. Your plan is set to stop at the end of the period you paid for, so it does not renew. Email ${SUPPORT_ADDRESS} and we will finish your refund.` },
   none: { tone: "warn", title: "Nothing was refunded", body: "The reason is below." },
   owner: { tone: "warn", title: "Only the store's owner can ask for this refund", body: "Ask the owner of this store to open this page." },
 };

@@ -6,6 +6,7 @@ import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { isStorePeople } from "@/lib/visit";
 import { ID_PATTERN, SHA_PATTERN, readSignedName } from "@/lib/agreement-rules";
 import { signAgreement } from "@/lib/agreement-store";
+import { agreementSigned } from "@/lib/agreement-flow-trigger";
 import { sendSignedCopies } from "@/lib/agreements";
 
 /**
@@ -47,5 +48,7 @@ export async function POST(request: NextRequest) {
   if (!signed.ok) return back(signed.reason === "busy" ? "error" : signed.reason);
   // The signed copies, each one of the store's emails for the month; the signature stands whether or not they go.
   await sendSignedCopies(store, signed.agreement, signed.version, signed.signature).catch((error) => console.error("sending a signed copy failed", error));
+  // 635 [GL3]: the workflows that start on signing, for the signer by the address it was sent to, only while on the list (never throws).
+  await agreementSigned(store, signed.agreement.email);
   return back("signed");
 }

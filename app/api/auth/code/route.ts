@@ -77,6 +77,6 @@ export async function POST(request: NextRequest) {
   const response = away("/studio");
   response.headers.append("Set-Cookie", sessionCookie(sessionId));
   response.headers.append("Set-Cookie", `${TWO_STEP_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}`);
-  response.headers.append("Set-Cookie", await noteSignIn(answer.email, request.cookies.get(DEVICE_COOKIE)?.value, "link", request.headers.get("user-agent") ?? ""));
+  response.headers.append("Set-Cookie", await noteSignIn(answer.email, request.cookies.get(DEVICE_COOKIE)?.value, answer.byGoogle ? "google" : "link", request.headers.get("user-agent") ?? ""));
   return response;
 }

@@ -630,6 +630,12 @@
       ]
     },
     {
+      "source": "app/accessibility/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/accessibility",
+      "parameters": []
+    },
+    {
       "source": "app/affiliate-programs/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/affiliate-programs",
@@ -949,6 +955,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/checkup/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/checkup",
+      "parameters": []
+    },
+    {
       "source": "app/studio/closing-refunds/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/closing-refunds",
@@ -1151,6 +1163,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/totals/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/totals",
+      "parameters": []
+    },
+    {
       "source": "app/takedown/[token]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/takedown/[token]",
@@ -1165,6 +1183,12 @@
       "source": "app/terms/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/terms",
+      "parameters": []
+    },
+    {
+      "source": "app/transparency/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/transparency",
       "parameters": []
     },
     {
@@ -1227,10 +1251,12 @@
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
     "components/certificate-actions.tsx",
+    "components/certificate-validity.tsx",
     "components/chat-summary-editor.tsx",
     "components/checkout-extras.tsx",
     "components/checkout-fields-editor.tsx",
     "components/checkout-script-editor.tsx",
+    "components/checkup-list.tsx",
     "components/clickfunnels-funnel.tsx",
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
@@ -1238,16 +1264,20 @@
     "components/community-event-room.tsx",
     "components/community-events-studio.tsx",
     "components/community-events.tsx",
+    "components/community-member-preview.tsx",
     "components/community-parts.tsx",
     "components/community-push-toggle.tsx",
     "components/community-room.tsx",
     "components/community-studio.tsx",
+    "components/confirm-action.tsx",
     "components/contact-box-editor.tsx",
     "components/copy-link.tsx",
     "components/countdown.tsx",
+    "components/course-access-check.tsx",
     "components/course-comments-studio.tsx",
     "components/course-editor.tsx",
     "components/course-outline.tsx",
+    "components/course-template-picker.tsx",
     "components/course-toggle.tsx",
     "components/course-work-studio.tsx",
     "components/cover-maker.tsx",
@@ -1268,7 +1298,10 @@
     "components/dispute-purchase-review.tsx",
     "components/domain-editor.tsx",
     "components/dunning-editor.tsx",
+    "components/email-field.tsx",
+    "components/email-input.tsx",
     "components/email-studio.tsx",
+    "components/email-suggestion.tsx",
     "components/email-sync-editor.tsx",
     "components/embed-messenger.tsx",
     "components/exit-offer-editor.tsx",
@@ -1276,11 +1309,13 @@
     "components/exit-offer.tsx",
     "components/fair-price-editor.tsx",
     "components/faq-editor.tsx",
+    "components/faq-from-inbox.tsx",
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
     "components/form-answers.tsx",
     "components/form-branching.tsx",
+    "components/form-keep.tsx",
     "components/form-response-deal.tsx",
     "components/forms-editor.tsx",
     "components/funnel-ai-draft.tsx",
@@ -1292,6 +1327,7 @@
     "components/funnel-starter-gallery.tsx",
     "components/funnel-type-picker.tsx",
     "components/google-searches.tsx",
+    "components/google-signin.tsx",
     "components/group-link-box.tsx",
     "components/handle-form.tsx",
     "components/heard-ask.tsx",
@@ -1330,6 +1366,7 @@
     "components/mail-picture-button.tsx",
     "components/mark-shipped.tsx",
     "components/meeting-connections.tsx",
+    "components/member-discount.tsx",
     "components/more-from.tsx",
     "components/morning-header.tsx",
     "components/mrr-chart.tsx",
@@ -1391,6 +1428,7 @@
     "components/pricing-cycle.tsx",
     "components/pricing-value.tsx",
     "components/print-button.tsx",
+    "components/product-about-view.tsx",
     "components/product-editor.tsx",
     "components/product-image-editor.tsx",
     "components/product-update-box.tsx",
@@ -1408,17 +1446,21 @@
     "components/report-form.tsx",
     "components/resend-purchase.tsx",
     "components/revenue-quality.tsx",
+    "components/review-ai-summaries.tsx",
     "components/review-form.tsx",
     "components/review-list.tsx",
     "components/review-photo-field.tsx",
+    "components/review-qr.tsx",
     "components/review-stars.tsx",
     "components/review-studio.tsx",
+    "components/review-themes.tsx",
     "components/sale-editor.tsx",
     "components/sales-blocks.tsx",
     "components/sales-goal-card.tsx",
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
     "components/saved-sections.tsx",
+    "components/sequence-import-box.tsx",
     "components/server-events-editor.tsx",
     "components/session-picker.tsx",
     "components/share-panel.tsx",
@@ -1455,6 +1497,7 @@
     "components/store-quotes.tsx",
     "components/store-reach.tsx",
     "components/store-resting.tsx",
+    "components/store-search-check.tsx",
     "components/store-setup-ai.tsx",
     "components/store-share-button.tsx",
     "components/store-socials-row.tsx",
@@ -1481,13 +1524,17 @@
     "components/tier-editor.tsx",
     "components/tips-editor.tsx",
     "components/toast.tsx",
+    "components/today-panel.tsx",
     "components/tools-calculator.tsx",
     "components/topic-page.tsx",
     "components/translate-page.tsx",
     "components/trust-checks.tsx",
     "components/two-step-manager.tsx",
+    "components/url-field.tsx",
     "components/usage-meter.tsx",
     "components/video-embed.tsx",
+    "components/visit-us-block.tsx",
+    "components/visit-us-editor.tsx",
     "components/waitlist-panel.tsx",
     "components/webhook-editor.tsx",
     "components/weekly-ai-toggle.tsx",
@@ -1503,6 +1550,7 @@
     "app/api/affiliate/route.ts",
     "app/api/auth/callback/route.ts",
     "app/api/auth/code/route.ts",
+    "app/api/auth/google/route.ts",
     "app/api/auth/join/route.ts",
     "app/api/auth/lost/confirm/route.ts",
     "app/api/auth/lost/route.ts",
@@ -1664,6 +1712,7 @@
     "app/api/store/form-opportunity/route.ts",
     "app/api/store/form/route.ts",
     "app/api/store/forms/export/route.ts",
+    "app/api/store/forms/response-pdf/route.ts",
     "app/api/store/forms/route.ts",
     "app/api/store/free/download/route.ts",
     "app/api/store/free/route.ts",
@@ -1707,6 +1756,7 @@
     "app/api/store/manage/pause/route.ts",
     "app/api/store/manage/route.ts",
     "app/api/store/manage/switch/route.ts",
+    "app/api/store/member-discount/route.ts",
     "app/api/store/meta-ads/route.ts",
     "app/api/store/move/open/route.ts",
     "app/api/store/next-offer/route.ts",
@@ -1753,6 +1803,7 @@
     "app/api/store/remind/route.ts",
     "app/api/store/rename/route.ts",
     "app/api/store/resend/route.ts",
+    "app/api/store/review-summary/route.ts",
     "app/api/store/review/route.ts",
     "app/api/store/reviews/route.ts",
     "app/api/store/sale/route.ts",
@@ -1783,6 +1834,7 @@
     "app/api/store/upsell/route.ts",
     "app/api/store/vault/route.ts",
     "app/api/store/via/route.ts",
+    "app/api/store/visit-us/route.ts",
     "app/api/store/voice/route.ts",
     "app/api/store/waitlist/confirm/route.ts",
     "app/api/store/waitlist/join/route.ts",
@@ -1806,6 +1858,7 @@
     "app/api/v1/access/route.ts",
     "app/api/v1/affiliates/route.ts",
     "app/api/v1/bookings/route.ts",
+    "app/api/v1/codes/route.ts",
     "app/api/v1/events/route.ts",
     "app/api/v1/hooks/route.ts",
     "app/api/v1/leads/labels/route.ts",
@@ -1820,45 +1873,55 @@
     {
       "area": "Semantic/action text contrast",
       "evidence": "Static palette pairs include danger5.11:1 on danger-soft,mint-deep5.89:1 on mint-soft,indigo5.54:1 on lilac-deep. Applicable rendered contexts and text sizes must be audited; no blanket AAA claim. Delivery22 adds a separate light-surface error-copy token used by actual sign-in inline validation and the existing notice-error,with enhanced contrast and validation-state browser tests at4 widths. Original danger token still used elsewhere;mint/indigo/other red contexts remain open.",
-      "status": "open"
+      "status": "open",
+      "publicWording": "Colored text for warnings, errors and buttons: some colors are checked at the enhanced contrast level, others are not checked yet."
     },
     {
       "area": "Dark/gradient/custom creator themes",
-      "status": "rendered and content-state audit still needed"
+      "status": "rendered and content-state audit still needed",
+      "publicWording": "Store themes, including dark themes, color blends and a creator's own colors: not yet checked on every page they can be used on."
     },
     {
       "area": "All page/process states and integration failures",
-      "status": "inventory made; complete AAA/manual evaluation pending"
+      "status": "inventory made; complete AAA/manual evaluation pending",
+      "publicWording": "Every state a page can be in, such as empty, loading or failed: we have listed them, but a person has not yet reviewed each one at level AAA."
     },
     {
       "area": "Keyboard,focus,zoom,reflow,text spacing,orientation,drag alternatives",
-      "status": "existing checks cover selected journeys; full cross-route/device evidence pending"
+      "status": "existing checks cover selected journeys; full cross-route/device evidence pending",
+      "publicWording": "Keyboard use, the focus outline, zoom, narrow screens, wider text spacing, turning the screen and other ways to do what dragging does: checked on some tasks, not yet on every page and device."
     },
     {
       "area": "Screen readers and platform/browser compatibility",
-      "status": "not validated with NVDA,JAWS,VoiceOver,TalkBack or all OS/browser combinations"
+      "status": "pilot only: CI entry trial with NVDA (Windows) and VoiceOver (macOS) on /signin and /signin?to=login; not validated with JAWS, TalkBack, other pages or all OS/browser combinations",
+      "publicWording": "Screen readers: a short trial with NVDA on Windows and VoiceOver on a Mac covers the sign-up and log-in pages only. Other screen readers, such as JAWS and TalkBack, and other devices and browsers are not checked yet."
     },
     {
       "area": "Real people with different access needs",
-      "status": "not conducted; no participant research or contact claimed"
+      "status": "not conducted; no participant research or contact claimed",
+      "publicWording": "Testing with people who have disabilities: not done yet."
     },
     {
       "area": "Cognitive usability,plain language,errors/help and media alternatives",
-      "status": "systematic human/content review pending"
+      "status": "systematic human/content review pending",
+      "publicWording": "Easy-to-understand words, error messages, help, and text versions of video and audio: a full review by a person is not done yet."
     },
     {
       "area": "Performance and comparative outcomes",
-      "status": "no matched competitor timing,percentile,assistive-task or superiority evidence; needs controlled measurement"
+      "status": "no matched competitor timing,percentile,assistive-task or superiority evidence; needs controlled measurement",
+      "publicWording": "Speed on simple phones and slow networks: not measured in a controlled way yet. We make no claim that we are faster or better than anyone else."
     },
     {
       "area": "Creator field placeholders",
       "evidence": "Shared .st-field placeholders now use --st-text at full opacity. Synthetic Chromium reads actual computed pseudo-element/background colours and opacity; normal text ratio>=7 for all4 themes x10 presets and textarea4 themes/custom yellow. Negative control rejects former faded Night text. No entire-page/assistive/user conformance claim.",
-      "status": "Partially addressed in delivery21; actual full journeys/custom background overrides remain open"
+      "status": "Partially addressed in delivery21; actual full journeys/custom background overrides remain open",
+      "publicWording": "The gray example text inside the studio's boxes: its contrast is checked in every built-in theme, but not yet on every page or with a creator's own background."
     },
     {
       "area": "Focus appearance for standard fields",
       "evidence": "Standard .field controls receive an opaque3px deep outline plus3px white inner band,with Highlight outline under forced colors. Actual Tab screenshot differences are measured for3:1 change area outside the original control,including invalid/readonly/select fixtures and real sign-in widths. Custom fields,clipping/occlusion across every journey,all browsers/OS/assistive users still need review. Delivery20 extends same-pixel checks to .st-field on actual production palettes;see docs/accessibility-store-field-focus.md.",
-      "status": "Partially addressed in deliveries19/20; whole-product focus evaluation remains open"
+      "status": "Partially addressed in deliveries19/20; whole-product focus evaluation remains open",
+      "publicWording": "The outline that shows which box has the keyboard: checked on the sign-in page and the studio's boxes, not yet across the whole product."
     }
   ],
   "currentEvidence": "Existing synthetic Chrome flows cover selected studio/campaign/Path/agreements states at390/1280 with AA automation and explicit keyboard cases. Added secondary-text tests are narrow evidence only; see docs/accessibility-programme.md.",
@@ -1883,6 +1946,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 129
+    "pageTemplates": 133
   }
 }

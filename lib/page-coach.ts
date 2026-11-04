@@ -20,8 +20,9 @@ import { PAGE_TEST_PAID_WORDS, PAGE_TEST_RUNNING_WORDS } from "@/lib/headline-te
  *
  * Pure, so the studio's editor and the server ask the same function.
  */
-import type { BlockKind, PageBlock, SalesPage } from "@/lib/sales-page";
+import { type BlockKind, type PageBlock, type SalesPage, picturesOf } from "@/lib/sales-page";
 import type { PageFacts } from "@/lib/page-facts";
+import { vagueLinkTitle } from "@/lib/link-purpose";
 
 export type CoachCheck = {
   id: string;
@@ -42,6 +43,8 @@ export type CoachInput = {
   free: boolean;
   /** The product has a picture of its own. */
   picture: boolean;
+  /** That picture's description (the product's own), shown at the top when the hero shows a picture. */
+  pictureAlt: string;
   /** The numbers the store has counted for it (lib/page-facts.ts). */
   facts: PageFacts;
 };
@@ -189,6 +192,35 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
       },
     );
   }
+  // Every picture the page shows, the second version's too (98 [D2-COMPLIANCE-REVIEW] unit 3, AX274 Part A item 6): a
+  // screen reader says its description instead. Asked only when there is a picture; the creator writes each one,
+  // nothing is filled in for them.
+  // The picture at the top is the product's own, with the product's description; each version counted once (the
+  // editor sends the version not being edited as the variant).
+  const alts = [...input.page.blocks, ...(input.page.variant?.blocks ?? [])].flatMap(picturesOf).map((p) => p.alt);
+  if (hero && hero.media === "picture" && input.picture) alts.push(input.pictureAlt);
+  if (alts.length > 0) {
+    const bare = alts.filter((alt) => !alt.trim()).length;
+    checks.push({
+      id: "described",
+      label: bare ? `Every picture described (${bare === 1 ? "1 has no description" : `${bare} have none`})` : "Every picture described",
+      why: "Some buyers use a screen reader, which reads the page aloud and says a picture's description in its place. In the box beside each picture, say what it shows; the picture at the top uses the product's own description.",
+      done: bare === 0,
+      weight: 2,
+    });
+  }
+  // A button's own words say what it does (274 [AX1] Part A item 6; WCAG 2.4.4, 2.4.9): a screen reader may list
+  // the buttons by their words alone. An empty label keeps the page's own words, which do.
+  const vagueButtons = [...blocks, ...(input.page.variant?.blocks ?? [])].filter((b) => b.kind === "cta" && b.label.trim() && vagueLinkTitle(b.label)).length;
+  if (blocks.some((b) => b.kind === "cta")) {
+    checks.push({
+      id: "button_words",
+      label: vagueButtons ? `Every button says what it does (${vagueButtons === 1 ? "1 does not" : `${vagueButtons} do not`})` : "Every button says what it does",
+      why: "Some buyers hear a page's buttons read out by their words alone, so \u201cClick here\u201d says nothing. Say what happens, such as \u201cGet the course\u201d or \u201cBook your call\u201d.",
+      done: vagueButtons === 0,
+      weight: 2,
+    });
+  }
   checks.push({
     id: "bio",
     label: "Who made it",
@@ -265,3 +297,21 @@ export function steepestDrop(
   }
   return best;
 }
+
+/**
+ * The three kinds of buyer a page review reads the page as (624 [SZ8](9)):
+ * named here, by the code, never by the model, so the studio always shows the
+ * same three. Each gives an objection in words and what the page could add;
+ * no conversion rate, lift or number of sales is ever predicted.
+ */
+export const BUYER_LENSES = [
+  { id: "first", label: "Someone buying from you for the first time", ask: "has never bought from this creator and needs to trust them" },
+  { id: "comparing", label: "Someone comparing it with other options", ask: "is weighing this against other ways to get the same result" },
+  { id: "doubtful", label: "Someone who doubts it will work for them", ask: "wonders whether it will work in their own situation" },
+] as const;
+
+export type BuyerLens = (typeof BUYER_LENSES)[number]["id"];
+
+/** An objection that predicts a result is not kept: a percent, a conversion, a lift or a number of sales. */
+export const PREDICTS = /\d\s*%|percent|\bconver(?:sion|t)|\blift\b|\b\d+\s*(?:more\s+)?(?:sales|buyers|customers|orders|sign-?ups)\b/i;
+

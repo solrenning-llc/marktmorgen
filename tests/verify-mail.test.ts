@@ -17,9 +17,10 @@ import { POST as resendPosts } from "@/app/api/mail/inbound/route";
 import { POST as amazonPosts } from "@/app/api/mail/ses/route";
 import { TRUSTED_TOKEN } from "@/lib/ses";
 import { stringToSign, type SnsMessage } from "@/lib/sns";
-import { verifyAmazonAccount, verifyHostToken, verifyMailLoop } from "@/lib/verify-mail";
+import { verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { withCutoff } from "@/lib/fetch-timeout";
 
 const REGION = "us-east-1";
 const TOPIC = `arn:aws:sns:${REGION}:123456789012:marktmorgen-email`;
@@ -172,6 +173,86 @@ async function main(): Promise<void> {
   is("Amazon's two went to Amazon's own test mailboxes, and Resend's to Resend's", [amazonTook.map((to) => to.replace(/\+[0-9a-f]{8}@/, "+label@")), resendTook.length], [["bounce+label@simulator.amazonses.com", "complaint+label@simulator.amazonses.com"], 2]);
   is("and nothing is left behind", leftBehind(), []);
   is("the existing role session serves the complete synthetic sender check", assumedRoles, 1);
+
+
+  part("Read-only account observations use one exact UTC anchor without new probes");
+  const readCalls: { path: string; method: string }[] = [];
+  let metricsStatus = 200;
+  let stallCredentials = false;
+  const collectorFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    readCalls.push({ path: url.pathname, method: String(init?.method) });
+    if (url.hostname === `sts.${REGION}.amazonaws.com` && stallCredentials) {
+      return { ok: true, status: 200, text: () => new Promise(() => {}) } as Response;
+    }
+    if (url.pathname === "/v2/email/account") return Response.json({
+      ProductionAccessEnabled: true, SendingEnabled: true, EnforcementStatus: "HEALTHY",
+      SendQuota: { Max24HourSend: 50_000, MaxSendRate: 14, SentLast24Hours: 37 },
+    });
+    if (url.hostname === "api.resend.com" && url.pathname === "/emails/metrics") {
+      if (metricsStatus !== 200) return new Response("", { status: metricsStatus });
+      return Response.json({
+        object: "metrics", start_date: url.searchParams.get("start_date"), end_date: url.searchParams.get("end_date"),
+        metrics: ["sent"], dimensions: [], totals: { sent: 11 },
+      });
+    }
+    if (url.hostname === "api.resend.com" && url.pathname === "/usage") return Response.json({
+      object: "usage", emails: {
+        daily: { used: 13, limit: 100, sent: 11, received: 2, resets_at: "2026-11-02T00:00:00.000Z" },
+        monthly: { used: 104, limit: 50_000, sent: 80, received: 24, resets_at: "2026-11-17T15:30:00.000Z" },
+      },
+    });
+    throw new Error(`Unexpected provider usage request: ${url.pathname}`);
+  };
+  const anchor = Date.now();
+  const observed = await verifyProviderUsage(anchor);
+  is("the exact Resend window is anchored to the collector's UTC start", observed.window, {
+    from: new Date(anchor - 86_400_000).toISOString(), through: new Date(anchor).toISOString(),
+  });
+  is("different provider counters never assert matching snapshots or billing units",
+    [observed.basis, observed.alignment], ["provider_reported_counters", {
+      anchor: "collector_start_utc", exactSameWindow: false, billingUnitsComparable: false,
+    }]);
+  is("all three evidence sources keep their own meanings",
+    [
+      observed.ses.ok ? observed.ses.sentLast24Hours : null,
+      observed.resend.ok ? observed.resend.sent : null,
+      observed.resendAccount.ok ? observed.resendAccount.monthly.used : null,
+      observed.resendAccount.ok ? observed.resendAccount.monthly.resetsAt : null,
+    ], [37, 11, 104, "2026-11-17T15:30:00.000Z"]);
+  is("the SES observation retains its latency bounds",
+    observed.ses.ok && observed.ses.requestedAt === new Date(anchor).toISOString() &&
+      Date.parse(observed.ses.observedAt) >= anchor, true);
+  is("the reader makes exactly three GETs and no email, list or notification writes",
+    readCalls.map(call => `${call.method} ${call.path}`).sort(),
+    ["GET /emails/metrics", "GET /usage", "GET /v2/email/account"]);
+  metricsStatus = 403;
+  const partial = await verifyProviderUsage();
+  is("read authorization failure does not erase the other provider or billing observation",
+    [partial.ses.ok, partial.resend, partial.resendAccount.ok],
+    [true, { ok: false, reason: "unauthorized" }, true]);
+  const priorCalls = readCalls.length;
+  is("an invalid anchor has no invented range or count",
+    await verifyProviderUsage(Number.MAX_SAFE_INTEGER), {
+      basis: "provider_reported_counters", window: null,
+      alignment: { anchor: "collector_start_utc", exactSameWindow: false, billingUnitsComparable: false },
+      ses: { ok: false, reason: "unknown" }, resend: { ok: false, reason: "unknown" },
+      resendAccount: { ok: false, reason: "unknown" },
+    });
+  is("the invalid anchor made no request", readCalls.length, priorCalls);
+
+  part("The collection deadline also bounds a stalled credential body");
+  const priorRole = process.env.AWS_SES_ROLE_ARN;
+  process.env.AWS_SES_ROLE_ARN = "arn:aws:iam::123456789012:role/synthetic-stalled-provider-usage";
+  metricsStatus = 200;
+  stallCredentials = true;
+  const bounded = await withCutoff(Date.now() + 250, () => verifyProviderUsage());
+  is("a credential body cannot block collection or erase successful Resend evidence",
+    [bounded.ses, bounded.resend.ok, bounded.resendAccount.ok],
+    [{ ok: false, reason: "provider" }, true, true]);
+  process.env.AWS_SES_ROLE_ARN = priorRole;
+  globalThis.fetch = collectorFetch;
 
   done();
 }

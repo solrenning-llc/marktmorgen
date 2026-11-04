@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { initBotId } from "botid/client/core";
 import { Icon } from "@/components/icons";
+import { EmailSuggestion } from "@/components/email-suggestion";
+import { holdForSuggestion, suggestEmail } from "@/lib/email-typo";
 
 type State =
   | { kind: "idle" }
@@ -55,6 +57,10 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
   const [website, setWebsite] = useState("");
   const [state, setState] = useState<State>({ kind: "idle" });
   const [touched, setTouched] = useState(false);
+  // The address the line was last shown for, so a second send of it goes as typed.
+  const [shownFor, setShownFor] = useState("");
+  // The address the link was really asked for, said back on the next screen.
+  const [sentTo, setSentTo] = useState("");
   const [wait, setWait] = useState(0);
 
   useEffect(startChallenge, []);
@@ -67,6 +73,9 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
   }, [wait]);
 
   const trimmed = email.trim();
+  // The suggestion's line describes the field only while it says something (lib/email-typo.ts).
+  const showSuggestion = touched && state.kind !== "sending";
+  const suggesting = showSuggestion && suggestEmail(email) !== null;
   const shapeProblem =
     touched && trimmed.length > 0 && !LOOKS_LIKE_EMAIL.test(trimmed)
       ? "Check the address: it needs an @ and a domain, like you@example.com."
@@ -75,6 +84,7 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
   async function send() {
     if (state.kind === "sending") return;
     setState({ kind: "sending" });
+    setSentTo(email);
 
     try {
       const ask = (how: typeof fetch) =>
@@ -111,6 +121,11 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
       setState({ kind: "error", message: trimmed ? "Check the address: it needs an @ and a domain, like you@example.com." : "Type your email first." });
       return;
     }
+    // A likely slip waits once, so its suggestion is seen; sending again sends it as typed (lib/email-typo.ts).
+    if (holdForSuggestion(email, shownFor)) {
+      setShownFor(email);
+      return;
+    }
     await send();
   }
 
@@ -122,7 +137,7 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
         </span>
         <p className="mt-4 text-xl font-semibold text-ink">Check that inbox</p>
         <p className="mt-2 text-ink-soft">
-          If <span className="font-medium text-ink">{email}</span> can log in, the link is on its way from Marktmorgen.
+          If <span className="font-medium text-ink [overflow-wrap:anywhere]">{sentTo || email}</span> can log in, the link is on its way from Marktmorgen.
           It works once and stops working in 15 minutes.
         </p>
         <p className="mt-3 text-sm text-ink-soft">Not there within a minute? Look in spam or promotions.</p>
@@ -159,7 +174,7 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
           onBlur={() => setTouched(true)}
           placeholder="you@example.com"
           aria-invalid={state.kind === "error" || shapeProblem ? true : undefined}
-          aria-describedby={state.kind === "error" ? "signin-error" : shapeProblem ? "signin-hint" : undefined}
+          aria-describedby={[state.kind === "error" ? "signin-error" : shapeProblem ? "signin-hint" : "", suggesting ? "signin-suggestion" : ""].filter(Boolean).join(" ") || undefined}
           className="field mt-2"
         />
         {shapeProblem && state.kind !== "error" ? (
@@ -167,6 +182,17 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
             {shapeProblem}
           </p>
         ) : null}
+        {/* A likely slip in the address, offered and never applied by itself (lib/email-typo.ts). */}
+        <EmailSuggestion
+          id="signin-suggestion"
+          inputId="signin-email"
+          value={email}
+          show={showSuggestion}
+          onUse={(address) => {
+            setEmail(address);
+            if (state.kind === "error") setState({ kind: "idle" });
+          }}
+        />
       </div>
 
       {/* Honeypot: hidden from people, irresistible to robots. */}

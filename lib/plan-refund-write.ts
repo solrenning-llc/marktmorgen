@@ -31,7 +31,7 @@
  */
 import { onPlatformAt } from "@/lib/billing";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
-import { READ_BUDGET_MS, readPlanRefund } from "@/lib/plan-refund";
+import { MAX_PARTS, READ_BUDGET_MS, readPlanRefund } from "@/lib/plan-refund";
 import { isRedisConfigured } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import type { Store } from "@/lib/store";
@@ -39,14 +39,14 @@ import type { Store } from "@/lib/store";
 const AT = "2024-06-20";
 /** The lock of one store's plan refund. */
 export const lockKeyOf = (sid: string): string => `nl:plan-refund:${sid}:lock`;
-/** The reading's budget, three Stripe time-outs (its last read, the list, the write) and a minute of room. */
-export const LOCK_SECONDS = Math.ceil((READ_BUDGET_MS + 3 * STRIPE_TIMEOUT_MS) / 1000) + 60;
+/** The reading's budget, its last read's time-out, a list and a write for each payment given back, and a minute of room. */
+export const LOCK_SECONDS = Math.ceil((READ_BUDGET_MS + (1 + 2 * MAX_PARTS) * STRIPE_TIMEOUT_MS) / 1000) + 60;
 /** The last moment after taking the lock a write may start: it ends, time-out included, a minute before the lock expires. */
 export const WRITE_BY_MS = (LOCK_SECONDS - 60) * 1000 - STRIPE_TIMEOUT_MS;
 const REFUND_ID = /^re_[A-Za-z0-9]{6,128}$/;
 
 export type PlanRefundMade =
-  | { ok: true; cents: number; currency: string; refundId: string; status: "succeeded" | "pending" }
+  | { ok: true; cents: number; currency: string; refundId: string; refundIds: string[]; status: "succeeded" | "pending" }
   | { ok: false; reason: "busy" | "no_lock" | "not_owed" | "unknown" | "pending" | "failed" | "changed" };
 
 type Row = Record<string, unknown>;
@@ -56,7 +56,12 @@ const rows = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unk
  * `expectCents`: the amount the creator was shown and confirmed (the review page). When the policy gives another
  * amount now (a month of a yearly plan started meanwhile), nothing is made ("changed"), for the page to show the new one.
  */
-export async function refundPlanPayment(store: Store, nowSeconds = Math.floor(Date.now() / 1000), expectCents?: number): Promise<PlanRefundMade> {
+export async function refundPlanPayment(
+  store: Store,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  expectCents?: number,
+  onPlan?: (parts: { chargeId: string; cents: number }[]) => Promise<unknown>,
+): Promise<PlanRefundMade> {
   if (!isRedisConfigured()) return { ok: false, reason: "no_lock" };
   let held;
   const takenAt = Date.now();
@@ -71,42 +76,51 @@ export async function refundPlanPayment(store: Store, nowSeconds = Math.floor(Da
     // Not decidable (a failed read, a list too long…): said so, for the page to send the creator to support.
     if (reading.refund.kind === "unknown") return { ok: false, reason: "unknown" };
     if (!("chargeId" in reading)) return { ok: false, reason: "not_owed" };
-    const { chargeId, paymentIntent, currency } = reading;
+    const { currency, parts } = reading;
     const cents = reading.refund.cents;
     if (expectCents !== undefined && cents !== expectCents) return { ok: false, reason: "changed" };
-    let refunds: Row[];
-    try {
-      const page = await onPlatformAt(AT, "GET", `/refunds?${new URLSearchParams({ charge: chargeId, limit: "100" })}`);
-      // More than a page of refunds on one plan payment is not read whole: nothing is made.
-      if (page.has_more !== false) return { ok: false, reason: "failed" };
-      refunds = rows(page);
-    } catch (error) {
-      console.error("reading a plan payment's refunds failed", error);
-      return { ok: false, reason: "failed" };
-    }
-    if (refunds.some((r) => r.status === "pending" || r.status === "requires_action")) return { ok: false, reason: "pending" };
-    if (refunds.some((r) => typeof r.status !== "string" || !["succeeded", "failed", "canceled"].includes(r.status))) return { ok: false, reason: "failed" };
-    const turnedDown = refunds.filter((r) => r.status === "failed" || r.status === "canceled").length;
-    // Too late to be sure the write ends while the lock holds: nothing is made, the creator may ask again.
-    if (Date.now() - takenAt > WRITE_BY_MS) return { ok: false, reason: "failed" };
-    try {
-      const made = await onPlatformAt(
-        AT,
-        "POST",
-        "/refunds",
-        new URLSearchParams({ payment_intent: paymentIntent, amount: String(cents), reason: "requested_by_customer", "metadata[plan_refund]": store.sid }),
-        `plan-refund:${chargeId}:${turnedDown}`,
-      );
-      const refundId = typeof made.id === "string" ? made.id : "";
-      if (made.object !== "refund" || !REFUND_ID.test(refundId) || made.amount !== cents || made.currency !== currency) return { ok: false, reason: "failed" };
-      if (made.status === "succeeded" || made.status === "pending" || made.status === "requires_action") {
-        return { ok: true, cents, currency, refundId, status: made.status === "succeeded" ? "succeeded" : "pending" };
+    if (!parts.length || parts.reduce((sum, part) => sum + part.cents, 0) !== cents) return { ok: false, reason: "unknown" };
+    // Every charge's refunds read before anything is made: one still on its way, or a list not read whole, makes nothing.
+    const turnedDown: number[] = [];
+    for (const part of parts) {
+      let refunds: Row[];
+      try {
+        const page = await onPlatformAt(AT, "GET", `/refunds?${new URLSearchParams({ charge: part.chargeId, limit: "100" })}`);
+        if (page.has_more !== false) return { ok: false, reason: "failed" };
+        refunds = rows(page);
+      } catch (error) {
+        console.error("reading a plan payment's refunds failed", error);
+        return { ok: false, reason: "failed" };
       }
-      return { ok: false, reason: "failed" };
-    } catch (error) {
-      console.error("making a plan refund failed", error);
-      return { ok: false, reason: "failed" };
+      if (refunds.some((r) => r.status === "pending" || r.status === "requires_action")) return { ok: false, reason: "pending" };
+      if (refunds.some((r) => typeof r.status !== "string" || !["succeeded", "failed", "canceled"].includes(r.status))) return { ok: false, reason: "failed" };
+      turnedDown.push(refunds.filter((r) => r.status === "failed" || r.status === "canceled").length);
     }
+    // The charges about to be refunded, for the caller to note before any money moves (lib/plan-refund-flow.ts).
+    if (onPlan) await onPlan(parts.map((part) => ({ chargeId: part.chargeId, cents: part.cents })));
+    const made: { id: string; pending: boolean }[] = [];
+    for (const [i, part] of parts.entries()) {
+      // Too late to be sure this write ends while the lock holds: stopped here, the creator may ask again (what was
+      // made is not made again: the reading takes it off, and each charge keeps its own idempotency key).
+      if (Date.now() - takenAt > WRITE_BY_MS) return { ok: false, reason: "failed" };
+      try {
+        const refund = await onPlatformAt(
+          AT,
+          "POST",
+          "/refunds",
+          new URLSearchParams({ payment_intent: part.paymentIntent, amount: String(part.cents), reason: "requested_by_customer", "metadata[plan_refund]": store.sid }),
+          `plan-refund:${part.chargeId}:${turnedDown[i]}`,
+        );
+        const refundId = typeof refund.id === "string" ? refund.id : "";
+        if (refund.object !== "refund" || !REFUND_ID.test(refundId) || refund.amount !== part.cents || refund.currency !== currency) return { ok: false, reason: "failed" };
+        if (refund.status !== "succeeded" && refund.status !== "pending" && refund.status !== "requires_action") return { ok: false, reason: "failed" };
+        made.push({ id: refundId, pending: refund.status !== "succeeded" });
+      } catch (error) {
+        console.error("making a plan refund failed", error);
+        return { ok: false, reason: "failed" };
+      }
+    }
+    return { ok: true, cents, currency, refundId: made[0].id, refundIds: made.map((m) => m.id), status: made.some((m) => m.pending) ? "pending" : "succeeded" };
   } finally {
     // Only our own lock: one that expired and was taken by another request is left alone.
     await releaseLock(held);

@@ -196,7 +196,8 @@ const PALETTES: Record<ThemeId, Palette> = {
     card: "#fffdf9",
     item: "#f8f3ea",
     text: "#2a2118",
-    muted: "#5c5244",
+    // 7.98:1 on the page, 9.22:1 on a card, 8.48:1 on an item: muted words are small text, so AAA asks 7:1 (was #5c5244, 6.51:1).
+    muted: "#4f4538",
     line: "#e4d9c6",
     lineStrong: "#c9bba2",
     field: "#fffdf9",
@@ -335,13 +336,15 @@ export function lookColours(look: LookPaint): LookColours {
   const accentSoft = nearestPassing(
     mix(fill, palette.card, palette.dark ? 0.72 : 0.86),
     palette.card,
-    (c) => contrast(c, palette.text) >= 7,
+    // Muted words sit on it too (a chosen or highlighted thing's note): 7:1, which the card always reaches.
+    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7,
   );
 
   const band = nearestPassing(
     mix(fill, palette.card, palette.dark ? 0.78 : 0.87),
     palette.card,
-    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 4.5 && contrast(c, accentText) >= 4.5,
+    // Muted words on a band are small text too: 7:1, which the card always reaches, so a band only grows paler to pass.
+    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7 && contrast(c, accentText) >= 4.5,
   );
 
   // The band behind the name on the Colour theme runs from the fill to a

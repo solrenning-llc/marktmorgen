@@ -68,6 +68,7 @@ import { bundleFromMeta, bundleMeta, deliverableItems, deliveredIds } from "@/li
 import { type BundleContents, contentsOf, offerableAfterPaying } from "@/lib/bundles";
 import { applyShareToPayment } from "@/lib/platform-share";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, validConsent } from "@/lib/digital-consent";
+import { cartOfferFrom, ownedBeforeCart } from "@/lib/cart-offers";
 
 export const UPSELL_COOKIE = "nl_upsell";
 export const UPSELL_WINDOW_SECONDS = 60 * 60;
@@ -197,8 +198,12 @@ type SessionView = {
   payment_intent?: { id?: unknown; payment_method?: unknown } | string | null;
 };
 
-/** Reads a paid checkout of this store, with what an upsell needs from it. */
-async function paidSession(store: Store, session: string): Promise<{ view: SessionView; product: Product } | null> {
+/**
+ * Reads a paid checkout of this store, with what an upsell needs from it:
+ * the product whose funnel follows it, which for a cart is the one its
+ * checkout named (lib/cart-offers.ts), and nothing when it named none.
+ */
+async function paidSession(store: Store, session: string): Promise<{ view: SessionView; product: Product; cart: boolean } | null> {
   if (!store.stripeAccountId || !SESSION_ID.test(session)) return null;
   let view: SessionView;
   try {
@@ -212,8 +217,10 @@ async function paidSession(store: Store, session: string): Promise<{ view: Sessi
   }
   if (view.status !== "complete" || view.payment_status !== "paid") return null;
   if (view.metadata?.store !== store.handle) return null;
-  const product = view.metadata?.product ? await readProduct(store, view.metadata.product) : null;
-  return product ? { view, product } : null;
+  const cart = view.metadata?.cart === "yes";
+  const from = cart ? cartOfferFrom(view.metadata) : view.metadata?.product;
+  const product = from ? await readProduct(store, from) : null;
+  return product ? { view, product, cart } : null;
 }
 
 /** Whether the offers can still be shown to this browser, for this order. */
@@ -252,7 +259,7 @@ export async function takeUpsell(input: {
   if (!store.stripeAccountId || !isRedisConfigured()) return { kind: "unavailable" };
   const found = await paidSession(store, session);
   if (!found) return { kind: "unavailable" };
-  const { view, product } = found;
+  const { view, product, cart } = found;
   // A one-click charge cannot carry Stripe Tax, so with tax on there is none.
   // A bundle that holds a course is never offered here (lib/bundles.ts).
   const offered = await offerableAfterPaying(store, await readListings(store, funnelProductIds(product.funnel)));
@@ -269,7 +276,17 @@ export async function takeUpsell(input: {
   // Where the buyer is, worked out from what they already answered: only
   // that offer can be answered now.
   const owned = new Set(deliveredIds(view.metadata));
+  // After a cart, nothing the buyer already has from the store either, read
+  // as the page read it; unreadable, nothing is offered (lib/cart-offers.ts).
+  if (cart) {
+    const before = await ownedBeforeCart(store, typeof view.customer_details?.email === "string" ? view.customer_details.email : null);
+    if (!before) return { kind: "unavailable" };
+    before.forEach((id) => owned.add(id));
+  }
   const records = await readAnswers(session);
+  // After a cart, a product turned down in this order is never offered again,
+  // not even at a lower price on a "no thanks" path (lib/cart-offers.ts).
+  if (cart) for (const record of records.values()) if (record.state === "declined" || record.state === "failed") owned.add(record.product);
   const position = funnelPosition(funnel, offered, toAnswers(records), owned);
   if (position.kind !== "offer" || position.step.id !== input.step) {
     const asked = funnel.steps.find((s) => s.id === input.step);
@@ -642,6 +659,12 @@ export async function funnelView(input: {
   created: number;
   secret: string | undefined;
   upsellKey: string | null;
+  /**
+   * Paid for from the cart (lib/cart-offers.ts): the product whose funnel
+   * follows, as its checkout named it (none: no offer), and the address it
+   * was paid with, to pass over what the buyer already has from the store.
+   */
+  cart?: { offerFrom: string | null; email: string | null };
 }): Promise<FunnelView> {
   const { store, session, product } = input;
   const records = await readAnswers(session);
@@ -663,12 +686,22 @@ export async function funnelView(input: {
 
   // The funnel and what it names are read only when an offer could follow.
   const open = input.eligible && !store.tax.enabled && offerOpen(input.created, input.secret, input.upsellKey ?? undefined);
-  const full = open ? await readProduct(store, product.id) : null;
+  const owner = input.cart ? input.cart.offerFrom : product.id;
+  const full = open && owner ? await readProduct(store, owner) : null;
   const offered = full ? await offerableAfterPaying(store, await readListings(store, funnelProductIds(full.funnel))) : [];
   const funnel = full ? activeFunnel(offered, full) : null;
   if (!funnel) return { offer: null, taken, notes, declined };
-  const owned = new Set([product.id, ...input.alsoOwned]);
-  const position = funnelPosition(funnel, offered, toAnswers(records), owned);
+  // After a cart, what was turned down in this order is passed over too, as on the server (takeUpsell).
+  const owned = new Set([product.id, ...input.alsoOwned, ...(input.cart ? declined : [])]);
+  let position = funnelPosition(funnel, offered, toAnswers(records), owned);
+  // After a cart, what the buyer already has from the store is passed over
+  // too, read only when there is an offer to show (lib/cart-offers.ts).
+  if (position.kind === "offer" && input.cart) {
+    const before = await ownedBeforeCart(store, input.cart.email);
+    if (!before) return { offer: null, taken, notes, declined };
+    before.forEach((id) => owned.add(id));
+    position = funnelPosition(funnel, offered, toAnswers(records), owned);
+  }
   if (position.kind !== "offer") return { offer: null, taken, notes, declined };
   const { step, target } = position;
   const pictured = step.imageFrom ? offered.find((p) => p.id === step.imageFrom) ?? null : null;

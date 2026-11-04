@@ -21,7 +21,7 @@ async function main(){
  const id=await create("live@example.test","cs_live_123456789012345");
  is("explicit buyer-posted current review",await pathBuyerReview(stats,listed,3),true);
  is("not another store's listed product",await pathBuyerReview(stats,new Set(["other00001"]),3),false);
- await setHidden(stats,product,id,true);
+ await setHidden(stats,product,id,true,"abusive");
  is("hidden review not evidence",await pathBuyerReview(stats,listed,3),false);
  await setHidden(stats,product,id,false);
  await markOneRefunded(stats,product,id);

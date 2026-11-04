@@ -11,10 +11,13 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
+import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
+import { CourseAccessCheck } from "@/components/course-access-check";
 import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
 import { canSellProduct } from "@/lib/store-checkout";
 import { passedFor } from "@/lib/quiz";
 import { certificatesFor } from "@/lib/certificate";
+import { CertificateValidity } from "@/components/certificate-validity";
 import {
   CertificateSwitch, CourseStart,
   CourseEditor,
@@ -154,7 +157,9 @@ export default async function StudioCoursePage({
           <span className="text-ink-mute">
             {selling
               ? "On sale on your store."
-              : lessons === 0
+              : product.hidden
+                ? "Hidden from your store. Publish it from your products in the studio when it is ready."
+                : lessons === 0
                 ? "Add the first lesson and it can go on sale."
                 : "Not on sale yet: your store needs Stripe connected and a running subscription."}
           </span>
@@ -176,8 +181,16 @@ export default async function StudioCoursePage({
             </ul>
           </section>
         ) : null}
+        <CourseAccessCheck
+          check={lessonCaptionCheck(course, streams, captions, writing)}
+          productId={product.id}
+          hrefOf={(id) => `${studioPath(store, `lesson=${encodeURIComponent(id)}`, `course/${product.id}`)}#${captionsAnchor(id)}`}
+          canWrite={autoCan}
+          canReupload={isStreamConfigured()}
+        />
         <CourseEditor
           productId={product.id}
+          openFirst={typeof query.lesson === "string" && lessonsInOrder(course).some(({ lesson }) => lesson.id === query.lesson) ? query.lesson : null}
           initial={course}
           folder={folder}
           streams={streams}
@@ -186,6 +199,8 @@ export default async function StudioCoursePage({
           auto={{ can: autoCan, spoken: parseLanguage(store.language) }}
           title={product.title}
           ai={aiState}
+          look={store.look}
+          language={parseLanguage(store.language)}
         />
 
         {hasTasks ? (
@@ -221,6 +236,7 @@ export default async function StudioCoursePage({
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
             <CourseStart productId={product.id} startsAt={course.startsAt} />
             <CertificateSwitch productId={product.id} on={course.certificate} />
+            {course.certificate ? <CertificateValidity productId={product.id} months={course.certificateMonths ?? null} /> : null}
             {course.certificate ? (
               <Link
                 href={`/@${store.handle}/certificate/sample?product=${product.id}`}

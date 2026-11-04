@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessFundedExposure, EXPOSURE_SCOPES } from '@/lib/funded-exposure-rules';
+import { assessFundedExposure, fundedExposureDetails, EXPOSURE_SCOPES } from '@/lib/funded-exposure-rules';
 import { assessCustomerWorstCase } from '@/lib/net-margin-rules';
 import { zeroExposureFixture } from './margin-test-fixtures';
 function loss(cents:number){const r=zeroExposureFixture();r.cases.trial.maximumMonthlyCases=3;r.cases.trial.worstCase!.costCeilings.ai=cents;r.monthlyBudgetCents=cents*3;return r;}
@@ -43,4 +43,47 @@ test('unknown waitlist operations, occurrence caps and taxes never become free',
   (r:ReturnType<typeof zeroExposureFixture>)=>{r.cases.platform_waitlist.worstCase!.costCeilings.email=null;},
   (r:ReturnType<typeof zeroExposureFixture>)=>{r.cases.platform_waitlist.worstCase!.taxesCeilingCents=null;},
  ]){const r=zeroExposureFixture();edit(r);assert.equal(assessFundedExposure(r).approved,false);}
+});
+
+test('both exposure readers refuse any raw fiscal presence before constructing legacy snapshots',()=>{
+ let reads=0;
+ for(const field of ['taxReview','taxContext'])for(const kind of ['enumerable','hidden','getter','inherited','proxy']){
+  const r=loss(100),row=r.cases.trial.worstCase!;
+  assert.equal(assessFundedExposure(r).approved,true);assert.ok(fundedExposureDetails(r));
+  if(kind==='inherited')Object.setPrototypeOf(row,{[field]:null});
+  else Object.defineProperty(row,field,kind==='getter'?{enumerable:false,get(){reads++;throw Error('must not execute');}}:{value:null,enumerable:kind==='enumerable',configurable:true});
+  if(kind==='proxy')r.cases.trial.worstCase=new Proxy(row,{has(){return false;}});
+  assert.equal(assessFundedExposure(r).approved,false);assert.equal(fundedExposureDetails(r),null);
+ }
+ assert.equal(reads,0);
+});
+
+test('exposure details checks and copies the same once-captured raw',()=>{
+ const r=loss(100),item=r.cases.trial,legacy=item.worstCase!,tx={...legacy};
+ Object.defineProperty(tx,'taxReview',{value:null,enumerable:false});let reads=0;
+ r.cases.trial=new Proxy(item,{getOwnPropertyDescriptor(target,key){const d=Reflect.getOwnPropertyDescriptor(target,key);return key==='worstCase'&&d?{...d,value:++reads%2?legacy:tx}:d;}});
+ const actual=fundedExposureDetails(r);assert.ok(actual);assert.equal(reads,1);
+ assert.equal(actual.snapshot,fundedExposureDetails(loss(100))!.snapshot);
+});
+
+test('zero counts still require every known loss cost and tax, and incoming-tax liabilities are not erased by zero revenue',()=>{
+ for(const count of [0,2])for(const revenue of [0,1000]){
+  const r=zeroExposureFixture(),item=r.cases.trial;item.maximumMonthlyCases=count;
+  item.worstCase!.collectedRevenueCents=revenue;item.worstCase!.refundableRevenueCents=revenue;
+  item.worstCase!.taxesCeilingCents=17;item.worstCase!.costCeilings.other=23;r.monthlyBudgetCents=count*40;
+  assert.equal(assessFundedExposure(r).requiredBudgetCents,count*40);
+  item.worstCase!.taxesCeilingCents=null;assert.equal(assessFundedExposure(r).approved,false);assert.equal(fundedExposureDetails(r),null);
+  item.worstCase!.taxesCeilingCents=17;item.worstCase!.costCeilings.other=null;assert.equal(assessFundedExposure(r).approved,false);
+ }
+});
+
+test('unmigrated exposure cannot use residual collected income to erase unknown TX liability',()=>{
+ for(const count of [0,1])for(const scope of ['trial','full_refund','legacy_credits'] as const){
+  const r=zeroExposureFixture(),item=r.cases[scope];item.maximumMonthlyCases=count;
+  item.worstCase!.collectedRevenueCents=1000;item.worstCase!.refundableRevenueCents=999;
+  item.worstCase!.taxesCeilingCents=0;item.worstCase!.costCeilings.other=0;
+  r.monthlyBudgetCents=0;
+  assert.equal(assessFundedExposure(r).approved,false,'a legacy flag is not scoped TX evidence');
+  assert.equal(assessFundedExposure(r).reason,'unknown');assert.equal(fundedExposureDetails(r),null);
+ }
 });

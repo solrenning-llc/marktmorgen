@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { MAX_COOKIE_DAYS } from "@/lib/affiliate-setting";
 import Link from "next/link";
 import { Icon, iconFor, type IconName } from "@/components/icons";
 import { RevealOnScroll } from "@/components/home-parts";
@@ -81,11 +82,11 @@ const BUILT = [
   "Sales tax and VAT worked out by Stripe Tax on your own account and added at checkout, switched on once Stripe says your tax setup is complete",
   "Limited quantities: the page shows how many are left, counted from real payments, and a unit someone is paying for is held so the last one is never sold twice",
   "Courses: modules of lessons with video, text, downloads and a link, free preview lessons, modules that open a set number of days after each student joins, with an email to the student the day each one opens, and each student's progress in your studio — students open them with their email, no password",
-  "Paid calls with a calendar: your weekly hours in your time zone, the free times shown to each buyer in theirs, the time held while they pay, and a calendar file emailed to both of you",
+  "Paid calls with a calendar: your weekly hours in your time zone, the free times shown to each buyer in theirs, the time held while they pay, and an email about each booking to the buyer and to you",
   "Group calls of up to 50 people, and live sessions on dates you set with up to 500 seats each, held on the meeting service whose link you give or in a video room made for them",
   "A private Jitsi Meet video room made for each booking if you choose it, in every email, reminder and calendar file, and a buyer's booked calls on their list of purchases",
   "Google Meet links made for each booking and live event once you connect your own Google Calendar, with a call's buyers on its event's guest list",
-  "Reminders before every booking, a day and an hour before, and buyers who move their own booking up to twice",
+  "Reminders a day and an hour before each booking, when it leaves time for them, and buyers who move their own booking up to twice",
   "Pay what you want: your price as the minimum, a suggested price in the box, and Stripe refusing anything under it",
   "Up to three questions at checkout — a short answer, a number or a list — with the answers in your list of sales",
   "A confirmation email to every buyer, from your store's name, with the way back to what they bought",
@@ -103,7 +104,7 @@ const BUILT = [
   "An email to a member whose renewal failed, once, with a link that pays it and makes the card that worked the one used next time",
   "An API with up to five keys you make and revoke in the studio: it reads your list, members, a course's students, your affiliates and your bookings, and a key made to write adds people who agreed to your list, changes their labels, and gives or takes back products",
   "Memberships whose files, course and community close when the membership ends",
-  "An affiliate program: commission of 1% to 90%, a window of 1 to 90 days, a link and a page for each affiliate, and a record of who is owed what — paid out by you",
+  `An affiliate program: commission of 1% to 90%, a window of up to ${MAX_COOKIE_DAYS} days for as long as the buyer's browser keeps it, a link and a page for each affiliate, and a record of who is owed what — paid out by you`,
   "Calendar sync: busy times in up to three Google, Outlook or iCloud calendars hide call times, and a private feed puts your bookings in your calendar",
   "Webhooks: up to five addresses told about sales, members, leads, bookings and refunds, signed, for Zapier, Make or your own server",
   "Course quizzes of up to 20 questions, and certificates of completion with a page anyone can open to check them",
@@ -208,7 +209,7 @@ const TRUST: { icon: IconName; title: string; body: string; href: string; link: 
   { icon: "mail", title: "How to reach us", body: "By email. A person reads every message and answers in writing, in English.", href: "mailto:support@marktmorgen.com", link: "Write to us" },
   { icon: "bank", title: "Where the money is", body: "Every sale is processed by Stripe on the creator's own account. We never hold a balance of yours.", href: "/platform/your-stripe", link: "How the money moves" },
   { icon: "shield", title: "What we keep about you", body: "What the service needs to run, listed in plain words, with who processes it for us. Nothing is sold.", href: "/privacy", link: "Privacy policy" },
-  { icon: "receipt", title: "The rules, in writing", body: `The terms of the service, a full refund of your first payment to us if you ask within ${REFUND_DAYS} days, and the months of a yearly plan you have not started refunded at any time, less Stripe's card fee.`, href: "/terms", link: "Terms and refunds" },
+  { icon: "receipt", title: "The rules, in writing", body: `The terms of the service, a full refund of your first payment to us, and of every plan payment for the same store made since, if you ask within ${REFUND_DAYS} days of the first, and the months of a yearly plan you have not started refunded at any time, less Stripe's card fee.`, href: "/terms", link: "Terms and refunds" },
   { icon: "door", title: "Leaving is free", body: "Your Stripe account, customers and payouts were always yours, and your list downloads as a file at any time.", href: "/proof/promises", link: "What we never do" },
 ];
 

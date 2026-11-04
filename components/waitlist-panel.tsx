@@ -62,6 +62,7 @@ export function WaitlistPanel({
   preorders = null,
   preorderBlocked = null,
   hasContent = true,
+  price,
 }: {
   productId: string;
   initial: WaitlistView | null;
@@ -72,6 +73,8 @@ export function WaitlistPanel({
   preorderBlocked?: PreorderProblem | null;
   /** Whether it has its file, its link or a lesson: what pre-orders get when it goes on sale. */
   hasContent?: boolean;
+  /** Its price, in the store's currency, as the waitlist's email carries it. */
+  price: string;
 }) {
   const [view, setView] = useState<WaitlistView>(initial ?? { soon: false, confirmed: 0, waiting: 0, launch: null });
   const [pre, setPre] = useState<PreorderView>(preorders ?? { day: null, waiting: 0, given: 0, refunded: 0 });
@@ -81,6 +84,11 @@ export function WaitlistPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  // "Change" on a row of the review before the sale: back to that field, the review closed (487 [IT4], pattern 8).
+  function changeAnswer(id: string) {
+    setConfirming(false);
+    requestAnimationFrame(() => document.getElementById(id)?.focus());
+  }
   const [address, setAddress] = useState(suggestedAddress);
   const [confirming, setConfirming] = useState(false);
 
@@ -213,7 +221,7 @@ export function WaitlistPanel({
           ) : null}
           <p className="text-sm text-ink-soft">
             {view.confirmed
-              ? `It goes on sale at once, and each of the ${view.confirmed.toLocaleString("en-US")} confirmed addresses gets one email with its link and price. Then the waitlist's addresses are deleted; whoever also asked to hear from you is on your list already.`
+              ? `It goes on sale at once, and ${view.confirmed === 1 ? "the confirmed address gets" : `each of the ${view.confirmed.toLocaleString("en-US")} confirmed addresses gets`} one email with its link and price. Then the waitlist's addresses are deleted; whoever also asked to hear from you is on your list already.`
               : "Nobody has confirmed yet, so no email goes out: it just goes on sale."}
           </p>
           {view.confirmed ? (
@@ -221,21 +229,23 @@ export function WaitlistPanel({
               <label className="block">
                 <span className="field-label">A note in the email (optional)</span>
                 <textarea
+                  id={`waitlist-${productId}-note`}
                   className="field mt-1"
                   rows={3}
                   maxLength={MAX_LAUNCH_NOTE}
                   value={note}
-                  onChange={(e) => setNote(e.target.value)}
+                  onChange={(e) => { setNote(e.target.value); setConfirming(false); }}
                   placeholder="Thank you for waiting. Reply to this email if you have any questions."
                 />
               </label>
               <label className="block">
                 <span className="field-label">Postal address at the bottom of the email</span>
                 <input
+                  id={`waitlist-${productId}-address`}
                   className="field mt-1"
                   maxLength={MAX_LAUNCH_ADDRESS}
                   value={address}
-                  onChange={(e) => setAddress(e.target.value)}
+                  onChange={(e) => { setAddress(e.target.value); setConfirming(false); }}
                   placeholder="123 Main St, Austin, TX 78701"
                   autoComplete="street-address"
                 />
@@ -243,19 +253,55 @@ export function WaitlistPanel({
               </label>
             </>
           ) : null}
+          {confirming && view.confirmed ? (
+            <div id={`waitlist-${productId}-review`} className="rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
+              <h3 id={`waitlist-${productId}-review-title`} tabIndex={-1} className="font-semibold">Check before it goes out</h3>
+              {/* A summary list, one answer a row (GOV.UK "Check answers"). */}
+              <dl className="mt-2 divide-y divide-line">
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Goes on sale</dt>
+                  <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">Now, as soon as you press again.</dd>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Price</dt>
+                  <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">{`${price}. Change it in the product's details above.`}</dd>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Emails</dt>
+                  <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">{view.confirmed === 1 ? "One to the confirmed address, with its link and price." : `One to each of the ${view.confirmed.toLocaleString("en-US")} confirmed addresses, with its link and price.`}</dd>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Note</dt>
+                  <dd className="min-w-0 basis-full whitespace-pre-line break-words sm:basis-0 sm:flex-1">{note.trim() || "No note"}</dd>
+                  <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer(`waitlist-${productId}-note`)}>Change<span className="sr-only"> note</span></button></dd>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Postal address</dt>
+                  <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">{address.trim() || "None yet. Add one before it can go out."}</dd>
+                  <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer(`waitlist-${productId}-address`)}>Change<span className="sr-only"> postal address</span></button></dd>
+                </div>
+              </dl>
+            </div>
+          ) : null}
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            disabled={busy || (pre.waiting > 0 && !hasContent)}
+            // An email about something for sale needs the postal address: without one, the second press is not offered.
+            disabled={busy || (pre.waiting > 0 && !hasContent) || (confirming && view.confirmed > 0 && !address.trim())}
             onClick={async () => {
-              if (!confirming) return setConfirming(true);
+              if (!confirming) {
+                setConfirming(true);
+                // The review opens with the focus on its heading, so it is read once, in order.
+                requestAnimationFrame(() => document.getElementById(`waitlist-${productId}-review-title`)?.focus());
+                return;
+              }
               setConfirming(false);
               await act({ action: "launch", note, address });
             }}
           >
             {confirming
               ? view.confirmed
-                ? `Press again: on sale now, ${view.confirmed.toLocaleString("en-US")} emails`
+                ? `Press again: on sale now, ${view.confirmed.toLocaleString("en-US")} ${view.confirmed === 1 ? "email" : "emails"}`
                 : "Press again to put it on sale"
               : view.confirmed
                 ? "Put it on sale and tell the waitlist"

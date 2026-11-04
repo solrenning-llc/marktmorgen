@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   const short = await review(3, a.product.id, 5, "Great!");
   const hidden = await review(4, b.product.id, 1, "I did not like the way the videos were filmed at all.");
   const refunded = await review(5, a.product.id, 4, "Clear steps and a friendly tone all the way through.");
-  await setHidden(statsId, b.product.id, hidden, true);
+  await setHidden(statsId, b.product.id, hidden, true, "unrelated");
   await markOneRefunded(statsId, a.product.id, refunded);
   void short;
 

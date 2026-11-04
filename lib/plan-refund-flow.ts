@@ -50,7 +50,7 @@ import { SUBSCRIPTION_PATTERN, type Store, setSubscription, storeForId, storeRef
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { planRefundLetter, planRefundNotMadeLetter } from "@/lib/plan-refund-words";
+import { planRefundLetter, planRefundNotMadeLetter, planRefundPartLetter } from "@/lib/plan-refund-words";
 import { randomBytes } from "node:crypto";
 
 const AT = "2024-06-20";
@@ -88,13 +88,15 @@ const OBJECT_ID = /^[a-z]{2,4}_[A-Za-z0-9]{6,128}$/;
  * set the stop. While a note stands, the stop stays: a refund may still turn up, and no renewal may be charged
  * before it is decided.
  */
-export type Note = { s: string; at: number; t: number; m: 0 | 1 };
+export type Note = { s: string; at: number; t: number; m: 0 | 1; p?: NotedPart[] };
+/** A charge the refund was about to give back, and how much (written before any money moves). */
+export type NotedPart = { c: string; a: number };
 
 export type PlanRefundFlow =
   /** Given back; `ended` false: the plan is ended by the daily job. `earlier`: given back by an earlier request. */
   | { ok: true; cents: number; currency: string; refundId: string; status: "succeeded" | "pending"; ended: boolean; earlier: boolean }
   /** Nothing given back. `stopLeft`: the stop set for it could not be taken back yet (the daily job does it). */
-  | { ok: false; reason: Exclude<PlanRefundMade, { ok: true }>["reason"] | "no_plan" | "stop_failed"; stopLeft: boolean };
+  | { ok: false; reason: Exclude<PlanRefundMade, { ok: true }>["reason"] | "no_plan" | "stop_failed" | "partial"; stopLeft: boolean };
 
 type Row = Record<string, unknown>;
 const rows = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).filter((r): r is Row => Boolean(r) && typeof r === "object") : []);
@@ -105,7 +107,8 @@ function readNote(raw: unknown): Note | null {
     const v = JSON.parse(raw) as Partial<Note>;
     if (typeof v.s !== "string" || !SUBSCRIPTION_PATTERN.test(v.s) || typeof v.at !== "number" || !Number.isSafeInteger(v.at) || v.at <= 0) return null;
     const t = typeof v.t === "number" && Number.isSafeInteger(v.t) && v.t >= v.at ? v.t : v.at;
-    return { s: v.s, at: v.at, t, m: v.m === 1 ? 1 : 0 };
+    const p = Array.isArray(v.p) && v.p.length && v.p.every((x) => x && typeof x.c === "string" && /^(ch|py)_[A-Za-z0-9]{6,128}$/.test(x.c) && Number.isSafeInteger(x.a) && x.a > 0) ? v.p : undefined;
+    return { s: v.s, at: v.at, t, m: v.m === 1 ? 1 : 0, ...(p ? { p } : {}) };
   } catch {
     return null;
   }
@@ -141,7 +144,54 @@ async function takeBackStop(id: string): Promise<boolean> {
   }
 }
 
-type Found = { kind: "found"; refund: Row; settled: boolean } | { kind: "none" } | { kind: "unknown" };
+type Found = { kind: "found"; refund: Row; settled: boolean } | { kind: "partial" } | { kind: "none" } | { kind: "unknown" };
+
+/**
+ * What became of the charges a note says were about to be given back, read from each charge's own refunds (ours:
+ * `metadata.plan_refund` = the store's id): all given ("found", settled), all given or on their way ("found", not
+ * settled), some given and some not ("partial": never ended on, never taken back, until it is whole), none, or not
+ * readable.
+ */
+/**
+ * The charges to judge a refund by: an earlier request's and this one's. A charge in both keeps the larger amount,
+ * which is what our refunds on it must add up to (a charge already partly refunded by us is read again as owing
+ * only the rest). Never fewer charges than before, so a refund of part is never read as the whole.
+ */
+export function mergeParts(before: NotedPart[] | undefined, now: NotedPart[]): NotedPart[] {
+  const merged = new Map<string, number>();
+  for (const part of [...(before ?? []), ...now]) merged.set(part.c, Math.max(merged.get(part.c) ?? 0, part.a));
+  return [...merged].map(([c, a]) => ({ c, a }));
+}
+
+export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Found> {
+  let succeededAll = true;
+  let coveredAll = true;
+  let anyOurs = false;
+  let first: Row | null = null;
+  let total = 0;
+  for (const part of parts) {
+    let listed: Row;
+    try {
+      listed = await onPlatform("GET", `/refunds?${new URLSearchParams({ charge: part.c, limit: "100" })}`, undefined, { version: AT });
+    } catch (error) {
+      console.error("reading a plan payment's refunds failed", error);
+      return { kind: "unknown" };
+    }
+    if (listed.has_more !== false) return { kind: "unknown" };
+    const ours = rows(listed).filter((r) => (r.metadata as Row | null | undefined)?.plan_refund === sid && typeof r.id === "string" && REFUND_ID.test(r.id));
+    const sum = (ok: (status: unknown) => boolean) => ours.filter((r) => ok(r.status)).reduce((n, r) => n + (Number(r.amount) || 0), 0);
+    const given = sum((x) => x === "succeeded");
+    const coming = sum((x) => x === "pending" || x === "requires_action");
+    if (given + coming > 0) anyOurs = true;
+    if (given < part.a) succeededAll = false;
+    if (given + coming < part.a) coveredAll = false;
+    first ??= ours.find((r) => r.status === "succeeded" || r.status === "pending" || r.status === "requires_action") ?? null;
+    total += part.a;
+  }
+  if (!anyOurs) return { kind: "none" };
+  if (!coveredAll || !first) return { kind: "partial" };
+  return { kind: "found", refund: { ...first, amount: total, status: succeededAll ? "succeeded" : "pending" }, settled: succeededAll };
+}
 /**
  * Our refund for this store made between `at` and `until` (seconds), found by its metadata among the platform's
  * refunds: `settled` when Stripe says it succeeded; one still pending or waiting for an action is found but not
@@ -278,7 +328,9 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
     const weStop = LIVE.includes(String(sub.status)) && !stopSet(sub);
     // A note for another subscription is an old one: this request's replaces it.
     const kept = before && before.s === id ? before : null;
-    let note: Note = { s: id, at: kept?.at ?? nowSeconds, t: nowSeconds, m: kept?.m === 1 || weStop ? 1 : 0 };
+    // The charges an earlier request was refunding stay in the note, so a refund of one of them is never taken
+    // for the whole: this request may stop before it reads what is owed (independent review, 31/10/2026).
+    let note: Note = { s: id, at: kept?.at ?? nowSeconds, t: nowSeconds, m: kept?.m === 1 || weStop ? 1 : 0, ...(kept?.p ? { p: kept.p } : {}) };
     await writeNote(store.sid, note);
 
     // Nothing given back now. `maybe`: a refund may still turn up (a lost answer, an earlier request), so the note
@@ -311,20 +363,25 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
         return notMade("stop_failed", Boolean(kept));
       }
     }
-    const made = await refundPlanPayment(store, nowSeconds, expectCents);
+    const made = await refundPlanPayment(store, nowSeconds, expectCents, async (parts) => {
+      note = { ...note, p: mergeParts(note.p, parts.map((part) => ({ c: part.chargeId, a: part.cents }))) };
+      await writeNote(store.sid, note);
+    });
     if (made.ok) {
       const ended = await finish(made.status === "succeeded");
       if (ended) await tell(store, made);
       return { ok: true, cents: made.cents, currency: made.currency, refundId: made.refundId, status: made.status, ended, earlier: false };
     }
     // Not made now: one made before (an earlier request, or this one whose answer was lost) is looked for.
-    const found = await findPlanRefund(store.sid, note.at, nowSeconds);
+    const found = note.p ? await partsOutcome(store.sid, note.p) : await findPlanRefund(store.sid, note.at, nowSeconds);
     if (found.kind === "found") {
       const result = refundOf(found.refund, made.reason !== "failed", await finish(found.settled));
       if (result.ok && result.ended) await tell(store, result);
       return result;
     }
     // "failed" may hide a refund Stripe makes after we stopped waiting, and an earlier note one we have not seen.
+    // Part of it given back (some charges refunded, some not): said as such, the note and the stop kept.
+    if (found.kind === "partial") return notMade("partial", true);
     return notMade(made.reason, made.reason === "failed" || found.kind === "unknown" || Boolean(kept));
   } finally {
     await releaseLock(held);
@@ -366,7 +423,7 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         counts.dropped += 1;
         continue;
       }
-      const found = await findPlanRefund(sid, note.at, note.t + SETTLE_SECONDS);
+      const found = note.p ? await partsOutcome(sid, note.p) : await findPlanRefund(sid, note.at, note.t + SETTLE_SECONDS);
       if (found.kind === "found") {
         // Still pending: looked at again tomorrow, the stop kept, so nothing renews meanwhile.
         if (found.settled && (await endPlanNow(store, note.s))) {
@@ -375,6 +432,18 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
           if (result.ok) await tell(store, result);
           counts.ended += 1;
         } else counts.left += 1;
+        continue;
+      }
+      if (found.kind === "partial") {
+        // Some given back and some not: never ended on part of a refund, and the stop stays (no renewal). The rest is
+        // given when the creator asks again; after GIVE_UP_DAYS the note goes and the creator is told to ask support.
+        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
+          counts.left += 1;
+          continue;
+        }
+        await dropNote(sid);
+        await mail(store, planRefundPartLetter({ store: store.name || store.handle }), `plan-refund-part:${sid}:${note.at}`);
+        counts.dropped += 1;
         continue;
       }
       if (found.kind === "unknown" || nowSeconds - note.t < SETTLE_SECONDS) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { UrlField } from "@/components/url-field";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { useHydrated } from "@/components/use-hydrated";
@@ -169,17 +170,14 @@ function LinkForm({
         <label htmlFor="link-url" className="field-label">
           Where it goes
         </label>
-        <input
+        <UrlField
           id="link-url"
-          name="url"
-          type="url"
-          required
           value={draft.url}
-          onChange={(event) => setDraft({ ...draft, url: event.target.value })}
-          placeholder="https://"
+          onChange={(url) => setDraft({ ...draft, url })}
+          describedBy="link-url-help"
           className="field mt-2"
         />
-        <p className="mt-1 text-sm text-ink-soft">
+        <p id="link-url-help" className="mt-1 text-sm text-ink-soft">
           Anything of yours that already lives somewhere else. Nothing is sold
           through a link and nothing is charged for it.
         </p>

@@ -4,13 +4,16 @@ import { Icon } from "@/components/icons";
 import { MorningLogo } from "@/components/morning-header";
 import { SignInForm } from "@/components/signin-form";
 import { PasskeySignIn } from "@/components/passkey-signin";
+import { GoogleSignIn } from "@/components/google-signin";
+import { googleSignInShown } from "@/lib/google-signin";
+import { headers } from "next/headers";
 import { ToastOnLoad } from "@/components/toast";
 import { isConnectConfigured } from "@/lib/stripe-connect";
 import { PLAN_TITLES as PLAN_NAMES, TIERS, TRIAL_DAYS, parseTier, publishedPriceWords as priceWords } from "@/lib/plan";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { formatMoney } from "@/lib/money";
 import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
-import { handleProblem, normaliseHandle } from "@/lib/store";
+import { newAddressProblem, normaliseHandle } from "@/lib/store";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
 const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere"]);
@@ -95,6 +98,30 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "You joined the team",
     body: "Your address already has an account here, so the invitation did not log you in. Log in below with a link sent to that address, or with a passkey, and the store is in your studio.",
   },
+  "google-expired": {
+    title: "That login with Google did not finish",
+    body: "It has to finish in the same browser within 10 minutes. Nothing was changed. Try again below.",
+  },
+  "google-declined": {
+    title: "Nothing happened",
+    body: "Google's page was closed or the request was turned down. Try again, or log in with a link sent to your email.",
+  },
+  "google-unverified": {
+    title: "Google has not confirmed that address",
+    body: "We only log you in with Google when Google has confirmed the email address on that account. Log in below with a link sent to your email instead.",
+  },
+  "google-elsewhere": {
+    title: "Use the emailed link for that address",
+    body: "Google can only confirm a Gmail address or a work address on Google Workspace. For any other address, log in below with a link sent to it.",
+  },
+  "google-slow": {
+    title: "Too many tries",
+    body: "Nothing was changed. Wait a few minutes, then try again, or log in with a link sent to your email.",
+  },
+  "google-error": {
+    title: "Logging in with Google did not work just now",
+    body: "Nothing was changed. Try again in a moment, or log in below with a link sent to your email.",
+  },
   "invite-slow": {
     title: "Too many tries",
     body: "Nothing was changed. Wait a little, then open the invitation again.",
@@ -118,7 +145,10 @@ export default async function SignInPage({
 }) {
   const params = await searchParams;
   const status = typeof params.status === "string" ? params.status : "";
-  const notice = NOTICES[status];
+  // The button on the site's own address only (lib/google-signin.ts); its notices only where it can be.
+  const sent = await headers();
+  const google = googleSignInShown(sent.get("x-forwarded-host") ?? sent.get("host"), params.google);
+  const notice = status.startsWith("google-") && !google ? undefined : NOTICES[status];
   // Somebody who pressed Log in has a store already, or believes so: the page
   // greets them that way, rather than with "Start your store", which reads as
   // if they had pressed the wrong thing. The form, the link and what it opens
@@ -152,7 +182,7 @@ export default async function SignInPage({
    * address step after the emailed link, under the same rules as below.
    */
   const asked = typeof params.handle === "string" ? normaliseHandle(params.handle.slice(0, 64)) : "";
-  const askedProblem = asked ? handleProblem(asked) : null;
+  const askedProblem = asked ? newAddressProblem(asked) : null;
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -246,6 +276,7 @@ export default async function SignInPage({
           <div className="card mt-8 p-6 sm:p-8">
             <SignInForm handle={asked && !returning && askedProblem === null ? asked : ""} />
             <PasskeySignIn />
+            {google ? <GoogleSignIn handle={asked && !returning && askedProblem === null ? asked : ""} /> : null}
             {/* Lost the inbox this account logs in with (lib/recovery-address.ts). */}
             <p className="mt-4 text-sm text-ink-soft">
               <Link prefetch={false} href="/signin/lost" className="link inline-flex min-h-11 items-center">

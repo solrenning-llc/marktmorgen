@@ -130,7 +130,7 @@ async function main() {
   part("The 30-day guarantee on the first payment");
   const a = await shop();
   const aPaid = pay(a, { at: NOW - 3 * DAY });
-  is("the first payment within 30 days comes back in full", await a.read(), { refund: { kind: "guarantee", cents: 6_900 }, chargeId: aPaid.id, paymentIntent: aPaid.pi, invoiceId: aPaid.inv, currency: "usd" });
+  is("the first payment within 30 days comes back in full", await a.read(), { refund: { kind: "guarantee", cents: 6_900 }, chargeId: aPaid.id, paymentIntent: aPaid.pi, invoiceId: aPaid.inv, currency: "usd", parts: [{ chargeId: aPaid.id, paymentIntent: aPaid.pi, invoiceId: aPaid.inv, cents: 6_900, paidAtSeconds: NOW - 3 * DAY }] });
   const b = await shop();
   pay(b, { at: NOW - 3 * DAY, amount: 3_450 });
   is("a coupon: what the card paid, never the list price", ((await b.read()).refund), { kind: "guarantee", cents: 3_450 });
@@ -260,6 +260,38 @@ async function main() {
   world.subs.set(o.subscriptionId, { ...world.subs.get(o.subscriptionId)!, metadata: { store: "someone-else" } });
   pay(o, { at: NOW - 3 * DAY });
   is("a subscription that is not this store's: unknown", (await o.read()).refund, { kind: "unknown", reason: "not_this_store" });
+
+  part("Every plan payment made within the guarantee's days (owner, 31/10/2026 15h41)");
+  // Pay 1 Feb, renew 1 Mar, ask 2 Mar: both come back.
+  const feb = await shop();
+  const fFirst = pay(feb, { at: NOW - 29 * DAY });
+  const fRenew = pay(feb, { at: NOW - DAY, reason: "subscription_cycle" });
+  const both = await feb.read();
+  is("the first payment and the renewal inside the window: both, in full", [both.refund, "parts" in both && both.parts.map((p) => [p.chargeId, p.cents])], [{ kind: "guarantee", cents: 13_800 }, [[fFirst.id, 6_900], [fRenew.id, 6_900]]]);
+  is("the first part is the first payment", "chargeId" in both && both.chargeId, fFirst.id);
+  const late = await shop();
+  pay(late, { at: NOW - 31 * DAY });
+  pay(late, { at: NOW - 2 * DAY, reason: "subscription_cycle" });
+  is("asked after the first payment's days: the renewal is never judged a first payment", (await late.read()).refund, { kind: "none", reason: "renewal" });
+  const sw = await shop();
+  pay(sw, { at: NOW - 20 * DAY });
+  pay(sw, { at: NOW - 5 * DAY, amount: 38_000, total: 38_000, reason: "subscription_update" });
+  is("a plan switch charged inside the window comes back too", (await sw.read()).refund, { kind: "guarantee", cents: 6_900 + 38_000 });
+  const dsp = await shop();
+  pay(dsp, { at: NOW - 20 * DAY });
+  const dspRenew = pay(dsp, { at: NOW - 2 * DAY, reason: "subscription_cycle", disputed: true });
+  world.disputes.push({ charge: dspRenew.id, status: "needs_response", amount: 6_900 });
+  const dspRead = await dsp.read();
+  is("a renewal in an open dispute is left to the dispute; the first payment still comes back", [dspRead.refund, "parts" in dspRead && dspRead.parts.length], [{ kind: "guarantee", cents: 6_900 }, 1]);
+  const part2 = await shop();
+  pay(part2, { at: NOW - 20 * DAY, refunded: 6_900 });
+  const rest = pay(part2, { at: NOW - 3 * DAY, reason: "subscription_cycle" });
+  const restRead = await part2.read();
+  is("the first already given back (a refund cut half way): the rest of the window still comes back", ["parts" in restRead && restRead.parts.map((p) => p.chargeId), restRead.refund], [[rest.id], { kind: "guarantee", cents: 6_900 }]);
+  const crowd = await shop();
+  pay(crowd, { at: NOW - 25 * DAY });
+  for (let i = 0; i < 6; i += 1) pay(crowd, { at: NOW - 20 * DAY + i * DAY, amount: 1_000, total: 1_000, reason: "subscription_update" });
+  is("more payments in the window than one refund gives back at once: unknown, for support", (await crowd.read()).refund, { kind: "unknown", reason: "too_many" });
 
   part("Bounds");
   let most = 0;

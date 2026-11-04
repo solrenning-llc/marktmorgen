@@ -308,11 +308,14 @@ async function main(): Promise<void> {
   await watched(fay.folder, "2026-11", VIDEO_SECONDS_INCLUDED + 10 * HOUR);
   await watched(fay.folder, "2026-12", VIDEO_SECONDS_INCLUDED + 40 * HOUR);
   await watched(gus.folder, "2026-12", VIDEO_SECONDS_INCLUDED - 60);
-  const early = await settleAll(Date.UTC(2026, 11, 2, 14));
+  // Only this part's stores: a store from the parts above recorded its hours under the
+  // real month (monthKey()), which from 1 November 2026 is the "2026-11" read here.
+  const ours = (r: { folder: string }) => r.folder === fay.folder || r.folder === gus.folder;
+  const early = (await settleAll(Date.UTC(2026, 11, 2, 14))).filter(ours);
   is("in a month's first days the month before is read and owes nothing", early.filter((r) => r.month === "2026-11").map((r) => [r.folder === fay.folder, r.state, r.added]), [[true, "nothing", 0]]);
   is("and the month that is running owes nothing either", early.filter((r) => r.month === "2026-12").map((r) => [r.folder === fay.folder, r.state, r.added]), [[true, "nothing", 0]]);
   is("a store inside its hours is not in it at all", early.some((r) => r.folder === gus.folder), false);
-  const later = await settleAll(Date.UTC(2026, 11, 20, 14));
+  const later = (await settleAll(Date.UTC(2026, 11, 20, 14))).filter(ours);
   is("later in the month, the month before is left closed, and no line was ever added", [later.some((r) => r.month === "2026-11"), lines.length], [false, 0]);
   is("a creator is written to about a month once", [await firstWord(fay.folder, "2026-12"), await firstWord(fay.folder, "2026-12"), await firstWord(fay.folder, "2027-01")], [true, false, true]);
 

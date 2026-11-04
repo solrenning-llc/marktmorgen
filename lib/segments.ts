@@ -16,7 +16,7 @@
  * readPaidSales), only when an email asks for one, and the answer is kept ten
  * minutes so a creator changing the boxes does not ask Stripe each time:
  *
- *   nl:stats:<statsId>:ledger   JSON [[address, cents, last ms, channel], …], ten minutes
+ *   nl:stats:<statsId>:ledger   JSON { c: currency, p: partial, v: 4, r: [[address, cents, last ms, channel, orders], …] }, ten minutes
  *   nl:mail:segs:<listId>       hash: <id> → JSON Segment, the store's saved groups
  *
  * A group is a name over the choices the composer already has: who, one
@@ -27,13 +27,15 @@ import { IMPORTED_CHANNEL } from "@/lib/channel-names";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { normaliseEmail } from "@/lib/auth";
-import { WHO, type Who } from "@/lib/contacts";
-import { ALL_TIME_PAGES, readsSales, readPaidSales } from "@/lib/stats";
+import { WHO, type Who, readTags } from "@/lib/contacts";
+import { paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
+import { rfmGroup } from "@/lib/rfm-rules";
+import { ALL_TIME_PAGES, readInvoicePayments, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { MAX_SEGMENTS, MAX_SEGMENT_NAME, type Narrow, type Segment, isNarrowed, readNarrow } from "@/lib/segments-rules";
 
-export { type Narrow, NO_NARROW, QUIET_DAYS, MAX_SEGMENTS, MAX_SEGMENT_NAME, type Segment, readNarrow, isNarrowed } from "@/lib/segments-rules";
+export { type Narrow, NO_NARROW, QUIET_DAYS, ACTIVE_DAYS, MAX_SEGMENTS, MAX_SEGMENT_NAME, type Segment, readNarrow, isNarrowed } from "@/lib/segments-rules";
 
 const LEDGER_SECONDS = 600;
 const SEGMENT_ID = /^[0-9a-f]{12}$/;
@@ -41,16 +43,30 @@ const SEGMENT_ID = /^[0-9a-f]{12}$/;
 const ledgerKey = (statsId: string) => `nl:stats:${statsId}:ledger`;
 const segmentsKey = (listId: string) => `nl:mail:segs:${listId}`;
 
-/** What one address has spent here, when it last bought, and where it first came from ("direct" when nowhere was named). */
-export type LedgerEntry = { cents: number; last: number; channel: string };
+/**
+ * What one address has spent here, when it last bought, where it first came
+ * from ("direct" when nowhere was named), and how many times it bought: each
+ * checkout once, an offer taken after paying not counted again (270 [GR1]).
+ */
+export type LedgerEntry = { cents: number; last: number; channel: string; orders: number };
 export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean };
 
-type Row = [string, number, number, string];
+type Row = [string, number, number, string, number];
+/** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes; 5: invoices' payments; 6: each renewal counted as a time they bought). */
+const LEDGER_SHAPE = 6;
+/** Pages of a hundred refunds read for the ledger; `partial` when there were more. */
+const TAKEN_BACK_PAGES = 10;
+/** How long the renewals are read for one ledger before the reading stops, partial: inside the email route's minute. */
+const RENEWALS_SECONDS = 25;
 
 /**
  * Every buyer of this store, from its sales on the creator's Stripe account,
- * as far back as a reading reaches (ALL_TIME_PAGES pages of each). Only the
- * store's currency counts; support for the creator's work is not a purchase.
+ * as far back as a reading reaches (ALL_TIME_PAGES pages of each). Support
+ * for the creator's work is not a purchase. A sale in another currency (from
+ * before the store changed its own) is a purchase like any other: its order,
+ * its date and its channel count, but not its money, because amounts in two
+ * currencies do not add up, so "spent with you" counts the store's currency
+ * only (22 [E5], unit 2c).
  */
 export async function buyerLedger(store: Store): Promise<Ledger> {
   if (!readsSales(store) && !store.pastBuyers) return { buyers: new Map(), partial: false };
@@ -58,26 +74,64 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
     const [cached] = await redisPipeline([["GET", ledgerKey(store.statsId)]]);
     if (typeof cached === "string" && cached) {
       try {
-        const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[] };
-        if (kept.c === store.currency && Array.isArray(kept.r)) {
-          return { buyers: new Map(kept.r.map(([e, cents, last, channel]) => [e, { cents, last, channel }])), partial: kept.p === true };
+        const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; v?: number };
+        if (kept.c === store.currency && kept.v === LEDGER_SHAPE && Array.isArray(kept.r)) {
+          return { buyers: new Map(kept.r.map(([e, cents, last, channel, orders]) => [e, { cents, last, channel, orders }])), partial: kept.p === true };
         }
       } catch {
         // Read again below.
       }
     }
   }
-  const { sales, partial } = await readPaidSales(store, 0, ALL_TIME_PAGES);
+  // Checkouts and offers after paying; and, on a Stripe account, the renewals
+  // of memberships and payment plans, and what refunds and disputes took back
+  // (270 [GR1], unit 2): a member who pays every month is not quiet since they
+  // joined, and a purchase given back is not a purchase.
+  const stripe = Boolean(store.stripeAccountId);
+  const none = { rows: [], partial: false };
+  const until = Date.now() + RENEWALS_SECONDS * 1000;
+  const [paid, renewals, refunds, disputes, paypalBack, invoicePayments] = await Promise.all([
+    readPaidSales(store, 0, ALL_TIME_PAGES),
+    // Renewals stop reading after RENEWALS_SECONDS, partial, so a store with years of them is not a timeout.
+    stripe ? readRenewalPayments(store, 0, ALL_TIME_PAGES, until) : Promise.resolve(none),
+    stripe ? readStoreRefunds(store, 0, TAKEN_BACK_PAGES) : Promise.resolve(none),
+    stripe ? readStoreDisputes(store, 0) : Promise.resolve(none),
+    // PayPal's refunds, as the numbers read them (lib/stats.ts): unread is partial, never none.
+    store.paypalSeller ? readPayPalRefundsWithCoverage(store.statsId, 0).catch(() => null) : Promise.resolve(none),
+    // Each invoice's payment (270 [GR1], unit 3a): a membership's payment, or its first through checkout, is refunded by that payment.
+    stripe ? readInvoicePayments(store, 0, ALL_TIME_PAGES, until).catch(() => null) : Promise.resolve({ byInvoice: new Map<string, string[]>(), partial: false }),
+  ]);
+  const { sales } = paid;
+  const readPartial = paid.partial || renewals.partial || refunds.partial || disputes.partial || !paypalBack || paypalBack.partial;
+  // An invoice whose payment had to be looked up and was not found (the list unread, cut short, or a charge with no payment
+  // intent) leaves its refunds unmatched: the reading is then partial, never "none refunded".
+  let missed = false;
+  const paymentsOfInvoice = (invoice: unknown): string[] => {
+    if (typeof invoice !== "string" || !invoice) return [];
+    const found = invoicePayments?.byInvoice.get(invoice) ?? [];
+    if (!found.length || found.some((intent) => !intent)) missed = true;
+    return found.filter(Boolean);
+  };
+  // What was given back of each payment, by the payment: refunds (Stripe's and PayPal's), and disputes that took or hold the money.
+  const takenBack = new Map<string, number>();
+  const backs = [...refunds.rows, ...disputes.rows, ...(paypalBack?.rows ?? []).map((r) => ({ cents: r.cents, paymentIntent: paypalPaymentId(r.capture) }))];
+  for (const back of backs) if (back.paymentIntent) takenBack.set(back.paymentIntent, (takenBack.get(back.paymentIntent) ?? 0) + back.cents);
+  const kept = (paymentIntents: string[], cents: number) => Math.max(0, cents - paymentIntents.reduce((sum, intent) => sum + (takenBack.get(intent) ?? 0), 0));
   const buyers = new Map<string, LedgerEntry & { firstAt: number }>();
   for (const sale of sales) {
-    if (sale.currency !== store.currency) continue;
     if ((sale.row.metadata as Record<string, string> | null | undefined)?.kind === "tip") continue;
     const details = sale.row.customer_details as { email?: unknown } | null | undefined;
     const raw = sale.upsell ? sale.row.receipt_email : details?.email;
     if (typeof raw !== "string" || !raw.trim()) continue;
+    // Given back in full: not a purchase (a free copy, which cost nothing, still is).
+    // A checkout that started a subscription carries no payment of its own: its first invoice's is the one refunded.
+    const sessionInvoice = sale.row.invoice && typeof sale.row.invoice === "object" ? (sale.row.invoice as { id?: unknown }).id : sale.row.invoice;
+    const left = kept(sale.paymentIntent ? [sale.paymentIntent] : paymentsOfInvoice(sessionInvoice), sale.cents);
+    if (sale.cents > 0 && left === 0) continue;
     const email = normaliseEmail(raw);
-    const row = buyers.get(email) ?? { cents: 0, last: 0, channel: "direct", firstAt: Infinity };
-    row.cents += sale.cents;
+    const row = buyers.get(email) ?? { cents: 0, last: 0, channel: "direct", orders: 0, firstAt: Infinity };
+    if (sale.currency === store.currency) row.cents += left;
+    if (!sale.upsell) row.orders += 1;
     row.last = Math.max(row.last, sale.created);
     // Where they first came from: the channel on their earliest checkout.
     if (!sale.upsell && sale.created < row.firstAt) {
@@ -86,15 +140,30 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
     }
     buyers.set(email, row);
   }
-  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel }])), partial };
+  // A renewal is a payment: it moves the last purchase, adds what was kept in the store's currency, and counts as one more time they bought.
+  for (const renewal of renewals.rows) {
+    const left = kept(renewal.paymentIntent ? [renewal.paymentIntent] : paymentsOfInvoice(renewal.invoice), renewal.cents);
+    if (left === 0) continue;
+    const email = normaliseEmail(renewal.email);
+    // A buyer known only by a renewal came from the channel the subscription was sold through.
+    const row = buyers.get(email) ?? { cents: 0, last: 0, channel: renewal.channel || "direct", orders: 0, firstAt: Infinity };
+    if (renewal.currency === store.currency) row.cents += left;
+    // Each payment kept is one more time they bought, for how often (lib/rfm-rules.ts): a member of a year is not "new".
+    row.orders += 1;
+    row.last = Math.max(row.last, renewal.created);
+    buyers.set(email, row);
+  }
+  // Partial when any list was cut short or unread, or when an invoice's payment was needed and not found.
+  const partial = readPartial || missed;
+  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial };
   // Buyers brought over from another platform (lib/imported-purchases.ts): history, never a sale.
   // Nothing spent here and no purchase date here; they first came "imported".
   for (const email of (await importedBuyers(store.statsId).catch(() => new Map<string, number>())).keys()) {
-    if (!out.buyers.has(email)) out.buyers.set(email, { cents: 0, last: 0, channel: IMPORTED_CHANNEL });
+    if (!out.buyers.has(email)) out.buyers.set(email, { cents: 0, last: 0, channel: IMPORTED_CHANNEL, orders: 0 });
   }
   if (store.statsId && isRedisConfigured()) {
-    const rows: Row[] = [...out.buyers].map(([e, r]) => [e, r.cents, r.last, r.channel]);
-    await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, r: rows }), "EX", LEDGER_SECONDS]]).catch(() => {});
+    const rows: Row[] = [...out.buyers].map(([e, r]) => [e, r.cents, r.last, r.channel, r.orders]);
+    await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, r: rows, v: LEDGER_SHAPE }), "EX", LEDGER_SECONDS]]).catch(() => {});
   }
   return out;
 }
@@ -107,6 +176,10 @@ export function keeps(narrow: Narrow, ledger: Ledger, now = Date.now()): (email:
     if (narrow.channel && (!row || row.channel !== narrow.channel)) return false;
     // Has bought, and not in these days: the ones who went quiet, not the ones who never bought.
     if (narrow.quietDays > 0 && (!row || row.last >= now - narrow.quietDays * 86_400_000)) return false;
+    // Bought here in these days (461 [EL5]): the buyers still active. Never someone who never bought.
+    if (narrow.activeDays && (!row || !row.last || row.last < now - narrow.activeDays * 86_400_000)) return false;
+    // One group of the store's buyers (lib/rfm-rules.ts, 270 [GR1], unit 3b), worked out from the same row.
+    if (narrow.group && (!row || rfmGroup(row, now) !== narrow.group)) return false;
     return true;
   };
 }
@@ -137,6 +210,7 @@ function parseSegment(raw: unknown): Segment | null {
       who: WHO.includes(value.who as Who) ? (value.who as Who) : "all",
       productId: typeof value.productId === "string" ? value.productId : "",
       notProductId: typeof value.notProductId === "string" ? value.notProductId : "",
+      label: typeof value.label === "string" ? readTags([value.label])[0] ?? "" : "",
       ...readNarrow(value),
     };
   } catch {
@@ -163,11 +237,12 @@ export async function saveSegment(store: Store, raw: Record<string, unknown>): P
   const notProductId = typeof raw.notProductId === "string" && raw.notProductId ? raw.notProductId : "";
   if ((productId && !hasProduct(store, productId)) || (notProductId && !hasProduct(store, notProductId))) return { ok: false, reason: "product" };
   const narrow = readNarrow(raw.narrow);
-  if (who === "all" && !productId && !notProductId && !isNarrowed(narrow)) return { ok: false, reason: "empty" };
+  const label = typeof raw.label === "string" ? readTags([raw.label])[0] ?? "" : "";
+  if (who === "all" && !productId && !notProductId && !label && !isNarrowed(narrow)) return { ok: false, reason: "empty" };
   const existing = await listSegments(store.listId);
   const same = existing.find((s) => s.name.toLowerCase() === name.toLowerCase());
   if (!same && existing.length >= MAX_SEGMENTS) return { ok: false, reason: "full" };
-  const segment: Segment = { id: same?.id ?? randomBytes(6).toString("hex"), name, who, productId, notProductId, ...narrow };
+  const segment: Segment = { id: same?.id ?? randomBytes(6).toString("hex"), name, who, productId, notProductId, label, ...narrow };
   await redisPipeline([["HSET", segmentsKey(store.listId), segment.id, JSON.stringify(segment)]]);
   return { ok: true, segments: await listSegments(store.listId) };
 }

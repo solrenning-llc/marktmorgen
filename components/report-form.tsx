@@ -1,8 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { UrlField } from "@/components/url-field";
+import { type LinkCheck, checkWith } from "@/lib/url-check";
 import { reportAnswer } from "@/lib/report-response";
-import { MAX_REPORT_CONTACT, MAX_REPORT_NAME, MAX_REPORT_TEXT, MAX_REPORT_URL, type ReportKind } from "@/lib/takedown-rules";
+import { MAX_REPORT_CONTACT, MAX_REPORT_NAME, MAX_REPORT_TEXT, MAX_REPORT_URL, REPORT_PROBLEMS, type ReportKind } from "@/lib/takedown-rules";
+
+// The page's address, checked when its field is left by the reading the notice is held to (lib/takedown-rules.ts), and required.
+const URL_SHAPE = checkWith((raw) => (/^https?:\/\/\S+$/i.test(raw) ? raw : null), REPORT_PROBLEMS.url, MAX_REPORT_URL);
+const REPORT_URL_CHECK: LinkCheck = (raw) => (raw.trim() ? URL_SHAPE(raw) : { problem: REPORT_PROBLEMS.url, fix: null });
 
 /**
  * The notice form (app/report, lib/takedown.ts): each thing a copyright
@@ -22,6 +28,11 @@ export function ReportForm({ url: given }: { url: string }) {
   async function send(event: React.FormEvent) {
     event.preventDefault();
     if (state === "sending") return;
+    // An address the notice would refuse, or one too long to keep whole, is not sent: the field says why.
+    if (REPORT_URL_CHECK(fields.url).problem) {
+      document.getElementById("report-url")?.focus();
+      return;
+    }
     setState("sending");
     setError("");
     try {
@@ -78,8 +89,8 @@ export function ReportForm({ url: given }: { url: string }) {
       </fieldset>
       <div>
         <label htmlFor="report-url" className="field-label">The page on Marktmorgen</label>
-        <input id="report-url" type="url" required maxLength={MAX_REPORT_URL} value={fields.url} onChange={set("url")} placeholder="https://marktmorgen.com/@store/p/…" className={field} />
-        <p className="mt-1 text-sm text-ink-soft">The store page or the product page, and in what you write below, which part of it.</p>
+        <UrlField id="report-url" value={fields.url} onChange={(url) => setFields({ ...fields, url })} check={REPORT_URL_CHECK} describedBy="report-url-help" placeholder="https://marktmorgen.com/@store/p/…" className={field} />
+        <p id="report-url-help" className="mt-1 text-sm text-ink-soft">The store page or the product page, and in what you write below, which part of it.</p>
       </div>
       <div>
         <label htmlFor="report-work" className="field-label">{copyright ? "The work that was copied, and what on the page copies it" : "What the content is, and why it is illegal"}</label>

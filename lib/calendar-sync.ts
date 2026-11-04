@@ -33,6 +33,7 @@
  *   nl:cal:err:<feed>          the last failure, for the studio
  *   nl:cal:out:<statsId>       the subscription file, five minutes
  */
+import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -43,20 +44,15 @@ import type { Listing, Store } from "@/lib/store";
 import { idsOfKind, readListing, recordListings } from "@/lib/catalog";
 import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
+import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 
-/** Calendars one store may read. */
-export const MAX_FEEDS = 3;
+/** Calendars one store may read, and how far ahead (lib/calendar-limits.ts, which the studio and the feature page read too). */
+export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
 /** The largest calendar file read. A busy calendar of ten years is well under it. */
 export const FEED_MAX_BYTES = 2_000_000;
 /** How long a calendar may take to answer, redirects included. */
 export const FEED_TIMEOUT_MS = 8_000;
-/** How long a reading is used before the calendar is asked again. */
-export const CACHE_SECONDS = 600;
-/** How long the last good reading stands in for a calendar that stopped answering. */
-export const STALE_SECONDS = 6 * 3600;
-/** How far ahead busy times are read: past the longest booking horizon. */
-export const LOOKAHEAD_DAYS = 120;
 /** How long the subscription file is reused before it is made again. */
 const OUT_SECONDS = 300;
 /** The longest address accepted. Google's secret addresses are about 150 characters. */
@@ -452,7 +448,9 @@ export function bookedCalendar(
     const key = `${slot.product}|${slot.start}`;
     // A booked time has the room its bookings were given; an empty session
     // that makes rooms gets one when somebody books it.
-    const room = rooms.has(key) ? rooms.get(key) ?? null : setup && !setup.video ? roomFor(setup, slot.start) : null;
+    // In person (lib/call-place.ts): the address, and no link, not even a room kept from when it was online.
+    const place = setup?.place ?? null;
+    const room = place ? null : rooms.has(key) ? rooms.get(key) ?? null : setup && !setup.video ? roomFor(setup, slot.start) : null;
     const video = isVideoRoom(room);
     const single = !group && slot.people.length === 1 ? slot.people[0] : null;
     const summary = single
@@ -462,7 +460,7 @@ export function bookedCalendar(
         : `${title} (no one booked yet)`;
     const description = [
       ...(slot.people.length ? [slot.people.length === 1 ? "Booked by:" : "Booked:", ...slot.people.map(who)] : ["Nobody has booked this yet."]),
-      ...(room ? ["", `Join: ${room}`] : []),
+      ...(place ? ["", `In person, at: ${placeLine(place)}`] : room ? ["", `Join: ${room}`] : []),
       ...(video ? [VIDEO_ROOM_NOTE] : []),
       ...(!room && setup?.video ? ["", "A private video room is made for it when the first person books."] : []),
       "",
@@ -477,7 +475,7 @@ export function bookedCalendar(
       `DTEND:${icsTime(slot.end)}`,
       `SUMMARY:${icsText(summary)}`,
       `DESCRIPTION:${icsText(description)}`,
-      ...(room ? [`LOCATION:${icsText(room)}`] : []),
+      ...(place ? placeIcsLines(place) : room ? [`LOCATION:${icsText(room)}`] : []),
       "STATUS:CONFIRMED",
       "TRANSP:OPAQUE",
       "END:VEVENT",

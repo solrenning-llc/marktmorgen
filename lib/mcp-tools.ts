@@ -266,12 +266,14 @@ export async function emailsTool(store: Store) {
         sent: b.sent,
         sales: b.tagged && money ? money.sales : null,
         revenue: b.tagged && money ? money.cents : null,
+        // Sales in another currency than the store's, counted, never added to revenue (22 [E5], unit 2d).
+        sales_in_another_currency: b.tagged && money ? money.elsewhere ?? 0 : null,
       };
     }),
     sequences: flows.map((f) => {
       const c = flowCounts.get(f.id);
       const money = flowMoney(revenue, f.id);
-      return { name: f.name, trigger: f.trigger, started: c?.started ?? 0, emails_sent: c?.sent ?? 0, reached_the_end: c?.reached ?? 0, sales: money?.sales ?? null, revenue: money?.cents ?? null };
+      return { name: f.name, trigger: f.trigger, started: c?.started ?? 0, emails_sent: c?.sent ?? 0, reached_the_end: c?.reached ?? 0, sales: money?.sales ?? null, revenue: money?.cents ?? null, sales_in_another_currency: money ? money.elsewhere ?? 0 : null };
     }),
   };
 }

@@ -24,18 +24,13 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { seal, unseal } from "@/lib/secret-box";
 
-export type ChatKind = "slack" | "discord";
+import { type ChatKind, chatKind } from "@/lib/chat-kind";
+
+// The reading of an address lives in lib/chat-kind.ts, browser-safe, so the studio's field checks it the same way.
+export { chatKind, type ChatKind };
 
 const key = (statsId: string) => `nl:chatsum:${statsId}`;
 const context = (statsId: string) => `chat-summary|${statsId}`;
-const SLACK = /^https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9_/-]{10,200}$/;
-const DISCORD = /^https:\/\/(?:discord|discordapp)\.com\/api\/webhooks\/\d{5,30}\/[A-Za-z0-9_-]{20,200}$/;
-
-/** Which chat an address belongs to, or null when it is neither. */
-export function chatKind(raw: unknown): ChatKind | null {
-  const text = typeof raw === "string" ? raw.trim() : "";
-  return SLACK.test(text) ? "slack" : DISCORD.test(text) ? "discord" : null;
-}
 
 /** What is posted, in the shape each takes: Slack's text with its three marks escaped, Discord's content under its 2,000 characters and with nobody pinged. */
 export function chatBody(kind: ChatKind, text: string): Record<string, unknown> {

@@ -41,7 +41,8 @@ test("the phone shows the typed address under the existing handle alphabet, neve
 
 test("the start page says a typed address back and reserves nothing", () => {
   const signin = readFileSync("app/signin/page.tsx", "utf8");
-  assert.match(signin, /handleProblem\(asked\)/);
+  // 568 [GD2] (j): the typed address is checked as a claim (the stricter rule), not only by its shape.
+  assert.match(signin, /newAddressProblem\(asked\)/);
   assert.match(signin, /It is not held for you yet/);
   assert.doesNotMatch(signin.slice(signin.indexOf("const asked"), signin.indexOf("return (")), /fetch\(|claim|redis/i);
 });

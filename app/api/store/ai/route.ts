@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
       readPageFacts(store, product),
       readDepth(store.statsId, product.id).catch(() => ({ visitors: 0, stopped: {} })),
     ]);
-    const missing = coachChecks({ page, productTitle: product.title, free: isFree(product), picture: Boolean(product.image), facts })
+    const missing = coachChecks({ page, productTitle: product.title, free: isFree(product), picture: Boolean(product.image), pictureAlt: product.image?.alt ?? "", facts })
       .filter((c) => !c.done)
       .map((c) => c.label);
     const reach = reachShares(page.blocks.map((b) => b.id), depth.stopped, depth.visitors);

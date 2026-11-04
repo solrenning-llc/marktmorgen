@@ -16,9 +16,11 @@
  *     The buyer can change it or delete it, through the same doors.
  *   - Stars from 1 to 5 and up to 1,000 characters, with the name the buyer
  *     chooses to show (or "Verified buyer"). Their email is never shown.
- *   - The creator can answer in public, and can hide a review. They cannot
- *     change a word of it, and there is no field for anything given in
- *     return for writing one.
+ *   - The creator can answer in public, and can hide a review only for one of
+ *     the review rules (HIDE_REASONS: private information, abuse, not about
+ *     the product, clearly false, unlawful), the same for every rating; the
+ *     reason is kept with it. They cannot change a word of it, and there is
+ *     no field for anything given in return for writing one.
  *   - Hiding takes a review's words off the page, never its stars out of the
  *     average: the average and the count include hidden reviews, and the
  *     page says how many are hidden ("2 reviews hidden by the creator"). So
@@ -26,8 +28,7 @@
  *   - A refund in full marks the review "refunded" and takes its stars out of
  *     the average and the count, because it no longer comes from a buyer who
  *     kept what they paid for. Its words stay, marked as such.
- *   - Stars show only when at least one review is on the page and at least
- *     one counts. New reviews go live at once; the creator's queue in the
+ *   - Stars show when at least one review counts, hidden or not. New reviews go live at once; the creator's queue in the
  *     studio lists what arrived since they last looked.
  *
  * Records in Redis, all under the store's statsId:
@@ -58,6 +59,8 @@ import {
   type ReviewPhoto,
   type Summary,
   summarise,
+  type HideReason,
+  isHideReason,
 } from "@/lib/review-summary";
 import { parseProductImage } from "@/lib/product-image";
 
@@ -159,9 +162,11 @@ export function parseReview(raw: unknown): Review | null {
       createdAt: Number(value.createdAt) || 0,
       editedAt: Number(value.editedAt) || 0,
       hidden: value.hidden === true,
+      hiddenReason: value.hidden === true && isHideReason(value.hiddenReason) ? value.hiddenReason : null,
       refunded: value.refunded === true,
       reply: reply && reply.text ? reply : null,
       photo: parseReviewPhoto(value.photo),
+      ...(Number.isSafeInteger(value.paidAt) && (value.paidAt as number) > 0 ? { paidAt: value.paidAt as number } : {}),
     };
   } catch {
     return null;
@@ -301,6 +306,8 @@ export type SaveInput = {
   rating: number;
   text: string;
   name: string;
+  /** When the order was paid, in seconds, from the order's proof (606 [WP5]); 0 when not known. */
+  paidAt?: number;
 };
 
 export type SaveResult = { state: "created" | "updated"; review: Review } | { state: "full" | "noroom" | "busy" | "invalid" };
@@ -343,11 +350,15 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
       createdAt: before?.createdAt || now,
       editedAt: before ? now : 0,
       hidden: before?.hidden ?? false,
+      hiddenReason: before?.hiddenReason ?? null,
       refunded: false,
       reply: before?.reply ?? null,
       // A photo stays through an edit; it is added or taken off by setReviewPhoto.
       photo: before?.photo ?? null,
     };
+    // When the order was paid: kept from the first writing of the same order, else as the order's proof says.
+    const paidAt = before && before.reference === input.reference && before.paidAt ? before.paidAt : input.paidAt;
+    if (Number.isSafeInteger(paidAt) && (paidAt as number) > 0) review.paidAt = paidAt;
     const grown = reviewBytes(review) - reviewBytes(before);
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     await write(statsId, review);
@@ -431,8 +442,15 @@ export async function setReviewPhoto(statsId: string, productId: string, id: str
   return typeof done === "string" ? done : { review: done, removed };
 }
 
-export function setHidden(statsId: string, productId: string, id: string, hidden: boolean) {
-  return creatorChange(statsId, productId, id, (review) => ({ ...review, hidden }), null);
+/**
+ * Hides a review for one of the review rules (HIDE_REASONS), or shows it again.
+ * Null, and nothing changed, when it is hidden without a listed reason. The
+ * rating is never read: the same rules for every review.
+ */
+export async function setHidden(statsId: string, productId: string, id: string, hidden: boolean, reason?: unknown) {
+  if (hidden && !isHideReason(reason)) return null;
+  const hiddenReason: HideReason | null = hidden && isHideReason(reason) ? reason : null;
+  return creatorChange(statsId, productId, id, (review) => ({ ...review, hidden, hiddenReason }), null);
 }
 
 /** The creator's public answer; empty text takes it away. */
@@ -547,6 +565,45 @@ export async function studioReviews(
     rows.push({ ...review, unseen: options.queue ? true : flags[i] !== null && flags[i] !== undefined });
   });
   return { rows, total: Number(total) || 0, unseen: Number(unseen) || 0 };
+}
+
+/** The most reviews the studio's overview reads at once (636 [GL4](c)). */
+export const OVERVIEW_READ_MAX = 1_000;
+
+/**
+ * Every review written since `since` (milliseconds), newest first, for the
+ * studio's overview by month (lib/review-overview.ts): at most
+ * OVERVIEW_READ_MAX, with `complete` false when there were more. Throws when
+ * the index or a record cannot be read, so a gap is never shown as no reviews.
+ */
+export async function reviewsSince(statsId: string | null, since: number): Promise<{ reviews: Review[]; complete: boolean }> {
+  if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) throw new Error("Review list unavailable");
+  const [members] = await redisPipeline([["ZREVRANGEBYSCORE", allKey(statsId), "+inf", since, "LIMIT", 0, OVERVIEW_READ_MAX + 1]]);
+  if (!Array.isArray(members)) throw new Error("Review index unavailable");
+  const complete = members.length <= OVERVIEW_READ_MAX;
+  const byProduct = new Map<string, string[]>();
+  for (const member of members.slice(0, OVERVIEW_READ_MAX)) {
+    if (typeof member !== "string") throw new Error("Review index unreadable");
+    const [product, id, ...extra] = member.split("|");
+    if (extra.length || !PRODUCT_ID_PATTERN.test(product) || !REVIEW_ID_PATTERN.test(id)) throw new Error("Review reference unreadable");
+    byProduct.set(product, [...(byProduct.get(product) ?? []), id]);
+  }
+  const products = [...byProduct.entries()];
+  const read = products.length ? await redisPipeline(products.map(([productId, ids]) => ["HMGET", productKey(statsId, productId), ...ids])) : [];
+  if (!Array.isArray(read) || read.length !== products.length) throw new Error("Review records incomplete");
+  const reviews: Review[] = [];
+  read.forEach((values, group) => {
+    const [productId, ids] = products[group];
+    if (!Array.isArray(values) || values.length !== ids.length) throw new Error("Review records incomplete");
+    for (const value of values) {
+      const review = parseReview(value);
+      // A record gone since the index was read (its buyer deleted it) is simply not there.
+      if (value === null) continue;
+      if (!review || review.productId !== productId) throw new Error("Review record unreadable");
+      reviews.push(review);
+    }
+  });
+  return { reviews: reviews.sort((a, b) => b.createdAt - a.createdAt), complete };
 }
 
 /** Forgets every review of a product that is gone. Returns their photos' paths, for the caller to delete. */

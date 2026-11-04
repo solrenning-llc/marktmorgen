@@ -42,7 +42,7 @@ jobs:
   entry-pilot:
     needs: documentation-scope
     # Fail closed before runner allocation; never use larger or self-hosted runners.
-    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' && github.repository == 'viniciussucupira/marktmorgen' && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' && (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
     name: Real reader entry (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
@@ -77,7 +77,7 @@ jobs:
         run: node node_modules/playwright-core/cli.js install ${{ runner.os == 'Windows' && 'chromium' || 'webkit' }}
       - name: Check owned preparation recovery and refusal cases
         working-directory: tooling/screen-reader
-        run: node --test setup-owned-reader.test.mjs
+        run: node --test owned-repository.test.mjs setup-owned-reader.test.mjs navigate-to-content.test.mjs windows-foreground.test.mjs
       - name: Configure real screen reader on disposable standard runner
         working-directory: tooling/screen-reader
         run: node setup-owned-reader.mjs

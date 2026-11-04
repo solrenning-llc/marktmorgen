@@ -1,12 +1,13 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { agreementReply, type AgreementAction, type AgreementReply } from "@/lib/agreement-reply";
 import { agreementEditorVersion } from "@/lib/agreement-editor-version";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
-import { type Currency, fieldPrefix, formatMoney, readMoney } from "@/lib/money";
+import { type Currency, fieldPrefix, formatMoney, isCurrency, readMoney } from "@/lib/money";
 import {
   KEEP_DAYS,
   KIND_WORDS,
@@ -20,13 +21,17 @@ import {
   MAX_TITLE,
   MAX_VERSIONS,
   SIGN_DAYS,
+  DRAFT_PROBLEMS,
   STATUS_WORDS,
   type Agreement,
+  type AgreementDraft,
+  type DraftProblem,
   type AgreementKind,
   type AgreementStatus,
   canRevise,
   canSendAgain,
   latestOf,
+  readDraft,
   statusOf,
 } from "@/lib/agreement-rules";
 
@@ -78,6 +83,19 @@ export function AgreementsStudio({
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  // The form as it was when its review opened (487 [IT4], pattern 8): the review holds only while nothing has changed since.
+  const [reviewOf, setReviewOf] = useState<string | null>(null);
+  // What the server's own reading (readDraft) makes of the form: the review shows this, so it shows what is sent.
+  // The form a send error was about: once it is edited, that error no longer applies and is not said again.
+  const [errorFor, setErrorFor] = useState<string | null>(null);
+  const [reviewed, setReviewed] = useState<AgreementDraft | null>(null);
+  const snapshot = JSON.stringify({ kind, email, name, title, body, lines, payRequest, consent, editing: editing?.id ?? null });
+  const reviewing = reviewOf !== null && reviewOf === snapshot && reviewed !== null;
+  function changeAnswer(id: string) {
+    setReviewOf(null);
+    setError("");
+    requestAnimationFrame(() => document.getElementById(id)?.focus());
+  }
   const money = (cents: number) => formatMoney(cents, currency);
 
   const total = lines.reduce((sum, line) => {
@@ -96,6 +114,8 @@ export function AgreementsStudio({
   }
 
   function reset() {
+    setReviewOf(null);
+    setReviewed(null);
     setEditing(null);
     setKind("agreement");
     setEmail("");
@@ -110,15 +130,23 @@ export function AgreementsStudio({
 
   async function startEdit(row: AgreementRow) {
     if (busy) return;
+    setReviewOf(null);
+    setReviewed(null);
     setBusy(`read:${row.id}`);
     const answer = await call({ action: "read", id: row.id });
     setBusy("");
     const latest = latestOf(row);
-    const v = agreementEditorVersion(answer.version, currency, latest?.n ?? 0);
-    if (!answer.ok || !v || v.sha256 !== latest?.sha256) {
+    // A version written before the store changed its currency keeps its own (22 [E5], unit 2c): its
+    // amounts are read in it, then left empty here, so €50 never comes back as $50.
+    const its = answer.version && typeof answer.version === "object" ? (answer.version as { currency?: unknown }).currency : undefined;
+    const then: Currency = isCurrency(its) ? its : currency;
+    const read = agreementEditorVersion(answer.version, then, latest?.n ?? 0);
+    if (!answer.ok || !read || read.sha256 !== latest?.sha256) {
       toast(answer.message ?? "That agreement can't be read right now. Try again in a moment.");
       return;
     }
+    const v = then === currency ? read : { ...read, lines: read.lines.map((line) => ({ ...line, amount: "" })) };
+    if (then !== currency) toast(`Its last version was in ${then.toUpperCase()}. Type its amounts again in ${currency.toUpperCase()}, your store's currency now.`);
     setEditing(row);
     setKind(row.kind);
     setEmail(row.email);
@@ -131,9 +159,30 @@ export function AgreementsStudio({
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "instant" });
   }
 
-  async function submit(event: React.FormEvent) {
+  // The first press opens the review; only its own button sends.
+  // Where each problem the reading can find is fixed.
+  const PROBLEM_FIELD: Record<DraftProblem, string> = { kind: "ag-kind", email: "ag-email", name: "ag-name", title: "ag-title", body: "ag-body", lines: "ag-body", line: "ag-line-0", amount: "ag-line-0", total: "ag-line-0", pay: "ag-pay", consent: "ag-consent" };
+
+  function submit(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
+    setError("");
+    // Held to the server's own rules before the review opens, so nothing is reviewed that would be refused.
+    const read = readDraft({ kind, email, name, title, body, lines, payRequest, consent }, currency, editing ? { kind: editing.kind, email: editing.email, name: editing.name } : undefined);
+    if (!read.ok) {
+      setReviewOf(null);
+      setError(DRAFT_PROBLEMS[read.problem]);
+      const field = (read.problem === "line" || read.problem === "amount") && read.line !== undefined ? `ag-line-${read.line}` : PROBLEM_FIELD[read.problem];
+      requestAnimationFrame(() => document.getElementById(field)?.focus());
+      return;
+    }
+    setReviewed(read.draft);
+    setReviewOf(snapshot);
+    requestAnimationFrame(() => document.getElementById("ag-review-title")?.focus());
+  }
+
+  async function send() {
+    if (busy || !reviewing) return;
     setBusy("save");
     setError("");
     const answer = editing
@@ -142,10 +191,18 @@ export function AgreementsStudio({
     setBusy("");
     if (!answer.ok) {
       setError(answer.message ?? "We couldn't confirm whether the agreement was saved or emailed. Your text is still here. Reload to check before trying again.");
+      // Said beside the button that was pressed, and read at once.
+      setErrorFor(snapshot);
+      requestAnimationFrame(() => document.getElementById("ag-send-error")?.focus());
       return;
     }
+    setReviewOf(null);
+    setReviewed(null);
+    setErrorFor(null);
     toast(answer.sent ? (editing ? "New version sent. It needs a new signature." : "Sent for signature.") : "Saved, but its email did not go. Send it again from the list.");
     reset();
+    // The review is gone with the focus in it: the focus goes back to the start of the form.
+    requestAnimationFrame(() => document.getElementById("ag-email")?.focus());
     router.refresh();
   }
 
@@ -168,7 +225,9 @@ export function AgreementsStudio({
     <div className="mt-8 space-y-8">
       {canSend ? (
         <form onSubmit={submit} className="card p-6 sm:p-8" noValidate>
-          <p className="text-lg font-semibold tracking-[-0.02em] text-ink">{editing ? `New version for ${editing.name || editing.email}` : "New proposal or agreement"}</p>
+          {/* Nothing in it can change while it is being sent. */}
+          <fieldset disabled={busy !== ""} className="m-0 min-w-0 border-0 p-0">
+          <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">{editing ? `New version for ${editing.name || editing.email}` : "New proposal or agreement"}</h2>
           <p className="mt-2 max-w-2xl text-ink-soft">
             {editing
               ? "A version that was sent is never changed. Saving writes a new version, emails its link, and needs a new signature; an earlier signature stays recorded against the text it signed."
@@ -179,28 +238,28 @@ export function AgreementsStudio({
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
               <label className="block">
                 <span className="text-sm font-semibold text-ink">Kind</span>
-                <select className="field mt-1" value={kind} onChange={(e) => setKind(e.target.value === "proposal" ? "proposal" : "agreement")}>
+                <select id="ag-kind" className="field mt-1" value={kind} onChange={(e) => setKind(e.target.value === "proposal" ? "proposal" : "agreement")}>
                   <option value="agreement">Agreement</option>
                   <option value="proposal">Proposal</option>
                 </select>
               </label>
               <label className="block">
                 <span className="text-sm font-semibold text-ink">Their email</span>
-                <input className="field mt-1" type="email" autoComplete="off" required maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} />
+                <input id="ag-email" className="field mt-1" type="email" autoComplete="off" required maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} />
               </label>
               <label className="block">
                 <span className="text-sm font-semibold text-ink">Their name (optional)</span>
-                <input className="field mt-1" maxLength={MAX_NAME} value={name} onChange={(e) => setName(e.target.value)} />
+                <input id="ag-name" className="field mt-1" maxLength={MAX_NAME} value={name} onChange={(e) => setName(e.target.value)} />
               </label>
             </div>
           ) : null}
           <label className="mt-5 block">
             <span className="text-sm font-semibold text-ink">Title</span>
-            <input className="field mt-1" maxLength={MAX_TITLE} required placeholder="Coaching agreement, October to December" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input id="ag-title" className="field mt-1" maxLength={MAX_TITLE} required placeholder="Coaching agreement, October to December" value={title} onChange={(e) => setTitle(e.target.value)} />
           </label>
           <label className="mt-5 block">
             <span className="text-sm font-semibold text-ink">The text</span>
-            <textarea className="field mt-1 min-h-64 font-mono text-sm" maxLength={MAX_BODY} required value={body} onChange={(e) => setBody(e.target.value)} />
+            <textarea id="ag-body" className="field mt-1 min-h-64 font-mono text-sm" maxLength={MAX_BODY} required value={body} onChange={(e) => setBody(e.target.value)} />
             <span className="mt-1 block text-xs text-ink-soft">{`Plain text, up to ${MAX_BODY.toLocaleString("en-US")} characters, shown exactly as you type it. Marktmorgen gives no legal advice and provides no templates: you write the terms, and whether they can be enforced depends on the law where you and they are.`}</span>
           </label>
           <fieldset className="mt-6">
@@ -210,7 +269,7 @@ export function AgreementsStudio({
                 <div key={i} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5rem_9rem_auto] sm:items-end">
                   <label className="block min-w-0">
                     <span className="sr-only">{`Line ${i + 1}: what it is for`}</span>
-                    <input className="field" placeholder="Twelve weekly sessions" maxLength={MAX_LINE_TEXT} value={line.text} onChange={(e) => setLine(i, { text: e.target.value })} />
+                    <input id={`ag-line-${i}`} className="field" placeholder="Twelve weekly sessions" maxLength={MAX_LINE_TEXT} value={line.text} onChange={(e) => setLine(i, { text: e.target.value })} />
                   </label>
                   <label className="block">
                     <span className="text-xs text-ink-soft">Quantity</span>
@@ -236,7 +295,7 @@ export function AgreementsStudio({
           {payChoices.length ? (
             <label className="mt-5 block">
               <span className="text-sm font-semibold text-ink">Payment request to show once signed (optional)</span>
-              <select className="field mt-1" value={payRequest} onChange={(e) => setPayRequest(e.target.value)}>
+              <select id="ag-pay" className="field mt-1" value={payRequest} onChange={(e) => setPayRequest(e.target.value)}>
                 <option value="">None</option>
                 {payChoices.map((p) => (
                   <option key={p.id} value={p.id}>{p.label}</option>
@@ -250,14 +309,14 @@ export function AgreementsStudio({
           </p>
           {!editing ? (
             <label className="mt-4 flex items-start gap-3">
-              <input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+              <input id="ag-consent" type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
               <span className="text-sm text-ink">I deal with this person, and they expect this from me.</span>
             </label>
           ) : null}
-          {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
+          {error && !reviewing && (errorFor === null || errorFor === snapshot) ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
           <div className="mt-5 flex flex-wrap gap-3">
-            <button type="submit" className="btn btn-primary" disabled={!open || busy !== ""}>
-              {busy === "save" ? "Sending..." : editing ? "Send the new version" : "Send for signature"}
+            <button type="submit" className={reviewing ? "btn btn-secondary" : "btn btn-primary"} disabled={!open || busy !== ""}>
+              Check before sending
             </button>
             {editing ? (
               <button type="button" className="btn btn-secondary" onClick={reset} disabled={busy !== ""}>
@@ -265,6 +324,60 @@ export function AgreementsStudio({
               </button>
             ) : null}
           </div>
+                  {reviewing && reviewed ? (
+            <div className="mt-5 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
+              <h3 id="ag-review-title" tabIndex={-1} className="font-semibold">Check before it goes out</h3>
+              {/* A summary list (GOV.UK "Check answers"): its link is emailed to this person as soon as it is sent. */}
+              <dl className="mt-2 divide-y divide-line">
+                {!editing ? (
+                  <>
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-32 sm:shrink-0">Kind</dt>
+                  <dd className="min-w-0 basis-full whitespace-pre-line break-words sm:basis-0 sm:flex-1">{reviewed.kind === "proposal" ? "Proposal" : "Agreement"}</dd>
+                  <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer("ag-kind")}>Change<span className="sr-only"> kind</span></button></dd>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-32 sm:shrink-0">To</dt>
+                  <dd className="min-w-0 basis-full whitespace-pre-line break-words sm:basis-0 sm:flex-1">{reviewed.name ? `${reviewed.name}, ${reviewed.email}` : reviewed.email}</dd>
+                  <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer("ag-email")}>Change<span className="sr-only"> who it goes to</span></button></dd>
+                </div>
+                  </>
+                ) : (
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-32 sm:shrink-0">To</dt>
+                  <dd className="min-w-0 basis-full whitespace-pre-line break-words sm:basis-0 sm:flex-1">{editing.name ? `${editing.name}, ${editing.email}` : editing.email}</dd>
+                </div>
+                )}
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-32 sm:shrink-0">Title</dt>
+                  <dd className="min-w-0 basis-full whitespace-pre-line break-words sm:basis-0 sm:flex-1">{reviewed.title}</dd>
+                  <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer("ag-title")}>Change<span className="sr-only"> title</span></button></dd>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-32 sm:shrink-0">Text</dt>
+                  <dd className="min-w-0 basis-full whitespace-pre-line break-words sm:basis-0 sm:flex-1">{`${reviewed.body.length.toLocaleString("en-US")} characters, starting: ${reviewed.body.slice(0, 160)}${reviewed.body.length > 160 ? "…" : ""}`}</dd>
+                  <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer("ag-body")}>Change<span className="sr-only"> text</span></button></dd>
+                </div>
+                {reviewed.lines.length ? (
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-32 sm:shrink-0">Total</dt>
+                  <dd className="min-w-0 basis-full whitespace-pre-line break-words sm:basis-0 sm:flex-1">{`${money(reviewed.total)}: ${reviewed.lines.map((line) => `${line.text}, ${line.quantity} × ${money(line.cents)}`).join("; ")}`}</dd>
+                </div>
+                ) : null}
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                  <dt className="basis-full font-semibold sm:basis-32 sm:shrink-0">Payment request</dt>
+                  <dd className="min-w-0 basis-full whitespace-pre-line break-words sm:basis-0 sm:flex-1">{reviewed.payRequest ? payChoices.find((p) => p.id === reviewed.payRequest)?.label ?? "One of your requests" : "None"}</dd>
+                  {/* Its field is there only when there are open requests to choose from. */}
+                  {payChoices.length ? <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changeAnswer("ag-pay")}>Change<span className="sr-only"> payment request</span></button></dd> : null}
+                </div>
+              </dl>
+              {error ? <p id="ag-send-error" tabIndex={-1} className="notice notice-error mt-3" role="alert">{error}</p> : null}
+              <button type="button" className="btn btn-primary mt-3" disabled={!open || busy !== ""} aria-busy={busy === "save"} onClick={() => void send()}>
+                {busy === "save" ? "Sending..." : editing ? "Yes, send the new version" : "Yes, send for signature"}
+              </button>
+            </div>
+          ) : null}
+          </fieldset>
         </form>
       ) : (
         <p className="notice">Only the owner and admins can send agreements. You can see them here.</p>
@@ -341,9 +454,9 @@ export function AgreementsStudio({
                     </button>
                   ) : null}
                   {canSend && status !== "open" ? (
-                    <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== ""} onClick={() => void act("delete", r.id, "Deleted. Copies already emailed stay with whoever received them.")} aria-label={`Delete the agreement with ${r.email}`}>
+                    <ConfirmAction className="btn btn-secondary btn-sm" disabled={busy !== ""} label={`Delete the agreement with ${r.email}`} question="Delete this agreement? It cannot be brought back; copies already emailed stay with whoever received them." yes="Yes, delete" onConfirm={() => act("delete", r.id, "Deleted. Copies already emailed stay with whoever received them.")}>
                       <Icon name="trash" size={15} /> Delete
-                    </button>
+                    </ConfirmAction>
                   ) : null}
                 </div>
               </li>

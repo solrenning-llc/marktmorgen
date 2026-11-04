@@ -93,7 +93,7 @@ async function main(): Promise<void> {
   part("Translated and coached");
   const words = pageWords(page);
   is("every word of the second version is translated with the first", [words.includes("Forty dinners"), words.includes("Dinner, sorted")], [true, true]);
-  const test = coachChecks({ page, productTitle: "Forty dinners", free: false, picture: false, facts: {} }).find((c) => c.id === "test");
+  const test = coachChecks({ page, productTitle: "Forty dinners", free: false, picture: false, pictureAlt: "", facts: {} }).find((c) => c.id === "test");
   is("the coach counts a second version as a test", test?.done, true);
 
   done();

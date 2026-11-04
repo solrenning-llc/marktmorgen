@@ -17,8 +17,9 @@
  *                  downloading the store's own data are never refused.
  *   api            every request to the REST API with one of the store's
  *                  keys (lib/api-guard.ts).
- *   inbox          a message that arrives in the store's inbox: a visitor's
- *                  chat, a contact form (lib/inbox.ts).
+ *   inbox          a conversation in the store's inbox: a visitor's chat, a
+ *                  contact form, or one the creator begins with one of their
+ *                  affiliates (lib/inbox.ts).
  *   email          the emails a store's own paths send that are neither its
  *                  monthly emails (lib/mail.ts) nor an order's: inbox notices
  *                  and replies, a purchase sent again, contact-form and
@@ -131,12 +132,24 @@ export function allowanceListWords(tier: Tier): string {
 /** "2,000": a figure with its thousands marked. */
 const count = (n: number) => Math.max(0, Math.floor(n)).toLocaleString("en-US");
 
-/** The sentence a refusal starts with, for the creator. `reset` says when it opens again (lib/allowance-window.ts, resetWords). */
-export function usedWords(kind: AllowanceKind, limit: number, reset: string): string {
+/**
+ * The sentence a refusal starts with, for the creator. `reset` says when it
+ * opens again (lib/allowance-window.ts, resetWords). `standing` names the
+ * window: the whole trial in a trial, the month otherwise. `plansOnSale`
+ * (lib/opening.ts, passed in so this file stays browser-safe) decides whether
+ * a plan can be started or changed at all; only then is that offered, and a
+ * larger plan only to a store that pays and has one above it on sale
+ * (`larger`).
+ */
+export function usedWords(kind: AllowanceKind, limit: number, reset: string, standing: Standing, plansOnSale: boolean, larger: boolean): string {
   const words = KIND_WORDS[kind];
-  return limit <= 0
-    ? `${words.what} are not included right now. Start or move to a plan that includes them.`
-    : `${words.what} for this month are used: ${count(limit)} ${words.many}. ${reset} Moving to a larger plan raises the figure at once.`;
+  if (limit <= 0) {
+    const where = standing === "trial" ? "in the trial" : standing === "paid" ? "in this plan" : "without a paid plan";
+    return `${words.what} are not included ${where}.${plansOnSale ? " Start or move to a plan that includes them." : ""}`;
+  }
+  const period = standing === "trial" ? "for this trial" : "for this month";
+  const move = plansOnSale && standing === "paid" && larger ? " Moving to a larger plan raises the figure at once." : "";
+  return `${words.what} ${period} are used: ${count(limit)} ${words.many}. ${reset}${move}`;
 }
 
 /** What a visitor or a buyer is told when a store cannot take what they sent: never the store's plan. */

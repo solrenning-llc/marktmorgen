@@ -1,14 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { UrlField } from "@/components/url-field";
+import { CALENDAR_CHECK } from "@/lib/fetch-url-check";
 import { useRouter } from "next/navigation";
 import { useHydrated } from "@/components/use-hydrated";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { CalendarView } from "@/lib/calendar-sync";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { LOOKAHEAD_DAYS, MAX_FEEDS } from "@/lib/calendar-limits";
 
-const MAX_FEEDS = 3;
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -127,7 +129,7 @@ export function CalendarEditor({ view: initial, weekly }: { view: CalendarView; 
                     <span className="block font-semibold text-ink">{feed.provider}</span>
                     <span className="block text-sm text-ink-soft">
                       {feed.state === "ok"
-                        ? `Read ${ago(feed.checkedAt, local)} · ${feed.busyTimes} busy ${feed.busyTimes === 1 ? "time" : "times"} in the next 120 days`
+                        ? `Read ${ago(feed.checkedAt, local)} · ${feed.busyTimes} busy ${feed.busyTimes === 1 ? "time" : "times"} in the next ${LOOKAHEAD_DAYS} days`
                         : feed.state === "error"
                           ? `Could not be read ${ago(feed.checkedAt, local)}`
                           : "Waiting for its first reading"}
@@ -173,19 +175,17 @@ export function CalendarEditor({ view: initial, weekly }: { view: CalendarView; 
           <label htmlFor="calendar-url" className="field-label">
             Private calendar address (iCal or .ics link)
           </label>
-          <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-            <input
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-start">
+            <UrlField
               id="calendar-url"
-              type="url"
-              inputMode="url"
               autoComplete="off"
-              spellCheck={false}
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={setUrl}
+              check={CALENDAR_CHECK}
               placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"
-              aria-describedby="calendar-url-hint"
-              className="field min-w-0 flex-1"
-              required
+              describedBy="calendar-url-hint"
+              wrapClassName="min-w-0 flex-1"
+              className="field w-full"
             />
             <button type="submit" disabled={busy !== null} aria-busy={busy === "add"} className="btn btn-primary shrink-0">
               {busy === "add" ? "Reading it…" : "Add calendar"}

@@ -9,6 +9,10 @@ import {EVERGREEN_GUIDES,DIGITAL_FILE_GUIDE_EXTRA,DIGITAL_FILE_GUIDE_FAQ} from "
  * from so a reader can check it.
  */
 import { PLAN_AT, feeWords, gumroadSums } from "@/lib/fee-words";
+import { AFFILIATES_PAID, PAYPAL_WAITS, STAN_AFFILIATES_AHEAD, paypalAtCheckout, paypalConnectionWords } from "@/lib/public-explanations";
+
+/** Whether a buyer can pay with PayPal here, read from the deployment so the posts say what is true on the day (lib/public-explanations.ts). */
+const PAYPAL = paypalAtCheckout();
 
 export type BlogBlock =
   | { type: "p"; text: string }
@@ -849,6 +853,10 @@ const BASE_BLOG_POSTS: BlogPost[] = [
         type: "note",
         text: "And later the same day, when Marktmorgen added live events inside the community, bundles of products, drafts, and importing a list, products and past buyers from another platform. Later still, it added Google Meet links made on your own Google Calendar.",
       },
+      {
+        type: "note",
+        text: `Corrected on November 1, 2026: an earlier version gave only half the PayPal story and said affiliates are not paid automatically. Stripe does not offer its own PayPal for the direct charges every sale here is made with; that part was right. ${paypalConnectionWords(PAYPAL)} And affiliates can be paid automatically on your payday, from your own PayPal.`,
+      },
       { type: "h2", text: "What Stan is" },
       {
         type: "p",
@@ -876,7 +884,7 @@ const BASE_BLOG_POSTS: BlogPost[] = [
       {
         type: "ul",
         items: [
-          "Range: automatic Instagram replies, PayPal, affiliates paid automatically, one builder for funnels, Zoom links made for each booking and webinar, and stores with no limit on products. We have none of those. PayPal does not reach our checkout, because Stripe does not support it for the direct charges every sale here is made with; our affiliates are paid by you; our funnels are pages and offers you connect rather than one builder; our video rooms, for calls and live events alike, are Google Meet links made on your connected Google Calendar, your own meeting link, or Jitsi Meet rooms, where the first person in may have to sign in to Jitsi; and a store holds up to 2,000 products.",
+          `Range: automatic Instagram replies, ${PAYPAL ? "" : "PayPal at checkout, "}${STAN_AFFILIATES_AHEAD}, one builder for funnels, Zoom links made for each booking and webinar, and stores with no limit on products. We have none of those. ${PAYPAL ? "" : `PayPal is not at our checkout yet: ${PAYPAL_WAITS}. `}Our affiliates are ${AFFILIATES_PAID}, which needs a PayPal Business account with Payouts switched on; our funnels are pages and offers you connect rather than one builder; our video rooms, for calls and live events alike, are Google Meet links made on your connected Google Calendar, your own meeting link, or Jitsi Meet rooms, where the first person in may have to sign in to Jitsi; and a store holds up to 2,000 products.`,
           "Years of running: their support library is deep, and ours is a few pages.",
           "A native creator app: their help center states their creator app is currently available only on iPhone and iPad. We do not have a native app at all — our studio and every store install to the home screen from the browser, on both iPhone and Android, and the studio can send notifications of sales, which is a different trade-off, not a better one in every case.",
           "Integrations with third-party tools, which they list on their site. We have webhooks that Zapier, Make or your own server can catch, and no app of our own in anyone's directory.",

@@ -1,20 +1,23 @@
 "use client";
 
 import { ELSEWHERE_NOTE, MAX_REVIEW_URL, parseReviewElsewhere } from "@/lib/review-elsewhere";
-import { useContext, useState } from "react";
+import { UrlField } from "@/components/url-field";
+import { checkWith } from "@/lib/url-check";
+import { useContext, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { Stars } from "@/components/review-stars";
 import { toast } from "@/components/toast";
-import { MAX_REPLY_TEXT } from "@/lib/review-summary";
+import { HIDE_REASONS, MAX_REPLY_TEXT, hideReasonLabel } from "@/lib/review-summary";
 import { AiOn } from "@/components/ai-assist";
-import { DEFAULT_ASK_DAYS, MAX_ASK_DAYS, MIN_ASK_DAYS } from "@/lib/review-ask";
+import { DEFAULT_ASK_DAYS, MAX_AGAIN_DAYS, MAX_ASK_DAYS, MIN_AGAIN_DAYS, MIN_ASK_DAYS } from "@/lib/review-ask";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   days: `Pick between ${MIN_ASK_DAYS} and ${MAX_ASK_DAYS} days.`,
+  again: `Pick no reminder, or one ${MIN_AGAIN_DAYS} to ${MAX_AGAIN_DAYS} days after the first email.`,
   elsewhere: "That is not a review page on Google, Trustpilot or Facebook. Paste the https address of your page there.",
   email: "Review requests are email, so they need Pro with your email set up (the sender name and postal address). Set that up in Email first.",
   busy: "Someone else changed this review at the same moment. Try again.",
@@ -23,6 +26,9 @@ const MESSAGES: Record<string, string> = {
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
+
+// The review page, checked when its field is left by the reading the server keeps (lib/review-elsewhere.ts). Optional.
+const ELSEWHERE_CHECK = checkWith((raw) => parseReviewElsewhere(raw)?.url ?? null, MESSAGES.elsewhere, MAX_REVIEW_URL);
 
 async function post(body: Record<string, unknown>): Promise<string | null> {
   try {
@@ -38,25 +44,29 @@ async function post(body: Record<string, unknown>): Promise<string | null> {
   }
 }
 
-/** The review-request email: off, or on some days after buying. */
-export function ReviewAskEditor({ days, canEmail, elsewhere = "" }: { days: number; canEmail: boolean; elsewhere?: string }) {
+/** The review-request email: off, or on some days after buying, with one reminder or none (636 [GL4](a)). */
+export function ReviewAskEditor({ days, canEmail, elsewhere = "", again = 0 }: { days: number; canEmail: boolean; elsewhere?: string; again?: number }) {
   const router = useRouter();
   const [on, setOn] = useState(days > 0);
   const [value, setValue] = useState(days > 0 ? days : DEFAULT_ASK_DAYS);
   const [page, setPage] = useState(elsewhere);
+  const [reminder, setReminder] = useState(again);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dirty = on !== days > 0 || (on && value !== days) || page.trim() !== elsewhere;
+  const dirty = on !== days > 0 || (on && value !== days) || page.trim() !== elsewhere || (on && reminder !== again);
 
   async function save() {
     setError(null);
     // The same rule the server holds (lib/review-elsewhere.ts), said before anything is sent.
     if (page.trim() && !parseReviewElsewhere(page)) {
-      setError(MESSAGES.elsewhere);
+      // The field says it beside itself (components/url-field.tsx); the focus goes there, so it is not said twice.
+      const field = document.getElementById("ask-elsewhere");
+      if (field) field.focus();
+      else setError(MESSAGES.elsewhere);
       return;
     }
     setBusy(true);
-    const problem = await post({ action: "ask", days: on ? value : 0, elsewhere: page.trim() });
+    const problem = await post({ action: "ask", days: on ? value : 0, elsewhere: page.trim(), again: reminder });
     setBusy(false);
     if (problem) {
       setError(problem);
@@ -70,7 +80,7 @@ export function ReviewAskEditor({ days, canEmail, elsewhere = "" }: { days: numb
     <div>
       <label className="flex min-h-[44px] cursor-pointer items-center gap-3 font-semibold text-ink">
         <input type="checkbox" className="h-5 w-5" checked={on} disabled={!canEmail && !on} onChange={(e) => setOn(e.target.checked)} />
-        Email buyers once to ask for a review
+        Email buyers to ask for a review
       </label>
       {on ? (
         <label htmlFor="ask-days" className="mt-2 block max-w-xs">
@@ -83,25 +93,37 @@ export function ReviewAskEditor({ days, canEmail, elsewhere = "" }: { days: numb
         </label>
       ) : null}
       {on ? (
-        <label htmlFor="ask-elsewhere" className="mt-3 block max-w-xl">
-          <span className="field-label">Your public review page (optional)</span>
-          <input
+        <label htmlFor="ask-again" className="mt-3 block max-w-xs">
+          <span className="field-label">One reminder (optional)</span>
+          <select id="ask-again" className="field" value={reminder} onChange={(e) => setReminder(Number(e.target.value))} aria-describedby="ask-again-note">
+            <option value={0}>No reminder</option>
+            {Array.from({ length: MAX_AGAIN_DAYS - MIN_AGAIN_DAYS + 1 }, (_, i) => i + MIN_AGAIN_DAYS).map((d) => (
+              <option key={d} value={d}>{`${d} days after the first email`}</option>
+            ))}
+          </select>
+          <span id="ask-again-note" className="mt-1 block text-xs text-ink-soft">
+            Only to buyers who have not reviewed yet, and never more than one. The first email says it will come; the reminder says it is the last.
+          </span>
+        </label>
+      ) : null}
+      {on ? (
+        <div className="mt-3 block max-w-xl">
+          <label htmlFor="ask-elsewhere" className="field-label">Your public review page (optional)</label>
+          <UrlField
             id="ask-elsewhere"
-            type="url"
-            inputMode="url"
             className="field"
-            maxLength={MAX_REVIEW_URL}
             placeholder="https://g.page/r/…/review"
             value={page}
-            onChange={(e) => setPage(e.target.value)}
-            aria-describedby="ask-elsewhere-note"
+            onChange={setPage}
+            check={ELSEWHERE_CHECK}
+            describedBy="ask-elsewhere-note"
           />
           <span id="ask-elsewhere-note" className="mt-1 block text-xs text-ink-soft">{ELSEWHERE_NOTE}</span>
-        </label>
+        </div>
       ) : null}
       <p className="mt-2 text-sm text-ink-soft">
         {canEmail
-          ? "One email per order, from your name, only for orders paid while this is on and not refunded, and never to someone who already reviewed it, left your list or pressed stop. It counts in your month's emails and carries your postal address and a one-click way to stop. It asks for an honest review and offers nothing in return."
+          ? `${reminder ? "One email per order, and one reminder if you chose it" : "One email per order"}, from your name, only for orders paid while this is on and not refunded, and never to someone who already reviewed it, left your list or pressed stop. It counts in your month's emails and carries your postal address and a one-click way to stop. It asks for an honest review and offers nothing in return.`
           : "Review requests are email, so they need Pro with your email set up: the sender name and postal address every email carries. Buyers can still review from their thank-you page and their list of purchases on every plan."}
       </p>
       {error ? (
@@ -129,6 +151,8 @@ export type StudioReview = {
   date: string;
   edited: string;
   hidden: boolean;
+  /** The review rule it was hidden for (HIDE_REASONS); empty when none was kept. */
+  hiddenReason: string;
   refunded: boolean;
   reply: string;
   unseen: boolean;
@@ -170,19 +194,34 @@ export function ReviewRow({ review }: { review: StudioReview }) {
   const [reply, setReply] = useState(review.reply);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Which reason picker is open: to hide the review, or to take its photo off. */
+  const [picking, setPicking] = useState<"hide" | "photo" | null>(null);
+  const hiding = picking !== null;
+  const setHiding = (open: boolean) => setPicking(open ? "hide" : null);
+  const [reason, setReason] = useState("");
+  /** The button that opened the reasons, where focus goes back when they close. */
+  const opener = useRef<HTMLButtonElement>(null);
+  const closeReasons = () => {
+    setHiding(false);
+    setReason("");
+    opener.current?.focus();
+  };
+  /** Hidden before reasons were kept: the creator is asked to name the rule, or to show it again. */
+  const noReason = review.hidden && !hideReasonLabel(review.hiddenReason);
 
-  async function act(kind: string, body: Record<string, unknown>, done: string) {
+  async function act(kind: string, body: Record<string, unknown>, done: string): Promise<boolean> {
     setBusy(kind);
     setError(null);
     const problem = await post({ product: review.productId, id: review.id, ...body });
     setBusy(null);
     if (problem) {
       setError(problem);
-      return;
+      return false;
     }
     toast(done);
     setReplying(false);
     router.refresh();
+    return true;
   }
 
   const base = `rv-${review.id}`;
@@ -194,7 +233,7 @@ export function ReviewRow({ review }: { review: StudioReview }) {
         </span>
         <span className="font-semibold text-ink">{review.name || "Verified buyer"}</span>
         {review.unseen ? <span className="tag tag-brand">New</span> : null}
-        {review.hidden ? <span className="tag">Hidden</span> : null}
+        {review.hidden ? <span className="tag">{hideReasonLabel(review.hiddenReason) ? `Hidden: ${hideReasonLabel(review.hiddenReason)}` : "Hidden"}</span> : null}
         {review.refunded ? <span className="tag">Refunded, not counted</span> : null}
       </div>
       <p className="mt-1 text-xs text-ink-soft">
@@ -215,7 +254,9 @@ export function ReviewRow({ review }: { review: StudioReview }) {
             type="button"
             className="btn btn-ghost btn-sm"
             disabled={busy !== null}
-            onClick={() => act("photo", { action: "photo" }, "Photo taken off the review.")}
+            aria-expanded={picking === "photo"}
+            aria-controls={picking === "photo" ? `${base}-hide` : undefined}
+            onClick={(event) => { opener.current = event.currentTarget; setPicking(picking === "photo" ? null : "photo"); setReason(""); }}
           >
             <Icon name="trash" size={15} />
             {busy === "photo" ? "Taking it off…" : "Take the photo off"}
@@ -284,15 +325,45 @@ export function ReviewRow({ review }: { review: StudioReview }) {
             {review.reply ? "Edit your reply" : "Reply"}
           </button>
         ) : null}
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          disabled={busy !== null}
-          onClick={() => act("hide", { action: "hide", hidden: !review.hidden }, review.hidden ? "Review shown again." : "Review hidden.")}
-        >
-          <Icon name={review.hidden ? "eye" : "ban"} size={15} />
-          {review.hidden ? "Show it again" : "Hide from the page"}
-        </button>
+        {review.hidden ? (
+          <button
+            type="button"
+            ref={noReason ? undefined : opener}
+            className="btn btn-ghost btn-sm"
+            disabled={busy !== null}
+            onClick={() => act("hide", { action: "hide", hidden: false }, "Review shown again.")}
+          >
+            <Icon name="eye" size={15} />
+            Show it again
+          </button>
+        ) : (
+          <button
+            type="button"
+            ref={opener}
+            className="btn btn-ghost btn-sm"
+            disabled={busy !== null}
+            aria-expanded={hiding}
+            aria-controls={hiding ? `${base}-hide` : undefined}
+            onClick={() => { setHiding(!hiding); setReason(""); }}
+          >
+            <Icon name="ban" size={15} />
+            Hide from the page
+          </button>
+        )}
+        {noReason ? (
+          <button
+            type="button"
+            ref={opener}
+            className="btn btn-ghost btn-sm"
+            disabled={busy !== null}
+            aria-expanded={hiding}
+            aria-controls={hiding ? `${base}-hide` : undefined}
+            onClick={() => { setHiding(!hiding); setReason(""); }}
+          >
+            <Icon name="ban" size={15} />
+            Name the rule it breaks
+          </button>
+        ) : null}
         {review.unseen ? (
           <button
             type="button"
@@ -305,6 +376,60 @@ export function ReviewRow({ review }: { review: StudioReview }) {
           </button>
         ) : null}
       </div>
+
+      {noReason ? (
+        <p className="mt-2 text-sm text-ink-soft">
+          This review was hidden before a reason was kept. Name the review rule it breaks, or show it again.
+        </p>
+      ) : null}
+
+      {picking === "photo" || (picking === "hide" && (!review.hidden || noReason)) ? (
+        <fieldset id={`${base}-hide`} className="mt-3 rounded-xl border border-line p-3">
+          <legend className="px-1 text-sm font-semibold text-ink">{picking === "photo" ? "Which review rule does the photo break?" : "Which review rule does it break?"}</legend>
+          <p className="text-sm text-ink-soft">
+            {picking === "photo"
+              ? "A buyer's photo is taken off only for one of these rules, the same for every rating. A photo that shows a problem with the product is not a reason to take it off."
+              : "A review is hidden only for one of these rules, the same for every rating. A low star rating or criticism is not a reason to hide a review. Its stars stay in your average either way."}
+          </p>
+          <div className="mt-2 space-y-2">
+            {HIDE_REASONS.map((option, index) => (
+              <label key={option.id} className="flex min-h-11 cursor-pointer items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={`${base}-reason`}
+                  value={option.id}
+                  checked={reason === option.id}
+                  onChange={() => setReason(option.id)}
+                  className="mt-1 h-5 w-5 shrink-0"
+                  autoFocus={index === 0}
+                />
+                <span>
+                  <span className="font-semibold text-ink">{option.label}</span>
+                  <span className="block text-ink-soft">{option.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={busy !== null || !reason}
+              onClick={() => {
+                const done = picking === "photo"
+                  ? act("photo", { action: "photo", reason }, "Photo taken off the review.")
+                  : act("hide", { action: "hide", hidden: true, reason }, "Review hidden.");
+                void done.then((ok) => { if (ok) closeReasons(); });
+              }}
+            >
+              {busy === "hide" ? "Hiding…" : busy === "photo" ? "Taking it off…" : picking === "photo" ? "Take the photo off for this reason" : "Hide for this reason"}
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={closeReasons}>
+              Cancel
+            </button>
+          </div>
+        </fieldset>
+      ) : null}
     </li>
   );
 }

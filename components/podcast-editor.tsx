@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -157,10 +157,18 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
 function EpisodeForm({ episode, onSave, onCancel }: { episode: Episode; onSave: (title: string, notes: string) => Promise<void>; onCancel: () => void }) {
   const [title, setTitle] = useState(episode.title);
   const [notes, setNotes] = useState(episode.notes);
+  // Visible labels (487 [IT4], item 4): a name only a screen reader hears is no label for anyone else.
+  const id = useId();
   return (
     <div className="space-y-3">
-      <input className="field" maxLength={MAX_EPISODE_TITLE} value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Title" />
-      <textarea className="field" rows={3} maxLength={MAX_EPISODE_NOTES} value={notes} onChange={(e) => setNotes(e.target.value)} aria-label="Notes" />
+      <div>
+        <label htmlFor={`${id}-title`} className="field-label">Episode title</label>
+        <input id={`${id}-title`} className="field mt-1" maxLength={MAX_EPISODE_TITLE} value={title} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      <div>
+        <label htmlFor={`${id}-notes`} className="field-label">Episode notes</label>
+        <textarea id={`${id}-notes`} className="field mt-1" rows={3} maxLength={MAX_EPISODE_NOTES} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </div>
       <div className="flex gap-3">
         <button type="button" className="btn btn-primary btn-sm" onClick={() => void onSave(title, notes)}>Save</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>

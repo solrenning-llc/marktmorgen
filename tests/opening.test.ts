@@ -102,7 +102,8 @@ async function main(): Promise<void> {
   const first = HOME_QUESTIONS.find((item) => item.q === "Can I start selling today?")!;
   is("the home page is asked whether selling starts today", Boolean(first), true);
   is("and answers with what is true", first.a.startsWith("Yes.") === PLANS_ON_SALE && first.a.includes("not on sale yet") !== PLANS_ON_SALE, true);
-  is("the plan cards say it first", readFileSync("components/home-parts.tsx", "utf8").includes('...(PLANS_ON_SALE ? [] : [["On sale", "Not yet.'), true);
+  // 243 [CF6], owner's complement of 31/10/2026: said once, right above the plans, not again in each card.
+  is("the pricing page says it once, above the plans", /\{!PRICING_OPEN && <p[^>]*>Paid plans and paid selling are not open yet\./.test(readFileSync("app/pricing/page.tsx", "utf8")), true);
   is("and so do the home page and the page where a store is started", ["app/page.tsx", "app/signin/page.tsx"].map((f) => readFileSync(f, "utf8").includes("PLANS_ON_SALE")), [true, true]);
 
   part("The mission page");

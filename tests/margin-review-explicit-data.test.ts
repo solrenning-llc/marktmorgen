@@ -1,12 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assessCustomerWorstCase, CUSTOMER_COST_CATEGORIES, type CustomerWorstCase } from '../lib/net-margin-rules';
+import { assessCustomerWorstCase, type CustomerWorstCase } from '../lib/net-margin-rules';
 
-function review(): CustomerWorstCase {
- return {collectedRevenueCents:10000,refundableRevenueCents:0,taxesCeilingCents:3000,
-  costCeilings:Object.fromEntries(CUSTOMER_COST_CATEGORIES.map(key=>[key,0])),
-  allCostsBounded:true,allTaxesReviewed:true,revenueCollected:true};
-}
+import {txCustomerFixture} from './customer-tax-review-fixture';
+function review(): CustomerWorstCase {return {...txCustomerFixture(10000,0),taxesCeilingCents:3000};}
 test('inherited costs never replace missing reviewed costs',()=>{
  const value=review();value.costCeilings=Object.create(value.costCeilings);
  assert.equal(assessCustomerWorstCase(value).reason,'unknown');

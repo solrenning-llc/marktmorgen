@@ -1,6 +1,6 @@
+import { servedImageUrl } from "@/lib/picture-served";
 import Link from "next/link";
 import type { Listing, Store } from "@/lib/store";
-import { imageUrl } from "@/lib/product-image";
 import { PriceTag, productPath } from "@/components/store-product";
 import { speech } from "@/lib/buyer-words";
 
@@ -46,7 +46,7 @@ export function MoreFrom({ store, products }: { store: Store; products: Listing[
             <Link prefetch={false} href={productPath(store, product)} className="st-card st-link-card flex min-h-11 items-center gap-4 p-4">
               {product.image ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={imageUrl(product.image)} alt="" width={56} height={56} loading="lazy" decoding="async" className="st-thumb shrink-0" />
+                <img src={servedImageUrl(product.image)} alt="" width={56} height={56} loading="lazy" decoding="async" className="st-thumb shrink-0" />
               ) : null}
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">{product.title}</span>
@@ -85,7 +85,7 @@ export function AlsoBought({ store, title, items }: { store: Store; title: strin
             <Link prefetch={false} href={productPath(store, product)} className="st-card st-link-card flex min-h-11 items-center gap-4 p-4">
               {product.image ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={imageUrl(product.image)} alt="" width={56} height={56} loading="lazy" decoding="async" className="st-thumb shrink-0" />
+                <img src={servedImageUrl(product.image)} alt="" width={56} height={56} loading="lazy" decoding="async" className="st-thumb shrink-0" />
               ) : null}
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">{product.title}</span>

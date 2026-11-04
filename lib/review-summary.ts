@@ -15,7 +15,32 @@ export const REVIEWS_PER_PAGE = 30;
 
 /** The rule for hidden reviews, in the words the studio and the pages use. */
 export const HIDDEN_RULE =
-  "Hiding takes a review's words off your page, never its stars out of the average: the average and the count include hidden reviews, and your page says how many are hidden.";
+  "Hiding takes a review's words off your page, never its stars out of the average: the average and the count include hidden reviews, and your page says how many are hidden. A review is hidden only for one of the review rules, the same for every rating.";
+
+/**
+ * Why a creator may hide a review (567 [GD1] (e)): what the review says, never
+ * how many stars it gives. The same rules for every rating, so hiding can never
+ * be used to keep only the good reviews on a page. A low star rating or
+ * criticism of the product is not a reason.
+ */
+export const HIDE_REASONS = [
+  { id: "private", label: "Shares private information", hint: "It shows someone's private details, such as a home address, a phone number or an email address." },
+  { id: "abusive", label: "Abusive or hateful", hint: "It harasses or threatens someone, or is obscene, sexually explicit or hateful about a group of people." },
+  { id: "unrelated", label: "Not about this product", hint: "It is about something else entirely, not this product or buying it." },
+  { id: "false", label: "Clearly false", hint: "It states a fact about the product that is plainly untrue, such as saying it has, or lacks, something it plainly does or does not have." },
+  { id: "unlawful", label: "Breaks the law", hint: "It breaks the law or someone else's rights, such as copied work or a link to something illegal." },
+] as const;
+
+export type HideReason = (typeof HIDE_REASONS)[number]["id"];
+
+export function isHideReason(value: unknown): value is HideReason {
+  return typeof value === "string" && HIDE_REASONS.some((reason) => reason.id === value);
+}
+
+/** The words the studio shows for a reason, or null. */
+export function hideReasonLabel(value: unknown): string | null {
+  return HIDE_REASONS.find((reason) => reason.id === value)?.label ?? null;
+}
 
 export const REVIEW_ID_PATTERN = /^[0-9a-f]{24}$/;
 
@@ -34,6 +59,8 @@ export type Review = {
   /** When the buyer last changed it; 0 when never. */
   editedAt: number;
   hidden: boolean;
+  /** Which review rule the creator hid it for; null when it is not hidden, or was hidden before reasons were kept. */
+  hiddenReason: HideReason | null;
   refunded: boolean;
   reply: { text: string; at: number } | null;
   /**
@@ -42,6 +69,12 @@ export type Review = {
    * review's words and hidden with them; the creator may take it off.
    */
   photo: ReviewPhoto | null;
+  /**
+   * When its order was paid, in seconds (606 [WP5]): kept when the review is
+   * first written, so the page can say how long after purchase it was
+   * written. Absent from reviews written before it was kept.
+   */
+  paidAt?: number;
 };
 
 export type ReviewPhoto = { path: string; width: number; height: number };
@@ -87,12 +120,12 @@ export function summarise(reviews: Review[]): Summary {
 }
 
 /**
- * Whether a page shows stars at all: at least one review on the page, and at
- * least one whose stars count. A product with only hidden reviews shows no
- * stars, and still says how many are hidden.
+ * Whether a page shows stars at all: at least one review whose stars count.
+ * Hidden reviews count (567 [GD1] (e)): hiding every review takes their words
+ * off the page, never the stars, so it cannot take a low rating away either.
  */
 export function showsRating(summary: Summary): boolean {
-  return summary.visible >= 1 && summary.count >= 1;
+  return summary.count >= 1;
 }
 
 /** The average, to one decimal, as the page prints it and the search data states it. */

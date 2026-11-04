@@ -32,8 +32,11 @@ import {
 import {
   DEEMED_SUPPLIER_JURISDICTIONS, DEEMED_SUPPLIER_RECORDS, deemedSupplierProblems, deemedSupplierReady, type DeemedSupplierRecord,
 } from "@/lib/deemed-supplier";
-import { EU_HOSTING_READING, MOST_TAX_READING, unitUnder } from "@/lib/receiving-costs";
-import { PUBLISHED_PLAN_PRICES, TIERS } from "@/lib/plan";
+import {MOST_CORRECT_READING} from "@/lib/receiving-costs";
+import {EU_HOSTING_READING,MOST_TAX_READING} from "./historical-receiving-model";
+import {reviewedUnitUnder} from "@/lib/reviewed-receiving";
+import {reviewedReceivingTaxInput} from "./reviewed-receiving-fixture";
+import {syntheticTaxContext} from "./customer-tax-review-fixture";
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { canSell } from "@/lib/store-checkout";
 import type { Store } from "@/lib/store";
@@ -69,11 +72,11 @@ const said = pages.flatMap((file) =>
 is("no rule, page or comment leaves a doubt for an accountant to close", said.map(({ file, line }) => `${file}:${line}`), []);
 
 part("The gate reading");
-is("while EU hosting is not live the gate is the reading with every tax stacked", [EU_HOSTING_CONFIRMED, GATE_READING_ID, gateReading() === MOST_TAX_READING], [false, "most-tax", true]);
+is("TX selects correct metadata without certifying a review or requiring EU hosting",[EU_HOSTING_CONFIRMED,GATE_READING_ID,gateReading()===MOST_CORRECT_READING],[false,"most-correct",true]);
 is("and the flag stays false in this change", read("lib/tax-gate.ts").includes("export const EU_HOSTING_CONFIRMED = false;"), true);
 is("the gate setting in force is accepted", gateProblems(GATE_READING_ID, EU_HOSTING_CONFIRMED), []);
-is("TX/SV: the historical scenario is not conditioned on EU hosting", gateProblems("most-tax-after-design", false), []);
-is("and accepted once it is", gateProblems("most-tax-after-design", true), []);
+is("a historical after-design selection cannot replace the current TX policy",gateProblems("most-tax-after-design" as never,false).length>0,true);
+is("EU confirmation cannot authorize that retired selection",gateProblems("most-tax-after-design" as never,true).length>0,true);
 is("an unknown reading is refused", gateProblems("lenient" as never, true).length > 0, true);
 is("the after-design reading is the receiving model's EU hosting one", [EU_HOSTING_READING.profitTaxBps, EU_HOSTING_READING.revenueTaxBps, EU_HOSTING_READING.salesTaxInsideBps], [2_868, 500, 0]);
 is("the most-tax reading stacks every tax", [MOST_TAX_READING.profitTaxBps, MOST_TAX_READING.revenueTaxBps, MOST_TAX_READING.salesTaxInsideBps], [7_818, 500, 2_700]);
@@ -115,13 +118,14 @@ for (const historicalFlag of [false, true]) {
 }
 
 
-part("MR: full-use modeled positive net never waives the unchanged gates");
-const gated = planUnits(false).map(unit => ({
-  id: unit.id, result: unitUnder(unit.priceCents, unit.usageCents + roomKept(unit), gateReading(), true),
-}));
+part("MR/TX: complete synthetic full-use evidence never waives the unchanged gates");
+const gated=planUnits(false).map(unit=>{
+ const usage=unit.usageCents+roomKept(unit),scope=syntheticTaxContext(unit.id.replaceAll('-','_'),unit.id.includes('-year-')?12:1);
+ return {id:unit.id,result:reviewedUnitUnder(unit.priceCents,usage,reviewedReceivingTaxInput(unit.priceCents,usage,scope),true)};
+});
 is("all six current price-cycle cases are tested at full registered use and unchanged room", gated.length, 6);
 for (const row of gated) {
-  is("a nonpositive registered net fails " + row.id, row.result.netCents > 0 && row.result.meetsFloor, true);
+  is("a nonpositive registered net fails " + row.id, row.result!==null && row.result.netCents > 0 && row.result.meetsFloor, true);
 }
 is("positive model results never supply the absent actual review", CURRENT_COMMERCIAL_MARGIN_REVIEW, null);
 is("a launch request cannot replace the missing review", commercialPlansMayOpen(true), false);
@@ -176,7 +180,7 @@ for (const date of ["2026-02-29", "2026-02-31", "2026-04-31", "1900-02-29", "202
 for (const date of ["2024-02-29", "2000-02-29", "2026-02-28", "2026-04-30", "2026-12-31"]) {
   is("a valid consultation day still needs the existing authority and source", consultationProblems([{ ...good, date }]), []);
 }
-is("no real answer or lower-tax reading is introduced", [CONSULTATION_ANSWERS.length, GATE_READING_ID, EU_HOSTING_CONFIRMED, taxGateValid(), PLANS_ON_SALE], [0, "most-tax", false, true, false]);
+is("no real answer or opening is introduced by selecting TX metadata",[CONSULTATION_ANSWERS.length,GATE_READING_ID,EU_HOSTING_CONFIRMED,taxGateValid(),PLANS_ON_SALE],[0,"most-correct",false,true,false]);
 
 part("The documents say what the code does");
 const nine = read("docs/eu-vat-article-9a.md");

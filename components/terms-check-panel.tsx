@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { type TermsCheckInput, type TermsWarningKind, checkCreatorTerms, replaceWords, withoutSentence } from "@/lib/terms-check-rules";
+import { BLOCKING_KINDS, type TermsCheckInput, type TermsWarningKind, checkCreatorTerms, replaceWords, withoutSentence } from "@/lib/terms-check-rules";
 
 /** What each kind of warning is called, in plain words. */
 const TITLES: Record<TermsWarningKind, string> = {
@@ -9,6 +9,7 @@ const TITLES: Record<TermsWarningKind, string> = {
   price_mismatch: "A different price",
   no_refunds: "No refunds",
   earnings_claim: "A promise of earnings or results",
+  fast_money: "Fast or easy money: not allowed by the Terms",
   false_urgency: "Urgency with nothing real behind it",
   resale_rights: "Resale rights",
 };
@@ -76,6 +77,11 @@ export function TermsCheckPanel({ id, fieldId, input, onChange }: { id: string; 
             {`${countWords(warnings.length)} before you save`}
           </h3>
           <p className="mt-1 text-sm text-ink-soft">These are suggestions, not legal advice. Nothing changes unless you press a button below and then save.</p>
+          {warnings.some((w) => BLOCKING_KINDS.has(w.kind)) ? (
+            <p className="mt-1 text-sm font-semibold text-ink">
+              A promise of fast or easy money keeps this product off your store until it is changed: the Terms do not allow it. The others are only suggestions.
+            </p>
+          ) : null}
           <ul className="mt-3 space-y-4">
             {warnings.map((w) => {
               const words = input.text.slice(w.at, w.at + w.length);

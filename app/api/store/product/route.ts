@@ -33,9 +33,14 @@ import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { dropCourse, filesInCourse, readCourse } from "@/lib/course";
+import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { idsOfKind, readAllListings, readListing, readProducts } from "@/lib/catalog";
+import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
+import { productPromptsLeft } from "@/lib/product-outline";
+import { pageWords } from "@/lib/page-translate";
+import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
@@ -143,7 +148,8 @@ export async function POST(request: NextRequest) {
   const title = text(body.title, MAX_TITLE_LENGTH);
   const summary = text(body.summary, MAX_SUMMARY_LENGTH);
   const price = text(body.price, 20);
-  const link = text(body.link, MAX_LINK_LENGTH);
+  // One past the length kept, so a longer link is refused as too long rather than cut and kept broken.
+  const link = text(body.link, MAX_LINK_LENGTH + 1);
   // Absent or unrecognised means a single sale, which is what a product is
   // unless the creator says otherwise. A trial or a payment count that was
   // typed and is not a whole number in range is said, not dropped.
@@ -161,6 +167,21 @@ export async function POST(request: NextRequest) {
 
   if (action !== "add" && !id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+  }
+
+  // What the Terms forbid ("anything that promises fast or easy money, or income
+  // for little effort") is not published (567 [GD1] (d)): a new product, which
+  // is on the store at once, and a published one, are refused with the passage,
+  // why and the fix. A draft may be saved with it; it is checked again when it
+  // is published, below. The creator's words are never changed for them.
+  if (action === "add" || action === "edit") {
+    // A product that cannot be read is taken as published: a failed read never lets words through.
+    const published = action === "add" || (await readListing(guarded.store, id).catch(() => null))?.hidden !== true;
+    const refused = published ? fastMoneyRefusal({ title, summary, about: about ?? "" }) : null;
+    if (refused) return Response.json({ ok: false, error: "fast_money", passage: refused }, { status: 409 });
+    // Nor with a prompt of the ready outline still in it (lib/product-outline.ts); a draft may keep them.
+    const promptLeft = published ? productPromptsLeft({ title, summary, about: about ?? "" })[0] : undefined;
+    if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft }, { status: 409 });
   }
 
   // A membership's introductory price (lib/intro-price.ts) and its yearly
@@ -316,6 +337,24 @@ export async function POST(request: NextRequest) {
     } else if (action === "visibility") {
       // A draft published, or a product taken off the store and kept.
       if (typeof body.hidden !== "boolean") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      if (body.hidden === false) {
+        // Published only when nothing a buyer reads promises fast or easy money (the Terms; 567 [GD1] (d)).
+        const draft = await readListing(guarded.store, id);
+        if (draft) {
+          const words = draft.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, draft.id) : "";
+          const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
+          const refused = fastMoneyRefusal({ title: draft.title, summary: draft.summary, about: words }) ?? (shownPage ? fastMoneyOnPage(pageWords(shownPage)) : null);
+          if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
+          const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
+          if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
+          // A course from a ready structure is published only once its example titles are replaced (540 [CU1]).
+          if (draft.course) {
+            const course = await readCourse(draft.course.id);
+            if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+            if (exampleTitlesLeft(course) > 0) return Response.json({ ok: false, error: "course_examples" }, { status: 409 });
+          }
+        }
+      }
       const done = await setProductHidden(ref, id, body.hidden);
       result = done.ok ? { ok: true, product: done.product } : done;
     } else if (action === "unlink") {

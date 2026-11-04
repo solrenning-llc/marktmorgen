@@ -256,9 +256,9 @@ async function main(): Promise<void> {
   is("nor one from another store's folder", parseProductImage({ ...big, small: { ...copy, path: `images/${"b".repeat(24)}/${"2".repeat(32)}.webp` } })?.small, null);
   is("both files are deleted together", imagePaths({ ...big, small: copy }), [big.path, copy.path]);
   const card = withoutComments(read("components/store-product.tsx"));
-  is("the store page's card hands the browser both", /srcSet=\{imageSrcSet\(image\)\}/.test(card) && /sizes=\{image\.small \?/.test(card), true);
+  is("the store page's card hands the browser both", /srcSet=\{servedSrcSet\(image\)\}/.test(card) && /sizes=\{image\.small \?/.test(card), true);
   is("and tells it to fetch the first product's picture first", /fetchPriority=\{first \? "high" : undefined\}/.test(card), true);
-  is("the product's own page hands it both too", /srcSet=\{imageSrcSet\(product\.image\)\}/.test(withoutComments(read("app/[handle]/p/[product]/page.tsx"))), true);
+  is("the product's own page hands it both too", /srcSet=\{servedSrcSet\(product\.image\)\}/.test(withoutComments(read("app/[handle]/p/[product]/page.tsx"))), true);
   const editor = withoutComments(read("components/product-image-editor.tsx"));
   is("the studio makes the copy when a picture is added, and sends it with the picture", /await shrink\(file, SMALL_LONG_SIDE\)/.test(editor) && /\.\.\.\(small \? \{ small \} : \{\}\)/.test(editor), true);
   const attach = withoutComments(read("app/api/store/image/route.ts"));

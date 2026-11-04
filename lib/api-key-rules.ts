@@ -23,4 +23,25 @@ export type ApiKey = {
    * stays one that reads.
    */
   write: boolean;
+  /**
+   * What an AI agent holding it may prepare for the creator to confirm (631
+   * [AA1] (c), added 2 November 2026): "none" (every key before then, and a
+   * key made only to read or write), "draft" (changes the creator may confirm
+   * in a batch) or "execute" (also changes confirmed one at a time: emails,
+   * answers to buyers). Nothing is ever carried out on the key alone: the
+   * agent prepares, the creator confirms (lib/agent-proposal-rules.ts).
+   * Separate from `write`, and chosen when the key is made, like it.
+   */
+  agent: AgentScope;
 };
+
+/** What an AI agent's key may prepare: nothing, drafts, or drafts and execute changes. */
+export type AgentScope = "none" | "draft" | "execute";
+export const AGENT_SCOPES: readonly AgentScope[] = ["none", "draft", "execute"];
+
+/** Whether a key of `scope` may prepare a change of `need`: an execute key also prepares drafts. */
+export const agentMay = (scope: AgentScope, need: "draft" | "execute"): boolean =>
+  need === "draft" ? scope === "draft" || scope === "execute" : scope === "execute";
+
+/** A stored or sent value as a scope; anything else is "none". */
+export const agentScopeOf = (raw: unknown): AgentScope => (raw === "draft" || raw === "execute" ? raw : "none");

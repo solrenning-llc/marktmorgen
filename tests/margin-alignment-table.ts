@@ -9,11 +9,13 @@
  * fails when the file on disk is not what this renders, so a change to a
  * price, a limit, a fee or a reading that is not regenerated is caught.
  */
-import { gateReading } from "@/lib/tax-gate";
+import { MOST_TAX_READING } from "./historical-receiving-model";
+const gateReading=()=>MOST_TAX_READING;
+export const HISTORICAL_TAX_NOTICE='> **Historical tax model — superseded by TX.** These dated sizing/most-tax figures are retained for history. Current profit and capacity require complete scoped annual books, exchange operations, FX and applicable component facts through the real reviewed model; missing evidence is unknown, never a zero cost or permission to sell.\n\n';
 import { PLAN_PRICES, PLAN_TITLES, TIERS, type Cycle, type Tier } from "@/lib/plan";
 import { ADD_ON_ROOM_CENTS, ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_PRICE_CENTS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, autoCaptionCents } from "@/lib/auto-captions-rules";
-import { unitUnder, type Reading, type UnitResult } from "@/lib/receiving-costs";
+import { unitUnder, type Reading, type UnitResult } from "./historical-receiving-model";
 import { renderLlcFixedCostStatus } from "../lib/llc-fixed-costs";
 import { COST_LINES, perPaymentCost } from "./plan-cost-registry";
 
@@ -156,7 +158,7 @@ export function renderMarginAlignment(plansOnSale: boolean, assistantOnSale: boo
   out.push("");
   out.push("The internal monthly report calculator accepts only complete reconciled actual accounting for the previous UTC month and outputs aggregates without personal data. Its actual dataset is still null. Ingestion, automatic scheduling and owner presentation are not delivered by that calculator; no actual60%achievement, company margin or finite customer base is asserted.");
   out.push("");
-  return out.join("\n");
+  return HISTORICAL_TAX_NOTICE+out.join("\n");
 }
 
 /**

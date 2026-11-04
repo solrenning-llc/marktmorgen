@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="October 31, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 2, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -223,9 +223,13 @@ export default function TermsPage() {
         <p>
           <strong className="text-black">Reviews.</strong> Reviews on your
           store come only from buyers whose payment your Stripe account
-          confirms. You may answer a review and hide one. You may not offer
-          anything in return for a review, or present as a review anything a
-          buyer did not write. A hidden review still counts
+          confirms. You may answer a review, and hide one only for one of
+          the review rules: it shares private information, is abusive or
+          hateful, is not about the product, is clearly false, or breaks the
+          law. The rules are the same for every rating; you may not hide a
+          review because of its stars or because it criticizes you. You may
+          not offer anything in return for a review, or present as a review
+          anything a buyer did not write. A hidden review still counts
           in your average, and your page says how many are hidden.
         </p>
         <p>
@@ -245,7 +249,7 @@ export default function TermsPage() {
           <strong className="text-black">
             Ad pixels, and purchases sent to ad platforms.
           </strong>{" "}
-          When you add a Meta, Google, TikTok or Pinterest pixel to your store,
+          When you add a Meta, Google, TikTok, Pinterest, X or Reddit pixel to your store,
           or give us an access token so that purchases, membership payments and
           sign-ups are also sent to that platform from our server, you are instructing us to send that data to
           that platform on your behalf, and you are responsible for doing so
@@ -951,8 +955,9 @@ export default function TermsPage() {
           >
             Refund Policy
           </Link>
-          . In summary: your first payment to us is refunded in full on request
-          within {REFUND_DAYS} days of it, for any reason or none; a yearly
+          . In summary: within {REFUND_DAYS} days of your first payment to us,
+          that payment and every plan payment for the same store made since
+          are refunded in full on request, once, for any reason or none; a yearly
           plan is refunded at any time for the months not yet started, the
           months used being charged at the monthly price and the card
           processing fee Stripe charged on that payment being kept; and you may cancel

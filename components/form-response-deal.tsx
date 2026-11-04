@@ -51,7 +51,7 @@ export function FormResponseDeal({ form, response, responseRef, stages, sid, cur
       <legend className="sr-only">Opportunity details</legend>
       <p className="text-sm text-ink-soft">Review the submitted information before saving. Set an estimate and a dated next action when useful. This does not send email or subscribe anyone to marketing.</p>
       <label className="block"><span className="field-label">Opportunity name</span><input className="field mt-2" maxLength={MAX_DEAL_TITLE} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>
-      <label className="block"><span className="field-label">Contact email (optional)</span><input className="field mt-2" type="email" maxLength={254} value={draft.email} onChange={event => setDraft({ ...draft, email: event.target.value })} /></label>
+      <label className="block"><span className="field-label">Contact email (optional)</span><input className="field mt-2" type="email" autoComplete="off" maxLength={254} value={draft.email} onChange={event => setDraft({ ...draft, email: event.target.value })} /></label>
       {matches.length ? <div className="notice notice-warn" role="status">
         <p className="font-semibold">{matches.length} existing {matches.length === 1 ? "opportunity uses" : "opportunities use"} this email.</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">{matches.slice(0, 5).map(deal => <li key={deal.id}>{deal.title} · {stages.find(stage => stage.id === deal.stage)?.name ?? "Stage unavailable"}</li>)}</ul>

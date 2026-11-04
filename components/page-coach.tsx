@@ -5,7 +5,7 @@ import { Icon } from "@/components/icons";
 import { AiOn } from "@/components/ai-assist";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { BLOCK_KINDS, type BlockKind, type SalesPage } from "@/lib/sales-page";
-import { type CoachCheck, coachChecks, coachScore, scoreWord, steepestDrop } from "@/lib/page-coach";
+import { BUYER_LENSES, type CoachCheck, coachChecks, coachScore, scoreWord, steepestDrop } from "@/lib/page-coach";
 import type { PageFacts } from "@/lib/page-facts";
 
 /** What the writing help sends back about a page (lib/ai.ts, PageReview). */
@@ -15,6 +15,8 @@ type Review = {
   headlines: { headline: string; sub: string }[];
   fit: { yes: string[]; no: string[] } | null;
   questions: { q: string; a: string }[];
+  /** The page read by three kinds of buyer (624 [SZ8](9)); absent from a review made before. */
+  buyers?: { lens: string; objection: string; add: string }[];
 };
 
 const MESSAGES: Record<string, string> = {
@@ -365,6 +367,25 @@ export function PageCoach({
                       {review.questions.some((q) => !q.a) ? (
                         <p className="mt-2 text-xs text-ink-soft">A question without an answer is left out when you save, until you write one.</p>
                       ) : null}
+                    </div>
+                  ) : null}
+
+                  {review.buyers?.length ? (
+                    <div className="rounded-xl bg-white p-3 ring-1 ring-line">
+                      <p className="field-label">Three buyers reading your page</p>
+                      <ul className="mt-2 space-y-3">
+                        {review.buyers.map((item) => {
+                          const lens = BUYER_LENSES.find((l) => l.id === item.lens);
+                          return lens ? (
+                            <li key={item.lens} className="text-sm">
+                              <span className="block font-semibold text-ink">{lens.label}</span>
+                              <span className="mt-0.5 block text-ink-soft">{`Their doubt: ${item.objection}`}</span>
+                              <span className="mt-0.5 block text-ink-soft">{`What could answer it: ${item.add}`}</span>
+                            </li>
+                          ) : null;
+                        })}
+                      </ul>
+                      <p className="mt-2 text-xs text-ink-soft">Three ways of reading the page, written by the AI from what it says. Not a prediction of sales.</p>
                     </div>
                   ) : null}
 

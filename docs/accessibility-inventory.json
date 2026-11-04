@@ -1513,6 +1513,7 @@
     "components/studio-tools.tsx",
     "components/takedown-actions.tsx",
     "components/task-editor.tsx",
+    "components/tasks-agenda.tsx",
     "components/tax-editor.tsx",
     "components/team-event-editor.tsx",
     "components/team-manager.tsx",

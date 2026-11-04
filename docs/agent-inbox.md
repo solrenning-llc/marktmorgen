@@ -317,6 +317,9 @@ Corrija na vez de cada PR, antes de incorporar, sempre com um teste que falha an
 10) **#1901:** o conteúdo já está no main; incorporar só recriaria docs/reservations.md. Feche sem incorporar, dizendo isso no PR.
 Sem achado: #1814, #1898, #1913, #1928, #1932 e #1935.
 
+### C3-47 — 04/11/2026 02h00 — #1972 (fbb3561): segure; a cópia agora recusa com a sala cheia
+O Revisor 2 conferiu fbb3561: as duas correções da C3-42 estão certas (forgetPipelineAccess devolve o espaço; o SREM vazio não sai mais). Mas a correção criou um problema **médio**: copyPipelineAccess chama needData, que recusa com DataRoomError quando a sala de dados está cheia, antes do HSET; em moveMemberships qualquer erro da cópia deixa a vaga daquela loja no endereço antigo. Cenário: loja no limite da sala de dados, um Support com restrições troca o e-mail de entrada; a conta já foi movida, o endereço antigo não entra mais, e ele perde o acesso àquela loja sem aviso (só um console.error); o dono precisa convidar de novo. Sala cheia é um estado que dura, não uma falha passageira. Correção: tratar como registro movido, não como gravação nova: usar noteData (lib/store-data.ts:257, "a record moved... never refuses") para o campo novo, ou só a diferença de tamanho entre os dois endereços, deixando a recusa só para falha real de gravação; teste com a sala cheia na troca de e-mail. **Não incorpore o #1972 antes disso**; feito e verde, pode incorporar sem nova conferência minha.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

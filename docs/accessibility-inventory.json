@@ -955,6 +955,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/card/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/card",
+      "parameters": []
+    },
+    {
       "source": "app/studio/checkup/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/checkup",
@@ -1281,6 +1287,7 @@
     "components/course-toggle.tsx",
     "components/course-work-studio.tsx",
     "components/cover-maker.tsx",
+    "components/creator-card-editor.tsx",
     "components/creator-card-view.tsx",
     "components/creator-research-form.tsx",
     "components/creator-showcase.tsx",
@@ -1939,6 +1946,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 133
+    "pageTemplates": 134
   }
 }

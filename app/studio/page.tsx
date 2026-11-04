@@ -1310,6 +1310,9 @@ export default async function StudioPage({
                 ...(may("settings")
                   ? [{ href: studioPath(store, "", "affiliates"), title: "Affiliates", text: "People who share your store, for a share you set.", icon: "handshake" as const }]
                   : []),
+                ...(may("settings")
+                  ? [{ href: studioPath(store, "", "card"), title: "Business card", text: "One address to give anyone you meet, with a button that saves you to their phone's contacts.", icon: "user" as const }]
+                  : []),
                 ...(may("community")
                   ? [{ href: studioPath(store, "", "community"), title: "Community", text: "A members-only space for your buyers.", icon: "users" as const }]
                   : []),

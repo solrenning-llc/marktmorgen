@@ -87,9 +87,15 @@ async function main(): Promise<void> {
   const langs = Object.entries(BOOKING_WORDS);
   is(
     "a length's price changed while the buyer chose is refused and said, never charged at a price the page did not show",
-    [route.includes('if (!now || now.cents !== Number(shown)) return back("price-changed");'), page.includes("shownCents={chosen ? chosen.cents : undefined}"), langs.every(([, w]) => Boolean(w.notices["price-changed"]?.title && w.notices["price-changed"]?.body.length > 40))],
+    [route.includes('if (!/^\\d{1,9}$/.test(shown) || now.cents !== Number(shown)) return back("price-changed");'), page.includes("shownCents={chosen ? chosen.cents : undefined}"), langs.every(([, w]) => Boolean(w.notices["price-changed"]?.title && w.notices["price-changed"]?.body.length > 40))],
     [true, true, true],
   );
+  is(
+    "a length the creator took off meanwhile is said as gone, never as a price that changed; a length sent with no shown price is refused",
+    [route.includes('if (!now) return back("length-gone");'), langs.every(([, w]) => Boolean(w.notices["length-gone"]?.title && w.notices["length-gone"]?.body.length > 40)), route.includes("if (minutes && /^")],
+    [true, true, false],
+  );
+  is("in French, a length and its price with no repeated \"pour\", and the no-break space before a semicolon", [BOOKING_WORDS.fr.lengthChosen(BOOKING_WORDS.fr.lengthOption(60, "50 €")), BOOKING_WORDS.fr.notices["price-changed"].body.includes("nouveau\u00a0;")], ["Horaires pour 60 minutes à 50 €.", true]);
   is(
     "a paid booking of a length no call may have is said to be unmovable here, never as times that could not be read",
     [page.includes('const lengthStuck = ownLength(setup, booking.end - booking.start) === "unknown";'), page.includes("const movable = blocked === null && !lengthStuck;"), page.includes("? b.lengthNotMovable"), langs.every(([, w]) => w.lengthNotMovable.length > 20)],

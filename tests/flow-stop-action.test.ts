@@ -92,6 +92,39 @@ async function main(): Promise<void> {
   for (let i = 0; i < 4; i += 1) await sendDueSteps(async (handle) => (handle === store.handle || handle === "oldname" ? renamed : storeForHandle(handle)), Date.now() + 20_000);
   is("is taken out too", (await waiting()).includes(oldEntry), false);
 
+  part("Due in the same minute: the stop really cancels the email");
+  // Found by the independent review: one pass takes both from the queue; the stop, done first, must keep the other
+  // sequence's email from going, and leave nothing after it queued (sendGroup reads the lease before its attempt).
+  const welcome = await saveFlow(store, { name: "Welcome", trigger: "tagged", tag: "welcome", active: true, steps: [{ delayHours: 0, subject: "Welcome one", body: "Hello." }, { delayHours: 24, subject: "Welcome two", body: "Again." }] }, { activate: true });
+  const welcomeId = welcome.ok ? welcome.flows.find((f) => f.name === "Welcome")!.id : "";
+  const paid = await saveFlow(store, { name: "Paid", trigger: "tagged", tag: "paid", active: true, steps: [{ delayHours: 0, action: { do: "stop", flowId: welcomeId } }] }, { activate: true });
+  const paidId = paid.ok ? paid.flows.find((f) => f.name === "Paid")!.id : "";
+  await upsertContact(list, "dee@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "dee@example.com", { joined: false, tag: "welcome" });
+  await enroll(store, "dee@example.com", { joined: false, tag: "paid" });
+  const [queued] = await redisPipeline([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
+  const stopEntry = (queued as string[]).find((m) => m.includes(`|${paidId}|`) && m.endsWith("|dee@example.com"))!;
+  await redisPipeline([["ZADD", "nl:mail:flowq", Math.floor(Date.now() / 1000) - 30, stopEntry]]);
+  const before = sent.length;
+  await run();
+  const [after] = await redisPipeline([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
+  is(
+    "the stop, done first in the batch, keeps the email from going, and nothing of that sequence is left queued for her",
+    [sent.slice(before).includes("Welcome one"), (after as string[]).some((m) => m.includes(`|${welcomeId}|`) && m.endsWith("|dee@example.com"))],
+    [false, false],
+  );
+  is(
+    "both histories say so: taken out, not put off for later",
+    [(await listRuns(welcomeId, 10)).filter((r) => r.email === "dee@example.com").map((r) => r.status), (await listRuns(paidId, 10)).some((r) => r.email === "dee@example.com" && r.status !== "held")],
+    [["ended"], true],
+  );
+  const flowsSource = readFileSync("lib/flows.ts", "utf8");
+  is(
+    "a step under way when the stop lands queues nothing after it, and says why",
+    [flowsSource.includes("queueNext(result.done.filter((email) => stay.has(email)))"), flowsSource.includes("queueNext(onwards.filter((email) => stay.has(email)))"), flowsSource.includes("Taken out by another workflow, so nothing after this step is sent.")],
+    [true, true, true],
+  );
+
   part("When the sequence is gone");
   is("the workflow's review says so", flowConfigurationIssues({ ...buyerFlow }, { products: [], courses: [], forms: [], fields: [], stages: [], flows: [] }).some((i) => i.includes("The sequence to take them out of is unavailable.")), true);
 

@@ -1110,7 +1110,10 @@ export default function PrivacyPage() {
           creator also gets a private address of their own that lists their
           upcoming calls and sessions with the name and email address of each
           buyer, for the calendar app they subscribe with; replacing that
-          address turns the old one off.
+          address turns the old one off. We keep the last copy of that list
+          made for their calendar app for up to 40 days; once the store is
+          deleted or closed, that copy is never shown again, and it is erased
+          within those 40 days.
         </p>
         <p id="webhooks">
           <strong className="text-black">Webhooks a creator adds.</strong> A

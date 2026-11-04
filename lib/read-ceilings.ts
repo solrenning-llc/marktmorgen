@@ -34,7 +34,7 @@ import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import { MAX_UPDATE_RECIPIENTS } from "@/lib/product-updates-rules";
 import { ALL_TIME_PAGES, DAY_FIELDS_MAX, KEPT_DAYS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
-import { CALENDAR_MAX_EVENTS } from "@/lib/calendar-sync";
+import { CALENDAR_FILE_MAX_BYTES } from "@/lib/calendar-sync";
 
 export type ReadShape = {
   /** Wall seconds, held at 2 GB. */
@@ -64,34 +64,51 @@ export const LISTING_READ_BYTES = 16_384;
 export const CALENDAR_STRIPE_PAGES = 5;
 /** Booked calls those pages can hold. */
 export const CALENDAR_CALLS = CALENDAR_STRIPE_PAGES * 100;
-/** The file at its largest (CALENDAR_MAX_EVENTS, lib/calendar-sync.ts): each event's lines, and each booking's name and address once. A review ceiling of 2 KB an event and 512 bytes a booking. */
-export const CALENDAR_FILE_BYTES = CALENDAR_MAX_EVENTS * 2_048 + CALENDAR_CALLS * 512;
+/** The file at its largest, a ceiling the feed holds before it keeps or sends one (lib/calendar-sync.ts, CALENDAR_FILE_MAX_BYTES). */
+export const CALENDAR_FILE_BYTES = CALENDAR_FILE_MAX_BYTES;
 
-/** Every answer: the token and its settings (2 GET), the hour's pace (SET NX, INCRBY and, when refused, DECRBY: 3), the copy and the changed mark (MGET); the copy sent. */
+/**
+ * Every answer: the token and its settings (2 GET), the hour's pace (SET NX,
+ * INCRBY, EXPIRE NX and, when refused, DECRBY: 4), the copy, the changed mark
+ * and the store's handle (one MGET); the copy sent. An answer refused for the
+ * pace stops after the pace: 6 commands and no copy (CALENDAR_REFUSED_SHAPE).
+ */
 export const CALENDAR_POLL_SHAPE: ReadShape = {
   seconds: 1,
   cpu: 0.1,
-  commands: 2 + 3 + 1,
-  dbBytes: 2 * 4_096 + CALENDAR_FILE_BYTES + 256,
+  commands: 2 + 4 + 1,
+  dbBytes: 2 * 4_096 + CALENDAR_FILE_BYTES + 2 * 256,
   outBytes: CALENDAR_FILE_BYTES,
   stripePages: 0,
 };
 /**
- * The file made again, besides its poll: the day's budget (SET NX, INCRBY and,
- * when refused, DECRBY: 3); the store (its handle and its record: 2 GET); its
- * Stripe pages; every call listing (one GET each, up to MAX_PRODUCTS, the
- * catalog's head aside); each booking's moves (lib/call-records.ts, readMoves:
- * one GET a booking); four reads of each booking's room (lib/call-rooms.ts,
- * roomsFor); the copy kept (SET).
+ * The file made again, besides its poll: the day's budget (SET NX, INCRBY,
+ * EXPIRE NX and, when refused, DECRBY: 4); the store (its handle and its
+ * record: 2 GET); its Stripe pages; every call listing (one GET each, up to
+ * MAX_PRODUCTS, the catalog's head aside); each booking's moves
+ * (lib/call-records.ts, readMoves: one GET a booking); four reads of each
+ * booking's room and, for a video room not made yet, its making (SET NX and
+ * GET: lib/call-rooms.ts, roomsFor); the copy kept (SET).
  */
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,
   cpu: 1,
-  commands: 3 + 2 + MAX_PRODUCTS + CALENDAR_CALLS + 4 * CALENDAR_CALLS + 1,
-  dbBytes: MAX_STORE_BYTES + MAX_PRODUCTS * LISTING_READ_BYTES + CALENDAR_CALLS * 1_024 + 4 * CALENDAR_CALLS * 1_024 + CALENDAR_FILE_BYTES,
+  commands: 4 + 2 + MAX_PRODUCTS + CALENDAR_CALLS + 4 * CALENDAR_CALLS + 2 * CALENDAR_CALLS + 1,
+  dbBytes: MAX_STORE_BYTES + MAX_PRODUCTS * LISTING_READ_BYTES + CALENDAR_CALLS * 1_024 + 4 * CALENDAR_CALLS * 1_024 + 2 * CALENDAR_CALLS * 512 + CALENDAR_FILE_BYTES,
   outBytes: 0,
   stripePages: CALENDAR_STRIPE_PAGES,
 };
+
+/** An answer refused for the hour's pace: the token, its settings and the pace (6 commands), nothing read or sent besides. */
+export const CALENDAR_REFUSED_SHAPE: ReadShape = { seconds: 0.2, cpu: 0.01, commands: 2 + 4, dbBytes: 2 * 4_096, outBytes: 64, stripePages: 0 };
+/**
+ * Refused answers priced in the feed's line, an hour: as many again as it
+ * answers. Their number is set by whoever holds the feed's secret address
+ * (its creator's own apps), not by a figure: past it each costs a
+ * CALENDAR_REFUSED_SHAPE, a few millionths of a dollar, and replacing the
+ * address in the studio stops them.
+ */
+export const CALENDAR_REFUSED_PRICED_PER_HOUR = 4;
 
 // ---- Telling a product's buyers it was updated ------------------------------
 

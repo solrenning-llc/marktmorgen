@@ -859,6 +859,13 @@ const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
+/**
+ * Whether a handle's key, as read, still leads to a store: not free, not held
+ * back after a store was deleted or closed. For a reader that asks along with
+ * other keys, such as the private calendar feed (lib/calendar-sync.ts).
+ */
+export const storeHandleKey = handleKey;
+export const handleLeadsToStore = (raw: unknown): boolean => typeof raw === "string" && raw !== "" && !raw.startsWith(RELEASED_PREFIX);
 
 /** The ids of an account's other stores. Deliberately not under nl:store:owner:. */
 const accountKey = async (email: string) =>

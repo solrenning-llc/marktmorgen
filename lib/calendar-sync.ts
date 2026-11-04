@@ -31,7 +31,12 @@
  *   nl:cal:busy:<feed>         the last reading, ten minutes
  *   nl:cal:good:<feed>         the last good reading, six hours
  *   nl:cal:err:<feed>          the last failure, for the studio
- *   nl:cal:out:<statsId>       the subscription file, five minutes
+ *   nl:cal:out:<statsId>       the last good copy of the subscription file,
+ *                              { at, ics }, CALENDAR_COPY_SECONDS (40 days)
+ *   nl:cal:pace:<statsId>:<h>  the feed's answers in hour h, an hour
+ *   nl:cal:builds:<statsId>:<d> the file's makings on UTC day d, two days
+ *   nl:cal:chg:<handle>        when the bookings last changed, ms (written by
+ *                              lib/call-records.ts, bookingsChangedKey)
  */
 import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
@@ -40,7 +45,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
 import { type Interval, looksLikeCalendar, parseIcs } from "@/lib/ics-parse";
-import type { Listing, Store } from "@/lib/store";
+import { type Listing, type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
 import { idsOfKind, readListing, recordListings } from "@/lib/catalog";
 import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
@@ -64,12 +69,22 @@ export const FEED_TIMEOUT_MS = 8_000;
 export const CALENDAR_MAX_EVENTS = 1_000;
 /** How long the last good copy of the subscription file is kept for the calendar app (bookedCalendarFeed). */
 export const CALENDAR_COPY_SECONDS = 40 * 86_400;
-/** The copy is made again when a booking changed (lib/call-records.ts, markBookingsChanged), or once it is this old. */
+/** The copy is made again when a booking changed (lib/call-records.ts, bookingsChangedKey: a booking made or moved, or a time let go), or once it is this old. */
 export const CALENDAR_REFRESH_SECONDS = 12 * 3_600;
 /** Times a store's file may be made again in a UTC day, every reason together. */
 export const CALENDAR_BUILDS_PER_DAY = 4;
-/** Answers one store's feed gets in an hour: two, its own REFRESH-INTERVAL of thirty minutes. */
-export const CALENDAR_POLLS_PER_HOUR = 2;
+/**
+ * Answers one store's feed gets in an hour: four, two calendar apps (a phone
+ * and a computer) each asking every thirty minutes, the file's own
+ * REFRESH-INTERVAL. A third app asks more than this and is told to come back.
+ */
+export const CALENDAR_POLLS_PER_HOUR = 4;
+/**
+ * The largest copy kept and sent, in bytes: CALENDAR_MAX_EVENTS events at
+ * 2 KB and the bookings of five Stripe pages (lib/calls.ts, MAX_PAGES) at
+ * 512 bytes each. A review ceiling of the file's lines; larger is refused.
+ */
+export const CALENDAR_FILE_MAX_BYTES = CALENDAR_MAX_EVENTS * 2_048 + 5 * 100 * 512;
 /** The longest address accepted. Google's secret addresses are about 150 characters. */
 export const MAX_FEED_URL = 1000;
 
@@ -548,11 +563,12 @@ function parseCopy(raw: unknown): Copy | null {
 
 /**
  * A count with a ceiling, taken whole or not at all: SET NX with its expiry,
- * INCRBY, and DECRBY when over. A count that cannot be made is a refusal.
+ * INCRBY, EXPIRE NX, and DECRBY when over. A count that cannot be made is a refusal.
  */
 async function takeCounted(key: string, ceiling: number, seconds: number): Promise<boolean> {
   try {
-    const [, raw] = await redisPipeline([["SET", key, "0", "NX", "EX", seconds], ["INCRBY", key, 1]]);
+    // The expiry is set after the count too (NX: only where there is none), so a count that lost it gets it back.
+    const [, raw] = await redisPipeline([["SET", key, "0", "NX", "EX", seconds], ["INCRBY", key, 1], ["EXPIRE", key, seconds, "NX"]]);
     const n = Number(raw);
     if (!Number.isSafeInteger(n) || n < 1) return false;
     if (n <= ceiling) return true;
@@ -566,7 +582,7 @@ async function takeCounted(key: string, ceiling: number, seconds: number): Promi
 /** Thrown by a feed's `make` when the store behind its token is not the one that kept it. */
 export class FeedGone extends Error {}
 
-export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "paced" | "none" };
+export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "paced" | "none" | "gone" };
 
 /**
  * What a store's private feed answers a calendar app (4 November 2026, C4-4;
@@ -576,23 +592,28 @@ export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "pac
  * CALENDAR_COPY_SECONDS, and the file is made again (`make`, which reads the
  * store and its Stripe account) only when a booking was made, moved or
  * cancelled since the copy was begun (lib/call-records.ts,
- * markBookingsChanged) or the copy is CALENDAR_REFRESH_SECONDS old; at most
+ * bookingsChangedKey) or the copy is CALENDAR_REFRESH_SECONDS old; at most
  * CALENDAR_BUILDS_PER_DAY times a store a UTC day, counted before it is made.
  * Past that, or when making it fails, the copy is answered as it is. One
  * feed is answered CALENDAR_POLLS_PER_HOUR times an hour, counted before its
- * copy is read; past them it is asked to come back ("paced"). All of it is
- * one cost line of its own (tests/plan-cost-registry.ts, calendar-feed).
- * "none" when there is no copy and none could be made.
+ * copy is read; past them it is asked to come back ("paced"). A store
+ * deleted or closed is "gone" at once, with the same read as its copy (its
+ * handle is let go: lib/store.ts, handleLeadsToStore): its copy, which names
+ * buyers, is never answered again. A file larger than CALENDAR_FILE_MAX_BYTES
+ * is neither kept nor sent. All of it is one cost line of its own
+ * (tests/plan-cost-registry.ts, calendar-feed). "none" when there is no copy
+ * and none could be made.
  */
 export async function bookedCalendarFeed(owner: { statsId: string; handle: string }, make: () => Promise<string>, now = Date.now()): Promise<FeedAnswer> {
   if (!(await takeCounted(paceKey(owner.statsId, Math.floor(now / 3_600_000)), CALENDAR_POLLS_PER_HOUR, 3_600))) return { state: "paced" };
   let raw: unknown[];
   try {
-    raw = await redisPipeline([["MGET", outKey(owner.statsId), bookingsChangedKey(owner.handle)]]);
+    raw = await redisPipeline([["MGET", outKey(owner.statsId), bookingsChangedKey(owner.handle), storeHandleKey(owner.handle)]]);
   } catch {
     return { state: "none" };
   }
-  const [copyRaw, changedRaw] = Array.isArray(raw[0]) ? (raw[0] as unknown[]) : [null, null];
+  const [copyRaw, changedRaw, handleRaw] = Array.isArray(raw[0]) ? (raw[0] as unknown[]) : [null, null, null];
+  if (!handleLeadsToStore(handleRaw)) return { state: "gone" };
   const copy = parseCopy(copyRaw);
   const changed = Number(changedRaw) || 0;
   const fresh = copy !== null && changed <= copy.at && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
@@ -609,6 +630,11 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     if (copy && !(error instanceof FeedGone)) return { state: "copy", ics: copy.ics };
     throw error;
   }
-  await redisPipeline([["SET", outKey(owner.statsId), JSON.stringify({ at: now, ics }), "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
+  const kept = JSON.stringify({ at: now, ics });
+  if (Buffer.byteLength(kept, "utf8") > CALENDAR_FILE_MAX_BYTES) {
+    console.error("a booking calendar file is larger than its ceiling, so it is neither kept nor sent", owner.statsId);
+    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  }
+  await redisPipeline([["SET", outKey(owner.statsId), kept, "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
   return { state: "made", ics };
 }

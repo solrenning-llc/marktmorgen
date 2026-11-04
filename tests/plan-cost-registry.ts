@@ -104,7 +104,7 @@ import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY } f
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
-import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE } from "@/lib/read-ceilings";
+import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, LIFE_FILL_SHAPE } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 
 export const GB = 1024 * 1024 * 1024;
@@ -669,14 +669,16 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: () =>
       DAY_WINDOWS * CALENDAR_BUILDS_PER_DAY * readShapeCost(CALENDAR_BUILD_SHAPE)
       + (UTC_DAYS * 24 + 1) * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE)
+      + (UTC_DAYS * 24 + 1) * CALENDAR_REFUSED_PRICED_PER_HOUR * readShapeCost(CALENDAR_REFUSED_SHAPE)
       + CALENDAR_FILE_BYTES * DB_BYTE_MONTH * (CALENDAR_COPY_SECONDS / (30 * 86_400)),
     sources: [
       { file: "lib/calendar-sync.ts", names: ["bookedCalendarFeed", "CALENDAR_BUILDS_PER_DAY", "CALENDAR_POLLS_PER_HOUR", "CALENDAR_REFRESH_SECONDS", "CALENDAR_COPY_SECONDS", "CALENDAR_MAX_EVENTS", "keptSlots", "takeCounted("] },
       { file: "lib/call-records.ts", names: ["bookingsChangedKey", "changedCommand(handle"] },
       { file: "app/api/store/calendar/[token]/route.ts", names: ["bookedCalendarFeed(owner"] },
-      { file: "lib/read-ceilings.ts", names: ["CALENDAR_POLL_SHAPE", "CALENDAR_BUILD_SHAPE", "CALENDAR_FILE_BYTES"] },
+      { file: "lib/read-ceilings.ts", names: ["CALENDAR_POLL_SHAPE", "CALENDAR_BUILD_SHAPE", "CALENDAR_FILE_BYTES", "CALENDAR_REFUSED_SHAPE", "CALENDAR_REFUSED_PRICED_PER_HOUR"] },
+      { file: "lib/store.ts", names: ["handleLeadsToStore", "storeHandleKey"] },
     ],
-    basis: "A store's feed answers its calendar app from the last good copy of the file, at most CALENDAR_POLLS_PER_HOUR times an hour, counted before the copy is read (each a CALENDAR_POLL_SHAPE: the token, its settings, the pace and the copy, the copy sent); the file is made again only after a booking was made, moved or let go, or once the copy is CALENDAR_REFRESH_SECONDS old, at most CALENDAR_BUILDS_PER_DAY times a UTC day, counted before it is made (each a CALENDAR_BUILD_SHAPE: the store, five Stripe pages, every call listing, each booking's moves and room, the copy kept); the copy itself kept CALENDAR_COPY_SECONDS at its largest. One feed a store (a new address replaces the old). None of it is the studio's requests: an app asking on its own must never spend a figure the creator sees.",
+    basis: "A store's feed answers its calendar app from the last good copy of the file, at most CALENDAR_POLLS_PER_HOUR times an hour, counted before the copy is read (each a CALENDAR_POLL_SHAPE: the token, its settings, the pace and the copy, the copy sent); the file is made again only after a booking was made, moved or let go, or once the copy is CALENDAR_REFRESH_SECONDS old, at most CALENDAR_BUILDS_PER_DAY times a UTC day, counted before it is made (each a CALENDAR_BUILD_SHAPE: the store, five Stripe pages, every call listing, each booking's moves and room, the copy kept); the copy itself kept CALENDAR_COPY_SECONDS at its largest. One feed a store (a new address replaces the old). Refused answers past the pace read only the token, its settings and the pace (CALENDAR_REFUSED_SHAPE); as many again as the answers are priced (CALENDAR_REFUSED_PRICED_PER_HOUR), past which their number is the address holder's own, a few millionths of a dollar each, stopped by replacing the address. A store deleted or closed is refused with the copy's own read (its handle let go). None of it is the studio's requests: an app asking on its own must never spend a figure the creator sees.",
   },
   {
     id: "rest-api",
@@ -806,6 +808,16 @@ export const COST_LINES: CostLine[] = [
  * payment at most, and is added once to each payment's worst case.
  */
 export const PER_PAYMENT_LINES: CostLine[] = [
+  {
+    id: "stats-life-fill",
+    feature: "A store's all-time numbers filled from its kept days, the first time anything reads its numbers (lib/stats.ts, readLife; reported by C4-4, 4 November 2026)",
+    monthlyUsd: () => readShapeCost(LIFE_FILL_SHAPE),
+    sources: [
+      { file: "lib/stats.ts", names: ["KEPT_DAYS", "DAY_FIELDS_MAX", "lifeLockKey(statsId)", "filled"] },
+      { file: "lib/read-ceilings.ts", names: ["LIFE_FILL_SHAPE"] },
+    ],
+    basis: "Once for each store, under a lock and marked filled so it never happens twice: two reads of each of KEPT_DAYS days, an HINCRBY for every field found (DAY_FIELDS_MAX a day at the most), its marks and the record read again (LIFE_FILL_SHAPE). Whichever reader comes first pays it (the studio's home page, the totals, the API, the weekly email), so it is priced here, once, in the first payment's worst case, like the closing.",
+  },
   {
     id: "retained-files",
     feature: "Files a store keeps after its plan ends, until its closing day (18 October 2026: nothing past it)",

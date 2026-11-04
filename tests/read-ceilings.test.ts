@@ -23,7 +23,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CALENDAR_BUILDS_PER_DAY, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS,
+  CALENDAR_BUILDS_PER_DAY, CALENDAR_FILE_MAX_BYTES, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS,
   bookedCalendar, bookedCalendarFeed, keptSlots, newFeedToken,
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
@@ -35,7 +35,7 @@ import {
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
 import { readNumbers } from "@/lib/stats-report";
-import { COST_LINES, UNIT_COST, readShapeCost } from "./plan-cost-registry";
+import { COST_LINES, PER_PAYMENT_LINES, UNIT_COST, readShapeCost } from "./plan-cost-registry";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -92,6 +92,7 @@ async function main(): Promise<void> {
   const second = await ask();
   is("the next answers it from the copy, reading nothing from Stripe", [second.status, stripeReads - readsAfterFirst], [200, 0]);
   is("and neither took a single studio request", before - (await studioLeft()), 1);
+  for (let n = 2; n < CALENDAR_POLLS_PER_HOUR; n += 1) await ask();
   const readsBeforePaced = stripeReads;
   const paced = await ask();
   is(`past ${CALENDAR_POLLS_PER_HOUR} answers in an hour the app is asked to come back, and nothing is read`, [paced.status, paced.headers.get("Retry-After"), stripeReads - readsBeforePaced], [429, "900", 0]);
@@ -131,6 +132,24 @@ async function main(): Promise<void> {
   is("no copy at all and Stripe down: the route answers 503, asking the app to come back", [none, read("app/api/store/calendar/[token]/route.ts").includes("return later(503, 300);")], ["failed", true]);
   stripeDown = false;
 
+  part("A deleted store's copy is never answered again (M2)");
+  const later = old + 5 * 3_600_000;
+  is("before: the copy is answered", (await bookedCalendarFeed(owner, make, later)).state, "made");
+  redis.run(["SET", `nl:store:handle:${owner.handle}`, `released:${new Date().toISOString()}`]);
+  is("the store deleted (its handle let go): gone at once, the copy kept or not", (await bookedCalendarFeed(owner, make, later + 60_000)).state, "gone");
+  is("the route answers 404 for it", read("app/api/store/calendar/[token]/route.ts").includes('if (answer.state === "gone") return missing();'), true);
+  redis.run(["SET", `nl:store:handle:${owner.handle}`, OWNER]);
+
+  part("Each count keeps its expiry, and the copy has a size (L3, L4)");
+  const paceKey = `nl:cal:pace:${owner.statsId}:${Math.floor((later + 7_200_000) / 3_600_000)}`;
+  redis.run(["SET", paceKey, "0"]);
+  await bookedCalendarFeed(owner, make, later + 7_200_000);
+  is("a count found without an expiry gets one back", Number(redis.run(["TTL", paceKey])) > 0, true);
+  const huge = async () => `BEGIN:VCALENDAR\r\n${"X".repeat(CALENDAR_FILE_MAX_BYTES)}\r\nEND:VCALENDAR`;
+  redis.run(["DEL", `nl:cal:out:${owner.statsId}`]);
+  const oversized = await bookedCalendarFeed(owner, huge, later + 3 * 3_600_000);
+  is("a file past its ceiling is neither kept nor sent", [oversized.state, redis.run(["GET", `nl:cal:out:${owner.statsId}`])], ["none", null]);
+
   part("The file keeps what is still to come first");
   const now = Date.now();
   const slots = [
@@ -146,7 +165,7 @@ async function main(): Promise<void> {
   const ics = bookedCalendar({ name: "Feeder", handle: "feeder", catalog: { items: [], head: [], inline: [] } } as unknown as Store, many as never, now, []);
   is("the file holds at most CALENDAR_MAX_EVENTS events, the soonest", [ics.split("BEGIN:VEVENT").length - 1, ics.includes("b0@example.com"), ics.includes(`b${CALENDAR_MAX_EVENTS}@example.com`)], [CALENDAR_MAX_EVENTS, true, false]);
   is("the build's Stripe pages are lib/calls.ts's own", read("lib/calls.ts").includes(`const MAX_PAGES = ${CALENDAR_STRIPE_PAGES};`), true);
-  is("each booking's moves and rooms are counted in the build", CALENDAR_BUILD_SHAPE.commands >= 2 + 5 * CALENDAR_STRIPE_PAGES * 100, true);
+  is("each booking's moves, room reads and room making are counted in the build (M1)", CALENDAR_BUILD_SHAPE.commands >= 2 + (1 + 4 + 2) * CALENDAR_STRIPE_PAGES * 100, true);
 
   part("Every figure costs at least the worst it stands for");
   const held: [string, number, number, number][] = [
@@ -157,11 +176,13 @@ async function main(): Promise<void> {
     is(`${what}: ${units} units at $${each.toFixed(6)} cover $${worst.toFixed(6)}`, units * each >= worst, true);
   }
   is("a totals reading costs more than a page, so it is no longer the page's units", TOTALS_STORE_UNITS >= STUDIO_PAGE_UNITS, true);
+  const fill = PER_PAYMENT_LINES.find((l) => l.id === "stats-life-fill");
+  is("a store's one-time all-time filling has its own line, once for each store (M4)", (fill?.monthlyUsd("creator") ?? 0) >= readShapeCost(LIFE_FILL_SHAPE), true);
   const line = COST_LINES.find((l) => l.id === "calendar-feed");
   const feedMonth = line ? line.monthlyUsd("creator") : 0;
   is("the feed is a cost line of its own, every making and answer of the month at its worst", feedMonth >= 32 * CALENDAR_BUILDS_PER_DAY * readShapeCost(CALENDAR_BUILD_SHAPE) + 31 * 24 * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE), true);
   console.log(`  calendar feed: a making $${readShapeCost(CALENDAR_BUILD_SHAPE).toFixed(6)}, an answer $${readShapeCost(CALENDAR_POLL_SHAPE).toFixed(6)}, the month $${feedMonth.toFixed(4)}`);
-  console.log(`  not one of these reads, reported: a store's first all-time filling $${readShapeCost(LIFE_FILL_SHAPE).toFixed(4)} once (${LIFE_FILL_SHAPE.commands} commands)`);
+  console.log(`  its own once-a-store line (stats-life-fill): a store's first all-time filling $${readShapeCost(LIFE_FILL_SHAPE).toFixed(4)} once (${LIFE_FILL_SHAPE.commands} commands)`);
 
   part("The totals page: one store's numbers, read within their count");
   redis.run(["HSET", `nl:stats:${owner.statsId}:life`, "filled", "2031-01-01", "since", "2031-01-01", "vgap", "0"]);

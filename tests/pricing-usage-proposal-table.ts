@@ -73,7 +73,8 @@ export function figuresBefore553(tier: Tier): Record<Printed, number[]> {
 
 /** The monthly prices looked at for each plan, in cents; the year is always ten monthly payments, Marktmorgen's convention. */
 export const PRICE_POINTS: Record<Tier, number[]> = {
-  creator: [2_900, 3_500, 3_900, 4_900, 5_900, 6_900],
+  // 7_900 and 8_900 since 4 November 2026 (C4-4): with the private calendar feed's own cost line, no point up to $69 reaches the share; looked at only, nothing proposed is in force.
+  creator: [2_900, 3_500, 3_900, 4_900, 5_900, 6_900, 7_900, 8_900],
   pro: [9_900, 12_900, 14_900, 19_900, 24_900, 29_900, 44_900],
   scale: [19_900, 24_900, 29_900, 34_900, 39_900, 49_900, 99_900],
 };

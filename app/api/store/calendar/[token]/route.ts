@@ -39,6 +39,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
       const listings = await readKind(store, "call");
       return bookedCalendar(store, calls, Date.now(), listings, await slotRooms(store, calls, listings));
     });
+    // The store was deleted or closed: its copy, which names its buyers, is never answered again.
+    if (answer.state === "gone") return missing();
     // Asked more often than its own refresh: the app keeps what it had.
     if (answer.state === "paced") return later(429, 900);
     if (!("ics" in answer)) return later(503, 3600);

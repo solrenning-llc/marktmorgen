@@ -118,14 +118,29 @@ export type ClosingTimes = { since: number; ended: number };
 export async function plansByCustomer(store: Store): Promise<Record<string, unknown>[]> {
   const customer = store.stripeCustomerId;
   if (!customer || !CUSTOMER_PATTERN.test(customer) || !isBillingConfigured()) return [];
+  const observedStore = { ...store, previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], stripeCustomerId: customer };
   const query = new URLSearchParams({ customer, status: "all", limit: "100" });
   query.append("expand[]", "data.customer");
   const page = await onPlatform("GET", `/subscriptions?${query}`);
-  const handles = saleHandles(store);
-  return (Array.isArray(page.data) ? (page.data as Record<string, unknown>[]) : [])
+  // The independent fallback may save a store and activate a funded plan.
+  // It needs the same full-page proof as the two-read recovery path.
+  const data = Object.getOwnPropertyDescriptor(page, "data");
+  const more = Object.getOwnPropertyDescriptor(page, "has_more");
+  const cursor = Object.getOwnPropertyDescriptor(page, "next_page");
+  if (!data || !Object.hasOwn(data, "value") || !Array.isArray(data.value) || data.value.length > 100 ||
+      !more || !Object.hasOwn(more, "value") || more.value !== false ||
+      cursor && (!Object.hasOwn(cursor, "value") || cursor.value !== null && cursor.value !== undefined)) throw new Error("Subscription customer page is incomplete");
+  const rows: Record<string, unknown>[] = [];
+  for (let index = 0; index < data.value.length; index++) {
+    const entry = Object.getOwnPropertyDescriptor(data.value, String(index));
+    if (!entry || !Object.hasOwn(entry, "value")) throw new Error("Subscription customer page is incomplete");
+    rows.push(entry.value);
+  }
+  const handles = saleHandles(observedStore);
+  return rows
     .filter((row) => {
       const meta = row.metadata as Record<string, string> | null | undefined;
-      return typeof row.id === "string" && SUBSCRIPTION_PATTERN.test(row.id) && typeof meta?.store === "string" && handles.has(meta.store) && ownedBy(store, row);
+      return typeof row.id === "string" && SUBSCRIPTION_PATTERN.test(row.id) && typeof meta?.store === "string" && handles.has(meta.store) && ownedBy(observedStore, row);
     })
     .sort((a, b) => (Number(b.created) || 0) - (Number(a.created) || 0));
 }

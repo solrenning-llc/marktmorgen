@@ -612,7 +612,11 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // A plan paid for it since its day began (a checkout opened before and
     // finished on it) is ended and returned in full (lib/closing-plan-guard.ts).
     await markShut(store, final.day ?? now, was);
-    await refuseLatePlans(store);
+    // The durable final index survives a late active snapshot, which clears
+    // planEndedAt. Keep the original closing proof for the refund guard.
+    const closingStore = store.planEndedAt ? store : { ...store, planEndedAt: new Date(was).toISOString() };
+    const latePlansChecked = await refuseLatePlans(closingStore);
+    if (!latePlansChecked) return { key, state: "held", note: "its plan subscriptions could not all be checked" };
     if (final.removed) {
       if (!final.due) {
         await markDue(key, now);
@@ -760,7 +764,16 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     }
     // Stripe's search can lag about a minute; its list by the store's customer does not, so a plan paid just
     // before this check still keeps the store (the owner's decision: a plan started in time saves it).
-    live = (await findStoreSubscriptions(store)).live ?? (await liveByCustomer(store));
+    let searchKnown = true;
+    try { live = (await findStoreSubscriptions(store)).live; }
+    catch (error) {
+      searchKnown = false;
+      console.error("searching for an ended store's plan failed", error);
+    }
+    // A positive, independent customer observation can still save the store
+    // when search is unavailable; an empty list cannot prove unknown absence.
+    live ??= await liveByCustomer(store);
+    if (!live && !searchKnown) return { key, state: "held", note: "Stripe could not be asked" };
   } catch (error) {
     console.error("asking Stripe about an ended plan failed", error);
     return { key, state: "held", note: "Stripe could not be asked" };
@@ -866,20 +879,39 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
  * began returned (lib/closing-plan-guard.ts). Stripe not answering is tried
  * again on the next run; the daily sync and the way back check it too.
  */
-async function refuseLatePlans(store: Store): Promise<void> {
-  if (!isBillingConfigured()) return;
+async function refuseLatePlans(store: Store): Promise<boolean> {
+  if (!isBillingConfigured()) return false;
+  let complete = true;
+  const ids = new Map<string, string>();
   try {
     const found = await findStoreSubscriptions(store);
-    const ids = new Map<string, string>([...(found.live ? [[found.live.subscriptionId, found.live.customerId] as const] : []), ...found.lapsed.map((id) => [id, found.customerId ?? ""] as const)]);
-    // And what Stripe's list by customer shows already that its search may not yet.
+    if (found.live) ids.set(found.live.subscriptionId, found.live.customerId);
+    for (const id of found.lapsed) ids.set(id, found.customerId ?? "");
+  } catch (error) {
+    complete = false;
+    console.error("searching for a plan paid for a closing store failed", error);
+  }
+  // This observation is independent: a rejected address search must never
+  // prevent us from finding and stopping a late charge by customer.
+  try {
     for (const row of await plansByCustomer(store)) {
       if (row.status === "canceled" || row.status === "incomplete_expired") continue;
       if (!ids.has(String(row.id))) ids.set(String(row.id), store.stripeCustomerId ?? "");
     }
-    for (const [id, customerId] of ids) await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId });
   } catch (error) {
-    console.error("looking for a plan paid for a closing store failed", error);
+    complete = false;
+    console.error("listing plans paid for a closing store failed", error);
   }
+  for (const [id, customerId] of ids) {
+    try {
+      const result = await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId });
+      if (result !== "returned" && result !== "returned-early") complete = false;
+    } catch (error) {
+      complete = false;
+      console.error("refusing a plan paid for a closing store failed", error);
+    }
+  }
+  return complete;
 }
 
 /**

@@ -85,6 +85,7 @@ const world = {
   /** One-off payments, each naming its store in its metadata (what the buyers' search finds). */
   payments: [] as Record<string, unknown>[],
   searches: 0,
+  planListHasMore: false,
   charges: new Map<string, Charge>(),
   refunds: [] as { id: string; payment_intent: string; amount: number; status: string; metadata: Record<string, string> }[],
   balance: 1_000_000,
@@ -97,6 +98,8 @@ const world = {
   writes: [] as { method: string; path: string; body: string }[],
   /** Plans on our own account that Stripe's list shows at once and its search does not show yet (its index lags). */
   plans: [] as Record<string, unknown>[],
+  failPlanSearch: false,
+  planListReads: 0,
 };
 
 const lengthOf = (sub: Sub) => (sub.metadata.yearly ? 365 : 30) * 86_400;
@@ -158,14 +161,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   // Our own account: the store's plan, which has ended.
   if (!account) {
     const plan = world.plans.find((row) => path === `/subscriptions/${String(row.id)}`);
+    if (plan && method === "DELETE") { plan.status = "canceled"; return json(plan); }
     if (plan) return json(plan);
     // Search deliberately lags the platform plan list in this journey.
     // Match its endpoint before the generic single-subscription fallback.
-    if (path === "/subscriptions/search" && method === "GET") return json({ object: "search_result", data: [], has_more: false, next_page: null });
+    if (path === "/subscriptions/search" && method === "GET") return world.failPlanSearch
+      ? json({ error: { message: "synthetic incomplete search" } }, 503)
+      : json({ object: "search_result", data: [], has_more: false, next_page: null });
     if (path.startsWith("/subscriptions/")) return json({ id: path.split("/").pop(), status: "canceled", items: { data: [] } });
     if (path === "/subscriptions" && method === "GET") {
+      world.planListReads++;
       const customer = url.searchParams.get("customer");
-      return json({ object: "list", data: world.plans.filter((row) => (row.customer as { id: string }).id === customer && (url.searchParams.get("status") === "all" || row.status !== "canceled")), has_more: false });
+      return json({ object: "list", data: world.plans.filter((row) => (row.customer as { id: string }).id === customer && (url.searchParams.get("status") === "all" || row.status !== "canceled")), has_more: world.planListHasMore });
     }
     return json({ object: "list", data: [], has_more: false });
   }
@@ -591,7 +598,27 @@ async function main() {
   const half = await closeOne(ned, N + CLOSING_DAYS * DAY + 60_000, failing, Number.POSITIVE_INFINITY);
   console.error = real;
   is("the day began: its membership ended, the store not removed yet", [half.state, world.subs.get("sub_nedmonth")!.status], ["held", "canceled"]);
+  const lateNed = { id: "sub_nedlate001", status: "active", created: S(N + CLOSING_DAYS * DAY), customer: { id: "cus_ned0001", email: ned }, metadata: { store: "ned" }, items: { data: [{ quantity: 1, current_period_start: S(N + CLOSING_DAYS * DAY), current_period_end: S(N + (CLOSING_DAYS + 31) * DAY), price: { lookup_key: "nimbus_creator_month", unit_amount: 6900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } };
+  world.plans.push(lateNed);
+  world.failPlanSearch = true;
+  const listsBefore = world.planListReads, lateWrites = world.writes.length;
+  const unknownSearch = await closeOne(ned, N + (CLOSING_DAYS + 1) * DAY, hands, Number.POSITIVE_INFINITY);
+  is("an unknown address search still reads the independent customer list and stops the late charge", [world.planListReads > listsBefore, world.writes.slice(lateWrites).some(w => w.method === "DELETE" && w.path === "/subscriptions/sub_nedlate001"), lateNed.status], [true, true, "canceled"]);
+  is("unknown address coverage never advances the final closing to removed", unknownSearch.state, "held");
+  world.failPlanSearch = false;
+  world.planListHasMore = true;
+  const incompleteOwn = await closeOne(ned, N + (CLOSING_DAYS + 1) * DAY, hands, Number.POSITIVE_INFINITY);
+  is("has_more on the own customer page refuses removal even after the late charge ended", incompleteOwn.state, "held");
+  world.planListHasMore = false;
+  world.plans.length = 0;
   await setSubscription(ned, { customerId: "cus_ned0001", subscriptionId: "sub_nedplan02", active: true, tier: "creator", cycle: "month", trialEnds: 0 });
+  const observedLateNed = { ...lateNed, id: "sub_nedlate002", status: "active" };
+  world.plans.push(observedLateNed);
+  const observedWrites = world.writes.length;
+  const finalAfterObservation = await closeOne(ned, N + (CLOSING_DAYS + 1) * DAY, hands, Number.POSITIVE_INFINITY);
+  is("the durable final closing still stops a late plan after the active snapshot cleared planEndedAt", [world.writes.slice(observedWrites).some(w => w.method === "DELETE" && w.path === "/subscriptions/sub_nedlate002"), observedLateNed.status], [true, "canceled"]);
+  is("known final coverage and completed plan refunds let the closing finish", finalAfterObservation.state, "removed");
+  world.plans.length = 0;
   const nedBefore = sent.length;
   await releaseRestarted(Date.now() + 60_000, tellStaysOpen, Date.now());
   is("no \"it stays open\" is sent: what its buyers paid for has ended", sent.slice(nedBefore).filter((m) => m.subject.includes("staying open")).length, 0);
@@ -612,7 +639,9 @@ async function main() {
   const ninaBefore = sent.length;
   const ninaWrites = world.writes.length;
   clockAt(ninaDay + 60_000);
+  world.failPlanSearch = true;
   const saved = await closeOne(nina, ninaDay + 60_000, hands, Number.POSITIVE_INFINITY);
+  world.failPlanSearch = false;
   is("the closing check reads Stripe's list by customer, so the plan keeps the store: it runs", [saved.state, (await storeForEmail(nina))?.subscriptionActive, (await storeForEmail(nina))?.subscriptionId], ["running", true, "sub_ninaplan02"]);
   is("nothing is refunded, its memberships are not ended and no closing letter goes", [world.writes.slice(ninaWrites).filter((w) => w.path === "/refunds" || w.body === "DELETE").length, world.subs.get("sub_ninamonth")!.status, sent.slice(ninaBefore).filter((m) => m.to === nina).length], [0, "active", 0]);
   world.plans.length = 0;

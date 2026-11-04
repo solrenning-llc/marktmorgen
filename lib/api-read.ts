@@ -21,15 +21,24 @@ import { productIds, readListing, readListings } from "@/lib/catalog";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { memberPage } from "@/lib/community";
 import { readCourse } from "@/lib/course";
-import { studentsOf } from "@/lib/learn";
-import { readBook } from "@/lib/affiliates";
+import { studentPage } from "@/lib/learn";
+import { BOOK_STRIPE_PAGES, bookSizes, readBook } from "@/lib/affiliates";
 import { paidCalls } from "@/lib/calls";
 import { productLink } from "@/lib/checkout-recovery";
+import { apiReadUnits, bookWork, bookingsWork, studentsPageWork } from "@/lib/api-read-rules";
 
 export type Page<T> = { data: T[]; next: string | null };
 
 /** How many rows one page of a long list holds. */
 export const API_PAGE = 200;
+
+/**
+ * Takes `more` of the store's API requests before a reading that costs more
+ * than its request (lib/api-guard.ts, takeMoreApi): null when taken, else the
+ * refusal to send as it is. The three readers below that read more than a
+ * page take it before they read; the others fit in their request.
+ */
+export type Charge = (more: number) => Promise<Response | null>;
 
 const isoFromSeconds = (s: number) => (s > 0 ? new Date(s * 1000).toISOString() : null);
 const isoFromMs = (ms: number) => (ms > 0 ? new Date(ms).toISOString() : null);
@@ -125,18 +134,37 @@ export async function members(store: Store, cursor: string | null): Promise<Page
   };
 }
 
-/** Everybody who has opened one course, with how far they got. */
-export async function students(store: Store, productId: string): Promise<{ data: Record<string, unknown>[]; total: number } | null> {
+/**
+ * Everybody who has opened one course, with how far they got, a page at a
+ * time in the order Redis keeps them. The page is read first; what each of
+ * its students marked done is read only once the further requests that costs
+ * are taken (lib/api-read-rules.ts, studentsPageWork), so a course of any size
+ * costs by the page and never by the whole course at once.
+ */
+export async function students(
+  store: Store,
+  productId: string,
+  cursor: string | null,
+  charge: Charge,
+): Promise<{ data: Record<string, unknown>[]; total: number; next: string | null } | Response | null> {
   // One product by id, which is one read — not every product in the store.
   const product = await readListing(store, productId);
   if (!product?.course) return null;
   const course = await readCourse(product.course.id);
   if (!course) return null;
   const lessons = course.modules.reduce((n, m) => n + m.lessons.length, 0);
-  const { students: rows, total } = await studentsOf(course, 500);
+  const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";
+  // What the charge said, kept outside the callback that asks it.
+  const said: { refused: Response | null } = { refused: null };
+  const page = await studentPage(course, start, API_PAGE, async (rows, blocked) => {
+    said.refused = await charge(apiReadUnits(studentsPageWork(rows, blocked)));
+    return said.refused === null;
+  });
+  if (said.refused) return said.refused;
+  if (!page) throw new Error("the course's students could not be counted");
   return {
-    total,
-    data: rows.map((s) => ({
+    total: page.total,
+    data: page.students.map((s) => ({
       email: s.email,
       lessons_done: s.done,
       lessons_total: lessons,
@@ -144,11 +172,26 @@ export async function students(store: Store, productId: string): Promise<{ data:
       last_seen_at: isoFromSeconds(s.lastSeen),
       blocked: s.blocked,
     })),
+    next: page.next === "0" ? null : page.next,
   };
 }
 
+/**
+ * The further API requests one reading of the affiliate program takes, from
+ * its size counted just before (lib/affiliates.ts, bookSizes), taken before it
+ * is read: null when taken, else the refusal. Shared with the MCP tool
+ * (lib/mcp-tools.ts, affiliatesTool), which reads the same book.
+ */
+export async function chargeBook(store: Store, charge: Charge): Promise<Response | null> {
+  const sizes = await bookSizes(store);
+  if (!sizes) throw new Error("the affiliate program could not be counted");
+  return charge(apiReadUnits(bookWork(sizes, BOOK_STRIPE_PAGES)));
+}
+
 /** Every affiliate, with what they have earned, been paid, and are owed. */
-export async function affiliates(store: Store): Promise<{ data: Record<string, unknown>[]; currency: string; refunds_checked: boolean }> {
+export async function affiliates(store: Store, charge: Charge): Promise<{ data: Record<string, unknown>[]; currency: string; refunds_checked: boolean } | Response> {
+  const refused = await chargeBook(store, charge);
+  if (refused) return refused;
   const book = await readBook(store);
   return {
     currency: book.currency,
@@ -172,8 +215,15 @@ export async function affiliates(store: Store): Promise<{ data: Record<string, u
   };
 }
 
-/** Paid calls and session seats, each at the time it is booked for now. */
-export async function bookings(store: Store): Promise<Record<string, unknown>[]> {
+/**
+ * Paid calls and session seats, each at the time it is booked for now. How
+ * many there are is known only once Stripe has answered, so the further
+ * requests its most (lib/api-read-rules.ts, bookingsWork) are taken before;
+ * a store without Stripe connected reads nothing and takes none.
+ */
+export async function bookings(store: Store, charge: Charge): Promise<Record<string, unknown>[] | Response> {
+  const refused = await charge(apiReadUnits(bookingsWork(Boolean(store.stripeAccountId))));
+  if (refused) return refused;
   const rows = await paidCalls(store);
   return rows.map((c) => ({
     id: c.session,

@@ -220,6 +220,7 @@ const en = {
 
   // ---- A membership that has ended ----------------------------------------------------------
   offerNotices: {
+    price: "The store no longer offers the price this offer was for, so it cannot be used. Nothing was charged.",
     expired: "This offer has ended. You can still come back at the usual price below.",
     unavailable: "This offer cannot be used for this membership any more. You can still come back at the usual price below, if it is offered.",
     refused: "The offer could not be applied just now. You can come back at the usual price below, or reply to the email it came in.",
@@ -228,6 +229,9 @@ const en = {
   membershipLabel: "Membership",
   endedBody: (title: string) =>
     `Your membership for ${title} is no longer running, so what it gave you access to is closed now. Renew it and everything opens again right away.`,
+  /** The same without the promise that renewing opens it again: said when the price the offer named is gone. */
+  endedClosed: (title: string) =>
+    `Your membership for ${title} is no longer running, so what it gave you access to is closed now.`,
   endedGone: (store: string) => `This membership is no longer running, and ${store} no longer lists it.`,
   comeBackOffer: "Your come-back offer",
   /** "25% off your first payment", "25% off your first 3 payments". */
@@ -242,6 +246,7 @@ const en = {
   notTaking: (store: string) =>
     `${store} is not taking new members for this right now. Reply to your order confirmation email and it reaches them.`,
   see: (title: string) => `See ${title}`,
+  seePrices: (title: string) => `See today's prices for ${title}`,
   /** A sentence with a link in it: before, the link, after. */
   failedBefore: "Did it end because a payment failed, not because you canceled? Updating the card may bring it back without renewing: ",
   failedLink: "manage your membership",
@@ -571,6 +576,7 @@ const es: MembershipWords = {
   backToMembership: "Volver a tu membresía",
 
   offerNotices: {
+    price: "La tienda ya no ofrece el precio para el que era esta oferta, así que no se puede usar. No se cobró nada.",
     expired: "Esta oferta ha terminado. Todavía puedes volver al precio habitual, abajo.",
     unavailable: "Esta oferta ya no se puede usar para esta membresía. Todavía puedes volver al precio habitual, abajo, si se ofrece.",
     refused: "No se pudo aplicar la oferta en este momento. Puedes volver al precio habitual, abajo, o responder al email en el que llegó.",
@@ -579,6 +585,8 @@ const es: MembershipWords = {
   membershipLabel: "Membresía",
   endedBody: (title) =>
     `Tu membresía de ${title} ya no está activa, así que aquello a lo que te daba acceso está cerrado ahora. Renuévala y todo se vuelve a abrir al instante.`,
+  endedClosed: (title) =>
+    `Tu membresía de ${title} ya no está activa, así que aquello a lo que te daba acceso está cerrado ahora.`,
   endedGone: (store) => `Esta membresía ya no está activa, y ${store} ya no la ofrece.`,
   comeBackOffer: "Tu oferta para volver",
   offerWords: (percent, months) =>
@@ -592,6 +600,7 @@ const es: MembershipWords = {
   notTaking: (store) =>
     `${store} no está aceptando nuevos miembros para esto en este momento. Responde al email de confirmación de tu pedido y le llegará.`,
   see: (title) => `Ver ${title}`,
+  seePrices: (title) => `Ver los precios de hoy de ${title}`,
   failedBefore: "¿Terminó porque falló un pago, no porque cancelaras? Actualizar la tarjeta puede reactivarla sin renovar: ",
   failedLink: "gestiona tu membresía",
   failedAfter: " con el email con el que pagaste.",
@@ -917,6 +926,7 @@ const fr: MembershipWords = {
   backToMembership: "Retour à votre abonnement",
 
   offerNotices: {
+    price: "La boutique ne propose plus le prix auquel cette offre correspondait, elle ne peut donc pas être utilisée. Rien n'a été débité.",
     expired: "Cette offre est terminée. Vous pouvez toujours revenir au prix habituel ci-dessous.",
     unavailable: "Cette offre ne peut plus être utilisée pour cet abonnement. Vous pouvez toujours revenir au prix habituel ci-dessous, s'il est proposé.",
     refused: "L'offre n'a pas pu être appliquée pour le moment. Vous pouvez revenir au prix habituel ci-dessous, ou répondre à l'e-mail dans lequel elle est arrivée.",
@@ -925,6 +935,8 @@ const fr: MembershipWords = {
   membershipLabel: "Abonnement",
   endedBody: (title) =>
     `Votre abonnement à ${title} n'est plus actif, donc ce à quoi il vous donnait accès est désormais fermé. Renouvelez-le et tout se rouvre immédiatement.`,
+  endedClosed: (title) =>
+    `Votre abonnement à ${title} n'est plus actif, donc ce à quoi il vous donnait accès est désormais fermé.`,
   endedGone: (store) => `Cet abonnement n'est plus actif, et ${store} ne le propose plus.`,
   comeBackOffer: "Votre offre de retour",
   offerWords: (percent, months) =>
@@ -940,6 +952,7 @@ const fr: MembershipWords = {
   notTaking: (store) =>
     `${store} n'accepte pas de nouveaux membres pour cela en ce moment. Répondez à l'e-mail de confirmation de votre commande et il lui parviendra.`,
   see: (title) => `Voir ${title}`,
+  seePrices: (title) => `Voir les prix actuels de ${title}`,
   failedBefore: `Il s'est terminé parce qu'un paiement a échoué, et non parce que vous avez annulé${S}? Mettre à jour la carte peut le rétablir sans le renouveler${S}: `,
   failedLink: "gérez votre abonnement",
   failedAfter: " avec l'e-mail avec lequel vous avez payé.",
@@ -1268,6 +1281,7 @@ const de: MembershipWords = {
   backToMembership: "Zurück zu Ihrer Mitgliedschaft",
 
   offerNotices: {
+    price: "Der Shop bietet den Preis, für den dieses Angebot galt, nicht mehr an, deshalb kann es nicht genutzt werden. Es wurde nichts berechnet.",
     expired: "Dieses Angebot ist abgelaufen. Sie können unten weiterhin zum normalen Preis zurückkehren.",
     unavailable:
       "Dieses Angebot kann für diese Mitgliedschaft nicht mehr genutzt werden. Sie können unten weiterhin zum normalen Preis zurückkehren, falls er angeboten wird.",
@@ -1278,6 +1292,8 @@ const de: MembershipWords = {
   membershipLabel: "Mitgliedschaft",
   endedBody: (title) =>
     `Ihre Mitgliedschaft für ${title} läuft nicht mehr, daher ist das, wozu sie Ihnen Zugang gab, jetzt geschlossen. Erneuern Sie sie, und alles öffnet sich sofort wieder.`,
+  endedClosed: (title) =>
+    `Ihre Mitgliedschaft für ${title} läuft nicht mehr, daher ist das, wozu sie Ihnen Zugang gab, jetzt geschlossen.`,
   endedGone: (store) => `Diese Mitgliedschaft läuft nicht mehr, und ${store} bietet sie nicht mehr an.`,
   comeBackOffer: "Ihr Rückkehrangebot",
   offerWords: (percent, months) =>
@@ -1291,6 +1307,7 @@ const de: MembershipWords = {
   notTaking: (store) =>
     `${store} nimmt hierfür gerade keine neuen Mitglieder auf. Antworten Sie auf die E-Mail mit Ihrer Bestellbestätigung, dann erreicht Ihre Nachricht ${store}.`,
   see: (title) => `${title} ansehen`,
+  seePrices: (title) => `Heutige Preise für ${title} ansehen`,
   failedBefore:
     "Endete sie, weil eine Zahlung fehlgeschlagen ist, und nicht, weil Sie gekündigt haben? Eine aktualisierte Karte kann sie ohne Erneuerung zurückbringen: ",
   failedLink: "verwalten Sie Ihre Mitgliedschaft",
@@ -1620,6 +1637,7 @@ const it: MembershipWords = {
   backToMembership: "Torna al tuo abbonamento",
 
   offerNotices: {
+    price: "Il negozio non offre più il prezzo a cui si riferiva questa offerta, quindi non può essere usata. Non è stato addebitato nulla.",
     expired: "Questa offerta è terminata. Puoi comunque tornare al prezzo normale qui sotto.",
     unavailable: "Questa offerta non può più essere usata per questo abbonamento. Puoi comunque tornare al prezzo normale qui sotto, se è offerto.",
     refused: "Non è stato possibile applicare l'offerta in questo momento. Puoi tornare al prezzo normale qui sotto, o rispondere all'email con cui è arrivata.",
@@ -1628,6 +1646,8 @@ const it: MembershipWords = {
   membershipLabel: "Abbonamento",
   endedBody: (title) =>
     `Il tuo abbonamento a ${title} non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso. Rinnovalo e tutto si riapre subito.`,
+  endedClosed: (title) =>
+    `Il tuo abbonamento a ${title} non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso.`,
   endedGone: (store) => `Questo abbonamento non è più attivo, e ${store} non lo offre più.`,
   comeBackOffer: "La tua offerta per tornare",
   offerWords: (percent, months) =>
@@ -1641,6 +1661,7 @@ const it: MembershipWords = {
   notTaking: (store) =>
     `${store} non accetta nuovi membri per questo al momento. Rispondi all'email di conferma del tuo ordine e arriverà a ${store}.`,
   see: (title) => `Vedi ${title}`,
+  seePrices: (title) => `Vedi i prezzi di oggi per ${title}`,
   failedBefore:
     "È terminato perché un pagamento non è andato a buon fine, e non perché hai annullato? Aggiornare la carta può riattivarlo senza rinnovarlo: ",
   failedLink: "gestisci il tuo abbonamento",
@@ -1963,6 +1984,7 @@ const nl: MembershipWords = {
   backToMembership: "Terug naar je lidmaatschap",
 
   offerNotices: {
+    price: "De winkel biedt de prijs waarvoor dit aanbod gold niet meer aan, dus het kan niet worden gebruikt. Er is niets afgeschreven.",
     expired: "Dit aanbod is afgelopen. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs.",
     unavailable: "Dit aanbod kan niet meer voor dit lidmaatschap worden gebruikt. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs, als die wordt aangeboden.",
     refused: "Het aanbod kon nu niet worden toegepast. Je kunt hieronder terugkomen tegen de gewone prijs, of de e-mail beantwoorden waarin het kwam.",
@@ -1971,6 +1993,8 @@ const nl: MembershipWords = {
   membershipLabel: "Lidmaatschap",
   endedBody: (title) =>
     `Je lidmaatschap voor ${title} loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten. Verleng het en alles gaat meteen weer open.`,
+  endedClosed: (title) =>
+    `Je lidmaatschap voor ${title} loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten.`,
   endedGone: (store) => `Dit lidmaatschap loopt niet meer, en ${store} biedt het niet meer aan.`,
   comeBackOffer: "Je aanbod om terug te komen",
   offerWords: (percent, months) =>
@@ -1984,6 +2008,7 @@ const nl: MembershipWords = {
   notTaking: (store) =>
     `${store} neemt hiervoor op dit moment geen nieuwe leden aan. Beantwoord de bevestigingsmail van je bestelling, dan komt je bericht bij ${store} aan.`,
   see: (title) => `${title} bekijken`,
+  seePrices: (title) => `Bekijk de prijzen van vandaag voor ${title}`,
   failedBefore: "Is het gestopt omdat een betaling mislukte, en niet omdat je opzegde? Je kaart bijwerken kan het terugbrengen zonder te verlengen: ",
   failedLink: "beheer je lidmaatschap",
   failedAfter: " met het e-mailadres waarmee je betaalde.",
@@ -2304,6 +2329,7 @@ const pt: MembershipWords = {
   backToMembership: "Voltar à sua subscrição",
 
   offerNotices: {
+    price: "A loja já não oferece o preço a que esta oferta se referia, por isso não pode ser usada. Não foi cobrado nada.",
     expired: "Esta oferta terminou. Ainda pode voltar ao preço habitual, abaixo.",
     unavailable: "Esta oferta já não pode ser usada nesta subscrição. Ainda pode voltar ao preço habitual, abaixo, se estiver disponível.",
     refused: "Não foi possível aplicar a oferta neste momento. Pode voltar ao preço habitual, abaixo, ou responder ao email em que ela chegou.",
@@ -2312,6 +2338,8 @@ const pt: MembershipWords = {
   membershipLabel: "Subscrição",
   endedBody: (title) =>
     `A sua subscrição de ${title} já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado. Renove-a e tudo volta a abrir de imediato.`,
+  endedClosed: (title) =>
+    `A sua subscrição de ${title} já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado.`,
   endedGone: (store) => `Esta subscrição já não está ativa, e ${store} já não a disponibiliza.`,
   comeBackOffer: "A sua oferta de regresso",
   offerWords: (percent, months) =>
@@ -2325,6 +2353,7 @@ const pt: MembershipWords = {
   notTaking: (store) =>
     `${store} não está a aceitar novos membros para isto neste momento. Responda ao email de confirmação da sua encomenda e a mensagem chega a ${store}.`,
   see: (title) => `Ver ${title}`,
+  seePrices: (title) => `Ver os preços de hoje de ${title}`,
   failedBefore: "Terminou porque um pagamento falhou, e não porque cancelou? Atualizar o cartão pode reativá-la sem renovar: ",
   failedLink: "gira a sua subscrição",
   failedAfter: " com o email com que pagou.",

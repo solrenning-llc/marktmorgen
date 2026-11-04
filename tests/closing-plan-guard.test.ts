@@ -341,7 +341,7 @@ async function main() {
 
   part("Where it is wired");
   const closing = readFileSync(join(process.cwd(), "lib/plan-closing.ts"), "utf8");
-  is("the closing day expires the checkouts right after it is entered, and each later run looks for a late plan", [closing.indexOf("expirePlanCheckouts(store") > closing.indexOf('["ZADD", FINAL_INDEX, endedAt, key]'), closing.includes("await refuseLatePlans(store);")], [true, true]);
+  is("the closing day expires the checkouts right after it is entered, and each later run looks for a late plan", [closing.indexOf("expirePlanCheckouts(store") > closing.indexOf('["ZADD", FINAL_INDEX, endedAt, key]'), closing.includes("await refuseLatePlans(closingStore);")], [true, true]);
   is("the closing job tries the line again on every run", readFileSync(join(process.cwd(), "app/api/cron/closing/route.ts"), "utf8").includes("retryPlanUndos("), true);
   is("the letter with nothing paid says so", planReturnedLetter("Kim Shop", 0, 0, "usd").text.includes("No payment was taken for it."), true);
 

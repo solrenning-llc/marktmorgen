@@ -56,7 +56,7 @@ import { type DataStore, DataRoomError } from "@/lib/store-data";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
-import { purchaseRefunded, refundedInFull } from "@/lib/refunds";
+import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { type Learner, TOKEN_PATTERN, emailKey, learnerFrom, storeKey } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
@@ -151,7 +151,11 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
       const meta = (intent.metadata ?? {}) as Record<string, string>;
       if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) continue;
       if (intent.status !== "succeeded" || refunded(intent)) continue;
-      if (deliveredIds(meta).some((id) => ids.has(id))) return true;
+      if (!deliveredIds(meta).some((id) => ids.has(id))) continue;
+      // Lost to a dispute is given back too (lib/refunds.ts); asked only of a
+      // charge Stripe marks disputed, and a failed read keeps it, as a refund read does.
+      if (await keptUnlessLost(account, intent)) continue;
+      return true;
     }
   }
   return false;

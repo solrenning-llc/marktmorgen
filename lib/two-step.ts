@@ -33,9 +33,11 @@
  * When the recovery inbox is lost as well (or for an account set up before
  * there was one), the creator still gets in at once, from the same page, with
  * the emailed link alone — into a studio where what could take money, data or
- * the account itself away is locked for RESET_DAYS (LOCKED_NEEDS: payments,
- * the plan, the team, deleting, exports, settings, sending to the list,
- * imports, the sign-in address, passkeys, two-step login). They can sell, edit
+ * the account itself away is locked for RESET_DAYS (LOCKED_NEEDS and
+ * LOCKED_ACTIONS, said in the words of lib/locked-words.ts: payments, the
+ * plan, the team, exports, imports, settings, email to the list or the
+ * members, anything deleted for good, the sign-in address, passkeys,
+ * two-step login). They can sell, edit
  * their products and pages, answer buyers and read their numbers meanwhile.
  * After those days two-step login turns off and nothing is locked. In that
  * time the account is emailed, every browser still logged in shows it, and any
@@ -62,10 +64,11 @@
  *   nl:2fa:lockedset:<hash> the account's locked sessions, to log them out on Cancel
  */
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, endSession, normaliseEmail, openSession } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, endSession, normaliseEmail, openSession } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
+import { LOCKED_LIST } from "@/lib/locked-words";
 import { seal, unseal } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
 import { newSecret, otpauthUri, stepOf } from "@/lib/totp";
@@ -187,9 +190,93 @@ const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { weekday: 
 /**
  * What a session opened without the second step may not do until its days
  * are over (lib/studio-route.ts studioAccess): everything that moves money or
- * data out, changes who can get in, or cannot be undone.
+ * data out, changes who can get in, or cannot be undone. "erase" (deleting a
+ * person and everything the store keeps about them, lib/person-erasure.ts)
+ * cannot be undone, so it waits too (4 November 2026, C2-76).
  */
-export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "delete", "export", "settings", "send", "import"];
+export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "delete", "export", "settings", "send", "import", "erase"];
+
+/**
+ * Single actions under a permission the locked session otherwise keeps, that
+ * cannot be undone, keyed by permission. Each is matched under every route
+ * of that permission, so a name used by one route only ("lesson-remove") is
+ * unique to it and never read from the request's path. Adding and editing
+ * stay open; what deletes something for good, or emails many people at once,
+ * waits (4 November 2026, C2-76, after a review found the same harm through
+ * other doors):
+ *
+ *   - products: "remove" (a product with its files, picture, course and page:
+ *     app/api/store/product; a price option and its file: option; a podcast
+ *     episode and its audio: podcast; a page funnel: page-funnels; a lesson
+ *     video's captions: stream/captions; the product picture: image),
+ *     "clear" (every license key: keys; a bundle's list: bundle), "detach"
+ *     (the product's file and the buyers' stamped copies: file/attach),
+ *     "replace" (a new file, picture, video or audio that deletes the old one,
+ *     or a page saved without pictures it showed), and in a course
+ *     (app/api/store/course) a lesson, a module or a lesson file taken out
+ *     ("lesson-remove", "module-remove", "media-remove"), an assignment taken
+ *     off with the work handed in ("task-remove"), a quiz taken off
+ *     ("quiz-remove"), a student's certificate withdrawn ("withdraw") and a
+ *     lesson comment deleted ("cm-delete"); and "launch" (app/api/store/
+ *     waitlist: the product goes on sale with one email, in the creator's
+ *     own words, to everyone on its waitlist);
+ *   - page: "remove" (a form with its answers, a site page, a saved block, a
+ *     link, a short link, the store photo), "delete" (a blog post), "clear"
+ *     (the questions the answers and the assistant missed) and "replace";
+ *   - events: "cancel" and "delete" (an event, emailing everyone coming) and
+ *     "move" (an edit that changes the time, emailing everyone coming);
+ *   - community: "report-delete" (a reported post or comment), and, for the
+ *     creator inside their own community (app/api/store/community, chat and
+ *     the lesson comments, where the owner is known by the address and not
+ *     by studioAccess), "email" (an announcement emailed to every member),
+ *     "delete", "delete-comment", "unsay" and "clear" (the chat room);
+ *   - orders: "remove" (a task on a person), "unnote" (a note on a person),
+ *     "undeal" (a deal), "fields-remove" (the store's own fields saved without
+ *     one it had, which takes that field's answers off every person: crm),
+ *     "unpipeline" (a whole pipeline taken away: its stages go and every deal
+ *     in it loses the stage it was in), "resend" (a buyer's purchase email sent again, which carries the
+ *     product's thank-you note: a note rewritten in that session would go to
+ *     every buyer listed);
+ *     stats: "remove" (a note or a spend on the numbers);
+ *     draft: "drop" (an outreach pitch), "segment-remove", "draft-remove";
+ *     reviews: "photo" (a buyer's photo taken off a review).
+ *
+ * A route whose action is not its body's `action` names it to
+ * guardStoreWrite (lib/store-request.ts); one that learns only from what is
+ * kept that a write would delete (a replacement) asks lockedFor first.
+ * tests/locked-deletes.test.ts holds every route that deletes to one of them.
+ */
+export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
+  products: ["remove", "clear", "detach", "replace", "launch", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
+  page: ["remove", "delete", "clear", "replace"],
+  events: ["cancel", "delete", "move"],
+  community: ["report-delete", "email", "delete", "delete-comment", "unsay", "clear"],
+  orders: ["remove", "unnote", "undeal", "unpipeline", "fields-remove", "resend"],
+  stats: ["remove"],
+  draft: ["drop", "segment-remove", "draft-remove"],
+  reviews: ["photo"],
+};
+
+/** Whether a locked session may not do `need` (with `action`, when the route names one). */
+export function lockedOut(need: string, action = ""): boolean {
+  if (LOCKED_NEEDS.includes(need)) return true;
+  if (!action || !Object.hasOwn(LOCKED_ACTIONS, need)) return false;
+  return LOCKED_ACTIONS[need].includes(action);
+}
+
+/**
+ * The same question for a route that does not go through studioAccess, or
+ * learns only from what is kept that a write deletes something: whether the
+ * session in these cookies is locked and may not do it. Asks Redis only when
+ * the action is one that waits.
+ */
+export async function lockedFor(
+  request: { cookies: { get(name: string): { value: string } | undefined } },
+  need: string,
+  action: string,
+): Promise<boolean> {
+  return lockedOut(need, action) && (await lockedUntil(request.cookies.get(SESSION_COOKIE)?.value)) > 0;
+}
 
 /** Until when a session is locked, in ms, or 0 for a session that is not. */
 export async function lockedUntil(session: string | undefined, now = Date.now()): Promise<number> {
@@ -224,7 +311,7 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   await tell(
     email,
     first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",
-    `Somebody who opened ${through} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, payments, your plan, your team, exports, settings, sending to your list, your sign-in address, passkeys and two-step login are locked for them; after that, two-step login turns off.
+    `Somebody who opened ${through} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, ${LOCKED_LIST} are locked for them; after that, two-step login turns off.
 
 If that was you, keep working: everything else is open.
 

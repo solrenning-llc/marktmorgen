@@ -38,7 +38,8 @@ async function main(): Promise<void> {
   const open = openRequestsFor(requests, "ana@example.com", NOW);
   is("only those emailed to this address that still take payment (one whose email never went is not shown)", open.map((r) => r.id.slice(0, 2)), ["a2", "a1", "a3", "a8"]);
   is("soonest due first, undated after, oldest first", open.map((r) => r.dueDate), ["2026-11-10", "2026-11-20", "", ""]);
-  is("with only what the page needs", Object.keys(open[0]).sort(), ["dueDate", "expiresAt", "id", "total"]);
+  is("with only what the page needs, and the currency it was made in", Object.keys(open[0]).sort(), ["currency", "dueDate", "expiresAt", "id", "total"]);
+  is("a request keeps its own currency whatever the store sells in now", openRequestsFor([request("g1", { currency: "usd" })], "ana@example.com", NOW)[0].currency, "usd");
   is("all of them, for the count", openRequestsFor(Array.from({ length: WAITING_SHOWN + 5 }, (_, i) => request(`b${i}`)), "ana@example.com", NOW).length, WAITING_SHOWN + 5);
 
   part("Proposals and agreements to sign");
@@ -73,13 +74,40 @@ async function main(): Promise<void> {
   is("where requests take no payment they are not read, so their failure says nothing", await waitingFor(shop, "ana@example.com", NOW, false), { requests: [], agreements: [], requestsTotal: 0, agreementsTotal: 0, unread: false });
 
 
+  part("An agreement's title comes from its record, never from reading its whole text");
+  const titledSid = "9".repeat(32);
+  const marked = agreement("b7", { sid: titledSid, versions: [{ n: 1, sha256: "a".repeat(64), title: "Website redesign", createdAt: NOW - DAY, signature: null }] });
+  await redis.pipeline([
+    ["SET", `nl:agree:r:${marked.id}`, JSON.stringify(marked)],
+    ["SET", `nl:agree:v:${marked.id}:1`, "x".repeat(12_000)],
+    ["SADD", `nl:agree:p:${titledSid}:${personKey(titledSid, "ana@example.com")}`, marked.id],
+  ]);
+  let versionReads = 0;
+  redis.pipeline = (async (list: (string | number)[][]) => {
+    versionReads += list.filter((c) => c[0] === "GET" && String(c[1] ?? "").startsWith("nl:agree:v:")).length;
+    return keep(list);
+  }) as typeof redis.pipeline;
+  const titled = await waitingFor({ sid: titledSid, statsId: null } as unknown as Store, "ana@example.com", NOW, false);
+  redis.pipeline = keep;
+  is("shown with the title kept in the record", [titled.agreements.map((a) => a.title), titled.unread], [["Website redesign"], false]);
+  is("its version's text is never read, only checked to be there", versionReads, 0);
+  await redis.pipeline([["DEL", `nl:agree:v:${marked.id}:1`]]);
+  const gone = await waitingFor({ sid: titledSid, statsId: null } as unknown as Store, "ana@example.com", NOW, false);
+  is("one whose text is gone is not listed, and is said as not read", [gone.agreements.length, gone.unread], [0, true]);
+
   part("On the orders page");
   const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
+  // What an opening takes, and that a refused one reads nothing, are run in tests/orders-open.test.ts (lib/buyer-orders.ts, openOrders).
+  is("an opening with a link is opened by openOrders, which takes the store's buyer requests before anything is read", [page.includes("const opened = token ? await openOrders(store, token) : null;"), /ordersGrant|takePublicRequest/.test(page)], [true, false]);
+  is("without room, the page says it is busy and reads nothing", [page.includes("token && !admitted ? NOTICES.busy"), page.includes("if (email && meter) {"), page.includes("if (error instanceof OrdersBusy) admitted = false;")], [true, true, true]);
+  is("the notice says only what is true: kept, try later, ask for a new link", [ORDERS_WORDS.en.notices.busy.title, /minutes|many people/i.test(ORDERS_WORDS.en.notices.busy.body)], ["This store can't show your purchases right now", false]);
+  is("the busy notice in every language", Object.values(ORDERS_WORDS).every((w) => !!w.notices.busy?.title && !!w.notices.busy?.body), true);
+  is("each request's amount in its own currency, never the store's now", (page.match(/speechFor\(store\.language, request\.currency\)\.money\(request\.total\)/g) ?? []).length, 2);
   is("a named section with its heading, before the bookings", page.includes('aria-labelledby="waiting-title"') && page.includes('<h2 id="waiting-title"') && page.indexOf("<WaitingList") < page.indexOf('aria-labelledby="calls-title"'), true);
   is("each linked to the page that was emailed to them", page.includes("href={`/@${store.handle}/pay/${request.id}`}") && page.includes("href={`/@${store.handle}/sign/${agreement.id}`}"), true);
   is("payment requests read and shown only where their page takes payment; a surprise failure is 'could not be read'", page.includes("waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))"), true);
   is("a list that cannot be read is said, never 'nothing to open'", page.includes("{waiting.unread ? (") && page.includes("{words.waitingUnread}") && page.includes("|| waiting.unread) ? null"), true);
-  is("the dates and amounts as their own pages say them", page.includes("rw.due(day(request.dueDate))") && page.includes("aw.until(said.date(agreement.expiresAt))") && page.includes("said.money(request.total)"), true);
+  is("the dates and amounts as their own pages say them", page.includes("rw.due(day(request.dueDate))") && page.includes("aw.until(said.date(agreement.expiresAt))") && page.includes("speechFor(store.language, request.currency).money(request.total)"), true);
   is("buttons tall enough to tap", (page.match(/btn st-btn btn-wrap mt-3 inline-flex min-h-11/g) ?? []).length, 2);
 
   part("Each link says by itself what it opens (WCAG 2.4.9)");
@@ -87,7 +115,7 @@ async function main(): Promise<void> {
   is("two payment requests never read the same", en.openRequest("$50.00", "November 20, 2026") !== en.openRequest("$80.00", "November 20, 2026") && en.openRequest("$50.00", "November 10, 2026") !== en.openRequest("$50.00", "November 20, 2026"), true);
   is("in plain words, with the amount and the date", [en.openRequest("$50.00", "November 20, 2026"), en.openRequest("$50.00", "")], ["Open the $50.00 payment request due November 20, 2026", "Open the $50.00 payment request"]);
   is("two agreements never read the same", [en.openToSign("Website redesign"), en.openToSign("Monthly retainer")], ["Read and sign “Website redesign”", "Read and sign “Monthly retainer”"]);
-  is("in the link's own text, not only for screen readers", page.includes("{words.openRequest(said.money(request.total), request.dueDate ? day(request.dueDate) : \"\")}") && page.includes("{words.openToSign(agreement.title)}") && !/aria-label=\{words\.open/.test(page), true);
+  is("in the link's own text, not only for screen readers", page.includes("{words.openRequest(speechFor(store.language, request.currency).money(request.total), request.dueDate ? day(request.dueDate) : \"\")}") && page.includes("{words.openToSign(agreement.title)}") && !/aria-label=\{words\.open/.test(page), true);
   is("a long title wraps inside its card", (page.match(/btn-wrap mt-3 inline-flex min-h-11 items-center \[overflow-wrap:anywhere\]/g) ?? []).length, 2);
 
   part("In every language the store can speak");

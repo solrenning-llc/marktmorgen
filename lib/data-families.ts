@@ -109,7 +109,8 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
   "nl:weekly:lock", "nl:weekly:off", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:",
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
-  "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:link:",
+  "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
+  "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
 ];
 
 /** Whether a key belongs to a family the room counts: the longest family name it starts with is one of COUNTED_FAMILIES. */
@@ -381,6 +382,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:wo:due": I, "nl:wo:n:": E, "nl:wo:r:": E, "nl:wo:start:": E,
   "nl:yearask:": E, "nl:yearask:count:": E, "nl:yearask:cursor": C,
   "nl:yearly-offer:": C, "nl:yearly:link:": X(30), "nl:yearly:price:": E,
+  // A failed yearly renewal moved to monthly (lib/yearly-fallback.ts): its tries lapse; the daily job takes each entry out of its list.
+  "nl:yearly:fallback:both": I, "nl:yearly:fallback:check": I, "nl:yearly:fallback:try:": X(2), "nl:yearly:fallback:void": I,
 };
 
 /**

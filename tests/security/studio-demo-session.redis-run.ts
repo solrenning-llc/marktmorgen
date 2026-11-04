@@ -11,7 +11,8 @@
  */
 import { STUDIO_DEMO_SEED_VALUES, openStudioDemo, readStudioDemo, takeDemoAction } from "@/lib/studio-demo";
 import {
-  DEMO_ACTIONS_PER_SESSION, DEMO_BYTES_PER_SESSION, DEMO_COOKIE, DEMO_NAMESPACE, DEMO_SESSIONS_PER_DAY, DEMO_SESSION_SECONDS, sandboxKey,
+  DEMO_ACTIONS_PER_SESSION, DEMO_BYTES_PER_SESSION, DEMO_COOKIE, DEMO_NAMESPACE, DEMO_REFUSALS_PER_DAY, DEMO_SESSIONS_PER_ADDRESS_PER_DAY, DEMO_SESSIONS_PER_DAY,
+  DEMO_SESSION_SECONDS, sandboxKey,
 } from "@/lib/studio-demo-rules";
 import { redisPipeline } from "@/lib/redis";
 import { check, finish } from "./check";
@@ -40,10 +41,18 @@ async function main(): Promise<void> {
   check("every sandbox key ends at the session's end", ends, keys.map(() => s.expiresAt));
   check("the first drafts are as written", await redisPipeline(keys.slice(1).map((k) => ["GET", k])), STUDIO_DEMO_SEED_VALUES);
   const all = (await one(["KEYS", "*"])) as string[];
-  check("no key outside the demo's namespace, the address limit and the store set before", all.filter((k) => !k.startsWith(DEMO_NAMESPACE) && !k.startsWith("nl:rl:studio-demo:")), ["nl:store:0123456789abcdef0123456789abcdef"]);
+  check("no key outside the demo's namespace but the store set before", all.filter((k) => !k.startsWith(DEMO_NAMESPACE)), ["nl:store:0123456789abcdef0123456789abcdef"]);
+  check("the addresses' counts end with the day", await one(["PEXPIRETIME", `${DEMO_NAMESPACE}addr:${day}`]), (Math.floor(now / 86_400_000) + 1) * 86_400_000);
+  const network: boolean[] = [];
+  for (let i = 0; i < DEMO_SESSIONS_PER_ADDRESS_PER_DAY; i += 1) network.push((await openStudioDemo(door(`2001:db8:abcd:${i + 1}::1`), ON)).ok);
+  const refusedBefore = Number(await one(["HGET", dayKey, "refused"]) ?? 0);
+  check("one network opens its own, then is refused from yet another /64, the refusal counted", [network, await openStudioDemo(door("2001:db8:abcd:ff::1"), ON), Number(await one(["HGET", dayKey, "refused"])) - refusedBefore], [network.map(() => true), { ok: false, reason: "address" }, 1]);
+  await one(["HSET", dayKey, "refused", String(DEMO_REFUSALS_PER_DAY)]);
+  check("past the day's refusals the door is closed and counts nothing more", [await openStudioDemo(door("192.0.2.9"), ON), await one(["HGET", dayKey, "refused"])], [{ ok: false, reason: "closed" }, String(DEMO_REFUSALS_PER_DAY)]);
+  await one(["HSET", dayKey, "refused", "0"]);
   check("the house key is untouched", await one(["GET", "nl:store:0123456789abcdef0123456789abcdef"]), "house");
   check("the session reads back", await readStudioDemo(new Request("https://marktmorgen.com/", { headers: { cookie: `${DEMO_COOKIE}=${s.id}` } }), ON), s);
-  check("its life is thirty minutes", s.expiresAt - s.startedAt, DEMO_SESSION_SECONDS * 1000);
+  check("its life is its DEMO_SESSION_SECONDS", s.expiresAt - s.startedAt, DEMO_SESSION_SECONDS * 1000);
 
   const cost = { commands: 12, bytes: 100 };
   check("an action is counted", (await takeDemoAction(s, cost, ON)).ok, true);

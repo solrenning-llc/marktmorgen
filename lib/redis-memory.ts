@@ -527,7 +527,7 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
-        if (key.startsWith("-- marktmorgen:studio-demo-day:v1\n")) return this.studioDemo("day", args);
+        if (key.startsWith("-- marktmorgen:studio-demo-door:v1\n")) return this.studioDemo("door", args);
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
@@ -1223,11 +1223,11 @@ export class MemoryRedis {
   }
 
   /**
-   * lib/studio-demo.ts: the demo's day counted, a session's record and drafts
+   * lib/studio-demo.ts: the demo's door (the day and the address) counted, a session's record and drafts
    * made, and one action counted, step by step as each script runs them, with
    * the commands run inside counted in scriptCalls.
    */
-  private studioDemo(kind: "day" | "seed" | "take", args: string[]): unknown {
+  private studioDemo(kind: "door" | "seed" | "take", args: string[]): unknown {
     const n = Number(args[0]);
     const keys = args.slice(1, 1 + n);
     const argv = args.slice(1 + n);
@@ -1238,18 +1238,34 @@ export class MemoryRedis {
     const held = this.data.get(keys[0]);
     if (held !== undefined && !(held instanceof Map) && kind !== "seed") throw new Error("WRONGTYPE");
     const hash = held instanceof Map ? held : undefined;
-    if (kind === "day") {
+    if (kind === "door") {
       this.scriptCalls += 1;
-      const [s, c, u] = ["sessions", "commands", "sent"].map((name) => digits(field(hash, name)) ?? 0);
-      if (s < 0 || c < 0 || u < 0) return [-1, 0, 0];
-      const [sessionsCap, commandsCap, worst, start, keep] = argv.map(Number);
-      if (s >= sessionsCap || c + worst > commandsCap) return [0, s, c];
+      const [s, c, u, r] = ["sessions", "commands", "sent", "refused"].map((name) => digits(field(hash, name)) ?? 0);
+      if (s < 0 || c < 0 || u < 0 || r < 0) return [-1, 0, 0];
+      const [sessionsCap, commandsCap, worst, start, keep, refusalsCap] = argv.slice(0, 6).map(Number);
+      const [addressField, addressCap, addressEnd] = [argv[6], Number(argv[7]), Number(argv[8])];
+      if (r >= refusalsCap) return [-2, s, c];
+      const addresses = this.data.get(keys[1]);
+      if (addresses !== undefined && !(addresses instanceof Map)) throw new Error("WRONGTYPE");
+      this.scriptCalls += 1;
+      const a = digits(addresses instanceof Map ? addresses.get(addressField) : undefined) ?? 0;
+      if (a < 0) return [-1, 0, 0];
+      const refuse = (code: number) => {
+        this.hash(keys[0]).set("refused", String(r + 1));
+        this.until.set(keys[0], this.now() + keep * 1000);
+        this.scriptCalls += 2;
+        return [code, s, c];
+      };
+      if (a >= addressCap) return refuse(-3);
+      if (s >= sessionsCap || c + worst > commandsCap) return refuse(0);
       const day = this.hash(keys[0]);
       day.set("sessions", String(s + 1));
       day.set("commands", String(c + worst));
       day.set("sent", String(u + start));
       this.until.set(keys[0], this.now() + keep * 1000);
-      this.scriptCalls += 4;
+      this.hash(keys[1]).set(addressField, String(a + 1));
+      this.until.set(keys[1], addressEnd * 1000);
+      this.scriptCalls += 6;
       return [1, s + 1, c + worst];
     }
     if (kind === "seed") {

@@ -9,10 +9,11 @@ import { readFileSync } from "node:fs";
 import {
   DEMO_ACTIONS_PER_SESSION, DEMO_ACTION_FUNCTION_MICRO_USD, DEMO_ACTION_MAX_BYTES, DEMO_AI_EXAMPLES, DEMO_AI_LABEL, DEMO_BYTES_PER_SESSION,
   DEMO_CAPABILITIES, DEMO_COMMANDS_PER_ACTION, DEMO_COMMANDS_PER_DAY, DEMO_COOKIE, DEMO_KEY_FAMILIES, DEMO_NAMESPACE, DEMO_OFF_WORDS,
-  DEMO_RESPONSE_MAX_BYTES, DEMO_SESSIONS_PER_DAY, DEMO_SESSION_SECONDS, DEMO_SESSION_WORST_COMMANDS, DEMO_SIGN_UP, DEMO_START_COMMANDS,
+  DEMO_RESPONSE_MAX_BYTES, DEMO_SESSIONS_PER_ADDRESS_PER_DAY, DEMO_SESSIONS_PER_DAY, DEMO_SESSION_SECONDS, DEMO_SESSION_WORST_COMMANDS, DEMO_SIGN_UP, DEMO_START_COMMANDS,
   DEMO_UNKNOWN_COSTS, STUDIO_DEMO_ON, demoActionAllowed, demoAiExample, demoDayFunctionWorstMicroUsd, demoDayKey, demoDayWorstActions,
   demoForbids, demoSessionAllowed, isDemoSessionId, sandboxKey, type DemoAiExampleKind, type DemoCapability,
 } from "@/lib/studio-demo-rules";
+import * as rules from "@/lib/studio-demo-rules";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { STORE_COOKIE } from "@/lib/studio-route";
 import { CDN_PER_REQUEST } from "./traffic-cost";
@@ -84,18 +85,52 @@ is("the turned-off buttons say why and what they do in a real studio", [/off in 
 is("the end leads to sign-up", DEMO_SIGN_UP.href, "/signin?from=demo");
 
 part("The worst day, as docs/studio-demo.md states it");
+// Read by name, so a rule that is missing fails here rather than stopping the build.
+const R = rules as unknown as Record<string, unknown>;
+const num = (name: string) => (typeof R[name] === "number" ? (R[name] as number) : Number.NaN);
+const call = (name: string) => (typeof R[name] === "function" ? (R[name] as () => number)() : Number.NaN);
+const reachable = call("demoDayReachableSessions");
+is("the sessions a day can reach: each opening reserves its whole worst", reachable, Math.min(DEMO_SESSIONS_PER_DAY, Math.floor(DEMO_COMMANDS_PER_DAY / DEMO_SESSION_WORST_COMMANDS)));
+is("the day's commands bind before its sessions do", reachable < DEMO_SESSIONS_PER_DAY, true);
 const actions = demoDayWorstActions();
-is("the day's commands bind before its sessions do", actions, Math.floor((DEMO_COMMANDS_PER_DAY - DEMO_SESSIONS_PER_DAY * DEMO_START_COMMANDS) / DEMO_COMMANDS_PER_ACTION));
-is("fewer than every session at every action", actions < DEMO_SESSIONS_PER_DAY * DEMO_ACTIONS_PER_SESSION, true);
+is("every reachable session at every action", actions, reachable * DEMO_ACTIONS_PER_SESSION);
 // The CDN's part, from tests/traffic-cost.ts: a request at the CDN, and the bytes a function sends it ($0.06 a GB, Fast Origin Transfer).
 const ORIGIN_MICRO_USD_PER_BYTE = (0.06 / 1e9) * 1e6;
 const cdnPerAnswer = CDN_PER_REQUEST * 1e6 + DEMO_RESPONSE_MAX_BYTES * ORIGIN_MICRO_USD_PER_BYTE;
-const dayMicroUsd = demoDayFunctionWorstMicroUsd() + (DEMO_SESSIONS_PER_DAY + actions) * cdnPerAnswer;
+const refusals = num("DEMO_REFUSALS_PER_DAY");
+const perOpening = num("DEMO_START_FUNCTION_MICRO_USD") + num("DEMO_SESSION_KEPT_MICRO_USD") + cdnPerAnswer;
+const perAction = DEMO_ACTION_FUNCTION_MICRO_USD + cdnPerAnswer;
+const perRefusal = num("DEMO_REFUSAL_FUNCTION_MICRO_USD") + cdnPerAnswer;
+const cohortMicroUsd = call("demoCohortFunctionWorstMicroUsd") + (reachable + actions) * cdnPerAnswer;
+const refusalsMicroUsd = call("demoRefusalsFunctionWorstMicroUsd") + refusals * cdnPerAnswer;
+const dayMicroUsd = cohortMicroUsd + refusalsMicroUsd;
+is("the day's function worst is one day's openings and its refusals", demoDayFunctionWorstMicroUsd(), call("demoCohortFunctionWorstMicroUsd") + call("demoRefusalsFunctionWorstMicroUsd"));
+// Every pair a day can hold, by brute force: s sessions open only while s whole worsts fit, each takes up to its actions.
+let best = 0;
+for (let s = 0; s <= DEMO_SESSIONS_PER_DAY; s += 1) {
+  if (s * DEMO_SESSION_WORST_COMMANDS > DEMO_COMMANDS_PER_DAY) break;
+  for (let a = 0; a <= s * DEMO_ACTIONS_PER_SESSION; a += 1) {
+    for (const r of [0, refusals]) best = Math.max(best, s * perOpening + a * perAction + r * perRefusal);
+  }
+}
+is("the day's ceiling is the most of every pair the caps allow", Math.abs(dayMicroUsd - best) < 1e-6, true);
 const dollars = (micro: number) => `$${(micro / 1e6).toFixed(2)}`;
+// A session lives past midnight, so thirty days can hold the actions of thirty-one days of openings.
+const thirtyMicroUsd = 31 * cohortMicroUsd + 30 * refusalsMicroUsd;
 const doc = readFileSync("docs/studio-demo.md", "utf8");
-is("an action at its worst, in micro-USD", Math.round((DEMO_ACTION_FUNCTION_MICRO_USD + cdnPerAnswer) * 100) / 100, 51.77);
+is("an action at its worst, in micro-USD", Math.round(perAction * 100) / 100, 51.77);
 is(`the doc states the day's known worst (${dollars(dayMicroUsd)})`, doc.includes(`${dollars(dayMicroUsd)} a day`), true);
-is(`the doc states thirty such days (${dollars(30 * dayMicroUsd)})`, doc.includes(`${dollars(30 * dayMicroUsd)} in thirty days`), true);
+is(`the doc states thirty days (${dollars(thirtyMicroUsd)})`, doc.includes(`${dollars(thirtyMicroUsd)} in thirty days`), true);
+is(`the doc states the reachable sessions and actions (${reachable}, ${actions})`, doc.includes(`${reachable} openings and ${actions.toLocaleString("en-US")} actions`), true);
 is("the doc says the demo stays off while a cost is unknown", /unknown/i.test(doc) && /STUDIO_DEMO_ON/.test(doc), true);
+
+part("Its life, refusals and addresses");
+is("a session lives longer than twenty hours (WCAG 2.2.1, its twenty-hour exception)", DEMO_SESSION_SECONDS > 20 * 3600, true);
+const kept = num("DEMO_SESSION_KEPT_MICRO_USD");
+is(`the doc states what a session's bytes cost for its whole life (${kept.toFixed(2)} µ$)`, doc.includes(`${kept.toFixed(2)} µ$`), true);
+is("a refusal's commands are bounded and its day's refusals capped", [Number.isSafeInteger(num("DEMO_REFUSAL_WORST_COMMANDS")) && num("DEMO_REFUSAL_WORST_COMMANDS") > 0, Number.isSafeInteger(refusals) && refusals > 0], [true, true]);
+is("no text says refusals are bounded per address", DEMO_UNKNOWN_COSTS.some((t) => /bounded per address/.test(t)), false);
+const addresses = Math.ceil(reachable / DEMO_SESSIONS_PER_ADDRESS_PER_DAY);
+is(`the doc states how many addresses or networks can take the day (${addresses})`, doc.includes(`${addresses} addresses`), true);
 
 done();

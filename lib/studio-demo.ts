@@ -7,24 +7,30 @@
  * as a path that does not exist. Nothing links here.
  *
  * What each function guarantees:
+ *   - Every request that reaches Redis first reads the day's count of refused
+ *     demo requests, alone; past DEMO_REFUSALS_PER_DAY it is answered "closed"
+ *     after that one command and writes nothing. Every refusal after that read
+ *     is counted, so what refusals send in a day has a ceiling.
  *   - `openStudioDemo` refuses, with its reason, when the demo is off, when
- *     Redis is not there, when the bot check calls the request a program,
- *     when the address has opened its five sessions in a day, or when the day
- *     has no session or no room for one more session's whole worst. The day's
- *     check and its counting are one script (STUDIO_DEMO_DAY_SCRIPT), so two
- *     doors at the last place cannot both take it. Only then is a session
+ *     Redis is not there, when the day's refusals are spent, when the bot
+ *     check calls the request a program, when the address (a new-kind one by
+ *     its network) has opened its sessions today, or when the day has no
+ *     session or no room for one more session's whole worst. The day's and the
+ *     address's checks and counts are one script (STUDIO_DEMO_DOOR_SCRIPT), so
+ *     two doors at the last place cannot both take it. Only then is a session
  *     made: a random id, its record and the sandbox's fixed fictional drafts
  *     written in one script under `sandboxKey()` names only, every key ending
  *     at the same absolute moment (EXPIREAT), never extended.
  *   - `readStudioDemo` answers the live session named by the `nl_studio_demo`
  *     cookie, or null: no cookie, a malformed id, an unknown or expired
- *     record, a record that does not read exactly as written, or Redis out of
- *     reach. Nothing else in the request is read.
+ *     record, a record that does not read exactly as written, the day's
+ *     refusals spent, or Redis out of reach. Nothing else in the request is read.
  *   - `takeDemoAction` checks a session's actions and bytes, its life and the
  *     day's commands (`demoActionAllowed`), and counts them, before the action
  *     writes anything; the session's count is taken in one script so two
- *     actions at the last place cannot both pass. Unknown or impossible counts
- *     refuse.
+ *     actions at the last place cannot both pass. The session's day is read
+ *     from its record, never taken from the caller. Unknown or impossible
+ *     counts refuse.
  *
  * It imports nothing that reaches a store, the catalog, mail, AI, payments,
  * uploads or the house store: the demo store's values are copied below as
@@ -32,12 +38,13 @@
  */
 import { isAutomated } from "@/lib/bot-check";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { BodyTooLarge, clientAddress, fromAnotherSite, limited, withinEssentialLimit } from "@/lib/request-guard";
+import { BodyTooLarge, clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import {
-  DEMO_ACTIONS_PER_SESSION, DEMO_BYTES_PER_SESSION, DEMO_COMMANDS_PER_DAY, DEMO_COOKIE, DEMO_SESSIONS_PER_ADDRESS_PER_DAY,
+  DEMO_ACTIONS_PER_SESSION, DEMO_BYTES_PER_SESSION, DEMO_COMMANDS_PER_DAY, DEMO_COOKIE, DEMO_REFUSALS_PER_DAY, DEMO_SESSIONS_PER_ADDRESS_PER_DAY,
   DEMO_SESSIONS_PER_DAY, DEMO_SESSION_SECONDS, DEMO_SESSION_WORST_COMMANDS, DEMO_START_COMMANDS, STUDIO_DEMO_ON,
-  type DemoRefusal, demoActionAllowed, demoDayKey, demoSessionAllowed, isDemoSessionId, sandboxKey,
+  type DemoRefusal, demoActionAllowed, demoAddressKey, demoDayKey, demoSessionAllowed, isDemoSessionId, sandboxKey,
 } from "@/lib/studio-demo-rules";
+import { shareAddress } from "@/lib/traffic-rules";
 
 // ---------------------------------------------------------------- the sandbox's first drafts
 
@@ -85,28 +92,45 @@ export const STUDIO_DEMO_SEED_BYTES = STUDIO_DEMO_SEED_VALUES.reduce((sum, value
 // ---------------------------------------------------------------- the scripts
 
 /**
- * The day's sessions and commands, checked and counted at once: one session
- * more, its whole worst reserved, the start's own commands counted as sent.
- * The checks are demoSessionAllowed's, on the counts read inside the script.
- * Answers {1, sessions, commands} when taken, {0, sessions, commands} as read
- * when refused, {-1, 0, 0} when a count is not a plain number.
- * KEYS[1] the day; ARGV the sessions cap, the commands cap, a session's worst,
- * the start's commands, how long the day is kept.
+ * The door: the day's refusals, the day's sessions and commands and the
+ * address's sessions, checked and counted at once. A session taken counts one
+ * more session, reserves its whole worst, counts the start's own commands as
+ * sent and one more session for the address. A refusal counts one refusal.
+ * The day's checks are demoSessionAllowed's, on the counts read inside.
+ * Answers {1, sessions, commands} when taken; {0, sessions, commands} as read
+ * when the day refuses; {-3, ...} when the address does; {-2, ...} when the
+ * day's refusals are spent (nothing written); {-1, 0, 0} when a count is not a
+ * plain number (nothing written).
+ * KEYS[1] the day, KEYS[2] the day's addresses; ARGV the sessions cap, the
+ * commands cap, a session's worst, the start's commands, how long the day is
+ * kept, the refusals cap, the address's field, the address cap, when the
+ * addresses' counts end (seconds).
  */
-export const STUDIO_DEMO_DAY_SCRIPT = `-- marktmorgen:studio-demo-day:v1
-local v = redis.call('HMGET', KEYS[1], 'sessions', 'commands', 'sent')
+export const STUDIO_DEMO_DOOR_SCRIPT = `-- marktmorgen:studio-demo-door:v1
+local v = redis.call('HMGET', KEYS[1], 'sessions', 'commands', 'sent', 'refused')
 local function n(x)
   if not x then return 0 end
   if not string.match(x, '^%d+$') or string.len(x) > 15 then return -1 end
   return tonumber(x)
 end
-local s, c, u = n(v[1]), n(v[2]), n(v[3])
-if s < 0 or c < 0 or u < 0 then return {-1, 0, 0} end
-if s >= tonumber(ARGV[1]) or c + tonumber(ARGV[3]) > tonumber(ARGV[2]) then return {0, s, c} end
+local s, c, u, r = n(v[1]), n(v[2]), n(v[3]), n(v[4])
+if s < 0 or c < 0 or u < 0 or r < 0 then return {-1, 0, 0} end
+if r >= tonumber(ARGV[6]) then return {-2, s, c} end
+local a = n(redis.call('HGET', KEYS[2], ARGV[7]))
+if a < 0 then return {-1, 0, 0} end
+local function refuse(code)
+  redis.call('HINCRBY', KEYS[1], 'refused', 1)
+  redis.call('EXPIRE', KEYS[1], ARGV[5])
+  return {code, s, c}
+end
+if a >= tonumber(ARGV[8]) then return refuse(-3) end
+if s >= tonumber(ARGV[1]) or c + tonumber(ARGV[3]) > tonumber(ARGV[2]) then return refuse(0) end
 redis.call('HINCRBY', KEYS[1], 'sessions', 1)
 redis.call('HINCRBY', KEYS[1], 'commands', ARGV[3])
 redis.call('HINCRBY', KEYS[1], 'sent', ARGV[4])
 redis.call('EXPIRE', KEYS[1], ARGV[5])
+redis.call('HINCRBY', KEYS[2], ARGV[7], 1)
+redis.call('EXPIREAT', KEYS[2], ARGV[9])
 return {1, s + 1, c + tonumber(ARGV[3])}`;
 
 /**
@@ -147,11 +171,12 @@ return {1, a + 1, b + tonumber(ARGV[2])}`;
 export const DEMO_DAY_KEEP_SECONDS = 400 * 86_400;
 
 /**
- * Commands takeDemoAction itself sends, as billed: the read (2), the counting
- * script with what it runs inside (4) and the day's count (1). An action costed
- * below this cannot be true and is refused.
+ * Commands takeDemoAction itself sends, as billed: the day's refusals (1), the
+ * record (1), the day's commands sent (1), the counting script with what it runs
+ * inside (4) and the day's count (1). An action costed below this cannot be
+ * true and is refused.
  */
-export const DEMO_TAKE_COMMANDS = 7;
+export const DEMO_TAKE_COMMANDS = 8;
 
 // ---------------------------------------------------------------- the session
 
@@ -166,11 +191,43 @@ const plain = (x: unknown): x is number => typeof x === "number" && Number.isSaf
 const digits = (x: unknown): number | null => (typeof x === "string" && /^\d{1,15}$/.test(x) ? Number(x) : null);
 const integers = (reply: unknown, length: number): number[] | null =>
   Array.isArray(reply) && reply.length === length && reply.every((x) => typeof x === "number" && Number.isSafeInteger(x)) ? (reply as number[]) : null;
+const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 function newSessionId(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   return "sd" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The field an address is counted under: a one-way hash of the address, or of the network of a new-kind one. */
+async function addressField(request: Request): Promise<string> {
+  const block = shareAddress(clientAddress(request)) || "unknown";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`marktmorgen-studio-demo:${block}`));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
+/**
+ * The day's refusals, read alone before anything else: "open" while they are
+ * under DEMO_REFUSALS_PER_DAY, "closed" past it, "unknown" when unreadable.
+ */
+async function refusalsGate(dayKey: string): Promise<"open" | "closed" | "unknown"> {
+  try {
+    const [held] = await redisPipeline([["HGET", dayKey, "refused"]]);
+    const refused = held === null ? 0 : digits(held);
+    if (refused === null) return "unknown";
+    return refused >= DEMO_REFUSALS_PER_DAY ? "closed" : "open";
+  } catch {
+    return "unknown";
+  }
+}
+
+/** One refusal more in the day's count. A count that cannot be made is a lost count, never a reason to let the request through. */
+async function countRefusal(dayKey: string): Promise<void> {
+  try {
+    await redisPipeline([["HINCRBY", dayKey, "refused", 1], ["EXPIRE", dayKey, DEMO_DAY_KEEP_SECONDS]]);
+  } catch {
+    // Already refused.
+  }
 }
 
 /** The cookie that names a session, kept no longer than the session lives. */
@@ -179,33 +236,38 @@ export function studioDemoCookie(session: StudioDemoSession, now: number): strin
   return `${DEMO_COOKIE}=${session.id}; Path=/; Max-Age=${left}; HttpOnly; Secure; SameSite=Lax`;
 }
 
-/** Opens a demo session, or says why not. Nothing is written past a refusal's step. */
+/** Opens a demo session, or says why not. Nothing is written past a refusal's step but the refusal's count. */
 export async function openStudioDemo(request: Request, options: StudioDemoOptions = {}): Promise<StudioDemoOpened> {
   const on = options.on ?? STUDIO_DEMO_ON;
   if (!on) return { ok: false, reason: "off" };
   if (!isRedisConfigured()) return { ok: false, reason: "unknown" };
-  if (await (options.isAutomated ?? isAutomated)()) return { ok: false, reason: "automated" };
-  if (!(await withinEssentialLimit("studio-demo", clientAddress(request), DEMO_SESSIONS_PER_ADDRESS_PER_DAY, 86_400))) {
-    return { ok: false, reason: "address" };
-  }
-
   const now = (options.now ?? Date.now)();
   if (!plain(now)) return { ok: false, reason: "unknown" };
-  const day = new Date(now).toISOString().slice(0, 10);
+  const day = dayOf(now);
   const dayKey = demoDayKey(day);
-  if (!dayKey) return { ok: false, reason: "unknown" };
+  const addressKey = demoAddressKey(day);
+  if (!dayKey || !addressKey) return { ok: false, reason: "unknown" };
 
+  const gate = await refusalsGate(dayKey);
+  if (gate !== "open") return { ok: false, reason: gate };
+  if (await (options.isAutomated ?? isAutomated)()) return { ok: false, reason: "automated" };
+
+  const field = await addressField(request);
+  const dayEnds = (Math.floor(now / 86_400_000) + 1) * 86_400;
   let taken: number[] | null;
   try {
     const [reply] = await redisPipeline([[
-      "EVAL", STUDIO_DEMO_DAY_SCRIPT, 1, dayKey,
+      "EVAL", STUDIO_DEMO_DOOR_SCRIPT, 2, dayKey, addressKey,
       DEMO_SESSIONS_PER_DAY, DEMO_COMMANDS_PER_DAY, DEMO_SESSION_WORST_COMMANDS, DEMO_START_COMMANDS, DEMO_DAY_KEEP_SECONDS,
+      DEMO_REFUSALS_PER_DAY, field, DEMO_SESSIONS_PER_ADDRESS_PER_DAY, dayEnds,
     ]]);
     taken = integers(reply, 3);
   } catch {
     taken = null;
   }
-  if (!taken || taken[0] < 0) return { ok: false, reason: "unknown" };
+  if (!taken || taken[0] === -1 || taken[0] < -3) return { ok: false, reason: "unknown" };
+  if (taken[0] === -2) return { ok: false, reason: "closed" };
+  if (taken[0] === -3) return { ok: false, reason: "address" };
   if (taken[0] !== 1) {
     const verdict = demoSessionAllowed({ today: day, sessionsToday: taken[1], commandsToday: taken[2] }, on);
     return { ok: false, reason: verdict.ok ? "unknown" : verdict.reason };
@@ -242,25 +304,33 @@ function cookieOf(request: Request, name: string): string | null {
   return found.length === 1 ? found[0] : null;
 }
 
-/** The live session the request's demo cookie names, or null. */
+/** The live session the request's demo cookie names, or null. A well-formed cookie that names no live session is a counted refusal. */
 export async function readStudioDemo(request: Request, options: StudioDemoOptions = {}): Promise<StudioDemoSession | null> {
   const id = cookieOf(request, DEMO_COOKIE);
   if (!isDemoSessionId(id) || !isRedisConfigured()) return null;
   const key = sandboxKey(id, "session");
-  if (!key) return null;
   const now = (options.now ?? Date.now)();
-  if (!plain(now)) return null;
+  if (!key || !plain(now)) return null;
+  const todayKey = demoDayKey(dayOf(now));
+  if (!todayKey || (await refusalsGate(todayKey)) !== "open") return null;
   let fields: unknown;
   try {
     [fields] = await redisPipeline([["HMGET", key, "day", "startedAt", "expiresAt", "actions", "bytes"]]);
   } catch {
     return null;
   }
+  const session = sessionOf(id, fields, now);
+  if (!session) await countRefusal(todayKey);
+  return session;
+}
+
+/** A session record as read, or null when it is gone, over or does not read exactly as written. */
+function sessionOf(id: string, fields: unknown, now: number): StudioDemoSession | null {
   if (!Array.isArray(fields) || fields.length !== 5) return null;
   const [day, ...rest] = fields;
   const [startedAt, expiresAt, actions, bytes] = rest.map(digits);
   if (typeof day !== "string" || !demoDayKey(day) || startedAt === null || expiresAt === null || actions === null || bytes === null) return null;
-  if (expiresAt !== startedAt + DEMO_SESSION_SECONDS * 1000 || new Date(startedAt).toISOString().slice(0, 10) !== day) return null;
+  if (expiresAt !== startedAt + DEMO_SESSION_SECONDS * 1000 || dayOf(startedAt) !== day) return null;
   if (now >= expiresAt) return null;
   return { id, day, startedAt, expiresAt, actions, bytes };
 }
@@ -270,8 +340,8 @@ export type DemoActionTaken = { ok: true; actions: number; bytes: number } | { o
 /**
  * Checks and counts one action of a session before it writes anything.
  * `cost` is the action's whole worst: its commands, these counting ones
- * included, and the bytes it will write. The session's counts are read
- * afresh, never taken from `session` as the caller holds it.
+ * included, and the bytes it will write. The session's counts and its day are
+ * read afresh from its record, never taken from `session` as the caller holds it.
  */
 export async function takeDemoAction(
   session: StudioDemoSession,
@@ -283,24 +353,39 @@ export async function takeDemoAction(
   if (!plain(cost?.commands) || !plain(cost?.bytes) || cost.commands < DEMO_TAKE_COMMANDS) return { ok: false, reason: "unknown" };
   if (!isRedisConfigured() || !isDemoSessionId(session?.id)) return { ok: false, reason: "unknown" };
   const key = sandboxKey(session.id, "session");
-  const dayKey = typeof session.day === "string" ? demoDayKey(session.day) : null;
   const now = (options.now ?? Date.now)();
-  if (!key || !dayKey || !plain(now)) return { ok: false, reason: "unknown" };
+  if (!key || !plain(now)) return { ok: false, reason: "unknown" };
+  const todayKey = demoDayKey(dayOf(now));
+  if (!todayKey) return { ok: false, reason: "unknown" };
+  const gate = await refusalsGate(todayKey);
+  if (gate !== "open") return { ok: false, reason: gate };
+  const refuse = async (reason: DemoRefusal): Promise<DemoActionTaken> => {
+    await countRefusal(todayKey);
+    return { ok: false, reason };
+  };
 
-  let read: unknown[];
+  let fields: unknown;
   try {
-    read = await redisPipeline([["HMGET", key, "actions", "bytes", "startedAt"], ["HGET", dayKey, "sent"]]);
+    [fields] = await redisPipeline([["HMGET", key, "actions", "bytes", "startedAt", "day"]]);
   } catch {
-    return { ok: false, reason: "unknown" };
+    return refuse("unknown");
   }
-  const [fields, sentRaw] = Array.isArray(read) && read.length === 2 ? read : [null, null];
-  if (!Array.isArray(fields) || fields.length !== 3) return { ok: false, reason: "unknown" };
-  if (fields.every((x) => x === null)) return { ok: false, reason: "expired" };
-  const [actions, bytes, startedAt] = fields.map(digits);
-  const sent = digits(sentRaw);
-  if (actions === null || bytes === null || startedAt === null || sent === null) return { ok: false, reason: "unknown" };
+  if (!Array.isArray(fields) || fields.length !== 4) return refuse("unknown");
+  if (fields.every((x) => x === null)) return refuse("expired");
+  const [actions, bytes, startedAt] = fields.slice(0, 3).map(digits);
+  const dayKey = typeof fields[3] === "string" ? demoDayKey(fields[3]) : null;
+  if (actions === null || bytes === null || startedAt === null || !dayKey) return refuse("unknown");
+
+  let sent: number | null;
+  try {
+    const [held] = await redisPipeline([["HGET", dayKey, "sent"]]);
+    sent = digits(held);
+  } catch {
+    sent = null;
+  }
+  if (sent === null) return refuse("unknown");
   const verdict = demoActionAllowed({ actions, bytes, startedAt, now, commandsToday: sent }, cost, on);
-  if (!verdict.ok) return verdict;
+  if (!verdict.ok) return refuse(verdict.reason);
 
   let taken: number[] | null;
   try {
@@ -309,9 +394,9 @@ export async function takeDemoAction(
   } catch {
     taken = null;
   }
-  if (!taken) return { ok: false, reason: "unknown" };
+  if (!taken) return refuse("unknown");
   const refused: Record<number, DemoRefusal> = { 0: "expired", [-1]: "unknown", [-2]: "expired", [-3]: "actions", [-4]: "bytes" };
-  if (taken[0] !== 1 || taken.length !== 3) return { ok: false, reason: refused[taken[0]] ?? "unknown" };
+  if (taken[0] !== 1 || taken.length !== 3) return refuse(refused[taken[0]] ?? "unknown");
 
   // The day's commands sent: under the reservation made at the door, so this only ever confirms it.
   let total: unknown;
@@ -337,7 +422,7 @@ const json = (body: unknown, status: number, headers: Record<string, string> = {
 export const studioDemoNotFound = () => new Response(null, { status: 404, headers: NO_STORE });
 
 const STATUS: Record<StudioDemoOpenRefusal, number> = {
-  off: 404, automated: 403, address: 429, sessions: 503, commands: 503, unknown: 503,
+  off: 404, automated: 403, address: 429, closed: 503, sessions: 503, commands: 503, unknown: 503,
   expired: 503, actions: 503, bytes: 503, too_big: 503,
 };
 

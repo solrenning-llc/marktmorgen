@@ -8,9 +8,9 @@ A visitor who has not signed up opens a studio on a copy of the fictional demo s
 
 ## The session
 
-1. **The door** (`POST /api/studio-demo`, unit 2, `openStudioDemo` in `lib/studio-demo.ts`). The page that holds the "Try the studio" button protects that path with the existing bot check (`initBotId` in the button's component, `isAutomated()` in the route, `lib/bot-check.ts`), exactly as the sign-in form does. A request the check calls a program is refused before anything is written. Then, in this order, nothing written until all pass: the per-address limit (`withinEssentialLimit("studio-demo", address, DEMO_SESSIONS_PER_ADDRESS_PER_DAY, 86_400)`, `lib/request-guard.ts`: the existing counter that refuses, rather than lets through, when Redis cannot be asked), and the day's caps, checked as `demoSessionAllowed()` checks them on the counts read inside one script (`STUDIO_DEMO_DAY_SCRIPT`) that also takes the place and reserves the session's whole worst, so two doors cannot both take the last place. Then one more script (`STUDIO_DEMO_SEED_SCRIPT`) writes the session's record and its first drafts, all or nothing, each with the same `EXPIREAT`. If that fails, the day's place stays taken: counted, never given back on a guess.
+1. **The door** (`POST /api/studio-demo`, unit 2, `openStudioDemo` in `lib/studio-demo.ts`). The page that holds the "Try the studio" button protects that path with the existing bot check (`initBotId` in the button's component, `isAutomated()` in the route, `lib/bot-check.ts`), exactly as the sign-in form does. First of all, alone, the day's count of refused demo requests is read: past `DEMO_REFUSALS_PER_DAY` (5,000) the door answers "closed" after that one command and writes nothing. Then a request the bot check calls a program is refused, with nothing counted or written. Then one script (`STUDIO_DEMO_DOOR_SCRIPT`) checks and counts at once the address's sessions today (`DEMO_SESSIONS_PER_ADDRESS_PER_DAY`, 3; an old-kind address as it is, a new-kind one by its network, the /48 of `shareAddress` in `lib/traffic-rules.ts`, so the many /64s one machine can be handed count once; kept as a one-way hash, in `nl:sdemo:addr:<day>`, until the day ends) and the day's caps as `demoSessionAllowed()` checks them; it takes the place, reserves the session's whole worst and counts the address, or counts one refusal, so two doors cannot both take the last place. Then one more script (`STUDIO_DEMO_SEED_SCRIPT`) writes the session's record and its first drafts, all or nothing, each with the same `EXPIREAT`. If that fails, the day's place stays taken: counted, never given back on a guess.
 2. **What a session is.** A random id, `sd` + 32 hex digits from `crypto.getRandomValues` (`DEMO_SESSION_ID_PATTERN`), which can never be a store id (`STORE_ID_PATTERN` is 32 hex digits only). It is kept in its own cookie, `nl_studio_demo` (HttpOnly, Secure, SameSite=Lax, Max-Age = `DEMO_SESSION_SECONDS`), never in `nl_session` or `nl_store`. A demo visitor has no sign-in session, so `emailForSession()` answers null and every real studio route (`studioAccess`, `lib/studio-route.ts`) refuses it as signed out.
-3. **Its sandbox store.** The session record and every draft live under `nl:sdemo:{<session>}:<family>[:<part>]`, made only by `sandboxKey()`, which refuses any family outside `DEMO_KEY_FAMILIES` (session, product, page, offer, subscription, email, steps) and any part that is not a short plain name. Every key gets the same absolute expiry (`EXPIREAT` at opening + 30 minutes), never extended. The sandbox starts from a copy of the demo store's *published seed values* (`lib/demo-seed.ts`), read from the code, never from the house store's Redis record, so the real demo store is never read for writing and never written.
+3. **Its sandbox store.** The session record and every draft live under `nl:sdemo:{<session>}:<family>[:<part>]`, made only by `sandboxKey()`, which refuses any family outside `DEMO_KEY_FAMILIES` (session, product, page, offer, subscription, email, steps) and any part that is not a short plain name. Every key gets the same absolute expiry (`EXPIREAT` at opening + 21 hours), never extended. The sandbox starts from a copy of the demo store's *published seed values* (`lib/demo-seed.ts`), read from the code, never from the house store's Redis record, so the real demo store is never read for writing and never written.
 
 ## Isolation: how it is guaranteed
 
@@ -36,26 +36,27 @@ The screens (unit 5) reuse the studio's editors in a demo frame, pointed at the 
 
 - **AI.** Wherever the studio has an AI button, the demo shows a fixed text from `DEMO_AI_EXAMPLES` under `DEMO_AI_LABEL`, "Example answer — the demo does not call the AI", drawn by the page. No model is called and no AI budget is touched.
 - **Send and Publish** stay visible, so the visitor learns where they are, and pressing them shows `DEMO_OFF_WORDS` instead of acting.
-- **Labelled as a demo.** Every screen carries a banner saying it is a demo on a fictional store and that everything is deleted after 30 minutes (VR item 2).
+- **Labelled as a demo.** Every screen carries a banner saying it is a demo on a fictional store and that everything is deleted 21 hours after it opened (VR item 2).
 - **End.** After the five steps (or at any time from the banner) one primary button, "Start your own store", leads to `/signin?from=demo` (`DEMO_SIGN_UP`). Nothing made in the demo is carried into the account (that would need a copy path and its own review); the screen says so.
 
 ## Conversion, measured without personal data
 
-One hash a day, `nl:sdemo:day:<YYYY-MM-DD>`, kept 400 days, holding only the fields in `DEMO_COUNTS`: opened, each of the five steps, finished, signUpClicked and signedUp. Counted through `lib/capped-count.ts` so the hash can never grow past them. `signedUp` is counted once when an account is made from a sign-in link that carried `from=demo`, as a number only. No address, cookie id, IP, user agent or session id is stored with a count; no pixel, no third-party analytics, no tracking of email opens. The day's `sessions`, `commands` (reserved) and `sent` fields in the same hash are the caps' counters.
+One hash a day, `nl:sdemo:day:<YYYY-MM-DD>`, kept 400 days, holding only the fields in `DEMO_COUNTS`: opened, each of the five steps, finished, signUpClicked and signedUp. Counted through `lib/capped-count.ts` so the hash can never grow past them. `signedUp` is counted once when an account is made from a sign-in link that carried `from=demo`, as a number only. No address, cookie id, IP, user agent or session id is stored with a count; no pixel, no third-party analytics, no tracking of email opens. The day's `sessions`, `commands` (reserved), `sent` and `refused` fields in the same hash are the caps' counters.
 
 ## Caps, all checked before anything is spent
 
 | Cap | Value | Why |
 | --- | --- | --- |
-| Session life | 30 minutes, absolute | The five steps take a few minutes; nothing lingers |
+| Session life | 21 hours, absolute | Longer than twenty hours, so WCAG 2.2.1's twenty-hour exception covers it and nobody loses a draft to a clock; the actions and bytes caps bound the cost, not the time |
 | Actions a session | 60 | Five steps at about ten requests each, with room |
 | Bytes a session | 256 KB; 32 KB an action | Five drafts at their largest, with room |
 | Commands an action | 12 at the most | Its own check and count (7, `DEMO_TAKE_COMMANDS`: the read, the counting script as billed, the day's count), then the draft read and written; an action costed dearer is refused |
 | Sessions a day (site) | 500 | Enough to measure conversion; small next to fixed costs |
-| Commands a day (site) | 250,000 | Binds before the sessions do (20,125 actions at most) |
-| Sessions an address a day | 5 | Through the existing per-address limit |
+| Commands a day (site) | 250,000 | Each opening reserves its whole worst (739), so it binds before the sessions do: 338 sessions and 20,280 actions at most |
+| Sessions an address (a new-kind one: its /48) a day | 3 | Counted in the door's script when a session opens |
+| Refused requests a day (site) | 5,000, 7 commands each at most | Every request reads this count first; past it, one command and nothing written |
 
-A session opens only while the day has room for its whole worst (`DEMO_SESSION_WORST_COMMANDS`, 737 commands), and that worst is reserved in the day's `commands` as it opens, so concurrent sessions cannot pass the day's cap. Every action is still checked against the commands the day has really sent (`sent`, which never passes the reservation) and counted in the session's record by one script (`STUDIO_DEMO_TAKE_SCRIPT`) before it writes, so two actions cannot both take a session's last place. Every unknown or impossible count refuses (`"unknown"`), never reads as zero.
+A session opens only while the day has room for its whole worst (`DEMO_SESSION_WORST_COMMANDS`, 739 commands), and that worst is reserved in the day's `commands` as it opens, so concurrent sessions cannot pass the day's cap. Every action is still checked against the commands the day has really sent (`sent`, which never passes the reservation) and counted in the session's record by one script (`STUDIO_DEMO_TAKE_SCRIPT`) before it writes, so two actions cannot both take a session's last place. The action's day is read from the session's record, never taken from the caller. Every refusal after the first read is counted in the day's `refused`. Every unknown or impossible count refuses (`"unknown"`), never reads as zero.
 
 ## Cost: a free feature, a bounded company exposure
 
@@ -68,23 +69,26 @@ The demo earns nothing per session, so its cost is not any plan's: it is a compa
 | Action: 66 KB through the database (a draft read and written, its check and count) | 2.03 µ$ | Upstash $0.03 a GB |
 | Action: CDN request, 120 KB sent to the CDN | 9.20 µ$ | `tests/traffic-cost.ts` ($2 a million; $0.06 a GB) |
 | **Action, in all** | **51.77 µ$** | |
-| Opening: 4 s at 2 GB (bot check waited on), 17 commands, 4 KB through the database, CDN | 74.59 µ$ | same |
-| A session's 256 KB kept 30 minutes | 0.05 µ$ | Upstash $0.25 a GB-month |
-| **A session at every cap** | **3,181 µ$ ($0.0032)** | |
+| Opening: 4 s at 2 GB (bot check waited on), 19 commands, 4 KB through the database, CDN | 78.59 µ$ | same |
+| A counted refusal: 4 s at 2 GB, 7 commands, 2 KB through the database, CDN | 54.53 µ$ | same |
+| A session's 256 KB kept its 21 hours | 1.91 µ$ | Upstash $0.25 a GB-month |
+| **A session at every cap** | **3,187 µ$ ($0.0032)** | |
 
-Worst day of what is priced: 500 openings and 20,125 actions, **$1.08 a day**, **$32.38 in thirty days** (`tests/studio-demo-rules.test.ts` checks both figures against the code).
+Worst day of what is priced: 338 openings and 20,280 actions, with 5,000 counted refusals, **$1.35 a day**. A session lives past midnight, so thirty days can hold the actions of thirty-one days of openings: **$41.57 in thirty days**. `tests/studio-demo-rules.test.ts` checks both figures against the code and checks the day's ceiling against a brute-force search of every number of sessions and actions the caps allow. At the most two days of openings are alive at once: 676 sessions, 177 MB kept.
 
 **Unknown, so the demo stays off** (`DEMO_UNKNOWN_COSTS`; never counted as zero):
 
 1. The script and style files a demo studio page loads from the CDN: not measured for the studio (13 were measured on a store's page). Unit 5 measures them and adds them to the action's cost.
 2. The bot check at its basic level: `lib/bot-check.ts` records no charge per check, but the repository has no dated official source for it.
-3. Requests refused after a cap: each is still a function call and a read. The per-address limit bounds each address; nothing in the demo bounds them across addresses. The review decides whether the site's existing request protections cover it or the door needs its own cap on refusals.
+3. Requests refused without being counted: a program the bot check refuses, and every request past the day's 5,000 counted refusals. Each sends one database command at the most and writes nothing, but is still a function call, and nothing bounds how many arrive across addresses. The bot check is the brake; the review decides whether the site's existing request protections cover the rest.
+
+**Availability, honestly.** With 3 sessions an address (or network) a day, 113 addresses can take the day's 338 sessions, and 5,000 refused requests close the door, the actions and the reads for the rest of the UTC day. Both are within reach of anyone with a few hundred addresses who gets past the bot check; the bot check is the main brake, and the cost stays inside the ceiling above whatever happens.
 
 ## The next units
 
 1. **Unit 1:** design and pure rules (`lib/studio-demo-rules.ts`, `tests/studio-demo-rules.test.ts`).
 2. **Session door (built, off):** `lib/studio-demo.ts` (`openStudioDemo`, `readStudioDemo`, `takeDemoAction`), `app/api/studio-demo/route.ts`, the three scripts and their stand-ins in `lib/redis-memory.ts`; `tests/studio-demo.test.ts` on the in-memory Redis and `tests/security/studio-demo-session.redis-run.ts` on a real one. The bot check's page side (`initBotId`) comes with the screens.
-3. **Sandbox store module:** the drafts' reads and writes in `lib/studio-demo.ts`, through `sandboxKey()` only, each after `takeDemoAction`; test that nothing outside the namespace is touched.
+3. **Sandbox store module:** the drafts' reads and writes in `lib/studio-demo.ts`, through `sandboxKey()` only, each after `takeDemoAction`; test that nothing outside the namespace is touched. `cost.commands` is declared by the caller, so this unit adds a test that measures what each action really sends (its read, `takeDemoAction`'s 8 and the draft's write, the stand-in's `scriptCalls` included) and holds it at or under its declared cost and `DEMO_COMMANDS_PER_ACTION`.
 4. **Studio guard:** the `/api/studio-demo/*` routes, `demoForbids()` before every handler, and the import-graph test that no demo route can reach email, AI, payments, storage, webhooks, keys, team, export or import.
-5. **Screens:** the demo frame, the five steps, the labels, the off buttons, the end button, the counts; accessibility to AX274 (WCAG 2.2 AAA, keyboard, screen reader, 44 px targets); the measured CDN files. The 30-minute life is a time limit under WCAG 2.2.3 (AAA) and 2.2.6: the screens say it at the start and warn before the end, a new session opens in one click, and unless the review finds a way to bound the cost without it, the case, the reason (the cost ceiling needs an end) and this alternative are recorded in `docs/accessibility-programme.md` as AX274 item 1 requires, never presumed.
+5. **Screens:** the demo frame, the five steps, the labels, the off buttons, the end button, the counts; accessibility to AX274 (WCAG 2.2 AAA, keyboard, screen reader, 44 px targets); the measured CDN files. The 21-hour life meets WCAG 2.2.1 (level A) by its twenty-hour exception. It is still a time limit under 2.2.3 (AAA) and 2.2.6 (AAA): the screens say at the start when it ends and warn before the end, a new session opens in one click, and the case, the reason (the cost ceiling needs an end) and this alternative are recorded in `docs/accessibility-programme.md` by this unit, as AX274 item 1 requires, never presumed.
 6. **Review:** costs complete, funded-exposure line, then the owner's decision to turn `STUDIO_DEMO_ON` on. Until all of that, nothing is on and nothing is shown publicly (VR item 2).

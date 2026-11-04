@@ -226,17 +226,31 @@ export const HANDOFF_WORDS =
  * Singular and plural share one term, so the store's "Discounts" allows "a
  * discount"; another form ("discounted") is its own term.
  */
+/**
+ * Ordinary uses of a word that is a deal word in its other sense, left out of
+ * the term (a use not listed here is still caught): the verb "to guarantee"
+ * with the store's access or safety as its object ("garantir o acesso"), the
+ * verb "to further" (Portuguese and Spanish "promover"), the French "remise"
+ * of a handing-over, and the Dutch "afkorting" (an abbreviation). A promise
+ * ("garantir o reembolso", "garantido"), a "remise de 20 %" and a real
+ * "korting" stay caught.
+ */
+const GUARANTEE_ACCESS = "(?!(?:ir|izar|ire) (?:(?:o|a|os|as|el|la|los|las|il|lo) |l['’]?)(?:acesso|acceso|accesso|acces|seguranca|seguridad|sicurezza|privacidade|privacidad|funcionamento|funcionamiento|funzionamento)(?!\\p{L}))";
+const REMISE_HANDOVER = "(?! (?:en (?:main|etat|place|forme|question|cause|service|jeu|marche|route|ordre|vente|liberte)|a (?:niveau|jour|zero|plat)|des (?:cles|diplomes|certificats|prix)|du (?:diplome|certificat|livre|dossier)|de (?:peine|cles|diplomes))(?!\\p{L}))";
+const ABBREVIATION_PREFIX = "(?!(?:af|in|ver|be|ont)korting(?:en|e|s)?(?!\\p{L}))";
+/** The Dutch compound term, which carries its own exclusion before its letters (it is still read as a compound). */
+const DUTCH_COMPOUND = `${ABBREVIATION_PREFIX}\\p{L}+korting\\p{L}*`;
 const DEAL_TERMS = [
   // English
-  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|uv\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
+  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|uv\\p{L}*|v\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
   "per[- ]?cent off", "on sale", "sale prices?", "free shipping", "limited[- ]time", "only \\d+ left", "hurry", "selling fast", "last chance",
   "ends (?:today|tonight|soon)", "act now", "today only", "exclusive offers?", "guarant\\p{L}*", "best[- ]?sell(?:ing|ers?)", "testimonials?",
   "five[- ]stars?", "5[- ]stars?",
   // Spanish
   "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promociona(?:l|les|is)", "rebaj\\p{L}*", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad",
-  "date prisa", "s[oó]lo hoy", "garant\\p{L}*", "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
+  "date prisa", "s[oó]lo hoy", `garant${GUARANTEE_ACCESS}\\p{L}*`, "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
   // French
-  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
+  "r[ée]ductions?", `remises?${REMISE_HANDOVER}`, "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
   "livraison gratuite", "soldes", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
   // German
   "rabatt\\p{L}*", "\\p{L}+rabatt\\p{L}*", "gutschein\\p{L}*", "\\p{L}+gutschein\\p{L}*", "kostenlos\\p{L}* versand", "\\p{L}*(?:gratis|kostenlos)versand\\p{L}*",
@@ -246,7 +260,7 @@ const DEAL_TERMS = [
   "scont[oi]", "scontat[aeio]", "spedizione gratuita", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi",
   "garanz\\p{L}*", "saldi", "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
   // Dutch
-  "korting\\p{L}*", "\\p{L}+korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
+  "korting\\p{L}*", DUTCH_COMPOUND, "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
   "gegarandeerd\\p{L}*", "\\p{L}*uitverkoop\\p{L}*", "vijf sterren",
   // Portuguese
   "descontos?", "cup(?:om|ons)", "cup(?:[aã]o|[oõ]es)", "ofertas? limitadas?", "[uú]ltima oportunidade", "s[oó] hoje", "frete gr[aá]tis", "depoimentos?",
@@ -289,7 +303,7 @@ const DEAL_TERM_RULES: DealTerm[] = [
   ...DEAL_TERMS.map((term) => ({
     find: new RegExp(`${WORD_EDGE_BEFORE}(?:${termSource(term)})${WORD_EDGE_AFTER}`, "gu"),
     open: /\\p\{L\}[*+]/.test(term),
-    compound: term.startsWith("\\p{L}") || COMPOUND_STEMS.has(term),
+    compound: term.startsWith("\\p{L}") || term === DUTCH_COMPOUND || COMPOUND_STEMS.has(term),
     anchor: anchorOf(term).length >= 2 ? anchorOf(term) : /[^]/,
   })),
   ...DEAL_SIGNS.map((sign) => ({ find: new RegExp(sign, "gu"), open: false, compound: false, anchor: new RegExp(sign, "u") })),
@@ -358,7 +372,7 @@ function lookalike(sign: string, stroke: "l" | "i"): string {
 const SPECIAL_SPACES = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/u;
 /** A line break that ends a sentence ("Pro.\nMost") or comes before a capital ("Pro\nMonthly"): read as a space, never joined. */
 const SENTENCE_BREAK = /(?:[.!?:;][\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])|[\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])[\t ]*(?=[\p{Lu}\p{Lt}]))/gu;
-const MAY_LOOK_ALIKE = /[\u00B5\u0250-\u1FFF\u2070-\uFFFF\u{10000}-\u{10FFFF}]/u;
+const MAY_LOOK_ALIKE = /[\u00B5\u00F8\u0111\u0142\u0250-\u1FFF\u2070-\uFFFF\u{10000}-\u{10FFFF}]/u;
 /**
  * Text folded to the one form it is matched in, never shown: compatibility
  * forms as their plain letter and digit (fullwidth, mathematical bold, a

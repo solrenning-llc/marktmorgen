@@ -186,4 +186,30 @@ is("while a site in any case is still refused", [
   heldToFacts("Visit Evil.Com today", probe), heldToFacts("Visit EVIL.COM today", probe), heldToFacts("See //evil.com/x", probe), heldToFacts("See /evil.com", probe),
   heldToFacts("See _evil.com", probe), heldToFacts("Visit evil.eu today", probe), heldToFacts("Visit Evil.Eu/now", probe), heldToFacts("Visit EVIL.EU now", probe),
 ], [false, false, false, false, false, false, false, false]);
+part("Review of 4 November 2026: honest uses of a deal-looking word pass, the deal itself is still refused");
+const nothing = "Pottery course. 12 lessons.";
+is("Portuguese, Spanish and Italian: guaranteeing access or safety is no promise of money", [
+  heldToFacts("Vamos garantir o acesso ao curso.", nothing), heldToFacts("Para garantir a segurança dos dados.", nothing), heldToFacts("Queremos garantizar el acceso al curso.", nothing),
+  heldToFacts("Possiamo garantire l'accesso al corso.", nothing), heldToFacts("Pour garantir l’accès au cours.", nothing),
+], [true, true, true, true, true]);
+is("and the promise, noun, participle or other object is still refused", [
+  heldToFacts("Vamos garantir o reembolso.", nothing), heldToFacts("Acesso garantido.", nothing), heldToFacts("Garantizamos el acceso.", nothing), heldToFacts("Garantia de acesso.", nothing),
+  heldToFacts("Possiamo garantire il rimborso.", nothing), heldToFacts("Garantirá o acesso.", nothing), heldToFacts("Wir garantieren Zugang.", nothing),
+], [false, false, false, false, false, false, false]);
+is("promover and promote-like verbs are no promotion, the promotion is", [
+  heldToFacts("Os alunos vão promover o curso.", nothing), heldToFacts("Para promover el aprendizaje.", nothing), heldToFacts("A turma promoveu a ideia.", nothing),
+  heldToFacts("Com a promoção do mês.", nothing), heldToFacts("Aproveite la promoción.", nothing), heldToFacts("En promoción.", nothing),
+], [true, true, true, false, false, false]);
+is("French: a handing-over is not a discount, a remise of any amount is", [
+  heldToFacts("Remise en main propre du certificat.", nothing), heldToFacts("La remise des clés a lieu le lundi.", nothing), heldToFacts("Une remise à niveau.", nothing),
+  heldToFacts("Une remise de 20 %.", nothing), heldToFacts("Profitez de la remise.", nothing), heldToFacts("Remises exceptionnelles.", nothing), heldToFacts("Remise en main propre, puis une remise.", nothing),
+], [true, true, true, false, false, false, false]);
+is("Dutch: an abbreviation is no discount, a korting in any form is", [
+  heldToFacts("Een afkorting uitgelegd.", nothing), heldToFacts("De afkortingen staan in de les.", nothing), heldToFacts("Een inkorting en een verkorting.", nothing),
+  heldToFacts("Een korting.", nothing), heldToFacts("Een prijskorting.", nothing), heldToFacts("Afkorting met een prijskorting.", nothing), heldToFacts("Een afkortingskorting.", nothing),
+], [true, true, true, false, false, false, false]);
+is("the store's own word still allows the same word", [heldToFacts("Profitez de la remise.", "Une remise pour les membres."), heldToFacts("De afkorting en de korting.", "Korting en afkorting.")], [true, true]);
+is("letters with a stroke read as their base letter, so they hide no deal word", [heldToFacts("Use the cup\u00F8n.", nothing), heldToFacts("A \u0111iscount.", nothing), heldToFacts("A discount for \u0142ots.", "A discount for lots."), heldToFacts("Kr\u00F8ner and \u0142\u00F3d\u017A.", nothing)], [false, false, true, true]);
+is("the reminder's line follows the same rules", [neutralLine("Remise en main propre du certificat.", nothing) !== "", neutralLine("Remise de groupe.", nothing) !== ""], [true, false]);
+
 done();

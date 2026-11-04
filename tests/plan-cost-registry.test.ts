@@ -230,7 +230,7 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   }
   const typicalBook = { fields: 50 + 50 + 1_000 + 40 + 20, rows: 5, listings: 20, stripePages: 23 };
   const typicalLoad = { sliceBytes: 12_000, listings: 3, codes: null };
-  console.log(`an affiliate program's book worked out: ${affiliatePageUnits(typicalBook)} requests for 50 affiliates and 1,000 sales ($${affiliatePageRead(typicalBook).toFixed(6)}), at most once in six hours; each other load ${affiliateLoadUnits(typicalLoad)} ($${affiliateLoadRead(typicalLoad).toFixed(6)}), ${affiliateLoadUnits({ ...typicalLoad, codes: 5 })} with codes; at $${laterPageCost().toFixed(6)} a request`);
+  console.log(`an affiliate program's book worked out: ${affiliatePageUnits(typicalBook)} requests for 50 affiliates and 1,000 sales ($${affiliatePageRead(typicalBook).toFixed(6)}), at most once a day; each other load ${affiliateLoadUnits(typicalLoad)} ($${affiliateLoadRead(typicalLoad).toFixed(6)}), ${affiliateLoadUnits({ ...typicalLoad, codes: 5 })} with codes; at $${laterPageCost().toFixed(6)} a request`);
   console.log(`a store's map: ${sitemapUnits({ listings: 0, carried: 20, postPages: 1 })} requests for 20 products and 12 posts ($${sitemapRead({ listings: 0, carried: 20, postPages: 1 }).toFixed(6)}), ${sitemapUnits({ listings: MAX_PRODUCTS - 50, carried: 50, postPages: MAX_POST_PAGES })} at the largest ($${sitemapRead({ listings: MAX_PRODUCTS - 50, carried: 50, postPages: MAX_POST_PAGES }).toFixed(6)})`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);

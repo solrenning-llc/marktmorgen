@@ -9,7 +9,9 @@
  *     load pays for its own part; a load that finds another working it out
  *     reads the last one kept; what each affiliate sees is what their own
  *     book always said;
- *   - an affiliate not approved sees no book and is a public page;
+ *   - an affiliate waiting or declined sees no book and is a public page;
+ *     one removed sees what they are still owed, from the kept book, and
+ *     never works it out;
  *   - working it out is not held against the asking connection's share of
  *     the day, which alone it can pass; the loads are;
  *   - a refused load reads nothing of the book;
@@ -82,13 +84,17 @@ async function paidStore(owner: string, handle: string, account: string) {
   return (await storeForEmail(owner))!;
 }
 
-/** A program of `n` approved affiliates (the second brought by the first), `sales` sales among them, and one waiting. */
+/** A program of `n` approved affiliates (the second brought by the first), `sales` sales among them, one waiting and two removed. */
 async function program(statsId: string, n: number, sales: number): Promise<void> {
   const people: string[] = [];
   for (let i = 0; i < n; i += 1) people.push(idOf(i), person(idOf(i), `p${i}@example.com`, `code${i}`, "approved", i === 1 ? idOf(0) : null));
   people.push("cccccccccccc", person("cccccccccccc", "waits@example.com", "waits", "pending"));
+  // Two removed: one still owed for five sales, one who never sold.
+  people.push("dddddddddddd", person("dddddddddddd", "gone@example.com", "gone", "removed"));
+  people.push("eeeeeeeeeeee", person("eeeeeeeeeeee", "never@example.com", "never", "removed"));
   const sold: string[] = [];
   for (let i = 0; i < sales; i += 1) sold.push(`ref${i}`, sale(`ref${i}`, idOf(i % n)));
+  for (let i = 0; i < 5; i += 1) sold.push(`gone${i}`, sale(`gone${i}`, "dddddddddddd"));
   await redis.pipeline([
     ["HSET", `nl:aff:${statsId}:people`, ...people],
     ["HSET", `nl:aff:${statsId}:sales`, ...sold],
@@ -109,7 +115,7 @@ async function main(): Promise<void> {
   shop = (await storeForEmail("aff-owner@example.com"))!;
   const counted = await watched(() => bookSize(shop));
   is("eight commands, none of which reads a record", [counted.names.length, counted.names.every((n) => n === "HLEN" || n === "ZCARD")], [8, true]);
-  is("its size: every field of the program's records", counted.value, { fields: 51 + 1_000 + 1, rows: 0 });
+  is("its size: every field of the program's records", counted.value, { fields: 53 + 1_005 + 1, rows: 0 });
   const full = (await affiliatePageCost(shop))!;
 
   part("Fifty affiliates, ten loads each, in one period");
@@ -148,7 +154,7 @@ async function main(): Promise<void> {
   is("and pays only its own part", waiting.taken, load);
   await releaseRefresh(shop);
   const refreshed = await watched(() => admitAffiliatePage(shop, as(idOf(3)), later));
-  is("the lock let go, the next load past six hours works it out again, once", [count(refreshed.names, "HGETALL"), refreshed.taken], [7, load + full]);
+  is("the lock let go, the next load past a day works it out again, once", [count(refreshed.names, "HGETALL"), refreshed.taken], [7, load + full]);
 
   part("An affiliate not approved sees no book");
   const pending = await watched(() => admitAffiliatePage(shop, as("cccccccccccc", "pending")));
@@ -156,6 +162,15 @@ async function main(): Promise<void> {
   for (const status of ["declined", "removed"] as const) {
     is(`${status}: no book`, await admitAffiliatePage(shop, as("cccccccccccc", status)), { admitted: true, book: null });
   }
+
+  part("Removed, and still owed");
+  const stale = later + (BOOK_FRESH_SECONDS + 60) * 1000;
+  const gone = await watched(() => admitAffiliatePage(shop, as("dddddddddddd", "removed"), stale));
+  const goneBook = gone.value.admitted && gone.value.book && gone.value.book !== "soon" ? gone.value.book.book : null;
+  is("a removed affiliate with a balance sees it: five sales at $6.00", [goneBook?.rows[0]?.affiliate.id, goneBook?.rows[0]?.owed, goneBook?.rows[0]?.sales], ["dddddddddddd", 3_000, 5]);
+  is(`paid as a load (${load} requests), from the book kept, though it is out of date`, gone.taken, load);
+  is("and never works the book out on their own: no record read, no refresh claimed", [count(gone.names, "HGETALL"), count(gone.names, "SET")], [0, 0]);
+  is("a removed affiliate who never sold: no book, the page as it was", await admitAffiliatePage(shop, as("eeeeeeeeeeee", "removed"), stale), { admitted: true, book: null });
 
   part("A refused load reads nothing");
   await takePublicRequest(shop, "buyer", Date.now(), requestLimitFor(shop));

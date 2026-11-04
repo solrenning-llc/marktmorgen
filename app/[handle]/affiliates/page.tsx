@@ -99,7 +99,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   // Paid for before anything that grows with the store is read (lib/affiliate-page-admission.ts):
   // past the window, the resting page, and nothing more is read.
   // An approved affiliate's figures come from the program's book, worked out for all its affiliates
-  // at most every few hours (lib/affiliate-book-snapshot.ts); the page says when they are from.
+  // at most once a day (lib/affiliate-book-snapshot.ts); the page says when they are from.
   const admission = await admitAffiliatePage(store, affiliate);
   if (!admission.admitted) return <StoreResting store={store} buyer={affiliate !== null} />;
   const kept = admission.book;

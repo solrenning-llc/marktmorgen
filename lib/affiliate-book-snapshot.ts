@@ -1,13 +1,15 @@
 /**
  * An affiliate program's book, worked out once for every affiliate and kept
- * a few hours (4 November 2026). Each affiliate's own page used to work out
+ * a day (4 November 2026). Each affiliate's own page used to work out
  * the whole program's book on every load (every hash of it, up to 23 pages
  * of the creator's Stripe account): fifty affiliates looking once a day
  * spent a Store plan's window of requests in under two weeks, and then the
  * store's buyers met the resting page. Now the load that finds the book out
  * of date works it out for everybody, paid once (lib/affiliate-page-admission.ts),
- * and keeps each approved affiliate's own part under its own field; every
- * other load reads only its own part. The page says when the figures are from.
+ * and keeps each approved affiliate's own part under its own field, and the
+ * part of anybody no longer approved who still has something in it (a
+ * balance, a commission, a payment made); every other load reads only its
+ * own part. The page says when the figures are from.
  *
  *   nl:aff:<statsId>:book        hash  affiliate id -> {"at":…, "book":…}, and "_at" -> when it was worked out
  *   nl:aff:<statsId>:book:lock   string, a minute or two: one refresh at a time
@@ -19,8 +21,8 @@ import { type Book, readBook } from "@/lib/affiliates";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
 
-/** How long a kept book is shown before a load works it out again. */
-export const BOOK_FRESH_SECONDS = 6 * 60 * 60;
+/** How long a kept book is shown before a load works it out again: a day (owner's decision through the coordinator, 4 November 2026; six hours spent too much of a Store window). */
+export const BOOK_FRESH_SECONDS = 24 * 60 * 60;
 /** How long it is kept: a quarter of an hour more, so a load that waits on another's refresh reads the last one. */
 export const BOOK_KEEP_SECONDS = BOOK_FRESH_SECONDS + 15 * 60;
 /** An approved affiliate missing from a fresh book (approved since) waits at least this long after it was worked out. */
@@ -106,17 +108,25 @@ export async function readSlice(store: Store, id: string): Promise<{ book: Book;
   }
 }
 
+/** Whether somebody no longer approved still has something to see: a balance, a commission or a payment. */
+export function hasSomething(slice: Book): boolean {
+  const row = slice.rows[0];
+  return Boolean(row && (row.owed !== 0 || row.earned !== 0 || row.paid !== 0)) || slice.lines.length > 0 || slice.payouts.length > 0;
+}
+
 /**
  * Keeps the whole program's book, each approved affiliate's part under their
- * own field, and when it was worked out last of all. False when it is past
+ * own field (and that of anybody no longer approved who still has
+ * something in it, hasSomething), and when it was worked out last of all. False when it is past
  * BOOK_SNAPSHOT_MAX_BYTES (nothing written) or could not be written.
  */
 export async function writeSnapshot(store: Store, book: Book, at: number): Promise<boolean> {
   if (!store.statsId) return false;
   const key = snapshotKey(store.statsId);
   const parts = book.rows
-    .filter((row) => row.affiliate.status === "approved")
-    .map((row) => [row.affiliate.id, JSON.stringify({ at, book: bookSlice(book, row.affiliate.id) })] as const);
+    .map((row) => ({ row, slice: bookSlice(book, row.affiliate.id) }))
+    .filter(({ row, slice }) => row.affiliate.status === "approved" || hasSomething(slice))
+    .map(({ row, slice }) => [row.affiliate.id, JSON.stringify({ at, book: slice })] as const);
   const bytes = parts.reduce((sum, [, value]) => sum + value.length, 0);
   if (bytes > BOOK_SNAPSHOT_MAX_BYTES) return false;
   try {

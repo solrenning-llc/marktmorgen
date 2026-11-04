@@ -15,7 +15,7 @@
  * tests/plan-cost-registry.test.ts.
  *
  * An affiliate program's book (lib/affiliates.ts, readBook) is worked out
- * for every affiliate at once and kept a few hours
+ * for every affiliate at once and kept a day
  * (lib/affiliate-book-snapshot.ts): the load that finds it out of date pays
  * for working it out (affiliatePageUnits), every other load pays for
  * reading its own part (affiliateLoadUnits).

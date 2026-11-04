@@ -134,7 +134,7 @@ const en = {
   refundsUnchecked:
     "Refunds and chargebacks could not all be checked just now, so a sale refunded or disputed recently may still show as earning. It is corrected when these figures next refresh.",
   /** When an affiliate's figures were worked out (lib/affiliate-book-snapshot.ts): `when` arrives written in the store's language. */
-  figuresAsOf: (when: string) => `Figures as of ${when}. They refresh every few hours.`,
+  figuresAsOf: (when: string) => `Figures as of ${when}. They refresh once a day.`,
   /** Shown while another load is working the figures out and none are kept yet. */
   figuresSoon: "Your figures are being updated. Check again in a few minutes.",
   salesHead: "Sales through your link",
@@ -446,7 +446,7 @@ const es: AffiliatesWords = {
   waitingNote: (amount) => `${amount} de lo que se te debe aún está dentro de ese plazo de espera, y todavía no se puede pagar.`,
   refundsUnchecked:
     "No se pudieron comprobar todos los reembolsos ahora mismo, así que una venta reembolsada hace poco puede seguir apareciendo como si generara ganancias. Se corrige cuando estas cifras se actualicen de nuevo.",
-  figuresAsOf: (when: string) => `Cifras del ${when}. Se actualizan cada pocas horas.`,
+  figuresAsOf: (when: string) => `Cifras del ${when}. Se actualizan una vez al día.`,
   figuresSoon: "Tus cifras se están actualizando. Vuelve a mirar en unos minutos.",
   salesHead: "Ventas a través de tu enlace",
   noneYet: "Ninguna todavía.",
@@ -725,7 +725,7 @@ const fr: AffiliatesWords = {
   nextPayment: (date) => `Prochain paiement${S}: ${date}.`,
   waitingNote: (amount) => `${amount} de ce qui vous est dû est encore dans ce délai d'attente et n'est pas encore payable.`,
   refundsUnchecked: `Tous les remboursements n'ont pas pu être vérifiés à l'instant${S}: une vente remboursée récemment peut donc encore apparaître comme rapportant de l'argent. C'est corrigé à la prochaine mise à jour de ces chiffres.`,
-  figuresAsOf: (when: string) => `Chiffres du ${when}. Ils sont mis à jour plusieurs fois par jour.`,
+  figuresAsOf: (when: string) => `Chiffres du ${when}. Ils sont mis à jour une fois par jour.`,
   figuresSoon: "Vos chiffres sont en cours de mise à jour. Revenez dans quelques minutes.",
   salesHead: "Ventes via votre lien",
   noneYet: "Aucune pour l'instant.",
@@ -1009,7 +1009,7 @@ const de: AffiliatesWords = {
   waitingNote: (amount) => `${amount} von dem, was Ihnen zusteht, liegt noch in dieser Wartezeit und ist noch nicht auszahlbar.`,
   refundsUnchecked:
     "Nicht alle Erstattungen konnten gerade geprüft werden, daher kann ein kürzlich erstatteter Verkauf noch so erscheinen, als bringe er etwas ein. Das wird bei der nächsten Aktualisierung dieser Zahlen korrigiert.",
-  figuresAsOf: (when: string) => `Zahlen vom ${when}. Sie werden alle paar Stunden aktualisiert.`,
+  figuresAsOf: (when: string) => `Zahlen vom ${when}. Sie werden einmal am Tag aktualisiert.`,
   figuresSoon: "Ihre Zahlen werden gerade aktualisiert. Schauen Sie in ein paar Minuten wieder vorbei.",
   salesHead: "Verkäufe über Ihren Link",
   noneYet: "Noch keine.",
@@ -1296,7 +1296,7 @@ const it: AffiliatesWords = {
   waitingNote: (amount) => `${amount} di quanto ti spetta è ancora in questo periodo di attesa, e non è ancora pagabile.`,
   refundsUnchecked:
     "Non è stato possibile controllare subito tutti i rimborsi, quindi una vendita rimborsata di recente potrebbe ancora risultare come guadagno. Viene corretto al prossimo aggiornamento di questi dati.",
-  figuresAsOf: (when: string) => `Dati del ${when}. Si aggiornano ogni poche ore.`,
+  figuresAsOf: (when: string) => `Dati del ${when}. Si aggiornano una volta al giorno.`,
   figuresSoon: "I tuoi dati sono in aggiornamento. Ricontrolla tra qualche minuto.",
   salesHead: "Vendite tramite il tuo link",
   noneYet: "Ancora nessuna.",
@@ -1579,7 +1579,7 @@ const nl: AffiliatesWords = {
   waitingNote: (amount) => `${amount} van wat je tegoed hebt, valt nog binnen die wachttijd en kan nog niet worden uitbetaald.`,
   refundsUnchecked:
     "Niet alle terugbetalingen konden zojuist worden gecontroleerd, dus een onlangs terugbetaalde verkoop kan nog als opbrengst worden getoond. Dat wordt rechtgezet bij de volgende bijwerking van deze cijfers.",
-  figuresAsOf: (when: string) => `Cijfers van ${when}. Ze worden om de paar uur bijgewerkt.`,
+  figuresAsOf: (when: string) => `Cijfers van ${when}. Ze worden één keer per dag bijgewerkt.`,
   figuresSoon: "Je cijfers worden bijgewerkt. Kijk over een paar minuten nog eens.",
   salesHead: "Verkopen via je link",
   noneYet: "Nog geen.",
@@ -1868,7 +1868,7 @@ const pt: AffiliatesWords = {
   waitingNote: (amount) => `${amount} do que lhe é devido ainda está dentro desse prazo de espera e ainda não pode ser pago.`,
   refundsUnchecked:
     "Não foi possível verificar agora todos os reembolsos, por isso uma venda reembolsada recentemente pode ainda aparecer como se gerasse ganhos. Fica corrigido na próxima atualização destes números.",
-  figuresAsOf: (when: string) => `Números de ${when}. São atualizados de poucas em poucas horas.`,
+  figuresAsOf: (when: string) => `Números de ${when}. São atualizados uma vez por dia.`,
   figuresSoon: "Os seus números estão em atualização. Volte a ver dentro de alguns minutos.",
   salesHead: "Vendas através da sua ligação",
   noneYet: "Ainda nenhuma.",

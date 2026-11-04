@@ -4,11 +4,15 @@
  * the page read the whole program's records and the creator's Stripe
  * account on every load of a signed-in affiliate, and counted nothing.
  *
- *   - Somebody not signed in, or an affiliate not approved (waiting,
- *     declined, removed), sees the program's terms and where they stand, and
- *     no book: a public page of the store, which rests with the others
- *     (isResting) and takes one more request for each PUBLIC_LISTINGS_PER_UNIT
- *     products it reads.
+ *   - Somebody not signed in, or an affiliate waiting or declined (who never
+ *     sold), sees the program's terms and where they stand, and no book: a
+ *     public page of the store, which rests with the others (isResting) and
+ *     takes one more request for each PUBLIC_LISTINGS_PER_UNIT products it
+ *     reads.
+ *   - Anybody else no longer approved (removed) sees their own part of the
+ *     kept book when it holds one (a balance, a commission, a payment made),
+ *     paid as an approved affiliate's load is, and never works the book out
+ *     on their own; with no part kept, the page as somebody waiting sees it.
  *   - An approved affiliate sees their own page, which rests only once the
  *     whole window is used (as a buyer's pages do). Its load takes
  *     affiliateLoadUnits: the page, its own part of the kept book
@@ -33,7 +37,7 @@ import { isResting, takePublicRequest } from "@/lib/traffic";
 
 export type AffiliatePageAdmission =
   | { admitted: false }
-  /** No book on this page: a visitor, or an affiliate not approved. */
+  /** No book on this page: a visitor, an affiliate waiting or declined, or one removed with nothing kept. */
   | { admitted: true; book: null }
   /** The affiliate's own part of the book and when it was worked out; "soon" while another load is working it out and none is kept. */
   | { admitted: true; book: { book: Book; at: number } | "soon" };
@@ -64,6 +68,14 @@ export async function affiliatePageCost(store: Store): Promise<number | null> {
 
 export async function admitAffiliatePage(store: Store, affiliate: Pick<Affiliate, "id" | "status" | "share"> | null, now = Date.now()): Promise<AffiliatePageAdmission> {
   const listings = affiliatePageListings(store, affiliate);
+  if (affiliate && affiliate.status !== "approved" && affiliate.status !== "pending" && affiliate.status !== "declined") {
+    const state = await snapshotState(store, affiliate.id);
+    if (state && state.sliceBytes > 0) {
+      if (!(await takePublicRequest(store, "buyer", now, affiliateLoadUnits({ sliceBytes: state.sliceBytes, listings, codes: null })))) return REFUSED;
+      const kept = await readSlice(store, affiliate.id);
+      if (kept) return { admitted: true, book: kept };
+    }
+  }
   if (!affiliate || affiliate.status !== "approved") {
     if (await isResting(store, now)) return REFUSED;
     const extra = listingUnits(listings);

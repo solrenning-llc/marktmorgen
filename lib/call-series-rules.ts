@@ -12,7 +12,9 @@
  *     time does not exist that day (the hour skipped in spring) is said, not
  *     moved to another time.
  *   - Every date must be a time the call offers and nobody holds, read as
- *     the booking page reads it (lib/call-setup.ts, isOpenSlot): the
+ *     the booking page reads it (lib/call-setup.ts, isOpenSlot), at the
+ *     length the buyer chose (lib/call-lengths.ts): a longer length is
+ *     checked over its whole time, against the hours and busy times. The
  *     creator's hours, notice, gap, and the busy times, including the
  *     calendars synced with it (lib/calendar-sync.ts). The booking window
  *     (horizonDays) is stretched for the series' own later dates only, which
@@ -82,20 +84,24 @@ export function seriesStarts(first: number, tz: string, cadence: SeriesCadence, 
 /**
  * The dates of a series that cannot be booked, by position (0 is the
  * first): a clock time that does not exist that day, or a time the call
- * does not offer or somebody holds. Empty: every date is free.
+ * does not offer or somebody holds. Empty: every date is free. `minutes` is
+ * the length the buyer chose (lib/call-lengths.ts), the call's own by
+ * default: every date is checked over that whole length.
  */
-export function seriesConflicts(setup: CallSetup, now: number, busy: Busy[], starts: (number | null)[], productId: string, knownUntil: number): number[] {
+export function seriesConflicts(base: CallSetup, now: number, busy: Busy[], starts: (number | null)[], productId: string, knownUntil: number, minutes = base.minutes): number[] {
+  // The length chosen, read as the booking page reads a length (lib/call-lengths.ts, slotsForLength): the same setup at that length.
+  const setup: CallSetup = { ...base, minutes };
   const last = Math.max(0, ...starts.map((s) => s ?? 0));
   // The booking window, stretched for the series' own later dates only: each is still checked against the hours, notice, gap and busy times.
   const days = Math.max(setup.horizonDays, Math.ceil((last - now) / DAY) + 1);
   // Each window's open times read once, then each date looked up in them.
   const own = new Set(openSlots(setup, now, busy, productId).flatMap((d) => d.starts));
   const wide = days > setup.horizonDays ? new Set(openSlots({ ...setup, horizonDays: days }, now, busy, productId).flatMap((d) => d.starts)) : own;
-  const minutes = setup.minutes * 60_000;
+  const span = minutes * 60_000;
   return starts.flatMap((start, i) => {
     if (start === null) return [i];
     // Past the busy times read (a synced calendar's own reach), nothing is known: not free.
-    if (start + minutes > knownUntil) return [i];
+    if (start + span > knownUntil) return [i];
     return (i === 0 ? own : wide).has(start) ? [] : [i];
   });
 }

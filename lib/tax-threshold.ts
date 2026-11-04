@@ -66,7 +66,7 @@ export function assessTaxThreshold(value: unknown, now = Date.now()): TaxThresho
     for (const key of KEYS) {
       if (!Object.hasOwn(descriptors, key)) return stop("unknown");
       const field = descriptors[key];
-      if (!field || !Object.hasOwn(field, "value")) return stop("unknown");
+      if (!field || !field.enumerable || !Object.hasOwn(field, "value")) return stop("unknown");
       data[key] = field.value;
     }
   } catch { return stop("unknown"); }
@@ -108,7 +108,7 @@ export function assessTaxSalesThreshold(value: unknown, now = Date.now()): TaxTh
     for (const key of keys) {
       if (!Object.hasOwn(fields, key)) return stop("unknown");
       const field = fields[key];
-      if (!field || !Object.hasOwn(field, "value")) return stop("unknown");
+      if (!field || !field.enumerable || !Object.hasOwn(field, "value")) return stop("unknown");
       evidence[key] = field.value;
     }
     if (typeof evidence.ruleId !== "string" || !Object.hasOwn(TAX_THRESHOLD_RULES, evidence.ruleId)

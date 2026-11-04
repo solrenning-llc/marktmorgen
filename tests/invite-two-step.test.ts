@@ -6,13 +6,14 @@
  * of its own, so the invitation only puts it on the team (lib/account-exists.ts,
  * app/api/auth/join/route.ts).
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { hasAccount } from "@/lib/account-exists";
 import { finishSetup, startSetup } from "@/lib/two-step";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { inviteMember } from "@/lib/team";
+import { inviteMember, readTeam } from "@/lib/team";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { POST as join_ } from "@/app/api/auth/join/route";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -62,7 +63,37 @@ async function main(): Promise<void> {
   // The route reads this before spending the invitation; true sends them to log in the usual way, with no session opened.
   is("an address with two-step login on, and no store, team or passkey, counts as an account", await hasAccount(HELPER), true);
   is("an address with nothing still does not", await hasAccount("nobody@join.example"), false);
-  is("and the invitation route asks that very check", readFileSync(join(process.cwd(), "app/api/auth/join/route.ts"), "utf8").includes('import { hasAccount } from "@/lib/account-exists";'), true);
+
+  part("The invitation taken, through the route itself (review of #2101, inbox C4-20)");
+  let ip = 0;
+  const take = async (token: string) => {
+    ip += 1;
+    const response = await join_(
+      new NextRequest("https://marktmorgen.com/api/auth/join", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": `203.0.113.${ip}` },
+        body: new URLSearchParams({ token }),
+      }),
+    );
+    const cookies = response.headers.getSetCookie?.() ?? [];
+    return { where: response.headers.get("location") ?? "", session: cookies.some((c) => c.startsWith(`${SESSION_COOKIE}=`) && !c.startsWith(`${SESSION_COOKIE}=;`)) };
+  };
+  // The token travels only in the invitation email (lib/team.ts): read from the email the stand-in kept.
+  const tokenTo = (to: string) => /\/signin\/join\?token=([0-9a-f]{64})/.exec([...mails].reverse().find((m) => m.to === to)?.text ?? "")?.[1] ?? "";
+  const helperToken = tokenTo(HELPER);
+  const helper = await take(helperToken);
+  is("an address with two-step login on is put on the team and sent to log in the usual way, with no session opened", [new URL(helper.where).searchParams.get("status"), helper.session], ["invite-joined", false]);
+  const NEW = "first.timer@join.example";
+  const fresh = await inviteMember(shop, NEW, "editor", "https://marktmorgen.com");
+  if (!fresh.ok) throw new Error("no second invitation");
+  const newcomer = await take(tokenTo(NEW));
+  is("an address with no account is logged in by the tap, the store open", [newcomer.session, new URL(newcomer.where).searchParams.get("team")], [true, "joined"]);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const members = (await readTeam(shop.sid)).members.map((m) => m.email).sort();
+  is("both are on the team after the tap", members.includes(HELPER) && members.includes(NEW), true);
+  is("and the owner was told of each, by email", mails.filter((m) => m.to === CREATOR).length >= 2, true);
+  const again = await take(helperToken);
+  is("an invitation already taken opens nothing", [again.session, (new URL(again.where).searchParams.get("status") ?? "").startsWith("invite-")], [false, true]);
 
   done();
 }

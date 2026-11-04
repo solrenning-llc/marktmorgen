@@ -96,13 +96,42 @@ test("exact plain and null-prototype snapshots keep their complete own amounts",
     const value = row(id, TAX_THRESHOLD_RULES[id].thresholdMinor + 1);
     for (const prototype of [Object.prototype, null]) {
       const snapshot = Object.create(prototype, Object.fromEntries(
-        Object.entries(value).map(([key, amount]) => [key, { value: amount, enumerable: false }]),
+        Object.entries(value).map(([key, amount]) => [key, { value: amount, enumerable: true }]),
       ));
       assert.deepEqual(assessTaxThreshold(snapshot, NOW), {
         status: "treatment-required", projectedApplicableMinor: TAX_THRESHOLD_RULES[id].thresholdMinor + 1,
       });
     }
   }
+});
+test("threshold snapshots cannot lose required amounts or evidence during serialization", () => {
+  for (const id of ["ca-specified-supplies", "no-remote-services"] as const) {
+    for (const key of Object.keys(row(id, 0))) {
+      const value = row(id, 0);
+      Object.defineProperty(value, key, { enumerable: false });
+      assert.deepEqual(assessTaxThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null }, `hidden ${key}`);
+    }
+    const complete = Object.freeze(row(id, TAX_THRESHOLD_RULES[id].thresholdMinor + 1));
+    assert.equal(assessTaxThreshold(complete, NOW).status, "treatment-required");
+  }
+});
+test("threshold ledger evidence cannot hide a required review field", async () => {
+  const { assessTaxSalesThreshold } = await import("@/lib/tax-threshold");
+  const complete = () => ({
+    ruleId: "ca-specified-supplies", completeRollingCoverage: true, applicableScopeReviewed: true,
+    ledger: {
+      place: { country: "CA", state: null }, currency: "CAD",
+      periodStart: "2025-10-28", periodEnd: "2026-10-27",
+      coverageFrom: "2025-10-28", coverageThrough: "2026-10-27", complete: true,
+      entries: [{ id: "own", country: "CA", state: "ON", currency: "CAD", supplyOn: "2026-10-27", position: "settled", amountMinor: 3_000_001, applicable: true }],
+    },
+  });
+  for (const key of Object.keys(complete())) {
+    const value = complete();
+    Object.defineProperty(value, key, { enumerable: false });
+    assert.deepEqual(assessTaxSalesThreshold(value, NOW), { status: "unknown", projectedApplicableMinor: null }, `hidden ${key}`);
+  }
+  assert.deepEqual(assessTaxSalesThreshold(Object.freeze(complete()), NOW), { status: "treatment-required", projectedApplicableMinor: 3_000_001 });
 });
 test("threshold arithmetic creates no actual registration, treatment record or permission to sell", () => {
   assert.equal(assessTaxThreshold(row("ca-specified-supplies",0),NOW).status,"below-threshold");

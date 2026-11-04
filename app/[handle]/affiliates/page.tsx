@@ -9,7 +9,8 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { formatMoney } from "@/lib/money";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { commissionRate, nextPayday } from "@/lib/affiliate-setting";
+import { IDLE_WARN_DAYS, readIdleDays } from "@/lib/affiliate-idle-rules";
+import { commissionRate, creditsContacts, nextPayday } from "@/lib/affiliate-setting";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { listCodes } from "@/lib/discount";
 import { speech } from "@/lib/buyer-words";
@@ -82,7 +83,9 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
     return a.bonusTitle(Number(sales) || 0, name);
   };
   const promise = (terms: typeof store.affiliates) => a.payoutPromise(store.name, terms.payday, terms.hold);
-  const attribution = (terms: typeof store.affiliates) => a.attribution(terms.days, terms.rule === "first", terms.lifetime);
+  // The rule, and the confirmed-lead credit where the program has it (630 [HN6](1), creditsContacts).
+  const attribution = (terms: typeof store.affiliates) =>
+    creditsContacts(terms) ? `${a.attribution(terms.days, terms.rule === "first", terms.lifetime)} ${a.contactsRule}` : a.attribution(terms.days, terms.rule === "first", terms.lifetime);
 
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token : "";
@@ -512,6 +515,8 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                         ? [lw.term(terms.lead.kind, money(terms.lead.cents, store.currency), store.name), lw.termRules(terms.lead.hold, terms.lead.daily, money(terms.lead.budget, store.currency), store.name)]
                         : []),
                       ...(terms.paidSearch ? [] : [a.termNoPaidSearch(store.name)]),
+                      // Removing affiliates who bring nothing (630 [HN6](3)): said before anyone applies.
+                      ...(readIdleDays(terms.idle) > 0 ? [a.termIdle(readIdleDays(terms.idle), IDLE_WARN_DAYS, terms.lead.kind !== "none")] : []),
                       attribution(terms),
                       a.termRefunds,
                       a.termDisclose,

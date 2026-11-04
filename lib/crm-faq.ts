@@ -13,14 +13,14 @@ import { ROLE_NAMES } from "@/lib/team-roles";
 import { tryBeforePaying } from "@/lib/beginner-faq";
 
 /** The studio's own words. */
-export const CRM_WORDS = { tool: "Deals and fields", newDeal: "New deal", what: "What it is", saveDeal: "Save deal", unloaded: "Your deals could not be loaded", reload: "Reload deals", fields: "Your fields", firstField: "Add your first field", addField: "Add a field", kind: "Kind", saveFields: "Save fields", buyers: "Buyers" } as const;
+export const CRM_WORDS = { tool: "Deals and fields", newDeal: "New deal", what: "What it is", saveDeal: "Save deal", unloaded: "Your deals could not be loaded", reload: "Reload deals", move: "Move", fields: "Your fields", firstField: "Add your first field", addField: "Add a field", kind: "Kind", saveFields: "Save fields", buyers: "Buyers" } as const;
 
 export function crmBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_DAYS): { q: string; a: string }[] {
   const w = CRM_WORDS;
   return [
     {
       q: "How do I record my first deal?",
-      a: `In your studio, the owner, or a teammate with the ${ROLE_NAMES.admin} or ${ROLE_NAMES.support} role, opens “${w.tool}” and presses “${w.newDeal}”. Fill in “${w.what}” (the only box you must fill), add anything else you know, and press “${w.saveDeal}”. Later, choose its new stage in the box on its card. If the page says “${w.unloaded}”, press “${w.reload}”; nothing saved was changed.`,
+      a: `In your studio, the owner, or a teammate with the ${ROLE_NAMES.admin} or ${ROLE_NAMES.support} role, opens “${w.tool}” and presses “${w.newDeal}”. Fill in “${w.what}” (the only box you must fill), add anything else you know, and press “${w.saveDeal}”. Later, choose its new stage in the box on its card and press “${w.move}”. If the page says “${w.unloaded}”, press “${w.reload}”; nothing saved was changed.`,
     },
     {
       q: "How do I keep a detail about each person?",

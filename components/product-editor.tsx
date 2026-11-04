@@ -1,5 +1,8 @@
 "use client";
 
+import { priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
+import { isBundle } from "@/lib/bundle-rules";
+import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
 import { WaitlistPanel } from "@/components/waitlist-panel";
@@ -68,7 +71,10 @@ import {
   intervalName,
   membershipPrice,
 } from "@/lib/product-recurring";
-import { MAX_INTRO_COUNT, introLineEnglish } from "@/lib/intro-price";
+import { MAX_INTRO_COUNT, activeIntro, introLineEnglish } from "@/lib/intro-price";
+import { activeYearly } from "@/lib/yearly-price";
+import { activePlan } from "@/lib/product-extras";
+import type { Listing } from "@/lib/store";
 import { MAX_ABOUT_LENGTH, aboutBlocks } from "@/lib/product-about";
 import { ProductAbout } from "@/components/product-about-view";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
@@ -121,6 +127,7 @@ const PWYW_MESSAGES: Record<string, string> = {
 };
 
 const MESSAGES: Record<string, string> = {
+  outline_left: PRODUCT_OUTLINE_LEFT,
   ...STUDIO_MESSAGES,
   title: "Give it a name before saving.",
   // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
@@ -273,6 +280,10 @@ async function send(
       return wrong(why === "suggested" || !PWYW_MESSAGES[why] ? pwywSuggested(currency) : PWYW_MESSAGES[why]);
     }
     if (data.error === "price") return wrong(productPrice(currency));
+    if (data.error === "outline_left") {
+      const said = data as { left?: unknown; product?: unknown };
+      return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
+    }
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
   } catch {
@@ -311,6 +322,9 @@ function ProductForm({
   preview?: { look: StoreLook; language: LanguageCode } | null;
 }) {
   const id = product?.id ?? "new";
+  // A ready outline for the description of a new product (487 [IT4], item 5), decided when the form opens: it never comes and goes while typing.
+  const [offerOutline, setOfferOutline] = useState(() => !product && !draft.about.trim());
+  const aboutField = useRef<HTMLTextAreaElement>(null);
   // The preview starts at a phone's width, where most product pages are read.
   const [phone, setPhone] = useState(true);
   const toggle = (on: boolean) => `inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold ${on ? "bg-white text-ink shadow-sm" : "text-ink-soft"}`;
@@ -449,6 +463,7 @@ function ProductForm({
           The full description <span className="font-normal text-ink-soft">(optional)</span>
         </label>
         <textarea
+          ref={aboutField}
           id={`product-about-${id}`}
           name="about"
           rows={7}
@@ -465,6 +480,38 @@ function ProductForm({
             ? "Reading what you wrote…"
             : `On this product's own page, which the card links to. A blank line starts a new paragraph. ${(MAX_ABOUT_LENGTH - draft.about.length).toLocaleString("en-US")} characters left.`}
         </p>
+        {offerOutline && !loadingAbout ? (
+          <div className="mt-2 rounded-[var(--r-sm)] border border-line bg-white p-3" data-product-outline="">
+            <p id={`product-outline-help-${id}`} className="text-sm text-ink-soft">
+              Not sure what to write? Start from an outline: it sets out what buyers look for, and each part in [brackets] is yours to replace with your own words, including the brackets. This product can&apos;t go on your store until you replace every one.
+            </p>
+            {draft.about.trim() ? (
+              <p className="mt-2 text-sm text-ink-soft">The outline goes only into an empty description. Clear the description to use it.</p>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm mt-2"
+                aria-describedby={`product-outline-help-${id}`}
+                onClick={() => {
+                  // Only into an empty description: nothing typed is replaced.
+                  if (draft.about.trim()) return;
+                  setDraft({ ...draft, about: PRODUCT_OUTLINE });
+                  setOfferOutline(false);
+                  // The button goes with the box: the focus moves to the description, the first part to replace selected.
+                  requestAnimationFrame(() => {
+                    const field = aboutField.current;
+                    if (!field) return;
+                    field.focus();
+                    const start = PRODUCT_OUTLINE.indexOf("[");
+                    field.setSelectionRange(start, PRODUCT_OUTLINE.indexOf("]", start) + 1);
+                  });
+                }}
+              >
+                Start from an outline
+              </button>
+            )}
+          </div>
+        ) : null}
         {loadingAbout ? null : (
           <TermsCheckPanel
             id={id}
@@ -1634,6 +1681,8 @@ export function ProductEditor({
   look = null,
   pairChoices = [],
   ownHosts = [],
+  tiers = [],
+  taxOnTop,
 }: {
   /** The products shown: every one, or one page of a long list. */
   products: Product[];
@@ -1685,6 +1734,10 @@ export function ProductEditor({
   pairChoices?: { id: string; title: string }[];
   /** The store's own domain, if it has one: not warned as "another site" in what the creator writes (493 [DE2]). */
   ownHosts?: string[];
+  /** The plans members switch between (lib/tier-switch.ts): none takes an introductory or yearly price. */
+  tiers?: readonly string[];
+  /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
+  taxOnTop: boolean;
 }) {
   const router = useRouter();
   const sid = useStudioStore();
@@ -1700,9 +1753,10 @@ export function ProductEditor({
   useLeaveGuard((adding || editingId !== null) && JSON.stringify(draft) !== JSON.stringify(opened) && !busy);
   // A new price on a product buyers can see is shown, old and new, before it is saved (487 [IT4], pattern 8): the id under review.
   const [priceReview, setPriceReview] = useState<string | null>(null);
-  function changePrice(productId: string) {
+  /** "Change" on a row of the price review: back to the field it names, or to the price when that field is not shown. */
+  function changePrice(productId: string, field: PriceField = "price") {
     setPriceReview(null);
-    requestAnimationFrame(() => document.getElementById(`product-price-${productId}`)?.focus());
+    requestAnimationFrame(() => (document.getElementById(`product-${field}-${productId}`) ?? document.getElementById(`product-price-${productId}`))?.focus());
   }
   const [fileBusyId, setFileBusyId] = useState<string | null>(null);
   const [percent, setPercent] = useState(0);
@@ -2026,9 +2080,38 @@ export function ProductEditor({
             className="rounded-2xl border border-line bg-paper p-4"
           >
             {editingId === product.id ? (() => {
-              // Only a product bought once, at one price, with no lowest price chosen by the buyer: there the field is what buyers pay.
-              const newPrice = readMoney(draft.price, currency);
-              const priceChanged = !product.hidden && !product.options.length && !draft.every && !draft.pwyw && newPrice !== null && newPrice !== product.priceCents;
+              // What this save changes in what buyers pay, if anything (lib/price-review.ts): a price, a membership's, a price they choose.
+              const review = reviewPrice(
+                {
+                  hidden: product.hidden,
+                  options: product.options.length,
+                  priceCents: product.priceCents,
+                  interval: product.recurring?.interval ?? null,
+                  suggestedCents: product.pwyw?.suggestedCents ?? null,
+                  // "Now" is what the checkout offers, never only what is stored (lib/store-checkout.ts).
+                  intro: activeIntro(product, tiers),
+                  yearlyCents: activeYearly(product, tiers)?.cents ?? null,
+                  id: product.id,
+                  tiers,
+                  bounds: priceBounds(currency),
+                  // What the save refuses for this kind of product (lib/store.ts, editProduct; lib/pay-what-you-want.ts, pwywProblem).
+                  refuses: {
+                    free: Boolean(product.call || product.course || product.podcast || product.shipping) || isBundle(product),
+                    membership: Boolean(product.call || product.shipping) || isBundle(product),
+                    choose: Boolean(product.call || product.plan || product.bumps.length || product.shipping) || isBundle(product),
+                  },
+                  taxOnTop,
+                  // The payment plan, offered now and once saved at the new price and schedule (lib/product-extras.ts).
+                  plan: product.plan && product.options.length === 0 ? { payments: product.plan.payments, cents: product.plan.amountCents } : null,
+                  planBefore: activePlan(product as Listing) !== null,
+                  planAfter: (next) => activePlan({ ...product, priceCents: next.priceCents, recurring: next.interval ? { ...(product.recurring ?? { trialDays: 0, payments: 0 }), interval: next.interval } : null, pwyw: null } as Listing) !== null,
+                },
+                // The words the save checks, the description as it will be sent (unread and untouched: not sent).
+                { ...draft, about: aboutUnread && !draft.about ? "" : draft.about },
+                (typed) => readMoney(typed, currency),
+                (cents) => formatMoney(cents, currency),
+              );
+              const priceChanged = review !== null;
               const save = () => {
                 const payload = payloadOf(draft);
                 if (aboutUnread && !draft.about) delete payload.about;
@@ -2049,7 +2132,7 @@ export function ProductEditor({
                 draft={draft}
                 setDraft={(next) => {
                   setDraft(next);
-                  if (next.price !== draft.price) setPriceReview(null);
+                  if (next.price !== draft.price || next.every !== draft.every || next.pwyw !== draft.pwyw || next.suggested !== draft.suggested || next.introPrice !== draft.introPrice || next.introCount !== draft.introCount || next.yearlyPrice !== draft.yearlyPrice) setPriceReview(null);
                 }}
                 busy={busy}
                 error={error}
@@ -2071,21 +2154,23 @@ export function ProductEditor({
                   setError(null);
                 }}
               />
-              {priceReview === product.id && priceChanged && newPrice !== null ? (
+              {priceReview === product.id && review ? (
                 <div className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
-                  <h3 id={`product-${product.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check the new price</h3>
-                  {/* A summary list (GOV.UK "Check answers"): the price buyers see changes as soon as it is saved. */}
+                  <h3 id={`product-${product.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check what buyers pay</h3>
+                  {/* A summary list (GOV.UK "Check answers"): what buyers pay changes as soon as it is saved. */}
                   <dl className="mt-2 divide-y divide-line">
-                    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
-                      <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">Price</dt>
-                      <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1">{`${formatMoney(product.priceCents, currency)} now, ${formatMoney(newPrice, currency)} once you save.`}</dd>
-                      <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changePrice(product.id)}>Change<span className="sr-only"> price</span></button></dd>
-                    </div>
+                    {review.rows.map((row) => (
+                      <div key={row.key} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">
+                        <dt className="basis-full font-semibold sm:basis-28 sm:shrink-0">{row.label}</dt>
+                        <dd className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1"><span className="block">{`Now: ${row.now}`}</span><span className="block font-semibold">{`Once you save: ${row.then}`}</span></dd>
+                        <dd><button type="button" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4" onClick={() => changePrice(product.id, row.field)}>Change<span className="sr-only">{` ${row.label.toLowerCase()}`}</span></button></dd>
+                      </div>
+                    ))}
                   </dl>
-                  <p className="mt-2">Your store shows the new price as soon as you save.</p>
+                  <p className="mt-2">{review.note}</p>
                   {/* The confirmation is here, after what it confirms, so the reading and the focus order end on it. */}
                   <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={save}>
-                    Yes, save the new price
+                    Yes, save what buyers pay
                   </button>
                 </div>
               ) : null}

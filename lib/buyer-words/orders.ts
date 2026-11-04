@@ -69,7 +69,14 @@ const en = {
   nothingArrived: "Nothing arrived? You may have paid with a different address: the one you typed at checkout. Try that one below.",
 
   // ---- The list of purchases -------------------------------------------------------
-  bookedCalls: (count: number): string => (count === 1 ? "Your booked call" : "Your booked calls"),
+  bookedCalls: (count: number): string => (count === 1 ? "Your booking" : "Your bookings"),
+  /** What the store waits on from them: payment requests and agreements still open (lib/buyer-waiting.ts). */
+  waiting: "Waiting for you",
+  waitingMore: (n: number) => `And ${n} more. Open the email each one came in to see it.`,
+  waitingUnread: "What is waiting for you could not be read just now. Try this page again in a moment.",
+  /** Each link names what it opens, so two of them never read the same (WCAG 2.4.9). `due` is a date already said, or "". */
+  openRequest: (amount: string, due: string): string => (due ? `Open the ${amount} payment request due ${due}` : `Open the ${amount} payment request`),
+  openToSign: (title: string): string => `Read and sign “${title}”`,
   nothingToOpen: (store: string) =>
     `There is nothing to open here anymore. A purchase that was refunded in full is no longer listed. If something is missing, reply to the order confirmation you were emailed when you paid, and it reaches ${store}.`,
   everythingSold: (store: string) =>
@@ -303,7 +310,12 @@ const es: OrdersWords = {
     `Si esa dirección le compró algo a ${store}, el enlace va en camino. Llega de ${store} vía Marktmorgen, normalmente en menos de un minuto. Si no está, mira en la carpeta de spam.`,
   nothingArrived: "¿No te llegó nada? Puede que hayas pagado con otra dirección: la que escribiste al pagar. Prueba con esa abajo.",
 
-  bookedCalls: (count) => (count === 1 ? "Tu llamada reservada" : "Tus llamadas reservadas"),
+  bookedCalls: (count) => (count === 1 ? "Tu reserva" : "Tus reservas"),
+  waiting: "Te espera",
+  waitingMore: (n) => `Y ${n} más. Abre el correo con el que llegó cada uno para verlo.`,
+  waitingUnread: "No pudimos leer ahora lo que te espera. Vuelve a abrir esta página en un momento.",
+  openRequest: (amount, due) => (due ? `Abrir la solicitud de pago de ${amount} con vencimiento el ${due}` : `Abrir la solicitud de pago de ${amount}`),
+  openToSign: (title) => `Leer y firmar «${title}»`,
   nothingToOpen: (store) =>
     `Aquí ya no hay nada que abrir. Una compra reembolsada por completo deja de aparecer. Si falta algo, responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
   everythingSold: (store) =>
@@ -513,7 +525,12 @@ const fr: OrdersWords = {
     `Si cette adresse a acheté quelque chose chez ${store}, le lien est en route. Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute. S'il n'y est pas, regardez dans les spams.`,
   nothingArrived: `Rien reçu${S}? Vous avez peut-être payé avec une autre adresse${S}: celle saisie lors du paiement. Essayez-la ci-dessous.`,
 
-  bookedCalls: (count) => (count < 2 ? "Votre appel réservé" : "Vos appels réservés"),
+  bookedCalls: (count) => (count < 2 ? "Votre réservation" : "Vos réservations"),
+  waiting: "Ce qui vous attend",
+  waitingMore: (n) => `Et ${n} de plus. Ouvrez l’e-mail par lequel chacun est arrivé pour le voir.`,
+  waitingUnread: "Ce qui vous attend n’a pas pu être lu pour le moment. Rouvrez cette page dans un instant.",
+  openRequest: (amount, due) => (due ? `Ouvrir la demande de paiement de ${amount} à régler le ${due}` : `Ouvrir la demande de paiement de ${amount}`),
+  openToSign: (title) => `Lire et signer «${S}${title}${S}»`,
   nothingToOpen: (store) =>
     `Il n'y a plus rien à ouvrir ici. Un achat remboursé en totalité n'apparaît plus. S'il manque quelque chose, répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
   everythingSold: (store) =>
@@ -721,7 +738,12 @@ const de: OrdersWords = {
     `Wenn mit dieser Adresse etwas bei ${store} gekauft wurde, ist der Link unterwegs. Er kommt von ${store} über Marktmorgen und trifft in der Regel innerhalb einer Minute ein. Wenn er nicht da ist, sehen Sie im Spam-Ordner nach.`,
   nothingArrived: "Nichts angekommen? Vielleicht haben Sie mit einer anderen Adresse bezahlt: der, die Sie beim Bezahlen eingegeben haben. Versuchen Sie es unten mit dieser.",
 
-  bookedCalls: (count) => (count === 1 ? "Ihr gebuchtes Gespräch" : "Ihre gebuchten Gespräche"),
+  bookedCalls: (count) => (count === 1 ? "Ihre Buchung" : "Ihre Buchungen"),
+  waiting: "Wartet auf Sie",
+  waitingMore: (n) => `Und ${n} weitere. Öffnen Sie die E-Mail, mit der jeweils eines kam, um es zu sehen.`,
+  waitingUnread: "Was auf Sie wartet, konnte gerade nicht gelesen werden. Öffnen Sie diese Seite gleich noch einmal.",
+  openRequest: (amount, due) => (due ? `Zahlungsanfrage über ${amount}, fällig am ${due}, öffnen` : `Zahlungsanfrage über ${amount} öffnen`),
+  openToSign: (title) => `„${title}“ lesen und unterschreiben`,
   nothingToOpen: (store) =>
     `Hier gibt es nichts mehr zu öffnen. Ein vollständig erstatteter Kauf wird nicht mehr aufgeführt. Wenn etwas fehlt, antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
   everythingSold: (store) =>
@@ -934,7 +956,12 @@ const it: OrdersWords = {
     `Se quell'indirizzo ha acquistato qualcosa da ${store}, il link è in arrivo. Arriva da ${store} tramite Marktmorgen, di solito entro un minuto. Se non lo trovi, guarda nella cartella spam.`,
   nothingArrived: "Non è arrivato nulla? Forse hai pagato con un altro indirizzo: quello che hai inserito al momento del pagamento. Prova con quello qui sotto.",
 
-  bookedCalls: (count) => (count === 1 ? "La tua chiamata prenotata" : "Le tue chiamate prenotate"),
+  bookedCalls: (count) => (count === 1 ? "La tua prenotazione" : "Le tue prenotazioni"),
+  waiting: "Ti aspetta",
+  waitingMore: (n) => `E altri ${n}. Apri l’email con cui è arrivato ciascuno per vederlo.`,
+  waitingUnread: "Non è stato possibile leggere ora cosa ti aspetta. Riapri questa pagina tra un momento.",
+  openRequest: (amount, due) => (due ? `Apri la richiesta di pagamento di ${amount} con scadenza ${due}` : `Apri la richiesta di pagamento di ${amount}`),
+  openToSign: (title) => `Leggi e firma «${title}»`,
   nothingToOpen: (store) =>
     `Qui non c'è più nulla da aprire. Un acquisto rimborsato per intero non compare più. Se manca qualcosa, rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
   everythingSold: (store) =>
@@ -1143,7 +1170,12 @@ const nl: OrdersWords = {
     `Als met dat adres iets is gekocht bij ${store}, is de link onderweg. Hij komt van ${store} via Marktmorgen en komt meestal binnen een minuut aan. Staat hij er niet, kijk dan in je spam.`,
   nothingArrived: "Niets ontvangen? Misschien heb je met een ander adres betaald: het adres dat je bij het afrekenen hebt ingevuld. Probeer dat hieronder.",
 
-  bookedCalls: (count) => (count === 1 ? "Je geboekte gesprek" : "Je geboekte gesprekken"),
+  bookedCalls: (count) => (count === 1 ? "Je boeking" : "Je boekingen"),
+  waiting: "Wacht op jou",
+  waitingMore: (n) => `En nog ${n}. Open de e-mail waarmee elk binnenkwam om het te zien.`,
+  waitingUnread: "Wat op je wacht, kon nu niet worden gelezen. Open deze pagina zo meteen opnieuw.",
+  openRequest: (amount, due) => (due ? `Het betaalverzoek van ${amount}, te betalen op ${due}, openen` : `Het betaalverzoek van ${amount} openen`),
+  openToSign: (title) => `‘${title}’ lezen en ondertekenen`,
   nothingToOpen: (store) =>
     `Hier valt niets meer te openen. Een aankoop die volledig is terugbetaald, staat er niet meer bij. Mist er iets, beantwoord dan de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
   everythingSold: (store) =>
@@ -1351,7 +1383,12 @@ const pt: OrdersWords = {
     `Se esse endereço comprou algo a ${store}, a ligação está a caminho. Chega de ${store} via Marktmorgen, normalmente em menos de um minuto. Se não estiver lá, veja na pasta de spam.`,
   nothingArrived: "Não recebeu nada? Talvez tenha pago com outro endereço: o que introduziu no pagamento. Experimente esse abaixo.",
 
-  bookedCalls: (count) => (count === 1 ? "A sua chamada marcada" : "As suas chamadas marcadas"),
+  bookedCalls: (count) => (count === 1 ? "A sua marcação" : "As suas marcações"),
+  waiting: "À sua espera",
+  waitingMore: (n) => `E mais ${n}. Abra o email com que cada um chegou para o ver.`,
+  waitingUnread: "Não foi possível ler agora o que está à sua espera. Volte a abrir esta página daqui a pouco.",
+  openRequest: (amount, due) => (due ? `Abrir o pedido de pagamento de ${amount} que vence a ${due}` : `Abrir o pedido de pagamento de ${amount}`),
+  openToSign: (title) => `Ler e assinar «${title}»`,
   nothingToOpen: (store) =>
     `Já não há nada para abrir aqui. Uma compra reembolsada na totalidade deixa de aparecer. Se faltar alguma coisa, responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
   everythingSold: (store) =>

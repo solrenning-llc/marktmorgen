@@ -69,6 +69,12 @@ export type Review = {
    * review's words and hidden with them; the creator may take it off.
    */
   photo: ReviewPhoto | null;
+  /**
+   * When its order was paid, in seconds (606 [WP5]): kept when the review is
+   * first written, so the page can say how long after purchase it was
+   * written. Absent from reviews written before it was kept.
+   */
+  paidAt?: number;
 };
 
 export type ReviewPhoto = { path: string; width: number; height: number };

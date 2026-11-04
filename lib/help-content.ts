@@ -31,7 +31,7 @@ import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MIN_CENTS, dollars } from "@/lib/auto-
 import { isDomainsConfigured } from "@/lib/domains";
 import { TEAM_LIMITS, teamLimitWords } from "@/lib/team-scheduling-rules";
 import { PLAN_TITLES, PRO_MONTHLY_EMAILS, REFUND_DAYS, TRIAL_MONTHLY_EMAILS, SCALE_MONTHLY_EMAILS } from "@/lib/plan";
-import { workflowLimitWords } from "@/lib/flow-limits";
+import { MAX_STEPS, workflowLimitWords } from "@/lib/flow-limits";
 import { pipelineLimitWords } from "@/lib/crm-rules";
 import { PLAN_BREAKS_ENABLED, PAID_MONTHS_BEFORE_PAUSE, PAUSE_MONTHS } from "@/lib/plan-pause-rules";
 import { healthRuleWords, rampRuleWords } from "@/lib/mail-health-rules";
@@ -46,6 +46,17 @@ import { ERASE_STUDIO_UNITS } from "@/lib/erasure-rules";
 import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib/agreement-rules";
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
+import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
+
+/**
+ * The help center's questions a feature page asks too, word for word, so
+ * renaming one here renames it there (lib/feature-pages.ts, helpAnswer).
+ */
+export const SHARED_QUESTIONS = {
+  address: "Can I change my store address later?",
+  domain: "Can I use my own domain?",
+  refunds: "Who handles refunds and disputes?",
+} as const;
 
 /** An anchor for one answer, from its question. */
 export function answerId(q: string): string {
@@ -301,7 +312,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Who handles refunds and disputes?",
+        q: SHARED_QUESTIONS.refunds,
         a: [
           "You do, in your own Stripe dashboard, with the same tools any business has. Because the charge was made on your account, a refund is a refund you issue, not a request you file with us.",
         ],
@@ -520,7 +531,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           "Yes, on any paid product sold once that hands over nothing else, at one price or at several for sizes or versions (S, M, L; signed or not). Under the product, choose \u201cShip it: a physical product, sent by you\u201d, then set the shipping cost per order (0 for free shipping), where it ships (the United States, the United States and Canada, the EU, Europe, everywhere Stripe ships, or only the countries you list) and, if you like, when it ships.",
           "Its page says what shipping costs and where it goes before anybody pays. Stripe's own page asks the buyer for an address in one of those countries and adds the shipping as its own line; with sales tax on, the product is taxed as goods and the shipping as shipping. The address is on the page after paying, in the buyer's confirmation email, on the sale in your studio and in your Stripe dashboard.",
-          "You send it yourself. On the sale, \u201cMark as shipped\u201d emails the buyer that it is on its way, with a tracking link if you paste one, once. A limited quantity and the boxes at checkout work as on any product; a product you ship cannot also be a gift, part of a cart or bundle, have a payment plan or a price the buyer chooses.",
+          "You send it yourself. On the sale, \u201cMark as shipped\u201d emails the buyer that it is on its way, with a tracking link if you paste one, once. A limited quantity and the boxes at checkout work as on any product; a product you ship cannot also be a gift or part of a bundle, have a payment plan or a price the buyer chooses. At one price and not limited, it can go in a cart with other products you ship: the buyer gives one address, in a country everything in the cart ships to, and pays each product's shipping added together.",
         ],
       },
       {
@@ -577,7 +588,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         q: "Can buyers put several products in a cart?",
         a: [
           "Yes, on every plan, once two or more of your products could go in one. Each product's card and page then shows \u201cAdd to cart\u201d under its buy button, and the cart appears at the top of your store with each product at its price now \u2014 a sale or a fair price for the buyer's country already taken off \u2014 and the total. Buyers pay for up to four products in one payment, on your own Stripe account, and each is handed over exactly as if bought on its own: its download or link, its course, its license key, its place on their list of purchases.",
-          "What can go in a cart: a paid product at one price, sold once \u2014 a file, a link, a course with lessons or a bundle. Not memberships, calls, products with several prices, a limited number, a price the buyer chooses or questions asked at checkout, products coming soon, or a bundle the buyer builds. A discount code box is shown only when nothing in the cart is already on sale. The cart is kept only in the buyer's own browser, and emptied once paid. With checkout reminders on, a cart left at its checkout gets the same one reminder a product does, naming everything in it with a link that puts the cart back as it was.",
+          "What can go in a cart: a paid product at one price, sold once \u2014 a file, a link, a course with lessons, a bundle or a product you ship. With products you ship, the cart shows the shipping and where it can go before the buyer pays, asks for one address in a country they all ship to, and adds each one's shipping together; when they share no country, it names the ones to take out and buy on their own. A cart holds either products you ship or products handed over online, not both: it says so before the buyer pays. Not memberships, calls, products with several prices, a limited number, a price the buyer chooses or questions asked at checkout, products coming soon, or a bundle the buyer builds. A discount code box is shown only when nothing in the cart is already on sale. The cart is kept only in the buyer's own browser, and emptied once paid. With checkout reminders on, a cart left at its checkout gets the same one reminder a product does, naming everything in it with a link that puts the cart back as it was.",
           "\u201cBuy more, save more\u201d, in your studio next to your sale and fair prices, takes a percent you choose, from 5% to 50%, off every product in a cart once it holds 2 or more (or 3, or 4, as you choose), on top of any sale or fair price. Every \u201cAdd to cart\u201d then says so, the cart tells the buyer how many more it takes, and shows what the deal took off before they pay. It is off until you switch it on, and the order records the percent, so your numbers and any refund add up.",
         ],
       },
@@ -685,6 +696,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        // 544 [SQ9]: the studio's "Bring in a sequence" (components/sequence-import-box.tsx, lib/sequence-import.ts), as it works.
+        q: "Can I bring my email sequences from another service?",
+        a: [
+          `Yes, on Studio and Scale. Under Sequences and workflows, choose “Download the template (CSV)”. Copy each email from your old service into it, one email per row. Each row has its subject, its words and days_after: how many days after the email before it goes out. Its columns are ${SEQUENCE_TEMPLATE.join(", ")}; leave preview empty. Then pick the file under “Bring in a sequence” and choose “Read the file”. A file can be up to ${MAX_SEQUENCE_FILE_BYTES / 1000} KB. A sequence holds up to ${MAX_STEPS} emails; any after that are left out and listed.`,
+          "The emails open in the sequence editor as a new sequence. You read each one, pick what starts it and save it. It is saved paused: nothing is sent until you preview it and switch it on from its card.",
+          "Emails written in HTML come in as text. Paragraphs, lists and links are kept, each link as its words and its address. Pictures and links through a known click-tracking address are taken out. So are merge fields like *|FNAME|* or {{ name }}. Each one taken out is listed by its line in the file, above the emails, so you can check it. So is each email left out, and each preview text, which an email in a sequence does not have yet.",
+        ],
+      },
+      {
         q: "Can I email the people on my list?",
         a: [
           "Yes, on Studio. From your studio you write one-off emails to everyone who agreed to hear from you, or only to those who got one product, and send them now or at a time you choose. Sequences go out by themselves: a welcome when someone joins, a few emails in the days after someone buys. Each person goes through a sequence once. A sequence can end for anyone who buys, or gets one product, so it stops selling to people who already have it; and any of its emails can go only to those who have a product or do not, who have bought or not yet, or who carry a label, the others skipping it or leaving there. A step can also act instead of writing: give someone a label, take one off, start them on another sequence, set one of your fields, put their deal in a stage of your deals board (a new deal when they have no open one), write a note on their page, or email you who reached it. A sequence can start when another gives someone a label, so one sequence hands people to the next, or when someone on your list sends one of your forms that asks for an email address. An email can also go only to those who used a link to your store in the email before, or did not: that is counted only for readers who allowed it, with a box of its own when they joined, and they can stop it from any email. There is no open tracking. AI can write a sequence's emails for you on " + AI_PLANS_WORDS + ", 3 to 7 of them, from your products' names, prices and links, with only your store's own links kept; you read them and save. And when a product gets a new version, “Tell buyers about an update” under it emails everyone who bought it, once a week at most, with your words and the link to their orders.",
@@ -694,7 +714,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           "Write an email in its box, or switch to Design and lay it out in blocks: headings, text, lists, buttons that lead to an https address, lines across and pictures, with the email shown beside it as it will be sent, buttons in your store's color. Four templates start you off: a newsletter, something new, a welcome and one product. A template only lays out blocks, with what to write in ⟦brackets⟧, and an email still holding one cannot go out. Both ways write the same email, so you can switch between them at any time.",
           "An email can carry up to six pictures, each added under its box where the cursor is, with what it shows for readers who cannot see it. Each is made smaller on your device, kept as a JPEG on this site so every mail app shows it, and stays for as long as your store does, so an email opened years later still has it.",
           "A sequence can also split its people in two, A and B: an email set to the first half goes only to them, one set to the second half only to the others, and each person stays in the same half at every step, so you can try two versions of a sequence on one list. A step can also tell your own server, through your webhooks, who reached it, once for each person.",
-          `A sequence is also a workflow. Any step can branch, IF/ELSE: those its condition holds for do it and go on to a later step you choose, the others go to another later step or leave. A step can only wait, which with a condition makes a pure branch, or make a teammate responsible for the person's open deal. A workflow can end once someone buys, gets one product or carries a label, and it can start when someone opens a course for the first time, or when someone on your list leaves a checkout unpaid after checking the box on the checkout page to hear from you (that box is Stripe's, shown to stores with a US Stripe account; such a workflow must end once they buy). New workflows are saved paused: preview the path someone would take, then switch it on. Every run keeps its history for up to 400 days, each step attempted, then confirmed, failed or uncertain; an uncertain step is never repeated by itself, and the run waits for you to choose. When someone asks to be deleted, one press in a run's history erases them from every workflow: their runs, history and steps still waiting. Removing a workflow or deleting the store erases its runs too. ${workflowLimitWords()} Every email a workflow sends counts in your monthly emails.`,
+          `A sequence is also a workflow. Any step can branch, IF/ELSE: those its condition holds for do it and go on to a later step you choose, the others go to another later step or leave. A step can only wait, which with a condition makes a pure branch, or make a teammate responsible for the person's open deal, or set its next action and the day it is due, or give it to whoever on your team has the fewest open deals. A workflow can end once someone buys, gets one product or carries a label, and it can start when someone opens a course for the first time, or when someone on your list leaves a checkout unpaid after checking the box on the checkout page to hear from you (that box is Stripe's, shown to stores with a US Stripe account; such a workflow must end once they buy). New workflows are saved paused: preview the path someone would take, then switch it on. Every run keeps its history for up to 400 days, each step attempted, then confirmed, failed or uncertain; an uncertain step is never repeated by itself, and the run waits for you to choose. When someone asks to be deleted, one press in a run's history erases them from every workflow: their runs, history and steps still waiting. Removing a workflow or deleting the store erases its runs too. ${workflowLimitWords()} Every email a workflow sends counts in your monthly emails.`,
           "A sequence can also follow your courses. It can start when someone who agreed to hear from you finishes a course, every lesson done, which is the moment to offer the next one; and any of its emails can go only to those who have, or have not, opened or finished a course. Wait three days after the purchase, send only to those who have not opened it, and the reminder reaches exactly the people who need it.",
           "You can also choose who gets an email by what your store knows about them: everyone who has spent at least an amount with you, everyone who first found you through one channel, like Instagram or a podcast, or everyone who has bought before but not in the last 30, 60, 90, 180 or 365 days. These are worked out from your own Stripe account when the email goes out, so they match buyers only, and nothing extra is recorded about anyone. Save any choice as a group with a name, up to 20, and pick it again for the next email.",
           "Someone on your team with the Editor role can write drafts, up to 20 per store; you or an Admin read them and send them. And, if you switch it on, one email asks each buyer for a review, 3 to 30 days after buying, counted in the same monthly emails.",
@@ -786,7 +806,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "Can I put the buyer's email on a PDF?",
         a: [
-          "Yes. Switch on stamping for a product, and every page of the PDF a buyer downloads carries one line along the bottom with their email, the date and their order. It discourages sharing; it does not stop it, and it is not copy protection. PDFs up to 50 MB are stamped; a bigger one, or one locked with a password, is handed over as uploaded and your studio tells you. Say on the product that the buyer's email is printed on it.",
+          "Yes. Switch on stamping for a product, and every page of the PDF a buyer downloads carries one line along the bottom with their email, the date and their order. It discourages sharing; it does not stop it, and it is not copy protection. PDFs up to 50 MB are stamped; a bigger one, or one locked with a password, is handed over as uploaded and your studio tells you. An EPUB gets the same line hidden inside the book's files, where reading apps do not show it; one with a digital signature or encryption (DRM) is handed over as uploaded. Say on the product that the buyer's email is in the file.",
         ],
       },
       {
@@ -887,6 +907,8 @@ export const HELP_SECTIONS: HelpSection[] = [
           "A deal is somebody you are talking to about a sale that does not happen at your checkout, such as a coaching package or a project, with what it is worth in your store's currency. It sits on a stage you name, each open, won or lost, and each stage is added up. Only people on your team who see your orders see any of it, and nothing in it emails anybody by itself.",
           "Deals sit in pipelines: one for coaching and one for brand partnerships, say, each with its own stages in the order you choose. You rename, reorder, add and remove stages; removing a stage that still holds deals asks you where they go, and removing a pipeline moves its deals to a stage of another, so no deal is deleted that way. A deal moves to any stage of any pipeline. Each pipeline shows what its open, won and lost deals add up to, from the values you recorded: nothing is weighted or forecast. " + pipelineLimitWords(),
           "A workflow can start when a deal enters a stage you choose: when your team makes a deal in that stage, or moves one there. It starts only for the person the deal names by email, only if they are on your list and agreed to hear from you, and once per person, like every workflow. A deal made from a form response, moved by a workflow step, or moved because you removed its stage starts nothing. Each stage starts one workflow at most, which can start others with a step. On a plan with workflows, a deal entering a stage takes one more studio request, for that check.",
+          "A workflow can also start when someone signs one of your proposals or agreements: only for the person who signed, by the address you sent it to, only if they are on your list and agreed to hear from you, and once per person. Signing never adds anybody to your list. One workflow starts on signing; it can start others with a step.",
+          "The same is true of a payment request: a workflow can start when someone pays one, only for the person you sent it to, only if they are on your list and agreed to hear from you, and once per person. Paying never adds anybody to your list. One workflow starts on a paid request.",
         ],
       },
       {
@@ -897,7 +919,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Can I use my own domain?",
+        q: SHARED_QUESTIONS.domain,
         a: [
           ...(isDomainsConfigured()
             ? [
@@ -907,7 +929,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
-        q: "Can I change my store address later?",
+        q: SHARED_QUESTIONS.address,
         a: [
           "Yes, whenever you want, from your studio. Nobody has to be asked and there is nothing to wait for.",
           "Your store does not move: same page, same name, same description, same products. Only the address changes.",
@@ -1035,3 +1057,14 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
 ];
 
+/**
+ * A help-center answer as one paragraph, for a feature page that asks the very
+ * same question (534 [FQ1] unit 44), so a question has one answer wherever it
+ * is asked (tests/distinct-questions.test.ts). Throws when the question is not
+ * in the help center, so a renamed one cannot slip by.
+ */
+export function helpAnswer(q: string): string {
+  const item = HELP_SECTIONS.flatMap((section) => section.items).find((x) => x.q === q);
+  if (!item) throw new Error(`No help answer for "${q}"`);
+  return item.a.join(" ");
+}

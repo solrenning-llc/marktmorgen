@@ -23,8 +23,14 @@ is("Italian", caught(["sconto", "sconti", "codice promozionale", "codici promozi
 is("Dutch", caught(["korting", "kortingen", "kortingscode", "kortingscodes", "tijdelijke aanbieding", "laatste kans", "alleen vandaag", "vijf sterren"]), []);
 is("Portuguese", caught(["desconto", "descontos", "cupom", "cupons", "cupão", "cupões", "código promocional", "códigos promocionais", "última oportunidade", "só hoje", "depoimentos", "cinco estrelas", "mais vendidos"]), []);
 
+part("Compounds, spacing and typography");
+is("German and Dutch compounds that end in the deal word", caught(["Frühlingsrabatt", "Mengenrabatt", "Sommergutschein", "prijskorting"]), []);
+is("free shipping in each language", caught(["envío gratis", "livraison gratuite", "kostenloser Versand", "spedizione gratuita", "gratis verzending", "frete grátis", "scontati"]), []);
+is("however the words are spaced or joined", caught(["last  chance", "last\nchance", "last\u00a0chance", "limited\u2011time", "aujourd’hui seulement", "best sellers", "bestseller", "best-seller", "SÓLO HOY"]), []);
+is("the store's own word is found however either side was typed", heldToFacts("Last  chance to join.", "The last chance to join is Friday."), true);
+
 part("Whole words only: an ordinary word that merely contains one is not caught");
-is("none of these", ["A barcode scanner", "The Codex class", "A promotion at work", "Encoded lessons", "Ultimatum", "Garantir la qualité", "Sconfitta e rinascita", "Rabattieren", "Unrabatt"].filter((t) => DEAL_WORDS.test(t)), []);
+is("none of these", ["A barcode scanner", "The Codex class", "A promotion at work", "Encoded lessons", "Ultimatum", "Garantir la qualité", "Sconfitta e rinascita", "Rabattieren", "Ein Scontrino"].filter((t) => DEAL_WORDS.test(t)), []);
 
 part("Held to the facts: a plural the store never wrote is not shown");
 const facts = "Pottery course. 12 lessons. $27.";

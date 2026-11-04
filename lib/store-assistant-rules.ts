@@ -225,24 +225,29 @@ const DEAL_TERMS = [
   "limited[- ]time", "only \\d+ left", "hurry", "selling fast", "last chance", "ends (?:today|tonight|soon)", "act now", "today only",
   "exclusive offers?", "guarantee[ds]?", "best[- ]selling", "best[- ]?sellers?", "testimonials?", "five[- ]stars?", "5[- ]stars?",
   // Spanish
-  "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promocional(?:es)?", "rebajas?", "ofertas? limitadas?", "[uú]ltima oportunidad", "date prisa", "solo hoy",
+  "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promocional(?:es)?", "rebajas?", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad", "date prisa", "s[oó]lo hoy",
   "garant[ií]as?", "testimonios?", "cinco estrellas", "m[aá]s vendidos?",
   // French
-  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez-vous", "aujourd'hui seulement",
+  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez-vous", "aujourd['’]hui seulement", "livraison gratuite",
   "garanties?", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
   // German
-  "rabatt(?:e|s)?", "rabattcodes?", "gutscheine?", "gutscheincodes?", "aktionscodes?", "sonderangebote?", "letzte chance", "nur heute",
+  "\\p{L}*rabatt(?:e|en|s)?", "rabattcodes?", "\\p{L}*gutscheine?", "gutscheincodes?", "kostenloser versand", "aktionscodes?", "sonderangebote?", "letzte chance", "nur heute",
   "beeilen sie sich", "garantien?", "kundenstimmen?", "erfahrungsberichte?", "f[uü]nf sterne",
   // Italian
-  "scont[oi]", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi", "garanzi[ae]",
+  "scont[oi]", "scontat[aeio]", "spedizione gratuita", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi", "garanzi[ae]",
   "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
   // Dutch
-  "korting(?:en)?", "kortingscodes?", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag", "garanties?", "vijf sterren",
+  "\\p{L}*korting(?:en)?", "kortingscodes?", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag", "garanties?", "vijf sterren",
   // Portuguese
   "descontos?", "cupom", "cupons", "cup[aã]o", "cup[oõ]es", "c[oó]digo promocional", "c[oó]digos promocionais", "ofertas? limitadas?", "[uú]ltima oportunidade",
-  "s[oó] hoje", "garantias?", "depoimentos?", "testemunhos?", "cinco estrelas", "mais vendidos?",
+  "s[oó] hoje", "frete gr[aá]tis", "garantias?", "depoimentos?", "testemunhos?", "cinco estrelas", "mais vendidos?",
 ];
-export const DEAL_WORDS = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${DEAL_TERMS.join("|")})(?![\\p{L}\\p{N}_])|%\\s?off(?![\\p{L}])`, "iu");
+/** Between the words of a term: any run of spaces (a line break, a no-break space) or a hyphen of any kind. */
+const BETWEEN = "[\\s\\-\\u2010-\\u2015]+";
+export const DEAL_WORDS = new RegExp(
+  `(?<![\\p{L}\\p{N}_])(?:${DEAL_TERMS.map((term) => term.replace(/\[- \]\?/g, `(?:${BETWEEN})?`).replace(/\[- \]| /g, BETWEEN)).join("|")})(?![\\p{L}\\p{N}_])|%\\s?off(?![\\p{L}])`,
+  "iu",
+);
 
 const NUMBERS = /\d+(?:[.,]\d+)*/g;
 /** A number as digits, and without decimals that are all zeros: "$27.00" and "$27" are the same price. */
@@ -265,9 +270,11 @@ export function heldToFacts(reply: string, facts: string): boolean {
   for (const n of reply.match(NUMBERS) ?? []) {
     if (!numberForms(n).some((form) => factNumbers.has(form))) return false;
   }
-  const lowerFacts = facts.toLowerCase();
+  // Both sides as one form, spaces single, so a word the store wrote is found however either was typed.
+  const plain = (text: string) => text.normalize("NFC").toLowerCase().replace(/[\s\-\u2010-\u2015]+/gu, " ");
+  const lowerFacts = plain(facts);
   for (const m of reply.matchAll(new RegExp(DEAL_WORDS.source, "giu"))) {
-    if (!lowerFacts.includes(m[0].toLowerCase())) return false;
+    if (!lowerFacts.includes(plain(m[0]))) return false;
   }
   return true;
 }

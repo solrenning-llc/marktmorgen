@@ -25,6 +25,20 @@
  *   - a bundle: only while it holds enough to hand over, counted as its own
  *     page counts it (offeredItems in lib/bundles.ts and bundleReady in
  *     lib/bundle-rules.ts); a failed read leaves it out.
+ *
+ * What one call costs, read from the code: the pre-orders read (soonState),
+ * the bundles' items (offeredItems), and per product passed one stock read
+ * with up to its MAX_CHECKS questions to Stripe (stockLeft, lib/stock.ts)
+ * and one LLEN of its key pool (outOfKeys). Nothing calls it yet. Contract
+ * for the unit that sends an email with product cards (546 [EB1]), before it
+ * is switched on:
+ *   - pass only the products the email's blocks name (productBlocksIn,
+ *     lib/mail-product-block.ts), never the whole catalog;
+ *   - bound how many distinct products one email may name, so a call's reads
+ *     have a ceiling, and refuse an email over it in plain words;
+ *   - call this once per send or per batch of one email, never per reader;
+ *   - register those reads at that ceiling as the email's own line in
+ *     tests/plan-cost-registry.ts (Revisor 3, C2-73, 4 November 2026).
  */
 import type { Listing, Store } from "@/lib/store";
 import { offeredItems } from "@/lib/bundles";

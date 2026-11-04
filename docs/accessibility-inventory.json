@@ -1282,6 +1282,7 @@
     "components/countdown.tsx",
     "components/course-access-check.tsx",
     "components/course-comments-studio.tsx",
+    "components/course-day-preview.tsx",
     "components/course-editor.tsx",
     "components/course-outline.tsx",
     "components/course-template-picker.tsx",

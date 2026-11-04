@@ -211,9 +211,38 @@ export const HANDOFF_WORDS =
 
 // ----------------------------------------------------------------- held to the facts
 
-/** Words of a deal or of pressure. A reply may use one only when the store's own text does. */
-export const DEAL_WORDS =
-  /\b(discount|coupon|promo|promo code|voucher|code|% ?off|percent off|sale price|free shipping|limited time|only \d+ left|hurry|selling fast|last chance|ends (today|tonight|soon)|act now|today only|exclusive offer|guarantee[ds]?|best[- ]selling|bestseller|testimonial|five[- ]star|5[- ]star)\b/i;
+/**
+ * Words of a deal or of pressure, singular and plural, in English and in
+ * every language a store can speak (Spanish, French, German, Italian, Dutch,
+ * Portuguese). A reply may use one only when the store's own text does.
+ * Whole words only, by Unicode letters, so an accented word is matched at its
+ * edges and a longer word that merely contains one ("barcode", "promotion")
+ * is not.
+ */
+const DEAL_TERMS = [
+  // English
+  "discount(?:s|ed)?", "coupons?", "promos?", "promo codes?", "vouchers?", "codes?", "percent off", "sale prices?", "free shipping",
+  "limited[- ]time", "only \\d+ left", "hurry", "selling fast", "last chance", "ends (?:today|tonight|soon)", "act now", "today only",
+  "exclusive offers?", "guarantee[ds]?", "best[- ]selling", "best[- ]?sellers?", "testimonials?", "five[- ]stars?", "5[- ]stars?",
+  // Spanish
+  "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promocional(?:es)?", "rebajas?", "ofertas? limitadas?", "[uú]ltima oportunidad", "date prisa", "solo hoy",
+  "garant[ií]as?", "testimonios?", "cinco estrellas", "m[aá]s vendidos?",
+  // French
+  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez-vous", "aujourd'hui seulement",
+  "garanties?", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
+  // German
+  "rabatt(?:e|s)?", "rabattcodes?", "gutscheine?", "gutscheincodes?", "aktionscodes?", "sonderangebote?", "letzte chance", "nur heute",
+  "beeilen sie sich", "garantien?", "kundenstimmen?", "erfahrungsberichte?", "f[uü]nf sterne",
+  // Italian
+  "scont[oi]", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi", "garanzi[ae]",
+  "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
+  // Dutch
+  "korting(?:en)?", "kortingscodes?", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag", "garanties?", "vijf sterren",
+  // Portuguese
+  "descontos?", "cupom", "cupons", "cup[aã]o", "cup[oõ]es", "c[oó]digo promocional", "c[oó]digos promocionais", "ofertas? limitadas?", "[uú]ltima oportunidade",
+  "s[oó] hoje", "garantias?", "depoimentos?", "testemunhos?", "cinco estrelas", "mais vendidos?",
+];
+export const DEAL_WORDS = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${DEAL_TERMS.join("|")})(?![\\p{L}\\p{N}_])|%\\s?off(?![\\p{L}])`, "iu");
 
 const NUMBERS = /\d+(?:[.,]\d+)*/g;
 /** A number as digits, and without decimals that are all zeros: "$27.00" and "$27" are the same price. */
@@ -237,7 +266,7 @@ export function heldToFacts(reply: string, facts: string): boolean {
     if (!numberForms(n).some((form) => factNumbers.has(form))) return false;
   }
   const lowerFacts = facts.toLowerCase();
-  for (const m of reply.matchAll(new RegExp(DEAL_WORDS.source, "gi"))) {
+  for (const m of reply.matchAll(new RegExp(DEAL_WORDS.source, "giu"))) {
     if (!lowerFacts.includes(m[0].toLowerCase())) return false;
   }
   return true;

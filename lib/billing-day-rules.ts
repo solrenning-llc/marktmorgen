@@ -109,32 +109,58 @@
  *     (`META_PRICE`) makes a request for a price since changed "changed".
  *     The last change made (`META_DONE`) is signed the same way, with the
  *     subscription and customer (`doneSigText`, `META_DONE_SIG`): one
- *     edited, or a signature without its time, is read as made just now,
- *     so an edit can only refuse the member ("recent"), never allow more.
+ *     edited, or a signature without its time, is read as made just now
+ *     ("recent"). That does not stop every edit: deleting the time and its
+ *     signature together, or putting back an older signed pair, lets the
+ *     member change again before a period has passed. The harm falls on
+ *     the creator alone (each change gives away at most the two-hour run
+ *     window, below), and the route should also keep the last change on
+ *     the server (Redis, by subscription) and refuse from that as well.
+ *   - The route reads the subscription with `Stripe-Version` 2025-03-31.basil
+ *     or later (lib/stripe-connect.ts pins 2026-08-26.dahlia): with an older
+ *     version, such as the 2024-06-20 used elsewhere, `billing_mode` and the
+ *     period on the item are not there, and every membership is refused.
  *   - The route previews, checks `mayRun` and updates under the same
  *     subscription lock (`withLock` on `nl:tier:{subscription}:lock`, as
  *     lib/yearly-switch.ts does), so no other change to the membership
- *     slips between the fresh preview and the update.
+ *     slips between the fresh preview and the update. Things outside the
+ *     subscription (a pending invoice item, a customer balance) can still
+ *     be added by the creator in the seconds between the two, so the route
+ *     checks the invoice the update returns (`latest_invoice`) with
+ *     `overCeiling`, and refunds any excess it reports at once, by code.
  *   - After a 402 Stripe "doesn't update the subscription", so its
  *     `latest_invoice` stays the old paid one, but a proration invoice it
  *     made may be left open (or draft) outside it, and could later be
  *     collected for a change that never happened. So the route must, on a
- *     402: list `/invoices?subscription={id}&status=open` and
- *     `status=draft` with `created[gte]` the second it sent the update, and
- *     add the invoice reached from the 402's `payment_intent` (through
- *     `/invoice_payments`) when there is one; take every invoice
- *     `invoicesToVoid` names; void each open one and delete each draft,
- *     with retries; and if voiding still fails, mark it uncollectible
- *     (`/invoices/{id}/mark_uncollectible`), never leaving it collectible;
- *     only then clear the request (`clearMoveBody`). Before every request
- *     and every run the route lists the subscription's open and draft
- *     invoices and passes them as `MoveContext.openInvoices`; while any is
- *     known, or the list was not read, the member is refused ("invoice").
+ *     402: list the subscription's open and draft invoices from a minute
+ *     before the second it sent the update (`sweepQuery`, for Stripe's
+ *     clock), add the invoice reached from the 402's `payment_intent`
+ *     (through `/invoice_payments`) when there is one, and clear every
+ *     invoice `invoicesToVoid` names, each with retries: for a draft, stop
+ *     it advancing first (`auto_advance=false`), then delete it, and if it
+ *     cannot be deleted, finalize it without advancing and void it; void
+ *     each open one, and if voiding keeps failing, mark it uncollectible
+ *     (`/invoices/{id}/mark_uncollectible`); never leave one collectible.
+ *     The request is not cleared then: the route writes the signed sweep
+ *     marker (`sweepMarkBody`), which refuses the member ("invoice"), and a
+ *     later run, at least `SWEEP_AGAIN_SECONDS` after, sweeps again with
+ *     the same query; only a sweep that finds nothing left to clear
+ *     (`sweepDone`) lets the route clear the request and the marker
+ *     (`clearMoveBody`). Before every request and every run the route lists
+ *     the subscription's open and draft invoices and passes them as
+ *     `MoveContext.openInvoices`; while any is known, or the list was not
+ *     read, the member is refused ("invoice").
+ *   - After any run that does not move the day ("above", "invoice", any
+ *     other refusal, a lapse or a 402), the route tells the member, in the
+ *     same words the page uses, that the payment day stays as it was and
+ *     why, so a request never ends in silence.
  *   - Not verified yet, and needed before the unit that calls Stripe: on a
  *     test clock, in both classic and flexible billing modes, how far the
  *     preview made a day ahead, the fresh one at the moment and the invoice
  *     the change makes differ; that the anchor really moves in flexible
- *     mode (until then `FLEXIBLE_MOVE_PROVEN` stays false); and "does the
+ *     mode (until then `FLEXIBLE_MOVE_PROVEN` stays false, and a flexible
+ *     membership, which is almost every new one, is refused with its own
+ *     reason, "mode": the feature is effectively off); and "does the
  *     402 leave an open invoice, and where?" (in `latest_invoice`, only in
  *     the subscription's invoice list, or reached only from the 402's
  *     payment). The ceiling keeps the member safe if the amounts differ; it
@@ -198,7 +224,9 @@ export const MOVE_LOCAL_HOUR = 12;
  * billing-mode page says the anchor "remains unchanged" in the cases it
  * lists). Not a product flag: a rule toggle the unit that calls Stripe
  * flips only with that recorded proof. While false, a flexible
- * subscription is refused ("state").
+ * subscription is refused with its own reason, "mode" (not offered for
+ * this membership yet), never "state", which a page reads as a membership
+ * that is not active.
  */
 export const FLEXIBLE_MOVE_PROVEN = false;
 
@@ -227,9 +255,18 @@ export const META_PRICE = "billing_day_price";
 export const META_SIG = "billing_day_sig";
 export const META_DONE = "billing_day_done";
 export const META_DONE_SIG = "billing_day_done_sig";
+/** After a 402: the second the update was sent, and its signature; cleared only after a later sweep found nothing (`sweepDone`). */
+export const META_SWEEP = "billing_day_sweep";
+export const META_SWEEP_SIG = "billing_day_sweep_sig";
 
 /** What a request writes and the end of a request clears. */
-const REQUEST_KEYS = [META_AT, META_ON, META_SHOWN, META_CEILING, META_END, META_MONTHS, META_PRICE, META_SIG] as const;
+const REQUEST_KEYS = [META_AT, META_ON, META_SHOWN, META_CEILING, META_END, META_MONTHS, META_PRICE, META_SIG, META_SWEEP, META_SWEEP_SIG] as const;
+
+/** How long after a 402 the second sweep may run: a later run, once Stripe's lists have caught up. */
+export const SWEEP_AGAIN_SECONDS = 15 * 60;
+
+/** How far before the second the update was sent the sweep looks, for Stripe's clock. */
+export const SWEEP_LEEWAY_SECONDS = 60;
 
 /**
  * What the caller expands when it reads the subscription for these rules, so
@@ -310,7 +347,8 @@ export type MoveRefusal =
   | "card"
   | "pending"
   | "recent"
-  | "changed";
+  | "changed"
+  | "mode";
 
 /** Why a preview of the change cannot be shown or charged as it is. */
 export type PreviewRefusal = "amount" | "balance" | "extra";
@@ -418,8 +456,9 @@ function signedMeta(sub: BillingDaySub, verify: RequestVerifier): Record<string,
 /**
  * When the last change was made, in seconds: 0 when none was ever recorded
  * (neither the time nor its signature is there). A time or signature that
- * was edited, or one without the other, is read as a change made just now,
- * so an edit can only refuse the member, never let them change sooner.
+ * was edited, or one without the other, is read as a change made just now.
+ * Deleting both, or putting back an older signed pair, is not caught here
+ * (see the header): the route also keeps the last change on the server.
  */
 export function lastDone(sub: BillingDaySub, nowSeconds: number, verify: RequestVerifier): number {
   const meta = sub.metadata ?? {};
@@ -427,6 +466,22 @@ export function lastDone(sub: BillingDaySub, nowSeconds: number, verify: Request
   const sig = meta[META_DONE_SIG];
   if (!raw && !sig) return 0;
   return typeof raw === "string" && checks(verify, doneSigText(sub, raw), sig) && seconds(raw) ? seconds(raw) : nowSeconds;
+}
+
+/** The exact text the server signs for a sweep marker: `billing-day-sweep:v1|{sub.id}|{customer}|{sentAt}`. */
+export function sweepSigText(sub: BillingDaySub, sentAt: string): string | null {
+  const id = stripeId(sub.id);
+  const customer = customerIdOf(sub);
+  if (!id || !customer || !DIGITS.test(sentAt)) return null;
+  return ["billing-day-sweep:v1", id, customer, sentAt].join("|");
+}
+
+/** The second a declined update was sent, from a signed sweep marker; null when none is kept. */
+export function sweepPending(sub: BillingDaySub, verify: RequestVerifier): number | null {
+  const meta = sub.metadata ?? {};
+  const raw = meta[META_SWEEP];
+  if (typeof raw !== "string" || !checks(verify, sweepSigText(sub, raw), meta[META_SWEEP_SIG])) return null;
+  return seconds(raw) || null;
 }
 
 /** When a signed change this membership is waiting for runs, in seconds; null when none waits. */
@@ -483,7 +538,9 @@ function cannotHold(sub: BillingDaySub, nowSeconds: number, context: MoveContext
   if (record(sub.latest_invoice)?.status !== "paid" || !noOpenInvoices(context.openInvoices)) return "invoice";
   if (!customer || customer.balance !== 0) return "balance";
   if (!chargesCard(sub, customer)) return "card";
+  if (record(sub.billing_mode)?.type === "flexible" && !FLEXIBLE_MOVE_PROVEN) return "mode";
   if (!periodKnown(sub)) return "state";
+  if (sweepPending(sub, context.verify) !== null) return "invoice";
   return null;
 }
 
@@ -800,23 +857,39 @@ export function mayRun(sub: BillingDaySub, fresh: MovePreview, nowSeconds: numbe
 }
 
 /** What the route found after a 402: from the invoice list, and from the 402's own payment. */
-export type FoundInvoice = { id?: unknown; status?: unknown; created?: unknown; subscription?: unknown; parent?: unknown };
+export type FoundInvoice = { id?: unknown; status?: unknown; created?: unknown; billing_reason?: unknown; subscription?: unknown; parent?: unknown };
 
-/** Which invoices to clear after a declined change, and how. */
-export type InvoicesToClear = { void: string[]; remove: string[] };
+/**
+ * Which invoices to clear after a declined change, and how: drafts are
+ * first stopped from advancing (`stopAdvance`, `auto_advance=false`), then
+ * deleted (`remove`; one that cannot be deleted is finalized with
+ * `auto_advance=false` and voided); open ones are voided (`void`; one that
+ * cannot be voided is marked uncollectible). Never left collectible.
+ */
+export type InvoicesToClear = { stopAdvance: string[]; remove: string[]; void: string[] };
+
+/**
+ * The query the route lists the subscription's invoices with after a 402,
+ * for one status ("open" or "draft"): from `SWEEP_LEEWAY_SECONDS` before
+ * the second the update was sent, so an invoice stamped by Stripe's clock a
+ * little behind is still found. The same query serves the later sweep.
+ */
+export function sweepQuery(subscription: string, sentAt: number, status: "open" | "draft"): URLSearchParams {
+  return new URLSearchParams({ subscription, status, "created[gte]": String(sentAt - SWEEP_LEEWAY_SECONDS), limit: "100" });
+}
 
 /**
  * Every invoice to clear after the change was declined (402): those found
- * (in `/invoices?subscription=...&status=open` and `status=draft` from the
- * second the update was sent, and the one reached from the 402's
- * `payment_intent`) that belong to this subscription and were made from
- * `sentAt` on (a minute's leeway for clocks). Open ones are voided (if a
- * void keeps failing, marked uncollectible, never left collectible), drafts
- * deleted. An invoice whose subscription or time cannot be read is
- * included: clearing one more is safer than leaving one collectible.
+ * (`sweepQuery`, and the one reached from the 402's `payment_intent`) that
+ * belong to this subscription, were made by an update to it
+ * (`billing_reason` "subscription_update", so an unrelated invoice the
+ * creator made in the same minutes is left alone), and were made from
+ * `SWEEP_LEEWAY_SECONDS` before `sentAt`. An invoice whose subscription,
+ * reason or time cannot be read is included: clearing one more of this
+ * subscription's is safer than leaving one collectible.
  */
 export function invoicesToVoid(found: readonly FoundInvoice[], subscription: string, sentAt: number): InvoicesToClear {
-  const out: InvoicesToClear = { void: [], remove: [] };
+  const out: InvoicesToClear = { stopAdvance: [], remove: [], void: [] };
   const seen = new Set<string>();
   for (const invoice of found) {
     const id = stripeId(invoice?.id);
@@ -825,13 +898,60 @@ export function invoicesToVoid(found: readonly FoundInvoice[], subscription: str
     const of = details ? details.subscription : invoice.subscription;
     const ofId = typeof of === "string" ? of : record(of)?.id;
     if (ofId !== undefined && ofId !== null && ofId !== subscription) continue;
-    if (typeof invoice.created === "number" && invoice.created < sentAt - 60) continue;
+    if (typeof invoice.billing_reason === "string" && invoice.billing_reason !== "subscription_update") continue;
+    if (typeof invoice.created === "number" && invoice.created < sentAt - SWEEP_LEEWAY_SECONDS) continue;
     if (invoice.status === "open") out.void.push(id);
-    else if (invoice.status === "draft") out.remove.push(id);
-    else continue;
+    else if (invoice.status === "draft") {
+      out.stopAdvance.push(id);
+      out.remove.push(id);
+    } else continue;
     seen.add(id);
   }
   return out;
+}
+
+/** The update that stops a draft invoice from finalizing and being collected on its own. */
+export function stopAdvanceBody(): URLSearchParams {
+  return new URLSearchParams({ auto_advance: "false" });
+}
+
+/**
+ * The metadata update the route writes after a 402, instead of clearing
+ * the request: the second it sent the update, signed (`sweepSigText`).
+ * Null when the signer cannot sign.
+ */
+export function sweepMarkBody(sub: BillingDaySub, sentAt: number, sign: RequestSigner): URLSearchParams | null {
+  const text = sweepSigText(sub, String(sentAt));
+  const sig = text === null ? null : sign(text);
+  if (typeof sig !== "string" || !/^[0-9a-f]{64}$/.test(sig)) return null;
+  return new URLSearchParams({ [`metadata[${META_SWEEP}]`]: String(sentAt), [`metadata[${META_SWEEP_SIG}]`]: sig });
+}
+
+/**
+ * Whether the route may now clear the request and the sweep marker
+ * (`clearMoveBody`): a signed marker is kept, this run is at least
+ * `SWEEP_AGAIN_SECONDS` after the update was sent, and the sweep it just
+ * made with `sweepQuery` found nothing left to clear. Otherwise the route
+ * clears what it found and leaves the marker for a later run.
+ */
+export function sweepDone(sub: BillingDaySub, nowSeconds: number, verify: RequestVerifier, found: InvoicesToClear): boolean {
+  const sentAt = sweepPending(sub, verify);
+  if (sentAt === null || nowSeconds < sentAt + SWEEP_AGAIN_SECONDS) return false;
+  return found.stopAdvance.length === 0 && found.remove.length === 0 && found.void.length === 0;
+}
+
+/**
+ * What the invoice the change returned took above the ceiling kept with
+ * the request, in the smallest unit of the currency (0 when nothing), for
+ * the route to refund at once; null when its `amount_paid` cannot be read
+ * (the route reads the invoice again). Something added outside the
+ * subscription in the seconds between the fresh preview and the update can
+ * land on that invoice.
+ */
+export function overCeiling(invoice: { amount_paid?: unknown } | null, ceiling: number): number | null {
+  const paid = invoice?.amount_paid;
+  if (typeof paid !== "number" || !Number.isInteger(paid) || paid < 0 || !wholeAmount(ceiling)) return null;
+  return Math.max(0, paid - ceiling);
 }
 
 /**
@@ -878,9 +998,9 @@ export function moveBody(sub: BillingDaySub, on: number, sign: RequestSigner): U
 }
 
 /**
- * The update that clears a request after its change was declined (402, once
- * every invoice it left was cleared: `invoicesToVoid`), was refused at run
- * time or lapsed. Metadata only: the payment day and every past change stay
+ * The update that clears a request (and a sweep marker) after its change
+ * was declined (402, only once a later sweep found nothing: `sweepDone`),
+ * was refused at run time or lapsed. Metadata only: the payment day and every past change stay
  * as they were, so the member may ask again at once.
  */
 export function clearMoveBody(): URLSearchParams {

@@ -58,7 +58,10 @@ async function main() {
   is("drawn for the 3rd: due today, not past", [fortaleza.includes("Due today (1)"), fortaleza.includes("Due Nov 3, 2026"), fortaleza.includes("Was due Nov 3, 2026")], [true, true, false]);
   is("and the 2nd's past, the 4th's to come", [fortaleza.includes("Was due Nov 2, 2026"), fortaleza.includes("Due Nov 4, 2026")], [true, true]);
   is("drawn for the 4th, the 3rd's is past", drawn("2026-11-04").includes("Was due Nov 3, 2026"), true);
-  is("a row opens the person's page, or says they were not found", [fortaleza.includes(`href="/studio/people?who=${ann}"`), fortaleza.includes("About someone not among the buyers read from your Stripe account: find them")], [true, true]);
+  is("a row opens the person's page, or says they were not found", [fortaleza.includes(`href="/studio/people?who=${ann}"`), fortaleza.includes("About a person we could not find among your Stripe buyers.")], [true, true]);
+  is("the link says where it goes, not only whose address it is, in words everyone sees (2.4.9)", fortaleza.includes(">Open the buyer page of ann@example.com</a>") && !fortaleza.includes("sr-only\">: open their page"), true);
+  is("someone not found is pointed to the search by its name, never by where it is on the page (1.3.3)", [fortaleza.includes("search for their address under Find a buyer."), fortaleza.includes("above")], [true, false]);
+  is("a reading cut short is said", renderToStaticMarkup(createElement(TasksAgendaList, { rows, days: agenda.days, serverDay: "2026-11-03", found: { partial: true } })).includes("buyers (the oldest buyers are not read). To open"), true);
   const list = readFileSync("components/tasks-agenda.tsx", "utf8");
   is("the browser's day takes over after the server's drawing", list.includes("const creatorDay = useCreatorDay(serverDay);") && list.includes("const { today, stale } = agendaDay(days, creatorDay, serverDay);"), true);
 
@@ -86,7 +89,8 @@ async function main() {
   is("each group under its own heading with its count", list.includes("<h3 className=\"text-base font-semibold text-ink\">{`${group.title} (${group.rows.length + group.more})`}</h3>"), true);
   is("a row opens the person's page by their key", page.includes("studioPath(store, `who=${row.person}`, \"people\")"), true);
   is("the page reads that key again among the buyers, and says when it is not there", page.includes("addressForPerson(store, who)") && page.includes("That person is not among the buyers read from your Stripe account just now."), true);
-  is("someone not found is said to be so", list.includes("About someone not among the buyers read from your Stripe account"), true);
+  is("someone not found is said to be so", list.includes("About a person we could not find among your Stripe buyers"), true);
+  is("the agenda says what a person's page lets you do: mark done or remove, not change", page.includes("Open a person to mark one done or remove it.") && !page.includes("mark one done or change it"), true);
   is("when the tasks or Stripe cannot be read, it says so", page.includes("tasks could not be read just now. Nothing was changed.") && page.includes("Stripe could not be read just now, so who each task is about is not shown."), true);
   is("only the shown rows' people are looked up, on any of the days", page.includes("const persons = new Set(agenda.rows.map((row) => row.person));"), true);
   is("the groups made for each day the creator's may be", page.includes("agendaForDays(all, daysAround(today))") && page.includes("<TasksAgendaList rows={rows} days={agenda.days} serverDay={today}"), true);

@@ -223,7 +223,7 @@ async function TasksAgenda({ store }: { store: Store }) {
       <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
       <p className="mt-2 text-sm text-ink-soft">
         {open
-          ? `${open} open ${open === 1 ? "task" : "tasks"} across your buyers. Open a person to mark one done or change it.`
+          ? `${open} open ${open === 1 ? "task" : "tasks"} across your buyers. Open a person to mark one done or remove it.`
           : "No open tasks. Add one on a person's page, under Tasks."}
       </p>
       {!found && open ? <p className="notice notice-warn mt-4">Stripe could not be read just now, so who each task is about is not shown. Try again in a moment.</p> : null}

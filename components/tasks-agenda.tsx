@@ -75,10 +75,11 @@ export function TasksAgendaList({ rows, days, serverDay, found }: { rows: Agenda
                   </p>
                   {row.email && row.href ? (
                     <Link href={row.href} className="mt-1 inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">
+                      {/* The link's own visible words say where it goes (2.4.9), for everyone, not only for a screen reader. */}
                       {agendaLinkWords(row.email)}
                     </Link>
                   ) : found ? (
-                    <p className="mt-1 text-xs text-ink-soft">{`About someone not among the buyers read from your Stripe account${found.partial ? " (the oldest are not read)" : ""}: find them by their address above.`}</p>
+                    <p className="mt-1 text-xs text-ink-soft">{`About a person we could not find among your Stripe buyers${found.partial ? " (the oldest buyers are not read)" : ""}. To open their page, search for their address under Find a buyer.`}</p>
                   ) : null}
                 </li>
               );

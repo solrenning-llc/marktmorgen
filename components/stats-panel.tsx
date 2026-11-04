@@ -389,7 +389,11 @@ export function RightNow({ currency }: { currency: string }) {
             : today
               ? "No visits from a known source yet today."
               : live
-                ? "Today's numbers could not be read just now."
+                ? // Only a reading that failed leaves today out (app/api/store/live/route.ts): said as one, with when it
+                  // is read again, never as numbers that do not exist (inbox C4-34).
+                  rested
+                  ? "Today's numbers could not be read on the last try; reload the page to read them again."
+                  : "Today's numbers could not be read on the last try; they are read again in half a minute."
                 : "Reading today's numbers."}
         </p>
         <p className="mt-1 text-xs text-ink-soft">The day in UTC, like every day here. Sales are paid ones, read from Stripe every two minutes.</p>

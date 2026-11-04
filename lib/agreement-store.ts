@@ -369,6 +369,36 @@ export async function listAgreements(store: Store): Promise<Agreement[] | null> 
   }
 }
 
+/**
+ * One person's agreements in the store, from their own set (at most
+ * MAX_PER_PERSON, and twice that read at most): two commands whatever the
+ * store keeps, for a page about one buyer (lib/buyer-waiting.ts). A record
+ * gone is skipped; one that does not read as this store's is null.
+ */
+export async function agreementsOfPerson(store: Pick<Store, "sid">, email: string): Promise<Agreement[] | null> {
+  if (!isRedisConfigured() || !store.sid) return null;
+  try {
+    const [members] = await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]);
+    if (!Array.isArray(members)) return null;
+    const ids = members.map(String).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
+    if (!ids.length) return [];
+    const [values] = await redisPipeline([["MGET", ...ids.map(recordKey)]]);
+    if (!Array.isArray(values) || values.length !== ids.length) return null;
+    const out: Agreement[] = [];
+    ids.forEach((id, i) => {
+      const raw = values[i];
+      if (raw === null) return;
+      const agreement = typeof raw === "string" ? parseAgreement(JSON.parse(raw)) : null;
+      if (!agreement || agreement.sid !== store.sid || agreement.id !== id) throw new Error("Agreement record could not be verified");
+      out.push(agreement);
+    });
+    return out;
+  } catch (error) {
+    console.error("reading a person's agreements failed", error);
+    return null;
+  }
+}
+
 /** Withdraws one waiting for a signature: its link stops taking one. A signed version stays signed. */
 export async function withdrawAgreement(store: Store, id: string, now = Date.now()): Promise<Agreement | "not_open" | "busy" | null> {
   const held = await hold(id);

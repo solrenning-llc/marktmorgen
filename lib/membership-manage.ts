@@ -38,6 +38,7 @@ import { isOwnReasonId, offers } from "@/lib/leave-rules";
 import { countLeave } from "@/lib/leave-flow";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type YearlyChoice, type YearlySub, paidYearHeld, yearlyChoice } from "@/lib/yearly-switch-rules";
+import { fallbackPendingFor } from "@/lib/yearly-fallback";
 
 /** How long the emailed link keeps working. */
 export const MANAGE_LINK_SECONDS = 60 * 60;
@@ -383,6 +384,8 @@ export type Membership = {
    * (lib/yearly-fallback-sweep.ts, paidYearHeld): the page says "Paid until" that day and offers no switch before it.
    */
   paidUntil?: number | null;
+  /** A move to the monthly price still being settled (lib/yearly-fallback.ts, fallbackPendingFor): no switch offered. */
+  settling?: boolean;
 };
 
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -483,6 +486,10 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
   const listings = new Map(ids.length ? (await readListings(store, ids).catch(() => [])).map((p) => [p.id, p]) : []);
   const titles = new Map([...listings.values()].map((p) => [p.id, p.title]));
   const nowSeconds = Math.floor(Date.now() / 1000);
+  // Unknown counts as still settling: no switch is offered on a guess.
+  const settling = await fallbackPendingFor(store.stripeAccountId ?? "", subs).catch(
+    () => new Set(subs.filter((s) => typeof s.id === "string" && s.metadata?.monthly_replaced).map((s) => s.id as string)),
+  );
   return subs.map((sub) => {
     const price = sub.items?.data?.[0]?.price;
     const product = productOfSub(sub);
@@ -502,9 +509,10 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
       periodEnd: periodEndOf(sub as PauseSub),
       yearly: (() => {
         const listing = listings.get(product);
-        return listing && canSellProduct(store, listing) ? yearlyChoice(sub as YearlySub, listing, store.tiers, store.currency, nowSeconds) : null;
+        return listing && canSellProduct(store, listing) && !settling.has(sub.id as string) ? yearlyChoice(sub as YearlySub, listing, store.tiers, store.currency, nowSeconds) : null;
       })(),
       paidUntil: paidYearHeld(sub) && typeof sub.trial_end === "number" ? sub.trial_end : null,
+      settling: settling.has(sub.id as string),
     };
   });
 }

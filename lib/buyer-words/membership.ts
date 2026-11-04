@@ -1145,7 +1145,7 @@ const de: MembershipWords = {
       ? { day: "pro Tag", week: "pro Woche", month: "pro Monat", year: "pro Jahr" }[interval]
       : `alle ${count} ${{ day: "Tage", week: "Wochen", month: "Monate", year: "Jahre" }[interval]}`,
   ends: (date) => `Endet am ${date}`,
-  paidUntil: (date) => `Bezahlt bis ${date}`,
+  paidUntil: (date) => `Bezahlt bis zum ${date}`,
   cancel: "Kündigen",
   switchPlan: "Tarif wechseln",
   switchCurrencyNote: "Bei dieser Mitgliedschaft ist kein Tarifwechsel möglich: Sie wird in einer anderen Währung bezahlt als der, in der die Tarife des Shops jetzt angeboten werden.",

@@ -88,6 +88,26 @@ export const FALLBACK_STRIPE_VERSION = "2026-08-26.dahlia";
 export const FALLBACK_VOID_KEY = "nl:yearly:fallback:void";
 export const FALLBACK_CHECK_KEY = "nl:yearly:fallback:check";
 export const FALLBACK_BOTH_KEY = "nl:yearly:fallback:both";
+
+/**
+ * The memberships among `subs` whose move to the monthly price is still being settled by the daily job (an entry of
+ * theirs on VOID, CHECK or BOTH, by the yearly invoice named in metadata[monthly_replaced]): no switch of tier and no
+ * move to the yearly price is made on them until it is, so nothing paid since could be refunded as a month (review
+ * rev30). Throws when the lists cannot be read: the caller refuses then.
+ */
+export async function fallbackPendingFor(account: string, subs: { id?: unknown; metadata?: Record<string, string> | null }[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  const moved = subs.filter((s) => typeof s.id === "string" && /^in_[A-Za-z0-9]{6,64}$/.test(s.metadata?.monthly_replaced ?? ""));
+  if (!moved.length || !account || !isRedisConfigured()) return out;
+  const lists = await redisPipeline([["SMEMBERS", FALLBACK_VOID_KEY], ["SMEMBERS", FALLBACK_CHECK_KEY], ["SMEMBERS", FALLBACK_BOTH_KEY]]);
+  const [voids, checks, boths] = lists.map((raw) => (Array.isArray(raw) ? raw.map(String) : []));
+  for (const sub of moved) {
+    const id = sub.id as string;
+    const yearly = sub.metadata?.monthly_replaced ?? "";
+    if (checks.includes(`${account}|${id}|${yearly}`) || [...voids, ...boths].some((entry) => entry.startsWith(`${account}|${yearly}|`))) out.add(id);
+  }
+  return out;
+}
 /**
  * Which store each connected account left on those lists belongs to (account -> store id): the daily job tells the
  * creator when it cannot reach the account or finish a move, and a list's entry names only the account.

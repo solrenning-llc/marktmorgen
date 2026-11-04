@@ -35,6 +35,7 @@ import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { withLock } from "@/lib/redis-lock";
 import { paidYearHeld } from "@/lib/yearly-fallback-rules";
+import { fallbackPendingFor } from "@/lib/yearly-fallback";
 import { forgetPaid } from "@/lib/learn";
 import { forgetTicket } from "@/lib/community-access";
 import type { Listing, Store } from "@/lib/store";
@@ -81,7 +82,7 @@ export function tierWords(store: Store, product: Listing, language: unknown = DE
 export function choicesFor(store: Store, membership: Membership, tiers: Listing[]): TierChoice[] {
   if (membership.endsAt !== null || membership.fixedEnd || !SWITCHABLE.has(membership.status)) return [];
   // A year paid and held until it ends (lib/yearly-fallback-sweep.ts): no switch is offered before then (find refuses it).
-  if (membership.paidUntil) return [];
+  if (membership.paidUntil || membership.settling) return [];
   // Paid in another currency than the store's now (it changed its currency since): every tier is
   // priced in the store's, so a switch would change the subscription's currency. None is offered.
   if (membership.currency.toLowerCase() !== store.currency) return [];
@@ -190,6 +191,8 @@ async function find(store: Store, token: string, subscription: string, target: s
   // A year paid and held as a "trial" until it ends (lib/yearly-fallback-sweep.ts): a switch now would be charged
   // nothing, as a trial's is, so none is made until the year ends; the member is told why, in their own words.
   if (paidYearHeld(sub as Parameters<typeof paidYearHeld>[0])) return { reason: "held" };
+  // A move to the monthly price still being settled (lib/yearly-fallback-sweep.ts): no switch until it is.
+  if ((await fallbackPendingFor(store.stripeAccountId ?? "", [sub])).has(subscription)) return { reason: "gone" };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription

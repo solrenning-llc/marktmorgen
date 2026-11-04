@@ -36,6 +36,7 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { withLock } from "@/lib/redis-lock";
+import { fallbackPendingFor } from "@/lib/yearly-fallback";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
 
@@ -154,6 +155,8 @@ async function find(store: Store, token: string, subscription: string): Promise<
   if (!product || !canSellProduct(store, product)) return { reason: "yearly", emailed };
   const choice = yearlyChoice(sub, product, store.tiers, store.currency, Math.floor(Date.now() / 1000));
   if (!choice) return { reason: "yearly", emailed };
+  // A move to the monthly price still being settled (lib/yearly-fallback-sweep.ts): no move to the yearly price until it is.
+  if ((await fallbackPendingFor(store.stripeAccountId ?? "", [sub as { id?: unknown; metadata?: Record<string, string> | null }])).has(subscription)) return { reason: "yearly", emailed };
   return { grant, emailed, itemId, product, choice, trialing: sub.status === "trialing" };
 }
 

@@ -308,7 +308,7 @@ test("purchases take their listings, pre-orders and what was brought over before
     payment_intent: { id: `pi_test${id.padEnd(10, "0")}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
   });
   sessions = [
-    // A guide with a bundle of two inside and a box ticked at checkout: four listings.
+    // A guide with a bundle of two inside and a box checked at checkout: four listings.
     paid("a", { product: ids.Guide, bundle: `${ids.Templates},${ids.Checklist}`, bump: ids.Workbook }),
     // A pre-order: its listing, and its entry and when it ships.
     paid("b", { product: ids.Planner, preorder: "1" }),
@@ -504,7 +504,7 @@ test("a download in one click is handed over exactly when the list shows it", as
     ["a checkout the list hands over", {}, true],
     ["a checkout given back", { payment_intent: { id: "pi_testmoss000000", status: "succeeded", latest_charge: { refunded: true, amount_refunded: 1900 } } }, false],
     ["a checkout of something that hands nothing over", { metadata: { ...parent.metadata, product: bare.product.id } }, false],
-    ["a checkout with something ticked that hands over", { metadata: { ...parent.metadata, product: bare.product.id, bump: ids[0] } }, true],
+    ["a checkout with something checked that hands over", { metadata: { ...parent.metadata, product: bare.product.id, bump: ids[0] } }, true],
     ["a checkout without a customer", { customer: null }, false],
   ];
   for (const [what, change, shown] of cases) {
@@ -535,7 +535,7 @@ test("a product of a bundle costs its lookup and two listings, whatever the bund
   assert.deepEqual(sent.filter((command) => command.includes(":l:")), []);
 });
 
-test("a product ticked at checkout is read with the one bought and no other; a key the order does not hold is refused", async () => {
+test("a product checked at checkout is read with the one bought and no other; a key the order does not hold is refused", async () => {
   const { store, ids, refs, token, folder, window } = await linkStore(["Course", "Workbook", "Extra"]);
   sessions[0] = { ...sessions[0], metadata: { store: "moss", product: ids[0], bump: ids[1], bump2: ids[2] } };
   const before = await requestsIn(folder, window);

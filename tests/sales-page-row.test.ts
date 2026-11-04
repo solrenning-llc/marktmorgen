@@ -188,6 +188,11 @@ is("a video is the lazy player, loading nothing before play", [video.includes("<
   const windowed = keep([row([[el.window]])]);
   is("a video in a window is kept as sent", [windowed.problem, windowed.page.blocks[0]?.kind === "row" ? windowed.page.blocks[0].columns[0][0] : null], [null, el.window]);
   const shown = draw(windowed.page.blocks[0]);
+  {
+    const css = readFileSync("app/globals.css", "utf8");
+    is("the window scrolls to the player's controls when a long title takes its room (400% zoom; review of #2135)", /\.vw-dialog \{[^}]*overflow-y: auto;/.test(css), true);
+    is("the Close button keeps its words at 7:1 under the pointer: its own darker hover", /\.pv-button\.vw-close:hover \{\s*background-color: rgb\(255 255 255 \/ 0\.18\);/.test(css), true);
+  }
   is("a theme button, at least 44 pixels high, that says it opens a video", [shown.includes('<button type="button" class="btn st-btn sp-row-btn" aria-haspopup="dialog">Watch the tour <span class="sp-video-window-mark">(video)</span></button>')], [true]);
   is("its window is closed and empty until pressed: no player, nothing loaded", [/<dialog[^>]*class="pv-dialog vw-dialog"/.test(shown), /<dialog[^>]* open/.test(shown), shown.includes("<iframe"), shown.includes("youtube")], [true, false, false, false]);
   const preview = draw(windowed.page.blocks[0], { ...ctx, preview: true });

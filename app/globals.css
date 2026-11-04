@@ -3293,6 +3293,9 @@ a.sp-product:focus-visible {
 }
 .vw-dialog {
   width: min(100vw, 64rem);
+  /* A long title at 400% zoom can push the player's controls past the screen: the window scrolls to them
+     (WCAG 1.4.4, 1.4.10; review of #2135). */
+  overflow-y: auto;
 }
 .vw-title {
   min-width: 0;
@@ -3310,6 +3313,10 @@ a.sp-product:focus-visible {
   padding-inline: 0.875rem 1rem;
   font-size: 0.9375rem;
   font-weight: 600;
+}
+/* The light hover of the picture viewer's buttons is kept under 7:1 text only on a dark ground: darker here. */
+.pv-button.vw-close:hover {
+  background-color: rgb(255 255 255 / 0.18);
 }
 .vw-video {
   width: min(100%, calc((100dvh - 6rem) * 16 / 9));

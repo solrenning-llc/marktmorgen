@@ -2989,7 +2989,7 @@ function RowEditor({
                   onChange={(e) => replace(element, { ...element, label: e.target.value })}
                 />
                 <p id={`${id}-bh`} className="mt-1 text-xs text-ink-soft">
-                  What the button says. The page adds “(video)” after your words, and the video opens in a window over the page when a visitor presses it.
+                  What the button says. The page adds a word saying it is a video, in the page&apos;s language, after your words, and the video opens in a window over the page when a visitor presses it.
                 </p>
                 {shown}
               </div>

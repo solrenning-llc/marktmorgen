@@ -35,6 +35,7 @@ const subscription = () => ({
   status: "past_due",
   collection_method: "charge_automatically",
   customer: "cus_Dana000001",
+  default_payment_method: { id: "pm_Card00000001", type: "card" },
   discount: null,
   discounts: [],
   pause_collection: null,
@@ -167,7 +168,7 @@ async function main(): Promise<void> {
   outcome = "voidFails";
   await clear();
   const kept = await move();
-  is("still open: kept for the daily job to void, with no automatic retry", [kept.ok, posts().includes("/invoices/in_Year00000001:auto_advance=true"), await members(FALLBACK_VOID_KEY)], [true, false, [`${ACCOUNT}|in_Year00000001`]]);
+  is("still open: kept for the daily job to void, with the month that paid the move, and no automatic retry", [kept.ok, posts().includes("/invoices/in_Year00000001:auto_advance=true"), await members(FALLBACK_VOID_KEY)], [true, false, [`${ACCOUNT}|in_Year00000001|in_Month0000001`]]);
   outcome = "voidFailsPaid";
   await clear();
   invoiceReads = ["open", "open", "paid"];

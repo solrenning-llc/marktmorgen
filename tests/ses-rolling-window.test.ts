@@ -77,3 +77,29 @@ test('missing or malformed grouped evidence never becomes known zero', async () 
   }
   assert.equal(getters, 0);
 });
+
+test('an inherited descriptor value cannot turn an accessor counter into known zero', async () => {
+  const pipeline = redis.pipeline;
+  const previous = Object.getOwnPropertyDescriptor(Object.prototype, 'value');
+  let inheritedReads = 0, counterReads = 0;
+  const rows = Array(25).fill(null);
+  Object.defineProperty(rows, '24', { get() { counterReads++; return '0'; }, enumerable: true });
+  redis.pipeline = async () => rows;
+  let observed: number | null = -1, room: number | null = -1;
+  try {
+    Object.defineProperty(Object.prototype, 'value', {
+      configurable: true,
+      get() { inheritedReads++; return '0'; },
+    });
+    observed = await sesSentLast24h(AT);
+    room = await sesBulkRoom(state, AT);
+  } finally {
+    Reflect.deleteProperty(Object.prototype, 'value');
+    if (previous) Object.defineProperty(Object.prototype, 'value', previous);
+    redis.pipeline = pipeline;
+  }
+  assert.equal(observed, null);
+  assert.equal(room, null);
+  assert.equal(counterReads, 0);
+  assert.equal(inheritedReads, 0);
+});

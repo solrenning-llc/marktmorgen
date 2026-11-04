@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductLink, setStripeAccount, setSubscription, setTax, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
+import { createBillingCheckout } from "@/lib/billing";
+import { PLAN_PRICES } from "@/lib/plan";
+import { createAssistantCheckout } from "@/lib/assistant-billing";
+import { ASSISTANT_PRICE_CENTS } from "@/lib/store-assistant-rules";
 import { createCheckout } from "@/lib/store-checkout";
 import { store as redis } from "./redis-stub";
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -38,7 +42,7 @@ async function world(interval: "month" | "year" | null, installment = false, tax
     return Response.json({ id: "cs_test_ClassicCheckout00000001", url: "https://checkout.stripe.com/c/pay/synthetic-classic" });
   };
   const open = () => createCheckout(store, product, "https://example.test", undefined, { digitalConsent: TEST_CONSENT, ...(installment ? { plan: true } : {}) });
-  return { captured, open, retryTaxDocuments: () => { refuseTaxDocuments = true; } };
+  return { store, captured, open, retryTaxDocuments: () => { refuseTaxDocuments = true; } };
 }
 function subscriptionContract({ headers, body }: Captured, amount: string, interval: string) {
   assert.equal(headers.get("Stripe-Account"), ACCOUNT);
@@ -72,4 +76,44 @@ test("an ordinary one-off sale keeps its payment contract", async () => {
   assert.equal(body.has("subscription_data[billing_mode][type]"), false);
   assert.equal(headers.get("Stripe-Version"), null);
   assert.equal(body.get("line_items[0][price_data][unit_amount]"), "3000");
+});
+
+test("the assistant subscription uses explicit classic on the platform account and its existing customer", async()=>{
+ const w=await world(null);const captured:Captured[]=[];
+ globalThis.fetch=async(input,init)=>{
+  const url=new URL(String(input));assert.equal(url.hostname,"api.stripe.com");
+  const headers=new Headers(init?.headers);assert.equal(headers.get("Stripe-Account"),null);
+  if(url.pathname==="/v1/prices" && init?.method==="GET")return Response.json({object:"list",data:[{id:"price_ClassicAssistant01",unit_amount:ASSISTANT_PRICE_CENTS,currency:"usd",recurring:{interval:"month"}}],has_more:false});
+  assert.equal(url.pathname,"/v1/checkout/sessions");assert.equal(init?.method,"POST");captured.push({headers,body:new URLSearchParams(String(init.body))});
+  return Response.json({id:"cs_test_ClassicAssistant01",url:"https://checkout.stripe.com/c/pay/synthetic-assistant"});
+ };
+ assert.equal(await createAssistantCheckout(w.store,"https://example.test"),"https://checkout.stripe.com/c/pay/synthetic-assistant");
+ assert.equal(captured.length,1);const {headers,body}=captured[0];
+ assert.equal(headers.get("Stripe-Version"),VERSION);assert.equal(body.get("subscription_data[billing_mode][type]"),"classic");
+ assert.equal(body.get("mode"),"subscription");assert.equal(body.get("customer"),w.store.stripeCustomerId);
+ assert.equal(body.get("line_items[0][price]"),"price_ClassicAssistant01");assert.equal(body.get("line_items[0][quantity]"),"1");
+ assert.equal(body.get("metadata[assistant_for]"),w.store.handle);assert.equal(body.get("subscription_data[metadata][assistant_for]"),w.store.handle);
+ assert.equal(body.has("metadata[store]"),false);assert.equal(body.has("subscription_data[metadata][store]"),false);
+ assert.equal(body.get("payment_method_options[card][request_three_d_secure]"),"any");
+});
+
+for(const cycle of ["month","year"] as const) for(const retry of ["none","customer","price"] as const) test(`platform ${cycle} plan keeps classic and version through ${retry} retry`,async()=>{
+ const w=await world(null);const captured:Captured[]=[];
+ globalThis.fetch=async(input,init)=>{
+  const url=new URL(String(input));const headers=new Headers(init?.headers);assert.equal(url.hostname,"api.stripe.com");assert.equal(headers.get("Stripe-Account"),null);
+  if(url.pathname==="/v1/prices" && init?.method==="GET")return Response.json({object:"list",data:[{id:`price_ClassicPlatform${cycle}`,unit_amount:PLAN_PRICES.creator[cycle],currency:"usd",recurring:{interval:cycle,interval_count:1}}],has_more:false});
+  assert.equal(url.pathname,"/v1/checkout/sessions");assert.equal(init?.method,"POST");captured.push({headers,body:new URLSearchParams(String(init.body))});
+  if(retry!=="none" && captured.length===1)return Response.json({error:{code:"parameter_invalid",message:`Synthetic ${retry} unavailable`}},{status:400});
+  return Response.json({id:"cs_test_ClassicPlatform01",url:"https://checkout.stripe.com/c/pay/synthetic-platform"});
+ };
+ assert.equal(await createBillingCheckout(w.store,"https://example.test",{tier:"creator",cycle}),"https://checkout.stripe.com/c/pay/synthetic-platform");assert.equal(captured.length,retry==="none"?1:2);
+ for(const {headers,body} of captured){
+  assert.equal(headers.get("Stripe-Version"),VERSION);assert.equal(body.get("subscription_data[billing_mode][type]"),"classic");
+  assert.equal(body.get("mode"),"subscription");assert.equal(body.get("metadata[store]"),w.store.handle);assert.equal(body.get("subscription_data[metadata][store]"),w.store.handle);assert.equal(body.get("subscription_data[metadata][tier]"),"creator");
+  assert.equal(body.has("subscription_data[trial_period_days]"),false);assert.equal(body.get("line_items[0][quantity]"),"1");
+  if(body.has("line_items[0][price_data][unit_amount]")){assert.equal(body.get("line_items[0][price_data][unit_amount]"),String(PLAN_PRICES.creator[cycle]));assert.equal(body.get("line_items[0][price_data][currency]"),"usd");assert.equal(body.get("line_items[0][price_data][recurring][interval]"),cycle);}
+  else assert.equal(body.get("line_items[0][price]"),`price_ClassicPlatform${cycle}`);
+ }
+ if(retry==="customer"){assert.equal(captured[0].body.get("customer"),w.store.stripeCustomerId);assert.equal(captured[1].body.has("customer"),false);assert.equal(captured[1].body.get("customer_email"),w.store.email);}
+ if(retry==="price")assert.equal(captured[1].body.has("line_items[0][price]"),false);
 });

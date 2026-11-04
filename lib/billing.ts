@@ -315,6 +315,7 @@ export async function createBillingCheckout(
   assertFunding(funding,tier,cycle,'checkout',store.statsId??'');
   const body = new URLSearchParams({
     mode: "subscription",
+    "subscription_data[billing_mode][type]": "classic",
     // Keep collection explicit even when a trial has nothing due today.
     payment_method_collection: "always",
     // English, always. Left to itself Stripe picks the language of the
@@ -367,7 +368,7 @@ export async function createBillingCheckout(
   let session: Record<string, unknown>;
   try {
     assertFunding(funding,tier,cycle,'checkout',store.statsId??'');
-    session = await onPlatform("POST", "/checkout/sessions", body);
+    session = await onPlatform("POST", "/checkout/sessions", body, { version: "2025-09-30.clover" });
   } catch (error) {
     if (!(error instanceof BillingError) || error.status !== 400) throw error;
     if (body.has("customer") && /customer/i.test(error.message)) {
@@ -385,7 +386,7 @@ export async function createBillingCheckout(
       throw error;
     }
     assertFunding(funding,tier,cycle,'checkout',store.statsId??'');
-    session = await onPlatform("POST", "/checkout/sessions", body);
+    session = await onPlatform("POST", "/checkout/sessions", body, { version: "2025-09-30.clover" });
   }
   if (typeof session.url !== "string" || !session.url) {
     throw new Error("Stripe did not return a checkout URL");

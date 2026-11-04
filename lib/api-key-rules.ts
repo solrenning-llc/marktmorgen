@@ -58,6 +58,8 @@ export type ShownKey = ApiKey & {
   maker: string;
   /** Whether the person looking may turn it back on (with a second step, in the route). */
   mayTurnOn: boolean;
+  /** Whether the person looking may revoke it: a key whose maker left the team is the owner's alone to revoke. */
+  mayRevoke: boolean;
 };
 
 /** The words for a key whose maker was never recorded: every key made before 4 November 2026. */
@@ -65,7 +67,12 @@ export const MAKER_UNRECORDED = "someone not recorded";
 /** The words for a key whose maker is no longer on the team. */
 export const MAKER_FORMER = "someone no longer on the team";
 
-/** One line of the review before the team's two-step switch is saved: whose keys, how many, and whether they will be emailed. */
-export type PauseLine = { who: string; count: number; emailed: boolean };
-/** The API keys that will pause when the team's two-step switch is turned on (lib/api-key-pause.ts pausePreview). */
-export type PausePreview = { total: number; people: PauseLine[] };
+/** One line of the review before the team's two-step switch is saved: whose keys, how many, the webhook endpoints they added, and whether they will be emailed. */
+export type PauseLine = { who: string; count: number; endpoints: number; emailed: boolean };
+/**
+ * The API keys, and the webhook endpoints they added, that will pause when
+ * the team's two-step switch is turned on (lib/api-key-pause.ts
+ * pausePreview); `untold`, keys paused before whose makers still wait for
+ * their email; `stamp`, made from exactly which ids, sent back with the save.
+ */
+export type PausePreview = { total: number; endpoints: number; untold: number; stamp: string; people: PauseLine[] };

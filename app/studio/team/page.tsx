@@ -99,6 +99,7 @@ export default async function StudioTeamPage({
                     ownerStep={ownerStep}
                     waiting={team.members.filter((_, i) => ready[i] !== true).map((m) => m.email)}
                     preview={preview}
+                    pending={team.requireTwoStep ? preview.total + preview.untold : 0}
                   />
                 ) : (
                   <p className="text-sm text-ink-soft">This cannot be changed right now. Reload the page in a moment.</p>

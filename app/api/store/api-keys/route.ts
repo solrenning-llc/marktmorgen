@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_KEY_NAME, makeKey, revokeKey } from "@/lib/api-keys";
-import { makerFor, pauseIfRuleOn, shownKeys, turnKeyOn } from "@/lib/api-key-pause";
+import { MAX_KEY_NAME, makeKey } from "@/lib/api-keys";
+import { makerFor, pauseIfRuleOn, revokeWithEndpoints, shownKeys, turnKeyOn } from "@/lib/api-key-pause";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 import { can } from "@/lib/team-roles";
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       if (write && !can(role, "import")) return Response.json({ ok: false, error: "role" }, { status: 403 });
       const step = (await liveSecondStep(email, session)) !== null;
       if (!step && (await hasSecondStep(email))) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
-      const maker = makerFor(role, email, step);
+      const maker = makerFor(store.sid, role, email, step);
       const made = await makeKey(store.sid, text(body.name, MAX_KEY_NAME * 2), Date.now(), write, "none", maker);
       if (!made.ok) return Response.json({ ok: false, error: made.reason }, { status: made.reason === "unavailable" ? 503 : 400 });
       const paused = await pauseIfRuleOn(store, made.made.id, maker);
@@ -55,8 +55,9 @@ export async function POST(request: NextRequest) {
       );
     }
     if (action === "revoke") {
-      const gone = await revokeKey(store.sid, text(body.id, 20));
-      if (!gone) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      // The webhook endpoints the key added stop with it (owner C3-100); a key whose maker left the team is the owner's to revoke.
+      const gone = await revokeWithEndpoints(store, role, text(body.id, 20));
+      if (gone !== "ok") return Response.json({ ok: false, error: gone }, { status: gone === "unknown" ? 404 : 403 });
       return Response.json({ ok: true, keys: await keys() }, { headers: { "Cache-Control": "no-store" } });
     }
     if (action === "turn_on") {

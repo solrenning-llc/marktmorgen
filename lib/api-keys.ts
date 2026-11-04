@@ -39,14 +39,19 @@
  *
  * Who made a key (owner C3-100, 4 November 2026) is written once, when it is
  * made: whether by the store's owner, a one-way fingerprint of the teammate's
- * sign-in address otherwise, and whether that session was opened with a
- * second step. A key made before then has none of it. Whether a key is paused
+ * sign-in address otherwise (makerPrint: an HMAC under the deployment's own
+ * secret and the store's id, so it cannot be matched across stores nor turned
+ * back into the address by trying addresses), and whether that session was
+ * opened with a second step. A key made before then has none of it. When the
+ * teammate leaves the team, the fingerprint goes from their keys (forgetMaker)
+ * and the keys are marked as their maker's who left. Whether a key is paused
  * is kept apart from its record, in the store's hold, because the record is
  * written again each time the key is used ("last used"): a pause written into
  * it could be undone by a request that read the record a moment before.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { deriveKey } from "@/lib/secret-box";
 
 import { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME, agentScopeOf } from "@/lib/api-key-rules";
 export { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME };
@@ -62,14 +67,38 @@ const hashOf = (key: string) => createHash("sha256").update(key).digest("hex");
 /**
  * Who made a key, written once when it is made (owner C3-100): `owner`, made
  * by the store's owner; `by`, otherwise, a one-way fingerprint of the
- * teammate's sign-in address (lib/api-key-pause.ts makerPrint); `step`,
- * whether that session was opened with a second step (lib/second-step-gate.ts
- * liveSecondStep). Absent on every key made before 4 November 2026.
+ * teammate's sign-in address (makerPrint); `step`, whether that session was
+ * opened with a second step (lib/second-step-gate.ts liveSecondStep); `left`,
+ * its maker has left the team, and the fingerprint is gone. Absent on every
+ * key made before 4 November 2026.
  */
-export type KeyMaker = { owner: boolean; by: string; step: boolean };
+export type KeyMaker = { owner: boolean; by: string; step: boolean; left?: true };
+
+/**
+ * A key's hold (lib/api-key-pause.ts): "paused", refused, its maker not yet
+ * told; "told", refused, its maker emailed (or nobody to tell); "vouched",
+ * turned back on by its maker with a second step; none, as made.
+ */
+export type Hold = "paused" | "told" | "vouched";
+const HOLDS: readonly string[] = ["paused", "told", "vouched"];
+/** Whether a hold refuses the key. */
+export const isPaused = (hold: Hold | null): boolean => hold === "paused" || hold === "told";
 
 /** A key's record with who made it and its hold, never the key or its fingerprint. */
-export type KeyRecord = ApiKey & { maker: KeyMaker | null; hold: "paused" | "vouched" | null };
+export type KeyRecord = ApiKey & { maker: KeyMaker | null; hold: Hold | null };
+
+/**
+ * A one-way fingerprint of a teammate's sign-in address on one store: an HMAC
+ * under a key derived from the deployment's secret, over the store's id and
+ * the address. "" when the deployment has no secret: then nobody is recorded,
+ * and the key counts as one whose maker is not known (paused by the team's
+ * two-step rule, turned back on only by the owner).
+ */
+export function makerPrint(sid: string, email: string): string {
+  const key = deriveKey("api-key-maker/v1");
+  if (!key) return "";
+  return createHmac("sha256", key).update(`${sid}|${email.trim().toLowerCase()}`).digest("hex").slice(0, 40);
+}
 
 type Stored = ApiKey & { hash: string; maker?: KeyMaker };
 
@@ -79,6 +108,7 @@ function makerOf(raw: unknown): KeyMaker | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const v = raw as Partial<KeyMaker>;
   const owner = v.owner === true;
+  if (!owner && v.left === true) return { owner: false, by: "", step: v.step === true, left: true };
   const by = typeof v.by === "string" && PRINT_PATTERN.test(v.by) ? v.by : "";
   if (!owner && !by) return undefined;
   return { owner, by, step: v.step === true };
@@ -181,20 +211,21 @@ export async function keyRecords(sid: string): Promise<KeyRecord[]> {
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const s = parseStored(flat[i + 1]);
     if (!s) continue;
-    const hold = held.get(s.id);
-    out.push({ id: s.id, name: s.name, hint: s.hint, madeAt: s.madeAt, usedAt: s.usedAt, write: s.write, agent: s.agent, maker: s.maker ?? null, hold: hold === "paused" || hold === "vouched" ? hold : null });
+    const hold = held.get(s.id) ?? "";
+    out.push({ id: s.id, name: s.name, hint: s.hint, madeAt: s.madeAt, usedAt: s.usedAt, write: s.write, agent: s.agent, maker: s.maker ?? null, hold: HOLDS.includes(hold) ? (hold as Hold) : null });
   }
   return out.sort((a, b) => a.madeAt - b.madeAt);
 }
 
 /**
- * Pauses keys, or marks them vouched for (turned back on by their maker in a
- * session with a second step, so no later switch pauses them again). Only
+ * Sets keys' hold: paused, told, or vouched for (turned back on by their
+ * maker in a session with a second step, so no later switch pauses them
+ * again). Only
  * ids that are still the store's keys are written, so a key revoked before
  * leaves nothing behind (one revoked in the very same instant may leave a
  * mark of a few bytes, which opens nothing and goes with the store).
  */
-export async function holdKeys(sid: string, ids: string[], state: "paused" | "vouched"): Promise<string[]> {
+export async function holdKeys(sid: string, ids: string[], state: Hold): Promise<string[]> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
   const wanted = ids.filter((id) => ID_PATTERN.test(id));
   if (!wanted.length) return [];
@@ -202,6 +233,43 @@ export async function holdKeys(sid: string, ids: string[], state: "paused" | "vo
   const kept = wanted.filter((_, i) => Number(present[i]) === 1);
   if (kept.length) await redisPipeline([["HSET", holdKey(sid), ...kept.flatMap((id) => [id, state])]]);
   return kept;
+}
+
+/** Puts keys' holds back as they were (null: none), when a change that paused them could not be saved. */
+export async function restoreHolds(sid: string, before: { id: string; hold: Hold | null }[]): Promise<void> {
+  if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return;
+  const valid = before.filter((b) => ID_PATTERN.test(b.id));
+  const back = valid.filter((b) => b.hold !== null);
+  const none = valid.filter((b) => b.hold === null);
+  await redisPipeline([
+    ...(back.length ? [["HSET", holdKey(sid), ...back.flatMap((b) => [b.id, b.hold as string])]] : []),
+    ...(none.length ? [["HDEL", holdKey(sid), ...none.map((b) => b.id)]] : []),
+  ]);
+}
+
+/**
+ * Rewrites who made some keys: `left`, their maker left the team and the
+ * fingerprint goes; or a fingerprint replaced by another (a teammate moving
+ * their sign-in address). A key used in the very same instant may write its
+ * record back as it read it ("last used"); the key stays paused all the same,
+ * as its hold is kept apart.
+ */
+export async function rewriteMakers(sid: string, change: (maker: KeyMaker) => KeyMaker | null): Promise<string[]> {
+  if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
+  const [raw] = await redisPipeline([["HGETALL", listKey(sid)]]);
+  const flat = flatOf(raw);
+  const writes: (string | number)[][] = [];
+  const ids: string[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    const s = parseStored(flat[i + 1]);
+    if (!s?.maker) continue;
+    const next = change(s.maker);
+    if (!next) continue;
+    ids.push(s.id);
+    writes.push(["HSET", listKey(sid), s.id, JSON.stringify({ ...s, maker: next })]);
+  }
+  if (writes.length) await redisPipeline(writes);
+  return ids;
 }
 
 const flatOf = (raw: unknown): unknown[] =>
@@ -251,8 +319,8 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   const [listed, hold] = await redisPipeline([["HGET", listKey(sid), id], ["HGET", holdKey(sid), id]]);
   const stored = parseStored(listed);
   if (!stored || stored.hash !== hash) return null;
-  // Paused by the team's two-step rule (lib/api-key-pause.ts): known, and refused, and not counted as used.
-  if (hold === "paused") return { sid, id, write: stored.write, agent: stored.agent, paused: true };
+  // Paused by the team's two-step rule or its maker leaving (lib/api-key-pause.ts): known, and refused, and not counted as used.
+  if (hold === "paused" || hold === "told") return { sid, id, write: stored.write, agent: stored.agent, paused: true };
 
   const seconds = Math.floor(now / 1000);
   if (seconds - stored.usedAt >= TOUCH_SECONDS) {

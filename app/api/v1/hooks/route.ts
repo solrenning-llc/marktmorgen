@@ -35,7 +35,8 @@ export async function POST(request: Request) {
   const body = writer.body;
   const url = typeof body.url === "string" ? body.url.slice(0, MAX_ENDPOINT_URL + 1) : "";
   try {
-    const result = await addEndpoint(writer.store, url, body.events);
+    // Kept with the key that added it, so it pauses and stops with that key (owner C3-100).
+    const result = await addEndpoint(writer.store, url, body.events, Date.now(), writer.keyId);
     if (!result.ok) return apiError(ADD_ERRORS[result.reason], result.reason, result.message);
     const added = result.view.endpoints[result.view.endpoints.length - 1];
     if (!added) return apiError(502, "unavailable", "The endpoint could not be read back just now. Try again in a moment.");

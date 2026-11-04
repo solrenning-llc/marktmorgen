@@ -201,6 +201,16 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
                     {endpoint.events.length === ALL.length ? "Every event" : endpoint.events.map((key) => EVENTS.find((e) => e.key === key)?.label ?? key).join(", ")}
                   </span>
                   {endpoint.oldSecretUntil && Number.isFinite(Date.parse(endpoint.oldSecretUntil)) ? <span className="mt-1 block text-xs text-ink-soft">{`Old secret still signs until ${when(Date.parse(endpoint.oldSecretUntil))}`}</span> : null}
+                  {endpoint.held ? (
+                    <span className="mt-1 block text-sm">
+                      <span className="font-semibold text-ink">Paused.</span>{" "}
+                      <span className="text-ink-soft">
+                        {endpoint.held === "paused"
+                          ? "An API key added this endpoint, and that key is paused. Nothing is sent here until the key is turned back on under API keys."
+                          : "An API key added this endpoint, and that key was revoked. Nothing is sent here. Remove it, or add the address again yourself."}
+                      </span>
+                    </span>
+                  ) : null}
                 </span>
                 <span className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => test(endpoint.id)} disabled={busy !== null} aria-busy={busy === `test:${endpoint.id}`} className="btn btn-secondary btn-sm">

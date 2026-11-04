@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
-import { MAKER_UNRECORDED, MAX_KEY_NAME, MAX_KEYS, type ShownKey } from "@/lib/api-key-rules";
+import { MAKER_FORMER, MAKER_UNRECORDED, MAX_KEY_NAME, MAX_KEYS, type ShownKey } from "@/lib/api-key-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -23,6 +23,7 @@ const MESSAGES: Record<string, string> = {
   not_yours: "Only whoever made this key can turn it back on. You can revoke it instead.",
   two_step_required: "This store's owner asks everyone on the team to log in with a second step. Log in again with your passkey, or with the emailed link and your app's code, then try again.",
   not_paused: "That key is already on. Reload the page.",
+  owner_only: "Only the store's owner can revoke a key made by someone no longer on the team.",
 };
 
 /** When, in the creator's own time zone: this runs in their browser. */
@@ -170,16 +171,18 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
                     <span className="mt-1 block text-sm">
                       <span className="font-semibold text-ink">Paused.</span>{" "}
                       <span className="text-ink-soft">
-                        {key.mayTurnOn
-                          ? "The team now logs in with a second step, and this key was made without one. Anything using it is refused until you turn it back on."
-                          : "The team now logs in with a second step, and this key was made without one. Anything using it is refused until whoever made it turns it back on."}
+                        {key.maker === MAKER_FORMER
+                          ? "Whoever made it is no longer on the team. Anything using it is refused, and the webhook endpoints it added are sent nothing. It can only be revoked, by the store's owner."
+                          : key.mayTurnOn
+                            ? "The team now logs in with a second step, and this key was made without one. Anything using it is refused, and the webhook endpoints it added are sent nothing, until you turn it back on."
+                            : "The team now logs in with a second step, and this key was made without one. Anything using it is refused, and the webhook endpoints it added are sent nothing, until whoever made it turns it back on."}
                       </span>
                     </span>
                   ) : null}
                 </span>
                 {revoking === key.id ? (
                   <span className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="font-semibold text-ink">Revoke it? Anything using it stops working.</span>
+                    <span className="font-semibold text-ink">Revoke it? Anything using it stops working, and so do the webhook endpoints it added.</span>
                     <button type="button" onClick={() => revoke(key.id)} disabled={busy !== null} aria-busy={busy === `revoke:${key.id}`} className="btn btn-danger btn-sm">
                       {busy === `revoke:${key.id}` ? "Revoking…" : "Yes, revoke"}
                     </button>
@@ -192,9 +195,11 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] }) {
                         {busy === `on:${key.id}` ? "Turning on…" : "Turn back on"}
                       </button>
                     ) : null}
-                    <button type="button" onClick={() => setRevoking(key.id)} disabled={busy !== null} className="btn btn-secondary btn-sm">
-                      Revoke
-                    </button>
+                    {key.mayRevoke ? (
+                      <button type="button" onClick={() => setRevoking(key.id)} disabled={busy !== null} className="btn btn-secondary btn-sm">
+                        Revoke
+                      </button>
+                    ) : null}
                   </span>
                 )}
               </div>

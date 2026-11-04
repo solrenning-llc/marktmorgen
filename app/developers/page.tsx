@@ -152,7 +152,9 @@ export default function DevelopersPage() {
           A key made by a team member who logged in without a second step is paused when the store&apos;s owner starts
           asking the team for one. Every request with it is answered 403 <code className="font-mono">key_paused</code>{" "}
           until whoever made it logs in with a passkey or an authenticator app&apos;s code and turns it back on under API
-          keys in the studio. A paused key is never deleted.
+          keys in the studio. A key made by someone who then leaves the team is paused too, and can only be revoked.
+          A paused key is never deleted. The webhook endpoints a key added are sent nothing while it is paused, start
+          again when it is turned back on, and stop for good when it is revoked.
         </p>
         <p>
           {"While the store's plan renewal is unpaid, reads answer 409 "}

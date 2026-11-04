@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MAKER_UNRECORDED, type PausePreview } from "@/lib/api-key-rules";
+import { MAKER_FORMER, MAKER_UNRECORDED, type PausePreview } from "@/lib/api-key-rules";
 
 /** How the owner's own session stands: logged in with a second step, has one but logged in without it, or has none. */
 export type OwnerStep = "live" | "other_session" | "none";
@@ -14,29 +14,37 @@ const ERRORS: Record<string, string> = {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+type Answer = { ok?: boolean; error?: string; preview?: PausePreview; paused?: number; emailed?: number; waiting?: number; undone?: boolean };
+
 /**
  * The owner's switch: everybody on the team logs in with a second step (612
  * [WP11]). Nothing is saved by the first press: it opens a review of what
  * will happen (WCAG 3.3.6), who on the team has no second step yet and which
- * API keys will pause and whose (owner C3-100), and only "Turn it on" saves.
- * When the keys changed since the page was drawn, the server says so and the
- * review is shown again with the new list. Turning it off asks once too, and
- * says that paused keys stay paused.
+ * API keys and webhook endpoints will pause and whose (owner C3-100), and
+ * only "Turn it on" saves. When that list changed since the page was drawn,
+ * the server says so and the review is shown again with the new list. Turning
+ * it off asks once too, and says that paused keys stay paused. When the rule
+ * was saved but not every key could be paused or every person told, it says
+ * so and offers to finish.
  */
 export function TeamTwoStepSwitch({
   on: initialOn,
   ownerStep,
   waiting,
   preview: initialPreview,
+  pending: initialPending,
 }: {
   on: boolean;
   ownerStep: OwnerStep;
   /** Team members with no second step yet: they are asked to set one up. */
   waiting: string[];
   preview: PausePreview;
+  /** While on: keys still to pause, and keys whose makers still wait for their email. */
+  pending: number;
 }) {
   const [on, setOn] = useState(initialOn);
   const [preview, setPreview] = useState(initialPreview);
+  const [pending, setPending] = useState(initialPending);
   const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,16 +57,32 @@ export function TeamTwoStepSwitch({
     const response = await fetch("/api/store/team", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "two-step", on: next, expect: preview.total }),
+      body: JSON.stringify({ action: "two-step", on: next, expect: preview.stamp }),
     }).catch(() => null);
-    const answer = response
-      ? ((await response.json().catch(() => null)) as { ok?: boolean; error?: string; preview?: PausePreview; paused?: number; emailed?: number } | null)
-      : null;
+    const answer = response ? ((await response.json().catch(() => null)) as Answer | null) : null;
     setBusy(false);
+    if (answer?.error === "incomplete") {
+      // The rule is saved; what is left is finished by pressing again.
+      setOn(true);
+      setReviewing(false);
+      setPending(Math.max(1, answer.waiting ?? 1));
+      setError(
+        `Turned on, but not finished: ${answer.waiting ? `${plural(answer.waiting, "key's maker was", "keys' makers were")} not emailed yet` : "some keys may not be paused yet"}. Press Finish now to try again.`,
+      );
+      return;
+    }
     if (!answer?.ok) {
       if (answer?.error === "changed" && answer.preview) {
         setPreview(answer.preview);
         setError("The API keys changed since this page opened. Nothing was saved. Check the list again, then turn it on.");
+        return;
+      }
+      if (answer?.error === "unsaved") {
+        setError(
+          answer.undone === false
+            ? "That did not save. Some API keys may already be paused: check the list under API keys, then try again."
+            : "That did not save, and no API key was paused. Try again in a moment.",
+        );
         return;
       }
       setError(ERRORS[answer?.error ?? ""] ?? "That did not save. Nothing was changed. Try again in a moment.");
@@ -66,12 +90,13 @@ export function TeamTwoStepSwitch({
     }
     setOn(next);
     setReviewing(false);
+    setPending(0);
     if (next) {
       const paused = answer.paused ?? 0;
       setDone(
         paused
           ? `Turned on. ${plural(paused, "API key is", "API keys are")} paused, and ${plural(answer.emailed ?? 0, "person was", "people were")} emailed how to turn theirs back on.`
-          : "Turned on. Everyone on the team now logs in with a second step.",
+          : `Turned on. Everyone on the team now logs in with a second step.${answer.emailed ? ` ${plural(answer.emailed, "person was", "people were")} emailed about their paused keys.` : ""}`,
       );
     } else {
       setDone("Turned off. The team no longer has to use a second step. Paused API keys stay paused until whoever made them turns them back on.");
@@ -92,6 +117,17 @@ export function TeamTwoStepSwitch({
       </p>
       {blocked ? (
         <p className="mt-2 max-w-2xl text-sm text-ink-soft">{ownerStep === "none" ? ERRORS.owner_no_step : ERRORS.owner_step_session}</p>
+      ) : null}
+
+      {on && pending > 0 && !blocked ? (
+        <div className="notice mt-3">
+          <p className="text-sm text-ink">
+            Not finished: some API keys still have to be paused, or their makers emailed. Nothing else changes.
+          </p>
+          <button type="button" className="btn btn-primary btn-sm mt-2" disabled={busy} aria-busy={busy} onClick={() => save(true)}>
+            {busy ? "Finishing…" : "Finish now"}
+          </button>
+        </div>
       ) : null}
 
       {reviewing ? (
@@ -132,10 +168,18 @@ export function TeamTwoStepSwitch({
   );
 }
 
+function lineWords(line: PausePreview["people"][number]): string {
+  const keys = plural(line.count, "key", "keys");
+  const hooks = line.endpoints ? `, and ${plural(line.endpoints, "webhook endpoint", "webhook endpoints")} ${line.count === 1 ? "it" : "they"} added` : "";
+  if (line.who === MAKER_UNRECORDED) return `${keys} made before November 4, 2026, when who made a key was not recorded${hooks}. You can turn ${line.count === 1 ? "it" : "them"} back on yourself.`;
+  if (line.who === MAKER_FORMER) return `${keys} made by ${MAKER_FORMER}${hooks}. ${line.count === 1 ? "It" : "They"} can only be revoked, by you.`;
+  return `${keys} made by ${line.who}${hooks}. ${line.emailed ? "They will get an email on how to turn them back on." : ""}`.trim();
+}
+
 /**
  * What saving the switch will do, shown before it is saved (WCAG 3.3.6): on,
- * who has no second step yet and which API keys pause and whose; off, that
- * paused keys stay paused.
+ * who has no second step yet and which API keys and webhook endpoints pause
+ * and whose; off, that paused keys stay paused.
  */
 export function TeamTwoStepReview({ on, waiting, preview }: { on: boolean; waiting: string[]; preview: PausePreview }) {
   return (
@@ -145,8 +189,8 @@ export function TeamTwoStepReview({ on, waiting, preview }: { on: boolean; waiti
       </h3>
       {on ? (
         <p className="mt-2 text-sm text-ink-soft">
-          Team members will be able to log in with the emailed link alone again. API keys paused before stay paused
-          until whoever made them turns them back on.
+          Team members will be able to log in with the emailed link alone again. API keys paused before stay paused until
+          whoever made them turns them back on.
         </p>
       ) : (
         <>
@@ -158,21 +202,18 @@ export function TeamTwoStepReview({ on, waiting, preview }: { on: boolean; waiti
           {preview.total ? (
             <>
               <p className="mt-3 text-sm font-semibold text-ink">
-                {`${plural(preview.total, "API key", "API keys")} will pause, because ${preview.total === 1 ? "it was" : "they were"} made without a second step. Nothing is deleted.`}
+                {`${plural(preview.total, "API key", "API keys")}${preview.endpoints ? ` and ${plural(preview.endpoints, "webhook endpoint", "webhook endpoints")}` : ""} will pause. Nothing is deleted.`}
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-soft">
                 {preview.people.map((line) => (
                   <li key={line.who} className="break-words">
-                    {line.who === MAKER_UNRECORDED
-                      ? `${plural(line.count, "key", "keys")} made before November 4, 2026, when who made a key was not recorded`
-                      : `${plural(line.count, "key", "keys")} made by ${line.who}${line.emailed ? ", who will get an email on how to turn them back on" : ""}`}
+                    {lineWords(line)}
                   </li>
                 ))}
               </ul>
               <p className="mt-2 text-sm text-ink-soft">
-                Anything using a paused key is refused until it is turned back on, under API keys in the studio, by whoever
-                made it after logging in with a second step.
-                {preview.people.some((line) => line.who === MAKER_UNRECORDED) ? " Keys made before November 4, 2026 you can turn back on yourself, as nobody else can." : ""}
+                Anything using a paused key is refused, and the webhook endpoints it added are sent nothing, until it is turned
+                back on under API keys in the studio by whoever made it, after logging in with a second step.
               </p>
             </>
           ) : (

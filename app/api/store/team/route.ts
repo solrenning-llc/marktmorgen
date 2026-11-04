@@ -3,7 +3,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { linkOrigin } from "@/lib/request-origin";
 import { noticeCreator } from "@/lib/account-notice";
 import { inviteMember, logTeam, readTeam, removeMember, revokeInvite, setMemberRole, setRequireTwoStep } from "@/lib/team";
-import { pauseForRule, pausePreview, tellPaused } from "@/lib/api-key-pause";
+import { pauseForRule, pausePreview, tellPaused, undoPause } from "@/lib/api-key-pause";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 import { ROLE_NAMES, parseTeamRole } from "@/lib/team-roles";
@@ -28,6 +28,7 @@ const ANSWERS: Record<string, number> = {
   owner_no_step: 409,
   owner_step_session: 403,
   changed: 409,
+  unsaved: 503,
 };
 
 /**
@@ -91,9 +92,11 @@ export async function POST(request: NextRequest) {
     // team, or stops. Only from a session opened with the owner's own second
     // step (lib/second-step-gate.ts liveSecondStep), so a session from an
     // emailed link cannot loosen or tighten it. Switching it on pauses the API
-    // keys teammates made without a second step (lib/api-key-pause.ts); the
-    // page showed how many and whose, and `expect` is that number: when it
-    // changed meanwhile, nothing is saved and the new review is sent back.
+    // keys teammates made without a second step, and the webhook endpoints
+    // they added (lib/api-key-pause.ts); the page showed which and whose, and
+    // `expect` is the stamp of that list: when it changed meanwhile, nothing
+    // is saved and the new review is sent back. When the rule cannot be saved
+    // the pause is undone, and the answer says whether it was.
     if (action === "two-step") {
       if (role !== "owner") return fail("owner");
       const on = body.on === true;
@@ -106,15 +109,32 @@ export async function POST(request: NextRequest) {
         await setRequireTwoStep(store, false, email);
         return Response.json({ ok: true, on: false });
       }
-      if ((await readTeam(store.sid)).requireTwoStep) return Response.json({ ok: true, on: true, paused: 0, emailed: 0 });
+      const origin = linkOrigin(request);
+      // Already on: pressing again finishes what an earlier save could not, the keys still to pause and the people still to tell.
+      if ((await readTeam(store.sid)).requireTwoStep) return finish(store, email, role, [], origin);
       const preview = await pausePreview(store);
-      if (body.expect !== preview.total) return Response.json({ ok: false, error: "changed", preview }, { status: ANSWERS.changed });
-      const first = await pauseForRule(store);
-      await setRequireTwoStep(store, true, email);
-      const paused = [...first, ...(await pauseForRule(store))];
-      if (paused.length) await logTeam(store.sid, { who: email, role, what: `Paused ${paused.length} API ${paused.length === 1 ? "key" : "keys"} made without a second step` });
-      const emailed = await tellPaused(store, paused, linkOrigin(request));
-      return Response.json({ ok: true, on: true, paused: paused.length, emailed: emailed.length });
+      if (body.expect !== preview.stamp) return Response.json({ ok: false, error: "changed", preview }, { status: ANSWERS.changed });
+      let first: Awaited<ReturnType<typeof pauseForRule>>;
+      try {
+        first = await pauseForRule(store);
+      } catch (error) {
+        console.error("pausing API keys before the team's two-step rule failed; the rule was not saved", error);
+        return Response.json({ ok: false, error: "unsaved", undone: false }, { status: ANSWERS.unsaved });
+      }
+      try {
+        await setRequireTwoStep(store, true, email);
+      } catch (error) {
+        // Saved after all (an error after the write)? Then the pause stands and the rest is finished as usual.
+        if (!(await readTeam(store.sid).then((t) => t.requireTwoStep === true).catch(() => true))) {
+          console.error("turning on the team's two-step rule failed; its pause is undone", error);
+          const undone = await undoPause(store, first).then(
+            () => true,
+            (undo) => (console.error("undoing the pause failed; those keys stay paused until their makers turn them on", undo), false),
+          );
+          return Response.json({ ok: false, error: "unsaved", undone }, { status: ANSWERS.unsaved });
+        }
+      }
+      return finish(store, email, role, first, origin);
     }
 
     if (action === "leave") {
@@ -129,5 +149,25 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("a team change failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+  }
+}
+
+/**
+ * With the rule saved: pauses what is still to pause (a key made in between),
+ * emails who is still to be told, and says how it went. When either could not
+ * be finished, the answer says so and the rule stays on: pressing again
+ * finishes it, with nobody told twice (lib/api-key-pause.ts).
+ */
+async function finish(store: Parameters<typeof pauseForRule>[0], email: string, role: Parameters<typeof logTeam>[1]["role"], first: Awaited<ReturnType<typeof pauseForRule>>, origin: string): Promise<Response> {
+  let paused = first.length;
+  try {
+    paused += (await pauseForRule(store)).length;
+    if (paused) await logTeam(store.sid, { who: email, role, what: `Paused ${paused} API ${paused === 1 ? "key" : "keys"} made without a second step` });
+    const told = await tellPaused(store, origin);
+    if (told.waiting) return Response.json({ ok: false, error: "incomplete", on: true, paused, emailed: told.emailed.length, waiting: told.waiting }, { status: 502 });
+    return Response.json({ ok: true, on: true, paused, emailed: told.emailed.length });
+  } catch (error) {
+    console.error("finishing the team's two-step rule failed; pressing again finishes it", error);
+    return Response.json({ ok: false, error: "incomplete", on: true, paused }, { status: 502 });
   }
 }

@@ -164,7 +164,27 @@ const DELIVERY_SECONDS = 7 * 86400;
  * every message carries a signature under each, so a receiver still holding
  * the old secret keeps accepting while the creator moves it to the new one.
  */
-type Endpoint = { id: string; url: string; secret: string; events: WebhookEvent[]; addedAt: string; previous?: string; previousUntil?: number };
+type Endpoint = {
+  id: string;
+  url: string;
+  secret: string;
+  events: WebhookEvent[];
+  addedAt: string;
+  previous?: string;
+  previousUntil?: number;
+  /** The API key that added it (app/api/v1/hooks), by id; absent for one added in the studio. */
+  key?: string;
+  /**
+   * Held with that key (owner C3-100, lib/api-key-pause.ts): "paused", while
+   * the key is paused, and on again with it; "revoked", for good, as the key
+   * is gone. A held endpoint is sent nothing.
+   */
+  held?: EndpointHeld;
+};
+
+/** Why an endpoint added by an API key is sent nothing: its key is paused, or was revoked. */
+export type EndpointHeld = "paused" | "revoked";
+const KEY_ID_PATTERN = /^[0-9a-f]{12}$/;
 
 /** How long the old secret still signs after it is replaced: one day, then it is gone. */
 export const ROTATION_HOURS = 24;
@@ -241,7 +261,15 @@ function parseConfig(raw: unknown): Config | null {
     const endpoints = Array.isArray(value.endpoints)
       ? value.endpoints
           .filter((e): e is Endpoint => Boolean(e) && typeof e.id === "string" && ENDPOINT_ID_PATTERN.test(e.id) && typeof e.url === "string" && typeof e.secret === "string")
-          .map((e) => withoutStalePrevious({ ...e, events: Array.isArray(e.events) ? e.events.filter(isEvent) : [] }))
+          .map((e) => {
+            const { key, held, ...rest } = e;
+            return withoutStalePrevious({
+              ...rest,
+              events: Array.isArray(e.events) ? e.events.filter(isEvent) : [],
+              ...(typeof key === "string" && KEY_ID_PATTERN.test(key) ? { key } : {}),
+              ...(held === "paused" || held === "revoked" ? { held } : {}),
+            });
+          })
       : [];
     return {
       handle: typeof value.handle === "string" ? value.handle : "",
@@ -359,6 +387,10 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
     return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: "The endpoint was removed." };
   }
   if (!store) return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: "The store could not be found." };
+  // Held with the API key that added it (owner C3-100): nothing is sent, and nothing is counted.
+  if (endpoint.held) {
+    return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: endpoint.held === "paused" ? "Not sent: the API key that added this endpoint is paused." : "Not sent: the API key that added this endpoint was revoked." };
+  }
   // 232 [CA1] 4b4b2: while the plan's renewal is unpaid or its payment is
   // disputed, nothing is sent and the endpoint is not called. The delivery is
   // marked not sent at once, with the reason, and not tried again: a delivery
@@ -480,7 +512,8 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   if (!store.statsId || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const config = await readConfig(statsId);
-  const listening = config?.endpoints.filter((e) => e.events.includes(type)) ?? [];
+  // An endpoint held with the API key that added it hears nothing (owner C3-100).
+  const listening = config?.endpoints.filter((e) => e.events.includes(type) && !e.held) ?? [];
   if (!listening.length) return 0;
   const eventId = eventIdFor(statsId, type, seed);
   const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);
@@ -577,7 +610,7 @@ export async function deliverDue(deadline: number, now = Date.now()): Promise<{ 
 // ---- The studio ---------------------------------------------------------------
 
 /** What the studio sees of an endpoint: never a secret, only until when the old one still signs. */
-export type EndpointView = { id: string; where: string; events: WebhookEvent[]; addedAt: string; oldSecretUntil?: string };
+export type EndpointView = { id: string; where: string; events: WebhookEvent[]; addedAt: string; oldSecretUntil?: string; held?: EndpointHeld };
 export type DeliveryView = Pick<Delivery, "id" | "eventId" | "type" | "state" | "attempts" | "next" | "lastStatus" | "lastError" | "lastAt" | "createdAt" | "notSentPaused" | "resentFrom" | "resentAs" | "givenUp"> & {
   endpoint: string;
 };
@@ -600,6 +633,7 @@ export async function webhooksView(store: Store): Promise<WebhooksView> {
       events: e.events,
       addedAt: e.addedAt,
       ...(e.previous && e.previousUntil ? { oldSecretUntil: new Date(e.previousUntil).toISOString() } : {}),
+      ...(e.held ? { held: e.held } : {}),
     })),
     log: deliveries
       .map(parseDelivery)
@@ -669,7 +703,7 @@ export type AddEndpointResult =
  * studio never shows it again. The address is checked now (https, a public
  * host) and again at every send, since what a name points to can change.
  */
-export async function addEndpoint(store: Store, rawUrl: string, events: unknown, now = Date.now()): Promise<AddEndpointResult> {
+export async function addEndpoint(store: Store, rawUrl: string, events: unknown, now = Date.now(), byKey = ""): Promise<AddEndpointResult> {
   if (!store.statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
   // 232 [CA1] 4b4b2: a new endpoint is new delivery work; it waits while the plan's costs are paused.
   const paused = integrationPauseWord(store, now / 1000);
@@ -694,7 +728,15 @@ export async function addEndpoint(store: Store, rawUrl: string, events: unknown,
     return { ok: false, reason: "unavailable", message: "The endpoint could not be added just now. Try again in a moment." };
   }
   const secret = `whsec_${randomBytes(24).toString("base64url")}`;
-  const endpoint: Endpoint = { id: `we_${randomBytes(8).toString("hex")}`, url, secret, events: chosen, addedAt: new Date(now).toISOString() };
+  const endpoint: Endpoint = {
+    id: `we_${randomBytes(8).toString("hex")}`,
+    url,
+    secret,
+    events: chosen,
+    addedAt: new Date(now).toISOString(),
+    // Which API key added it, so the endpoint pauses and stops with that key (owner C3-100).
+    ...(KEY_ID_PATTERN.test(byKey) ? { key: byKey } : {}),
+  };
   // The Stripe pass starts from now for a store's first endpoint: nothing
   // that happened before it was added is sent to it. Checked again on the
   // settings as they are when written, in case another change landed first.
@@ -754,6 +796,44 @@ export async function rotateSecret(store: Store, id: string, now = Date.now()): 
   });
   if (!written) return { ok: false, reason: "missing" };
   return { ok: true, secret, oldSecretUntil: new Date(previousUntil).toISOString(), view: await webhooksView(store) };
+}
+
+/** The endpoints the given API keys added, as the review before the team's two-step switch counts them. */
+export async function endpointsOfKeys(store: Store, keyIds: string[]): Promise<{ id: string; key: string; where: string; held?: EndpointHeld }[]> {
+  if (!store.statsId || !keyIds.length || !isRedisConfigured()) return [];
+  const config = await readConfig(store.statsId);
+  return (config?.endpoints ?? []).filter((e) => e.key && keyIds.includes(e.key)).map((e) => ({ id: e.id, key: e.key as string, where: shortAddress(e.url), ...(e.held ? { held: e.held } : {}) }));
+}
+
+/**
+ * Holds, or lets go, the endpoints the given API keys added (owner C3-100):
+ * "paused" with a paused key; "revoked" for good with a revoked one; null
+ * lets go of those held "paused" only, when the key is turned back on. A
+ * revoked key's endpoints stay held until the creator removes them. Returns
+ * the ids changed.
+ */
+export async function holdEndpointsOfKeys(store: Store, keyIds: string[], held: EndpointHeld | null): Promise<string[]> {
+  if (!store.statsId || !keyIds.length || !isRedisConfigured()) return [];
+  let changed: string[] = [];
+  const written = await changeConfig(store.statsId, (fresh) => {
+    if (!fresh) return null;
+    changed = [];
+    const endpoints = fresh.endpoints.map((e) => {
+      if (!e.key || !keyIds.includes(e.key)) return e;
+      if (held === null) {
+        if (e.held !== "paused") return e;
+        changed.push(e.id);
+        const { held: _gone, ...rest } = e;
+        void _gone;
+        return rest;
+      }
+      if (e.held === held || e.held === "revoked") return e;
+      changed.push(e.id);
+      return { ...e, held };
+    });
+    return changed.length ? { ...fresh, handle: store.handle, endpoints } : null;
+  });
+  return written ? changed : [];
 }
 
 /** Removes an endpoint. Anything still waiting to be sent to it is dropped at its next try. */
@@ -927,7 +1007,8 @@ const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.star
 
 /** Which of the Stripe-read events an endpoint of this store listens for. */
 function wantsStripe(config: Config): boolean {
-  return config.endpoints.some((e) => e.events.some((t) => FROM_STRIPE.includes(t)));
+  // A held endpoint (owner C3-100) hears nothing, so it asks for no Stripe reading either.
+  return config.endpoints.some((e) => !e.held && e.events.some((t) => FROM_STRIPE.includes(t)));
 }
 
 const iso = (seconds: unknown) => (typeof seconds === "number" && seconds > 0 ? new Date(seconds * 1000).toISOString() : null);

@@ -40,6 +40,14 @@ is("free: the booking window is stretched for the series' own later dates", seri
 const busy = [{ start: FIRST + 7 * DAY + HOUR, end: FIRST + 7 * DAY + 2 * HOUR }];
 is("a date somebody holds, or a synced calendar's busy time, is named", seriesConflicts(setup, NOW, busy, seriesStarts(FIRST, NY, "weekly", 4), "p1", KNOWN), [1]);
 is("the first date must be inside the booking window, which is never stretched for it", seriesConflicts(setup, NOW, [], seriesStarts(FIRST + 14 * DAY + HOUR, NY, "weekly", 2), "p1", KNOWN), [0]);
+// A longer length the buyer chose (lib/call-lengths.ts), read on that length's own grid (the booking page offers 9:00, 10:30, 12:00… for 90 minutes): noon is on both grids.
+const NOON = Date.UTC(2026, 9, 26, 16, 0);
+const noon = seriesStarts(NOON, NY, "weekly", 3);
+// 13:00 to 14:00 on Monday 2 November, in New York: an hour from noon fits before it, an hour and a half does not.
+const afterNoon = [{ start: Date.UTC(2026, 10, 2, 18, 0), end: Date.UTC(2026, 10, 2, 19, 0) }];
+is("at the length chosen: a busy time only a longer length reaches is named, the call's own length passes", [seriesConflicts(setup, NOW, afterNoon, noon, "p1", KNOWN, 90), seriesConflicts(setup, NOW, afterNoon, noon, "p1", KNOWN)], [[1], []]);
+is("at the length chosen: every date free when nothing is in the way", seriesConflicts(setup, NOW, [], noon, "p1", KNOWN, 90), []);
+is("at the length chosen: past the busy times read by its own end", [seriesConflicts(setup, NOW, [], [NOON], "p1", NOON + 75 * 60_000), seriesConflicts(setup, NOW, [], [NOON], "p1", NOON + 75 * 60_000, 90)], [[], [0]]);
 is("a date outside the creator's hours is named", seriesConflicts(setup, NOW, [], [FIRST, FIRST + 5 * DAY], "p1", KNOWN), [1]);
 is("a missing clock time is a conflict too", seriesConflicts(setup, NOW, [], [FIRST, null], "p1", KNOWN), [1]);
 const long = seriesStarts(FIRST, NY, "biweekly", 12);

@@ -7,7 +7,8 @@ import { DataRoomError } from "@/lib/store-data";
 import { MAX_AI_LESSONS, MAX_AI_MODULES } from "@/lib/ai-rules";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setCourseLessons, setProductCourse, setProductHidden, storeForEmail, storeFolder } from "@/lib/store";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { requestLocked } from "@/lib/two-step";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
@@ -146,6 +147,8 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: true });
       }
       if (action === "cm-delete") {
+        // A student's words, gone for good: a locked session (lib/two-step.ts) may hide it instead.
+        if (await requestLocked(request)) return refusedJson("locked");
         await deleteComment(courseId, commentId, store);
         return Response.json({ ok: true });
       }
@@ -244,6 +247,8 @@ export async function POST(request: NextRequest) {
         const found = findLesson(course, lessonId);
         if (!found) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
         if (body.task === null) {
+          // It takes the work students handed in with it: not while the session is locked (lib/two-step.ts).
+          if (found.lesson.task && (await requestLocked(request))) return refusedJson("locked");
           const result = editCourse(course, { op: "task", lessonId, task: null });
           if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
           await save(result.course);
@@ -271,6 +276,8 @@ export async function POST(request: NextRequest) {
         if (!findLesson(course, lessonId)) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
         if (hasTask && body.quiz !== null) return Response.json({ ok: false, error: "task_there" }, { status: 400 });
         if (body.quiz === null) {
+          // Its questions are deleted for good: not while the session is locked (lib/two-step.ts).
+          if (findLesson(course, lessonId)?.lesson.quiz && (await requestLocked(request))) return refusedJson("locked");
           const result = editCourse(course, { op: "quiz", lessonId, quiz: null });
           if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
           await save(result.course);
@@ -451,6 +458,11 @@ export async function POST(request: NextRequest) {
       if (!result.ok) {
         return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
       }
+      // An edit that takes lessons away (their text, quizzes, comments and the work handed in for
+      // them) or deletes a lesson's file waits while the session is locked (lib/two-step.ts).
+      const keptFiles = new Set(filesInCourse(result.course).map((f) => f.pathname));
+      const destroys = lessonCount(result.course) < lessonCount(course) || result.removed.some((f) => !keptFiles.has(f.pathname));
+      if (destroys && (await requestLocked(request))) return refusedJson("locked");
       await save(result.course);
       const lessons = lessonCount(result.course);
       if (lessons !== courseInfo.lessons) await setCourseLessons(ref, id, lessons);

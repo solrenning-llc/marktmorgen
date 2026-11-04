@@ -63,7 +63,7 @@
  *   nl:2fa:lockedset:<hash> the account's locked sessions, to log them out on Cancel
  */
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, endSession, normaliseEmail, openSession } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, endSession, normaliseEmail, openSession } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
@@ -216,7 +216,8 @@ const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { weekday: 
  * the team and not a permission, is not refused. A permission keeps a route
  * open, not every action in it: a route whose action destroys what its
  * permission otherwise only edits refuses that action itself while the
- * session is locked (app/api/store/product/route.ts, "remove" and "link").
+ * session is locked (requestLocked: the product, option, course, podcast,
+ * file and site-page routes under app/api/store/).
  */
 export const LOCKED_ALLOWS: Readonly<Record<Permission, boolean>> = {
   billing: false,
@@ -247,6 +248,16 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
   const [raw] = await redisPipeline([["GET", lockedKey(session)]]);
   const until = Number(raw);
   return Number.isFinite(until) && until > now ? until : 0;
+}
+
+/**
+ * Whether the request's own session is locked, for a route that refuses one of
+ * its actions itself: one that destroys for good what its permission otherwise
+ * only edits (a product, a price's file, lessons and the work handed in for
+ * them, a podcast episode, a page). Answered with refusedJson("locked").
+ */
+export async function requestLocked(request: { cookies: { get(name: string): { value: string } | undefined } }): Promise<boolean> {
+  return (await lockedUntil(request.cookies.get(SESSION_COOKIE)?.value)) > 0;
 }
 
 /**

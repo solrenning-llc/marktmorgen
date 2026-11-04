@@ -20,12 +20,20 @@ import { NextRequest } from "next/server";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { SESSION_COOKIE, emailForSession, openSession } from "@/lib/auth";
 import { finishSetup, lockedUntil, startSetup } from "@/lib/two-step";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setProductFile, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, productFile, setProductFile, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
+import { readCourse } from "@/lib/course";
+import { addComment, readComment } from "@/lib/lesson-comments";
+import { readPodcast, savePodcast } from "@/lib/podcast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
 import { POST as productRoute } from "@/app/api/store/product/route";
+import { POST as optionRoute } from "@/app/api/store/option/route";
+import { POST as courseRoute } from "@/app/api/store/course/route";
+import { POST as podcastRoute } from "@/app/api/store/podcast/route";
+import { POST as attachRoute } from "@/app/api/store/file/attach/route";
+import { POST as sitePageRoute } from "@/app/api/store/site-page/route";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -71,7 +79,7 @@ async function main(): Promise<void> {
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
   await ensureListId(OWNER);
-  await setStripeAccount(OWNER, "acct_1LockedProductXX", true);
+  await setStripeAccount(OWNER, "acct_1LockedProdXXX", true);
   await setSubscription(OWNER, { customerId: "cus_lockedproduct", subscriptionId: "sub_lockedproduct", active: true, tier: "creator", period: paidPeriod() });
   const started = await startSetup(OWNER, "c".repeat(64), BACKUP);
   if (typeof started === "string") throw new Error(`setup: ${started}`);
@@ -111,6 +119,84 @@ async function main(): Promise<void> {
   is("removed", (await product(full, { action: "remove", id })).status, 200);
   is("and gone", await listing(id), null);
   is("the route still asks for the products permission, so the roles that may remove one are unchanged", readFileSync("app/api/store/product/route.ts", "utf8").includes('guardStoreWrite(request, "products", 40_000)'), true);
+
+  // The other routes "products" and "page" keep open that delete for good what they otherwise only edit.
+  const asStore = <T,>(route: (r: NextRequest) => Promise<T>, path: string) => async (session: string, body: Record<string, unknown>) => {
+    const response = (await route(new NextRequest(`https://marktmorgen.com/api/store/${path}`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }))) as unknown as Response;
+    return { status: response.status, error: ((await response.json().catch(() => ({}))) as { error?: string }).error };
+  };
+  const option = asStore(optionRoute, "option");
+  const course = asStore(courseRoute, "course");
+  const podcast = asStore(podcastRoute, "podcast");
+  const attach = asStore(attachRoute, "file/attach");
+  const sitePage = asStore(sitePageRoute, "site-page");
+  const LOCKED = { status: 403, error: "locked" };
+
+  part("A price option that holds a file is not removed by a locked session");
+  const priced = await addProduct(OWNER, "Seed Packs", "Seeds.", "15");
+  if (!priced.ok) throw new Error("no priced product");
+  if (!(await addOption(OWNER, priced.product.id, "Deluxe", "30")).ok) throw new Error("no option");
+  const optionId = (await listing(priced.product.id))?.options[0]?.id ?? "";
+  const optionFile = { pathname: `stores/locked-product/${optionId}/deluxe.zip`, name: "deluxe.zip", bytes: 2_000, contentType: "application/zip", addedAt: "2026-10-01T00:00:00.000Z" };
+  if (!(await setProductFile(OWNER, optionId, optionFile)).ok) throw new Error("no option file");
+  is("refused as locked", await option(locked, { action: "remove", id: optionId }), LOCKED);
+  is("the option and its file are still there", (await productFile(OWNER, optionId))?.file.pathname, optionFile.pathname);
+  is("nor is the file taken off it through the upload route", await attach(locked, { id: optionId, detach: true }), LOCKED);
+  is("still there", (await productFile(OWNER, optionId))?.file.pathname, optionFile.pathname);
+  is("a full session removes the option", (await option(full, { action: "remove", id: optionId })).status, 200);
+  is("and it is gone", (await listing(priced.product.id))?.options.length, 0);
+
+  part("A product's own file is not taken off by a locked session");
+  const sold = await addProduct(OWNER, "Tide Tables", "Tides.", "12");
+  if (!sold.ok) throw new Error("no sold product");
+  const soldFile = { pathname: `stores/locked-product/${sold.product.id}/tides.pdf`, name: "tides.pdf", bytes: 1_500, contentType: "application/pdf", addedAt: "2026-10-01T00:00:00.000Z" };
+  if (!(await setProductFile(OWNER, sold.product.id, soldFile)).ok) throw new Error("no sold file");
+  is("refused as locked", await attach(locked, { id: sold.product.id, detach: true }), LOCKED);
+  is("the file is still on it", (await listing(sold.product.id))?.file?.pathname, soldFile.pathname);
+  is("a full session takes it off", (await attach(full, { id: sold.product.id, detach: true })).status, 200);
+
+  part("A course's lessons, assignments and students' comments are not deleted by a locked session");
+  const taught = await addProduct(OWNER, "Botany Course", "A course.", "40");
+  if (!taught.ok) throw new Error("no course product");
+  const cid = taught.product.id;
+  is("a course is set up", (await course(full, { action: "enable", id: cid })).status, 200);
+  await course(full, { action: "edit", id: cid, op: "module-add", title: "Week one" });
+  const courseId = (await listing(cid))?.course?.id ?? "";
+  const moduleId = (await readCourse(courseId))?.modules[0]?.id ?? "";
+  await course(full, { action: "edit", id: cid, op: "lesson-add", moduleId, title: "Leaves" });
+  const lessonId = (await readCourse(courseId))?.modules[0]?.lessons[0]?.id ?? "";
+  is("with a lesson that has an assignment", (await course(full, { action: "task", id: cid, lessonId, task: { prompt: "Press a leaf and photograph it." } })).status, 200);
+  const said = await addComment({ courseId, lessonId, by: "student-key-0001", name: "Sam", text: "Which leaves work best?", room: (await storeForEmail(OWNER))! });
+  if (!said.ok) throw new Error("no comment");
+  const commentId = said.comment.id;
+  is("taking the assignment off (and the work handed in) is refused", await course(locked, { action: "task", id: cid, lessonId, task: null }), LOCKED);
+  is("deleting a student's comment is refused", await course(locked, { action: "cm-delete", id: cid, comment: commentId }), LOCKED);
+  is("removing the lesson is refused", await course(locked, { action: "edit", id: cid, op: "lesson-remove", lessonId }), LOCKED);
+  const still = await readCourse(courseId);
+  is("the lesson, its assignment and the comment are all still there", [still?.modules[0]?.lessons[0]?.id, Boolean(still?.modules[0]?.lessons[0]?.task), (await readComment(courseId, commentId))?.id], [lessonId, true, commentId]);
+  is("hiding the comment is still open", (await course(locked, { action: "cm-hide", id: cid, comment: commentId, hidden: true })).status, 200);
+  is("renaming the lesson is still open", (await course(locked, { action: "edit", id: cid, op: "lesson-edit", lessonId, title: "Leaves and stems" })).status, 200);
+  is("a full session removes the lesson", (await course(full, { action: "edit", id: cid, op: "lesson-remove", lessonId })).status, 200);
+
+  part("A podcast episode is not deleted by a locked session");
+  const show = await addProduct(OWNER, "Coast Podcast", "A show.", "8");
+  if (!show.ok) throw new Error("no podcast product");
+  is("a podcast is set up", (await podcast(full, { action: "enable", id: show.product.id })).status, 200);
+  const podcastId = (await listing(show.product.id))?.podcast?.id ?? "";
+  await savePodcast({ id: podcastId, episodes: [{ id: "ep0000000001", title: "Episode one", notes: "", pathname: `stores/locked-product/${show.product.id}/one.mp3`, bytes: 3_000, contentType: "audio/mpeg", at: 1_790_000_000 }] });
+  is("refused as locked", await podcast(locked, { action: "remove", id: show.product.id, episode: "ep0000000001" }), LOCKED);
+  is("the episode is still there", (await readPodcast(podcastId))?.episodes.length, 1);
+  is("a full session removes it", (await podcast(full, { action: "remove", id: show.product.id, episode: "ep0000000001" })).status, 200);
+  is("and it is gone", (await readPodcast(podcastId))?.episodes.length, 0);
+
+  part("A page of the site is not deleted by a locked session");
+  const made = await sitePage(locked, { action: "add", title: "About the coast" });
+  is("a locked session may add a page", made.status, 200);
+  const pageId = (await storeForEmail(OWNER))?.sitePages[0]?.id ?? "";
+  is("but not delete one", await sitePage(locked, { action: "remove", id: pageId }), LOCKED);
+  is("the page is still there", (await storeForEmail(OWNER))?.sitePages.map((p) => p.id), [pageId]);
+  is("a full session deletes it", (await sitePage(full, { action: "remove", id: pageId })).status, 200);
+  is("and it is gone", (await storeForEmail(OWNER))?.sitePages.length, 0);
 
   done();
 }

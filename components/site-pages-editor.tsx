@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_SITE_PAGES, MAX_SITE_TITLE, MAX_SLUG, SITE_STARTERS, type SitePage, slugFrom } from "@/lib/site-page-rules";
 
 const MESSAGES: Record<string, string> = {
@@ -14,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   taken: "Another of your pages has that address.",
   unknown: "That is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include its pages.",
+  locked: STUDIO_MESSAGES.locked,
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

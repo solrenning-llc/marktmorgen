@@ -2,6 +2,8 @@ import type { NextRequest } from "next/server";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setPodcastEpisodes, setProductPodcast, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { refusedJson } from "@/lib/studio-route";
+import { requestLocked } from "@/lib/two-step";
 import { ownsPath } from "@/lib/product-file";
 import { readListing } from "@/lib/catalog";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
@@ -60,6 +62,8 @@ export async function POST(request: NextRequest) {
       } else if (action === "edit") {
         edit = { op: "edit", id: text(body.episode, 20), title: body.title, notes: body.notes };
       } else if (action === "remove") {
+        // Its audio is deleted for good: not while the session is locked (lib/two-step.ts).
+        if (await requestLocked(request)) return refusedJson("locked");
         edit = { op: "remove", id: text(body.episode, 20) };
       } else {
         return fail("invalid");

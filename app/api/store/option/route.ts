@@ -5,9 +5,12 @@ import {
   addOption,
   editOption,
   moveOption,
+  productFile,
   removeOption,
   type OptionResult,
 } from "@/lib/store";
+import { refusedJson } from "@/lib/studio-route";
+import { requestLocked } from "@/lib/two-step";
 import { MAX_OPTION_DETAILS, MAX_OPTION_DETAIL_LENGTH, MAX_OPTION_LABEL_LENGTH } from "@/lib/product-option";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { StoreFullError } from "@/lib/store";
@@ -50,6 +53,10 @@ export async function POST(request: NextRequest) {
   if (!id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
+
+  // A session let in without its second step (lib/two-step.ts) edits prices but does not
+  // remove one that holds a file: the file goes with it, for good.
+  if (action === "remove" && (await requestLocked(request)) && (await productFile(ref, id))) return refusedJson("locked");
 
   try {
     let result: OptionResult;

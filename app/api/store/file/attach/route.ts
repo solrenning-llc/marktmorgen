@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
-import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
+import { productFile, setProductFile, storeForEmail, storeFolder } from "@/lib/store";
+import { refusedJson } from "@/lib/studio-route";
+import { requestLocked } from "@/lib/two-step";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
 import { dropStamped } from "@/lib/pdf-stamp";
@@ -50,6 +52,13 @@ export async function POST(request: NextRequest) {
         contentType: found.contentType,
         addedAt: new Date().toISOString(),
       };
+    }
+
+    // Replacing or taking off the file it holds deletes that file, and buyers' stamped copies, for
+    // good: not while the session is locked (lib/two-step.ts). Putting a file where there is none is.
+    if (await requestLocked(request)) {
+      const held = await productFile(ref, id);
+      if (held && held.file.pathname !== file?.pathname) return refusedJson("locked");
     }
 
     const result = await setProductFile(ref, id, file);

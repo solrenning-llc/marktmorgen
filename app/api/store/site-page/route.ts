@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { StoreFullError, imageFolder, setSitePages } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { refusedJson } from "@/lib/studio-route";
+import { requestLocked } from "@/lib/two-step";
 import { MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
 import { claimPictures, dropPage, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
@@ -85,6 +87,8 @@ export async function POST(request: NextRequest) {
 
     if (action === "remove") {
       if (!found) return refuse("unknown", 404);
+      // The page and its pictures are deleted for good: not while the session is locked (lib/two-step.ts).
+      if (await requestLocked(request)) return refusedJson("locked");
       const saved = await setSitePages(ref, pages.filter((page) => page.id !== found.id));
       if (!saved.ok) return refuse(saved.reason);
       const gone = await dropPage(saved.store.statsId, siteKey(found.id), saved.store).catch(() => [] as string[]);

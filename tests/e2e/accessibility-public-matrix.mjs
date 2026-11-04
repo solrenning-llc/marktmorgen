@@ -164,12 +164,49 @@ try{
     await posted;
     if(recoveryPosts!==1)throw Error("Corrected recovery input did not submit exactly once");
     console.log("PENDING_SUBMIT_VALIDATION_REGRESSION:"+JSON.stringify({engine,emptyRetry:true,malformedRetry:true,validKeyboardPost:1,intercepted:true}));
+
+    // The actual help page and its hydrated search: no account, API or test-only UI.
+    // Preserve the entry-page audit above; these are bounded navigation regressions.
+    for(const helpWidth of [390,1280]){
+     await page.setViewportSize({width:helpWidth,height:900});
+     await page.goto(origin+"/help#%",{waitUntil:"networkidle"});
+     const search=page.getByRole("searchbox",{name:"Search the help center",exact:true});
+     const sectionLink=page.getByRole("navigation",{name:"Help sections",exact:true}).locator("a").first();
+     const sectionId=(await sectionLink.getAttribute("href")).slice(1);
+     const answerId=await page.locator("details[data-help-item]").last().getAttribute("id");
+     if(!sectionId||!answerId)throw Error("Help navigation fixture is incomplete");
+     await search.fill("zzzz-no-answer-fixture");
+     await page.waitForFunction(()=>document.querySelectorAll("details[data-help-item]:not([hidden])").length===0);
+     await sectionLink.focus();await page.keyboard.press("Enter");
+     await page.waitForFunction(id=>{
+      const field=document.querySelector("#help-search"),section=document.getElementById(id);
+      return field?.value===""&&section&&!section.hidden&&section.getBoundingClientRect().height>0;
+     },sectionId);
+     await search.fill("zzzz-no-answer-fixture");
+     await page.waitForFunction(()=>document.querySelectorAll("details[data-help-item]:not([hidden])").length===0);
+     await page.goto(origin+"/help#"+encodeURIComponent(answerId));
+     await page.waitForFunction(id=>{
+      const answer=document.getElementById(id),section=answer?.closest("section[data-help-section]");
+      return document.querySelector("#help-search")?.value===""&&answer?.open&&!answer.hidden&&section&&!section.hidden;
+     },answerId);
+     if(!await page.locator("details[data-help-item]").last().isVisible())throw Error("Help answer is still hidden after its link");
+     await search.fill("Stripe");
+     await page.waitForFunction(()=>document.querySelector("#help-search")?.value==="Stripe"&&document.querySelector("#help-search")?.getAttribute("aria-describedby")&&document.querySelectorAll("details[data-help-item][hidden]").length>0);
+     for(const fragment of ["missing-help-answer-fixture","%E0%A4%A"]){
+      await page.goto(origin+"/help#"+fragment);
+      // Let the real hashchange handler run before checking that it kept the search.
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      if(await search.inputValue()!=="Stripe")throw Error("Unrelated or malformed help fragment cleared the search");
+     }
+     if(errors.length)throw Error("Help navigation raised a browser error: "+errors.join("; "));
+     console.log("HELP_FRAGMENT_NAVIGATION_REGRESSION:"+JSON.stringify({engine,width:helpWidth,malformedEntry:true,keyboardSection:true,hiddenAnswer:true,queryPreserved:true,writes,foreign}));
+    }
    }
 
   }catch(error){failed++;console.error("PUBLIC_MATRIX_FAILURE:"+JSON.stringify({engine,path,width,mode,error:String(error)}));}
   finally{cases++;await context.close();}
  }
  console.log("PUBLIC_MATRIX_OPEN_GAPS:"+JSON.stringify(gaps));
- console.log("PUBLIC_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,failed,gaps:gaps.length,scope:"Three public entry journeys only. Synthetic emulation; reflow320 is not real browser400% zoom. No real-device, assistive-user or whole-product AAA certification."}));
+ console.log("PUBLIC_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,failed,gaps:gaps.length,scope:"Three public entry journeys and help fragment navigation regressions. Synthetic emulation; reflow320 is not real browser400% zoom. No real-device, assistive-user or whole-product AAA certification."}));
 }finally{if(browser)await browser.close();app.kill("SIGTERM");}
 process.exitCode=failed?1:0;

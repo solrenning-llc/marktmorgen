@@ -3,13 +3,21 @@
 import { useEffect, useId, useState } from "react";
 
 /** Opens the answer a link points at (#can-i-sell-a-course). */
-function openFromHash() {
-  const id = decodeURIComponent(window.location.hash.slice(1));
+function openFromHash(resetSearch: () => void) {
+  let id: string;
+  try {
+    id = decodeURIComponent(window.location.hash.slice(1));
+  } catch {
+    return;
+  }
   const target = id ? document.getElementById(id) : null;
+  if (!target?.matches("details[data-help-item], section[data-help-section]")) return;
+  // A link must remain reachable even when the current search hid its section.
+  resetSearch();
   if (target instanceof HTMLDetailsElement) {
     target.open = true;
-    target.scrollIntoView({ block: "start" });
   }
+  target.scrollIntoView({ block: "start" });
 }
 
 /** Shows only the answers that mention every word typed, opened, and says how many. */
@@ -39,9 +47,13 @@ export function HelpSearch() {
   const hint = useId();
 
   useEffect(() => {
-    openFromHash();
-    window.addEventListener("hashchange", openFromHash);
-    return () => window.removeEventListener("hashchange", openFromHash);
+    const reveal = () => openFromHash(() => {
+      setQuery("");
+      setShown(narrow(""));
+    });
+    reveal();
+    window.addEventListener("hashchange", reveal);
+    return () => window.removeEventListener("hashchange", reveal);
   }, []);
 
   const search = (value: string) => {

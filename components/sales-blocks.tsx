@@ -315,17 +315,25 @@ function RowElementView({ element, ctx, level }: { element: RowElement; ctx: Blo
  */
 function RowView({ block, ctx }: { block: RowBlock; ctx: BlockContext }) {
   if (block.columns.every((column) => column.length === 0)) return null;
+  // In reading order, column by column: the first heading is the section's (h2), every one after it sits under it (h3).
+  const levels: number[][] = [];
   let headed = false;
+  for (const column of block.columns) {
+    const inColumn: number[] = [];
+    for (const element of column) {
+      inColumn.push(headed ? 3 : 2);
+      if (element.kind === "heading") headed = true;
+    }
+    levels.push(inColumn);
+  }
   return (
     <section className="sp-section">
       <div className={`sp-row sp-row-${block.columns.length}`}>
         {block.columns.map((column, i) => (
           <div key={i} className="sp-row-column">
-            {column.map((element, j) => {
-              const level = headed ? 3 : 2;
-              if (element.kind === "heading") headed = true;
-              return <RowElementView key={j} element={element} ctx={ctx} level={level} />;
-            })}
+            {column.map((element, j) => (
+              <RowElementView key={j} element={element} ctx={ctx} level={levels[i][j]} />
+            ))}
           </div>
         ))}
       </div>

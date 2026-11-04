@@ -6,6 +6,7 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Codex F | 466 [MR3]: current result follows LC/TX; earlier sizing results remain historical | codex/f-mr3-current-result | `docs/mr3-current-price-result-2026-10-27.md`, `tests/mr3-current-price-result.test.ts` | 04/11/2026 |
 | Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |
 
 | Codex principal | CX-56(3): prove lost-dispute application fee reversal using pinned dispute list | codex/share-lost-dispute-proof | `lib/share-settle.ts`, `tests/share-lost-dispute.test.ts`, `tests/platform-share.test.ts`, `docs/share-lost-dispute-proof.md` | 04/11/2026 |
@@ -13,4 +14,6 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex D | 473 [TX3]: exact plain-data threshold snapshots | codex/d-tx3-threshold-evidence | `lib/tax-threshold.ts`, `tests/tax-threshold.test.ts` | 04/11/2026 |
 | Codex E | 465 [MR2]: reject discarded customer cost evidence | codex/e-mr2-cost-evidence | `lib/net-margin-rules.ts`, `lib/reviewed-resource-envelope.ts`, `lib/funded-exposure-rules.ts`, `tests/net-margin-cost-evidence.test.ts` | 04/11/2026 |
 | Codex C | 465 [MR2]: complete protocol infrastructure profiles | codex/c-mr2-protocol-evidence | `lib/spend-cost-table.ts`, `tests/protocol-infrastructure-cost.test.ts`, `tests/contract-protocol-cost.test.ts` | 04/11/2026 |
+| Codex D | 465 [MR2]: complete fixed-cost evidence before minimum-base arithmetic | codex/d-mr2-fixed-evidence | `lib/customer-base-rules.ts`, `tests/customer-base-fixed-evidence.test.ts` | 04/11/2026 |
+| Codex C | 473 [TX3]: serializable own sales evidence | codex/c-tx3-sales-evidence | `lib/tax-sales-counter.ts`, `tests/tax-sales-counter.test.ts` | 04/11/2026 |
 | Codex E | 465 [MR2]: complete plan payment dispute cost evidence | codex/e-dispute-cost-evidence | `lib/plan-payment-dispute-cost-rules.ts`, `tests/plan-payment-dispute-evidence.test.ts` | 04/11/2026 |

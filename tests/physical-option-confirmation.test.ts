@@ -1,7 +1,7 @@
 /** Recovery of the pure selection slice only; no paid73h/source/worker proof. */
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {selectedPhysicalOption} from '@/lib/physical-option-confirmation';
+import {selectedPhysicalOption,physicalOptionBodyMatches} from '@/lib/physical-option-confirmation';
 const option=()=>({id:'large_print',label:'Large print',priceCents:6500,file:null,link:null,details:['Printed edition'],best:false});
 const select=(o:unknown)=>selectedPhysicalOption({options:[o]},'large_print');
 test('captures only the selected physical identity and makes a detached description copy',()=>{
@@ -37,4 +37,55 @@ test('getters in selected fields and descriptions are refused without execution'
 test('inherited, sparse and non-array projections cannot hide an unknown option',()=>{
  assert.equal(select(Object.create(option())),null);const a=[option()];delete a[0];assert.equal(selectedPhysicalOption({options:a},'large_print'),null);
  for(const p of [null,[],{options:{0:option(),length:1}},{options:false}])assert.equal(selectedPhysicalOption(p,'large_print'),null);
+});
+
+
+function original(priceCents=6500){
+ const selected={...option(),priceCents},product={id:'original_product',title:'Original printed book',priceCents:3500,
+  shipping:{cents:500},note:false,fields:[],options:[selected],file:null,link:null};
+ const store={handle:'original.store',currency:'usd'},name=`${product.title} (${selected.label})`;
+ const body=new URLSearchParams({mode:'payment','metadata[store]':store.handle,'metadata[product]':product.id,
+  'metadata[option]':selected.id,'metadata[title]':name,'metadata[mm_order_origin]':'physical-v1',
+  'line_items[0][quantity]':'1','line_items[0][price_data][unit_amount]':String(priceCents),
+  'line_items[0][price_data][currency]':store.currency,'line_items[0][price_data][product_data][name]':name});
+ return {body,snapshot:{store,product},value:()=>({body:body.toString(),snapshot:{store,product}})};
+}
+test('the original selected amount matches its snapshot even when the parent price differs',()=>{
+ for(const cents of [6500,0]){const f=original(cents);assert.equal(physicalOptionBodyMatches(f.value(),60000),true);
+  assert.equal(f.snapshot.product.priceCents,3500);assert.equal(f.snapshot.product.options[0].priceCents,cents);}
+});
+test('product, store, title, quantity, amount and currency cannot be substituted in the original body',()=>{
+ for(const [key,value] of [['metadata[store]','replacement'],['metadata[product]','other'],['metadata[option]','other'],
+  ['metadata[title]','Other receipt'],['metadata[mm_order_origin]','single-digital-v1'],['line_items[0][quantity]','2'],
+  ['line_items[0][price_data][unit_amount]','3500'],['line_items[0][price_data][currency]','eur'],
+  ['line_items[0][price_data][product_data][name]','Replacement']]){
+  const f=original();f.body.set(key,value);assert.equal(physicalOptionBodyMatches(f.value(),60000),false);
+ }
+});
+test('missing shipping, unknown currency, custom fields and mixed delivery stay outside the snapshot contract',()=>{
+ for(const patch of [{shipping:null},{note:true},{fields:[{label:'Question'}]},{file:{pathname:'digital.pdf'}},{course:{id:'course'}},{recurring:{interval:'month'}}]){
+  const f=original();Object.assign(f.snapshot.product,patch);assert.equal(physicalOptionBodyMatches(f.value(),60000),false);
+ }
+ const f=original();f.snapshot.store.currency='USD';assert.equal(physicalOptionBodyMatches(f.value(),60000),false);
+});
+test('duplicate body keys, extra line items and known additional entitlements are not this original selection',()=>{
+ for(const [key,value] of [['line_items[0][quantity]','1'],['line_items[1][quantity]','1'],['discounts[0][coupon]','coupon'],
+  ['custom_fields[0][key]','question1'],['optional_items[0][price]','price'],['metadata[gift]','friend@example.test']]){
+  const f=original();f.body.append(key,value);assert.equal(physicalOptionBodyMatches(f.value(),60000),false);
+ }
+});
+test('a later snapshot edit cannot reinterpret the unchanged original checkout body',()=>{
+ const f=original();f.snapshot.product.options[0].priceCents=1;assert.equal(physicalOptionBodyMatches(f.value(),60000),false);
+ const g=original();g.snapshot.product.title='New catalog title';assert.equal(physicalOptionBodyMatches(g.value(),60000),false);
+});
+test('missing, malformed and noncanonical wire bodies refuse inside the explicit byte envelope',()=>{
+ const f=original();for(const body of [null,'mode=payment',f.body.toString().replaceAll('+','%20')])
+  assert.equal(physicalOptionBodyMatches({...f.value(),body},60000),false);
+ for(const cap of [0,-1,NaN,Infinity,'60000',131073,Buffer.byteLength(f.body.toString())-1])assert.equal(physicalOptionBodyMatches(f.value(),cap),false);
+ assert.equal(physicalOptionBodyMatches(f.value(),Buffer.byteLength(f.body.toString())),true);
+});
+test('descriptor-backed snapshot and store fields are refused without running getters',()=>{
+ let reads=0;const f=original();const store=Object.defineProperty({...f.snapshot.store},'currency',{get(){reads++;throw Error('no');}});
+ assert.equal(physicalOptionBodyMatches({...f.value(),snapshot:{...f.snapshot,store}},60000),false);
+ const v=Object.defineProperty(f.value(),'body',{get(){reads++;throw Error('no');}});assert.equal(physicalOptionBodyMatches(v,60000),false);assert.equal(reads,0);
 });

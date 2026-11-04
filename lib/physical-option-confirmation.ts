@@ -26,3 +26,25 @@ export function selectedPhysicalOption(product:unknown,optionId:unknown):Product
   !details||details.some(d=>typeof d!=='string'||d.length>100||/[\u0000-\u001f\u007f]/.test(d)))return null;
  return {id:o.id,label:o.label,priceCents:Number(o.priceCents),file:null,link:null,details:details as string[],best:o.best};
 }
+
+/** Exact original selected snapshot/body comparison, not original-store
+ * authenticity, complete shipping/payment proof or financial permission. */
+export function physicalOptionBodyMatches(value:unknown,maximumBytes:unknown):boolean{
+ const v=own(value),snapshot=own(v?.snapshot),product=own(snapshot?.product),store=own(snapshot?.store);
+ if(!v||typeof v.body!=='string'||typeof maximumBytes!=='number'||!Number.isSafeInteger(maximumBytes)||maximumBytes<1||maximumBytes>131072||
+  v.body.length>maximumBytes||Buffer.byteLength(v.body)>maximumBytes||!product||!store)return false;
+ for(const s of [product.id,product.title,store.handle])if(typeof s!=='string'||!s||s.length>maximumBytes||Buffer.byteLength(s)>maximumBytes)return false;
+ if(typeof store.currency!=='string'||!/^[a-z]{3}$/.test(store.currency)||!own(product.shipping)||product.note!==false||list(product.fields,0)?.length!==0||
+  ['call','course','podcast','recurring','bundle','keys','file','link','plan','pwyw','callPackage'].some(key=>product[key]!==undefined&&product[key]!==null))return false;
+ const form=new URLSearchParams(v.body),entries=[...form];
+ if(form.toString()!==v.body||new Set(entries.map(([key])=>key)).size!==entries.length)return false;
+ const selected=selectedPhysicalOption(product,form.get('metadata[option]'));if(!selected)return false;
+ const name=`${product.title} (${selected.label})`;
+ const expected:Record<string,string>={mode:'payment','metadata[store]':store.handle as string,'metadata[product]':product.id as string,
+  'metadata[mm_order_origin]':'physical-v1','metadata[title]':name.slice(0,480),
+  'line_items[0][quantity]':'1','line_items[0][price_data][unit_amount]':String(selected.priceCents),
+  'line_items[0][price_data][currency]':store.currency,'line_items[0][price_data][product_data][name]':name};
+ return Object.entries(expected).every(([key,val])=>form.get(key)===val)&&
+  !entries.some(([key])=>/^line_items\[(?!0\])/.test(key)||/^(discounts|custom_fields|optional_items|subscription_data)\[/.test(key))&&
+  !['gift','group','people','preorder','upsell_key','bundle'].some(key=>form.has(`metadata[${key}]`));
+}

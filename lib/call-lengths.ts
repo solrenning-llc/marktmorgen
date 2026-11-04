@@ -15,10 +15,11 @@
  *     weekly hours, or it would never be offered.
  *   - Refused, until each is tied to one length: a call sold in packages (a
  *     package's sessions are free once bought, so a long one would be had at
- *     a short one's price), a deposit paid online for a call in person (it
- *     must stay below every length's price), and team booking (its hosts'
- *     times are read at one length). Payment plans, price options, offers in
- *     the checkout and pay-what-you-want are already refused for every call.
+ *     a short one's price) and team booking (its hosts' times are read at one
+ *     length). A deposit paid online for a call in person is allowed only
+ *     below every length's price, which need not be the shortest's. Payment
+ *     plans, price options, offers in the checkout and pay-what-you-want are
+ *     already refused for every call.
  *   - The base, which the setup's own length and the product's price must
  *     equal (the catalog, the store page and the assistant's facts read
  *     them): the shortest length. "From" a price is the lowest of them, which

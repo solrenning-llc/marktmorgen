@@ -5,7 +5,6 @@ import { canSeal } from "@/lib/secret-box";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { cancelReset, finishSetup, lockedUntil, replaceCodes, startSetup, turnOff } from "@/lib/two-step";
 import { liveSecondStep, mayAddSecondStep } from "@/lib/second-step-gate";
-import { cancelRemoval } from "@/lib/passkeys";
 import { LockBusyError } from "@/lib/redis-lock";
 
 /** Changes one account may ask for in an hour: most of them email the account. */
@@ -32,8 +31,8 @@ const CHANGES_PER_HOUR = 30;
  *                                  step is refused above, as it is the one the
  *                                  request is about), except one opened with a
  *                                  passkey that is set to be removed or gone.
- *                                  Passkey removals that wait are called off too,
- *                                  only from a session with a valid second step
+ *                                  Passkey removals that wait stay: only "Keep it"
+ *                                  calls one off
  *
  * It belongs to the person, not to a store, like their passkeys.
  */
@@ -80,8 +79,7 @@ export async function POST(request: NextRequest) {
       const step = await liveSecondStep(email, session);
       if (step === null && (await sessionMark(session, email))?.startsWith("passkey")) return refuse("second_step", 403);
       await cancelReset(email, "studio");
-      // Passkeys set to be removed stay only for a session with a valid second step, as "Keep it" (owner C3-95).
-      if (step !== null) await cancelRemoval(email, { by: "studio" });
+      // Passkey removals stay: only "Keep it", next to the passkey, calls one off (lib/passkeys.ts).
       return Response.json({ ok: true });
     }
     if (body.action === "off") {

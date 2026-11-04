@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
+import { pendingRemoval } from "@/lib/passkeys";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { HOLD_SECONDS, TWO_STEP_COOKIE, endRecoveryAccess, holdSignIn, resetIfDue, twoStepOn } from "@/lib/two-step";
 
@@ -40,6 +41,8 @@ export async function finishProvenSignIn(
       return response;
     }
     sessionId = owner ? await openSession(owner) : null;
+    // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
+    if (owner) await pendingRemoval(owner).catch((error) => console.error("applying a passkey removal failed", error));
     if (owner) await endRecoveryAccess(owner).catch((error) => console.error("closing a recovery login failed", error));
   } catch (error) {
     console.error("finishing a login failed", error);

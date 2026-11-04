@@ -72,7 +72,6 @@ import { LOCKED_LIST } from "@/lib/locked-words";
 import { seal, unseal } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
 import { newSecret, otpauthUri, stepOf } from "@/lib/totp";
-import { cancelRemovalsBy } from "@/lib/passkeys";
 import { alignRecoveryLock, endRecoveryLock, hideAddress, keepRecoveryAddress, recoveryAddress } from "@/lib/recovery-address";
 
 export { hideAddress };
@@ -94,6 +93,25 @@ const setupKey = (session: string) => `nl:2fa:setup:${sha(`nimbus-2fa-setup:${se
 const lockedKey = (session: string) => `nl:2fa:locked:${sha(`nimbus-2fa-locked:${session}`).slice(0, 40)}`;
 const lockedSetKey = (email: string) => `nl:2fa:lockedset:${sha(`nimbus-2fa-lockedset:${normaliseEmail(email)}`).slice(0, 40)}`;
 const rescueKey = (token: string) => `nl:2fa:rescue:${sha(`nimbus-2fa-rescue:${token}`).slice(0, 40)}`;
+/**
+ * A code used once: the app's step, or a recovery code, taken with SET NX so
+ * two logins that send the same code at the same moment never both pass.
+ * Minutes for a step (it is past its window by then), a day for a recovery
+ * code (it is gone from the record by then).
+ */
+const onceKey = (email: string, what: string) => `nl:2fa:once:${sha(`nimbus-2fa-once:${normaliseEmail(email)}:${what}`).slice(0, 40)}`;
+
+async function spendOnce(email: string, what: string, seconds: number): Promise<boolean> {
+  const [taken] = await redisPipeline([["SET", onceKey(email, what), "1", "NX", "EX", seconds]]);
+  return taken !== null;
+}
+
+/** Writes the record back only while it is still there: a code checked as two-step login turned off never brings it back. */
+async function rewrite(email: string, record: TwoStep): Promise<boolean> {
+  const [done] = await redisPipeline([["SET", recordKey(email), JSON.stringify(record), "XX"]]);
+  return done !== null;
+}
+
 const holdKey = (token: string) => `nl:2fa:hold:${sha(`nimbus-2fa-hold:${token}`).slice(0, 40)}`;
 const context = (email: string) => `two-step|${normaliseEmail(email)}`;
 // Not bound to the address, so a move of the sign-in address keeps them; each code is random enough on its own.
@@ -350,8 +368,7 @@ async function endLocked(email: string): Promise<void> {
   const sessions = (Array.isArray(members) ? members : []).filter((m): m is string => typeof m === "string");
   for (const session of sessions) await endSession(session);
   await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
-  // A passkey removal one of them asked for goes with it (lib/passkeys.ts scheduleRemoval).
-  await cancelRemovalsBy(email, sessions).catch((error) => console.error("calling off a passkey removal failed", error));
+  // A passkey removal one of them asked for stays: only "Keep it" calls one off (lib/passkeys.ts).
 }
 
 /** Calls off a pending request: the owner logged in with a code or a passkey, or pressed Cancel. The locked sessions are logged out. */
@@ -539,13 +556,15 @@ export async function checkCode(email: string, typed: string, now = Date.now()):
     if (!opened.ok) return "unreadable";
     const step = stepOf(opened.value, cleaned, now, record.last);
     if (step === null) return "wrong";
-    await write(email, { ...record, last: step });
+    if (!(await spendOnce(email, `step:${step}`, 5 * 60))) return "wrong";
+    if (!(await rewrite(email, { ...record, last: step }))) return "wrong";
     return "app";
   }
   const hash = codeHash(cleaned);
   if (!record.codes.includes(hash)) return "wrong";
+  if (!(await spendOnce(email, `code:${hash}`, 86_400))) return "wrong";
   const left = record.codes.filter((c) => c !== hash);
-  await write(email, { ...record, codes: left });
+  if (!(await rewrite(email, { ...record, codes: left }))) return "wrong";
   await tell(email, "A recovery code was used on your Marktmorgen account", `One of your recovery codes was used to log in to your Marktmorgen account. ${left.length} ${left.length === 1 ? "is" : "are"} left; you can make new ones under Two-step login in your studio.`);
   return "recovery";
 }

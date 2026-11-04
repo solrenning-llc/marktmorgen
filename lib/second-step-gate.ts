@@ -30,7 +30,8 @@ import { twoStepOn } from "@/lib/two-step";
 export async function liveSecondStep(email: string, session: string | undefined, now = Date.now()): Promise<SecondStep | null> {
   const pending = await pendingRemoval(email, now);
   const mark = await sessionMark(session, email);
-  if (mark === "app" || mark === "recovery") return mark;
+  // The app's marks hold only while the app is still on (turning it off also takes them: lib/auth.ts dropSecondStep).
+  if (mark === "app" || mark === "recovery") return (await twoStepOn(email)) ? mark : null;
   if (!mark?.startsWith("passkey")) return null;
   const id = mark.slice("passkey:".length);
   if (!id || pending?.ids.includes(id)) return null;

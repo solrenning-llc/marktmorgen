@@ -189,7 +189,7 @@ export function PasskeyManager({
 
   async function remove(row: PasskeyRow) {
     const question = blocked
-      ? `Remove “${row.name}”? You did not log in with a passkey or an app code (or logged in with a passkey that is set to be removed), so it is removed in ${removalDays} days, and we email you now. To stop it, log in with another passkey or your app's code. Logging in with this passkey does not stop it.`
+      ? `Remove “${row.name}”? You did not log in with a passkey or an app code (or logged in with a passkey that is set to be removed), so it is removed in ${removalDays} days, and we email you now. To stop it, log in with another passkey or your app's code, then press Keep it next to it. Logging in alone does not stop it.`
       : `Remove “${row.name}”? You will no longer be able to log in with it.`;
     if (!window.confirm(question)) return;
     setBusy(row.id);
@@ -248,7 +248,7 @@ export function PasskeyManager({
                 {waiting[row.id] ? (
                   <span className="block text-xs font-bold text-ink">{canKeep
                     ? `Will be removed on ${onDay(waiting[row.id])}. To keep it, press Keep it.`
-                    : `Will be removed on ${onDay(waiting[row.id])}. To keep it, log in with another passkey or your app's code. Logging in with this passkey does not keep it.`}</span>
+                    : `Will be removed on ${onDay(waiting[row.id])}. To keep it, log in with another passkey or your app's code, then press Keep it here. Logging in alone does not keep it.`}</span>
                 ) : null}
               </span>
               {waiting[row.id] && canKeep ? (
@@ -290,7 +290,7 @@ export function PasskeyManager({
           <p className="text-sm text-ink-soft">{MESSAGES.second_step}</p>
           {list.length ? (
             <p className="mt-2 text-sm text-ink-soft">
-              {`Lost your passkey? Press Remove next to it. Because you did not log in with a passkey or an app code (or logged in with a passkey that is set to be removed), it is removed after ${removalDays} days, and we email you now. To stop it, log in with another passkey or your app's code; logging in with the passkey being removed does not stop it. Once no passkey is left, you can add a new one here. Lost your authenticator app too? After the emailed link, the code page offers a way in that also waits ${removalDays} days; ask for the passkey's removal from there as well, and both waits run at the same time.`}
+              {`Lost your passkey? Press Remove next to it. Because you did not log in with a passkey or an app code (or logged in with a passkey that is set to be removed), it is removed after ${removalDays} days, and we email you now. To stop it, log in with another passkey or your app's code, then press Keep it next to it; logging in alone does not stop it, and the passkey being removed cannot. Once no passkey is left, you can add a new one here. Lost your authenticator app too? After the emailed link, the code page offers a way in that also waits ${removalDays} days; ask for the passkey's removal from there as well, and both waits run at the same time.`}
             </p>
           ) : null}
           <Link href="/signin?status=reauth" onClick={rememberReturn} className="btn btn-secondary mt-3">

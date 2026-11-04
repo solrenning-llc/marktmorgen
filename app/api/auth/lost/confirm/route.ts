@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { pendingRemoval } from "@/lib/passkeys";
 import { originFrom } from "@/lib/request-origin";
 import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
@@ -26,6 +27,8 @@ export async function POST(request: NextRequest) {
   try {
     const email = await spendLostEmailLink(token);
     if (!email) return away("/signin?status=expired");
+    // A passkey removal whose days are over is applied at every login (lib/passkeys.ts).
+    await pendingRemoval(email).catch((error) => console.error("applying a passkey removal failed", error));
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     if (await twoStepOn(email)) {
       const held = await holdSignIn(email, true);

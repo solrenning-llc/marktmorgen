@@ -6,7 +6,7 @@ import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemoval } from "@/lib/passkeys";
 import { LockBusyError } from "@/lib/redis-lock";
 import { liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
-import { lockedUntil } from "@/lib/two-step";
+import { lockedUntil, twoStepOn } from "@/lib/two-step";
 
 const MAX_BODY_BYTES = 16_000;
 /** Changes one account may make to its passkeys in an hour: each one emails the account. */
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     try {
-      const at = await scheduleRemoval(email, typeof body.id === "string" ? body.id.slice(0, 1_400) : "", session);
+      const at = await scheduleRemoval(email, typeof body.id === "string" ? body.id.slice(0, 1_400) : "", session, await twoStepOn(email));
       return at === null ? Response.json({ ok: false, error: "unknown" }, { status: 404 }) : Response.json({ ok: true, removeOn: at });
     } catch (error) {
       return failed(error, "asking for a passkey removal failed");
@@ -99,7 +99,9 @@ export async function POST(request: NextRequest) {
       const id = typeof body.id === "string" ? body.id.slice(0, 1_400) : "";
       // Keeping one needs a session with a valid second step, never the passkey's own (owner C3-95, lib/second-step-gate.ts).
       if (!mayKeepPasskey(await liveSecondStep(email, session))) return Response.json({ ok: false, error: "second_step" }, { status: 403 });
-      return (await cancelRemoval(email, { only: id })) ? Response.json({ ok: true }) : Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      // Checked again under the account's lock (lib/passkeys.ts cancelRemoval).
+      const kept = await cancelRemoval(email, id, session);
+      return kept === "kept" ? Response.json({ ok: true }) : Response.json({ ok: false, error: kept }, { status: ANSWERS[kept] ?? 400 });
     }
     if (body.action === "options") {
       return Response.json({ ok: true, options: await registrationOptions(email, session) }, { headers: { "Cache-Control": "no-store" } });
@@ -117,12 +119,13 @@ export async function POST(request: NextRequest) {
       const id = typeof body.id === "string" ? body.id.slice(0, 1_400) : "";
       // At once only from a session with a valid second step (not one opened with a passkey that is itself set to be removed).
       if ((await liveSecondStep(email, session)) === null) {
-        const at = await scheduleRemoval(email, id, session);
+        const at = await scheduleRemoval(email, id, session, await twoStepOn(email));
         if (at === null) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
         return Response.json({ ok: true, removeOn: at });
       }
-      if (!(await removePasskey(email, id, session))) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-      return Response.json({ ok: true });
+      // Checked again under the account's lock (lib/passkeys.ts removePasskey).
+      const removed = await removePasskey(email, id, session);
+      return removed === "removed" ? Response.json({ ok: true }) : Response.json({ ok: false, error: removed }, { status: ANSWERS[removed] ?? 400 });
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {

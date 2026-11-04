@@ -5,17 +5,17 @@
  * on no app; a session opened with the passkey or the app's code does. An
  * account with neither still adds its first from the link. A passkey removed
  * from a link session waits REMOVAL_DAYS with an email (the way back for a
- * lost passkey); logging in with that very passkey does not call it off
- * (owner C3-88), another passkey or the app's code does; once it
+ * lost passkey); no login calls it off, only "Keep it" from a session with a
+ * valid second step (security review of 3467adf6d); once it
  * has gone, the link adds a new one. Synthetic records; no email leaves.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
-import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, pendingRemoval, scheduleRemoval } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingRemoval, removePasskey, scheduleRemoval } from "@/lib/passkeys";
 import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
-import { RESET_DAYS, finishSetup, lockedUntil, resetIfDue, startSetup, twoStepStatus } from "@/lib/two-step";
+import { RESET_DAYS, checkCode, finishSetup, lockedUntil, resetIfDue, startSetup, twoStepStatus } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
@@ -71,7 +71,7 @@ const cookieOf = (response: Response, name: string) => (response.headers.get("se
 const lockOf = (email: string) => `nl:pk:lock:${hex(`nimbus-passkey-lock:${email}`).slice(0, 40)}`;
 
 /** Turns the app on for an account, as the studio does; answers its secret and recovery codes. */
-async function turnOnApp(email: string, backup: string): Promise<{ secret: Uint8Array; codes: string[] }> {
+async function turnOnApp(email: string, backup: string): Promise<{ secret: Buffer; codes: string[] }> {
   const setup = await startSetup(email, "d".repeat(64), backup);
   if (typeof setup === "string") throw new Error(setup);
   const sent = /Your code: (\d{6})/.exec([...mails].reverse().find((m) => m.to === backup)?.text ?? "")?.[1] ?? "";
@@ -129,8 +129,9 @@ async function main(): Promise<void> {
   const kaiB = makePasskey(KAI, "cred-kai-b");
   await kaiB.keep();
   const byOther = await signInWithPasskey(kaiB);
-  is("logging in with another passkey calls it off", [byOther.length, await pendingRemoval(KAI), (await listPasskeys(KAI)).length], [64, null, 2]);
-  is("and says so", mails.some((m) => m.to === KAI && m.subject === "Your passkeys stay on your Marktmorgen account"), true);
+  is("logging in with another passkey does not call it off either", [byOther.length, (await pendingRemoval(KAI))?.ids, (await listPasskeys(KAI)).length], [64, ["cred-kai-1"], 2]);
+  is("“Keep it” from that session does", [(await passkeys(byOther, { action: "keep", id: "cred-kai-1" })).ok, await pendingRemoval(KAI)], [true, null]);
+  is("and says so", mails.some((m) => m.to === KAI && m.subject === "Your passkey stays on your Marktmorgen account"), true);
   await passkeys(byOther, { action: "remove", id: "cred-kai-b" });
   await passkeys(byLink, { action: "remove", id: "cred-kai-1" });
   const dropKai = `nl:pk:drop:${hex(`nimbus-passkey-drop:${KAI}`).slice(0, 40)}`;
@@ -153,7 +154,7 @@ async function main(): Promise<void> {
   const ADA = "ada-overdue@example.com";
   const ada = makePasskey(ADA, "cred-ada-1");
   await ada.keep();
-  await scheduleRemoval(ADA, "cred-ada-1", "f".repeat(64), Date.now() - (REMOVAL_DAYS * 86_400_000) - 60_000);
+  await scheduleRemoval(ADA, "cred-ada-1", "f".repeat(64), false, Date.now() - (REMOVAL_DAYS * 86_400_000) - 60_000);
   is("the way offered is to set one up, and the passkey is gone", [await secondStepWay(ADA), (await listPasskeys(ADA)).length], ["set_up", 0]);
 
   part("A session opened with a passkey set to be removed has no second step");
@@ -188,14 +189,14 @@ async function main(): Promise<void> {
   const dropBo = `nl:pk:drop:${hex(`nimbus-passkey-drop:${BO}`).slice(0, 40)}`;
   const [rawBo] = await redis.pipeline([["GET", dropBo]]);
   await redis.pipeline([["SET", dropBo, JSON.stringify({ ...JSON.parse(String(rawBo)), at: Date.now() - 1_000 })]]);
-  is("a removal whose days are over cannot be called off", [await cancelRemoval(BO, { by: "code" }), (await listPasskeys(BO)).length], [false, 0]);
+  is("a removal whose days are over cannot be kept", [await cancelRemoval(BO, "cred-bo-p", await openSession(BO, "app")), (await listPasskeys(BO)).length], ["unknown", 0]);
   is("the session P opened before is logged out with it", await emailForSession(byP), null);
   is("and used by the API it removes nothing and adds nothing", [(await passkeys(byP, { action: "remove", id: "cred-bo-q" })).error, (await passkeys(byP, { action: "options" })).error], ["signed_out", "signed_out"]);
 
   part("Keep it: the owner's rule (C3-95)");
   is("no second step, no Keep it; another passkey or the app's code may", [mayKeepPasskey(null), mayKeepPasskey("passkey"), mayKeepPasskey("app")], [false, true, true]);
 
-  part("The app's code calls a removal off too");
+  part("The app's code does not call a removal off");
   const ZOE = "zoe-code@example.com";
   const zoe = makePasskey(ZOE, "cred-zoe-1");
   await zoe.keep();
@@ -205,7 +206,7 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenZoe}`).slice(0, 40)}`, ZOE, "EX", 900]]);
   const heldZoe = await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenZoe }));
   await codeRoute(form(`${ORIGIN}/api/auth/code`, { code: zoeApp.codes[0] }, `nl_2fa=${cookieOf(heldZoe, "nl_2fa")}`));
-  is("logging in with a recovery code keeps the passkey", [await pendingRemoval(ZOE), (await listPasskeys(ZOE)).length], [null, 1]);
+  is("logging in with a recovery code leaves the removal waiting", [(await pendingRemoval(ZOE))?.ids, (await listPasskeys(ZOE)).length], [["cred-zoe-1"], 1]);
 
   part("What a removed passkey or a turned-off app opened goes with it");
   const LEA = "lea-two-keys@example.com";
@@ -269,7 +270,7 @@ async function main(): Promise<void> {
   is("a passkey removed while its sign-in was checked opens nothing", await cancelling, "");
   is("and is not written back", (await listPasskeys(NIA)).length, 0);
 
-  part("A removal asked through the recovery address goes when the owner's full login closes it");
+  part("A removal asked through the recovery address stays when the owner's full login closes that session");
   const SAM = "sam-recovery@example.com";
   const sam = makePasskey(SAM, "cred-sam-1");
   await sam.keep();
@@ -282,8 +283,9 @@ async function main(): Promise<void> {
   mails.length = 0;
   await linkSession(SAM);
   is("the owner's login with the sign-in inbox logs it out", await emailForSession(viaRecovery), null);
-  is("and calls its removal off", [await pendingRemoval(SAM), (await listPasskeys(SAM)).length], [null, 1]);
-  is("saying so, beside the notice that what the recovery address opened was closed", [mails.some((m) => m.to === SAM && m.subject === "Your passkeys stay on your Marktmorgen account"), mails.some((m) => m.to === SAM && m.subject === "What your recovery address opened was closed")], [true, true]);
+  is("but its removal stays: no login calls one off", [(await pendingRemoval(SAM))?.ids, (await listPasskeys(SAM)).length], [["cred-sam-1"], 1]);
+  is("the notice that what the recovery address opened was closed, and none that the passkey stays", [mails.some((m) => m.to === SAM && m.subject === "What your recovery address opened was closed"), mails.some((m) => m.to === SAM && m.subject.startsWith("Your passkey"))], [true, false]);
+  await cancelRemoval(SAM, "cred-sam-1", await openSession(SAM, "app"));
   const sam2 = makePasskey(SAM, "cred-sam-2");
   await sam2.keep();
   const samKey = await signInWithPasskey(sam2);
@@ -300,24 +302,107 @@ async function main(): Promise<void> {
   await tia.keep();
   const t0 = Date.now();
   const told = () => mails.filter((m) => m.to === TIA && m.subject === "A passkey is set to be removed from your Marktmorgen account").length;
-  await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), t0);
-  await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), t0 + 10 * 60_000);
+  await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), false, t0);
+  await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), false, t0 + 10 * 60_000);
   is("once in the first hour", told(), 1);
-  await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), t0 + 61 * 60_000);
+  await scheduleRemoval(TIA, "cred-tia-1", "e".repeat(64), false, t0 + 61 * 60_000);
   is("again an hour later", told(), 2);
   const tiaMail = [...mails].reverse().find((m) => m.to === TIA && m.subject === "A passkey is set to be removed from your Marktmorgen account")?.text ?? "";
   is("the email says when, with the time and the time zone spelled out", tiaMail.includes(`It will be removed on ${removalWhen(t0 + REMOVAL_DAYS * 86_400_000)}.`) && tiaMail.includes("Coordinated Universal Time (UTC)"), true);
   is(
-    "and what to do if it was not them: log in with another passkey or the app's code, Keep it; not with this passkey",
+    "its only passkey, no app: the email says the truth, nothing can stop it, and what to do on the day",
     [
-      tiaMail.includes(`If it was not you, stop it before ${removalWhen(t0 + REMOVAL_DAYS * 86_400_000)}:`),
-      tiaMail.includes("with another of your passkeys, or with the emailed link and the code from your authenticator app. That login stops the removal."),
-      tiaMail.includes("press “Keep it” next to the passkey"),
-      tiaMail.includes("Logging in with the passkey that is being removed does not stop it."),
+      tiaMail.includes("every passkey on your account is set to be removed and you have no authenticator app, so nothing can stop it"),
+      tiaMail.includes(`On ${removalWhen(t0 + REMOVAL_DAYS * 86_400_000)}, log in at`),
       tiaMail.includes("If this was you, there is nothing to do: it is removed on that day."),
     ],
-    [true, true, true, true, true],
+    [true, true, true],
   );
+  const UNA = "una-two@example.com";
+  const unaP = makePasskey(UNA, "cred-una-p");
+  const unaQ = makePasskey(UNA, "cred-una-q");
+  await unaP.keep();
+  await unaQ.keep();
+  const atUna = await scheduleRemoval(UNA, "cred-una-p", "e".repeat(64), true, t0);
+  const unaMail = [...mails].reverse().find((m) => m.to === UNA && m.subject === "A passkey is set to be removed from your Marktmorgen account")?.text ?? "";
+  is(
+    "with another passkey and the app: when, and what to do if it was not them; only Keep it stops it",
+    [
+      unaMail.includes(`It will be removed on ${removalWhen(atUna!)}.`),
+      unaMail.includes(`If it was not you, stop it before ${removalWhen(atUna!)}:`),
+      unaMail.includes("with another of your passkeys, or the emailed link and the code from your authenticator app."),
+      unaMail.includes("press “Keep it” next to the passkey. Only “Keep it” stops the removal: logging in alone does not, and logging in with the passkey that is being removed cannot."),
+    ],
+    [true, true, true, true],
+  );
+
+  part("A stolen passkey stays set to go, whatever the owner logs in with (review of 3467adf6d)");
+  const OW = "owner-lost@example.com";
+  const owP = makePasskey(OW, "cred-ow-p");
+  const owQ = makePasskey(OW, "cred-ow-q");
+  await owP.keep();
+  await owQ.keep();
+  const owApp = await turnOnApp(OW, "ow-backup@example.org");
+  const thief = await signInWithPasskey(owP);
+  is("the thief's session with P had a second step", await liveSecondStep(OW, thief), "passkey");
+  const hotel = await openSession(OW);
+  is("the owner asks for P's removal from a session without the step", typeof (await passkeys(hotel, { action: "remove", id: "cred-ow-p" })).removeOn, "number");
+  is("the thief's session is logged out at once", await emailForSession(thief), null);
+  const ownerQ = await signInWithPasskey(owQ);
+  is("the owner logs in with Q", ownerQ.length, 64);
+  is("P is still set to go", (await pendingRemoval(OW))?.ids, ["cred-ow-p"]);
+  const tokenOw = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenOw}`).slice(0, 40)}`, OW, "EX", 900]]);
+  const heldOw = await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenOw }));
+  const ownerCode = cookieOf(await codeRoute(form(`${ORIGIN}/api/auth/code`, { code: owApp.codes[0] }, `nl_2fa=${cookieOf(heldOw, "nl_2fa")}`)), "nl_session");
+  is("the owner logs in with the app's code", ownerCode.length, 64);
+  is("P is still set to go", (await pendingRemoval(OW))?.ids, ["cred-ow-p"]);
+  const thiefAgain = await signInWithPasskey(owP);
+  is("a new session with P has no second step", [thiefAgain.length, await liveSecondStep(OW, thiefAgain)], [64, null]);
+  is("and removes Q only after the wait, not at once", [typeof (await passkeys(thiefAgain, { action: "remove", id: "cred-ow-q" })).removeOn, (await listPasskeys(OW)).map((p) => p.id).sort()], ["number", ["cred-ow-p", "cred-ow-q"]]);
+  is("Keep it from the owner's own session keeps Q", (await passkeys(ownerCode, { action: "keep", id: "cred-ow-q" })).ok, true);
+
+  part("The record waits with no expiry until it is applied, and moves with the account");
+  const dropOw = `nl:pk:drop:${hex(`nimbus-passkey-drop:${OW}`).slice(0, 40)}`;
+  is("no expiry on the removal record", (await redis.pipeline([["TTL", dropOw]]))[0], -1);
+  const OW2 = "owner-moved@example.com";
+  await movePasskeys(OW, OW2);
+  is("after a move, P is set to go at the new address, with the same moment", [(await pendingRemoval(OW2))?.ids, (await pendingRemoval(OW))], [["cred-ow-p"], null]);
+
+  part("Checked again under the lock: a session whose passkey is set to go keeps and removes nothing");
+  const VI = "vi-lock@example.com";
+  const viP = makePasskey(VI, "cred-vi-p");
+  const viQ = makePasskey(VI, "cred-vi-q");
+  const viR = makePasskey(VI, "cred-vi-r");
+  await viP.keep();
+  await viQ.keep();
+  await viR.keep();
+  const viQSession = await signInWithPasskey(viQ);
+  // P and then Q set to go, written straight in, as a request landing between the route's check and the lock would.
+  await redis.pipeline([["SET", `nl:pk:drop:${hex(`nimbus-passkey-drop:${VI}`).slice(0, 40)}`, JSON.stringify({ ids: ["cred-vi-p", "cred-vi-q"], at: Date.now() + 86_400_000, told: Date.now() })]]);
+  is("Keep it of P from Q's session is refused under the lock", await cancelRemoval(VI, "cred-vi-p", viQSession), "second_step");
+  is("removing R at once from it is refused under the lock", [await removePasskey(VI, "cred-vi-r", viQSession), (await listPasskeys(VI)).length], ["second_step", 3]);
+
+  part("The app's mark holds only while the app is on");
+  const WIN = "win-noapp@example.com";
+  is("a session marked by the app on an account without it has no second step", await liveSecondStep(WIN, await openSession(WIN, "app")), null);
+
+  part("A code is used once, even at the same moment, and never brings back a record turned off");
+  const XAN = "xan-code@example.com";
+  const xan = await turnOnApp(XAN, "xan-backup@example.org");
+  const nextStep = codeAt(xan.secret, Math.floor(Date.now() / 1000 / STEP_SECONDS) + 1);
+  const both = await Promise.all([checkCode(XAN, nextStep), checkCode(XAN, nextStep)]);
+  is("two logins with the same code at once: one passes", both.sort(), ["app", "wrong"]);
+  const twice = await Promise.all([checkCode(XAN, xan.codes[0]), checkCode(XAN, xan.codes[0])]);
+  is("two with the same recovery code at once: one passes", twice.sort(), ["recovery", "wrong"]);
+  const realPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "SET" && c.includes("XX"))) await realPipe([["DEL", `nl:2fa:${hex(`nimbus-2fa:${XAN}`).slice(0, 40)}`]]);
+    return realPipe(commands);
+  }) as typeof redis.pipeline;
+  const raced = await checkCode(XAN, xan.codes[1]);
+  redis.pipeline = realPipe;
+  is("a code checked as two-step login is turned off: refused, and the record stays gone", [raced, (await twoStepStatus(XAN)).on], ["wrong", false]);
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";
@@ -353,7 +438,9 @@ async function main(): Promise<void> {
   await wes.keep();
   const wesLink = await linkSession(WES);
   await passkeys(wesLink, { action: "remove", id: "cred-wes-1" });
-  const wesApp = await openSession(WES, "app");
+  const wes2 = makePasskey(WES, "cred-wes-2");
+  await wes2.keep();
+  const wesApp = await signInWithPasskey(wes2);
   const blocking = await takeLock(lockOf(WES), 30, 1_000);
   is("keeping it while the lock is held elsewhere", await passkeys(wesApp, { action: "keep", id: "cred-wes-1" }), { status: 503, ok: false, error: "busy" });
   const optionsBusy = await passkeySignIn(asJson(`${ORIGIN}/api/auth/passkey/signin`, { action: "options" }, ""));

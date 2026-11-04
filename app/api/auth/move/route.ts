@@ -11,7 +11,7 @@ import {
 } from "@/lib/auth";
 import { moveAccount } from "@/lib/store";
 import { moveMemberships } from "@/lib/team";
-import { movePasskeys } from "@/lib/passkeys";
+import { movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { movePhoneDevices } from "@/lib/phone-alerts";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
@@ -70,6 +70,8 @@ export async function POST(request: NextRequest) {
     await movePhoneDevices(moved.from, moved.to).catch((error) => console.error("moving phone devices failed", error));
     await endAllSessions(moved.from);
     sessionId = await openSession(moved.to);
+    // Passkeys set to be removed moved with the rest (lib/passkeys.ts movePasskeys); a removal whose days are over is applied at every login.
+    await pendingRemoval(moved.to).catch((error) => console.error("applying a passkey removal failed", error));
   } catch (error) {
     console.error("address move failed", error);
     return away("/signin?status=move-error");

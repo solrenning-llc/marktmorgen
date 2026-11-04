@@ -35,6 +35,7 @@
  *   nl:person:<statsId>:n:<person>     hash: <id> → JSON { at, by, text }
  *   nl:person:find:<token>             JSON { s: store id, e: address }, an hour
  */
+import { paidYearHeld } from "@/lib/yearly-fallback-rules";
 import { personKey } from "@/lib/person-key";
 import { readPaid } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
@@ -313,10 +314,11 @@ function chargeOf(raw: unknown): Charge | null {
 
 function membershipStatus(sub: Row): ProfileMembership["status"] {
   const status = str(sub.status);
-  if (status === "trialing") return "trialing";
+  // A year paid and held as a "trial" until it ends (lib/yearly-fallback-sweep.ts) is a paid membership.
+  if (status === "trialing" && !paidYearHeld(sub as Parameters<typeof paidYearHeld>[0])) return "trialing";
   if (status === "past_due" || status === "unpaid") return "past_due";
   if (sub.pause_collection && typeof sub.pause_collection === "object") return "paused";
-  if (status === "active") return sub.cancel_at_period_end === true || num(sub.cancel_at) > 0 ? "canceling" : "active";
+  if (status === "active" || status === "trialing") return sub.cancel_at_period_end === true || num(sub.cancel_at) > 0 ? "canceling" : "active";
   return "ended";
 }
 

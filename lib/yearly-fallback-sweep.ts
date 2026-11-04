@@ -57,17 +57,28 @@
  *          one of ours (metadata[fallback_refund]) before a new one, and an
  *          idempotency key. A disputed charge is never refunded: the dispute
  *          is the member's money coming back already;
- *       4. the creator is told in a short note, in English, from the store's
- *          own email figure, only by the run that made the refund.
- *     Before any of it, the year itself is read: a year refunded (on its
- *     charge or by a credit note) or disputed since is not a paid year, so
- *     nothing is undone and the creator is told: never a free year. A move
- *     back that Stripe refuses for certain (a 4xx: the yearly price archived,
- *     say), or a subscription in flexible billing mode, does not hold the
- *     refund back: the month is refunded and the creator is told the
- *     membership is still monthly. A disputed month, or a month paid with no
- *     payment of its own on Stripe (the member's credit balance, or marked
- *     paid outside Stripe), is settled and the creator told, never kept.
+ *       4. the creator is told in a short note, in English.
+ *     Before any of it, the year itself is read: a year refunded in full (on
+ *     its charge or by credit notes) or lost in a dispute since is not a paid
+ *     year, so nothing is undone and the creator is told: never a free year.
+ *     A courtesy refund of part of it, or a dispute the creator won, leaves a
+ *     paid year; a dispute still open waits for its outcome. A move back that
+ *     Stripe refuses for certain (a 4xx: the yearly price archived, say), or
+ *     a subscription in flexible billing mode, never holds the refund back
+ *     and never leaves the next month charged on top of the paid year: the
+ *     membership is held on its monthly price with nothing to pay until the
+ *     year paid ends (holdBody: a trial, which keeps its access; a pause
+ *     would not), and the creator is told, also when the month was still
+ *     owed and only voided. A disputed month, or a month paid with no payment
+ *     of its own on Stripe (the member's credit balance, or marked paid
+ *     outside Stripe), is settled and the creator told; a part paid from the
+ *     credit balance is said. A refund still pending waits until it
+ *     succeeded. Such a "trial" is read as paid everywhere (paidYearHeld).
+ *
+ * Every notice is about the creator's own account and money, so it is the
+ * company's email (lib/email.ts, "company"), never taken from the store's
+ * own figure; an entry whose notice did not go is kept for the next run, the
+ * facts worked out again from Stripe (never a second refund).
  *
  * No invoice is ever voided while a payment on it is still processing (a
  * bank debit): it waits for the next day.
@@ -77,7 +88,9 @@
  * Stripe call cut to what is left of that share, and FALLBACK_PER_SET entries
  * of each list a run, in a random order. An entry is kept at most
  * FALLBACK_MAX_DAYS from the day the job first saw it; then the creator is
- * told what is left to look at, and it leaves the list. An account Stripe
+ * told what is left to look at, and it leaves the list once that notice
+ * went (never dropped unseen; only an account with no store left to tell is
+ * dropped with a log line). An account Stripe
  * refuses us (401, 403: disconnected, or the key no longer reaches it) is
  * not read again that run, never taken for "nothing there", and its creator
  * is told at most once a week.
@@ -227,14 +240,14 @@ export async function settleFallbacks(until: number): Promise<FallbackSweep> {
       }
       let step: Step = "wait";
       try {
-        step = (await expired(run, key, entry)) ? "done" : await settle(run, entry);
+        step = (await expired(run, key, entry)) ?? (await settle(run, entry));
       } catch (error) {
         if (deniedBy(error)) {
           // Never read as "nothing there": the account is left alone for the run, and its creator told.
           run.denied.add(account);
           out.denied += 1;
           console.error("Stripe refuses us this account; its moves to monthly wait, and its creator is told", account, error);
-          await tellDenied(account).catch((failure) => console.error("telling a creator their Stripe account cannot be reached failed", failure));
+          await tellDenied(account);
         } else if (!(error instanceof Error && (error.name === "LockBusyError" || error.name === "OutOfTime"))) {
           // No certain answer: kept for tomorrow, never decided on a guess.
           console.error("settling a move to monthly failed; kept for tomorrow", error);
@@ -253,18 +266,18 @@ export async function settleFallbacks(until: number): Promise<FallbackSweep> {
   return out;
 }
 
-/** Past FALLBACK_MAX_DAYS since the job first saw it: the creator is told what is left to look at, and it leaves. */
-async function expired(run: Run, key: string, entry: string): Promise<boolean> {
+/**
+ * Past FALLBACK_MAX_DAYS since the job first saw it: the creator is told what is left to look at, and only once the
+ * notice is accepted does it leave (never dropped unseen); null while it is not that old.
+ */
+async function expired(run: Run, key: string, entry: string): Promise<Step | null> {
   const now = Date.now();
   const [, first] = await redisPipeline([["HSETNX", FALLBACK_SINCE_KEY, entry, String(now)], ["HGET", FALLBACK_SINCE_KEY, entry]]);
   const since = Number(first);
-  if (!Number.isFinite(since) || now - since <= FALLBACK_MAX_DAYS * 86_400_000) return false;
+  if (!Number.isFinite(since) || now - since <= FALLBACK_MAX_DAYS * 86_400_000) return null;
   const [account = "", a = "", b = ""] = entry.split("|");
-  console.error("a move to monthly could not be settled in time; taken off, its creator told", entry.slice(0, 200));
-  run.out.expired += 1;
   const invoices = (key === FALLBACK_CHECK_KEY ? [b] : [a, b]).filter((id) => INVOICE_PATTERN.test(id));
-  await tellCreator(account, null, {
-    kind: "expired",
+  const told = await tellCreator(account, null, {
     key: `fallback-expired:${entry}`,
     subject: "A member's move to a monthly price needs a look",
     lines: [
@@ -272,8 +285,14 @@ async function expired(run: Run, key: string, entry: string): Promise<boolean> {
       "Nothing more will be done about it automatically. Please look at that customer on your Stripe account, so they are never charged for both the year and a month.",
       ...(invoices.length ? ["", `Invoices to look at: ${invoices.join(", ")}.`] : []),
     ],
-  }).catch((error) => console.error("telling a creator about a move left unsettled failed", error));
-  return true;
+  });
+  if (told === "unsent") {
+    console.error("a move to monthly could not be settled in time, and its notice did not go; kept until it does", entry.slice(0, 200));
+    return "wait";
+  }
+  console.error("a move to monthly could not be settled in time; taken off", told === "told" ? "its creator told" : "no store to tell", entry.slice(0, 200));
+  run.out.expired += 1;
+  return "done";
 }
 
 /** An entry that cannot be read is no work for anyone: said in the log and taken off. */
@@ -415,25 +434,26 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
       if (!gone(error)) throw error;
     }
     const money = (cents: number) => formatMoney(cents, str(month.currency) || str(year.currency) || "usd");
+    const invoices = `Invoices: ${yearly} (the year) and ${monthly} (the month).`;
+    const sent = (told: Told): Step => (told === "unsent" ? "wait" : "done");
 
-    // 0. A year refunded or disputed since is not a paid year: nothing is undone, never a free year.
+    // 0. A year refunded in full (on its charge or by credit notes) or lost in a dispute since is not a paid year:
+    //    nothing is undone, never a free year. A dispute still open waits for its outcome (within FALLBACK_MAX_DAYS).
     const kept = await yearKept(run, account, year);
+    if (kept === "open-dispute") return "wait";
     if (kept !== "kept") {
-      const [first] = await redisPipeline([["SET", fallbackRefundedKey(monthly), `year-${kept}`, "NX", "EX", REFUNDED_SECONDS]]);
-      if (first !== null) {
+      return sent(
         await tellCreator(account, sub, {
-          kind: "year-undone",
           key: `fallback-year-undone:${account}:${monthly}`,
           subject: "A member's yearly payment was refunded or disputed",
           lines: [
-            `A member paid their yearly renewal while their move to the monthly price was being made, and that yearly payment was ${kept === "refunded" ? "refunded" : "disputed"} afterwards.`,
+            `A member paid their yearly renewal while their move to the monthly price was being made, and that yearly payment was ${kept === "refunded" ? "refunded" : "lost in a dispute"} afterwards.`,
             "So the membership stays on the monthly price, the monthly payment is kept, and nothing was refunded by us.",
             "",
-            `Invoices: ${yearly} (the year, ${kept}) and ${monthly} (the month).`,
+            invoices,
           ],
-        }).catch((error) => console.error("a note about a yearly payment undone failed", error));
-      }
-      return "done";
+        }),
+      );
     }
 
     // 1. A month still owed is never collected (unless a payment on it is still processing: then it waits).
@@ -441,62 +461,102 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
       if (!(await voidIdle(run, account, month))) return "wait";
     } else if (month.status !== "paid" && month.status !== "void") return "wait";
 
-    // 2. Back on the year's own price, nothing charged until the year paid ends.
-    const back = sub ? await moveBack(run, account, sub, year, yearly) : "skipped";
-    const until = back === "moved" || back === "already" ? yearEnd(year)?.end ?? 0 : 0;
-    const where =
-      until > 0
-        ? `Their membership is back on the yearly price, with nothing more to pay until ${new Date(until * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}. Stripe shows it as a trial until then; the year is paid.`
-        : "Their membership could not be moved back to the yearly price by itself, so it is still monthly. Please move it on your Stripe account, so the next month is not charged.";
+    // 2. Back on the year's own price, nothing charged until the year paid ends; where that cannot be done, the
+    //    membership is held on its monthly price with nothing charged until then, so the year is never paid on top of.
+    const back = sub ? await moveBack(run, account, sub, year, yearly) : "ended";
+    const where = whereWords(back, yearEnd(year)?.end ?? 0);
+    const settledBack = back === "moved" || back === "already";
 
     // 3. A month paid is refunded in full, once; anything that cannot be refunded is said to the creator.
-    if (month.status !== "paid") return "done";
+    if (month.status !== "paid") {
+      if (settledBack || back === "ended") return "done";
+      // The month was voided, but the membership could not go back to the year by itself: the creator is told.
+      return sent(
+        await tellCreator(account, sub, {
+          key: `fallback-back:${account}:${monthly}`,
+          subject: "A member's yearly payment needs a look",
+          lines: ["A member paid their yearly renewal while their move to the monthly price was being made. The monthly payment was not taken.", where, "", invoices],
+        }),
+      );
+    }
     const outcome = await refundMonth(run, account, yearly, monthly, month);
-    const invoices = `Invoices: ${yearly} (the year, kept) and ${monthly} (the month).`;
+    if (outcome.kind === "pending") return "wait";
+    const credit = Math.max(0, num(month.total) - num(month.amount_paid));
+    const creditLine = credit > 0 && outcome.kind !== "no-payment" ? [`Part of the month, ${money(credit)}, was paid from the member's credit balance on your Stripe account; it was not given back by itself. If they are owed it, please credit it back.`] : [];
     if (outcome.kind === "refunded") {
-      run.out.refunds += 1;
-      await tellCreator(account, sub, {
-        kind: "refunded",
+      const told = await tellCreator(account, sub, {
         key: `fallback-both:${account}:${monthly}`,
         subject: "A member's extra month was refunded",
         lines: [
           "A member paid their yearly renewal while their move to the monthly price was being made, so they paid for both.",
           `The year is kept. The month, ${money(outcome.amount)}, was refunded in full.`,
+          ...creditLine,
           where,
           "",
           `${invoices} It is all on your own Stripe account, under that customer.`,
         ],
-      }).catch((error) => console.error("a note about a refunded month failed", error));
-    } else if (outcome.kind === "disputed") {
-      await tellCreator(account, sub, {
-        kind: "disputed",
-        key: `fallback-disputed:${account}:${monthly}`,
-        subject: "A member disputed an extra month they paid",
-        lines: [
-          "A member paid their yearly renewal while their move to the monthly price was being made, so they paid for both.",
-          "They disputed the month's payment with their bank, so we did not refund it: the dispute is how that money goes back. You can answer the dispute on your Stripe account.",
-          where,
-          "",
-          invoices,
-        ],
-      }).catch((error) => console.error("a note about a disputed month failed", error));
-    } else if (outcome.kind === "no-payment") {
-      await tellCreator(account, sub, {
-        kind: "no-payment",
-        key: `fallback-nopay:${account}:${monthly}`,
-        subject: "A member paid an extra month that needs a look",
-        lines: [
-          "A member paid their yearly renewal while their move to the monthly price was being made, so they paid for both.",
-          `The month (${money(num(month.amount_paid) || num(month.total))}) was paid without a card payment on Stripe: from the member's credit balance, or marked paid outside Stripe. So nothing was refunded by itself. If they are owed it, please refund or credit it on your Stripe account.`,
-          where,
-          "",
-          invoices,
-        ],
-      }).catch((error) => console.error("a note about a month paid without a payment failed", error));
+      });
+      if (told !== "unsent" && !outcome.again) run.out.refunds += 1;
+      return sent(told);
     }
-    // "settled-before": a note went with the refund already, or there was nothing left to refund.
+    if (outcome.kind === "disputed") {
+      return sent(
+        await tellCreator(account, sub, {
+          key: `fallback-disputed:${account}:${monthly}`,
+          subject: "A member disputed an extra month they paid",
+          lines: [
+            "A member paid their yearly renewal while their move to the monthly price was being made, so they paid for both.",
+            "They disputed the month's payment with their bank, so we did not refund it: the dispute is how that money goes back. You can answer the dispute on your Stripe account.",
+            ...creditLine,
+            where,
+            "",
+            invoices,
+          ],
+        }),
+      );
+    }
+    if (outcome.kind === "no-payment") {
+      return sent(
+        await tellCreator(account, sub, {
+          key: `fallback-nopay:${account}:${monthly}`,
+          subject: "A member paid an extra month that needs a look",
+          lines: [
+            "A member paid their yearly renewal while their move to the monthly price was being made, so they paid for both.",
+            `The month (${money(num(month.amount_paid) || num(month.total))}) was paid without a card payment on Stripe: from the member's credit balance, or marked paid outside Stripe. So nothing was refunded by itself. If they are owed it, please refund or credit it on your Stripe account.`,
+            where,
+            "",
+            invoices,
+          ],
+        }),
+      );
+    }
+    // "none": the payment was refunded in full before, by someone else; only what could not go back is said.
+    if (creditLine.length || !settledBack) {
+      return sent(
+        await tellCreator(account, sub, {
+          key: `fallback-back:${account}:${monthly}`,
+          subject: "A member's yearly payment needs a look",
+          lines: ["A member paid their yearly renewal while their move to the monthly price was being made.", ...creditLine, where, "", invoices],
+        }),
+      );
+    }
     return "done";
   });
+}
+
+type Back = "moved" | "already" | "held" | "refused" | "skipped" | "ended";
+
+/** What the creator is told of where the membership is now, from what moveBack did. */
+function whereWords(back: Back, end: number): string {
+  const until = end > 0 ? new Date(end * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }) : "";
+  if ((back === "moved" || back === "already") && until) {
+    return `Their membership is back on the yearly price, with nothing more to pay until ${until}. Stripe shows it as a trial until then; the year is paid.`;
+  }
+  if (back === "held" && until) {
+    return `It could not be moved back to the yearly price by itself, so it stays on the monthly price with nothing more to pay until ${until}, the end of the year they paid. Stripe shows it as a trial until then; the year is paid. You may move it back to the yearly price yourself.`;
+  }
+  if (back === "ended") return "The membership has ended since, so nothing more will be charged.";
+  return "It could not be moved back to the yearly price by itself, so it is still monthly. Please move it on your Stripe account before its next payment, so the month is not charged on top of the year they paid.";
 }
 
 /** The yearly invoice's own line: the price paid and when the year paid ends. */
@@ -538,44 +598,83 @@ async function paidPayments(run: Run, account: string, invoice: Raw): Promise<Pa
   return (Array.isArray(read.data) ? (read.data as PaymentRow[]) : []).filter((row) => row.status === "paid");
 }
 
-/** Whether the year is still a paid year: never refunded (on its charge or by a credit note) nor disputed since. */
-async function yearKept(run: Run, account: string, year: Raw): Promise<"kept" | "refunded" | "disputed"> {
-  if (num(year.post_payment_credit_notes_amount) > 0) return "refunded";
+/**
+ * Where a disputed charge stands, from Stripe's own disputes of it (Dispute object, `status`,
+ * docs.stripe.com/api/disputes/object): won (or closed with no chargeback) keeps the money with the creator; lost
+ * gives it back; anything else is still open.
+ */
+async function disputeOf(run: Run, account: string, chargeId: string): Promise<"won" | "lost" | "open"> {
+  const read = await get(run, account, `/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`);
+  const rows = Array.isArray(read.data) ? (read.data as Raw[]) : [];
+  if (!rows.length) return "open";
+  if (rows.some((d) => d.status === "lost")) return "lost";
+  if (rows.every((d) => d.status === "won" || d.status === "warning_closed" || d.status === "prevented")) return "won";
+  return "open";
+}
+
+/**
+ * Whether the year is still a paid year. Refunded only when refunded in full (its charge's `refunded`, or its whole
+ * amount, or credit notes for all of what was paid): a small courtesy refund leaves a paid year. Disputed only when
+ * the dispute was lost: one the creator won leaves a paid year, one still open waits.
+ */
+async function yearKept(run: Run, account: string, year: Raw): Promise<"kept" | "refunded" | "disputed" | "open-dispute"> {
+  const paid = num(year.amount_paid);
+  if (paid > 0 && num(year.post_payment_credit_notes_amount) >= paid) return "refunded";
   for (const row of await paidPayments(run, account, year)) {
     const found = await chargeOf(run, account, row);
     if (!found) continue;
-    if (found.charge.disputed === true) return "disputed";
-    if (num(found.charge.amount_refunded) > 0 || found.charge.refunded === true) return "refunded";
+    const charge = found.charge;
+    if (charge.refunded === true || (num(charge.amount) > 0 && num(charge.amount_refunded) >= num(charge.amount))) return "refunded";
+    if (charge.disputed === true) {
+      const outcome = await disputeOf(run, account, idOf(charge.id));
+      if (outcome === "lost") return "disputed";
+      if (outcome === "open") return "open-dispute";
+    }
   }
   return "kept";
 }
 
-/** The membership back on the year's own price until the year paid ends; never twice, never a charge. */
-async function moveBack(run: Run, account: string, sub: SubRead, year: Raw, yearly: string): Promise<"moved" | "already" | "skipped" | "refused"> {
-  if (ended(sub)) return "skipped";
-  if (sub.metadata?.yearly_paid === yearly || interval(sub) === "year") return "already";
+/**
+ * The membership back on the year's own price until the year paid ends; never twice, never a charge. Where Stripe
+ * refuses that for certain (the yearly price archived, say), or the subscription is in flexible billing mode, the
+ * membership is held on its monthly price instead with nothing charged until the year paid ends (holdBody): it keeps
+ * its access (a trial is a live membership, lib/membership-access.ts; a paused one is not), and the month is never
+ * charged on top of the paid year.
+ */
+async function moveBack(run: Run, account: string, sub: SubRead, year: Raw, yearly: string): Promise<Back> {
+  if (ended(sub)) return "ended";
+  if (sub.metadata?.yearly_paid === yearly) return interval(sub) === "year" ? "already" : "held";
+  if (interval(sub) === "year") return "already";
   if (!movedFor(sub, yearly)) {
     console.error("a membership paid twice is not on the monthly price of its move; left as it is", account, idOf(sub.id));
     return "skipped";
   }
-  // Flexible billing mode keeps the billing date when a trial is set (Stripe, Set the subscription billing renewal
-  // date): the move back would not charge nothing until the year paid ends, so it is left to the creator.
-  if (sub.billing_mode?.type === "flexible") return "skipped";
   const paid = yearEnd(year);
   const itemId = idOf(sub.items?.data?.[0]?.id);
   if (!paid || !itemId || paid.end <= Math.floor(Date.now() / 1000) + 3_600) {
     console.error("a membership paid twice has no year left to move back to; left on the monthly price", account, idOf(sub.id));
     return "skipped";
   }
+  const path = `/subscriptions/${encodeURIComponent(idOf(sub.id))}`;
+  // Flexible billing mode keeps the billing date when a trial is set (Stripe, Set the subscription billing renewal
+  // date): a change of price with it would not charge nothing until the year paid ends, so it is held instead.
+  if (sub.billing_mode?.type !== "flexible") {
+    try {
+      await post(run, account, path, moveBackBody(itemId, paid.price, paid.end, yearly), `fallback-back:${yearly}`);
+      return "moved";
+    } catch (error) {
+      if (!refusedBy(error)) throw error;
+      console.error("moving a membership paid twice back to its yearly price was refused; it is held on the monthly price instead", account, idOf(sub.id), error);
+    }
+  }
   try {
-    await post(run, account, `/subscriptions/${encodeURIComponent(idOf(sub.id))}`, moveBackBody(itemId, paid.price, paid.end, yearly), `fallback-back:${yearly}`);
+    await post(run, account, path, holdBody(paid.end, yearly), `fallback-hold:${yearly}`);
+    return "held";
   } catch (error) {
-    // Refused for certain (the yearly price archived, say): the refund is never held back for it; the creator is told.
     if (!refusedBy(error)) throw error;
-    console.error("moving a membership paid twice back to its yearly price was refused; the month is refunded all the same", account, idOf(sub.id), error);
+    console.error("holding a membership paid twice on its monthly price was refused; its creator is told", account, idOf(sub.id), error);
     return "refused";
   }
-  return "moved";
 }
 
 /** The move back, as Stripe is sent it: the year's price, nothing charged until `end`, the move's marks taken off. */
@@ -593,23 +692,40 @@ export function moveBackBody(itemId: string, yearlyPrice: string, end: number, y
   });
 }
 
+/**
+ * The hold when the price cannot change: the same monthly price, nothing charged until `end` (a trial sets no new
+ * price, so no new billing period begins), and the paid year named, so every reader knows this trial is paid
+ * (lib/yearly-fallback-rules.ts, paidYearHeld).
+ */
+export function holdBody(end: number, yearly: string): URLSearchParams {
+  return new URLSearchParams({ trial_end: String(end), proration_behavior: "none", "metadata[yearly_paid]": yearly });
+}
+
 type RefundOutcome =
-  | { kind: "refunded"; amount: number }
+  | { kind: "refunded"; amount: number; again: boolean }
+  | { kind: "pending" }
   | { kind: "disputed" }
   | { kind: "no-payment" }
-  | { kind: "settled-before" };
+  | { kind: "none" };
 
-/** The month's payment refunded in full, once; a month with nothing to refund settles too, never kept. */
+/**
+ * The month's payment refunded in full, once; a month with nothing to refund settles too, never kept. Worked out
+ * from Stripe each time (the mark only spares calls), so a notice that did not go is sent again with the same facts.
+ * A refund still pending waits until it succeeded.
+ */
 async function refundMonth(run: Run, account: string, yearly: string, monthly: string, month: Raw): Promise<RefundOutcome> {
   const mark = fallbackRefundedKey(monthly);
   const [settled] = await redisPipeline([["GET", mark]]);
-  if (typeof settled === "string") return { kind: "settled-before" };
+  const before = typeof settled === "string" ? /^refunded:(\d+)$/.exec(settled) : null;
+  if (before) return { kind: "refunded", amount: Number(before[1]), again: true };
+  if (settled === "disputed" || settled === "no-payment" || settled === "none") return { kind: settled };
   const done = (why: string) => redisPipeline([["SET", mark, why, "EX", REFUNDED_SECONDS]]);
 
   const rows = await paidPayments(run, account, month);
   let gave = 0;
   let disputed = false;
   let found = false;
+  let pending = false;
   let paidOnInvoice = num(month.amount_paid);
   for (const row of rows) {
     const paid = await chargeOf(run, account, row);
@@ -622,6 +738,7 @@ async function refundMonth(run: Run, account: string, yearly: string, monthly: s
     // One made here before, under this invoice: never a second (Stripe's own list, read in full).
     const ours = await ourRefund(run, account, paid.by, monthly);
     if (ours) {
+      if (ours.status !== "succeeded") pending = true;
       gave += num(ours.amount);
       paidOnInvoice -= num(ours.amount);
       continue;
@@ -629,8 +746,9 @@ async function refundMonth(run: Run, account: string, yearly: string, monthly: s
     const left = num(paid.charge.amount) - num(paid.charge.amount_refunded);
     const give = Math.min(paidOnInvoice, typeof row.amount_paid === "number" ? row.amount_paid : paidOnInvoice, left);
     if (give <= 0) continue;
+    let made: Raw;
     try {
-      await post(
+      made = await post(
         run,
         account,
         "/refunds",
@@ -645,23 +763,19 @@ async function refundMonth(run: Run, account: string, yearly: string, monthly: s
       if (error instanceof StripeError && error.code === "charge_already_refunded") continue;
       throw error;
     }
+    if (made.status !== "succeeded") pending = true;
     gave += give;
     paidOnInvoice -= give;
   }
+  if (pending) return { kind: "pending" };
   if (gave > 0) {
-    await done("refunded");
-    return { kind: "refunded", amount: gave };
+    await done(`refunded:${gave}`);
+    return { kind: "refunded", amount: gave, again: false };
   }
-  if (disputed) {
-    await done("disputed");
-    return { kind: "disputed" };
-  }
-  await done(found ? "none" : "no-payment");
-  // Paid with no payment of its own on Stripe (a credit balance, or marked paid outside Stripe): settled, the creator
-  // told; a payment fully refunded before is nothing left to give.
-  return found ? { kind: "settled-before" } : { kind: "no-payment" };
+  const kind = disputed ? "disputed" : found ? "none" : "no-payment";
+  await done(kind);
+  return { kind };
 }
-
 /** A refund of ours already made on this payment, from Stripe's own list read in full (a few pages at most). */
 async function ourRefund(run: Run, account: string, by: [string, string], monthly: string): Promise<Raw | null> {
   let after = "";
@@ -691,13 +805,12 @@ async function storeOf(account: string, sub: SubRead | null): Promise<Store | nu
   return byId?.stripeAccountId === account ? byId : null;
 }
 
-/** Stripe refuses us the account: its creator is told, at most once a week. */
+/** Stripe refuses us the account: its creator is told, at most once a week (again the next run if it did not go). */
 async function tellDenied(account: string): Promise<void> {
   if (!ACCOUNT_PATTERN.test(account)) return;
   const [first] = await redisPipeline([["SET", deniedKey(account), "1", "NX", "EX", DENIED_SECONDS]]);
   if (first === null) return;
-  await tellCreator(account, null, {
-    kind: "denied",
+  const told = await tellCreator(account, null, {
     key: `fallback-denied:${account}:${Math.floor(Date.now() / (DENIED_SECONDS * 1000))}`,
     subject: "We cannot reach your Stripe account",
     lines: [
@@ -705,23 +818,36 @@ async function tellDenied(account: string): Promise<void> {
       "Stripe no longer lets us reach your account. Please connect it again from your studio; until then, please look at your members whose yearly renewal failed on Stripe.",
     ],
   });
+  if (told === "unsent") await redisPipeline([["DEL", deniedKey(account)]]).catch(() => {});
 }
 
-type Note = { kind: string; key: string; subject: string; lines: string[] };
+type Note = { key: string; subject: string; lines: string[] };
+/** Whether a notice went: accepted by the sender, no store to tell (nothing more can be done), or not sent. */
+type Told = "told" | "nostore" | "unsent";
 
-/** A short note to the creator, in English, from the store's own email figure. */
-async function tellCreator(account: string, sub: SubRead | null, note: Note): Promise<void> {
-  const store = await storeOf(account, sub);
-  if (!store || !store.email) return;
-  const productId = sub ? productOfSub(sub as Parameters<typeof productOfSub>[0]) : "";
-  const [product] = productId ? await readListings(store, [productId]).catch(() => [] as Listing[]) : [];
-  const subject = product?.title ? `${note.subject} for ${product.title}` : note.subject;
-  await sendEmail({
-    meter: { by: "store", store, kind: "email" },
-    from: NIMBUS_FROM,
-    to: store.email,
-    subject: subject.slice(0, 200),
-    text: note.lines.join("\n"),
-    idempotencyKey: note.key.slice(0, 200),
-  });
+/**
+ * A short note to the creator, in English, about their own account and their money: counted as the company's
+ * (lib/email.ts, "company": "what we send a creator about their own account"), never against the store's own
+ * figure, which an ended plan or a trial may have spent. What did not go is said, so the entry is kept for it.
+ */
+async function tellCreator(account: string, sub: SubRead | null, note: Note): Promise<Told> {
+  try {
+    const store = await storeOf(account, sub);
+    if (!store || !store.email) return "nostore";
+    const productId = sub ? productOfSub(sub as Parameters<typeof productOfSub>[0]) : "";
+    const [product] = productId ? await readListings(store, [productId]).catch(() => [] as Listing[]) : [];
+    const subject = product?.title ? `${note.subject} for ${product.title}` : note.subject;
+    const ok = await sendEmail({
+      meter: { by: "company" },
+      from: NIMBUS_FROM,
+      to: store.email,
+      subject: subject.slice(0, 200),
+      text: note.lines.join("\n"),
+      idempotencyKey: note.key.slice(0, 200),
+    });
+    return ok ? "told" : "unsent";
+  } catch (error) {
+    console.error("a notice to a creator about a move to monthly failed", error);
+    return "unsent";
+  }
 }

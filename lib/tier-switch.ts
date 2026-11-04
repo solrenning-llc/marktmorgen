@@ -34,6 +34,7 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { withLock } from "@/lib/redis-lock";
+import { paidYearHeld } from "@/lib/yearly-fallback-rules";
 import { forgetPaid } from "@/lib/learn";
 import { forgetTicket } from "@/lib/community-access";
 import type { Listing, Store } from "@/lib/store";
@@ -184,6 +185,9 @@ async function find(store: Store, token: string, subscription: string, target: s
   const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
   // Not this member's, not this store's, or no longer running: one answer for all.
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
+  // A year paid and held as a "trial" until it ends (lib/yearly-fallback-sweep.ts): a switch now would be charged
+  // nothing, as a trial's is, so none is made until the year ends.
+  if (paidYearHeld(sub as Parameters<typeof paidYearHeld>[0])) return { reason: "gone" };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription

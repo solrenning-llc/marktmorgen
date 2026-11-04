@@ -33,6 +33,10 @@ import {
   settleFallbacks,
 } from "@/lib/yearly-fallback-sweep";
 import { recoverFailedPayments } from "@/lib/payment-recovery";
+import { paidYearHeld } from "@/lib/yearly-fallback-rules";
+import { yearlyChoice } from "@/lib/yearly-switch-rules";
+import { readSub } from "@/lib/membership-numbers";
+import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setProductYearly, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
@@ -77,6 +81,14 @@ const state = {
   slow: new Map<string, number>(),
   /** A PaymentIntent's status, "succeeded" when not named. */
   intents: new Map<string, string>(),
+  /** A change of price on the subscription refused for certain (the yearly price archived). */
+  refusePrice: false,
+  /** Disputes by charge, as Stripe lists them. */
+  disputes: new Map<string, Obj[]>(),
+  /** What a new refund is answered with. */
+  refundStatus: "succeeded",
+  /** The email sender failing. */
+  mailDown: false,
 };
 
 const subscription = (onMonthly: boolean, extra: Obj = {}): Obj => ({
@@ -125,6 +137,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.resend.com") {
+    if (state.mailDown) return json({ name: "internal_server_error", message: "down" }, 500);
     const sent = JSON.parse(String(init?.body)) as { to: string[] | string; subject: string; text: string };
     mails.push({ to: Array.isArray(sent.to) ? sent.to.join(",") : sent.to, subject: sent.subject, text: sent.text });
     return json({ id: `email_${mails.length}` });
@@ -145,6 +158,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       });
     });
   }
+  if (state.refusePrice && method === "POST" && path.startsWith("/subscriptions/") && body.has("items[0][price]")) {
+    return json({ error: { type: "invalid_request_error", code: "resource_missing", message: "The price specified is inactive. This field only accepts active prices." } }, 400);
+  }
+  if (path === "/disputes" && method === "GET") return json({ object: "list", data: state.disputes.get(String(url.searchParams.get("charge"))) ?? [], has_more: false });
   if (state.refuse.has(`${method} ${path}`)) return json({ error: { type: "invalid_request_error", code: "resource_missing", message: "The price specified is inactive. This field only accepts active prices." } }, 400);
   if (state.deny.has(`${method} ${path}`)) return json({ error: { type: "invalid_request_error", message: "The provided key does not have access to account" } }, 403);
   if (state.fail.has(`${method} ${path}`)) return json({ error: { type: "api_error", message: "down" } }, 500);
@@ -212,7 +229,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = Number(body.get("amount"));
     if (!charge || amount > Number(charge.amount) - Number(charge.amount_refunded)) return json({ error: { type: "invalid_request_error", code: "amount_too_large", message: "too much" } }, 400);
     charge.amount_refunded = Number(charge.amount_refunded) + amount;
-    const made = { id: `re_${state.refunds.length + 1}`, amount, status: "succeeded", payment_intent: body.get("payment_intent"), reason: body.get("reason"), metadata: { fallback_refund: body.get("metadata[fallback_refund]") } };
+    const made = { id: `re_${state.refunds.length + 1}`, amount, status: state.refundStatus, payment_intent: body.get("payment_intent"), reason: body.get("reason"), metadata: { fallback_refund: body.get("metadata[fallback_refund]") } };
     state.refunds.push(made);
     return json(made);
   }
@@ -236,6 +253,10 @@ async function reset(sub: Obj | null, invoices: Obj[], charge?: Obj): Promise<vo
   state.deny.clear();
   state.slow.clear();
   state.intents.clear();
+  state.refusePrice = false;
+  state.disputes.clear();
+  state.refundStatus = "succeeded";
+  state.mailDown = false;
   shift = 0;
   // The year's own charge, clean unless a case says otherwise (paidYear, called after reset, replaces it).
   state.charges.set(YPI, { id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: false });
@@ -419,7 +440,11 @@ async function main(): Promise<void> {
   mails.length = 0;
   await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
   await sweep();
-  is("put back by mistake and run again: never a second refund, move or note", [posts(), mails.length, state.refunds.length, await members(FALLBACK_BOTH_KEY)], [[], 0, 1, []]);
+  is(
+    "put back by mistake and run again: never a second refund or move; its notice may go again, under the same idempotency key, so the sender keeps one",
+    [posts(), mails.length, state.refunds.length, await members(FALLBACK_BOTH_KEY)],
+    [[], 1, 1, []],
+  );
 
   await reset(subscription(true), [yearInvoice("paid"), monthInvoice("paid")], paidCharge(500));
   await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
@@ -468,13 +493,19 @@ async function main(): Promise<void> {
 
   part("Found by the review of 4 November 2026 (rev26): each failed before its fix");
   await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
-  state.refuse.add(`POST /subscriptions/${SUB}`);
+  state.refusePrice = true;
   await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
   await sweep();
   is(
-    "the move back refused for certain (the yearly price archived): the month is refunded all the same, the entry settles, and the creator is told it is still monthly",
+    "the move back refused for certain (the yearly price archived): the month is refunded all the same, the entry settles, and the creator is told",
     [state.refunds.map((r) => r.amount), await members(FALLBACK_BOTH_KEY), mails.length, mails[0]?.text.includes("could not be moved back to the yearly price")],
     [[2000], [], 1, true],
+  );
+  const hold = calls.filter((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}`).at(-1);
+  is(
+    "and the member is held on the monthly price with nothing to pay until the paid year ends, never the month on top of the year (review rev27)",
+    [hold?.body.toString(), state.subs.get(SUB)?.status, (state.subs.get(SUB)?.metadata as Record<string, string>).yearly_paid, mails[0]?.text.includes("stays on the monthly price with nothing more to pay until")],
+    [`trial_end=${(state.invoices.get(YEAR)?.lines as { data: { period: { end: number } }[] }).data[0].period.end}&proration_behavior=none&metadata%5Byearly_paid%5D=${YEAR}`, "trialing", YEAR, true],
   );
 
   await reset(subscription(true), [paidYear(), monthInvoice("paid", { amount_paid: 0, total: 2000, payments: { data: [] } })]);
@@ -492,10 +523,11 @@ async function main(): Promise<void> {
 
   for (const [what, charge, extra] of [
     ["refunded on its charge", { id: "ch_Year000000001", amount: 20000, amount_refunded: 20000, refunded: true, disputed: false }, {}],
-    ["disputed", { id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: true }, {}],
+    ["lost in a dispute", { id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: true }, {}],
     ["refunded by a credit note", { id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: false }, { post_payment_credit_notes_amount: 20000 }],
   ] as const) {
     await reset(subscription(true), [], paidCharge());
+    state.disputes.set("ch_Year000000001", [{ id: "dp_1", status: "lost" }]);
     state.invoices.set(YEAR, { ...paidYear(charge as Obj), ...(extra as Obj) });
     state.invoices.set(MONTH, monthInvoice("paid"));
     await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
@@ -511,9 +543,9 @@ async function main(): Promise<void> {
   await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
   await sweep();
   is(
-    "flexible billing mode (a trial keeps the billing date): no move back, the month refunded, the creator told it is still monthly",
-    [posts(), state.refunds.map((r) => r.amount), mails[0]?.text.includes("could not be moved back to the yearly price")],
-    [["/refunds"], [2000], true],
+    "flexible billing mode (a trial keeps the billing date): no change of price, the member held on the monthly price until the paid year ends, the month refunded, the creator told",
+    [posts(), calls.find((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}`)?.body.has("items[0][price]"), state.refunds.map((r) => r.amount), mails[0]?.text.includes("stays on the monthly price with nothing more to pay until")],
+    [[`/subscriptions/${SUB}`, "/refunds"], false, [2000], true],
   );
 
   await reset(subscription(true), [yearInvoice("open"), monthInvoice("paid")]);
@@ -564,6 +596,120 @@ async function main(): Promise<void> {
     [old.expired, await members(FALLBACK_VOID_KEY), mails[0]?.subject, mails[0]?.text.includes(YEAR)],
     [1, [], "A member's move to a monthly price needs a look", true],
   );
+
+  part("Found by the review of 4 November 2026 (rev27): each failed before its fix");
+  for (const [what, setup] of [
+    ["the yearly price archived", () => { state.refusePrice = true; }],
+    ["flexible billing mode", () => { state.subs.set(SUB, subscription(true, { billing_mode: { type: "flexible" } })); }],
+  ] as const) {
+    await reset(subscription(true), [paidYear(), monthInvoice("open")]);
+    setup();
+    await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+    await sweep();
+    is(
+      `the year paid, the month still owed, no move back to the year (${what}): the month voided, the member held until the paid year ends, the creator told`,
+      [state.invoices.get(MONTH)?.status, state.subs.get(SUB)?.status, mails.length, mails[0]?.text.includes("stays on the monthly price with nothing more to pay until"), await members(FALLBACK_BOTH_KEY)],
+      ["void", "trialing", 1, true, []],
+    );
+  }
+  await reset(subscription(true), [paidYear(), monthInvoice("open")]);
+  state.refuse.add(`POST /subscriptions/${SUB}`);
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is(
+    "and the hold refused too: the creator is told to move it before its next payment",
+    [mails.length, mails[0]?.text.includes("Please move it on your Stripe account before its next payment"), await members(FALLBACK_BOTH_KEY)],
+    [1, true, []],
+  );
+
+  await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+  await setSubscription(OWNER, { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: false, period: paidPeriod(Date.now() - 90 * DAY) });
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("a store whose plan has ended: the notice of a $20 refund still goes, as the company's email about their own account", [state.refunds.map((r) => r.amount), mails.length], [[2000], 1]);
+  await setSubscription(OWNER, { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: true, period: paidPeriod() });
+
+  await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+  state.mailDown = true;
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("the notice did not go: the entry is kept, the refund made once", [state.refunds.map((r) => r.amount), await members(FALLBACK_BOTH_KEY)], [[2000], [`${ACCOUNT}|${YEAR}|${MONTH}`]]);
+  state.mailDown = false;
+  await sweep();
+  is("the next run: the notice goes, no second refund, settled", [state.refunds.length, mails.length, mails[0]?.text.includes("$20"), await members(FALLBACK_BOTH_KEY)], [1, 1, true, []]);
+  await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+  state.mailDown = true;
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  await redisPipeline([["DEL", fallbackRefundedKey(MONTH)]]);
+  state.mailDown = false;
+  await sweep();
+  is("even once the mark has gone: the refund is found made on Stripe, never a second, and the notice goes", [state.refunds.length, mails.length, await members(FALLBACK_BOTH_KEY)], [1, 1, []]);
+
+  await reset(subscription(true), [yearInvoice("open"), monthInvoice("paid")]);
+  state.fail.add(`GET /invoices/${YEAR}`);
+  await put(FALLBACK_VOID_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  shift = (FALLBACK_MAX_DAYS + 1) * DAY;
+  state.mailDown = true;
+  await sweep();
+  is(`past ${FALLBACK_MAX_DAYS} days with the notice not sent: never dropped unseen`, await members(FALLBACK_VOID_KEY), [`${ACCOUNT}|${YEAR}|${MONTH}`]);
+  state.mailDown = false;
+  await sweep();
+  is("dropped once the notice went", [await members(FALLBACK_VOID_KEY), mails.length], [[], 1]);
+
+  await reset(subscription(true), [], paidCharge());
+  state.invoices.set(YEAR, paidYear({ id: "ch_Year000000001", amount: 20000, amount_refunded: 100, refunded: false, disputed: false }));
+  state.invoices.set(MONTH, monthInvoice("paid"));
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("a $1 courtesy refund on the year leaves it a paid year: moved back, the month refunded", [posts(), state.refunds.map((r) => r.amount)], [[`/subscriptions/${SUB}`, "/refunds"], [2000]]);
+  await reset(subscription(true), [], paidCharge());
+  state.invoices.set(YEAR, { ...paidYear(), post_payment_credit_notes_amount: 500 });
+  state.invoices.set(MONTH, monthInvoice("paid"));
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("so does a credit note for part of it", state.refunds.map((r) => r.amount), [2000]);
+  await reset(subscription(true), [], paidCharge());
+  state.invoices.set(YEAR, paidYear({ id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: true }));
+  state.invoices.set(MONTH, monthInvoice("paid"));
+  state.disputes.set("ch_Year000000001", [{ id: "dp_1", status: "won" }]);
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("a dispute of the year the creator won: a paid year, moved back, the month refunded", [posts(), state.refunds.map((r) => r.amount)], [[`/subscriptions/${SUB}`, "/refunds"], [2000]]);
+  await reset(subscription(true), [], paidCharge());
+  state.invoices.set(YEAR, paidYear({ id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: true }));
+  state.invoices.set(MONTH, monthInvoice("paid"));
+  state.disputes.set("ch_Year000000001", [{ id: "dp_1", status: "needs_response" }]);
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("one still open: waits for its outcome, nothing done", [posts(), mails.length, await members(FALLBACK_BOTH_KEY)], [[], 0, [`${ACCOUNT}|${YEAR}|${MONTH}`]]);
+
+  await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+  state.refundStatus = "pending";
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("a refund still pending: kept, no notice yet", [state.refunds.length, mails.length, await members(FALLBACK_BOTH_KEY)], [1, 0, [`${ACCOUNT}|${YEAR}|${MONTH}`]]);
+  state.refunds[0].status = "succeeded";
+  await sweep();
+  is("once it succeeded: never a second, the notice goes, settled", [state.refunds.length, mails.length, await members(FALLBACK_BOTH_KEY)], [1, 1, []]);
+
+  await reset(subscription(true), [paidYear(), monthInvoice("paid", { total: 2500 })], paidCharge());
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("a month paid partly from the credit balance: the card part refunded, the creator told of the balance part", [state.refunds.map((r) => r.amount), mails[0]?.text.includes("Part of the month, $5, was paid from the member's credit balance")], [[2000], true]);
+
+  part("A paid year held as a trial is read as paid (review rev27)");
+  const heldSub = { status: "trialing", metadata: { store: "harbor", product, yearly_paid: YEAR }, trial_end: nowSeconds() + 300 * 86_400 };
+  is("paidYearHeld: only a trial naming the year paid", [paidYearHeld(heldSub), paidYearHeld({ ...heldSub, metadata: { store: "harbor" } }), paidYearHeld({ ...heldSub, status: "active" })], [true, false, false]);
+  const numbers = readSub({ id: SUB, ...heldSub, items: { data: [{ quantity: 1, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } }, new Set(["harbor"]));
+  is("the store's numbers count it as a paying member, not a trial", [numbers?.status, numbers?.trialEnd], ["active", 0]);
+  is(
+    "no move to the yearly price is offered before the year ends",
+    yearlyChoice({ ...heldSub, items: { data: [{ quantity: 1, price: { unit_amount: 2000, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } }, { id: product, priceCents: 2000, recurring: { interval: "month", trialDays: 0, payments: 0 }, options: [], pwyw: false, yearly: { cents: 20000 } }, [], "usd", nowSeconds()),
+    null,
+  );
+  is("and a switch between tiers refuses it (lib/tier-switch.ts reads paidYearHeld)", readFileSync("lib/tier-switch.ts", "utf8").includes("if (paidYearHeld("), true);
 
   part("Its own share of the daily job's time");
   const at = 1_000_000;

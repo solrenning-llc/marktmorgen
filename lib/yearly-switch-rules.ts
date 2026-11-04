@@ -88,6 +88,8 @@ export function yearlyChoice(
   if (!product) return null;
   const status = String(sub.status ?? "");
   if (status !== "active" && status !== "trialing") return null;
+  // A year paid and held as a "trial" until it ends (lib/yearly-fallback-sweep.ts): nothing to move to before then.
+  if (status === "trialing" && /^in_[A-Za-z0-9]{6,64}$/.test(sub.metadata?.yearly_paid ?? "")) return null;
   if (num(sub.cancel_at) > 0 || sub.cancel_at_period_end === true) return null;
   if (sub.pause_collection && typeof sub.pause_collection === "object") return null;
   const meta = sub.metadata ?? {};

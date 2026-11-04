@@ -28,6 +28,7 @@
  * Read at most MAX_PAGES pages of 100 and kept CACHE_SECONDS, so the page
  * that shows them asks Stripe at most once every few minutes.
  */
+import { paidYearHeld } from "@/lib/yearly-fallback-rules";
 import { DISCOUNT_KINDS, type DiscountKind, entryOf } from "@/lib/discount-impact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
@@ -462,9 +463,11 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
   const item = raw.items?.data?.[0];
   const unit = num(item?.price?.unit_amount);
   const quantity = num(item?.quantity) || 1;
+  // A year paid and held as a "trial" until it ends (lib/yearly-fallback-sweep.ts) is a paying member, not a trial.
+  const held = paidYearHeld(raw as Parameters<typeof paidYearHeld>[0]);
   return {
     id: typeof raw.id === "string" ? raw.id : "",
-    status: typeof raw.status === "string" ? raw.status : "",
+    status: held ? "active" : typeof raw.status === "string" ? raw.status : "",
     product: meta.product,
     amount: unit * quantity,
     currency: typeof raw.currency === "string" ? raw.currency : "",
@@ -472,7 +475,7 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     count: num(item?.price?.recurring?.interval_count) || 1,
     start: num(raw.start_date),
     ended: num(raw.ended_at),
-    trialEnd: num(raw.trial_end),
+    trialEnd: held ? 0 : num(raw.trial_end),
     channel: "channel" in meta ? (meta.channel && meta.channel !== "direct" ? meta.channel : "direct") : meta.utm_source || "unrecorded",
     entry: entryOf(meta),
     // A membership with a set number of payments is given its end when it is

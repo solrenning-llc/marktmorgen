@@ -764,7 +764,9 @@ export async function removeEndpoint(store: Store, id: string): Promise<Webhooks
   // Its sets of passed-over events, today's and yesterday's (none older is kept).
   if (written) {
     const today = Math.floor(Date.now() / 86_400_000);
-    await redisPipeline([["DEL", givenUpDayKey(store.statsId, today, id)], ["DEL", givenUpDayKey(store.statsId, today - 1, id)]]);
+    // The removal worked; sets that could not be deleted now expire by themselves within two days.
+    await redisPipeline([["DEL", givenUpDayKey(store.statsId, today, id)], ["DEL", givenUpDayKey(store.statsId, today - 1, id)]])
+      .catch((error) => console.error("deleting a removed endpoint's sets of passed-over events failed; they expire by themselves", store.handle, id, error));
   }
   return webhooksView(store);
 }

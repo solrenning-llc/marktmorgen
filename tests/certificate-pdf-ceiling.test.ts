@@ -15,7 +15,7 @@ import { issueCertificate, withdrawCertificate } from "@/lib/certificate";
 import { saveCourse, type Course } from "@/lib/course";
 import { storeKey } from "@/lib/learn";
 import { requestsIn } from "@/lib/traffic";
-import { requestLimitFor } from "@/lib/traffic-rules";
+import { publicVisitLimit, requestLimitFor } from "@/lib/traffic-rules";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   part("The sample");
   before = await requestsIn(folder, window);
   const sample = await get(`sample/pdf?product=${made.product.id}`);
-  is("drawn for the public, kept by the CDN an hour, with no tag", [sample.status, sample.headers.get("cache-control"), sample.headers.get("etag"), (await requestsIn(folder, window)) - before], [200, "public, max-age=0, s-maxage=3600", null, CERTIFICATE_PDF_UNITS]);
+  is("drawn for the public, kept by the CDN five minutes, with no tag", [sample.status, sample.headers.get("cache-control"), sample.headers.get("etag"), (await requestsIn(folder, window)) - before], [200, "public, max-age=0, s-maxage=300", null, CERTIFICATE_PDF_UNITS]);
 
   part("A store past its requests");
   const limit = requestLimitFor(store, Date.now() / 1000);
@@ -91,7 +91,12 @@ async function main(): Promise<void> {
   const second = issueCertificate({ store: storeKey(store), productId: made.product.id, course, title: "Glazing basics", creator: "Kiln Works", email: "ben@example.com", who: "ben", name: "Ben Ito", room: ROOM });
   const other = await second;
   if (!other.ok) throw new Error("no certificate");
-  await redis.pipeline([["SET", counter, String(limit - 1)]]);
+  // The public side is full, the buyers' reserve is not: a certificate's public address does not spend it.
+  const publicLimit = publicVisitLimit(limit);
+  await redis.pipeline([["SET", counter, String(publicLimit)]]);
+  const strangers = await get(`${other.certificate.id}/pdf`);
+  is("a certificate is paid on the public side: refused once the public's requests are used, the buyers' reserve left", [publicLimit < limit, strangers.status, Number((await redis.pipeline([["GET", counter]]))[0]) <= limit], [true, 503, true]);
+  await redis.pipeline([["SET", counter, String(publicLimit - 1)]]);
   const half = await get(`${other.certificate.id}/pdf`);
   is("with one request left: the record read, the file not drawn, refused", [half.status, half.headers.get("content-type"), half.headers.get("cache-control")], [503, "text/plain; charset=utf-8", "no-store"]);
   const source = (await import("node:fs")).readFileSync("app/[handle]/certificate/[id]/pdf/route.ts", "utf8");

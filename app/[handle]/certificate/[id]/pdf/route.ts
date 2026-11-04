@@ -24,10 +24,13 @@ import { plain } from "@/lib/serve-file";
  *
  * Drawing a file is paid for before it is drawn (C3, 4 November 2026): one of
  * the store's public requests before anything is read, and the rest of
- * CERTIFICATE_PDF_UNITS before the file is made, the buyer's side for a
- * certificate and the public's for the sample; past them the store is
- * resting and nothing is drawn. The sample is the same for everyone for a
- * while, so the CDN keeps it an hour. A certificate can be withdrawn, so no
+ * CERTIFICATE_PDF_UNITS before the file is made, on the public side for a
+ * certificate too: its address is public (a check, a LinkedIn post), so
+ * strangers opening it never spend what is kept for the store's buyers.
+ * Past them the store is resting and nothing is drawn. The sample is the
+ * same for everyone for a while, so the CDN keeps it five minutes: short,
+ * so a course whose certificate is switched off or a store whose look
+ * changes shows it within minutes. A certificate can be withdrawn, so no
  * cache keeps one: the browser asks every time, and gets "not modified",
  * without the file being drawn again, only while the record and the store's
  * look are the same and it is not withdrawn.
@@ -39,10 +42,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) return new Response("Not found", { status: 404 });
   const sample = id === "sample";
-  const who = sample ? "public" : "buyer";
   const now = Date.now();
   const resting = () => plain(503, speech(store).w.restingTitle);
-  if (!(await takePublicRequest(store, who, now, 1))) return resting();
+  if (!(await takePublicRequest(store, "public", now, 1))) return resting();
   const w = coursesWords(store.language);
   let certificate = sample ? null : await readCertificate(id);
   if (sample) {
@@ -77,12 +79,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // Everything the file is drawn from, and the code that draws it: the same tag, the same file.
   const tag = `"${createHash("sha256").update(JSON.stringify([process.env.VERCEL_GIT_COMMIT_SHA ?? "", sheet])).digest("base64url").slice(0, 32)}"`;
   const cache: Record<string, string> = sample
-    ? { "Cache-Control": "public, max-age=0, s-maxage=3600" }
+    ? // Five minutes at the CDN: a sample switched off or redrawn in a new look is seen soon, each try past it paid as above.
+      { "Cache-Control": "public, max-age=0, s-maxage=300" }
     : { "Cache-Control": "private, no-cache", ETag: tag };
   if (!sample && (request.headers.get("if-none-match") ?? "").split(",").some((one) => one.trim().replace(/^W\//, "") === tag)) {
     return new Response(null, { status: 304, headers: { ...cache, "X-Robots-Tag": "noindex" } });
   }
-  if (CERTIFICATE_PDF_UNITS > 1 && !(await takePublicRequest(store, who, now, CERTIFICATE_PDF_UNITS - 1))) return resting();
+  if (CERTIFICATE_PDF_UNITS > 1 && !(await takePublicRequest(store, "public", now, CERTIFICATE_PDF_UNITS - 1))) return resting();
   if (!(await canDraw(certificate.name, certificate.title, certificate.creator, store.name))) {
     return new Response(null, { status: 303, headers: { Location: new URL(page, request.nextUrl.origin).toString(), "Cache-Control": "no-store" } });
   }

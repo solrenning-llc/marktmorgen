@@ -50,7 +50,8 @@ export type Room = {
   /**
    * A count is already at its line (overTheLine) while no pause is set. Then
    * heardFromSender's pauseIfOver, run after every notice it counts, pauses
-   * on the next one of either kind, so both rooms are 1.
+   * on the next one of either kind, so both rooms are 1: a notice from an
+   * address not already counted, if no more email goes out first.
    */
   atLevel: boolean;
 };
@@ -92,8 +93,9 @@ export function roomLine(room: Room): string {
   if (room.bounces !== null) parts.push(plural(room.bounces, "more bounce", "more bounces"));
   if (room.complaints !== null) parts.push(plural(room.complaints, "more spam report", "more spam reports"));
   if (!parts.length) return "";
-  // At the level with no pause set, the next counted notice of either kind pauses (pauseIfOver), as KB20's advice says.
-  if (room.atLevel) return "Email to your list is at the level that pauses it, so the next bounce or spam report we hear about pauses it.";
+  // At the level with no pause set, the next counted notice of either kind pauses (pauseIfOver), as KB20's advice says. Counted means
+  // from an address not counted in the last days (heardFromSender's seenKey), and only while no more email lowers the share first.
+  if (room.atLevel) return "Email to your list is at the level that pauses it: the next bounce or spam report from a new address pauses it, unless more email goes out first.";
   return `At this many emails, ${parts.join(" or ")} would pause it.`;
 }
 
@@ -132,9 +134,14 @@ export function levelWords(level: HealthLevel): string {
   return LEVEL_WORDS[level];
 }
 
-/** The room as its cell says it: a number, or, at the level, that the next notice of either kind pauses. */
+/**
+ * The room as its cell says it: a number, or, at the level, that the next
+ * notice of either kind pauses. Only from an address not already counted
+ * (heardFromSender ignores one counted in the last days), and only if no
+ * more email goes out first: more sent lowers the share under the line.
+ */
 export function roomWords(room: number, atLevel: boolean): string {
-  return atLevel ? "The next one of either kind" : n(room);
+  return atLevel ? "The next bounce or spam report from a new address, unless more email goes out first" : n(room);
 }
 
 const percent = (rate: number) => `${Number((rate * 100).toFixed(2))}%`;

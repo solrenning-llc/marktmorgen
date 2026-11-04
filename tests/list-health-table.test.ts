@@ -25,6 +25,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { healthLevels, shareWords, type HealthLevel } from "@/lib/mail-health-levels";
 import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, healthRows, levelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
 import { ListHealthTable } from "@/components/list-health-table";
+import { overTheLine } from "@/lib/mail-health";
 import { done, is, part } from "./check";
 
 const h = (sent: number, bounced = 0, complained = 0) => ({ sent, bounced, complained });
@@ -79,7 +80,7 @@ function main(): void {
     const c = cells(html, "Reported as spam");
     if (b[2] !== WORDS[levels.bounces] || c[2] !== WORDS[levels.complaints]) levelOk = false;
     if (b[4] !== roomWords(room.bounces ?? -1, room.atLevel) || c[4] !== roomWords(room.complaints ?? -1, room.atLevel)) roomOk = false;
-    if (b[4] !== (room.atLevel ? "The next one of either kind" : room.bounces?.toLocaleString("en-US"))) roomOk = false;
+    if (b[4] !== (room.atLevel ? "The next bounce or spam report from a new address, unless more email goes out first" : room.bounces?.toLocaleString("en-US"))) roomOk = false;
     if (room.atLevel !== (levels.worst === "over")) roomOk = false;
     if (b[3] !== "25 or more, and 2% or more of those sent" || c[3] !== "5 or more, and 0.08% or more of those sent") levelOk = false;
     if (b[1] !== shareWords(health.bounced, health.sent) || c[1] !== shareWords(health.complained, health.sent)) shareOk = false;
@@ -100,11 +101,12 @@ function main(): void {
   is("short of it: roomLine under the table", render(h(1000, 4, 1)).includes(roomLine(roomBeforePause(h(1000, 4, 1)))), true);
   is("near: still said", render(h(1000, 21, 0)).includes("At this many emails, 4 more bounces or 5 more spam reports would pause it."), true);
   const over = render(h(1000, 30, 0));
-  is("at the level: both room cells say the next notice of either kind pauses", [cells(over, "Bounced for good")[4], cells(over, "Reported as spam")[4]], ["The next one of either kind", "The next one of either kind"]);
+  is("an address already counted is not counted again (heardFromSender), and more email sent first can bring the share under: hence 'new address' and 'unless'", [/redisPipeline\(\[\["SET", seenKey\(notice\.store, email\), "1", "NX", "EX", KEPT_SECONDS\]\]\);\s*if \(first === null\) return "ignored";/.test(readFileSync("lib/mail-health.ts", "utf8")), overTheLine(h(1000, 25)) !== null, overTheLine(h(1400, 26)) === null], [true, true, true]);
+  is("at the level: both room cells say the next notice of either kind pauses", [cells(over, "Bounced for good")[4], cells(over, "Reported as spam")[4]], ["The next bounce or spam report from a new address, unless more email goes out first", "The next bounce or spam report from a new address, unless more email goes out first"]);
   const bounceLine = render(h(1000, 25, 1));
-  is("at the bounce line with 1 spam report: the next spam report pauses too (overTheLine answers bounces)", [cells(bounceLine, "Bounced for good")[4], cells(bounceLine, "Reported as spam")[4]], ["The next one of either kind", "The next one of either kind"]);
+  is("at the bounce line with 1 spam report: the next spam report pauses too (overTheLine answers bounces)", [cells(bounceLine, "Bounced for good")[4], cells(bounceLine, "Reported as spam")[4]], ["The next bounce or spam report from a new address, unless more email goes out first", "The next bounce or spam report from a new address, unless more email goes out first"]);
   is("at the level: no distance sentence, nothing that contradicts KB20's advice", over.includes("At this many emails") || over.includes(roomLine(roomBeforePause(h(1000, 30, 0)))), false);
-  is("at the level by spam reports alone, the same", [cells(render(h(5000, 0, 5)), "Bounced for good")[4], render(h(5000, 0, 5)).includes("At this many emails")], ["The next one of either kind", false]);
+  is("at the level by spam reports alone, the same", [cells(render(h(5000, 0, 5)), "Bounced for good")[4], render(h(5000, 0, 5)).includes("At this many emails")], ["The next bounce or spam report from a new address, unless more email goes out first", false]);
 
   part("Nothing sent");
   const none = render(h(0));

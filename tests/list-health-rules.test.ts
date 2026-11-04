@@ -93,7 +93,7 @@ function main(): void {
   is("a distance, singular", roomLine({ bounces: 1, complaints: 1, atLevel: false }), "At this many emails, 1 more bounce or 1 more spam report would pause it.");
   is("a distance, a measure far from its line still said", roomLine(roomBeforePause(h(20, 3, 1))), "At this many emails, 22 more bounces or 4 more spam reports would pause it.");
   is("thousands written as thousands", roomLine({ bounces: 1200, complaints: null, atLevel: false }), "At this many emails, 1,200 more bounces would pause it.");
-  is("at the line with no pause set: the next of either kind pauses, as KB20's advice says", roomLine(roomBeforePause(h(1000, 30))), "Email to your list is at the level that pauses it, so the next bounce or spam report we hear about pauses it.");
+  is("at the line with no pause set: the next of either kind pauses, as KB20's advice says", roomLine(roomBeforePause(h(1000, 30))), "Email to your list is at the level that pauses it: the next bounce or spam report from a new address pauses it, unless more email goes out first.");
   is("nothing to say when nothing was sent", roomLine(roomBeforePause(h(0))), "");
 
   part("Terms");

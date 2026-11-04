@@ -340,14 +340,17 @@ export async function membershipsTool(store: Store, charge: Charge) {
 
 /**
  * The list and what each email sent to it did. Its broadcasts and sequences
- * are measured by their bytes, what they sold is looked up (kept or not, and
- * the PayPal sales it would read), and all that reading them costs is taken
- * in one go before anything is read (lib/api-read-rules.ts, emailsWork and,
- * when what they sold is not kept, mailRevenueColdWork). Only a copy that was
- * kept when measured and is gone a moment later takes its sales as a second
- * step (refused with its own words, nothing shown).
+ * are measured by their bytes, what they sold is looked up (kept or not, the
+ * bytes it is kept at, and the PayPal sales it would read), and all that
+ * reading them can cost is set aside in one go before anything is read
+ * (lib/api-read-rules.ts, emailsWork and, when what they sold is not kept,
+ * mailRevenueColdWork), then settled at what was read: the kept copy at the
+ * bytes it was read at, a copy made again at the bytes it was kept at
+ * (lib/api-guard.ts, holdMoreApi). Only a copy that was kept when measured
+ * and is gone a moment later takes its sales as a second step, before
+ * Stripe is asked (refused with its own words, nothing shown).
  */
-export async function emailsTool(store: Store, charge: Charge) {
+export async function emailsTool(store: Store, meter: { charge: Charge; hold: Hold }) {
   if (!store.listId) return { list: null, note: "This store keeps no list yet." };
   const [sizes, flowBytes, revenueBytes, paypal] = await Promise.all([
     broadcastSizes(store.listId, EMAILS_BROADCASTS),
@@ -358,23 +361,37 @@ export async function emailsTool(store: Store, charge: Charge) {
   if (!sizes || flowBytes === null || revenueBytes === null || !paypal) throw new Error("the emails could not be measured");
   // What they sold is read when there is an email or a sequence to credit, and from Stripe when it is not kept.
   const salesRead = Boolean(store.stripeAccountId && store.statsId) && revenueBytes === 0 && (sizes.count > 0 || flowBytes > 0);
-  const work = addWork(EMAILS_PROBE_WORK, emailsWork({ broadcasts: sizes.count, broadcastBytes: sizes.bytes, flowBytes }));
-  const units = apiReadUnits(salesRead ? addWork(work, mailRevenueColdWork(paypal.sales)) : work);
-  const first = await charge(units);
-  if (first) return first;
+  const emailsAt = (revenue: number) => addWork(EMAILS_PROBE_WORK, emailsWork({ broadcasts: sizes.count, broadcastBytes: sizes.bytes, flowBytes, revenueBytes: revenue }));
+  const held = apiReadUnits(salesRead ? addWork(emailsAt(0), mailRevenueColdWork(paypal.sales)) : emailsAt(revenueBytes));
+  const settle = await meter.hold(held);
+  if (settle instanceof Response) return settle;
   const [counts, broadcasts, flows] = await Promise.all([listCounts(store.listId), listBroadcasts(store.listId, EMAILS_BROADCASTS), readFlows(store.listId)]);
-  const said: { refused: Response | null } = { refused: null };
+  const said: { refused: Response | null; second: number; read: number; kept: number | null } = { refused: null, second: 0, read: 0, kept: null };
   const [revenueRead, flowCounts] = await Promise.all([
     broadcasts.length || flows.length
-      ? readMailRevenuePaid(store, async () => {
-          if (salesRead) return true;
-          said.refused = await charge(apiReadUnits(mailRevenueColdWork(paypal.sales)), units);
-          return said.refused === null;
-        }).catch(() => null)
+      ? readMailRevenuePaid(
+          store,
+          async () => {
+            if (salesRead) return true;
+            said.second = apiReadUnits(mailRevenueColdWork(paypal.sales));
+            said.refused = await meter.charge(said.second, held);
+            return said.refused === null;
+          },
+          (bytes) => {
+            if ("read" in bytes) said.read = bytes.read;
+            else said.kept = bytes.kept;
+          },
+        ).catch(() => null)
       : Promise.resolve(null),
     flowStats(flows).catch(() => new Map()),
   ]);
   if (said.refused) return said.refused;
+  // Settled at what was read: the copy at the bytes it was read at, or the sales and the copy made of them. What a
+  // second step already took is counted against it, so it is not taken twice.
+  const read = said.kept === null ? emailsAt(said.read) : addWork(emailsAt(0), mailRevenueColdWork(paypal.sales, said.kept));
+  const due = Math.max(0, settledUnits(read, held + said.second) - said.second);
+  const refused = await settle(due);
+  if (refused) return refused;
   const revenue = revenueRead === "refused" ? null : revenueRead;
   return {
     currency: store.currency,

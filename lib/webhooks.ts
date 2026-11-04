@@ -159,6 +159,26 @@ const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
 
 /**
+ * The most bytes one delivery is ever kept at (nl:hooks:d:<id>, a week): its
+ * message, escaped once more inside the record, and how it went. The store's
+ * data registry prices a delivery at this (tests/store-data-registry.ts) and
+ * the recent events read up to LOG_SIZE of them (lib/api-read-rules.ts,
+ * eventsWork). The largest message the code makes is a sale of a bundle of
+ * MAX_BUNDLE_ITEMS with three products ticked at checkout, each a bundle of
+ * as many, every title MAX_TITLE_LENGTH characters of a three-byte script:
+ * about 30 KB kept (tests/api-events-measured.test.ts).
+ */
+export const DELIVERY_MAX_BYTES = 48 * 1024;
+/**
+ * Room left under DELIVERY_MAX_BYTES when a delivery is first written, for
+ * what its tries write on it later: its state, its count of tries, the
+ * endpoint's answer in a sentence, the resend that names it.
+ */
+export const DELIVERY_UPDATE_ROOM_BYTES = 2 * 1024;
+/** What the studio's log says of a message larger than a delivery may be kept at: written down, not sent. */
+export const TOO_LARGE_WORDS = `Not sent: this message was larger than ${DELIVERY_MAX_BYTES / 1024} KB, the most a webhook message may be. Nothing was counted.`;
+
+/**
  * An endpoint. `previous` is the secret it had before the creator replaced
  * it (378 [TB4]), kept only until `previousUntil` (milliseconds): until then
  * every message carries a signature under each, so a receiver still holding
@@ -194,8 +214,10 @@ export type Delivery = {
   resentAs?: string;
   /**
    * Set on the line a Stripe event leaves in the log when it was passed over
-   * after waiting STRIPE_WAIT_RUNS visits on a lookup that kept failing: no
-   * message was made, so there is nothing to send again (its body is empty).
+   * after waiting STRIPE_WAIT_RUNS visits on a lookup that kept failing, and
+   * on the line of a message larger than a delivery may be kept at
+   * (DELIVERY_MAX_BYTES): no message is kept, so there is nothing to send
+   * again (its body is empty).
    */
   givenUp?: true;
 };
@@ -499,29 +521,36 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   // already sent is taken off it by runClaimed), and the log gets only what
   // it does not hold. Deleting the event's mark after a failure can then
   // never send it twice.
-  const ids: string[] = [];
-  const writes: (string | number)[][] = [];
-  for (const endpoint of listening) {
-    const id = `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`;
-    ids.push(id);
-    const delivery: Delivery = {
-      id,
-      statsId,
-      endpoint: endpoint.id,
-      eventId,
-      type,
-      body,
-      attempts: 0,
-      state: "queued",
-      // Due at once; if the try below never happens, the job finds it.
-      next: now,
-      lastStatus: 0,
-      lastError: "",
-      lastAt: 0,
-      createdAt: now,
-    };
-    writes.push(["SET", deliveryKey(id), JSON.stringify(delivery), "NX", "EX", DELIVERY_SECONDS]);
+  const deliveries: Delivery[] = listening.map((endpoint) => ({
+    id: `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`,
+    statsId,
+    endpoint: endpoint.id,
+    eventId,
+    type,
+    body,
+    attempts: 0,
+    state: "queued",
+    // Due at once; if the try below never happens, the job finds it.
+    next: now,
+    lastStatus: 0,
+    lastError: "",
+    lastAt: 0,
+    createdAt: now,
+  }));
+  const ids = deliveries.map((d) => d.id);
+  const kept = deliveries.map((d) => JSON.stringify(d));
+  // Bounded where it is made: a message that would be kept past DELIVERY_MAX_BYTES, with the room its tries write
+  // later, is never kept or sent. Each endpoint's line says so instead, with no message behind it; nothing is
+  // queued, so no delivery of the month is taken. Every endpoint is sent the same message, so one too large is
+  // too large for all.
+  if (kept.some((text) => Buffer.byteLength(text) > DELIVERY_MAX_BYTES - DELIVERY_UPDATE_ROOM_BYTES)) {
+    console.error("WEBHOOK MESSAGE TOO LARGE: its lines say so, nothing is sent", statsId, type, eventId, Buffer.byteLength(body));
+    const lines = deliveries.map((d) => JSON.stringify(noticeLine(d.id, statsId, d.endpoint, eventId, type, TOO_LARGE_WORDS, now)));
+    const written = await redisPipeline(ids.map((id, at) => ["SET", deliveryKey(id), lines[at], "NX", "EX", DELIVERY_SECONDS]));
+    await pushMissing(statsId, ids.filter((_, at) => written[at] !== "OK"), ids.filter((_, at) => written[at] === "OK"));
+    return 0;
   }
+  const writes = ids.map((id, at) => ["SET", deliveryKey(id), kept[at], "NX", "EX", DELIVERY_SECONDS]);
   try {
     const written = await redisPipeline(writes);
     await redisPipeline(ids.map((id) => ["ZADD", QUEUE_KEY, "NX", now, `${statsId}|${id}`]));
@@ -627,32 +656,65 @@ export async function webhooksView(store: Store): Promise<WebhooksView> {
 /** Most messages recentMessages gives back. */
 export const RECENT_MESSAGES_MAX = 10;
 
+/** How many messages a reading of the recent events gives back for the `limit` asked: one to RECENT_MESSAGES_MAX. */
+export function recentLimit(limit: number): number {
+  return Math.max(1, Math.min(RECENT_MESSAGES_MAX, Number.isFinite(limit) ? Math.floor(limit) : 3));
+}
+
+/**
+ * The store's last LOG_SIZE deliveries and how many bytes each is kept at
+ * (STRLEN), looked up before they are read by a reading that pays for what
+ * it reads (lib/api-read.ts, recentEvents); `logBytes` is what the log
+ * itself answered. Null when a size did not come back.
+ */
+export async function recentDeliverySizes(store: Store): Promise<{ ids: string[]; logBytes: number; sizes: number[] } | null> {
+  if (!store.statsId || !isRedisConfigured()) return { ids: [], logBytes: 0, sizes: [] };
+  const [rawLog] = await redisPipeline([["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1]]);
+  const all = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String) : [];
+  const logBytes = all.reduce((n, id) => n + Buffer.byteLength(id), 0);
+  const ids = all.filter((id) => DELIVERY_ID_PATTERN.test(id));
+  if (!ids.length) return { ids, logBytes, sizes: [] };
+  const sizes = (await redisPipeline(ids.map((id) => ["STRLEN", deliveryKey(id)]))).map(Number);
+  return sizes.every((n) => Number.isSafeInteger(n) && n >= 0) ? { ids, logBytes, sizes } : null;
+}
+
+/**
+ * The messages of one event among the deliveries `ids` (the store's log, as
+ * recentDeliverySizes read it), newest first, each once, at most `most`; and
+ * the bytes the deliveries were read at, which a reading that pays for them
+ * settles at.
+ */
+export async function recentMessagesOf(store: Store, type: WebhookEvent, ids: string[], most: number): Promise<{ messages: Record<string, unknown>[]; readBytes: number }> {
+  if (!store.statsId || !ids.length || !isRedisConfigured()) return { messages: [], readBytes: 0 };
+  const raws = await redisPipeline(ids.map((id) => ["GET", deliveryKey(id)]));
+  const readBytes = raws.reduce((n: number, raw) => n + (typeof raw === "string" ? Buffer.byteLength(raw) : 0), 0);
+  const seen = new Set<string>();
+  const messages: Record<string, unknown>[] = [];
+  for (const delivery of raws.map(parseDelivery)) {
+    if (messages.length >= most) break;
+    if (!delivery || delivery.type !== type || delivery.statsId !== store.statsId || seen.has(delivery.eventId)) continue;
+    seen.add(delivery.eventId);
+    try {
+      messages.push(JSON.parse(delivery.body) as Record<string, unknown>);
+    } catch {
+      continue;
+    }
+  }
+  return { messages, readBytes };
+}
+
 /**
  * The store's recent messages of one event, newest first, each once, as they
  * were sent: read from its last LOG_SIZE deliveries, each kept a week. What a
  * tool such as Zapier shows the creator as an example while they set a step
- * up, so it is only what already left the store; nothing new is read.
+ * up, so it is only what already left the store; nothing new is read. The
+ * API reads them paid for first (lib/api-read.ts, recentEvents).
  */
 export async function recentMessages(store: Store, type: WebhookEvent, limit = 3): Promise<Record<string, unknown>[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const most = Math.max(1, Math.min(RECENT_MESSAGES_MAX, Math.floor(limit)));
   const [rawLog] = await redisPipeline([["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1]]);
   const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
-  if (!ids.length) return [];
-  const deliveries = (await redisPipeline(ids.map((id) => ["GET", deliveryKey(id)]))).map(parseDelivery);
-  const seen = new Set<string>();
-  const out: Record<string, unknown>[] = [];
-  for (const delivery of deliveries) {
-    if (!delivery || delivery.type !== type || delivery.statsId !== store.statsId || seen.has(delivery.eventId)) continue;
-    seen.add(delivery.eventId);
-    try {
-      out.push(JSON.parse(delivery.body) as Record<string, unknown>);
-    } catch {
-      continue;
-    }
-    if (out.length >= most) break;
-  }
-  return out;
+  return (await recentMessagesOf(store, type, ids, recentLimit(limit))).messages;
 }
 
 /** Whether a word is one of the events an endpoint can hear. */
@@ -1063,9 +1125,11 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
   const previous = event.data?.previous_attributes ?? {};
   const handles = saleHandles(store);
   let meta = (object.metadata ?? {}) as Record<string, string>;
+  // The order's own title (meta.title) stands in only for its own product when its listing is gone, never for a
+  // product in a bundle or ticked at checkout, which it does not name.
   const product = async (id: string | undefined) => {
     const found = id ? await readListing(store, id) : null;
-    return { id: id ?? null, title: found?.title ?? meta.title ?? null };
+    return { id: id ?? null, title: found?.title ?? (id === meta.product ? meta.title : null) ?? null };
   };
   const created = typeof event.created === "number" ? event.created * 1000 : Date.now();
 

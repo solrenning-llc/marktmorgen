@@ -127,7 +127,7 @@ export async function POST(request: Request) {
       return refused ? refusedWith(refused) : result(id, answer);
     }
     if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));
-    if (params.name === "get_emails") return answer(await emailsTool(store, charge));
+    if (params.name === "get_emails") return answer(await emailsTool(store, { charge, hold }));
     if (params.name === "get_affiliates") return answer(await affiliatesTool(store, charge));
     if (params.name === "list_products") {
       const cursor = typeof params.arguments?.cursor === "string" ? params.arguments.cursor.slice(0, 200) : null;

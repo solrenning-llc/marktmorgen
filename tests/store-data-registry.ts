@@ -71,7 +71,7 @@ import { MAX_CHAT_KEPT, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { MAX_REPORT_QUEUE, MAX_SPACES, MAX_QUESTIONS, MAX_WELCOME } from "@/lib/community-text";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
 import { MAX_TEAM, LOG_LINES } from "@/lib/team";
-import { GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
+import { DELIVERY_MAX_BYTES, GIVEN_UP_LINES_PER_DAY, MAX_ENDPOINTS, LOG_SIZE as HOOK_LOG } from "@/lib/webhooks";
 import { LOG_SIZE as SYNC_LOG } from "@/lib/email-sync";
 import { MAX_DEVICES } from "@/lib/phone-alerts";
 import { MAX_FEEDS } from "@/lib/calendar-sync";
@@ -887,7 +887,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hooks:anchor:@lib/webhooks.ts": { what: "The last Stripe event read", parts: [capped(KEY, "One a store.")] },
   "nl:hooks:cfg:@lib/webhooks.ts": { what: "The store's endpoints", parts: [capped(MAX_ENDPOINTS * 2 * KB, "MAX_ENDPOINTS endpoints.", src("lib/webhooks.ts", "MAX_ENDPOINTS"))] },
   "nl:hooks:d:@lib/webhooks.ts": { what: "One delivery and how it went, a week", parts: [
-    per("webhook", 7, 4 * KB, "One delivery and how it went, a week"),
+    // Bounded where it is made (lib/webhooks.ts, emitEvent): a message past it is kept as a line that says so. The largest
+    // message the code makes, a sale of a full bundle with three full bundles ticked at checkout, is about 30 KB.
+    per("webhook", 7, DELIVERY_MAX_BYTES, "One delivery and how it went, a week, at the most a delivery is kept at (DELIVERY_MAX_BYTES)"),
     // A passed-over Stripe event leaves its line without taking a delivery: per endpoint, GIVEN_UP_LINES_PER_DAY events a day
     // (counted in code) get their own, every later one that day only rewrites the endpoint's summary line; at most MAX_ENDPOINTS
     // endpoints a store a day (counted in code, nl:hooks:wait:<id>:eps:<day>), each line kept a week.

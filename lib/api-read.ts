@@ -27,8 +27,10 @@ import { BOOK_STRIPE_PAGES, bookSizes, readBook } from "@/lib/affiliates";
 import { paidCalls } from "@/lib/calls";
 import { productLink } from "@/lib/checkout-recovery";
 import {
-  type ReadWork, API_PAGE_ROWS, addWork, apiReadUnits, bookWork, bookingsWork, listPageMost, numbersWork, productsPageWork, scannedPageWork, settledUnits, studentsPageWork,
+  type ReadWork, API_PAGE_ROWS, addWork, apiReadUnits, bookWork, bookingsWork, eventsSentMost, eventsWork, listPageMost, numbersWork, productsPageWork, scannedPageWork, settledUnits,
+  studentsPageWork,
 } from "@/lib/api-read-rules";
+import { type WebhookEvent, recentDeliverySizes, recentLimit, recentMessagesOf } from "@/lib/webhooks";
 import { readsSales } from "@/lib/stats";
 import { paypalCounts } from "@/lib/paypal-sales";
 
@@ -129,6 +131,27 @@ export async function chargedLeads(store: Store, cursor: string | null, onlyAgre
     const { page, readBytes } = await scanLeads(store, cursor, onlyAgreed);
     return { out: page, work: scannedPageWork(1, readBytes, sentBytes(page)) };
   });
+}
+
+/**
+ * The store's recent messages of one event (GET /api/v1/events), paid for by
+ * what they really are: the log and the size of each delivery in it looked
+ * up first (recentDeliverySizes), the deliveries' bytes and the most that
+ * can be sent of them set aside (eventsWork, eventsSentMost), then read and
+ * settled at the bytes read and sent, before they are sent. The refusal, as
+ * it is, when they are not left, with no delivery read.
+ */
+export async function recentEvents(store: Store, type: WebhookEvent, limit: number, hold: Hold): Promise<Record<string, unknown>[] | Response> {
+  const sized = await recentDeliverySizes(store);
+  if (!sized) throw new Error("the recent deliveries could not be measured");
+  const most = recentLimit(limit);
+  const kept = sized.sizes.reduce((n, size) => n + size, 0);
+  const held = apiReadUnits(eventsWork({ deliveries: sized.ids.length, bytes: sized.logBytes + kept, sent: eventsSentMost(sized.sizes, most) }));
+  const settle = await hold(held);
+  if (settle instanceof Response) return settle;
+  const { messages, readBytes } = await recentMessagesOf(store, type, sized.ids, most);
+  const refused = await settle(settledUnits(eventsWork({ deliveries: sized.ids.length, bytes: sized.logBytes + readBytes, sent: sentBytes(messages) }), held));
+  return refused ?? messages;
 }
 
 /** A page set aside at `most`, read, and settled at what it did before it is sent (lib/api-guard.ts, holdMoreApi). */

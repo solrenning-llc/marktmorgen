@@ -797,6 +797,9 @@ Médio, reproduzido: lib/store-assistant-rules.ts:247, GUARANTEE_NOUNS deixou de
 Leve: :257, REMISE_AS_DISCOUNT deixa passar "Profitez de la remise exclusive pour les abonnés." e "La remise réservée aux membres.". Decisão: inverta, pegue "remise" e libere só as locuções de entrega ("remise en main propre", "remise du", "date de remise"). Teste com as duas frases.
 Sem achado no claude3/api-events-measured (4020385d). Depois da correção, o Revisor 2 confere de novo antes do merge.
 
+### C3-108 — 04/11/2026 14h35 — Resposta do dono: e-mail agendado SEM filtro também é cancelado com aviso
+mail-ledger-counted (1b15a9ffa), C3-102 (2): decidido. Um e-mail agendado sem filtro (lista inteira) segue a mesma regra do filtrado: se o plano não estiver pago no mês do envio, é cancelado com aviso ao criador, e nada sai depois do fim do plano. O criador reagenda se o plano voltar. Não deixe em 'waiting' para sair sozinho quando o Pro voltar. Teste que falha antes: plano encerrado + agendado sem filtro -> cancelado, aviso enviado, zero envios; plano reativado não o ressuscita. Siga com a conferência curta do alto corrigido e abra o PR.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

@@ -109,7 +109,9 @@ const en = {
   alsoIn: (option: string) => `Also in ${option}`,
   openIt: "Open it",
   openTitle: (title: string) => `Open ${title}`,
+  /** Where a link too long to show as text is kept: its host alone (lib/buyer-orders-rules.ts, LINK_SHOWN). */
   keptOn: (host: string, link: string) => `Kept on ${host}: ${link}`,
+  keptAt: (host: string) => `Kept on ${host}`,
   downloadIt: "Download it",
   downloadTitle: (title: string) => `Download ${title}`,
   importedNote: (store: string) =>
@@ -374,6 +376,7 @@ const es: OrdersWords = {
   openIt: "Abrirlo",
   openTitle: (title) => `Abrir ${title}`,
   keptOn: (host, link) => `Alojado en ${host}: ${link}`,
+  keptAt: (host) => `Alojado en ${host}`,
   downloadIt: "Descargarlo",
   downloadTitle: (title) => `Descargar ${title}`,
   importedNote: (store) =>
@@ -615,6 +618,7 @@ const fr: OrdersWords = {
   openIt: "L'ouvrir",
   openTitle: (title) => `Ouvrir ${title}`,
   keptOn: (host, link) => `Hébergé sur ${host}${S}: ${link}`,
+  keptAt: (host) => `Hébergé sur ${host}`,
   downloadIt: "Le télécharger",
   downloadTitle: (title) => `Télécharger ${title}`,
   importedNote: (store) =>
@@ -854,6 +858,7 @@ const de: OrdersWords = {
   openIt: "Öffnen",
   openTitle: (title) => `${title} öffnen`,
   keptOn: (host, link) => `Gespeichert auf ${host}: ${link}`,
+  keptAt: (host) => `Gespeichert auf ${host}`,
   downloadIt: "Herunterladen",
   downloadTitle: (title) => `${title} herunterladen`,
   importedNote: (store) =>
@@ -1098,6 +1103,7 @@ const it: OrdersWords = {
   openIt: "Aprilo",
   openTitle: (title) => `Apri ${title}`,
   keptOn: (host, link) => `Ospitato su ${host}: ${link}`,
+  keptAt: (host) => `Ospitato su ${host}`,
   downloadIt: "Scaricalo",
   downloadTitle: (title) => `Scarica ${title}`,
   importedNote: (store) =>
@@ -1338,6 +1344,7 @@ const nl: OrdersWords = {
   openIt: "Openen",
   openTitle: (title) => `${title} openen`,
   keptOn: (host, link) => `Bewaard op ${host}: ${link}`,
+  keptAt: (host) => `Bewaard op ${host}`,
   downloadIt: "Downloaden",
   downloadTitle: (title) => `${title} downloaden`,
   importedNote: (store) =>
@@ -1577,6 +1584,7 @@ const pt: OrdersWords = {
   openIt: "Abrir",
   openTitle: (title) => `Abrir ${title}`,
   keptOn: (host, link) => `Alojado em ${host}: ${link}`,
+  keptAt: (host) => `Alojado em ${host}`,
   downloadIt: "Descarregar",
   downloadTitle: (title) => `Descarregar ${title}`,
   importedNote: (store) =>

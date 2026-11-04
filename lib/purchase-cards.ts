@@ -121,14 +121,13 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
 
   const delivery = (given: Delivery, item: "main" | BumpKey): CardDelivery => {
     if (given.link) {
-      const shown = given.link.length > LINK_SHOWN ? `${given.link.slice(0, LINK_SHOWN)}…` : given.link;
       const host = linkHost(given.link);
+      // The button says what it opens by name (WCAG 2.4.9); the address is the button's own, shown as text only when short.
       return {
         href: given.link,
         external: true,
-        label: item !== "main" ? words.openTitle(given.title) : words.openIt,
-        keptOn: words.keptOn(host, shown),
-        keptOnAll: shown === given.link ? null : words.keptOn(host, given.link),
+        label: words.openTitle(given.title),
+        keptOn: given.link.length > LINK_SHOWN ? words.keptAt(host) : words.keptOn(host, given.link),
       };
     }
     const query = new URLSearchParams({ handle, ref: purchase.reference, token });
@@ -242,7 +241,9 @@ export function ordersShared(store: Store, token: string): OrdersShared {
         openCourse: words.openCourse,
         startCourse: words.startCourse,
         openIt: words.openIt,
+        openTitle: words.openTitle("{title}"),
         keptOn: words.keptOn("{host}", "{link}"),
+        keptAt: words.keptAt("{host}"),
         downloadIt: words.downloadIt,
         nothingAttached: words.nothingAttached(store.name),
       },

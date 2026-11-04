@@ -22,8 +22,12 @@ export type BundleWords = {
   openCourse: string;
   startCourse: string;
   openIt: string;
+  /** "Open {title}": the link's button named by what it opens, where given (WCAG 2.4.9); "openIt" where not. */
+  openTitle?: string;
   /** "Kept on {host}: {link}". */
   keptOn: string;
+  /** "Kept on {host}", for an address longer than shownLink, where given. */
+  keptAt?: string;
   downloadIt: string;
   nothingAttached: string;
   /** Said when products are missing, already with how many; null when none are. */
@@ -67,9 +71,10 @@ export function BundleDelivery({
   /** False when the heading is already drawn above, as on the list of purchases (components/orders-bundle.tsx): it stays the list's name. */
   showHeading?: boolean;
   /**
-   * The most characters of a link's address said as text, as on the list of
-   * purchases (lib/buyer-orders-rules.ts, LINK_SHOWN): the whole address is the
-   * button's own, one click away. All of it when not given, as on the thanks page.
+   * The longest address said as text, as on the list of purchases
+   * (lib/buyer-orders-rules.ts, LINK_SHOWN): a longer one is named by its host
+   * alone (words.keptAt), its whole address the button's own, one click away.
+   * Every address said whole when not given, as on the thanks page.
    */
   shownLink?: number;
   /** Said in the store's language; English when not given. */
@@ -103,17 +108,13 @@ export function BundleDelivery({
               ) : product.link ? (
                 <>
                   <a href={product.link} rel="noopener noreferrer nofollow" target="_blank" className="btn st-btn mt-3">
-                    {words.openIt}
+                    {words.openTitle ? words.openTitle.replace("{title}", () => product.title) : words.openIt}
                   <NewTab /></a>
-                  {shownLink !== undefined && product.link.length > shownLink ? (
-                    /* Cut where it is shown; a screen reader reads the whole address instead (C3-90). */
-                    <p className="st-muted mt-2 break-all text-xs">
-                      <span aria-hidden="true">{words.keptOn.replace("{host}", linkHost(product.link)).replace("{link}", `${product.link.slice(0, shownLink)}…`)}</span>
-                      <span className="sr-only">{words.keptOn.replace("{host}", linkHost(product.link)).replace("{link}", product.link)}</span>
-                    </p>
-                  ) : (
-                    <p className="st-muted mt-2 break-all text-xs">{words.keptOn.replace("{host}", linkHost(product.link)).replace("{link}", product.link)}</p>
-                  )}
+                  <p className="st-muted mt-2 break-all text-xs">
+                    {shownLink !== undefined && product.link.length > shownLink && words.keptAt
+                      ? words.keptAt.replace("{host}", () => linkHost(product.link as string))
+                      : words.keptOn.replace("{host}", linkHost(product.link)).replace("{link}", product.link)}
+                  </p>
                 </>
               ) : line.download ? (
                 <a href={line.download} className="btn st-btn mt-3">

@@ -552,9 +552,12 @@ test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES", 
   const { html, size } = await openSize((await storeForEmail(OWNER))!);
   const words = ordersWords("en");
   const count = (text: string) => html.split(text).length - 1;
-  assert.equal(count('<span aria-hidden="true">Kept on example.test: '), MAX_LISTED * 4, "forty purchases, each with three checked at checkout");
-  // Each address shown cut is read whole by a screen reader (C3-90).
-  for (let i = 0; i < MAX_LISTED * 4; i++) assert.ok(html.includes(`<span class="sr-only">Kept on example.test: ${costlyLink(i).replaceAll("&", "&amp;")}</span>`), `link ${i}`);
+  assert.equal(count(">Kept on example.test</span>"), MAX_LISTED * 4, "forty purchases, each with three checked at checkout");
+  // An address too long to show is named by its host and sent once, in its button's address: never again as text, cut or
+  // whole, and the button says what it opens by name (WCAG 2.4.9; C3-90).
+  assert.equal(count("Kept on example.test: "), 0);
+  for (let i = 0; i < MAX_LISTED * 4; i++) assert.equal(count(`href="${costlyLink(i).replaceAll("&", "&amp;")}"`), 1, `link ${i}`);
+  assert.equal(count(`>${words.openTitle(`0`.padEnd(MAX_TITLE_LENGTH, "&")).replaceAll("&", "&amp;")}<`), 1, "the button named by the product it opens");
   assert.equal(count('<input type="hidden" name="bundle"'), MAX_LISTED * 4, "and a bundle under each");
   assert.equal(count(`>${words.addToCalendar}<`), MAX_LISTED, "forty calls");
   assert.ok(count("<code") >= MAX_LISTED * 4, "with their license keys");
@@ -772,7 +775,9 @@ test("without JavaScript, a bundle's button shows its products on the page itsel
   assert.ok(html.includes(`<h1 class="font-display`) && html.includes(words.insideTitle("0".padEnd(MAX_TITLE_LENGTH, "&")).replaceAll("&", "&amp;")));
   assert.equal((html.match(/<code/g) ?? []).length, MAX_BUNDLE_ITEMS, "each product with its key");
   assert.equal((html.match(/href="https:\/\/example\.test\/\?/g) ?? []).length, MAX_BUNDLE_ITEMS, "each product with its whole address");
-  assert.equal((html.match(/<span class="sr-only">Kept on example\.test: https:\/\/example\.test\/\?(&amp;){1900}/g) ?? []).length, MAX_BUNDLE_ITEMS, "read whole by a screen reader where it is shown cut (C3-90)");
+  assert.equal((html.match(/>Kept on example\.test<\/p>/g) ?? []).length, MAX_BUNDLE_ITEMS, "each long address named by its host alone (C3-90)");
+  assert.ok(!html.includes("Kept on example.test: "), "never as text");
+  assert.equal((html.match(/>Open 1&amp;/g) ?? []).length, 1, "each button named by the product it opens (WCAG 2.4.9)");
   assert.ok(html.includes(`href="/@bounds/orders?token=${token}"`) && html.includes(words.backToList), "and the way back to the list");
   const size = await responseSize(tree);
   const listKeys = MAX_BUNDLE_ITEMS * MAX_KEY_LENGTH * 12;

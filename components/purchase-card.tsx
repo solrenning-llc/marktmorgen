@@ -12,10 +12,8 @@ export type CardDelivery = {
   href: string;
   label: string;
   external: boolean;
-  /** Where a link is kept, its address cut to LINK_SHOWN characters. */
+  /** Where a link is kept: its address when it is at most LINK_SHOWN characters, else its host alone. */
   keptOn: string | null;
-  /** The same with the whole address, for a screen reader, when the shown one is cut (C3-90); null when it is not. */
-  keptOnAll?: string | null;
 };
 
 /** A license key on the card, already in the store's language. */
@@ -55,18 +53,8 @@ function Delivery({ delivery, language }: { delivery: CardDelivery; language: un
         <a href={delivery.href} rel="noopener noreferrer" target="_blank" className="btn st-btn btn-block">
           {delivery.label}
         <NewTab language={language} /></a>
-        {/* The address as text, cut to LINK_SHOWN characters: the whole of it is the button's, one click away (C3-80). A screen
-            reader reads the whole address instead of the cut one (C3-90). */}
-        {delivery.keptOn ? (
-          delivery.keptOnAll ? (
-            <span className="st-muted mt-2 block break-all text-xs">
-              <span aria-hidden="true">{delivery.keptOn}</span>
-              <span className="sr-only">{delivery.keptOnAll}</span>
-            </span>
-          ) : (
-            <span className="st-muted mt-2 block break-all text-xs">{delivery.keptOn}</span>
-          )
-        ) : null}
+        {/* Where it is kept: the address when short, else the host alone; the whole address is the button's (C3-80, C3-90). */}
+        {delivery.keptOn ? <span className="st-muted mt-2 block break-all text-xs">{delivery.keptOn}</span> : null}
       </span>
     );
   }

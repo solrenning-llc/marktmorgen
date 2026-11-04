@@ -18,14 +18,13 @@
  * above what they stand for, with a tenth to spare and no more.
  *
  * Measured on 4 November 2026 (C3-83, C3-90, C3-93): the page at every limit
- * as it is sent is 9,317,915 bytes (HTML 3,934,214, RSC payload 4,791,701,
+ * as it is sent is 5,722,881 bytes (HTML 2,318,806, RSC payload 2,812,075,
  * keys from a creator's list 192,000, and the shell measured on a local
  * production build, 398,764, taken as 400,000), held under ORDERS_PAGE_BYTES
- * (9,350,000). An opening then costs $0.001159 at most before its metered
- * reads; 21 units at $0.0000633 are $0.001329, 14.7% to spare (20 would be
- * 9.2%). 12 until the page was measured as it is sent: #2060 measured its
- * HTML alone, 2.5 MB, and so did not cover the payload, the shell or the
- * whole address a screen reader is given where the list shows it cut.
+ * (5,750,000). An opening then costs $0.000943 at most before its metered
+ * reads; 17 units at $0.0000633 are $0.001076, 14.1% to spare (16 would be
+ * 7.4%). 12 until the page was measured as it is sent: #2060 measured its
+ * HTML alone, 2.5 MB, and so did not cover the payload or the shell.
  *
  * Taken from the public requests, never from the buyers' actions figure
  * (takeAllowance(store, "buyer"), lib/buyer-actions.ts): that figure is the
@@ -33,7 +32,7 @@
  * would let one buyer reloading the page use it up and stop every other
  * buyer's actions at the store.
  */
-export const ORDERS_OPEN_UNITS = 21;
+export const ORDERS_OPEN_UNITS = 17;
 /** How long one opening may run at the most: the page's maxDuration (app/[handle]/orders/page.tsx). */
 export const ORDERS_OPEN_SECONDS = 30;
 /** Commands every opening may make besides its metered reads: the grant, what waits (four, and one for each of WAITING_SHOWN agreements, lib/buyer-waiting.ts), the Discord server and its roles (tests/orders-open.test.ts holds it). */
@@ -144,16 +143,24 @@ export const PLAN_REFUND_CALLS = 1 + 1 + 10 + 10;
  * what waits on the buyer. Counted as the App Router sends it
  * (tests/page-response.ts): the HTML, the RSC payload that carries the same
  * tree again (each address once more, & at six bytes there), and the
- * shell; every text of the character that costs the most in both, each address cut where it is shown also given whole to a screen
- * reader (C3-90), and the shell as measured on a local production build
+ * shell; every text of the character that costs the most in both, an address
+ * longer than LINK_SHOWN named by its host and sent once, in its button's own
+ * address (C3-90), and the shell as measured on a local production build
  * (tests/page-response.ts, SHELL_BYTES). Measured with the HTML alone it was
  * 2,650,000 until the review of 4 November 2026 found the payload missing. tests/orders-page-bounds.test.ts
  * holds a page drawn at those limits under it, and tests/plan-cost-registry.ts
  * prices it in ORDERS_OPEN_READ.
  */
-export const ORDERS_PAGE_BYTES = 9_350_000;
-/** The most characters of a delivery's address the list shows as text; the whole address is the button's own, one click away. */
-export const LINK_SHOWN = 60;
+export const ORDERS_PAGE_BYTES = 5_750_000;
+/**
+ * The longest address of a delivery the list of purchases shows as text. A
+ * longer one is named by its host alone ("Kept on example.com"): its whole
+ * address is only the button's own, one click away, and the button says what
+ * it opens by the product's name (WCAG 2.4.9), so the address is sent once in
+ * the HTML and once in the payload, never again as text (C3-90, 4 November
+ * 2026; before, cut to 60 characters and then given whole to screen readers).
+ */
+export const LINK_SHOWN = 80;
 
 /**
  * What showing a bundle's products takes (app/api/store/orders/bundle/route.ts;
@@ -166,7 +173,7 @@ export const LINK_SHOWN = 60;
  * read. tests/plan-cost-registry.ts prices it (ORDERS_BUNDLE_READ) and
  * tests/plan-cost-registry.test.ts holds the units above it, with a tenth to
  * spare (2 until C3-83, when the page without JavaScript had to fit too):
- * $0.000161 at most, 3 units $0.000190, 17.9% to spare (measured 4 November 2026).
+ * $0.000134 at most, 3 units $0.000190, 41.6% to spare (measured 4 November 2026).
  */
 export const ORDERS_BUNDLE_UNITS = 3;
 /**
@@ -177,7 +184,7 @@ export const ORDERS_BUNDLE_UNITS = 3;
  * the larger, measured as it is sent (tests/page-response.ts), and is what
  * this holds (tests/orders-page-bounds.test.ts holds both under it).
  */
-export const ORDERS_BUNDLE_BYTES = 1_450_000;
+export const ORDERS_BUNDLE_BYTES = 1_000_000;
 /** How often one link may show a bundle's products in an hour, as a download's link is limited. */
 export const ORDERS_BUNDLE_PER_HOUR = 240;
 
@@ -193,8 +200,8 @@ export const ORDERS_BUNDLE_PER_HOUR = 240;
  * reads past them goes through its meter. tests/plan-cost-registry.ts prices
  * it (ORDERS_OLDER_READ) and tests/plan-cost-registry.test.ts holds the units
  * above it, with a tenth to spare (8 until C3-83, when the page without
- * JavaScript had to fit too): $0.000574 at most, 10 units $0.000633, 10.2% to
- * spare (measured 4 November 2026).
+ * JavaScript had to fit too): $0.000529 at most, 10 units $0.000633, 19.6% to
+ * spare, 9 only 7.6% (measured 4 November 2026).
  */
 export const ORDERS_OLDER_UNITS = 10;
 /** Commands a batch makes besides its metered reads: the link's grant. */
@@ -207,7 +214,7 @@ export const ORDERS_OLDER_COMMANDS = 1;
  * as it is sent (tests/page-response.ts), is the larger and is what this
  * holds (tests/orders-page-bounds.test.ts holds both under it).
  */
-export const ORDERS_OLDER_BYTES = 2_150_000;
+export const ORDERS_OLDER_BYTES = 1_400_000;
 /** How often one link may check a batch of older purchases in an hour. */
 export const ORDERS_OLDER_PER_HOUR = 60;
 /**

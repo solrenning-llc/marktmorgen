@@ -38,3 +38,31 @@ test("large products use exact arithmetic and refuse an unrepresentable reservat
  assert.ok(protocolInfrastructureMicroUsd({...bound,redisCommands:1_000_001})!.totalMicroUsd>first.totalMicroUsd);
  assert.equal(Object.keys(bound).length,8);
 });
+
+
+test("extra unpriced protocol categories are unknown, never a known zero", () => {
+ for (const extra of [null, undefined, 0, 100_000]) {
+  assert.equal(protocolInfrastructureMicroUsd({...zero, unreviewedSupplier: extra} as ProtocolInfrastructureBounds), null);
+ }
+ const symbol = {...zero, [Symbol("unreviewed supplier")]: null};
+ const hidden = Object.defineProperty({...zero}, "unreviewedSupplier", {value: null});
+ let getters = 0;
+ const computed = Object.defineProperty({...zero}, "unreviewedSupplier", {get(){getters++;return 100_000;}});
+ for (const input of [symbol, hidden, computed]) assert.equal(protocolInfrastructureMicroUsd(input), null);
+ assert.equal(getters, 0);
+});
+
+test("protocol evidence is plain own enumerable data while frozen and null-prototype data stay exact", () => {
+ for (const key of Object.keys(zero)) {
+  const hidden = Object.defineProperty({...zero}, key, {enumerable: false});
+  assert.equal(protocolInfrastructureMicroUsd(hidden), null, key);
+ }
+ const derived = Object.assign(Object.create({unreviewedSupplier: null}), zero);
+ const unreadable = new Proxy({...zero}, {getPrototypeOf(){throw Error("unreadable profile");}});
+ for (const input of [derived, unreadable]) assert.equal(protocolInfrastructureMicroUsd(input), null);
+ const bound = {...zero, redisCommands: 1_000_000, retainedBytes: 1_000_000, retentionMonths: 12};
+ const expected = protocolInfrastructureMicroUsd(bound);
+ assert.ok(expected && expected.totalMicroUsd > 0);
+ assert.deepEqual(protocolInfrastructureMicroUsd(Object.freeze({...bound})), expected);
+ assert.deepEqual(protocolInfrastructureMicroUsd(Object.assign(Object.create(null), bound)), expected);
+});

@@ -191,9 +191,13 @@ export function protocolInfrastructureMicroUsd(
     'redisCommands', 'transferBytes', 'retainedBytes', 'retentionMonths', 'storageCopies'] as const;
   const values: bigint[] = [];
   try {
+    // Reject unpriced categories before projecting the known components. A
+    // complete profile must survive a plain-data snapshot without omissions.
+    if (![Object.prototype, null].includes(Object.getPrototypeOf(input)) ||
+        Reflect.ownKeys(input).length !== keys.length) return null;
     for (const key of keys) {
       const field = Object.getOwnPropertyDescriptor(input, key);
-      if (!field || !Object.hasOwn(field, 'value') ||
+      if (!field || !field.enumerable || !Object.hasOwn(field, 'value') ||
           !Number.isSafeInteger(field.value) || field.value < 0) return null;
       values.push(BigInt(field.value));
     }

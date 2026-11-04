@@ -49,3 +49,15 @@ test("an unknown bound or overflowing annual retention cannot become a partial m
  assert.equal(contractProtocolInfrastructureCosts({...input,scale_year:{...input.scale_year,retainedBytes:Number.MAX_SAFE_INTEGER,retentionMonths:Number.MAX_SAFE_INTEGER,storageCopies:Number.MAX_SAFE_INTEGER}}),null);
  assert.ok(contractProtocolInfrastructureCosts(input));
 });
+
+
+test("an unpriced category in any monthly or annual profile refuses the whole contract comparison", () => {
+ for (const key of CONTRACT_KEYS) {
+  for (const unreviewedSupplier of [null, 0, 100_000]) {
+   const input = profiles();
+   const value = {...input, [key]: {...input[key], unreviewedSupplier}};
+   assert.equal(contractProtocolInfrastructureCosts(value), null, `${key}: ${unreviewedSupplier}`);
+  }
+ }
+ assert.ok(contractProtocolInfrastructureCosts(profiles()));
+});

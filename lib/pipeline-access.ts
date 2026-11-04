@@ -86,21 +86,31 @@ export async function writePipelineAccess(statsId: string, email: string, map: A
  * without its restrictions. The old field is deleted only once the team
  * record has moved (forgetPipelineAccess).
  */
-export async function copyPipelineAccess(statsId: string | null, from: string, to: string): Promise<void> {
+export async function copyPipelineAccess(store: DataStore, from: string, to: string): Promise<void> {
+  const statsId = store.statsId;
   if (!statsId || !isRedisConfigured()) return;
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
   if (before === after) return;
   const [raw] = await redisPipeline([["HGET", accessKey(statsId), before]]);
   if (raw === null || raw === undefined || raw === "") return;
-  const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]);
-  if (written !== 0 && written !== 1) throw new Error("copying a teammate's pipeline access could not be confirmed");
+  // The new address's field takes its own room first; the old one gives its room back when it is forgotten.
+  const bytes = dataBytes([after, String(raw)], 1);
+  await needData(store, [{ slot: ACCESS_SLOT, bytes }]);
+  const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]).catch(() => [null]);
+  if (written !== 0 && written !== 1) {
+    await giveData(store, [{ slot: ACCESS_SLOT, bytes }]).catch(() => {});
+    throw new Error("copying a teammate's pipeline access could not be confirmed");
+  }
 }
 
-/** A teammate who left: their restrictions go with them. */
-export async function forgetPipelineAccess(statsId: string | null, email: string): Promise<void> {
+/** A teammate who left: their restrictions go with them, and the room they took is given back. */
+export async function forgetPipelineAccess(store: DataStore, email: string): Promise<void> {
+  const statsId = store.statsId;
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["HDEL", accessKey(statsId), normaliseEmail(email)]]);
+  const who = normaliseEmail(email);
+  const [raw, deleted] = await redisPipeline([["HGET", accessKey(statsId), who], ["HDEL", accessKey(statsId), who]]);
+  if (deleted === 1 && typeof raw === "string" && raw) await giveData(store, [{ slot: ACCESS_SLOT, bytes: dataBytes([who, raw], 1) }]);
 }
 
 /**

@@ -13,6 +13,7 @@ import {
 } from "@/lib/mail-health";
 
 import type { SesEvent } from "@/lib/sns";
+import { SCALE_MONTHLY_EMAILS, TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 
 export { MAIL_REPORT_TAG };
 
@@ -34,6 +35,28 @@ const prefixes = (campaign: string) => Object.fromEntries(
   Object.entries(CODE).map(([event, code]) => [event, `r:${campaign}:${code}:`]),
 ) as Record<MailReportEvent, string>;
 
+/** Two billing windows can overlap the retained ten UTC days. Each sent
+ * message leaves at most four receipts and four campaign counter fields.
+ * This is an internal storage bound derived from existing send allowances. */
+export const MAIL_REPORT_MAX_FIELDS = 3 + 2 * Math.max(SCALE_MONTHLY_EMAILS, TRIAL_MONTHLY_EMAILS) * 8;
+export const RECORD_MAIL_REPORT = `-- marktmorgen:mail-report:v1
+local t=redis.call('TYPE',KEYS[1]).ok
+if t~='none' and t~='hash' then return -1 end
+local old=redis.call('HGET',KEYS[1],ARGV[1])
+if old then
+  if old==ARGV[3] then return 2 end
+  return -1
+end
+local total=redis.call('HGET',KEYS[1],ARGV[2])
+if total and (not string.match(total,'^%d+$') or tonumber(total)>1000000000) then return -1 end
+local size=redis.call('HLEN',KEYS[1])
+local need=total and 1 or 2
+if size+need>tonumber(ARGV[5]) then return -1 end
+redis.call('HSET',KEYS[1],ARGV[1],ARGV[3])
+redis.call('HINCRBY',KEYS[1],ARGV[2],ARGV[3])
+redis.call('EXPIREAT',KEYS[1],ARGV[4])
+return 1`;
+
 /** Count one signed provider event. No recipient identifier is accepted or kept. */
 export async function noteMailReportEvent(
   store: string,
@@ -53,12 +76,9 @@ export async function noteMailReportEvent(
   const expiresAt = Math.floor(occurredAt / 86_400_000) * 86_400 + MAIL_HEALTH_DAY_SECONDS;
   if (expiresAt * 1000 <= now) return false;
   const identity = createHash("sha256").update(providerIdentity).digest("hex").slice(0, 32);
-  await redisPipeline([
-    // One field per provider email/outcome: a replay overwrites the same
-    // value, even when its webhook delivery carries a new id.
-    ["HSET", key, `${prefixes(report)[event]}${identity}`, count],
-    ["EXPIREAT", key, expiresAt],
-  ]);
+  const prefix = prefixes(report)[event];
+  const reply = await redisPipeline([["EVAL", RECORD_MAIL_REPORT, 1, key, `${prefix}${identity}`, prefix, count, expiresAt, MAIL_REPORT_MAX_FIELDS]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== 1 && reply[0] !== 2)) throw new Error("The delivery report write is unconfirmed");
   return true;
 }
 
@@ -72,24 +92,12 @@ const readCount = (value: unknown): number | null => {
 export async function mailReportDay(store: string, campaign: string, now = Date.now()): Promise<MailReportCounts | null> {
   const report = mailReportCampaign(campaign);
   if (!HEALTH_ID.test(store) || !report || !isRedisConfigured()) return null;
-  const reply = await redisPipeline([["HGETALL", mailHealthDayKey(store, now)]]);
-  if (!Array.isArray(reply) || !Array.isArray(reply[0]) || reply[0].length % 2 !== 0) return null;
   const wanted = prefixes(report);
-  const total: Record<MailReportEvent, number> = { delivered: 0, "permanent-bounce": 0, "temporary-bounce": 0, complained: 0 };
-  let observed = false;
-  for (let i = 0; i < reply[0].length; i += 2) {
-    const field: unknown = reply[0][i];
-    if (typeof field !== "string") return null;
-    const event = (Object.keys(wanted) as MailReportEvent[]).find((kind) => field.startsWith(wanted[kind]));
-    if (!event) continue;
-    observed = true;
-    if (!/^[0-9a-f]{32}$/.test(field.slice(wanted[event].length))) return null;
-    const count = readCount(reply[0][i + 1]);
-    if (count === null || !Number.isSafeInteger(total[event] + count)) return null;
-    total[event] += count;
-  }
-  if (!observed) return null;
-  return { delivered: total.delivered, permanentBounces: total["permanent-bounce"], temporaryBounces: total["temporary-bounce"], complained: total.complained };
+  const reply = await redisPipeline([["HMGET", mailHealthDayKey(store, now), wanted.delivered, wanted["permanent-bounce"], wanted["temporary-bounce"], wanted.complained]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0]) || reply[0].length !== 4 || reply[0].every(value => value === null)) return null;
+  const counts = reply[0].map(value => value === null ? 0 : readCount(value));
+  if (counts.some(value => value === null)) return null;
+  return { delivered: counts[0]!, permanentBounces: counts[1]!, temporaryBounces: counts[2]!, complained: counts[3]! };
 }
 
 /** Apply one already-authenticated SES outcome. Kept separate so its aggregate behavior is tested without bypassing POST authentication. */

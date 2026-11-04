@@ -8,7 +8,7 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/mail/inbound/route";
 import { recordSesEvent } from "@/lib/mail-report";
 import { healthTags } from "@/lib/mail-health";
-import { MAIL_REPORT_TAG, mailReportDay, noteMailReportEvent } from "@/lib/mail-report";
+import { MAIL_REPORT_TAG, RECORD_MAIL_REPORT, mailReportDay, noteMailReportEvent } from "@/lib/mail-report";
 import { readSesEvent } from "@/lib/sns";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -132,6 +132,19 @@ async function main() {
   } finally {
     redis.pipeline = pipeline;
   }
+
+  part("A receipt and its aggregate change together");
+  const at = Date.now();
+  const concurrentCampaign = "b-concurrent-test";
+  const repeats = await Promise.all(Array.from({ length: 64 }, () => noteMailReportEvent(STORE, concurrentCampaign, "delivered", 1, "ses:one-concurrent-email", at)));
+  is("identical concurrent outcomes are all acknowledged", repeats.every(Boolean), true);
+  is("but counted once", (await mailReportDay(STORE, concurrentCampaign))?.delivered, 1);
+  const boundedKey = `nl:mail:health:${STORE}:bounded-fixture`;
+  const first = ["EVAL", RECORD_MAIL_REPORT, 1, boundedKey, "receipt", "aggregate", 1, Math.floor(at / 1000) + 3600, 2];
+  is("the exact field ceiling admits the receipt and aggregate", redis.run(first), 1);
+  is("a second receipt is refused before another field is written", redis.run(["EVAL", RECORD_MAIL_REPORT, 1, boundedKey, "receipt2", "aggregate", 1, Math.floor(at / 1000) + 3600, 2]), -1);
+  is("refusal preserves both original fields", redis.run(["HGETALL", boundedKey]), ["receipt", "1", "aggregate", "1"]);
+  is("a contradictory replay cannot change the count", redis.run(["EVAL", RECORD_MAIL_REPORT, 1, boundedKey, "receipt", "aggregate", 2, Math.floor(at / 1000) + 3600, 2]), -1);
 
   done();
 }

@@ -122,6 +122,24 @@ export const STREAM_STORAGE_PER_GB = 0.02;
 export const STREAM_DELIVERY_PER_GB = 0.005;
 export const FETCHED_AHEAD = 1.25;
 export const PER_EMAIL = 0.0009;
+/** DR1 unit 1 observed components, deliberately NOT an authorization or a
+ * complete cost line. The draft's new writes must not be merged until the
+ * callback attempts, SNS/hosting tariff and admission envelope are closed.
+ * Lua includes EVAL and every internal command; storage is separately in
+ * the mail-health family of store-data-registry, without free-tier credit. */
+export const MAIL_REPORT_COST_COMPONENTS = {
+  firstOutcomeCommands: 8,
+  duplicateOutcomeCommands: 3,
+  reportReadCommands: 1,
+  reportReadFields: 4,
+  outcomeKindsPerSentEmail: 4,
+  bytesPerSentEmail: 2048,
+  retentionDays: 10,
+  callbackAttemptsPerEmailCeiling: null,
+  snsAndHostingMonthlyUsd: null,
+  completeMonthlyUsd: null,
+  reviewedAdmission: null,
+} as const;
 /** An order's pages and jobs, set well over a visit's whole page (tests/traffic-cost.ts). */
 export const ORDER_COMPUTE = 0.0003;
 /**

@@ -29,3 +29,15 @@ Official references, read 4 November 2026:
 - [Setting up Amazon SES event publishing](https://docs.aws.amazon.com/ses/latest/dg/monitor-sending-activity-using-notifications-event-publishing.html)
 - [Creating an event destination](https://docs.aws.amazon.com/ses/latest/dg/event-publishing-add-event-destination.html)
 - [Amazon SES event contents](https://docs.aws.amazon.com/ses/latest/dg/event-publishing-retrieving-sns-contents.html)
+
+## Implementation checkpoint: bounded Redis components
+
+The event writer uses one atomic Lua operation. A first outcome costs eight Redis commands including `EVAL`; an identical replay costs three inside that operation. A day read uses one `HMGET` for four counters. The receipt stores only a hash of the provider's message identity, but that hash is still a pseudonym and needs the stated retention/privacy treatment. It is not proof of anonymous data.
+
+The daily hash has an internal field ceiling derived from the largest existing list-email allowance, two billing windows and eight fields per sent email, plus its three health counters. The script checks capacity before adding a receipt/counter. Hashes expire at the original provider day's deadline; a replay neither moves the outcome into another day nor renews its expiry. The current checkpoint retains ten days. The separate 30-day unit has not shipped.
+
+Disposable local Redis 7.4.12 executed the exact static `RECORD_MAIL_REPORT` script: 64 concurrent identical receipts left one count, conflicting receipts and capacity overflow were refused before writes, duplicate expiry stayed fixed, and a corrupt counter was refused. `INFO commandstats` measured eight commands for a first outcome. `MEMORY USAGE` for 1,002 worst-length fields was 154,251 bytes, below the modeled 256 bytes per field plus 1,024 bytes per hash. This one allocator/version observation is a component check, not a supplier invoice or complete hosting approval.
+
+`MAIL_REPORT_COST_COMPONENTS` in the shared cost registry records the known commands and the 2,048-byte storage allowance per sent email (eight fields). The storage family prices those bytes for ten days without free-tier credit. Callback attempts, SNS/hosting and the complete monthly cost remain explicitly `null`; no existing commercial review is expanded by these observations. In particular, a finite number of distinct outcomes does not bound all delivery attempts or rejected requests. The draft must remain unmerged until those new operational costs have a reviewed ceiling before spending.
+
+For account evidence, the owner should record the existing SNS subscription's effective HTTP/S delivery policy and whether any dead-letter redrive/manual replay is configured. No account values were read or changed by this patch. [SNS HTTP/S retry policy constraints](https://docs.aws.amazon.com/sns/latest/dg/sns-message-delivery-retries.html), read November 4, 2026, allow custom HTTP/S retries; the live policy must not be inferred from an example or default. The current request's 30-second maximum is a timeout bound, not a reviewed monthly callback budget.

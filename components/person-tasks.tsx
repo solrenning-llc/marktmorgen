@@ -132,6 +132,40 @@ export function undoWords(task: PersonTask, unassigned: boolean, doneAgain: bool
   return doneAgain ? `${back} Marked done again.` : `${back} It is open: mark it done if it still is.`;
 }
 
+/** What putting a removed task back needs from the screen: its request, the last refusal's code, and its two ways of saying. */
+export type PutBackSay = {
+  send: (body: Record<string, unknown>, done: string | null, quietOn?: string) => Promise<PersonTask[] | null>;
+  lastRefusal: () => string;
+  toast: (words: string) => void;
+  refuse: (words: string) => void;
+};
+
+/**
+ * A removed task put back with its words, date and teammate, done again if
+ * it was, all of it said once (round 2, A-L). With nobody named when that
+ * teammate may no longer be responsible; and when the server refuses the
+ * teammate (they left after the page was drawn), put back once more with
+ * nobody, the first refusal neither said nor read again (round 3, M3; round
+ * 4, M2). When done again does not save, it is said to be open (round 3, L5).
+ */
+export async function putBack(task: PersonTask, assignees: readonly string[], before: readonly PersonTask[], say: PutBackSay): Promise<{ back: boolean; added: PersonTask | null }> {
+  let { body, unassigned } = undoBody(task, assignees);
+  const words = () => (task.done ? null : undoWords(task, unassigned, null));
+  let back = await say.send(body, words(), body.assignee ? "assignee" : "");
+  if (!back && say.lastRefusal() === "assignee" && body.assignee) {
+    unassigned = true;
+    body = { ...body, assignee: "" };
+    back = await say.send(body, words());
+  }
+  if (!back) return { back: false, added: null };
+  const added = addedTask(before, back, { text: String(body.text), due: String(body.due), assignee: String(body.assignee) });
+  if (task.done) {
+    if (!added) say.toast(undoWords(task, unassigned, false));
+    else if (!(await say.send({ action: "done", id: added.id, done: true }, undoWords(task, unassigned, true)))) say.refuse(undoWords(task, unassigned, "failed"));
+  }
+  return { back: true, added };
+}
+
 /**
  * Refusals that mean this screen is out of date (another tab or teammate
  * removed the task, or filled the person's list, or the teammate chosen left
@@ -226,8 +260,10 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
   }
 
   /** `form` when the change is the add form's own, so a refusal is told beside the field at fault. */
-  async function send(body: Record<string, unknown>, done: string | null, form = false): Promise<PersonTask[] | null> {
+  async function send(body: Record<string, unknown>, done: string | null, form = false, quietOn = ""): Promise<PersonTask[] | null> {
     if (working.current) return null;
+    // The last refusal is this request's own, never one left from an earlier request (round 4, M2).
+    lastRefusal.current = "";
     working.current = true;
     setBusy(true);
     clearError();
@@ -245,6 +281,8 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
         return answer.tasks;
       }
       lastRefusal.current = answer.error ?? "";
+      // A refusal the caller answers itself (an undo tried again with nobody responsible) is neither said nor read again.
+      if (quietOn && answer.error === quietOn) return null;
       const said = answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need first." : "That did not save. Try again in a moment.");
       // Changed elsewhere since this page was drawn: what is kept now is shown, and the refusal says why.
       refuse(staleRefusal(answer.error) && (await reread()) ? `${said} The list now shows the tasks as they are.` : said, form ? (FIELD_OF[answer.error ?? ""] ?? null) : null);
@@ -272,25 +310,15 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
    */
   async function undoRemove(task: PersonTask) {
     if (busy || full) return;
-    let { body, unassigned } = undoBody(task, assignees);
-    const before = tasks;
-    // Said once, when all of it is done (round 2, A-L): never a message for the add and another for done again.
-    let back = await send(body, task.done ? null : undoWords(task, unassigned, null));
-    // The teammate left after this page was drawn (round 3, M3): put back once more with nobody responsible, and said so.
-    if (!back && lastRefusal.current === "assignee" && body.assignee) {
-      unassigned = true;
-      body = { ...body, assignee: "" };
-      back = await send(body, task.done ? null : undoWords(task, unassigned, null));
-    }
-    if (!back) return;
+    const done = await putBack(task, assignees, tasks, {
+      send: (body, words, quietOn) => send(body, words, false, quietOn),
+      lastRefusal: () => lastRefusal.current,
+      toast,
+      refuse: (words) => refuse(words, null),
+    });
+    if (!done.back) return;
     setRemoved(null);
-    const added = addedTask(before, back, { text: String(body.text), due: String(body.due), assignee: String(body.assignee) });
-    if (task.done) {
-      if (!added) toast(undoWords(task, unassigned, false));
-      // Put back, but done again did not save (round 3, L5): it is said to be open.
-      else if (!(await send({ action: "done", id: added.id, done: true }, undoWords(task, unassigned, true)))) refuse(undoWords(task, unassigned, "failed"), null);
-    }
-    focusAfterDrawing(added ? { to: "task", id: added.id } : { to: "count" });
+    focusAfterDrawing(done.added ? { to: "task", id: done.added.id } : { to: "count" });
   }
 
   async function add(event: React.FormEvent) {
@@ -361,22 +389,23 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
           })}
         </ul>
       ) : null}
-      <div role="status" className="mt-3">
+      {/* Only words in the status region, so a screen reader says them; the Undo button stays outside it (round 4, L4). */}
+      <div className="mt-3">
+        <p role="status" className="text-sm text-ink [overflow-wrap:anywhere]">
+          {removed ? `Removed: ${removed.text}` : ""}
+        </p>
         {removed ? (
           <>
-            <p className="flex flex-wrap items-center gap-3 text-sm text-ink">
-              <span className="[overflow-wrap:anywhere]">{`Removed: ${removed.text}`}</span>
-              <button
-                ref={undoButton}
-                type="button"
-                className="btn btn-secondary btn-sm"
-                aria-disabled={busy || full || undefined}
-                aria-describedby={full ? "task-undo-full" : undefined}
-                onClick={() => void undoRemove(removed)}
-              >
-                Undo
-              </button>
-            </p>
+            <button
+              ref={undoButton}
+              type="button"
+              className="btn btn-secondary btn-sm mt-2"
+              aria-disabled={busy || full || undefined}
+              aria-describedby={full ? "task-undo-full" : undefined}
+              onClick={() => void undoRemove(removed)}
+            >
+              Undo
+            </button>
             {full ? (
               <p id="task-undo-full" className="mt-1 text-sm text-ink">{`It cannot be put back now: this person has ${MAX_PERSON_TASKS} tasks, the most one person can have. Remove a done one first.`}</p>
             ) : null}

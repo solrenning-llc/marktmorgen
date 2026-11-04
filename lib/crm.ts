@@ -387,9 +387,16 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
   } catch { return unavailable; }
 }
 
-/** Capacity and save share one Redis operation, including alongside form conversions. */
-export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v1
-if redis.call("HEXISTS", KEYS[1], ARGV[1]) == 0 and redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
+/**
+ * Capacity and save share one Redis operation, including alongside form
+ * conversions. An edit (ARGV[4] "edit") writes only a deal that is still
+ * there: one deleted since it was read (by its person's deletion, or by
+ * someone else) answers 2 and is never written back.
+ */
+export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v2
+local there = redis.call("HEXISTS", KEYS[1], ARGV[1])
+if there == 0 and ARGV[4] == "edit" then return 2 end
+if there == 0 and redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
 return 1`;
 
@@ -400,9 +407,13 @@ export const dealBytes = (deal: Deal) => dataBytes([deal.id, JSON.stringify(deal
 /**
  * Saves a deal. False when the store already has as many as it may and this
  * one is new. Its room in the store's data room is taken first: DataRoomError
- * when it does not fit, and nothing is written.
+ * when it does not fit, and nothing is written. With `edit`, the deal is
+ * written only if it is still there: "gone" when it was deleted since it was
+ * read, with its room given back, so a deleted person's deal never comes back.
  */
-export async function writeDeal(statsId: string, deal: Deal, room: DataStore): Promise<boolean> {
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore): Promise<boolean>;
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit: "edit"): Promise<boolean | "gone">;
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit?: "edit"): Promise<boolean | "gone"> {
   let preflight: unknown;
   try {
     preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)]]);
@@ -411,11 +422,11 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore): P
   if (preflight[0] === 0 && preflight[1] >= MAX_DEALS) return false;
   await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
   try {
-    const saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, JSON.stringify(deal), MAX_DEALS]]);
-    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1)) throw new CrmDealWriteUnconfirmed();
-    // Full after all: a new deal's room goes back.
-    if (saved[0] === 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: 0, set: true }]);
-    return saved[0] === 1;
+    const saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, JSON.stringify(deal), MAX_DEALS, edit ?? ""]]);
+    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1 && !(edit && saved[0] === 2))) throw new CrmDealWriteUnconfirmed();
+    // Full after all, or deleted since it was read: the deal's room goes back.
+    if (saved[0] !== 1) await giveData(room, [{ slot: dealSlot(deal.id), bytes: 0, set: true }]);
+    return saved[0] === 2 ? "gone" : saved[0] === 1;
   } catch { throw new CrmDealWriteUnconfirmed(); }
 }
 
@@ -492,11 +503,17 @@ export async function forgetCrm(statsId: string | null): Promise<void> {
   await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]]));
 }
 
+/** One person's value of a field deleted, answered with what it was (null when there was none). */
+const TAKE_CRM_VALUE = `-- marktmorgen:crm-value-take:v1
+local value = redis.call("HGET", KEYS[1], ARGV[1])
+if value then redis.call("HDEL", KEYS[1], ARGV[1]) end
+return value`;
+
 /**
  * Deletes one person from the store's fields, deals and tasks
  * (lib/person-erasure.ts): every value kept under their key, every deal with
- * them, by the address a deal names, and the team's tasks about them, whose
- * room goes back to `room` when it is given. Answers how many records went.
+ * them, by the address a deal names, and the team's tasks about them; the
+ * room all of these took goes back to `room` when it is given. Answers how many records went.
  */
 export async function forgetCrmPerson(statsId: string | null, person: string, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
@@ -510,10 +527,30 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     const deal = json(value) as { email?: unknown } | null;
     return typeof deal?.email === "string" && deal.email.trim().toLowerCase() === address;
   }).map(([id]) => id);
-  const commands: (string | number)[][] = fields.map((f) => ["HDEL", valuesKey(statsId, f.id), person]);
-  if (theirs.length) commands.push(["HDEL", dealsKey(statsId), ...theirs]);
+  // Each value taken out in one script that answers what it deleted, each deal
+  // deleted on its own: what goes back to the store's data room is exactly
+  // what was removed, even with a change of the same value at the same time.
+  const commands: (string | number)[][] = [
+    ...fields.map((f) => ["EVAL", TAKE_CRM_VALUE, 1, valuesKey(statsId, f.id), person]),
+    ...theirs.map((id) => ["HDEL", dealsKey(statsId), id]),
+  ];
   const replies = commands.length ? await redisPipeline(commands) : [];
-  let records = replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  let records = 0;
+  let valuesFreed = 0;
+  fields.forEach((_, i) => {
+    const taken = replies[i];
+    if (typeof taken !== "string") return;
+    records += 1;
+    if (taken) valuesFreed += dataBytes([person, taken], 1);
+  });
+  const dealsGone = theirs.filter((_, i) => replies[fields.length + i] === 1);
+  records += dealsGone.length;
+  if (room && (valuesFreed > 0 || dealsGone.length)) {
+    await giveData(room, [
+      ...(valuesFreed > 0 ? [{ slot: VALUES_SLOT, bytes: valuesFreed }] : []),
+      ...dealsGone.map((id) => ({ slot: dealSlot(id), bytes: 0, set: true })),
+    ]);
+  }
   // Their tasks (639 [GL7](6)) go with them, under the tasks' lock, so a
   // change read before the deletion cannot write them back after it; their
   // values and deals above never wait on it. A lock still taken after the

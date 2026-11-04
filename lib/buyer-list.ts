@@ -13,7 +13,7 @@
  *   nl:listed:<checkout id>   done (kept 8 days), or being done (2 minutes)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { noteProduct, upsertContact } from "@/lib/contacts";
+import { noteProduct, orderRoom, upsertContact } from "@/lib/contacts";
 import { enroll } from "@/lib/flows";
 import type { Store } from "@/lib/store";
 
@@ -71,7 +71,7 @@ export async function listOrder(store: Store, order: ListedOrder): Promise<"done
         clicks: order.clicks === true,
         productId: first.id,
         title: first.title,
-      }, { order: store });
+      }, orderRoom(store));
       await enroll(store, order.email, { joined: added.joined, productId: first.id });
       for (const item of rest) {
         if (await noteProduct(store.listId, order.email, item.id, item.title, store)) {

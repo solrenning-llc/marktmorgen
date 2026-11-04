@@ -98,6 +98,7 @@ import {
   type RowElementKind,
   type RowIcon,
   picturesOf,
+  picturesOutside,
   type Quote,
   quoteUrl,
   PAGE_TEMPLATES,
@@ -1508,7 +1509,7 @@ export function PageEditor({
         );
       }
       case "pictures": {
-        const elsewhere = drafts.reduce((n, d, i) => (i !== index ? n + picturesOf(d.block).length : n), 0);
+        const elsewhere = picturesOutside(drafts.map((d) => d.block), index);
         return (
           <div className="space-y-4">
             {field(`${base}-h`, "Heading (optional)", <input id={`${base}-h`} className="field" maxLength={MAX_HEADING} value={block.heading} placeholder="A look inside" onChange={(e) => change(index, { heading: e.target.value })} />)}
@@ -1555,7 +1556,7 @@ export function PageEditor({
         );
       }
       case "feature": {
-        const elsewhere = drafts.reduce((n, d, i) => (i !== index ? n + picturesOf(d.block).length : n), 0);
+        const elsewhere = picturesOutside(drafts.map((d) => d.block), index);
         return (
           <div className="space-y-4">
             {field(`${base}-h`, "Heading", <input id={`${base}-h`} className="field" maxLength={MAX_HEADING} value={block.heading} placeholder="What this part of it does for them" onChange={(e) => change(index, { heading: e.target.value })} />)}

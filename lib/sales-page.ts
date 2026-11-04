@@ -814,6 +814,15 @@ export function picturesOf(block: PageBlock): Picture[] {
 }
 
 /**
+ * How many pictures every block but the one at `index` shows, by picturesOf
+ * (a row's included): what the editor takes from MAX_PAGE_PICTURES before it
+ * offers room for one more, so it never offers what the save then refuses.
+ */
+export function picturesOutside(blocks: readonly PageBlock[], index: number): number {
+  return blocks.reduce((n, block, i) => (i === index ? n : n + picturesOf(block).length), 0);
+}
+
+/**
  * One element of a row, made safe to use; null when it cannot be one: an
  * unknown kind, no words where words are the element, an icon not on the
  * list, a button address that is not https (javascript:, data: and the

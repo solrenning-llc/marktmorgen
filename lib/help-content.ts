@@ -846,7 +846,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "Can I reuse a section on several pages?",
         a: [
-          `Yes, on every plan. In the page editor, open Saved sections and save up to ${MAX_SECTION_BLOCKS} blocks of the page under a name; then add it to any other page of your store, product pages and your own pages alike. A headline at the top and the reviews cannot be in a section, because a page has one of each.`,
+          `Yes, on every plan. In the page editor, open Saved sections and save up to ${MAX_SECTION_BLOCKS} blocks of the page under a name; then add it to any other page of your store, product pages and your own pages alike. A headline at the top and the reviews cannot be in a section, because a page has one of each; columns cannot either, because their pictures stay on their own page.`,
           "After changing a section on one page, press Update the saved section from this page. You see the other pages that use it and check the ones to update; nothing else changes. A page with its own pictures in the section, or running a test, is listed and left for you to change by hand. Every page updated keeps its earlier version, to bring back.",
           `Pictures stay on the page that shows them: a section keeps the block, and you add that page's pictures. Sections in your library: ${SHARE_LIMITS.creator.savedBlocks} on Store, ${SHARE_LIMITS.pro.savedBlocks} on Studio and ${SHARE_LIMITS.scale.savedBlocks} on Scale.`,
         ],

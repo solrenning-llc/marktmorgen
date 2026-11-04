@@ -17,7 +17,7 @@
  * however long the list is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
@@ -505,8 +505,10 @@ export async function changePersonTasks(statsId: string, person: string, room: D
   if (!PERSON.test(person)) return { ok: false, error: "unknown" };
   return withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, async (held) => {
     // A change that waited while the store was deleted writes nothing back:
-    // its tasks are gone with it (forgetCrm).
-    if (room.sid && STORE_ID_PATTERN.test(room.sid) && (await storeForId(room.sid))?.statsId !== statsId) return { ok: false, error: "unknown" };
+    // its tasks are gone with it (forgetCrm). One EXISTS of the store's id
+    // key; a store whose id is not of today's form (none is made any more)
+    // relies on forgetCrm's second deletion under this lock instead.
+    if (room.sid && STORE_ID_PATTERN.test(room.sid) && !(await storeIdExists(room.sid))) return { ok: false, error: "unknown" };
     const [before] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
     const tasks = tasksOf(before);
     const result = change(tasks);

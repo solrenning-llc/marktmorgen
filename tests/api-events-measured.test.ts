@@ -36,7 +36,7 @@ import { done, is, part } from "./check";
 process.env.STRIPE_SECRET_KEY = "sk_test_api_events_measured_only";
 const OWNER = "events-measured@example.com";
 const HANDLE = "events-measured";
-const ACCOUNT = "acct_events_test";
+const ACCOUNT = "acct_EventsTest01";
 
 let events: Record<string, unknown>[] = [];
 let commands: (string | number)[][] = [];

@@ -36,6 +36,11 @@ import { POST as eraseRoute } from "@/app/api/privacy/erase/route";
 import DeletePage from "@/app/privacy/delete/page";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
+
+/** The email goes after the answer (lib/erasure-request.ts, afterAnswer): wait for it before reading what was sent. */
+const settled = async () => {
+  for (let i = 0; i < 50; i += 1) await new Promise((resolve) => setImmediate(resolve));
+};
 import { done, is, part } from "./check";
 
 const sent: { to: string; text: string }[] = [];
@@ -104,6 +109,7 @@ async function main(): Promise<void> {
   const usedBefore = [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")];
   const from = sent.length;
   is("the link is sent", await requestErasureLink({ email: TESS, ip: "203.0.113.20", origin: "https://marktmorgen.com" }), "sent");
+  await settled();
   const link = sent.slice(from).find((m) => m.to === TESS);
   is("to the address, naming both stores", [Boolean(link), link?.text.includes(one.name), link?.text.includes(two.name)], [true, true, true]);
   is("taken from the second store's share, nothing more from the first", [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")], [usedBefore[0], usedBefore[1] + 1]);

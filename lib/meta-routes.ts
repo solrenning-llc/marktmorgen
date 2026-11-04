@@ -62,7 +62,7 @@ export async function finishMetaConnect(request: NextRequest): Promise<Response>
   const taken = await takeMeta(params.get("state") ?? "", { sessionCookie: cookie, email });
   if (!taken) return away(origin, "/studio?metaads=expired#numbers");
   // Still allowed on that very store, read now.
-  const allowed = await resolveAccess(email, { pinned: taken.sid }, "settings");
+  const allowed = await resolveAccess(email, { pinned: taken.sid, session: cookie }, "settings");
   if (!allowed.ok) return away(origin, allowed.store ? studioPath(allowed.store, "team=forbidden") : "/studio?team=gone");
   const { store, role } = allowed.access;
   if (store.statsId !== taken.statsId) return back(origin, store, "expired");

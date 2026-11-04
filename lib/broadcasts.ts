@@ -234,10 +234,16 @@ export function linksToStore(body: string, store: Pick<Store, "handle" | "domain
   return false;
 }
 
-/** Writes a broadcast down to go now or later. What it may contain is checked here. */
+/**
+ * Writes a broadcast down to go now or later. What it may contain is checked
+ * here. `count` counts the reading of the store's buyers a narrowed email
+ * needs before it is read (lib/segments.ts, buyerLedger); when it is not
+ * counted, LedgerNotCounted is thrown and nothing is written.
+ */
 export async function createBroadcast(
   store: Store,
   input: { subject: unknown; body: unknown; productId: unknown; notProductId: unknown; sendAt: unknown; who?: unknown; test?: unknown; narrow?: unknown; label?: unknown },
+  count?: (units: number) => Promise<boolean>,
 ): Promise<CreateResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
   if (!store.mail || !store.listId) return { ok: false, reason: "setup" };
@@ -266,7 +272,7 @@ export async function createBroadcast(
     sendAt = Math.max(at, now);
   }
   // Checked now for a send that starts now; a scheduled one is checked again when it starts.
-  const reach = (await audience(store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), await keepFor(store, narrow), label ?? undefined)).length;
+  const reach = (await audience(store.listId, productId ?? undefined, notProductId ?? undefined, whoOf(store, who), await keepFor(store, narrow, count), label ?? undefined)).length;
   if (reach === 0) return { ok: false, reason: "empty" };
   // A second subject line, when one was asked for. Refused here, with the
   // reason, whenever it could not be a real test: the creator finds out while

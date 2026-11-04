@@ -16,7 +16,8 @@ import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
-import { buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
+import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
+import { countLedger } from "@/lib/person-agenda-read";
 import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, saveFlow, setFlowActive } from "@/lib/flows";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FlowRunUnavailable, PERSON_KEY, listRuns, readRun } from "@/lib/flow-runs";
@@ -32,6 +33,9 @@ import { readListings } from "@/lib/catalog";
 import type { Permission } from "@/lib/team-roles";
 
 export const maxDuration = 60;
+
+/** Said when what reading the store's buyers costs could not be counted, and no sentence came with the refusal. */
+const NOT_COUNTED = "Your studio's requests could not be counted just now, so your buyers were not read. Nothing was changed. Try again in a minute.";
 
 /** Refusals of "keep sending" that have words of their own in the studio. */
 const KEEP_REFUSALS = new Set(["unsent", "excludes", "money", "already", "full"]);
@@ -117,6 +121,8 @@ export async function POST(request: NextRequest) {
   const { email, ref, body } = guarded;
   const action = text(body.action, 20);
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // The store's buyers not read because what reading them costs could not be counted (lib/segments.ts, buyerLedger).
+  const notCounted = (message: string) => Response.json({ ok: false, error: "studio_used", message: message || NOT_COUNTED }, { status: 429 });
 
   try {
     let store = await storeForEmail(ref);
@@ -161,10 +167,14 @@ export async function POST(request: NextRequest) {
       if (!isNarrowed(narrow) && body.channels !== true) {
         return Response.json({ ok: true, count: (await audience(store.listId, productId, notProductId, whoOf(store, who), undefined, label)).length });
       }
-      const ledger = await buyerLedger(store).catch((error) => {
+      // Counted before it is read: the ten-minute copy by its size, or Stripe, PayPal and the imported buyers again.
+      const counting = countLedger(store);
+      const ledger = await buyerLedger(store, counting.count).catch((error) => {
+        if (error instanceof LedgerNotCounted) return error;
         console.error("reading a store's buyers for an email failed", error);
         return null;
       });
+      if (ledger instanceof LedgerNotCounted) return notCounted(counting.said.message);
       if (!ledger) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
       // One moment for the kinds counted and the kind kept, so a buyer at a boundary is the same kind in both.
       const now = Date.now();
@@ -233,6 +243,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "broadcast") {
+      // A narrowed email reads the store's buyers again when their copy ran out: counted first, nothing written when not.
+      const counting = countLedger(store);
       const created = await createBroadcast(store, {
         subject: text(body.subject, 400),
         body: text(body.body, MAX_MAIL_BODY * 2),
@@ -245,7 +257,11 @@ export async function POST(request: NextRequest) {
         // A second subject line to try against the first; what it may be is
         // decided where the email is written down (lib/mail-test.ts).
         test: body.test && typeof body.test === "object" ? body.test : undefined,
+      }, counting.count).catch((error) => {
+        if (error instanceof LedgerNotCounted) return error;
+        throw error;
       });
+      if (created instanceof LedgerNotCounted) return notCounted(counting.said.message);
       if (!created.ok) return fail(created.reason);
       const id = created.broadcast.id;
       // A draft that has now been sent or scheduled is done with.

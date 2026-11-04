@@ -249,10 +249,13 @@ export function ledgerChannels(ledger: Ledger): string[] {
   return [...by].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([channel]) => channel);
 }
 
-/** The narrowing for an audience: null when there is none, so nothing is read from Stripe. */
-export async function keepFor(store: Store, narrow: Narrow | null | undefined): Promise<((email: string) => boolean) | undefined> {
+/**
+ * The narrowing for an audience: null when there is none, so nothing is read
+ * from Stripe. `count`, when given, counts that reading first (buyerLedger).
+ */
+export async function keepFor(store: Store, narrow: Narrow | null | undefined, count?: (units: number) => Promise<boolean>): Promise<((email: string) => boolean) | undefined> {
   if (!isNarrowed(narrow)) return undefined;
-  return keeps(narrow, await buyerLedger(store));
+  return keeps(narrow, await buyerLedger(store, count));
 }
 
 // ------------------------------------------------------------ saved groups

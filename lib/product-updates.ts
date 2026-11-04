@@ -51,6 +51,9 @@ import { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuye
 import { noteForErasure } from "@/lib/erasure-index";
 import { orderWrite } from "@/lib/order-data";
 import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { BUYER_LEDGER_UNITS, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
+import { paypalKept } from "@/lib/paypal-sales";
+import { countUnits } from "@/lib/person-agenda-read";
 
 export { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuyers };
 
@@ -129,7 +132,16 @@ export function buyersFrom(rows: Record<string, unknown>[], handles: ReadonlySet
 
 export type StartResult =
   | { ok: true; job: UpdateJob }
-  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe"; until?: number };
+  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe"; until?: number }
+  | { ok: false; reason: "studio_used"; message: string; until?: undefined };
+
+/**
+ * Studio requests reading every paid sale of the store costs, before it is
+ * read: as much as a reading of its buyers from Stripe (lib/segments.ts,
+ * BUYER_LEDGER_UNITS, which reads these pages and more), with the PayPal
+ * sales kept (`paypalSales`), which are read with them, by their weight.
+ */
+export const updateReadUnits = (paypalSales: number) => BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales, paypalRefunds: 0 }));
 
 /** When this product's buyers may next be told, in seconds; 0 when they may now. */
 export async function nextUpdateAt(store: Store, productId: string): Promise<number> {
@@ -145,6 +157,11 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   if (!canTellBuyers(product)) return { ok: false, reason: "kind" };
   const next = await nextUpdateAt(store, product.id);
   if (next > nowSeconds) return { ok: false, reason: "soon", until: next };
+  // Every paid sale, read again from Stripe each time: counted in the studio's requests first, nothing read when not.
+  const kept = await paypalKept(store.statsId, false).catch(() => null);
+  if (!kept) return { ok: false, reason: "stripe" };
+  const counted = await countUnits(store, updateReadUnits(kept.sales)).catch(() => null);
+  if (!counted?.ok) return { ok: false, reason: "studio_used", message: counted && !counted.ok ? counted.message : "" };
   let rows: Record<string, unknown>[];
   try {
     rows = (await readPaidSales(store, 0, ALL_TIME_PAGES)).sales.filter((s) => !s.upsell).map((s) => s.row);

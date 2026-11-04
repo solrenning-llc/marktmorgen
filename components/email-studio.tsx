@@ -135,7 +135,8 @@ async function call(payload: Record<string, unknown>): Promise<Answer> {
   }
 }
 
-const message = (a: Answer) => MESSAGES[a.error ?? ""] ?? MESSAGES.server_error;
+// A refusal for the studio's requests carries its own sentence (how many this needs, how many are left).
+const message = (a: Answer) => (a.error === "studio_used" && typeof a.message === "string" && a.message ? a.message : MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
 const n = (x: number) => x.toLocaleString("en-US");
 
 type BroadcastRow = {
@@ -783,7 +784,7 @@ function Compose(props: {
           setKinds(Object.fromEntries(RFM_GROUPS.flatMap((g) => (Number.isSafeInteger(read[g.id]) && (read[g.id] as number) >= 0 ? [[g.id, read[g.id] as number]] : []))));
         }
         if (typeof a.partial === "boolean") setPartial(a.partial);
-      } else if (a.error === "stripe") setError(message(a));
+      } else if (a.error === "stripe" || a.error === "studio_used") setError(message(a));
     });
     return () => {
       live = false;

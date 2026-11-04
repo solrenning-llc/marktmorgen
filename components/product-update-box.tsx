@@ -61,7 +61,7 @@ export function ProductUpdateBox({ product }: { product: Product }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: product.id, note }),
           });
-          const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; total?: number; until?: number | null };
+          const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; total?: number; until?: number | null };
           if (data.ok) {
             setSent(data.total ?? 0);
             setOpen(false);
@@ -73,7 +73,9 @@ export function ProductUpdateBox({ product }: { product: Product }) {
           setError(
             data.error === "soon" && data.until
               ? `This product's buyers were told of an update in the last 7 days. The next one can go on ${when(data.until)}.`
-              : (MESSAGES[data.error ?? ""] ?? "Something went wrong on our side. Nothing was sent. Try again in a moment."),
+              : data.error === "studio_used" && typeof data.message === "string" && data.message
+                ? `${data.message} Nothing was sent.`
+                : (MESSAGES[data.error ?? ""] ?? "Something went wrong on our side. Nothing was sent. Try again in a moment."),
           );
         } catch {
           setError("Something went wrong on our side. Nothing was sent. Try again in a moment.");

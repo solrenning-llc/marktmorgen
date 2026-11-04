@@ -1,11 +1,12 @@
 /** Pure original-wire comparison, not catalog authentication, valid consent,
  * admission, a funding review, a persisted source or paid-access permission. */
+import { types } from "node:util";
 import { confirmationBodyDigest } from "@/lib/order-confirmation-outbox";
 import { selectedDigitalOptionFromOriginal, selectedDigitalOptionForFolder, type SelectedDigitalOption } from "@/lib/digital-option-confirmation";
 import { MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 
 function original(value: unknown): Record<string, string> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!value || typeof value !== "object" || types.isProxy(value) || Array.isArray(value)) return null;
   try {
     if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return null;
     const names = ["storeHandle", "productId", "title", "currency", "consent", "summary"];
@@ -44,7 +45,7 @@ export function digitalOptionBodyMatches(body: unknown, product: unknown, option
 
 type Data = Record<string, unknown>;
 function ownRecord(value: unknown, maximum = 128): Data | null {
-  if (!value || typeof value !== "object" || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return null;
+  if (!value || typeof value !== "object" || types.isProxy(value) || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return null;
   const keys = Reflect.ownKeys(value); if (keys.length > maximum) return null;
   const out: Data = Object.create(null);
   for (const key of keys) {
@@ -79,7 +80,7 @@ export function captureDigitalOptionRequestSnapshot(input: unknown): DigitalOpti
         typeof store.stripeAccountId !== "string" || !/^acct_[A-Za-z0-9]{6,128}$/.test(store.stripeAccountId)) return null;
     for (const key of ["recurring","course","call","podcast","shipping","bundle","keys","link","file","plan","pwyw","callPackage","note"]) if (product[key]) return null;
     const fields = product.fields;
-    if (!Array.isArray(fields) || Object.getPrototypeOf(fields) !== Array.prototype || Reflect.ownKeys(fields).length !== 1 || Object.getOwnPropertyDescriptor(fields,"length")?.value !== 0) return null;
+    if (types.isProxy(fields) || !Array.isArray(fields) || Object.getPrototypeOf(fields) !== Array.prototype || Reflect.ownKeys(fields).length !== 1 || Object.getOwnPropertyDescriptor(fields,"length")?.value !== 0) return null;
     const identity = original({storeHandle:store.handle,productId:product.id,title:product.title,currency:store.currency,summary:product.summary,consent:value.consent});
     const selected = selectedDigitalOptionFromOriginal(product,value.optionId,value.folder);
     if (!identity || !selected || !digitalOptionBodyMatches(value.body,{options:[selected]},selected.id,value.folder,identity,value.maximumBytes)) return null;

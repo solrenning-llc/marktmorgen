@@ -41,3 +41,10 @@ test("inherited global JSON hooks are refused before any selected values are enc
   assert.equal(result,null);assert.equal(reads,0);
  }
 });
+
+test("Proxy traps are not invoked while inspecting original request, choice or file",()=>{
+ let traps=0;const wrap=<T extends object>(v:T)=>new Proxy(v,{getPrototypeOf(){traps++;throw Error("executable prototype");},ownKeys(){traps++;throw Error("executable keys");},getOwnPropertyDescriptor(){traps++;throw Error("executable descriptor");}});
+ const f=fixture();
+ for(const candidate of [wrap(f),{...f,store:wrap(f.store)},{...f,product:wrap(f.product)},{...f,product:{...f.product,options:wrap(f.product.options)}},{...f,product:{...f.product,options:[{...f.product.options[0],file:wrap(f.product.options[0].file)}]}}])assert.equal(captureDigitalOptionRequestSnapshot(candidate),null);
+ assert.equal(traps,0,"reflection must not execute caller Proxy hooks");
+});

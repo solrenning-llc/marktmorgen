@@ -1,5 +1,6 @@
 /** Detached paid-file selection only. No original catalog/owner proof,
  * financial grant, immutable persisted source, payment or download permission. */
+import {types} from "node:util";
 import {MAX_OPTIONS} from "@/lib/product-option";
 import {ownsPath,type ProductFile} from '@/lib/product-file';
 
@@ -8,14 +9,14 @@ export type SelectedDigitalOption=Readonly<{
 }>;
 function own(value:unknown):Record<string,unknown>|null{
  try{
-  if(!value||typeof value!=='object'||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))return null;
+  if(!value||typeof value!=='object'||types.isProxy(value)||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))return null;
   const keys=Reflect.ownKeys(value);if(keys.length>128)return null;const result:Record<string,unknown>=Object.create(null);
   for(const key of keys){const d=Object.getOwnPropertyDescriptor(value,key);if(typeof key!=='string'||!d||!Object.hasOwn(d,'value'))return null;result[key]=d.value;}return result;
  }catch{return null;}
 }
 function list(value:unknown,maximum:number):unknown[]|null{
  try{
-  if(!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)return null;
+  if(types.isProxy(value)||!Array.isArray(value)||Object.getPrototypeOf(value)!==Array.prototype)return null;
   const n=Object.getOwnPropertyDescriptor(value,'length')?.value;
   if(typeof n!=='number'||!Number.isSafeInteger(n)||n<0||n>maximum||Reflect.ownKeys(value).length!==n+1)return null;
   const result=[];for(let i=0;i<n;i++){const d=Object.getOwnPropertyDescriptor(value,String(i));if(!d||!Object.hasOwn(d,'value'))return null;result.push(d.value);}return result;

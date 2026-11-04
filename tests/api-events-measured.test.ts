@@ -40,12 +40,15 @@ const ACCOUNT = "acct_1EventsMeasured01";
 
 let events: Record<string, unknown>[] = [];
 let commands: (string | number)[][] = [];
+/** While true, the lease is refused, so a message made is kept untried (attempts 0), as when the try after it never ran. */
+let leaseOff = false;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: (string | number)[][]) => {
   commands.push(...batch);
   const [only] = batch;
   // The webhook queue's lease (lib/webhooks.ts, LEASE_SCRIPT), as Redis runs it and tests/webhooks-delivery.test.ts models it.
   if (batch.length === 1 && only[0] === "EVAL" && String(only[1]).includes('redis.call("ZSCORE", KEYS[1], ARGV[1])')) {
+    if (leaseOff) return [0];
     const [, , , key, member, now, until] = only.map(String);
     const [due] = await pipeline([["ZSCORE", key, member]]);
     if (due === null || due === undefined || Number(due) > Number(now)) return [0];
@@ -286,17 +289,25 @@ async function main(): Promise<void> {
   part("The month's webhook deliveries used: no message kept or sent, a line that says so, bounded by the day");
   {
     const store = await mine();
+    const read = async (id: string) => JSON.parse(String((await redis.pipeline([["GET", `nl:hooks:d:${id}`]]))[0])) as { body: string; state: string; attempts: number; givenUp?: boolean; lastError: string };
+    // One counted at its first try (it failed and waits to be tried again), one never tried.
+    const counted = await emitEvent(store, "sale.completed", "synthetic-counted", { amount_cents: 100 });
+    const [countedId] = await deliveryIds(statsId);
+    leaseOff = true;
     const waiting = await emitEvent(store, "sale.completed", "synthetic-before-used", { amount_cents: 100 });
+    leaseOff = false;
     const [waitingId] = await deliveryIds(statsId);
-    is("a message made while deliveries are left is kept, to be tried", [waiting, JSON.parse(String((await redis.pipeline([["GET", `nl:hooks:d:${waitingId}`]]))[0])).body.length > 0], [1, true]);
+    is("messages made while deliveries are left are kept: one tried and counted, one not tried yet", [counted, waiting, (await read(countedId)).attempts, (await read(waitingId)).attempts, (await read(waitingId)).body.length > 0], [1, 1, 1, 0, true]);
     for (;;) if (!(await takeAllowance(store, "webhook")).ok) break;
     const tried = await deliverDue(Date.now() + 10_000, Date.now() + 10 * 60_000);
-    const after = JSON.parse(String((await redis.pipeline([["GET", `nl:hooks:d:${waitingId}`]]))[0])) as { body: string; state: string; givenUp?: boolean; lastError: string };
-    is("tried once the month is used: not sent, and its message not kept past it", [tried.tried >= 1, after.state, after.body, after.givenUp, after.lastError.startsWith("Not sent. Your webhook deliveries for this month are used")], [true, "failed", "", true, true]);
+    const after = await read(waitingId);
+    is("not tried before the month was used: not sent, and its message not kept past it", [tried.tried >= 2, after.state, after.body, after.givenUp, after.lastError.startsWith("Not sent. Your webhook deliveries for this month are used")], [true, "failed", "", true, true]);
+    const kept = await read(countedId);
+    is("counted at its first try: not sent again, but its message kept, to be sent again by hand", [kept.state, kept.body.length > 0, kept.givenUp, kept.lastError.startsWith("Not sent. Your webhook deliveries for this month are used")], ["failed", true, undefined, true]);
     for (let i = 0; i < SKIPPED_LINES_PER_DAY + 3; i += 1) is(`made with the month used ${i}: nothing queued`, await emitEvent(store, "sale.completed", `synthetic-used-${i}`, { amount_cents: 100 }), 0);
     const log = (await webhooksView(store)).log;
     // Every delivery tried once the month was used is not kept either (above); the lines of messages made since have no try.
-    const own = log.filter((d) => d.lastError.startsWith("Not sent. Your webhook deliveries for this month are used") && d.state === "failed" && d.attempts === 0);
+    const own = log.filter((d) => d.lastError.startsWith("Not sent. Your webhook deliveries for this month are used") && d.state === "failed" && d.attempts === 0 && d.id !== waitingId);
     const rest = log.filter((d) => /^3 more messages on .* were not sent because your store's webhook deliveries for this month are used/.test(d.lastError));
     is("SKIPPED_LINES_PER_DAY lines of their own, then one line that counts the rest", [own.length, rest.length], [SKIPPED_LINES_PER_DAY, 1]);
     const bodies = (await redis.pipeline(own.map((d) => ["GET", `nl:hooks:d:${d.id}`]))).map((raw) => (JSON.parse(String(raw)) as { body: string }).body);

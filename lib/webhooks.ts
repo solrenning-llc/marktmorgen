@@ -406,9 +406,10 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
   const paused = store === "taken" || delivery.type === "test" ? null : integrationPauseWord(store, now / 1000);
   // One of the store's webhook deliveries for its month, before the endpoint is called.
   const taken = store === "taken" ? ({ ok: true } as const) : await takeAllowance(store, "webhook", 1, now);
-  // The month's deliveries used: not sent, and its message is not kept past it (a line, as emitEvent writes one), so
-  // a message is kept only by a delivery the month counted.
-  const unkept = !taken.ok && taken.reason === "used" && delivery.type !== "test" ? { body: "", givenUp: true as const } : {};
+  // The month's deliveries used before its first try: not sent, and its message is not kept past it (a line, as
+  // emitEvent writes one), so a message is kept only by a delivery the month counted. One counted at an earlier try
+  // keeps its message, and can be sent again by hand.
+  const unkept = !taken.ok && taken.reason === "used" && delivery.type !== "test" && delivery.attempts === 0 ? { body: "", givenUp: true as const } : {};
   // Paused: never retried, whatever the count answered; a month already used is said too.
   if (paused) {
     const counted = taken.ok ? ` ${WEBHOOK_PAUSED_COUNTED}` : taken.reason === "unknown" ? "" : ` ${taken.message}`;

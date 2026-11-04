@@ -20,7 +20,7 @@
  */
 import { POST_PLACES, postLink, postName } from "@/lib/share-links";
 import { postRows, readLive, readStats, recordHit } from "@/lib/stats";
-import { BUSY_FLOOR, isBusy, maybeBusyAlert, setWeeklyOff } from "@/lib/stats-report";
+import { BUSY_CLAIM_SECONDS, BUSY_FLOOR, isBusy, maybeBusyAlert, setWeeklyOff } from "@/lib/stats-report";
 import { makeKey } from "@/lib/api-keys";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { GET as mcpGet, POST as mcp } from "@/app/api/mcp/route";
@@ -161,6 +161,28 @@ async function main(): Promise<void> {
   redis.run(["SET", `nl:busy:${new Date(TODAY).toISOString().slice(0, 10)}:harbor:before`, JSON.stringify(Array(14).fill(500))]);
   const quiet = await sent(() => maybeBusyAlert(quietStore, 256, TODAY));
   is("a day that is not busy asks only for the fortnight it kept", [quiet.result, quiet.sent.length <= BUSY.later, fortnightReads(quiet.sent)], [false, true, 0]);
+  // A request that claims the day and dies before writing the fortnight down
+  // (a function's timeout): its claim lapses after BUSY_CLAIM_SECONDS, and a
+  // later power of two still reads the days and sends the email, once.
+  const crashDay = new Date(TODAY).toISOString().slice(0, 10);
+  redis.run(["DEL", `nl:busy:${crashDay}:harbor:before`]);
+  redis.run(["DEL", `nl:busy:${crashDay}:harbor`]);
+  const sentBefore = emails.length;
+  const realPipeline = redis.pipeline;
+  (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HGET" && c[2] === "v")) throw new Error("the function timed out");
+    return realPipeline.call(redis, commands);
+  }) as typeof redis.pipeline;
+  const died = await maybeBusyAlert(store, 64, TODAY).then(() => "finished", () => "died");
+  (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = realPipeline;
+  const held = redis.run(["TTL", `nl:busy:${crashDay}:harbor:before`]) as number;
+  is("a request that dies after claiming the day leaves only a short claim", [died, held > 0 && held <= BUSY_CLAIM_SECONDS], ["died", true]);
+  is("while it holds, a later power of two waits", [await maybeBusyAlert(store, 128, TODAY), emails.length], [false, sentBefore]);
+  redis.advance((BUSY_CLAIM_SECONDS + 1) * 1000);
+  const recovered = await sent(() => maybeBusyAlert(store, 256, TODAY));
+  is("once it lapses, a later power of two reads the days and the email goes", [recovered.result, fortnightReads(recovered.sent), emails.length], [true, 14, sentBefore + 1]);
+  is("and only once", [await maybeBusyAlert(store, 512, TODAY), emails.length], [false, sentBefore + 1]);
+  is("and the days are then kept for the day", (redis.run(["TTL", `nl:busy:${crashDay}:harbor:before`]) as number) > BUSY_CLAIM_SECONDS, true);
 
   part("The MCP server");
   const rpc = (body: unknown, key?: string) =>

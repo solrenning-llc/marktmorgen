@@ -216,7 +216,11 @@ const evalCost = (n: number) => n * EVAL_BYTES * DB_BYTE;
  * view when the day's views reach 64, 128, 256 and so on: at most once a
  * store a day for each power of two a day's count can reach, and a day's
  * count is a 64-bit integer in the database, so from 2^6 to 2^62, BUSY_POWERS.
- * Commands, as tests/numbers-three.test.ts measures them (4 November 2026):
+ * Commands, as tests/numbers-three.test.ts measures them (4 November 2026).
+ * The fortnight is read once a day unless the request reading it dies before
+ * writing it down: its claim then lapses after a minute
+ * (lib/stats-report.ts, BUSY_CLAIM_SECONDS) and the next power of two reads
+ * it again, so the day is priced as if every power of two were its first.
  */
 export const BUSY = {
   /** The day's first ask: whether the day is kept, its claim, the fourteen days before, and keeping them. */
@@ -232,11 +236,13 @@ export const BUSY_POWERS = 62 - 6 + 1;
 
 /**
  * A store's day of the busy-day email at the most, in commands: every power
- * of two reached, every one of them on a busy day, and the email sent. The
- * email itself is priced where emails are (tests/plan-cost-registry.ts).
+ * of two reached, each one reading the fortnight as the day's first would
+ * (a claim left by a request that died lapses, BUSY.first), every one of them
+ * on a busy day, and the email sent. The email itself is priced where emails
+ * are (tests/plan-cost-registry.ts).
  */
 export function busyDayCommands(): number {
-  return BUSY.first + (BUSY_POWERS - 1) * BUSY.later + BUSY_POWERS * BUSY.busy + BUSY.send;
+  return BUSY_POWERS * (BUSY.first + BUSY.busy) + BUSY.send;
 }
 
 /** Answering one page and its count: two calls, a tenth of a second of work, and memory held while the database is waited on. */

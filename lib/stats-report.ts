@@ -577,6 +577,13 @@ export function isBusy(today: number, before: number[]): { busy: boolean; times:
 const busyDayKey = (handle: string, day: string) => `nl:busy:${day}:${handle}:before`;
 /** What the day's key holds once its email has gone: no later power of two reads anything more. */
 const BUSY_SENT = "sent";
+/**
+ * How long a claim to read the fortnight holds before the days are written
+ * under it. A request that dies in between (a function's timeout) leaves an
+ * empty claim; it lapses after this, and a later power of two reads the days
+ * itself. Written days, and the email's mark, are kept two days.
+ */
+export const BUSY_CLAIM_SECONDS = 60;
 
 /**
  * The views a usual day of the last two weeks had, read once a day per store:
@@ -586,7 +593,9 @@ const BUSY_SENT = "sent";
  * fourteen days and the creator's choice were read again at every power of
  * two, before the day's email was claimed. "sent" once the day's email has
  * gone; null while another request holds the claim and has not written the
- * days yet: that power of two is not checked, and a later one is.
+ * days yet: that power of two is not checked, and a later one is. The claim
+ * lapses after BUSY_CLAIM_SECONDS if its request died before writing (4
+ * November 2026: it was kept two days, so one timeout lost the day's email).
  */
 async function busyBefore(store: Store, day: string, now: number): Promise<number[] | typeof BUSY_SENT | null> {
   const key = busyDayKey(store.handle, day);
@@ -601,7 +610,7 @@ async function busyBefore(store: Store, day: string, now: number): Promise<numbe
     }
   }
   if (held !== null && held !== undefined) return null;
-  const [claimed] = await redisPipeline([["SET", key, "", "NX", "EX", 2 * 86400]]);
+  const [claimed] = await redisPipeline([["SET", key, "", "NX", "EX", BUSY_CLAIM_SECONDS]]);
   if (claimed === null) return null;
   const before = await viewsBefore(store, 14, now);
   await redisPipeline([["SET", key, JSON.stringify(before), "XX", "EX", 2 * 86400]]);

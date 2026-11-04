@@ -12,10 +12,10 @@
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
-import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingRemoval, removePasskey, scheduleRemoval } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingRemoval, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
 import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
-import { RESET_DAYS, checkCode, finishSetup, lockedUntil, resetIfDue, startSetup, twoStepStatus } from "@/lib/two-step";
+import { RESET_DAYS, cancelReset, checkCode, finishSetup, lockedUntil, replaceCodes, resetIfDue, startSetup, turnOff, twoStepStatus } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
@@ -26,6 +26,10 @@ import { POST as passkeyRoute } from "@/app/api/auth/passkey/route";
 import { POST as passkeySignIn } from "@/app/api/auth/passkey/signin/route";
 import { POST as twoStepRoute } from "@/app/api/auth/two-step/route";
 import { makePasskey } from "./passkey-world";
+import { POST as addressRoute } from "@/app/api/store/address/route";
+import { POST as moveRoute } from "@/app/api/auth/move/route";
+import { claimHandle } from "@/lib/store";
+import { sendMoveLink } from "@/lib/auth";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -397,14 +401,95 @@ async function main(): Promise<void> {
   is("two logins with the same code at once: one passes", both.sort(), ["app", "wrong"]);
   const twice = await Promise.all([checkCode(XAN, xan.codes[0]), checkCode(XAN, xan.codes[0])]);
   is("two with the same recovery code at once: one passes", twice.sort(), ["recovery", "wrong"]);
-  const realPipe = redis.pipeline.bind(redis);
+  // As if a day had passed for these codes: their one-use marks are gone, so only the record decides.
+  const forgetOnce = async (email: string, codes: string[]) => {
+    const keys = codes.map((code) => `nl:2fa:once:${hex(`nimbus-2fa-once:${email}:code:${hex(`nimbus-2fa-code:${code.toLowerCase().replace(/[^a-z0-9]/g, "")}`)}`).slice(0, 40)}`);
+    await redis.pipeline([["DEL", ...keys]]);
+  };
+  const YAS = "yas-race@example.com";
+  const yas = await turnOnApp(YAS, "yas-backup@example.org");
+  const yasStep = codeAt(yas.secret, Math.floor(Date.now() / 1000 / STEP_SECONDS) + 1);
+  is("an app code and recovery code A at the same moment: both pass", (await Promise.all([checkCode(YAS, yas.codes[0]), checkCode(YAS, yasStep)])).sort(), ["app", "recovery"]);
+  await forgetOnce(YAS, [yas.codes[0]]);
+  is("and A never comes back, even once its one-use mark is gone", await checkCode(YAS, yas.codes[0]), "wrong");
+  const ZED = "zed-race@example.com";
+  const zed = await turnOnApp(ZED, "zed-backup@example.org");
+  const zedStep = codeAt(zed.secret, Math.floor(Date.now() / 1000 / STEP_SECONDS) + 1);
+  const [fresh] = await Promise.all([replaceCodes(ZED, zedStep), checkCode(ZED, zed.codes[1])]);
+  await forgetOnce(ZED, [zed.codes[1]]);
+  is("new recovery codes made while a leaked code is checked: the old code never works after", [typeof fresh === "object", await checkCode(ZED, zed.codes[2]), await checkCode(ZED, zed.codes[1])], [true, "wrong", "wrong"]);
+  const AMY = "amy-race@example.com";
+  const amy = await turnOnApp(AMY, "amy-backup@example.org");
+  await Promise.all([turnOff(AMY, amy.codes[0]), checkCode(AMY, amy.codes[1]), cancelReset(AMY, "studio")]);
+  is("turning it off while a code is checked and Cancel is pressed: it stays off", (await twoStepStatus(AMY)).on, false);
+
+  part("A move never joins another address's ways in to the account (review of da5191515)");
+  const VIC = "vic-move@example.com";
+  await claimHandle(VIC, "vic-move", "Vic Move", "");
+  const vicP = makePasskey(VIC, "cred-vic-p");
+  await vicP.keep();
+  const ATK = "atk-move@example.com";
+  const atkQ = makePasskey(ATK, "cred-atk-q");
+  await atkQ.keep();
+  const atkSession = await signInWithPasskey(atkQ);
+  const askMove = async (session: string, to: string) => {
+    const r = await addressRoute(form(`${ORIGIN}/api/store/address`, { email: to }, `nl_session=${session}`));
+    return (r.headers.get("location") ?? "").split("address=")[1] ?? r.headers.get("location");
+  };
+  is("asked by a session opened only by the emailed link, on an account with a passkey: refused", await askMove(await linkSession(VIC), ATK), "second-step");
+  const vicByP = await signInWithPasskey(vicP);
+  is("asked with the passkey, onto an address with its own passkey: refused", await askMove(vicByP, ATK), "has-login");
+  const tapMove = async (to: string) => {
+    mails.length = 0;
+    await sendMoveLink(VIC, to, ORIGIN, vicByP);
+    const token = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === to)?.text ?? "")?.[1] ?? "";
+    const r = await moveRoute(form(`${ORIGIN}/api/auth/move`, { token }));
+    return r.headers.get("location") ?? "";
+  };
+  is("the tap itself refuses an address with its own passkey", await tapMove(ATK), `${ORIGIN}/signin?status=move-has-login`);
+  is("nothing joined: the account keeps only its passkey, the attacker's session gets no second step on it", [(await listPasskeys(VIC)).map((p) => p.id), (await listPasskeys(ATK)).map((p) => p.id), await liveSecondStep(VIC, atkSession)], [["cred-vic-p"], ["cred-atk-q"], null]);
+  const ATK2 = "atk-app@example.com";
+  await turnOnApp(ATK2, "atk2-backup@example.org");
+  is("an address with its own app and codes: refused", await tapMove(ATK2), `${ORIGIN}/signin?status=move-has-login`);
+  const ATK3 = "atk-drop@example.com";
+  await redis.pipeline([["SET", `nl:pk:drop:${hex(`nimbus-passkey-drop:${ATK3}`).slice(0, 40)}`, JSON.stringify({ ids: ["cred-gone"], at: Date.now() - 1_000, told: 0 })]]);
+  is("an address with a passkey removal waiting, even one already due: refused", await tapMove(ATK3), `${ORIGIN}/signin?status=move-has-login`);
+  is("and the account's passkey did not fall", (await listPasskeys(VIC)).map((p) => p.id), ["cred-vic-p"]);
+  const CLEAN = "vic-new@example.com";
+  const before = await openSession(CLEAN);
+  const moveDone = await tapMove(CLEAN);
+  is("onto an address with nothing of its own, it moves, with the passkey", [moveDone.includes("/studio"), (await listPasskeys(CLEAN)).map((p) => p.id), (await listPasskeys(VIC)).length], [true, ["cred-vic-p"], 0]);
+  is("and whatever that address had open before is logged out", await emailForSession(before), null);
+
+  part("Small checks from the same review");
+  const KIM = "kim-small@example.com";
+  const kimP = makePasskey(KIM, "cred-kim-p");
+  await kimP.keep();
+  await scheduleRemoval(KIM, "cred-kim-p", "c".repeat(64), false);
+  is("a team member whose only passkey is set to go is not told to log in with it", await secondStepWay(KIM), "set_up");
+  let ran = false;
+  is("work tied to a passkey set to go does not run", [await unlessSetToGo(KIM, "cred-kim-p", async () => { ran = true; }), ran], [false, false]);
+  const LIA = "lia-fence@example.com";
+  const liaP = makePasskey(LIA, "cred-lia-p");
+  const liaQ = makePasskey(LIA, "cred-lia-q");
+  await liaP.keep();
+  await liaQ.keep();
+  const liaSession = await signInWithPasskey(liaQ);
+  is("work tied to a passkey not set to go runs", await unlessSetToGo(LIA, "cred-lia-q", async () => {}), true);
+  const listLia = `nl:pk:${hex(`nimbus-passkeys:${LIA}`).slice(0, 40)}`;
+  const pipe = redis.pipeline.bind(redis);
+  let expired = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "SET" && c.includes("XX"))) await realPipe([["DEL", `nl:2fa:${hex(`nimbus-2fa:${XAN}`).slice(0, 40)}`]]);
-    return realPipe(commands);
+    // The lock runs out in the middle of the removal, as a request held up past its five seconds.
+    if (!expired && commands.some((c) => c[0] === "GET" && c[1] === listLia) && (await pipe([["EXISTS", lockOf(LIA)]]))[0] === 1) {
+      expired = true;
+      await pipe([["DEL", lockOf(LIA)]]);
+    }
+    return pipe(commands);
   }) as typeof redis.pipeline;
-  const raced = await checkCode(XAN, xan.codes[1]);
-  redis.pipeline = realPipe;
-  is("a code checked as two-step login is turned off: refused, and the record stays gone", [raced, (await twoStepStatus(XAN)).on], ["wrong", false]);
+  const lost = await removePasskey(LIA, "cred-lia-p", liaSession).catch((error: unknown) => (error instanceof Error ? error.name || error.message : "error"));
+  redis.pipeline = pipe;
+  is("a removal whose lock ran out writes nothing: both passkeys stay", [lost !== "removed", (await listPasskeys(LIA)).map((p) => p.id).sort()], [true, ["cred-lia-p", "cred-lia-q"]]);
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";

@@ -14,6 +14,7 @@ import {
 import { storeForEmail } from "@/lib/store";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { lockedUntil } from "@/lib/two-step";
+import { hasSecondStep, holdsSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 
 /**
  * Asks to move the sign-in address.
@@ -59,6 +60,12 @@ export async function POST(request: NextRequest) {
     return back("invalid");
   }
   if (normaliseEmail(wanted) === normaliseEmail(email)) return back("same");
+
+  // Moving the account outlives the session that asks, so an account with a passkey or an app asks it
+  // from a session opened with one (lib/second-step-gate.ts): an emailed link alone never moves it.
+  if ((await hasSecondStep(email)) && (await liveSecondStep(email, session)) === null) return back("second-step");
+  // Never onto an address with ways in of its own: they would join this account's (checked again at the tap).
+  if (await holdsSecondStep(wanted)) return back("has-login");
 
   // Moving is moving a store. With no store there is nothing to carry, and the
   // creator simply signs in with the other address instead.

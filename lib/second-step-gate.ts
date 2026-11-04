@@ -12,7 +12,7 @@
  * without a code, which waits as long (lib/two-step.ts enterLocked).
  */
 import { type SecondStep, sessionMark } from "@/lib/auth";
-import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
+import { holdsPasskeys, listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { twoStepOn } from "@/lib/two-step";
 
 /**
@@ -59,4 +59,15 @@ export async function hasSecondStep(email: string, now = Date.now()): Promise<bo
 export async function mayAddSecondStep(email: string, session: string | undefined, now = Date.now()): Promise<boolean> {
   if ((await liveSecondStep(email, session, now)) !== null) return true;
   return !(await hasSecondStep(email, now));
+}
+
+/**
+ * Whether an address holds any way in of its own: a passkey, an
+ * authenticator app with its recovery codes, or a passkey removal waiting.
+ * An account is never moved onto such an address (security review of
+ * da5191515): its ways in would join the account's.
+ */
+export async function holdsSecondStep(email: string): Promise<boolean> {
+  const [app, keys] = await Promise.all([twoStepOn(email), holdsPasskeys(email)]);
+  return app || keys;
 }

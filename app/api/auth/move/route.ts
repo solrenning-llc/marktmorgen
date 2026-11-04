@@ -12,6 +12,7 @@ import {
 import { moveAccount } from "@/lib/store";
 import { moveMemberships } from "@/lib/team";
 import { movePasskeys, pendingRemoval } from "@/lib/passkeys";
+import { holdsSecondStep } from "@/lib/second-step-gate";
 import { movePhoneDevices } from "@/lib/phone-alerts";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
@@ -52,6 +53,10 @@ export async function POST(request: NextRequest) {
   }
   if (!moved) return away("/signin?status=expired");
 
+  // Never onto an address with ways in of its own (a passkey, an app and its codes, a removal waiting):
+  // two addresses' ways in are never merged (security review of da5191515).
+  if (await holdsSecondStep(moved.to).catch(() => true)) return away("/signin?status=move-has-login");
+
   let sessionId: string;
   try {
     const result = await moveAccount(moved.from, moved.to);
@@ -69,6 +74,8 @@ export async function POST(request: NextRequest) {
     // a team member's become the new address's (lib/phone-alerts.ts).
     await movePhoneDevices(moved.from, moved.to).catch((error) => console.error("moving phone devices failed", error));
     await endAllSessions(moved.from);
+    // And whatever the new address had open before: nothing opened there earlier stays open into this account.
+    await endAllSessions(moved.to);
     sessionId = await openSession(moved.to);
     // Passkeys set to be removed moved with the rest (lib/passkeys.ts movePasskeys); a removal whose days are over is applied at every login.
     await pendingRemoval(moved.to).catch((error) => console.error("applying a passkey removal failed", error));

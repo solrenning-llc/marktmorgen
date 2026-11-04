@@ -864,6 +864,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:2fa:@lib/two-step.ts": company("An account's second step", "An account's."),
   "nl:2fa:hold:@lib/two-step.ts": company("A second step held", "An account's."),
   "nl:2fa:once:@lib/two-step.ts": company("A code used once", "An account's, minutes to a day."),
+  "nl:2fa:lock:@lib/two-step.ts": company("An account's two-step record being changed", "An account's, seconds."),
   "nl:2fa:locked:@lib/two-step.ts": company("A session let in without its second step", "An account's."),
   "nl:2fa:lockedset:@lib/two-step.ts": company("An account's locked sessions", "An account's."),
   "nl:2fa:rescue:@lib/two-step.ts": company("A rescue link", "An account's."),

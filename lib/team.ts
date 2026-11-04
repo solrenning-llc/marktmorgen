@@ -193,9 +193,11 @@ export async function teamTwoStepBlocks(store: Store, email: string, role: Role,
 export type SecondStepWay = "passkey" | "app" | "set_up";
 
 export async function secondStepWay(email: string, now = Date.now()): Promise<SecondStepWay> {
-  // A passkey whose wait to be removed has run out goes first, so it is never offered (lib/passkeys.ts).
-  await pendingRemoval(email, now);
-  const [app, keys] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
+  // A passkey whose wait to be removed has run out goes first, so it is never offered (lib/passkeys.ts);
+  // one still waiting to go is not offered either, as it opens no second step (lib/second-step-gate.ts).
+  const waiting = (await pendingRemoval(email, now))?.ids ?? [];
+  const [app, all] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
+  const keys = all.filter((p) => !waiting.includes(p.id));
   return keys.length > 0 ? "passkey" : app ? "app" : "set_up";
 }
 

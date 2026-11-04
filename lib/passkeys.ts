@@ -44,7 +44,7 @@ import { dropSecondStep, normaliseEmail, sessionMark } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SITE_URL } from "@/lib/site-url";
-import { withLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, holdLock, setIfHeld, withLock } from "@/lib/redis-lock";
 import { removalWhen } from "@/lib/removal-time";
 import { recoveryAddressOf } from "@/lib/two-step";
 
@@ -84,8 +84,24 @@ const lockKey = (email: string) => `nl:pk:lock:${sha(`nimbus-passkey-lock:${norm
  * read, bringing back a passkey just removed or undoing a cancellation.
  * Emails go after the lock is let go.
  */
-function withPasskeys<T>(email: string, work: () => Promise<T>): Promise<T> {
+function withPasskeys<T>(email: string, work: (held: Held) => Promise<T>): Promise<T> {
   return withLock(lockKey(email), 5, 4_000, work);
+}
+
+/**
+ * Writes under the lock are fenced (lib/redis-lock.ts setIfHeld): a request
+ * held up past its lock's five seconds writes nothing, so it never puts back
+ * a list or a removal record read before somebody else changed it. A lost
+ * lock is answered as busy, to try again.
+ */
+async function fencedSet(held: Held, key: string, value: string): Promise<void> {
+  if (!(await setIfHeld(held, key, value))) throw new LockBusyError();
+}
+
+async function fencedDel(held: Held, keys: string[]): Promise<void> {
+  if (!keys.length) return;
+  if (!(await holdLock(held))) throw new LockBusyError();
+  await redisPipeline([["DEL", ...keys]]);
 }
 
 /** Reads a key and deletes it in one step, so a challenge answers once. */
@@ -147,8 +163,9 @@ export async function listPasskeys(email: string): Promise<Passkey[]> {
   return parseList(raw);
 }
 
-async function saveList(email: string, list: Passkey[]): Promise<void> {
-  await redisPipeline([list.length ? ["SET", listKey(email), JSON.stringify(list)] : ["DEL", listKey(email)]]);
+async function saveList(held: Held, email: string, list: Passkey[]): Promise<void> {
+  if (list.length) await fencedSet(held, listKey(email), JSON.stringify(list));
+  else await fencedDel(held, [listKey(email)]);
 }
 
 /**
@@ -233,7 +250,7 @@ export async function addPasskey(
   if (!verified.verified) return { ok: false, reason: "invalid" };
 
   const { credential, credentialBackedUp } = verified.registrationInfo;
-  const kept = await withPasskeys(address, async (): Promise<AddResult> => {
+  const kept = await withPasskeys(address, async (held): Promise<AddResult> => {
     const list = await listPasskeys(address);
     if (list.length >= MAX_PASSKEYS) return { ok: false, reason: "full" };
     const [claimed] = await redisPipeline([["SET", credKey(credential.id), address, "NX"]]);
@@ -249,7 +266,7 @@ export async function addPasskey(
       lastUsedAt: "",
       synced: credentialBackedUp,
     };
-    await saveList(address, [...list, made]);
+    await saveList(held, address, [...list, made]);
     return { ok: true, passkey: made };
   });
   if (!kept.ok) return kept;
@@ -305,8 +322,8 @@ async function readDrop(email: string): Promise<DropRecord | null> {
  * every check of a session's second step and on every passkey change
  * (pendingRemoval, removeDue), and it goes with the account when it moves.
  */
-async function writeDrop(email: string, record: DropRecord): Promise<void> {
-  await redisPipeline([["SET", dropKey(email), JSON.stringify(record)]]);
+async function writeDrop(held: Held, email: string, record: DropRecord): Promise<void> {
+  await fencedSet(held, dropKey(email), JSON.stringify(record));
 }
 
 /**
@@ -339,8 +356,8 @@ async function sessionPasskey(email: string, session: string | undefined): Promi
 export async function scheduleRemoval(email: string, id: string, session: string, appOn = false, now = Date.now()): Promise<number | null> {
   const address = normaliseEmail(email);
   let gone: Passkey[] = [];
-  const asked = await withPasskeys(address, async () => {
-    gone = (await removeDue(address, now)) ?? [];
+  const asked = await withPasskeys(address, async (held) => {
+    gone = (await removeDue(held, address, now)) ?? [];
     const list = await listPasskeys(address);
     const row = list.find((p) => p.id === id);
     if (!row) return null;
@@ -348,7 +365,7 @@ export async function scheduleRemoval(email: string, id: string, session: string
     const at = before?.at ?? now + REMOVAL_DAYS * 86_400_000;
     const tellNow = !before || now - before.told >= RETELL_MS;
     const ids = [...new Set([...(before?.ids ?? []), id])];
-    await writeDrop(address, { ids, at, told: tellNow ? now : (before?.told ?? now) });
+    await writeDrop(held, address, { ids, at, told: tellNow ? now : (before?.told ?? now) });
     // Whether a second step is left that can still keep it: another passkey not set to go, or the app.
     const another = list.some((p) => !ids.includes(p.id));
     return { at, name: row.name, tellNow, another };
@@ -389,13 +406,13 @@ export async function scheduleRemoval(email: string, id: string, session: string
  * run out; answers them (empty when none were due), or null when nothing
  * waits or the moment has not come.
  */
-async function removeDue(address: string, now: number): Promise<Passkey[] | null> {
+async function removeDue(held: Held, address: string, now: number): Promise<Passkey[] | null> {
   const record = await readDrop(address);
   if (!record || now < record.at) return null;
   const list = await listPasskeys(address);
   const removed = list.filter((p) => record.ids.includes(p.id));
-  await saveList(address, list.filter((p) => !record.ids.includes(p.id)));
-  await redisPipeline([["DEL", dropKey(address), ...removed.map((p) => credKey(p.id))]]);
+  await saveList(held, address, list.filter((p) => !record.ids.includes(p.id)));
+  await fencedDel(held, [dropKey(address), ...removed.map((p) => credKey(p.id))]);
   return removed;
 }
 
@@ -419,7 +436,7 @@ export async function pendingRemoval(email: string, now = Date.now()): Promise<P
   const pending = await readDrop(address);
   if (!pending) return null;
   if (now < pending.at) return { ids: pending.ids, at: pending.at };
-  const gone = await withPasskeys(address, () => removeDue(address, now));
+  const gone = await withPasskeys(address, (held) => removeDue(held, address, now));
   if (gone === null) {
     const left = await readDrop(address);
     return left ? { ids: left.ids, at: left.at } : null;
@@ -437,15 +454,15 @@ export async function pendingRemoval(email: string, now = Date.now()): Promise<P
 export async function cancelRemoval(email: string, id: string, session: string | undefined, now = Date.now()): Promise<"kept" | "unknown" | "second_step"> {
   const address = normaliseEmail(email);
   let gone: Passkey[] = [];
-  const answer = await withPasskeys(address, async (): Promise<"kept" | "unknown" | "second_step"> => {
-    gone = (await removeDue(address, now)) ?? [];
+  const answer = await withPasskeys(address, async (held): Promise<"kept" | "unknown" | "second_step"> => {
+    gone = (await removeDue(held, address, now)) ?? [];
     const record = await readDrop(address);
     const own = await sessionPasskey(address, session);
     if (own && (record?.ids.includes(own) || !(await listPasskeys(address)).some((p) => p.id === own))) return "second_step";
     if (!record || !record.ids.includes(id)) return "unknown";
     const ids = record.ids.filter((x) => x !== id);
-    if (ids.length) await writeDrop(address, { ...record, ids });
-    else await redisPipeline([["DEL", dropKey(address)]]);
+    if (ids.length) await writeDrop(held, address, { ...record, ids });
+    else await fencedDel(held, [dropKey(address)]);
     return "kept";
   });
   await afterDue(address, gone);
@@ -463,20 +480,20 @@ export async function cancelRemoval(email: string, id: string, session: string |
 export async function removePasskey(email: string, id: string, keep?: string, now = Date.now()): Promise<"removed" | "unknown" | "second_step"> {
   const address = normaliseEmail(email);
   let due: Passkey[] = [];
-  const answer = await withPasskeys(address, async (): Promise<Passkey | "unknown" | "second_step"> => {
-    due = (await removeDue(address, now)) ?? [];
+  const answer = await withPasskeys(address, async (held): Promise<Passkey | "unknown" | "second_step"> => {
+    due = (await removeDue(held, address, now)) ?? [];
     const list = await listPasskeys(address);
     const record = await readDrop(address);
     const own = await sessionPasskey(address, keep);
     if (own && (record?.ids.includes(own) || !list.some((p) => p.id === own))) return "second_step";
     const row = list.find((p) => p.id === id);
     if (!row) return "unknown";
-    await saveList(address, list.filter((p) => p.id !== id));
-    await redisPipeline([["DEL", credKey(id)]]);
+    await saveList(held, address, list.filter((p) => p.id !== id));
+    await fencedDel(held, [credKey(id)]);
     if (record?.ids.includes(id)) {
       const ids = record.ids.filter((x) => x !== id);
-      if (ids.length) await writeDrop(address, { ...record, ids });
-      else await redisPipeline([["DEL", dropKey(address)]]);
+      if (ids.length) await writeDrop(held, address, { ...record, ids });
+      else await fencedDel(held, [dropKey(address)]);
     }
     return row;
   });
@@ -520,8 +537,8 @@ export async function signInWith(nonce: string, response: AuthenticationResponse
   // studio, or by its wait) is never written back.
   let gone: Passkey[] = [];
   let doomed = false;
-  const signed = await withPasskeys(owner, async () => {
-    gone = (await removeDue(owner, Date.now())) ?? [];
+  const signed = await withPasskeys(owner, async (held) => {
+    gone = (await removeDue(held, owner, Date.now())) ?? [];
     // Read under the same lock: whether this passkey is set to be removed (it then calls nothing off at login).
     doomed = (await readDrop(owner))?.ids.includes(response.id) === true;
     const list = await listPasskeys(owner);
@@ -547,7 +564,7 @@ export async function signInWith(nonce: string, response: AuthenticationResponse
     }
     if (!verified.verified) return false;
     const newCounter = verified.authenticationInfo.newCounter;
-    await saveList(owner, list.map((p) => (p.id === passkey.id ? { ...p, counter: newCounter, lastUsedAt: new Date().toISOString() } : p)));
+    await saveList(held, owner, list.map((p) => (p.id === passkey.id ? { ...p, counter: newCounter, lastUsedAt: new Date().toISOString() } : p)));
     return true;
   });
   await afterDue(owner, gone);
@@ -555,43 +572,52 @@ export async function signInWith(nonce: string, response: AuthenticationResponse
 }
 
 /**
- * Carries an account's passkeys to its new address, when it moves. Any the
- * new address already had are kept, first, up to the ten an account holds;
- * a passkey that does not fit is forgotten rather than left pointing at an
- * account that no longer lists it. What waits to be removed moves with them
- * (security review of 3467adf6d): what is due is applied first, and the rest
- * keeps its moment, the earlier one where the new address had its own, so a
- * move never brings back a passkey set to go.
+ * Runs `work` only while this passkey is not set to be removed, with the
+ * account's lock held throughout, so a removal asked meanwhile waits for it
+ * (a passkey set to go calls nothing off at login: app/api/auth/passkey/
+ * signin). True when it ran.
+ */
+export async function unlessSetToGo(email: string, id: string, work: () => Promise<void>): Promise<boolean> {
+  const address = normaliseEmail(email);
+  return withPasskeys(address, async () => {
+    if ((await readDrop(address))?.ids.includes(id)) return false;
+    await work();
+    return true;
+  });
+}
+
+/**
+ * Whether an address holds passkeys of its own, or a removal record: an
+ * account is never moved onto one (app/api/auth/move, security review of
+ * da5191515), so two addresses' ways in are never merged.
+ */
+export async function holdsPasskeys(email: string): Promise<boolean> {
+  return (await listPasskeys(email)).length > 0 || (await readDrop(normaliseEmail(email))) !== null;
+}
+
+/**
+ * Carries an account's passkeys to its new address, when it moves, with
+ * what waits to be removed, each passkey keeping its own moment. Refused,
+ * with nothing changed, when the new address holds passkeys or a removal
+ * record of its own (the move route refuses that case first): the two are
+ * never merged. What is due is applied first.
  */
 export async function movePasskeys(from: string, to: string, now = Date.now()): Promise<void> {
   const source = normaliseEmail(from);
   const address = normaliseEmail(to);
   let due: Passkey[] = [];
-  await withPasskeys(source, () =>
-    withPasskeys(address, async () => {
-      due = (await removeDue(source, now)) ?? [];
+  await withPasskeys(source, (heldFrom) =>
+    withPasskeys(address, async (heldTo) => {
+      if (await holdsPasskeys(address)) throw new Error("the new address holds passkeys of its own");
+      due = (await removeDue(heldFrom, source, now)) ?? [];
       const list = await listPasskeys(source);
       const pending = await readDrop(source);
-      if (!list.length) {
-        if (pending) await redisPipeline([["DEL", dropKey(source)]]);
-        return;
+      if (list.length) {
+        await fencedSet(heldTo, listKey(address), JSON.stringify(list));
+        await redisPipeline(list.map((p) => ["SET", credKey(p.id), address]));
       }
-      const theirs = await listPasskeys(address);
-      const known = new Set(theirs.map((p) => p.id));
-      const merged = [...theirs, ...list.filter((p) => !known.has(p.id))].slice(0, MAX_PASSKEYS);
-      const kept = new Set(merged.map((p) => p.id));
-      const there = await readDrop(address);
-      const ids = [...new Set([...(there?.ids ?? []), ...(pending?.ids ?? []).filter((id) => kept.has(id))])];
-      const drop: DropRecord | null = ids.length
-        ? { ids, at: Math.min(there?.at ?? Infinity, pending?.at ?? Infinity), told: Math.max(there?.told ?? 0, pending?.told ?? 0) }
-        : null;
-      await redisPipeline([
-        ["SET", listKey(address), JSON.stringify(merged)],
-        ...list.map((p) => (kept.has(p.id) ? ["SET", credKey(p.id), address] : ["DEL", credKey(p.id)])),
-        ["DEL", listKey(from)],
-        ["DEL", dropKey(source)],
-        ...(drop ? [["SET", dropKey(address), JSON.stringify(drop)]] : []),
-      ]);
+      if (pending) await fencedSet(heldTo, dropKey(address), JSON.stringify(pending));
+      await fencedDel(heldFrom, [listKey(source), dropKey(source)]);
     }),
   );
   await afterDue(source, due);

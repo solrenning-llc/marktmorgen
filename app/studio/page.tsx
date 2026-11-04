@@ -655,6 +655,14 @@ const ADDRESS_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Log in again first",
     body: "Moving your account needs a login from the last 15 minutes. Log out, log in again, and ask once more. Nothing was changed.",
   },
+  "second-step": {
+    title: "Log in again with your passkey or your app's code",
+    body: "Your account has a passkey or two-step login, so moving it needs a login with one of them, not only the emailed link. Nothing was changed.",
+  },
+  "has-login": {
+    title: "That address has its own passkeys or two-step login",
+    body: "An account cannot be moved onto an address that already has its own passkeys, authenticator app or recovery codes. Nothing was changed.",
+  },
   limited: {
     title: "Too many attempts for that address",
     body: "Wait an hour and try again.",

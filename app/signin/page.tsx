@@ -62,6 +62,10 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "That address already has a store",
     body: "An account cannot be moved on top of another one. Nothing was changed.",
   },
+  "move-has-login": {
+    title: "That address has its own passkeys or two-step login",
+    body: "An account cannot be moved onto an address that already has its own passkeys, authenticator app or recovery codes. Nothing was changed. Remove them from that address first, or move to another address.",
+  },
   "move-error": {
     title: "The move did not finish",
     body: "Nothing was changed. Log in and try again.",

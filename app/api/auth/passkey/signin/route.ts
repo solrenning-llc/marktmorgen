@@ -4,7 +4,7 @@ import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, ses
 import { LockBusyError } from "@/lib/redis-lock";
 import { isRedisConfigured } from "@/lib/redis";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { PASSKEY_COOKIE, listPasskeys, pendingRemoval, signInOptions, signInWith } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, listPasskeys, pendingRemoval, signInOptions, signInWith, unlessSetToGo } from "@/lib/passkeys";
 import { cancelReset, endRecoveryAccess } from "@/lib/two-step";
 
 const MAX_BODY_BYTES = 16_000;
@@ -74,10 +74,13 @@ export async function POST(request: NextRequest) {
       // (lib/second-step-gate.ts liveSecondStep).
       // Read under the account's lock as it was checked (lib/passkeys.ts signInWith), or set to go since.
       // No login calls a passkey removal off, this one included: only "Keep it" does (lib/passkeys.ts).
+      // Checked again under the account's lock, held while it runs (lib/passkeys.ts unlessSetToGo).
       const doomed = signed.doomed || waiting?.ids.includes(signed.id) === true;
       if (!doomed) {
-        await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
-        await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
+        await unlessSetToGo(email, signed.id, async () => {
+          await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
+          await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
+        }).catch((error) => console.error("calling off a two-step reset failed", error));
       }
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));

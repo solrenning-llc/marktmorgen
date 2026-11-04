@@ -3,7 +3,7 @@ import { StoreFullError } from "@/lib/store-full";
 import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
 import { DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
-import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage } from "@/lib/pipeline-access-rules";
+import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
 import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
@@ -72,7 +72,8 @@ export async function POST(request: NextRequest) {
         const changing = removing ? id : typeof sent === "string" && pipelines.some((p) => p.id === sent) ? sent : null;
         // A new pipeline is anyone's to add; one that exists, and where a removed one's deals go, need edit.
         if (changing !== null && !mayEdit(changing)) return noAccess();
-        if (removing && !mayEdit(pipelineOfStage(pipelines, moveTo))) return noAccess();
+        // An empty pipeline is removed with no destination; a destination, when there is one, must be theirs to change.
+        if (removing && moveTo !== "" && !mayEdit(pipelineOfStage(pipelines, moveTo))) return noAccess();
         // Deals of a removed stage may be sent to another pipeline's stage: that one must be theirs to change too.
         // Moves may be one stage for every removed stage (a string) or one per stage (an object): every target is checked.
         const sentMoves = body.moves;
@@ -81,7 +82,9 @@ export async function POST(request: NextRequest) {
         if (targets.some((stage) => !sentStages.includes(stage) && !mayEdit(pipelineOfStage(pipelines, stage)))) return noAccess();
       }
       const result = await savePipelineChange(statsId, removing ? { remove: id } : { pipeline: body.pipeline }, moves, pipelineLimit(store), store);
-      return result.ok ? Response.json({ ok: true, pipelines: result.pipelines, moved: Object.keys(result.moves).length }) : refuse(result.error, result.error === "unknown" ? 404 : 400);
+      // Someone restricted gets back only the pipelines they may see, never the names and stages of the others.
+      const shown = restricted ? visiblePipelines(result.ok ? result.pipelines : [], guarded.role, access).map((p) => ({ id: p.id, name: p.name, stages: p.stages })) : result.ok ? result.pipelines : [];
+      return result.ok ? Response.json({ ok: true, pipelines: shown, moved: Object.keys(result.moves).length }) : refuse(result.error, result.error === "unknown" ? 404 : 400);
     }
     const stages = await readStages(statsId);
     if (body.action === "deal") {

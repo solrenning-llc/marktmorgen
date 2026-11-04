@@ -26,13 +26,16 @@ part("A pipeline they may only see");
 const seen = draw([FIRST_PIPELINE_ID]);
 is("its deals are shown", seen.includes("Deal d000000001"), true);
 is("with nothing that changes them: no new deal, no move, no edit, no remove", [seen.includes("New deal"), seen.includes("Move Deal d000000001"), />Edit</.test(seen), seen.includes('aria-label="Remove Deal d000000001"')], [false, false, false, false]);
-is("its stages cannot be changed, and it says why and whom to ask", [seen.includes("Change Sales and its stages"), seen.includes("You can see this pipeline but not change it. Ask the store&#x27;s owner or an Admin to change your access.")], [false, true]);
+is("its stages cannot be changed, and it says why and whom to ask", [seen.includes("Change Sales and its stages"), seen.includes("You can see this pipeline but not change it. Ask the store&#x27;s owner to change your access.")], [false, true]);
 
 is("nor a copy of it offered; a new pipeline of their own still is", [seen.includes("Duplicate “Sales”"), seen.includes("New pipeline")], [false, true]);
 const agenda = (onEdit?: (d: Deal) => void) => renderToStaticMarkup(createElement(DealAgenda, { deals: [{ ...deal("d000000001", "lead00"), nextAction: "Call back", dueDate: "2026-11-05" }], stages: DEFAULT_STAGES, currency: "usd", today: "2026-11-04", disabled: false, onEdit }));
 is("its agenda lists the deals with no Edit column or button", [/>Edit</.test(agenda()), agenda().includes("Call back")], [false, true]);
 is("the agenda of a pipeline they may change keeps Edit", />Edit</.test(agenda(() => {})), true);
 is("the board gives the agenda no editor on a pipeline they may only see", readFileSync("components/deals-board.tsx", "utf8").includes("onEdit={canChange ? deal =>"), true);
+
+is("never sends them to a button that is not there, and marks the pipeline view only (review of units 2 and 3)", [seen.includes("No deals in this pipeline yet. You can see it but not change it.") || seen.includes("Deal d000000001"), seen.includes("· view only"), seen.includes("owner or an Admin")], [true, true, false]);
+is("the store's pipeline count is never said to someone who may not see them all", [renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { push() {}, refresh() {}, prefetch() {} } as never }, createElement(DealsBoard, { ...props, someHidden: true }))).includes("of the 5 pipelines"), draw().includes("of the 5 pipelines")], [false, true]);
 
 part("A pipeline they may change, beside one they may only see");
 const mixed = draw(["coach0"]);
@@ -47,6 +50,7 @@ is("the deals page reads this person's access, the owner and Admins never restri
 is("shows only what they may see, and marks what they may only see", deals.includes("visiblePipelines(inventory.pipelines, view.role, access)") && deals.includes("deals: inventory.deals.filter((deal) => seenStages.has(deal.stage))") && deals.includes("viewOnly={viewOnly}"), true);
 is("never offers a pipeline beyond the store's limit", deals.includes("pipelineMax={Math.max(0, pipelineLimit(store) - hidden)}"), true);
 is("says so when there is nothing they may see", deals.includes("You have no pipelines to see in this store."), true);
+is("an access record that cannot be read is said as such, and nobody is sent to an Admin who cannot change access", [deals.includes("Your access to this store&apos;s pipelines could not be read just now"), deals.includes("owner or an Admin"), deals.includes("someHidden={restricted}")], [true, false, true]);
 is("but never when their access could not be read: then the deals are unavailable, not missing", deals.includes("inventory.available && access !== null && shown.pipelines.length === 0") && deals.includes("&& shown.pipelines.length > 0;"), true);
 const forms = readFileSync("app/studio/forms/page.tsx", "utf8");
 is("the forms page offers only stages they may change, and shows only deals they may see", forms.includes('seen.filter((p) => p.access === "edit")') && forms.includes("reviewData.deals.filter((deal) => !restricted || seenStages.has(deal.stage))"), true);

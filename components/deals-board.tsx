@@ -1,6 +1,7 @@
 "use client";
 
 import { useLeaveGuard } from "@/components/leave-guard";
+import { PIPELINE_ACCESS_REFUSAL } from "@/lib/pipeline-access-rules";
 import { dealActionFilter, filterDeals, type DealActionFilter } from "@/lib/crm-deal-filter";
 import { dealOrder, orderDeals, dealWorklistCsv, type DealOrder, type DealView } from "@/lib/crm-deal-worklist";
 import { DealAgenda } from "@/components/deal-agenda";
@@ -52,6 +53,8 @@ const MESSAGES: Record<string, string> = {
   pipeline_last: "A store keeps at least one pipeline.",
   moves: "Choose where the deals of each stage you remove go.",
   crm_conflict: "Somebody else changed your pipelines a moment ago, so nothing was saved. Reload the page and make your change again.",
+  // A refused change by access (639 [GL7](7)): nothing was saved, and the board stays usable.
+  pipeline_access: PIPELINE_ACCESS_REFUSAL,
   server_error: "The change could not be confirmed. Check the saved CRM data before trying again.",
   crm_schema_read_unavailable: "The saved CRM configuration could not be checked before this change. Your current work is still here. Try again shortly.",
   crm_deal_read_unavailable: "Saved deals could not be checked before this change. Your current work is still here. Try again shortly.",
@@ -90,7 +93,7 @@ function StageOptions({ pipelines, except }: { pipelines: readonly Pipeline[]; e
   return <>{shown.map(p => <optgroup key={p.id} label={p.name}>{p.stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</optgroup>)}</>;
 }
 
-export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipelines, pipelineMax = 1, fields, currency, assignees, today, initialFilter = "all", requestHref, viewOnly }: { deals: Deal[]; stages: Stage[]; /** The store's pipelines (lib/crm-rules.ts); the first holds the board it always had. */ pipelines?: Pipeline[]; /** How many pipelines the store's plan may have. */ pipelineMax?: number; fields: CrmField[]; currency: string; assignees: string[]; today: string; initialFilter?: DealActionFilter; /** The payment requests page, for a role that may send them; a deal with a person links to it, filled in. */ requestHref?: string; /** Pipelines this person may see but not change (639 [GL7](7)): their deals are shown without the controls that change them. */ viewOnly?: string[] }) {
+export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipelines, pipelineMax = 1, fields, currency, assignees, today, initialFilter = "all", requestHref, viewOnly, someHidden = false }: { deals: Deal[]; stages: Stage[]; /** The store's pipelines (lib/crm-rules.ts); the first holds the board it always had. */ pipelines?: Pipeline[]; /** How many pipelines the store's plan may have. */ pipelineMax?: number; fields: CrmField[]; currency: string; assignees: string[]; today: string; initialFilter?: DealActionFilter; /** The payment requests page, for a role that may send them; a deal with a person links to it, filled in. */ requestHref?: string; /** Pipelines this person may see but not change (639 [GL7](7)): their deals are shown without the controls that change them. */ viewOnly?: string[]; /** Someone who may not see every pipeline (639 [GL7](7)): the store's pipeline count is never said, so it cannot tell how many are hidden. */ someHidden?: boolean }) {
   const router = useRouter();
   const pipelines: Pipeline[] = savedPipelines?.length ? savedPipelines : [firstPipeline(everyStage)];
   const [pipelineId, setPipelineId] = useState(pipelines[0].id);
@@ -236,6 +239,9 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               <Icon name="plus" size={18} />
               New deal
             </button>
+          ) : !canChange ? (
+            // Said where "New deal" would be, so nobody wonders where it went (639 [GL7](7)).
+            <p className="max-w-xs text-sm text-ink-soft">You can see this pipeline but not change it. Ask the store&apos;s owner to change your access.</p>
           ) : null}
         </div>
 
@@ -245,6 +251,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               <button key={t.pipeline.id} type="button" aria-pressed={t.pipeline.id === pipeline.id} disabled={editing && t.pipeline.id !== pipeline.id} className={`btn btn-sm ${t.pipeline.id === pipeline.id ? "btn-primary" : "btn-secondary"}`} onClick={() => { setPipelineId(t.pipeline.id); setError(null); }}>
                 {t.pipeline.name}
                 <span className="tabular-nums opacity-80">{` · ${t.open.count} open`}</span>
+                {readOnly.has(t.pipeline.id) ? <span className="opacity-80"> · view only</span> : null}
               </button>
             ))}
             {pipelines.length < pipelineMax ? (
@@ -273,7 +280,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
               ))}</tbody>
             </table>
           </div>
-          <p className="mt-2 text-xs text-ink-mute">{`Each total adds up the values recorded on its deals, in ${currency.toUpperCase()}. Nothing is weighted or forecast. You have ${pipelines.length} of the ${pipelineMax} ${pipelineMax === 1 ? "pipeline" : "pipelines"} your store can keep.`}</p>
+          <p className="mt-2 text-xs text-ink-mute">{`Each total adds up the values recorded on its deals, in ${currency.toUpperCase()}. Nothing is weighted or forecast. ${someHidden ? (pipelines.length < pipelineMax ? "Your store can add another pipeline." : "Your store has no room for another pipeline.") : `You have ${pipelines.length} of the ${pipelineMax} ${pipelineMax === 1 ? "pipeline" : "pipelines"} your store can keep.`}`}</p>
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="block"><span className="field-label">Find a deal</span><input type="search" className="field mt-2" maxLength={80} value={search} onChange={e => setSearch(e.target.value)} placeholder="Name, email, next action or note" /></label><label className="block"><span className="field-label">Responsible teammate</span><select className="field mt-2" value={responsible} onChange={e => setResponsible(e.target.value)}><option value="all">Everyone</option><option value="unassigned">Unassigned</option>{responsibleChoices.map(email => <option key={email} value={"person:" + email}>{email}{assignees.includes(email) ? "" : " (no longer eligible)"}</option>)}</select></label></div>
@@ -366,7 +373,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
         {/* An empty board says what it is for and how to start (487 [IT4], pattern 5). */}
         {pipelineDeals.length === 0 && draft === null ? (
           <p className="mt-6 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
-            No deals yet. When someone asks about something you sell outside a checkout, press &ldquo;New deal&rdquo; and move it across the stages as the talk goes on.
+            {canChange ? <>No deals yet. When someone asks about something you sell outside a checkout, press &ldquo;New deal&rdquo; and move it across the stages as the talk goes on.</> : "No deals in this pipeline yet. You can see it but not change it."}
           </p>
         ) : null}
         {view === "agenda" ? <DealAgenda deals={visibleDeals} stages={stages} currency={currency} today={today} disabled={locked || editing || writeUnconfirmed} onEdit={canChange ? deal => { setError(null); setDraft(draftFromDeal(deal, currency)); } : undefined} /> : (
@@ -541,9 +548,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
             <button type="button" className="btn btn-secondary btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); setPipelineDraft({ id: pipeline.id, name: pipeline.name, stages: structuredClone(pipeline.stages), isNew: false, moves: {}, removeTo: "" }); }}>
               {pipelines.length > 1 ? `Change ${pipeline.name} and its stages` : "Change the pipeline and its stages"}
             </button>
-          ) : (
-            <p className="text-sm text-ink-soft">You can see this pipeline but not change it. Ask the store&apos;s owner or an Admin to change your access.</p>
-          )}
+          ) : null}
         </div>
       </section>
 

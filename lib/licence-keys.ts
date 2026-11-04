@@ -478,9 +478,10 @@ export function storeHasKeys(store: Store): boolean {
  * the key back as a full refund does (queue 388 [TB14]): the disputes closed
  * since the last run are read with the first page of refunds, from Stripe's
  * closing events, so a lost dispute revokes within the same five minutes;
- * one still open, won, or lost for part of the price changes nothing. That
- * is one more GET /events every five minutes per store that hands out keys
- * (and one charge read per lost dispute). Stripe keeps events thirty days,
+ * one still open or won changes nothing, and one lost for less than the
+ * price is read as lost (lib/refunds.ts says why). That is up to
+ * LOST_DISPUTE_PAGES more GET /events every five minutes per store that
+ * hands out keys, inside the run's deadline, and no other call. Stripe keeps events thirty days,
  * so a job down longer than that misses lost disputes; refunds are not
  * affected. A failed read of the disputes leaves the refunds handled and the
  * anchor where it was. The limit of the pages and lookups read per run,
@@ -547,7 +548,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     const listed = await onAccount("GET", account, `/refunds?${query}`);
     const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
     // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
-    const lost = page === 0 ? await lostDisputesOrRetry(account, since) : { rows: [], complete: true };
+    const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline) : { rows: [], complete: true };
     if (!lost.complete) unsure = true;
     const rows = [...lost.rows, ...refunds];
     for (const refund of rows) {

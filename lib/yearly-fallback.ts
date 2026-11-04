@@ -46,10 +46,6 @@
  *      paid in those seconds, the month is refunded (FALLBACK_BOTH_KEY), never
  *      both kept. Moved with the month not paid yet: the year is voided only
  *      once the month is (FALLBACK_CHECK_KEY).
- *   6. Moved (paid or not yet): the membership's own record says it now, in
- *      a second call, never in the move itself (fallbackBody says why). A
- *      record that could not be written goes on FALLBACK_CHECK_KEY for the
- *      daily job, and the result says so (`recordLeft`).
  *
  * A list that cannot be written to (Redis down) is never only a log line: the
  * result says so (`unrecorded`, or the reason "unknown-unrecorded"), for the
@@ -84,8 +80,11 @@ export const FALLBACK_STRIPE_VERSION = "2026-08-26.dahlia";
  *     the move, so a year found paid meanwhile has its month refunded ("account|yearly|monthly");
  *   - CHECK: a move whose outcome is not known yet (Stripe did not answer, a pending update whose payment is not known
  *     to have failed, or it applied with the first month not paid yet): the year stays with no automatic retry until
- *     the job reads the membership again ("account|subscription|invoice"); also a move made whose own record
- *     (fallbackRecordBody) could not be written, for the job to write it once it reads the membership monthly;
+ *     the job reads the membership again ("account|subscription|invoice"). The job knows the move happened by the
+ *     price's interval being month together with `metadata.monthly_replaced` naming this yearly invoice, which Stripe
+ *     writes with the move itself, never before it applies (fallbackBody; from API version 2026-05-27.dahlia). Still
+ *     to do in unit 2c, as an extra defence: take the CHECK entry itself plus an interval of month as the move made,
+ *     without requiring the metadata;
  *   - BOTH: the year was paid while the month was charged; the month is refunded ("account|yearly|monthly").
  */
 export const FALLBACK_VOID_KEY = "nl:yearly:fallback:void";
@@ -97,8 +96,7 @@ export const fallbackLockKey = (subscription: string) => `nl:tier:${subscription
 const tryKey = (invoice: string) => `nl:yearly:fallback:try:${invoice}`;
 /**
  * Longer than every Stripe call of the longest path here at its ceiling, in a row: two reads, a price made, the year
- * stopped and read again, the move, then up to three more (a void and a retry; or a void, a read and the
- * membership's record), nine at
+ * stopped and read again, the move, then two more (a void and a retry, or a void and a read), nine at
  * STRIPE_TIMEOUT_MS (20 s, lib/fetch-timeout.ts) each, with a minute to spare for the database.
  */
 export const FALLBACK_LOCK_SECONDS = 240;
@@ -111,30 +109,27 @@ export const FALLBACK_LOCK_SECONDS = 240;
  * (`billing_cycle_anchor=now`), so the first month is charged whole. Any proration would credit the member for a
  * year they never paid, or charge them for days of it.
  *
- * Never any metadata here: with `payment_behavior=pending_if_incomplete` Stripe takes only the fields a pending
- * update may carry (Pending updates, docs.stripe.com/billing/subscriptions/pending-updates; lib/billing.ts makes its
- * own move the same way) and refuses the whole request otherwise, so the move would never be made (found by the
- * third review, 4 November 2026). The record follows in a call of its own once the move applied (fallbackRecordBody).
+ * The membership's own record travels with the move, atomic with it: from API version 2026-05-27.dahlia Stripe
+ * accepts `metadata` with `payment_behavior=pending_if_incomplete`, keeps it in `pending_update.metadata` and merges
+ * it into the subscription's only when the pending update applies (changelog, read 4 November 2026:
+ * docs.stripe.com/changelog/dahlia/2026-05-27/pending-subscription-update-metadata; before that version it was an
+ * error). FALLBACK_STRIPE_VERSION is pinned after it, and tests/yearly-fallback.test.ts fails if it ever goes back.
+ * `metadata.every` is read by lib/purchase-email.ts, app/[handle]/thanks/page.tsx and lib/yearly-switch-rules.ts.
  */
-export function fallbackBody(itemId: string, monthlyPrice: string): URLSearchParams {
+export function fallbackBody(itemId: string, monthlyPrice: string, failedInvoice: string): URLSearchParams {
   const body = new URLSearchParams({
     "items[0][id]": itemId,
     "items[0][price]": monthlyPrice,
     billing_cycle_anchor: "now",
     proration_behavior: "none",
     payment_behavior: "pending_if_incomplete",
+    // As a membership bought monthly says it, and which yearly invoice it replaced.
+    "metadata[every]": "month",
+    "metadata[monthly_from]": "year",
+    "metadata[monthly_replaced]": failedInvoice,
   });
   body.append("expand[]", "latest_invoice");
   return body;
-}
-
-/**
- * The membership's own record once it moved, as a membership bought monthly says it, and which yearly invoice it
- * replaced: `metadata.every` is read by the purchase email (lib/purchase-email.ts), the thanks page
- * (app/[handle]/thanks/page.tsx) and the offer to pay yearly (lib/yearly-switch-rules.ts).
- */
-export function fallbackRecordBody(failedInvoice: string): URLSearchParams {
-  return new URLSearchParams({ "metadata[every]": "month", "metadata[monthly_from]": "year", "metadata[monthly_replaced]": failedInvoice });
 }
 
 /** The subscription as the rules need it: its payment method and its customer's default, expanded. */
@@ -155,12 +150,6 @@ export type FallbackResult =
       paid: boolean;
       /** A list for the daily job that could not be written: what is left undone, said to the member and the creator. */
       unrecorded?: "void" | "check" | "both";
-      /**
-       * Moved, but the membership's own record (fallbackRecordBody) could not be written: it still reads as yearly to
-       * what reads `metadata.every` until the daily job writes it (FALLBACK_CHECK_KEY; `unrecorded` "check" when that
-       * list could not be written either).
-       */
-      recordLeft?: true;
     }
   | { ok: false; reason: "gone" | "fallback" | "declined" | "busy" | "unknown" | "unknown-unrecorded" | "error" };
 
@@ -234,7 +223,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
 
       let updated: Record<string, unknown>;
       try {
-        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, fallbackBody(itemId, price), v, `fallback:${failedInvoice}:${Number(attempt) || 1}`);
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, fallbackBody(itemId, price, failedInvoice), v, `fallback:${failedInvoice}:${Number(attempt) || 1}`);
       } catch (error) {
         if (refused(error)) {
           // Refused for certain: nothing was done, and the year is retried as before.
@@ -280,35 +269,21 @@ export async function moveToMonthly(store: Store, customer: string, subscription
         // Applied with the first month not paid yet (a payment still processing), or with no month's invoice read
         // back: the year is voided only once the month is, by the daily job; until then it is never retried by itself.
         if (!(await record(FALLBACK_CHECK_KEY, check))) result.unrecorded = "check";
-      } else {
-        // Moved and the month paid: the year can never be paid as well.
-        try {
-          await onAccount("POST", account, `/invoices/${encodeURIComponent(failedInvoice)}/void`, new URLSearchParams(), v);
-        } catch (error) {
-          const again = await onAccount("GET", account, `/invoices/${encodeURIComponent(failedInvoice)}`, undefined, v).catch(() => null);
-          if (again?.status === "paid") {
-            // Paid in the seconds the month was: the month is refunded, never both kept.
-            console.error("a yearly invoice was paid while the monthly move was made; the month is refunded by the daily job", error);
-            if (!(await record(FALLBACK_BOTH_KEY, `${account}|${failedInvoice}|${latestId}`))) result.unrecorded = "both";
-          } else if (again?.status !== "void") {
-            console.error("voiding the yearly invoice after a monthly move failed; kept for the daily job", error);
-            if (!(await record(FALLBACK_VOID_KEY, `${account}|${failedInvoice}|${latestId}`))) result.unrecorded = "void";
-          }
-        }
+        return result;
       }
-      // The move applied: the membership's own record follows, in a call of its own (fallbackBody says why), after
-      // the year's void, which matters more. Not written: the daily job writes it, and the result says so; a list
-      // already left unwritten above keeps its name in `unrecorded`, the one about money.
-      const written = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, fallbackRecordBody(failedInvoice), v).then(
-        () => true,
-        (error) => {
-          console.error("recording a move to monthly on the membership failed; left for the daily job", error);
-          return false;
-        },
-      );
-      if (!written) {
-        result.recordLeft = true;
-        if (!(await record(FALLBACK_CHECK_KEY, check))) result.unrecorded ??= "check";
+      // Moved and the month paid: the year can never be paid as well.
+      try {
+        await onAccount("POST", account, `/invoices/${encodeURIComponent(failedInvoice)}/void`, new URLSearchParams(), v);
+      } catch (error) {
+        const again = await onAccount("GET", account, `/invoices/${encodeURIComponent(failedInvoice)}`, undefined, v).catch(() => null);
+        if (again?.status === "paid") {
+          // Paid in the seconds the month was: the month is refunded, never both kept.
+          console.error("a yearly invoice was paid while the monthly move was made; the month is refunded by the daily job", error);
+          if (!(await record(FALLBACK_BOTH_KEY, `${account}|${failedInvoice}|${latestId}`))) result.unrecorded = "both";
+        } else if (again?.status !== "void") {
+          console.error("voiding the yearly invoice after a monthly move failed; kept for the daily job", error);
+          if (!(await record(FALLBACK_VOID_KEY, `${account}|${failedInvoice}|${latestId}`))) result.unrecorded = "void";
+        }
       }
       return result;
     });

@@ -10,15 +10,16 @@
  * year is voided; declined, the month's invoice is voided and the year
  * retried as before; applied with the month not paid yet, the year waits;
  * a year paid meanwhile has the month refunded, never kept twice; someone
- * else's membership is refused. Third review (4 November 2026): the stand-in
- * refuses metadata on a move made only if paid, as Stripe does, so the
- * membership's record follows in a call of its own, and one not written is
- * left for the daily job; another change holding the lock answers "busy".
+ * else's membership is refused. Third review (4 November 2026): the
+ * membership's record travels in the move itself, which Stripe accepts only
+ * from API version 2026-05-27.dahlia (the stand-in refuses it below that, and
+ * keeps it pending until the month is paid, as Stripe does); another change
+ * holding the lock answers "busy".
  */
 import { FALLBACK_BOTH_KEY, FALLBACK_CHECK_KEY, FALLBACK_STRIPE_VERSION, FALLBACK_VOID_KEY, fallbackBody, fallbackLockKey, moveToMonthly } from "@/lib/yearly-fallback";
+import { LockBusyError } from "@/lib/redis-lock";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setProductYearly, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
-import { LockBusyError } from "@/lib/redis-lock";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -32,8 +33,16 @@ type Outcome = "paid" | "declined" | "voidFails" | "voidFailsPaid" | "applied-op
 let outcome: Outcome = "paid";
 /** What each read of the yearly invoice says, in order; "open" once they run out. */
 let invoiceReads: string[] = [];
-/** Whether writing the membership's own record (metadata alone) fails. */
-let recordFails = false;
+
+/**
+ * The first API version at which Stripe takes `metadata` with `payment_behavior=pending_if_incomplete`, keeps it in
+ * `pending_update.metadata` and merges it into the subscription only when the pending update applies; before it, the
+ * request was refused (docs.stripe.com/changelog/dahlia/2026-05-27/pending-subscription-update-metadata, read
+ * 4 November 2026). Versions compare by their date.
+ */
+const PENDING_METADATA_FROM = "2026-05-27.dahlia";
+const versionDate = (version: string | null) => (version ?? "").slice(0, 10);
+const metadataOf = (body: URLSearchParams) => Object.fromEntries([...body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v]));
 
 const subscription = () => ({
   id: "sub_Year00000001",
@@ -68,20 +77,19 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "POST" && path === "/prices") return json({ id: "price_Month00001" });
   if (method === "POST" && path === "/invoices/in_Year00000001") return json({ id: "in_Year00000001" });
   if (method === "POST" && path === "/subscriptions/sub_Year00000001") {
-    const metadata = [...body.keys()].some((k) => k.startsWith("metadata["));
-    // As Stripe: a change made only if paid takes only what a pending update may carry, metadata never among it.
-    if (metadata && body.get("payment_behavior") === "pending_if_incomplete") {
-      return json({ error: { type: "invalid_request_error", message: "Received unknown parameter with payment_behavior=pending_if_incomplete: metadata" } }, 400);
-    }
-    if (metadata && !body.has("items[0][price]")) {
-      return recordFails ? json({ error: { type: "api_error", message: "down" } }, 500) : json({ ...subscription(), metadata: { ...subscription().metadata, ...Object.fromEntries([...body].map(([k, v]) => [k.slice(9, -1), v])) } });
+    const metadata = metadataOf(body);
+    // As Stripe: metadata on a change made only if paid is refused before 2026-05-27.dahlia; from it, kept on the
+    // pending update and merged into the subscription only once the change applies.
+    if (Object.keys(metadata).length && body.get("payment_behavior") === "pending_if_incomplete" && versionDate(headers.get("Stripe-Version")) < versionDate(PENDING_METADATA_FROM)) {
+      return json({ error: { type: "invalid_request_error", message: "Received unknown parameter: metadata" } }, 400);
     }
     if (outcome === "timeout") throw new TypeError("fetch failed");
     if (outcome === "stripe-500") return json({ error: { type: "api_error", message: "down" } }, 500);
     if (outcome === "refused-400") return json({ error: { type: "invalid_request_error", message: "no" } }, 400);
-    if (outcome === "declined") return json({ id: "sub_Year00000001", pending_update: { expires_at: 1 }, latest_invoice: { id: "in_Month0000001", status: "open" } });
-    if (outcome === "applied-open") return json({ id: "sub_Year00000001", pending_update: null, latest_invoice: { id: "in_Month0000001", status: "open", amount_paid: 0, currency: "usd" } });
-    return json({ id: "sub_Year00000001", pending_update: null, latest_invoice: { id: "in_Month0000001", status: "paid", amount_paid: 2000, currency: "usd" } });
+    const kept = subscription().metadata;
+    if (outcome === "declined") return json({ id: "sub_Year00000001", metadata: kept, pending_update: { expires_at: 1, metadata }, latest_invoice: { id: "in_Month0000001", status: "open" } });
+    if (outcome === "applied-open") return json({ id: "sub_Year00000001", metadata: { ...kept, ...metadata }, pending_update: null, latest_invoice: { id: "in_Month0000001", status: "open", amount_paid: 0, currency: "usd" } });
+    return json({ id: "sub_Year00000001", metadata: { ...kept, ...metadata }, pending_update: null, latest_invoice: { id: "in_Month0000001", status: "paid", amount_paid: 2000, currency: "usd" } });
   }
   if (method === "POST" && path === "/invoices/in_Month0000001/void") return json({ id: "in_Month0000001", status: "void" });
   if (method === "POST" && path === "/invoices/in_Year00000001/void") {
@@ -95,7 +103,6 @@ const members = async (key: string) => ((await redisPipeline([["SMEMBERS", key]]
 const clear = async () => {
   calls.length = 0;
   invoiceReads = [];
-  recordFails = false;
   await redisPipeline([["DEL", FALLBACK_VOID_KEY, FALLBACK_CHECK_KEY, FALLBACK_BOTH_KEY]]);
 };
 
@@ -116,35 +123,34 @@ async function main(): Promise<void> {
   const ACCOUNT = "acct_1TestHarbor0001";
 
   part("The move, as Stripe is sent it");
-  const sent = fallbackBody("si_Year0000001", "price_Month00001");
+  const sent = fallbackBody("si_Year0000001", "price_Month00001", "in_Year00000001");
   is(
-    "the product's monthly price from now, no proration (the year was never paid), made only if the month is paid, and no metadata (Stripe refuses it there)",
-    [sent.get("items[0][price]"), sent.get("billing_cycle_anchor"), sent.get("proration_behavior"), sent.get("payment_behavior"), [...sent.keys()].filter((k) => k.startsWith("metadata["))],
-    ["price_Month00001", "now", "none", "pending_if_incomplete", []],
+    "the product's monthly price from now, no proration (the year was never paid), made only if the month is paid, with the membership's record in the same call",
+    [sent.get("items[0][price]"), sent.get("billing_cycle_anchor"), sent.get("proration_behavior"), sent.get("payment_behavior"), metadataOf(sent)],
+    ["price_Month00001", "now", "none", "pending_if_incomplete", { every: "month", monthly_from: "year", monthly_replaced: "in_Year00000001" }],
+  );
+  is(
+    "the pinned API version is one that takes metadata on a change made only if paid (2026-05-27.dahlia or later)",
+    [/^\d{4}-\d{2}-\d{2}\.[a-z]+$/.test(FALLBACK_STRIPE_VERSION), versionDate(FALLBACK_STRIPE_VERSION) >= versionDate(PENDING_METADATA_FROM)],
+    [true, true],
   );
 
   part("Paid");
   await clear();
   const paid = await move();
   is("moved: the month charged, from the member's own record", paid.ok ? [paid.paid, paid.charged, paid.offer.monthly, paid.offer.extraPerYear] : paid.reason, [true, 2000, 2000, 4000]);
-  is(
-    "in this order: the year stops retrying, the move, the year is voided, then the membership's record",
-    posts(),
-    ["/invoices/in_Year00000001:auto_advance=false", "/subscriptions/sub_Year00000001", "/invoices/in_Year00000001/void", "/subscriptions/sub_Year00000001"],
-  );
-  const written = calls.filter((c) => c.method === "POST" && c.path === "/subscriptions/sub_Year00000001").at(-1)!;
-  is(
-    "the record says it as a membership bought monthly, and which yearly invoice it replaced, in a call of its own",
-    [written.body.get("metadata[every]"), written.body.get("metadata[monthly_from]"), written.body.get("metadata[monthly_replaced]"), written.body.has("items[0][price]"), written.body.has("payment_behavior"), written.version],
-    ["month", "year", "in_Year00000001", false, false, FALLBACK_STRIPE_VERSION],
-  );
-  is("nothing left for the daily job", [paid.ok && paid.recordLeft, paid.ok && paid.unrecorded, await members(FALLBACK_CHECK_KEY)], [undefined, undefined, []]);
+  is("in this order: the year stops retrying, the move, then the year is voided", posts(), ["/invoices/in_Year00000001:auto_advance=false", "/subscriptions/sub_Year00000001", "/invoices/in_Year00000001/void"]);
   is(
     "read again from Stripe before anything, and the yearly invoice once more right before the move",
     calls.filter((c) => c.method === "GET").map((c) => c.path),
     ["/subscriptions/sub_Year00000001", "/invoices/in_Year00000001", "/invoices/in_Year00000001"],
   );
   const update = calls.find((c) => c.path === "/subscriptions/sub_Year00000001" && c.method === "POST");
+  is(
+    "every call of the move goes at the pinned version, the move itself with its record",
+    [calls.filter((c) => c.path !== "/prices").map((c) => c.version), metadataOf(update!.body).every],
+    [calls.filter((c) => c.path !== "/prices").map(() => FALLBACK_STRIPE_VERSION), "month"],
+  );
   is("at a pinned API version, never the account's default, as every call here", [update?.version, calls.filter((c) => c.path !== "/prices").every((c) => c.version === FALLBACK_STRIPE_VERSION)], [FALLBACK_STRIPE_VERSION, true]);
 
   part("Declined, then tried again with another card");
@@ -180,17 +186,6 @@ async function main(): Promise<void> {
   const refused = await move();
   is("refused for certain by Stripe: nothing was done, and the year is retried as before", [refused.ok ? "moved" : refused.reason, posts().at(-1), await members(FALLBACK_CHECK_KEY)], ["error", "/invoices/in_Year00000001:auto_advance=true", []]);
 
-  part("Moved, the membership's record not written");
-  outcome = "paid";
-  await clear();
-  recordFails = true;
-  const unwritten = await move();
-  is(
-    "still moved and the year voided; the record is left for the daily job, and the result says so",
-    [unwritten.ok && unwritten.paid, unwritten.ok && unwritten.recordLeft, unwritten.ok && unwritten.unrecorded, posts().includes("/invoices/in_Year00000001/void"), await members(FALLBACK_CHECK_KEY)],
-    [true, true, undefined, true, [`${ACCOUNT}|sub_Year00000001|in_Year00000001`]],
-  );
-
   part("Moved, the first month still being paid");
   outcome = "applied-open";
   await clear();
@@ -200,7 +195,6 @@ async function main(): Promise<void> {
     [open.ok && open.paid, posts().includes("/invoices/in_Year00000001/void"), posts().includes("/invoices/in_Year00000001:auto_advance=true"), posts().includes("/invoices/in_Month0000001/void"), await members(FALLBACK_CHECK_KEY)],
     [false, false, false, false, [`${ACCOUNT}|sub_Year00000001|in_Year00000001`]],
   );
-  is("the move applied, so the membership's record is written all the same", [open.ok && open.recordLeft, posts().at(-1)], [undefined, "/subscriptions/sub_Year00000001"]);
 
   part("Voiding the year failed after the month was paid");
   outcome = "voidFails";
@@ -239,7 +233,7 @@ async function main(): Promise<void> {
   const held = await move();
   await redisPipeline([["DEL", fallbackLockKey("sub_Year00000001")]]);
   is("another change to the membership holding the lock: busy, never an error, and nothing sent", [held.ok ? "moved" : held.reason, calls.length], ["busy", 0]);
-  is("the lock's error carries its own name, for a caller that tells it by name (lib/paypal-payouts.ts)", [new LockBusyError().name, new LockBusyError() instanceof Error], ["LockBusyError", true]);
+  is("the lock's error carries its own name as well", [new LockBusyError().name, new LockBusyError() instanceof Error], ["LockBusyError", true]);
   is("a malformed id: refused without a call", [(await moveToMonthly(store, "cus_Dana000001", "sub_x", "in_Year00000001")).ok, (await moveToMonthly(store, "cus_Dana000001", "sub_Year00000001", "nope")).ok], [false, false]);
 }
 

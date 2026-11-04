@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   is("again: from its own copy", [(await tool(s.key, "get_buyers", { days: 7 })).result?.isError, stripe.length], [false, 0]);
   is("taking little", (await used(s)) - before <= 3, true);
 
-  part("A kept copy cannot be forged, nor read for another store, nor past its hour");
+  part("A kept copy whose fields do not match is not used: another store, variant, Stripe account or currency, or past its hour");
   {
     const mine = await s.store();
     const raw = String((await redis.pipeline([["GET", keptNumbersKey(mine.statsId!, "plain")]]))[0]);
@@ -125,7 +125,9 @@ async function main(): Promise<void> {
     is("its own copy opens", openKeptNumbers(mine, "plain", raw) !== null, true);
     is("another store's copy does not open for this one", openKeptNumbers(theirs, "plain", raw), null);
     is("nor as the other variant", openKeptNumbers(mine, "full", raw), null);
-    is("a changed number does not open", openKeptNumbers(mine, "plain", raw.replace(/"visitors":\d+/, '"visitors":999999')), null);
+    is("a copy whose first line names another store does not open", openKeptNumbers(mine, "plain", raw.replace(mine.statsId!, theirs.statsId!)), null);
+    is("nor one in another currency", openKeptNumbers({ ...mine, currency: mine.currency === "eur" ? "usd" : "eur" }, "plain", raw), null);
+    is("nor one without its first line", openKeptNumbers(mine, "plain", raw.slice(raw.indexOf("\n") + 1)), null);
     is("an hour later it does not open", openKeptNumbers(mine, "plain", raw, Date.now() + 3_600_001), null);
     is("under another Stripe account it does not open", openKeptNumbers({ ...mine, stripeAccountId: "acct_1Someone00000" }, "plain", raw), null);
     // A copy put in the other store's place by anything but this code is read anew, and paid for as such.

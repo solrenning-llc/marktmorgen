@@ -76,6 +76,7 @@ import { MAX_PRODUCTS, MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalo
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { MAX_OPTION_LABEL_LENGTH } from "@/lib/product-option";
 import { readProduct } from "@/lib/catalog";
+import { addKeys, keyOfSale, setRevoked } from "@/lib/licence-keys";
 import { MAX_NAME_LENGTH } from "@/lib/store-field-rules";
 import { MAX_ROOM_LENGTH, readSetup } from "@/lib/call-setup";
 import { MAX_GROUPS, MAX_GROUP_LENGTH, MAX_PREFIX_LENGTH } from "@/lib/key-setup";
@@ -98,6 +99,7 @@ import {
   setProductCall,
   setProductCourse,
   setProductKeys,
+  setProductPodcast,
   setProductLink,
   addOption,
   setLanguage,
@@ -183,8 +185,14 @@ beforeEach(() => {
 /** The longest store name, of the character that costs the most in the HTML and in the payload together. */
 const COSTLY_NAME = "&".repeat(MAX_NAME_LENGTH);
 
-async function shop(tier: "creator" | "scale" = "scale", name = "Bounds Studio"): Promise<Store> {
-  await claimHandle(OWNER, "bounds", name, "");
+/** The store's handle in the test running: "bounds", or the longest the handle rule takes for the worst cases. */
+let HANDLE = "bounds";
+/** The longest handle HANDLE_PATTERN takes (24 characters). */
+const LONG_HANDLE = "bounds0123456789abcdefgh";
+
+async function shop(tier: "creator" | "scale" = "scale", name = "Bounds Studio", handle = "bounds"): Promise<Store> {
+  HANDLE = handle;
+  await claimHandle(OWNER, handle, name, "");
   await ensureStatsId(OWNER);
   await ensureStoreId(OWNER);
   await setStripeAccount(OWNER, ACCOUNT, true);
@@ -196,7 +204,8 @@ async function shop(tier: "creator" | "scale" = "scale", name = "Bounds Studio")
 function paid(index: number, ago: number, metadata: Record<string, string>, over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     object: "checkout.session",
-    id: `cs_test_Bounds${String(index).padStart(12, "0")}`,
+    // As long as lib/buyer-orders.ts (SESSION_ID_PATTERN) takes a checkout's id: 208 characters.
+    id: `cs_test_${`Bounds${String(index).padStart(12, "0")}`.padEnd(200, "X")}`,
     status: "complete",
     payment_status: "paid",
     mode: "payment",
@@ -206,7 +215,7 @@ function paid(index: number, ago: number, metadata: Record<string, string>, over
     customer: `cus_Bounds${String(index % 10).padStart(8, "0")}`,
     customer_details: { email: BUYER },
     payment_intent: { id: `pi_Bounds${index}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
-    metadata: { store: "bounds", ...metadata },
+    metadata: { store: HANDLE, ...metadata },
     ...over,
   };
 }
@@ -224,22 +233,74 @@ function plan(index: number, ago: number, product: string): Record<string, unkno
 const CLIENT = { OrdersBundle, OlderPurchases, OrdersKey, OrdersSharedProvider, LicenceKeyBox, EmailField, Link };
 clientComponents(CLIENT);
 
+// The stand-in database has no LPOP, which hands out a key from a creator's own list (lib/licence-keys.ts, keyForSale):
+// here it is LINDEX then LTRIM, one command after the other, as Redis does it in one.
+{
+  const pipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!commands.some((command) => command[0] === "LPOP")) return pipeline(commands);
+    const answers: unknown[] = [];
+    for (const command of commands) {
+      if (command[0] !== "LPOP") {
+        answers.push(...(await pipeline([command])));
+        continue;
+      }
+      const [first] = await pipeline([["LINDEX", command[1], 0]]);
+      if (first !== null && first !== undefined) await pipeline([["LTRIM", command[1], 1, -1]]);
+      answers.push(first ?? null);
+    }
+    return answers;
+  }) as typeof redis.pipeline;
+}
+
+/** Takes back every key given for these products on any of the buyer's checkouts (lib/licence-keys.ts, setRevoked): said with the store's name, struck through. */
+async function takeBackKeys(ids: string[]): Promise<number> {
+  const store = (await storeForEmail(OWNER))!;
+  let taken = 0;
+  for (const id of ids) {
+    const product = (await readProduct(store, id))!;
+    for (const checkout of checkouts) {
+      const known = await keyOfSale(store, product, checkout.id as string);
+      if (known?.state === "issued" && (await setRevoked(store, product, known.key, true))) taken += 1;
+    }
+  }
+  return taken;
+}
+
+/** The shapes a bought product's card can take at its richest: each sold at a price option of the longest label, whose own link is what it adds. */
+type CardShape = "course" | "podcast" | "plain";
+const CARD_SHAPES: CardShape[] = ["course", "podcast", "plain"];
+
 /**
- * Makes a product the richest card the list draws: a course (its button), sold at a price option with the longest label
- * (said on the card, and again in "also includes") whose own link is what that price adds. Returns the option's id, which
- * the checkout names.
+ * A license key from the creator's own list at its longest (MAX_KEY_LENGTH), of the character that costs the most in the
+ * HTML and in the payload (&), each its own.
  */
-async function richCourse(id: string, link: string): Promise<string> {
-  assert.ok((await setProductCourse(OWNER, id, { id: createHash("sha256").update(id).digest("hex").slice(0, 32), lessons: 1 })).ok);
+const costlyKey = (index: number) => `${"&".repeat(MAX_KEY_LENGTH - String(index).length)}${index}`;
+
+/** Hands a product out with a key from the creator's own list (a pool), and puts that key, at its longest, in the pool. */
+async function listKey(id: string, index: number): Promise<void> {
+  assert.ok((await setProductKeys(OWNER, id, { source: "pool", prefix: "", groups: 4, groupLength: 4, lowAt: 0 })).ok);
+  const store = (await storeForEmail(OWNER))!;
+  const added = await addKeys(store, (await readProduct(store, id))!, [costlyKey(index)]);
+  assert.equal(added.added, 1);
+}
+
+/**
+ * Makes a product the richest card of a shape: a course (its button, and "also in"), a private podcast (its feed's button,
+ * "also in" and a key) or a plain product (a key), each sold at a price option with the longest label (said on the card)
+ * whose own link is what that price adds. Returns the option's id, which the checkout names.
+ */
+async function richMain(id: string, index: number, link: string, shape: CardShape = "course"): Promise<string> {
+  const hex = createHash("sha256").update(id).digest("hex").slice(0, 32);
+  if (shape === "course") assert.ok((await setProductCourse(OWNER, id, { id: hex, lessons: 1 })).ok);
+  if (shape === "podcast") assert.ok((await setProductPodcast(OWNER, id, { id: hex, episodes: 1 })).ok);
   assert.ok((await addOption(OWNER, id, "&".repeat(MAX_OPTION_LABEL_LENGTH), "10")).ok);
   const option = (await readProduct((await storeForEmail(OWNER))!, id))!.options[0].id;
   const linked = await setProductLink(OWNER, option, link);
   assert.ok(linked.ok, JSON.stringify(linked));
+  if (shape !== "course") await listKey(id, index);
   return option;
 }
-
-/** A number of bytes as it is read in a log line. */
-const size4 = (bytes: number) => bytes.toLocaleString("en-US");
 
 /** The token of the last link a test opened the list with. */
 let token = "";
@@ -279,7 +340,7 @@ function costlyLink(index: number): string {
 const listed = (html: string) => [...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><p class="font-semibold">([^<]+)<\/p>/g)].map((m) => m[1]);
 
 /** The next batch of older purchases, from where the cursor says (a checkout, lib/buyer-orders.ts olderCursor), as the button asks for it. */
-const older = (from: string, by = token) => olderRoute(new NextRequest(`${ORIGIN}/api/store/orders/older?${new URLSearchParams({ handle: "bounds", token: by, older: from })}`));
+const older = (from: string, by = token) => olderRoute(new NextRequest(`${ORIGIN}/api/store/orders/older?${new URLSearchParams({ handle: HANDLE, token: by, older: from })}`));
 
 test("a hundred purchases paid in installments: at most ORDERS_STRIPE_CALLS calls to Stripe, the newest checked, the rest not checked yet with a button that checks them, batch by batch, to the last", async () => {
   const store = await shop();
@@ -349,11 +410,11 @@ test("checking older purchases pays before it reads and refuses without reading:
 });
 
 /** A store whose buyer has twice as many purchases paid in installments as an opening checks, each of four products with a bundle each, every text at its longest of `char`. */
-async function fullPlans(char: string): Promise<{ checks: number; link: (i: number) => string }> {
-  // With &, the costliest in the HTML and the payload: the longest store name, the longest host said, and each bought
-  // product the richest card (richCourse).
+async function fullPlans(char: string, shape: CardShape = "course"): Promise<{ checks: number; link: (i: number) => string; ids: string[] }> {
+  // With &, the costliest in the HTML and the payload: the longest store name and handle, the longest host said, each
+  // bought product the richest card of its shape (richMain) and every key from the creator's list at its longest.
   const rich = char === "&";
-  await shop("scale", rich ? COSTLY_NAME : "Bounds Studio");
+  await shop("scale", rich ? COSTLY_NAME : "Bounds Studio", rich ? LONG_HANDLE : "bounds");
   const link = (i: number) => {
     const head = `https://${rich ? COSTLY_HOST : "example.test"}/${i}/?`;
     const parsed = readLink(`${head}${char.repeat(MAX_LINK_LENGTH - head.length)}`);
@@ -364,14 +425,17 @@ async function fullPlans(char: string): Promise<{ checks: number; link: (i: numb
   const drafts = await addDraftProducts(OWNER, Array.from({ length: checks * 2 * 4 }, (_, i) => ({ title: `${i}`.padEnd(MAX_TITLE_LENGTH, rich ? "&" : '"'), summary: "", priceCents: 1000, link: rich && i % 4 === 0 ? null : link(i) })));
   assert.ok(drafts.ok);
   const options = new Map<string, string>();
-  if (rich) for (let i = 0; i < checks * 2; i++) options.set(drafts.ids[i * 4], await richCourse(drafts.ids[i * 4], link(i * 4)));
-  for (const [i, id] of drafts.ids.entries()) if (!rich || i % 4) assert.ok((await setProductKeys(OWNER, id, { source: "generated", prefix: "K".repeat(MAX_PREFIX_LENGTH), groups: MAX_GROUPS, groupLength: MAX_GROUP_LENGTH, lowAt: 0 })).ok);
+  if (rich) for (let i = 0; i < checks * 2; i++) options.set(drafts.ids[i * 4], await richMain(drafts.ids[i * 4], i * 4, link(i * 4), shape));
+  for (const [i, id] of drafts.ids.entries()) {
+    if (rich && i % 4) await listKey(id, i);
+    else if (!rich) assert.ok((await setProductKeys(OWNER, id, { source: "generated", prefix: "K".repeat(MAX_PREFIX_LENGTH), groups: MAX_GROUPS, groupLength: MAX_GROUP_LENGTH, lowAt: 0 })).ok);
+  }
   const ids = drafts.ids;
   checkouts = Array.from({ length: checks * 2 }, (_, i) => ({
     ...plan(i, 60 * (i + 1), ids[i * 4]),
-    metadata: { store: "bounds", kind: "plan", product: ids[i * 4], ...(rich ? { option: options.get(ids[i * 4])! } : {}), bump: ids[i * 4 + 1], bump2: ids[i * 4 + 2], bump3: ids[i * 4 + 3], ...bundleMeta("bundle", ids.slice(0, MAX_BUNDLE_ITEMS)), ...Object.fromEntries(BUMP_KEYS.flatMap((key) => Object.entries(bundleMeta(`${key}_bundle`, ids.slice(0, MAX_BUNDLE_ITEMS))))) },
+    metadata: { store: HANDLE, kind: "plan", product: ids[i * 4], ...(rich ? { option: options.get(ids[i * 4])! } : {}), bump: ids[i * 4 + 1], bump2: ids[i * 4 + 2], bump3: ids[i * 4 + 3], ...bundleMeta("bundle", ids.slice(0, MAX_BUNDLE_ITEMS)), ...Object.fromEntries(BUMP_KEYS.flatMap((key) => Object.entries(bundleMeta(`${key}_bundle`, ids.slice(0, MAX_BUNDLE_ITEMS))))) },
   }));
-  return { checks, link };
+  return { checks, link, ids };
 }
 
 test("a batch of older purchases at every limit stays under ORDERS_OLDER_BYTES, as the button's answer and as the page drawn without JavaScript", async () => {
@@ -385,25 +449,32 @@ test("a batch of older purchases at every limit stays under ORDERS_OLDER_BYTES, 
   assert.ok(body.ok && body.cards.length === ORDERS_OLDER_MOST && body.older === null, "a whole batch, the last one");
   assert.ok(body.ok && body.cards.every((card) => card.keys.length === 4 && card.bundles.length === 4 && card.main?.href === link(Number(card.title.replace(/\D+$/, "")))));
   assert.ok(Buffer.byteLength(text) <= ORDERS_OLDER_BYTES, `${Buffer.byteLength(text)} bytes`);
-  // The page without JavaScript: & costs the most there, in the HTML and in the payload.
-  redis.clear();
-  const costly = await fullPlans("&");
-  await open((await storeForEmail(OWNER))!);
-  const listKeys = ORDERS_OLDER_MOST * 4 * MAX_KEY_LENGTH * 12;
+  // The page without JavaScript: & costs the most there, in the HTML and in the payload; every shape of card, each key from
+  // the creator's list as given and as taken back, in every language.
   const sizes: string[] = [];
-  let most = 0;
-  for (const language of LANGUAGE_CODES) {
-    assert.ok(await setLanguage(OWNER, language));
-    const tree = await pageTree((await storeForEmail(OWNER))!, { token, older: checkouts[costly.checks].id as string });
-    const html = renderToStaticMarkup(tree);
-    assert.equal((html.match(/<li class="rounded-2xl p-5"/g) ?? []).length, ORDERS_OLDER_MOST, language);
-    assert.equal(html.split(ordersWords(language).alsoIn("&".repeat(MAX_OPTION_LABEL_LENGTH)).replaceAll("&", "&amp;")).length - 1, ORDERS_OLDER_MOST, `${language}: each a course at a price option`);
-    const size = await responseSize(tree);
-    assert.ok(size.total + listKeys <= ORDERS_OLDER_BYTES, `${language}: ${JSON.stringify(size)} + ${listKeys}`);
-    most = Math.max(most, size.total + listKeys);
-    sizes.push(`${language} ${size.total + listKeys}`);
+  let most = { bytes: 0, at: "" };
+  for (const shape of CARD_SHAPES) {
+    redis.clear();
+    const costly = await fullPlans("&", shape);
+    await open((await storeForEmail(OWNER))!);
+    for (const keys of ["given", "taken back"] as const) {
+      if (keys === "taken back") assert.ok((await takeBackKeys(costly.ids)) >= ORDERS_OLDER_MOST * 3, "the batch's keys taken back");
+      for (const language of LANGUAGE_CODES) {
+        assert.ok(await setLanguage(OWNER, language));
+        const tree = await pageTree((await storeForEmail(OWNER))!, { token, older: checkouts[costly.checks].id as string });
+        const html = renderToStaticMarkup(tree);
+        const at = `${shape}, keys ${keys}, ${language}`;
+        assert.equal((html.match(/<li class="rounded-2xl p-5"/g) ?? []).length, ORDERS_OLDER_MOST, at);
+        assert.equal(html.split(ordersWords(language).alsoIn("&".repeat(MAX_OPTION_LABEL_LENGTH)).replaceAll("&", "&amp;")).length - 1, shape === "plain" ? 0 : ORDERS_OLDER_MOST, `${at}: a course or podcast at a price option`);
+        assert.equal((html.match(/<code/g) ?? []).length, ORDERS_OLDER_MOST * (shape === "course" ? 3 : 4), `${at}: with its keys`);
+        const size = await responseSize(tree);
+        assert.ok(size.total <= ORDERS_OLDER_BYTES, `${at}: ${JSON.stringify(size)}`);
+        if (size.total > most.bytes) most = { bytes: size.total, at };
+        sizes.push(`${at} ${size.total}`);
+      }
+    }
   }
-  console.log(`a batch of ${ORDERS_OLDER_MOST} older purchases at their longest: ${Buffer.byteLength(text)} bytes as the button's answer; as the page without JavaScript, with the shell and ${listKeys} for keys from a creator's list: ${sizes.join("; ")}; the most ${most}, under ${ORDERS_OLDER_BYTES}`);
+  console.log(`a batch of ${ORDERS_OLDER_MOST} older purchases at their longest: ${Buffer.byteLength(text)} bytes as the button's answer; as the page without JavaScript, with the shell: ${sizes.join("; ")}; the most ${most.bytes} (${most.at}), under ${ORDERS_OLDER_BYTES}`);
 });
 
 test("a batch shows ORDERS_OLDER_MOST purchases at the most, even when each check is one call to Stripe", async () => {
@@ -548,19 +619,18 @@ test("forty purchases of four twenty-product bundles: each bundle is a button, n
   console.log(`forty purchases of four full bundles: ${size.html} bytes of HTML, ${size.payload} of payload, ${size.total} with the shell (14,191,912 of HTML alone before)`);
 });
 
-test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES, in every language", async () => {
-  await shop("scale", COSTLY_NAME);
+/** A store whose buyer has everything at its longest, the bought products of one card shape (CardShape); the products, by index. */
+async function everyLimit(shape: CardShape): Promise<string[]> {
+  redis.clear();
+  await shop("scale", COSTLY_NAME, LONG_HANDLE);
   // Every delivery a link of 2,000 characters of its own made of the character that costs the most in the HTML and in the
   // payload together (&), every title at its longest of it.
   const drafts = await addDraftProducts(OWNER, Array.from({ length: MAX_LISTED * 4 }, (_, i) => ({ title: `${i}`.padEnd(MAX_TITLE_LENGTH, "&"), summary: "&".repeat(MAX_SUMMARY_LENGTH), priceCents: 1000, link: i % 4 === 0 ? null : costlyLink(i) })));
   assert.ok(drafts.ok);
-  // Each bought product the richest card: a course at a price option whose link is what it adds.
   const options = new Map<string, string>();
-  for (let i = 0; i < MAX_LISTED; i++) options.set(drafts.ids[i * 4], await richCourse(drafts.ids[i * 4], costlyLink(i * 4)));
-  // Each ticked one hands out a license key of the longest made shape. A key from the creator's own list may be longer and
-  // escaped longer (MAX_KEY_LENGTH characters at six bytes); the stand-in database cannot hand one out, so its most is
-  // added below, for the bought ones too.
-  for (const [i, id] of drafts.ids.entries()) if (i % 4) assert.ok((await setProductKeys(OWNER, id, { source: "generated", prefix: "K".repeat(MAX_PREFIX_LENGTH), groups: MAX_GROUPS, groupLength: MAX_GROUP_LENGTH, lowAt: 0 })).ok);
+  for (let i = 0; i < MAX_LISTED; i++) options.set(drafts.ids[i * 4], await richMain(drafts.ids[i * 4], i * 4, costlyLink(i * 4), shape));
+  // Each ticked one hands out a key from the creator's own list at its longest.
+  for (const [i, id] of drafts.ids.entries()) if (i % 4) await listKey(id, i);
   // Forty calls still to come, each with the creator's own room link at its longest.
   const call = await addProduct(OWNER, "&".repeat(MAX_TITLE_LENGTH), "", "45", null);
   assert.ok(call.ok);
@@ -603,47 +673,72 @@ test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES, i
       return paid(1000 + i, 30, { kind: "call", product: call.product.id, title: "call", start: String(start), end: String(start + 1_800_000), tz: "UTC" });
     }),
   ];
-  // Every key drawn from a creator's list at its longest, on top of the key drawn here: six bytes a character at the most in
-  // the HTML and six in the payload.
-  const listKeys = MAX_LISTED * 4 * MAX_KEY_LENGTH * 12;
+  return ids;
+}
+
+test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES, whatever the shape of its cards and its keys, in every language", async () => {
   const sizes: string[] = [];
-  let most = 0;
-  for (const language of LANGUAGE_CODES) {
-    assert.ok(await setLanguage(OWNER, language));
-    const { html, size } = await openSize((await storeForEmail(OWNER))!);
-    const words = ordersWords(language);
-    const count = (text: string) => html.split(text).length - 1;
-    // As React writes text and attributes into the HTML.
-    const escaped = (text: string) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#x27;");
-    assert.equal(count(`>${escaped(words.keptAt(COSTLY_HOST))}</span>`), MAX_LISTED * 4, `${language}: forty purchases, each with three checked at checkout, each named by its host`);
-    // An address too long to show is sent once, in its button's address: never again as text, cut or whole, and the button
-    // says what it opens by name (WCAG 2.4.9; C3-90).
-    for (let i = 0; i < MAX_LISTED * 4; i++) assert.equal(count(`href="${escaped(costlyLink(i))}"`), 1, `${language}: link ${i}`);
-    assert.equal(count(`>${escaped(words.openTitle(`1`.padEnd(MAX_TITLE_LENGTH, "&")))}<`), 1, `${language}: the button named by the product it opens`);
-    assert.equal(count(escaped(words.alsoIn("&".repeat(MAX_OPTION_LABEL_LENGTH)))), MAX_LISTED, `${language}: each a course at a price option`);
-    assert.equal(count('<input type="hidden" name="bundle"'), MAX_LISTED * 4, `${language}: and a bundle under each`);
-    assert.equal(count(`>${escaped(words.addToCalendar)}<`), MAX_LISTED, `${language}: forty calls`);
-    assert.ok(count("<code") >= MAX_LISTED * 3, `${language}: with their license keys`);
-    if (language === "en") assert.ok(count("Read and sign") > 0 && count("payment request") > 0, "and what waits on the buyer");
-    assert.ok(size.total + listKeys <= ORDERS_PAGE_BYTES, `${language}: ${JSON.stringify(size)} + ${listKeys} bytes`);
-    most = Math.max(most, size.total + listKeys);
-    sizes.push(`${language} ${size.total + listKeys} (HTML ${size.html}, payload ${size.payload})`);
+  let most = { bytes: 0, at: "" };
+  for (const shape of CARD_SHAPES) {
+    const ids = await everyLimit(shape);
+    // Each key from the creator's list as given, and then as taken back (said with the store's name, struck through).
+    for (const keys of ["given", "taken back"] as const) {
+      if (keys === "taken back") {
+        const store = (await storeForEmail(OWNER))!;
+        for (const [i, id] of ids.entries()) {
+          if (i % 4 === 0 && shape === "course") continue;
+          const product = (await readProduct(store, id))!;
+          const sale = checkouts[Math.floor(i / 4)].id as string;
+          const known = await keyOfSale(store, product, sale);
+          assert.ok(known?.state === "issued", `key ${i}`);
+          if (known?.state === "issued") assert.ok(await setRevoked(store, product, known.key, true));
+        }
+      }
+      for (const language of LANGUAGE_CODES) {
+        assert.ok(await setLanguage(OWNER, language));
+        const { html, size } = await openSize((await storeForEmail(OWNER))!);
+        const words = ordersWords(language);
+        const count = (text: string) => html.split(text).length - 1;
+        // As React writes text and attributes into the HTML.
+        const escaped = (text: string) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#x27;");
+        const at = `${shape}, keys ${keys}, ${language}`;
+        assert.equal(count(`>${escaped(words.keptAt(COSTLY_HOST))}</span>`), MAX_LISTED * 4, `${at}: forty purchases, each with three checked at checkout, each named by its host`);
+        // An address too long to show is sent once, in its button's address: never again as text, cut or whole, and the
+        // button says what it opens by name (WCAG 2.4.9; C3-90).
+        for (let i = 0; i < MAX_LISTED * 4; i++) assert.equal(count(`href="${escaped(costlyLink(i))}"`), 1, `${at}: link ${i}`);
+        assert.equal(count(`>${escaped(words.openTitle(`1`.padEnd(MAX_TITLE_LENGTH, "&")))}<`), 1, `${at}: the button named by the product it opens`);
+        assert.equal(count(escaped(words.alsoIn("&".repeat(MAX_OPTION_LABEL_LENGTH)))), shape === "plain" ? 0 : MAX_LISTED, `${at}: a course or podcast at a price option`);
+        assert.equal(count('<input type="hidden" name="bundle"'), MAX_LISTED * 4, `${at}: and a bundle under each`);
+        assert.equal(count(`>${escaped(words.addToCalendar)}<`), MAX_LISTED, `${at}: forty calls`);
+        // Each key from the list whole, once as text, never split into a group by hyphen (components/licence-key-box.tsx).
+        assert.equal(count(`>${escaped(costlyKey(1))}</code>`), 1, `${at}: a key from the list, whole`);
+        assert.equal(count("<code"), MAX_LISTED * (shape === "course" ? 3 : 4), `${at}: with their license keys`);
+        if (keys === "taken back") assert.equal(count(escaped(words.keyRevoked(COSTLY_NAME))), MAX_LISTED * (shape === "course" ? 3 : 4), at);
+        if (language === "en" && keys === "given") assert.ok(count("Read and sign") > 0 && count("payment request") > 0, "and what waits on the buyer");
+        assert.ok(size.total <= ORDERS_PAGE_BYTES, `${at}: ${JSON.stringify(size)}`);
+        if (size.total > most.bytes) most = { bytes: size.total, at };
+        sizes.push(`${at} ${size.total}`);
+      }
+    }
   }
-  console.log(`a page at every limit, as sent, with ${size4(listKeys)} for keys from a creator's list and the shell: ${sizes.join("; ")}; the most ${most}, under ${ORDERS_PAGE_BYTES} (HTML alone measured 2,504,686 before C3-83)`);
+  console.log(`a page at every limit, as sent, with the shell: ${sizes.join("; ")}; the most ${most.bytes} (${most.at}), under ${ORDERS_PAGE_BYTES} (HTML alone measured 2,504,686 before C3-83)`);
 });
 
 /** A store selling one bundle of twenty products, each a 2,000-character link with a key, bought by the buyer, and a link to their list. */
 async function oneBundle(char = "\\"): Promise<{ store: Store; token: string; ids: string[]; link: string; folder: string; window: string }> {
   // With &, the costliest in the HTML and the payload: the longest store name and the longest host said.
   const rich = char === "&";
-  await shop("scale", rich ? COSTLY_NAME : "Bounds Studio");
+  await shop("scale", rich ? COSTLY_NAME : "Bounds Studio", rich ? LONG_HANDLE : "bounds");
   const head = `https://${rich ? COSTLY_HOST : "example.test"}/?`;
   const parsed = readLink(`${head}${char.repeat(MAX_LINK_LENGTH - head.length)}`);
   assert.ok(parsed.ok);
   const drafts = await addDraftProducts(OWNER, Array.from({ length: 1 + 2 * MAX_BUNDLE_ITEMS }, (_, i) => ({ title: `${i}`.padEnd(MAX_TITLE_LENGTH, char === "&" ? "&" : '"'), summary: "", priceCents: 1000, link: i === 0 ? null : `${parsed.url.slice(0, -4)}${String(i).padStart(4, "0")}` })));
   assert.ok(drafts.ok);
   const ids = drafts.ids;
-  for (const id of ids.slice(1)) assert.ok((await setProductKeys(OWNER, id, { source: "generated", prefix: "K".repeat(MAX_PREFIX_LENGTH), groups: MAX_GROUPS, groupLength: MAX_GROUP_LENGTH, lowAt: 0 })).ok);
+  for (const [i, id] of ids.slice(1).entries()) {
+    if (rich) await listKey(id, i + 1);
+    else assert.ok((await setProductKeys(OWNER, id, { source: "generated", prefix: "K".repeat(MAX_PREFIX_LENGTH), groups: MAX_GROUPS, groupLength: MAX_GROUP_LENGTH, lowAt: 0 })).ok);
+  }
   assert.ok((await setProductBundle(OWNER, ids[0], ids.slice(1, 1 + MAX_BUNDLE_ITEMS))).ok);
   checkouts = [paid(0, 60, { product: ids[0], ...bundleMeta("bundle", ids.slice(1, 1 + MAX_BUNDLE_ITEMS)), bump: ids[1 + MAX_BUNDLE_ITEMS], ...bundleMeta("bump_bundle", ids.slice(2 + MAX_BUNDLE_ITEMS)) })];
   const store = (await storeForEmail(OWNER))!;
@@ -651,7 +746,7 @@ async function oneBundle(char = "\\"): Promise<{ store: Store; token: string; id
   return { store, token: new URL(link).searchParams.get("token")!, ids, link: parsed.url, folder: await storeFolder(OWNER), window: allowanceWindow(store)!.id };
 }
 
-const ask = (token: string, ref: string, item: string) => bundleRoute(new NextRequest(`${ORIGIN}/api/store/orders/bundle?${new URLSearchParams({ handle: "bounds", token, ref, item })}`));
+const ask = (token: string, ref: string, item: string) => bundleRoute(new NextRequest(`${ORIGIN}/api/store/orders/bundle?${new URLSearchParams({ handle: HANDLE, token, ref, item })}`));
 
 test("showing a bundle's products reads that bundle alone, with keys, inside ORDERS_BUNDLE_BYTES, taking ORDERS_BUNDLE_UNITS before anything is read", async () => {
   const { token, ids, link, folder, window } = await oneBundle();
@@ -828,7 +923,7 @@ test("payments taken in one click wait with what they followed: one after a chec
 });
 
 test("without JavaScript, a bundle's button shows its products on the page itself, paid for as the button's request is, refusing the same way", async () => {
-  const { store, token: link, folder, window } = await oneBundle("&");
+  const { store, token: link, folder, window, ids } = await oneBundle("&");
   token = link;
   const ref = checkouts[0].id as string;
   const before = await requestsIn(folder, window);
@@ -845,19 +940,24 @@ test("without JavaScript, a bundle's button shows its products on the page itsel
   assert.equal(html.split(`>${words.keptAt(host)}</p>`).length - 1, MAX_BUNDLE_ITEMS, "each long address named by its host alone (C3-90)");
   assert.ok(!html.includes(`${words.keptAt(host)}: `), "never as text");
   assert.equal((html.match(/>Open 1&amp;/g) ?? []).length, 1, "each button named by the product it opens (WCAG 2.4.9)");
-  assert.ok(html.includes(`href="/@bounds/orders?token=${token}"`) && html.includes(words.backToList), "and the way back to the list");
-  const listKeys = MAX_BUNDLE_ITEMS * MAX_KEY_LENGTH * 12;
+  assert.ok(html.includes(`href="/@${HANDLE}/orders?token=${token}"`) && html.includes(words.backToList), "and the way back to the list");
+  // Each key from the creator's list at its longest, whole (components/licence-key-box.tsx), as given and as taken back.
+  assert.ok(html.includes(`>${costlyKey(1).replaceAll("&", "&amp;")}</code>`));
   const sizes: string[] = [];
-  let most = 0;
-  for (const language of LANGUAGE_CODES) {
-    assert.ok(await setLanguage(OWNER, language));
-    const size = await responseSize(await pageTree((await storeForEmail(OWNER))!, { token, bundle: `${ref}:main` }));
-    assert.ok(size.total + listKeys <= ORDERS_BUNDLE_BYTES, `${language}: ${JSON.stringify(size)} + ${listKeys}`);
-    most = Math.max(most, size.total + listKeys);
-    sizes.push(`${language} ${size.total + listKeys}`);
+  let most = { bytes: 0, at: "" };
+  for (const keys of ["given", "taken back"] as const) {
+    if (keys === "taken back") assert.equal(await takeBackKeys(ids.slice(1, 1 + MAX_BUNDLE_ITEMS)), MAX_BUNDLE_ITEMS);
+    for (const language of LANGUAGE_CODES) {
+      assert.ok(await setLanguage(OWNER, language));
+      const size = await responseSize(await pageTree((await storeForEmail(OWNER))!, { token, bundle: `${ref}:main` }));
+      const at = `keys ${keys}, ${language}`;
+      assert.ok(size.total <= ORDERS_BUNDLE_BYTES, `${at}: ${JSON.stringify(size)}`);
+      if (size.total > most.bytes) most = { bytes: size.total, at };
+      sizes.push(`${at} ${size.total}`);
+    }
   }
   assert.ok(await setLanguage(OWNER, "en"));
-  console.log(`a bundle of twenty without JavaScript, with the shell and ${listKeys} for keys: ${sizes.join("; ")}; the most ${most}, under ${ORDERS_BUNDLE_BYTES}`);
+  console.log(`a bundle of twenty without JavaScript, with the shell: ${sizes.join("; ")}; the most ${most.bytes} (${most.at}), under ${ORDERS_BUNDLE_BYTES}`);
   // No room: said, and nothing read.
   await redis.pipeline([["SET", `nl:traffic:r:${folder}:${window}`, String(requestLimitFor(store) - 1)]]);
   calls = [];

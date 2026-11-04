@@ -18,13 +18,16 @@
  * above what they stand for, with a tenth to spare and no more.
  *
  * Measured on 4 November 2026 (C3-83, C3-90, C3-93, C3-97), in each of the 7
- * languages with every field at its longest of the costliest character: the
- * most, in French, is 5,831,910 bytes as sent (HTML 2,358,336, RSC payload
- * 2,871,574, keys from a creator's list 192,000, and the shell measured on a
- * local production build, at most 401,498, taken as 410,000), held under
- * ORDERS_PAGE_BYTES (5,850,000). An opening then costs $0.000949 at most
- * before its metered reads; 17 units at $0.0000633 are $0.001076, 13.4% to
- * spare (16 would be 6.7%). 12 until the page was measured as it is sent: #2060 measured its
+ * languages, with every field at its longest of the costliest character, the
+ * store's handle (24) and every checkout's id (208) at the longest their
+ * rules take, and every card shape (a course, a private podcast or a plain
+ * product, each at a price option of its own link, keys from the creator's
+ * list of 100 characters, given and taken back): the most is a private
+ * podcast at a price option with its key taken back, in French, 6,076,927
+ * bytes as sent, with the shell measured on a local production build (at
+ * most 401,498, taken as 410,000), held under ORDERS_PAGE_BYTES (6,100,000).
+ * An opening then costs $0.000964 at most before its metered reads; 17 units
+ * at $0.0000633 are $0.001076, 11.6% to spare (16 would be 5.0%). 12 until the page was measured as it is sent: #2060 measured its
  * HTML alone, 2.5 MB, and so did not cover the payload or the shell.
  *
  * Taken from the public requests, never from the buyers' actions figure
@@ -154,7 +157,7 @@ export const PLAN_REFUND_CALLS = 1 + 1 + 10 + 10;
  * holds a page drawn at those limits under it, and tests/plan-cost-registry.ts
  * prices it in ORDERS_OPEN_READ.
  */
-export const ORDERS_PAGE_BYTES = 5_850_000;
+export const ORDERS_PAGE_BYTES = 6_100_000;
 /**
  * The longest address of a delivery the list of purchases shows as text. A
  * longer one is named by its host alone ("Kept on example.com"): its whole
@@ -188,7 +191,8 @@ export const HOST_SHOWN = 63;
  * tests/plan-cost-registry.test.ts holds the units above it, with a tenth to
  * spare (2 until C3-83, when the page without JavaScript had to fit too):
  * $0.000135 at most, 3 units $0.000190, 40.4% to spare (measured 4 November
- * 2026; the page without JavaScript at most 1,014,516 bytes, in French).
+ * 2026; the page without JavaScript at most 1,014,727 bytes, its keys from
+ * the creator's list taken back, in French).
  */
 export const ORDERS_BUNDLE_UNITS = 3;
 /**
@@ -217,9 +221,10 @@ export const ORDERS_BUNDLE_PER_HOUR = 240;
  * reads past them goes through its meter. tests/plan-cost-registry.ts prices
  * it (ORDERS_OLDER_READ) and tests/plan-cost-registry.test.ts holds the units
  * above it, with a tenth to spare (8 until C3-83, when the page without
- * JavaScript had to fit too): $0.000531 at most, 10 units $0.000633, 19.2% to
- * spare, 9 only 7.2% (measured 4 November 2026; the page without JavaScript
- * at most 1,426,236 bytes, in French).
+ * JavaScript had to fit too): $0.000534 at most, 10 units $0.000633, 18.5% to
+ * spare, 9 only 6.6% (measured 4 November 2026; the page without JavaScript
+ * at most 1,467,384 bytes: private podcasts at a price option, their keys
+ * taken back, in French).
  */
 export const ORDERS_OLDER_UNITS = 10;
 /** Commands a batch makes besides its metered reads: the link's grant. */
@@ -232,7 +237,7 @@ export const ORDERS_OLDER_COMMANDS = 1;
  * as it is sent (tests/page-response.ts), is the larger and is what this
  * holds (tests/orders-page-bounds.test.ts holds both under it).
  */
-export const ORDERS_OLDER_BYTES = 1_430_000;
+export const ORDERS_OLDER_BYTES = 1_480_000;
 /** How often one link may check a batch of older purchases in an hour. */
 export const ORDERS_OLDER_PER_HOUR = 60;
 /**

@@ -324,34 +324,53 @@ export class MemoryRedis {
           return 1;
         }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
-        if (key.startsWith("-- marktmorgen:crm-deal-move:v1\n") && args[0] === "1" && args.length === 5) {
+        if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
           const current = held instanceof Map ? held.get(args[2]) : undefined;
           if (current === undefined) return 0;
-          if (current !== args[3]) return -1;
+          if (current !== args[3]) return [-1, new TextEncoder().encode(current).length];
           this.hash(target).set(args[2], args[4]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-pipelines-save:v1\n") && args[0] === "1" && args.length === 4) {
+        if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, lease, queue, member, score, next] = args;
+          if (this.run(["ZSCORE", lease, member]) === null) return 0;
+          this.run(["ZADD", queue, score, next]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
-          if ((held ?? "") !== args[2]) return -1;
+          if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
           this.data.set(target, args[3]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-deal-save:v1\n") && args[0] === "1" && args.length === 5) {
+        if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
           const target = args[1];
           this.live(target);
           const held = this.data.get(target);
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
-          if (held instanceof Map && !held.has(args[2]) && held.size >= Number(args[4])) return 0;
+          const there = held instanceof Map && held.has(args[2]);
+          if (!there && args[5] === "edit") return 2;
+          if (!there && held instanceof Map && held.size >= Number(args[4])) return 0;
           this.hash(target).set(args[2], args[3]);
           return 1;
+        }
+        if (key.startsWith("-- marktmorgen:crm-value-take:v1\n") && args[0] === "1" && args.length === 3) {
+          const target = args[1];
+          this.live(target);
+          const held = this.data.get(target);
+          if (held === undefined) return null;
+          if (!(held instanceof Map)) throw new Error("WRONGTYPE");
+          const value = held.get(args[2]);
+          if (value === undefined) return null;
+          held.delete(args[2]);
+          return value;
         }
         if (key.startsWith("-- marktmorgen:host-claim:v1\n")) return this.hostClaim(args);
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
@@ -506,6 +525,7 @@ export class MemoryRedis {
           }
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:stock-sold:v1\n") || key.startsWith("-- marktmorgen:stock-asked:v1\n") || key.startsWith("-- marktmorgen:stock-pending:v1\n")) return this.stockScript(key, args);
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
@@ -1257,6 +1277,44 @@ export class MemoryRedis {
    * what a request is billed, not only what it sends (tests/traffic.test.ts).
    */
   scriptCalls = 0;
+
+  /**
+   * lib/stock.ts: a unit counted sold once (stock-sold), when Stripe was last
+   * asked written only over the hold as read (stock-asked), and provisional
+   * holds written only while every lock is still the checkout's
+   * (stock-pending), the way the scripts run them, each command they send
+   * counted in scriptCalls.
+   */
+  private stockScript(source: string, args: string[]): unknown {
+    const n = Number(args[0]);
+    const keys = args.slice(1, 1 + n);
+    const argv = args.slice(1 + n);
+    const call = (command: (string | number)[]) => {
+      this.scriptCalls += 1;
+      return this.run(command);
+    };
+    if (source.startsWith("-- marktmorgen:stock-sold:v1\n")) {
+      if (n !== 3 || argv.length !== 2) throw new Error("ERR stock-sold: arguments");
+      const fresh = call(["SET", keys[2], "1", "NX", "EX", argv[1]]);
+      call(["HDEL", keys[0], argv[0]]);
+      if (fresh === "OK") {
+        call(["INCR", keys[1]]);
+        return 1;
+      }
+      return 0;
+    }
+    if (source.startsWith("-- marktmorgen:stock-asked:v1\n")) {
+      if (n !== 1 || argv.length !== 3) throw new Error("ERR stock-asked: arguments");
+      if (call(["HGET", keys[0], argv[0]]) !== argv[1]) return 0;
+      call(["HSET", keys[0], argv[0], argv[2]]);
+      return 1;
+    }
+    if (n < 2 || n % 2 !== 0 || argv.length !== n / 2 + 2) throw new Error("ERR stock-pending: arguments");
+    const half = n / 2;
+    for (let i = 0; i < half; i += 1) if (call(["GET", keys[i]]) !== argv[i]) return 0;
+    for (let i = 0; i < half; i += 1) call(["HSET", keys[half + i], argv[half], argv[half + 1]]);
+    return 1;
+  }
 
   /** lib/capped-count.ts: counts that never grow a hash past its most fields, the way version 2 runs them. */
   private cappedCount(args: string[]): unknown {

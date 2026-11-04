@@ -112,6 +112,10 @@ import { ORDERS_INCLUDED, ORDER_CENTS_PER_THOUSAND_OVER, TRIAL_ORDERS, freeCopie
 import { coveredByShare } from "@/lib/orders";
 import { SHARE_PROVED_IN_TEST_MODE, shareOf } from "@/lib/platform-share";
 import { readFileSync } from "node:fs";
+import { fullUseNet, roomOf } from "./full-use-net";
+import { reviewedUnitUnder } from "@/lib/reviewed-receiving";
+import { reviewedReceivingTaxInput } from "./reviewed-receiving-fixture";
+import { syntheticTaxContext } from "./customer-tax-review-fixture";
 import { join } from "node:path";
 
 import {
@@ -207,11 +211,12 @@ for (const [schedule, prices] of SCHEDULES) for (const tier of TIERS) {
 }
 
 // MR rule (AGENTS.md; owner, 3 November 2026, C2-63/C2-70; docs/codex-queue.md, 465 [MR2]): no unit loses money.
-test("every plan keeps a net profit above the spend floor's room in its own worst month, monthly and yearly", () => {
+// Net after every tax (the same reviewed adapter and sum as tests/spend-floor.test.ts, tests/full-use-net.ts), every
+// allowance used in full and what is kept after the plan ends, with the spend floor's room left (4 November 2026).
+test("every plan keeps a net profit after taxes, with the spend floor's room, in its own worst month, monthly and yearly", () => {
   for (const tier of TIERS) for (const cycle of ["month", "year"] as const) {
-    const months = cycle === "year" ? 12 : 1;
-    const profit = months * (netOf(tier, cycle, PRICES_WITHOUT_COMMISSION) - worstCost(tier));
-    assert.ok(profit > 0 && profit >= (cycle === "year" ? 1 : 0.25), `${tier}, ${cycle}: net profit $${profit.toFixed(4)}`);
+    const row = fullUseNet(tier, cycle);
+    assert.ok(row.unit.netCents > 0 && row.room >= roomOf(cycle), `${tier}, ${cycle}: net $${(row.unit.netCents / 100).toFixed(2)}, room $${row.room.toFixed(4)}`);
   }
 });
 
@@ -256,9 +261,13 @@ test("a thousand orders past what a plan covers bring in more than they cost, wi
   // The third thing charged by use: what reaches us for a thousand orders, against a thousand of the dearest order
   // there is. MR rule (owner, 3 November 2026, C2-70; docs/codex-queue.md, 465 [MR2]): a profit with the room, no
   // longer a 45% floor; the share it keeps (about 42% since the stock work is priced) is for the monthly report.
-  const kept = (ORDER_CENTS_PER_THOUSAND_OVER / 100) * lineKeptShare();
-  const cost = 1000 * ORDER_COST;
-  assert.ok(kept - cost > 0 && kept - cost >= 0.25, `a thousand orders past the plan bring in $${kept.toFixed(4)} and cost $${cost.toFixed(4)}.`);
+  // After taxes (4 November 2026): a line on a renewal invoice, under the same reviewed adapter as the plans, with its
+  // costs; net above zero and above the room left under a monthly plan.
+  const usageCents = Math.ceil(Math.round(1000 * ORDER_COST * 1e7) / 1e5);
+  const input = reviewedReceivingTaxInput(ORDER_CENTS_PER_THOUSAND_OVER, usageCents, syntheticTaxContext("orders_over_month", 1), false);
+  const unit = reviewedUnitUnder(ORDER_CENTS_PER_THOUSAND_OVER, usageCents, input, false);
+  assert.ok(unit);
+  assert.ok(unit.netCents > 0 && unit.netCents >= roomOf("month") * 100, `a thousand orders past the plan bring in $${(unit.revenueCents / 100).toFixed(2)}, cost $${(usageCents / 100).toFixed(2)} and keep $${(unit.netCents / 100).toFixed(2)} after taxes.`);
 });
 
 test("an order that paid a share is covered by it several times over, so it is not counted", () => {

@@ -456,7 +456,7 @@ FUNNEL_STARTERS.push(
 // health, beauty or other result, no rating, badge or "best seller", no
 // delivery date.
 const SHIP_FIRST =
-  "Choose a product you ship. Only a paid product bought once can ship: not a membership, a call, a bundle, a payment plan or a price the buyer chooses, and with no file, link, course or podcast to hand over. In its editor, turn on “Ship it: a physical product, sent by you”: its page then shows what shipping costs and where it ships, and the checkout asks for an address.";
+  "Choose a product you ship. Only a paid product bought once can ship. A membership, a call, a bundle, a payment plan or a price the buyer chooses cannot. Neither can a product with a file, link, course or podcast to hand over. In its editor, turn on “Ship it: a physical product, sent by you”. Its page then shows what shipping costs and where it ships. The checkout asks for an address.";
 FUNNEL_STARTERS.push({
   id: "physical-product",
   label: "Sell something you ship",
@@ -495,7 +495,7 @@ FUNNEL_STARTERS.push({
 // and turning shipping on said first. Food also says, first, what only the
 // creator can check: no rule of any country is stated or promised here.
 const FOOD_RULES =
-  "Before you sell food, check the rules where you make it and where you ship it: whether you may sell and ship it from where you make it, what its label must say, the ingredients and allergens to list, how long it keeps and how it must be packed. Marktmorgen cannot tell you what they are or whether you meet them.";
+  "Before you sell food, check the rules where you make it and where you ship it. Check whether you may sell and ship it from there. Check what its label must say and which ingredients and allergens to list. Check how long it keeps and how it must be packed. Marktmorgen cannot tell you what the rules are or whether you meet them.";
 
 type Shipped = {
   id: string;

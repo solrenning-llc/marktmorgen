@@ -52,7 +52,7 @@ export function nicheCampaignFeature(niche: StarterNiche) {
   return {
     icon: "ladder" as const,
     title: `Ready campaigns for ${STARTER_NICHE_LABELS[niche].toLowerCase()}`,
-    body: `${nicheCampaignWords(niche)} Find them in your studio under Funnels, in “Start with a campaign”. See how they work.`,
+    body: `${nicheCampaignWords(niche)} Find them in your studio under Funnels, in “Start with a campaign”. See how campaigns work on the Funnels page.`,
     href: "/platform/funnels",
   };
 }

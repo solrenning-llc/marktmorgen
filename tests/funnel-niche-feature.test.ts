@@ -52,7 +52,7 @@ is(
   "short enough to read as one link, and it says it leads to how they work",
   STARTER_NICHES.filter((n) => {
     const { title, body } = nicheCampaignFeature(n);
-    return title.length + body.length > 320 || !body.endsWith("See how they work.");
+    return title.length + body.length > 320 || !body.endsWith("See how campaigns work on the Funnels page.");
   }),
   [],
 );

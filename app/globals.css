@@ -723,11 +723,39 @@ html {
   opacity: 0.75;
   transform: none;
 }
-.btn:disabled,
-.btn[aria-disabled="true"] {
+.btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
+}
+/*
+ * Off, but still holding focus (AX274, AAA review of the deals board,
+ * 4 Nov 2026).
+ *
+ * A control that cannot be used now keeps its place in the tab order
+ * (aria-disabled), so it can be holding the keyboard focus. Fading the whole
+ * element would fade its focus ring too (to about 2.6:1). So it is never
+ * faded: a dashed border on the sand surface says "off" without colour alone,
+ * its words stay above 9:1 (--ink-soft on --sand), and the ring outside it
+ * keeps its full colour. Hover does not light it up.
+ */
+.btn[aria-disabled="true"],
+.btn[aria-disabled="true"]:hover {
+  opacity: 1;
+  cursor: not-allowed;
+  transform: none;
+  background-color: var(--sand);
+  color: var(--ink-soft);
+  border: 1px dashed var(--ink-mute);
+  box-shadow: none;
+}
+@media (forced-colors: active) {
+  /* The system's own colours for the words; the dashed border still says "off". */
+  .btn[aria-disabled="true"],
+  .btn[aria-disabled="true"]:hover {
+    border-style: dashed;
+    border-color: GrayText;
+  }
 }
 /*
  * 40px was below both platforms' guidance. 44 is Apple's number and the
@@ -1364,6 +1392,17 @@ a.chip {
   outline: none;
   border-color: var(--violet);
   box-shadow: 0 0 0 4px rgba(73, 70, 166, 0.16);
+}
+/*
+ * A field that cannot be changed now (a change is being saved): the same
+ * dashed border and sand surface as an off button, never faded, so its words
+ * and its focus ring keep their contrast (AAA review of the deals board).
+ */
+.field[aria-disabled="true"] {
+  background-color: var(--sand);
+  border-style: dashed;
+  border-color: var(--ink-mute);
+  cursor: not-allowed;
 }
 .field[aria-invalid="true"] {
   border-color: var(--danger);

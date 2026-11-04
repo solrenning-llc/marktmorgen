@@ -3,7 +3,7 @@
  * control is removed, which fields an error is about, and the one status
  * region's words. Pure rules, so the board and its tests read the same ones.
  */
-import { hasChoices, type FieldType, type Stage } from "@/lib/crm-rules";
+import { MAX_FIELD_NAME, MAX_FIELD_OPTION, MAX_PIPELINE_NAME, MAX_STAGE_NAME, hasChoices, oneLine, type FieldType, type Stage } from "@/lib/crm-rules";
 import { dealFieldId, type DraftField } from "@/lib/deal-draft";
 
 /** After removing one of a list (a deal in a stage, a stage, a field): the one after it, else the one before, else null. */
@@ -29,17 +29,21 @@ export const stageNameId = (stage: string) => `stage-name-${stage}`;
 export const stageKindId = (stage: string) => `stage-kind-${stage}`;
 export const stageMovesId = (stage: string) => `stage-moves-${stage}`;
 
+/** A name as the server keeps it (lib/crm-rules.ts, oneLine), compared without case. */
+const kept = (value: string, max: number) => oneLine(value, max).toLowerCase();
+
 /**
  * What in the pipeline editor keeps it from being saved (3.3.1), in the
  * editor's order: an empty name, a name another pipeline has, a stage with
- * no name, and (on the first stage's "Counts as") a kind missing. Empty when
- * nothing is wrong that the board can see.
+ * no name, and (on the first stage's "Counts as") a kind missing. Names are
+ * read as the server keeps them (oneLine), so the board never passes what
+ * the server would refuse. Empty when nothing is wrong that the board can see.
  */
 export function pipelineProblems(draft: { name: string; stages: readonly Stage[] }, otherNames: readonly string[]): string[] {
   const ids: string[] = [];
-  const name = draft.name.trim().toLowerCase();
-  if (!name || otherNames.some((other) => other.trim().toLowerCase() === name)) ids.push(PIPELINE_NAME_ID);
-  for (const stage of draft.stages) if (!stage.name.trim()) ids.push(stageNameId(stage.id));
+  const name = kept(draft.name, MAX_PIPELINE_NAME);
+  if (!name || otherNames.some((other) => kept(other, MAX_PIPELINE_NAME) === name)) ids.push(PIPELINE_NAME_ID);
+  for (const stage of draft.stages) if (!kept(stage.name, MAX_STAGE_NAME)) ids.push(stageNameId(stage.id));
   const kinds = new Set(draft.stages.map((stage) => stage.kind));
   if (draft.stages.length && !(kinds.has("open") && kinds.has("won") && kinds.has("lost"))) ids.push(stageKindId(draft.stages[0].id));
   return ids;
@@ -49,15 +53,15 @@ export function pipelineProblems(draft: { name: string; stages: readonly Stage[]
 export const crmFieldNameId = (field: string) => `crm-field-name-${field}`;
 export const crmFieldChoicesId = (field: string) => `crm-field-choices-${field}`;
 
-/** What in the fields editor keeps it from being saved (3.3.1): an empty or repeated name, a choice with fewer than two options. */
+/** What in the fields editor keeps it from being saved (3.3.1): an empty or repeated name, a choice with fewer than two options, read as the server keeps them (oneLine, options cut at MAX_FIELD_OPTION). */
 export function fieldProblems(fields: readonly { id: string; name: string; type: FieldType; optionsText: string }[]): string[] {
   const ids: string[] = [];
   const seen = new Set<string>();
   for (const field of fields) {
-    const name = field.name.trim().toLowerCase();
+    const name = kept(field.name, MAX_FIELD_NAME);
     if (!name || seen.has(name)) ids.push(crmFieldNameId(field.id));
     seen.add(name);
-    const options = new Set(field.optionsText.split(",").map((option) => option.trim()).filter(Boolean));
+    const options = new Set(field.optionsText.split(",").map((option) => oneLine(option, MAX_FIELD_OPTION)).filter(Boolean));
     if (hasChoices(field.type) && options.size < 2) ids.push(crmFieldChoicesId(field.id));
   }
   return ids;
@@ -83,4 +87,4 @@ export const SHOWN_SAY_AFTER_MS = 800;
 export const MOVE_HINT = "Choose a new stage, then press Move.";
 
 /** Said once, at the top of the board, for a pipeline this person may only see (639 [GL7](7)); each refused change says why too. */
-export const VIEW_ONLY_WORDS = "You can see this pipeline but not change it. Ask the store's owner to change your access.";
+export const VIEW_ONLY_WORDS = "You can see this pipeline but not change it. Ask the store’s owner to change your access.";

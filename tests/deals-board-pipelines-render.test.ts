@@ -38,7 +38,7 @@ is("its hint sits outside the select's label, so it is not part of its name, and
 is("the board has one status region, always there (4.1.3; AAA review)", [(html.match(/role="status"/g) ?? []).length, html.includes('<p id="deal-board-status" role="status" class="sr-only"></p>')], [1, true]);
 is("no control on the board is disabled outright: each one off stays focusable (2.4.3; AAA review)", html.includes('disabled=""'), false);
 is("focus is given back only when it was lost (round 3)", boardSource.includes("focusWasLost(document.activeElement, document.body)"), true);
-is("repeated words in the status region are said again", boardSource.includes("const say = (words: string) => setStatus(previous => announce(previous, words));"), true);
+is("repeated words in the status region are said again", boardSource.includes("setStatus(previous => announce(previous, words))"), true);
 is("what was typed, to copy, is a named group, says the message once, and Done gives focus to New deal or the alert", [boardSource.includes('role="group" tabIndex={-1}'), boardSource.includes("{`${DEAL_HIDDEN} Here is what you typed"), boardSource.includes('focusLater("deal-new", "deal-board-alert")')], [true, false, true]);
 const full = renderToStaticMarkup(createElement(DealsBoard, { ...props, pipelineMax: 2 }));
 is("and not at it", full.includes("New pipeline"), false);

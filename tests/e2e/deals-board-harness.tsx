@@ -14,18 +14,15 @@ type World = { deals: Deal[]; versions: Record<string, string>; pipelines: Pipel
 type Forced = { status: number; body: unknown };
 type Harness = { world: World; writes: Record<string, unknown>[]; next: Forced | null; delay: number; refresh: () => void; mount: (world: World) => void };
 
-declare global {
-  interface Window {
-    harness: Harness;
-  }
-}
+/** The page's own handle on the harness, read by tests/e2e/deals-board-focus.mjs as page.harness. */
+const page = window as unknown as Window & { harness: Harness };
 
 const version = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 /** The stand-in for /api/store/crm: the deal and undeal actions as the route answers them (versions, 409 crm_conflict), and a forced answer when a check sets one. */
 async function crm(body: Record<string, unknown>): Promise<Response> {
-  const h = window.harness;
+  const h = page.harness;
   h.writes.push(body);
   await new Promise((resolve) => setTimeout(resolve, h.delay));
   if (h.next) {
@@ -67,14 +64,14 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 function Board() {
   const [, setDrawn] = useState(0);
   useEffect(() => {
-    window.harness.refresh = () => setDrawn((n) => n + 1);
+    page.harness.refresh = () => setDrawn((n) => n + 1);
   }, []);
-  const w = window.harness.world;
+  const w = page.harness.world;
   return <DealsBoard deals={[...w.deals]} versions={{ ...w.versions }} stages={w.pipelines.flatMap((p) => p.stages)} pipelines={w.pipelines} pipelineMax={3} viewOnly={w.viewOnly} fields={w.fields} currency="usd" assignees={["owner@example.test"]} today="2026-11-04" />;
 }
 
 const root = createRoot(document.getElementById("root")!);
-window.harness = {
+page.harness = {
   world: { deals: [], versions: {}, pipelines: [], fields: [] },
   writes: [],
   next: null,

@@ -11,7 +11,7 @@
  * back, before they are sent), a course's
  * students (each one's progress), the affiliates (the whole program and pages
  * of the creator's Stripe account), the bookings (up to five pages of it and
- * every booking's move), the numbers (ninety days of counts and up to
+ * every booking's move, a hundred at an MGET), the numbers (ninety days of counts and up to
  * NUMBERS_STRIPE_PAGES pages of sales, renewals, refunds and disputes), the
  * memberships, the emails and what they sold, the recent events and the
  * discount codes. Whatever can be counted first (the program, the PayPal
@@ -34,6 +34,7 @@ import { DAY_FIELDS_MAX, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { MAX_CODES } from "@/lib/discount";
 import { MAX_FLOWS } from "@/lib/flow-limits";
+import { MOVE_BYTES, MOVE_KEY_BYTES, moveReads } from "@/lib/call-moves-read";
 
 /** Database commands one further API request pays for. */
 export const API_UNIT_COMMANDS = 20;
@@ -166,10 +167,8 @@ export const AFFILIATE_SENT_BYTES = 512;
 export const BOOK_PAYPAL_REFUNDS = 500;
 /** A PayPal sale's record, read for its refund: the order, the payment, the buyer, what the visit carried. */
 export const PAYPAL_PAID_BYTES = 4_096;
-/** Open bookings whose moves readBook reads at the most. */
+/** Open bookings whose moves readBook reads at the most, a hundred at a command (lib/call-moves-read.ts). */
 export const BOOK_MOVES = 200;
-/** A booking's move. */
-export const MOVE_BYTES = 128;
 /** Invoices readBook reads at the most, so products named by them at the most (lib/affiliates.ts, INVOICE_PAGES of a hundred). */
 export const BOOK_INVOICES = 1_000;
 /** A product's listing, read for its title. */
@@ -184,9 +183,9 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   const stripe = s.stripe && s.people > 0;
   const products = stripe ? Math.min(s.products, BOOK_INVOICES) : 0;
   return {
-    // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below.
-    commands: 8 + 7 + (any ? 1 + paypal : 0) + moves + products,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + moves * MOVE_BYTES + products * LISTING_BYTES,
+    // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below; the moves a hundred at an MGET.
+    commands: 8 + 7 + (any ? 1 + paypal : 0) + moveReads(moves) + products,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,
@@ -204,15 +203,16 @@ export const BOOKING_SENT_BYTES = 2_048;
 
 /**
  * What one reading of the bookings does (lib/calls.ts, paidCalls) at the
- * most: every page of checkouts, each booking's move read, and every booking
- * sent. How many there are is known only once Stripe has answered, so it is
- * taken whole, before; a store without Stripe connected reads nothing.
+ * most: every page of checkouts, each booking's move read (a hundred keys at
+ * an MGET, all in one trip: lib/call-records.ts, readMoves), and every
+ * booking sent. How many there are is known only once Stripe has answered,
+ * so it is taken whole, before; a store without Stripe connected reads nothing.
  */
 export function bookingsWork(stripe: boolean): ReadWork {
   if (!stripe) return { ...NONE };
   return {
-    commands: BOOKINGS_READ,
-    bytes: BOOKINGS_READ * MOVE_BYTES,
+    commands: moveReads(BOOKINGS_READ),
+    bytes: BOOKINGS_READ * (MOVE_BYTES + MOVE_KEY_BYTES),
     sent: BOOKINGS_READ * BOOKING_SENT_BYTES,
     stripePages: BOOKING_PAGES,
     roundTrips: 1,

@@ -8,7 +8,7 @@ import { PageAnswers } from "@/components/page-answers";
 import type { WhyNot } from "@/lib/why-not-rules";
 import type { VideoReach } from "@/lib/page-depth";
 
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SavedSections } from "@/components/saved-sections";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
@@ -23,6 +23,8 @@ import { AiPosts } from "@/components/ai-posts";
 import { PageCoach } from "@/components/page-coach";
 import { PageStylePicker } from "@/components/page-style-picker";
 import { BlockPicker } from "@/components/block-picker";
+import { addedSaying, chosenSaying, insertAt, insertionPlaces, offeredKinds, placeWords } from "@/lib/block-insert";
+import { browserFrames, focusWhenDrawn, groupEntry } from "@/lib/focus-when-drawn";
 import { SharePanel } from "@/components/share-panel";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { BlockRewrite } from "@/components/block-rewrite";
@@ -83,8 +85,20 @@ import {
   MAX_QUOTE,
   MAX_QUOTE_NAME,
   MAX_QUOTE_URL,
+  MAX_COLUMN_ELEMENTS,
+  MAX_ICON_LABEL,
   MAX_ROW_COLUMNS,
   MAX_ROW_ELEMENTS,
+  MAX_ROW_LIST_ITEMS,
+  MAX_ROW_PARAGRAPH,
+  ROW_ELEMENT_KINDS,
+  ROW_ICONS,
+  type RowBlock,
+  type RowElement,
+  type RowElementKind,
+  type RowIcon,
+  picturesOf,
+  picturesOutside,
   type Quote,
   quoteUrl,
   PAGE_TEMPLATES,
@@ -106,6 +120,30 @@ import type { PageFacts } from "@/lib/page-facts";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
+import { PreviewFrame, ScreenSwitch, usePreviewScreen } from "@/components/preview-frame";
+import { SidePanelSwitch, useSidePanel } from "@/components/side-panel-switch";
+import { COMPUTER_BODY_MAX, type PreviewScreen, screenFor } from "@/lib/preview-screen";
+import {
+  ROW_EDIT_WHY,
+  ROW_ELEMENT_NAMES,
+  ROW_ICON_NAMES,
+  type RowColumns,
+  type RowEdit,
+  type RowPlace,
+  addElement,
+  addRefusal,
+  arrivePicture,
+  blankElement,
+  moveElement,
+  removeElement,
+  replaceElement,
+  rowElementCount,
+  rowElementProblem,
+  releaseHeld,
+  shiftHeld,
+  rowProblem,
+  setColumnCount,
+} from "@/lib/row-edit-rules";
 
 // Started provider attempts stay counted even when their reply is unusable (lib/ai.ts).
 const HEADLINE_UNCONFIRMED_NOTE = "A replacement headline was not confirmed. Your current draft was kept. Started attempts count toward your monthly writing allowance. Check your allowance before trying again.";
@@ -152,8 +190,8 @@ function fromLocalField(value: string): number {
 /** Below this many visitors a share would say more about chance than about the page. */
 const MIN_DEPTH_VISITORS = 30;
 
-// A row of columns (375 [TB1]) and a booking block (552 [BB1]) are not in the gallery yet, so their names are given here.
-const kindLabel = (kind: BlockKind) => (kind === "row" ? "Columns" : kind === "booking" ? "Booking" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
+// A booking block (552 [BB1]) is not in the gallery yet, so its name is given here.
+const kindLabel = (kind: BlockKind) => (kind === "booking" ? "Booking" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
 
 export type EditorProduct = {
   id: string;
@@ -344,6 +382,8 @@ export function PageEditor({
   // Whether the screen is wide enough to draw the page beside its blocks; only
   // then is the second drawing made at all, so a narrow screen holds one.
   const [sideBySide, setSideBySide] = useState(false);
+  // There, the side menu of blocks to add and the page share one column, switched at its top (lib/side-panel.ts).
+  const [sidePanel, chooseSidePanel, showSidePanel] = useSidePanel();
   const beside = useRef<HTMLElement>(null);
   // The block being edited, outlined in the page beside it.
   useEffect(() => {
@@ -443,9 +483,35 @@ export function PageEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const [wide, setWide] = useState(false);
+  // The preview as on a computer or as on a phone, one press apart; remembered in this browser only.
+  const [chosenScreen, setScreen] = usePreviewScreen();
+  // One choice for both places; until it is made, the narrow column beside the blocks shows a phone and the full preview a computer.
+  const screen = screenFor("beside", chosenScreen);
+  const fullScreen = screenFor("full", chosenScreen);
   // Where the block picker is open: the place a new block would take, or null when closed.
   const [picking, setPicking] = useState<number | null>(null);
+  // The side menu beside the page (375 [TB1]): the card chosen before its place, the card
+  // being dragged from it and the place it is over; what the status region says last;
+  // the new block whose first field takes the focus once it is drawn.
+  const [chosenKind, setChosenKind] = useState<BlockKind | null>(null);
+  const [draggingKind, setDraggingKind] = useState<BlockKind | null>(null);
+  const [overPlace, setOverPlace] = useState<number | null>(null);
+  const [said, setSaid] = useState("");
+  const focusNew = useRef<string | null>(null);
+  // Places held in a row for a picture still being sent there, by the row's id (lib/row-edit-rules.ts, RowHeld):
+  // kept here, not in the row's editor, so closing and reopening the row while it is sent never frees them.
+  const rowHeld = useRef(new Map<string, number[]>());
+  // Drawn again whenever a held place changes, so a row reopened while its picture is sent shows it ending.
+  // A copy to draw from, made whenever a held place changes, so a row reopened while its picture is sent shows it ending.
+  const [heldShown, setHeldShown] = useState<ReadonlyMap<string, number[]>>(() => new Map());
+  // Both versions as last drawn, for a picture that arrives: is its row still on the page?
+  const pagesNow = useRef({ drafts, other });
+  // Before anything else can run after a change is drawn: a picture that arrives always sees the page as drawn.
+  useLayoutEffect(() => {
+    pagesNow.current = { drafts, other };
+  }, [drafts, other]);
+  const heldElsewhere = (row: string) =>
+    [...heldShown].reduce((n, [id, counts]) => (id === row ? n : n + counts.reduce((a, b) => a + b, 0)), 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -502,8 +568,11 @@ export function PageEditor({
   // Nothing typed here is lost to a closed tab or a link pressed by mistake.
   useLeaveGuard(dirty && !busy);
   const hasHero = drafts[0]?.block.kind === "hero";
-  const hasReviews = drafts.some((d) => d.block.kind === "reviews");
-  const addable = BLOCK_KINDS.filter((k) => (site ? site.kinds.includes(k.kind) : k.kind !== "form") && (k.kind === "hero" ? !hasHero : k.kind === "reviews" ? !hasReviews : true));
+  // What can still be added, and where (lib/block-insert.ts): the gallery, the side menu and every place use the same.
+  const addable = offeredKinds(drafts.map((d) => d.block.kind), site?.kinds);
+  const places = insertionPlaces(drafts.map((d) => d.block.kind));
+  // A card chosen in the side menu counts only while the menu is there.
+  const armed = sideBySide ? chosenKind : null;
 
   function change(index: number, patch: Partial<PageBlock>) {
     setDrafts((all) => all.map((d, i) => (i === index ? { ...d, block: { ...d.block, ...patch } as PageBlock } : d)));
@@ -516,21 +585,114 @@ export function PageEditor({
     );
   }
 
-  /** A new block at `at` (the end when left out); a hero always goes on top. */
-  function add(kind: BlockKind, at?: number) {
-    if (drafts.length >= MAX_BLOCKS) return;
+  /**
+   * A new block at `at` (the end when left out); a hero always goes on top
+   * (lib/block-insert.ts). Chosen in the gallery or the side menu (`chosen`),
+   * its first field takes the focus and the status region says where it went.
+   */
+  function add(kind: BlockKind, at?: number, chosen = false) {
     const block = emptyBlock(kind, newBlockId());
-    const draft: Draft = { block, video: "" };
-    setDrafts((all) => {
-      if (kind === "hero") return [draft, ...all];
-      const place = at === undefined ? all.length : Math.max(all[0]?.block.kind === "hero" ? 1 : 0, Math.min(at, all.length));
-      const copy = [...all];
-      copy.splice(place, 0, draft);
-      return copy;
-    });
+    const result = insertAt(drafts, (d) => d.block.kind, { block, video: "" }, kind, at, { siteKinds: site?.kinds });
+    if (!result.ok) {
+      if (chosen) setSaid(result.why === "full" ? `${MAX_BLOCKS} blocks is the most one page can have.` : `${kindLabel(kind)} cannot be added to this page now.`);
+      return;
+    }
+    setDrafts(result.items);
     setOpen(block.id);
     setPicking(null);
+    setChosenKind(null);
+    if (chosen) {
+      focusNew.current = block.id;
+      setSaid(addedSaying(kindLabel(kind), result.at));
+    }
   }
+
+  // A block just chosen, from "Add here", the gallery or the side menu alike: its
+  // first field takes the focus once its panel is drawn, at a later frame if
+  // the panel is not there yet (lib/focus-when-drawn.ts), never dropped.
+  const stopFocusNew = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    const id = focusNew.current;
+    if (!id || open !== id) return;
+    focusNew.current = null;
+    stopFocusNew.current?.();
+    stopFocusNew.current = focusWhenDrawn(() => {
+      const panel = document.getElementById(`panel-${id}`);
+      if (!panel) return null;
+      const first = panel.querySelector<HTMLElement>("input:not([disabled]):not([type=hidden]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])");
+      // A group of radio buttons is entered at the one checked (a row's "Two columns"), never at one a Space would check.
+      if (first instanceof HTMLInputElement) {
+        return groupEntry(first, (name) => panel.querySelector<HTMLInputElement>(`input[type=radio][name="${CSS.escape(name)}"]:checked:not([disabled])`));
+      }
+      return first ?? document.querySelector<HTMLElement>(`#row-${CSS.escape(id)} button[aria-expanded]`);
+    }, browserFrames());
+  }, [open, drafts]);
+  const stopFocusMenu = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      stopFocusNew.current?.();
+      stopFocusMenu.current?.();
+    },
+    [],
+  );
+
+  /** "Add here" at a place: the card chosen goes there, or the place waits for a card (in the side menu, or the gallery opened here). */
+  function addHere(at: number) {
+    if (armed) {
+      add(armed, at, true);
+      return;
+    }
+    setPicking(at);
+    if (sideBySide) {
+      // The column beside the blocks may be showing the page: it shows the menu instead, and its search takes the focus once drawn.
+      showSidePanel("add");
+      setSaid(`Choose a block to add ${placeWords(at, drafts.length)}.`);
+      stopFocusMenu.current?.();
+      stopFocusMenu.current = focusWhenDrawn(() => document.getElementById("menu-block-find"), browserFrames());
+    }
+  }
+
+  /** A card pressed in the side menu: into the place waiting for it, or chosen until its place is pressed. */
+  function pickInMenu(kind: BlockKind) {
+    if (picking !== null) {
+      add(kind, picking, true);
+      return;
+    }
+    if (chosenKind === kind) {
+      setChosenKind(null);
+      setSaid(`${kindLabel(kind)} no longer chosen.`);
+      return;
+    }
+    setChosenKind(kind);
+    setSaid(chosenSaying(kindLabel(kind)));
+  }
+
+  /** The side menu or the gallery closed with nothing added: the focus goes back to the place it was opened from. */
+  function cancelPicking() {
+    const from = picking;
+    setPicking(null);
+    setChosenKind(null);
+    setSaid("");
+    backToPlace.current = from;
+  }
+  // Escape anywhere forgets the card chosen in the side menu, as its own Cancel does.
+  useEffect(() => {
+    if (!chosenKind) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      setChosenKind(null);
+      setSaid("Nothing chosen to add.");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chosenKind]);
+  const backToPlace = useRef<number | null>(null);
+  useEffect(() => {
+    const at = backToPlace.current;
+    if (at === null || picking !== null) return;
+    backToPlace.current = null;
+    document.querySelector<HTMLElement>(`[data-place="${at}"]`)?.focus();
+  }, [picking]);
 
   /** A saved section's blocks (components/saved-sections.tsx), at the end of the page. */
   function insertSection(blocks: PageBlock[]) {
@@ -624,6 +786,7 @@ export function PageEditor({
     if (!source || drafts.length >= MAX_BLOCKS || !canDuplicate(source.block)) return;
     const block = { ...structuredClone(source.block), id: newBlockId() } as PageBlock;
     if (block.kind === "feature") block.picture = null;
+    if (block.kind === "row") block.columns = block.columns.map((column) => column.filter((element) => element.kind !== "image"));
     // A copy is the creator's own block, not part of the saved section the original came from.
     delete block.saved;
     setDrafts((all) => {
@@ -633,7 +796,8 @@ export function PageEditor({
       return copy;
     });
     setOpen(block.id);
-    toast(`Block ${index + 1} copied below it.`);
+    const leftOut = picturesOf(source.block).length - picturesOf(block).length;
+    toast(`Block ${index + 1} copied below it${block.kind === "row" && leftOut ? `, without its ${leftOut === 1 ? "picture" : `${leftOut} pictures`}: a picture is shown once on a page` : ""}.`);
   }
 
   /** Brings version B (or A) to the front for editing; the other waits as it is. */
@@ -805,6 +969,15 @@ export function PageEditor({
       show(badVideo.id);
       return;
     }
+    // A part of a row that the save would refuse, said where it is before anything is sent.
+    for (const b of all) {
+      const problem = b.kind === "row" ? rowProblem(b.columns) : null;
+      if (!problem) continue;
+      setError(`In the columns block, column ${problem.column + 1}, part ${problem.index + 1}: ${problem.problem} Nothing was saved.`);
+      setBusy(false);
+      show(b.id);
+      return;
+    }
     const badCountdown = all.find((b) => b.kind === "countdown" && !b.until);
     if (badCountdown) {
       setError(MESSAGES.countdown);
@@ -887,9 +1060,9 @@ export function PageEditor({
       <ReviewsSection heading={heading} summary={summary} reviews={previewReviews} storeName={storeName} productTitle={product.title} moreHref={null} preview picked={pickedIds} />
     ) : null;
   const buyPreview = (
-    <section className="st-card sp-section p-6 sm:p-8">
+    <section className="st-card sp-section p-6 page-sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <p className="font-display text-xl font-semibold leading-snug sm:text-2xl">{product.free ? `Get ${product.title}` : product.title}</p>
+        <p className="font-display text-xl font-semibold leading-snug page-sm:text-2xl">{product.free ? `Get ${product.title}` : product.title}</p>
         {pill}
       </div>
       <p className="st-muted mt-3 text-sm">
@@ -903,14 +1076,14 @@ export function PageEditor({
     </section>
   );
 
-  /** The page as visitors will see it, in the store's look: at phone width, or wide. */
-  const pagePreview = (wideView: boolean) => (
-          <div className="overflow-hidden rounded-2xl ring-1 ring-line">
-            <div
-              className={`st-page st-theme-${look.theme} mx-auto overflow-hidden`}
-              style={{ ...(lookStyle(look) as React.CSSProperties), maxWidth: wideView ? "100%" : 390 }}
-            >
-              <div className={`sp-body sp-style-${style} mx-auto ${wideView ? "max-w-3xl" : ""} px-4 pb-12 pt-8`}>
+  /**
+   * The page as visitors will see it, in the store's look, laid out at a
+   * computer's or a phone's real width (lib/preview-screen.ts) and shrunk to fit.
+   */
+  const pagePreview = (on: PreviewScreen) => (
+          <PreviewFrame screen={on}>
+            <div className={`st-page st-theme-${look.theme} overflow-hidden`} style={lookStyle(look) as React.CSSProperties}>
+              <div className={`sp-body sp-style-${style} mx-auto px-4 pb-12 pt-8`} style={on === "computer" ? { maxWidth: COMPUTER_BODY_MAX } : undefined}>
                 {drafts.length === 0 ? (
                   <p className="st-note text-sm">Add a block and it appears here, in your store&apos;s look.</p>
                 ) : (
@@ -925,7 +1098,7 @@ export function PageEditor({
                           {pill}
                           {rating}
                         </div>
-                        <p className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em]">{product.title}</p>
+                        <p className="font-display mt-4 text-[2.1rem] font-semibold leading-[1.08] tracking-[-0.025em] page-sm:text-5xl">{product.title}</p>
                       </header>
                     )}
                     {product.free && !site ? buyPreview : null}
@@ -941,7 +1114,72 @@ export function PageEditor({
                 )}
               </div>
             </div>
-          </div>
+          </PreviewFrame>
+  );
+
+  /** Whether a place is lit: the side menu's card is dragged over it, or it waits for a card in the side menu. */
+  const placeLit = (at: number) => (draggingKind !== null && overPlace === at) || (sideBySide && picking === at);
+  /** A place a card from the side menu can be dropped on: the same insertion as "Add here". */
+  const placeOf = (event: React.DragEvent<HTMLElement>) => Number(event.currentTarget.dataset.dropAt);
+  function dragOverPlace(event: React.DragEvent<HTMLElement>) {
+    if (draggingKind === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    const at = placeOf(event);
+    if (overPlace !== at) setOverPlace(at);
+  }
+  function dragLeavePlace(event: React.DragEvent<HTMLElement>) {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    if (overPlace === placeOf(event)) setOverPlace(null);
+  }
+  function dropOnPlace(event: React.DragEvent<HTMLElement>) {
+    if (draggingKind === null) return;
+    event.preventDefault();
+    add(draggingKind, placeOf(event), true);
+    setDraggingKind(null);
+    setOverPlace(null);
+  }
+  /**
+   * A place between blocks (or before the first): "Add here", by a press or the
+   * keyboard, with a line across when a card is dragged over it. On a narrow
+   * screen the gallery opens in its stead; on a wide one the side menu answers.
+   */
+  const placeAt = (at: number) => {
+    if (!places.includes(at)) return <div className="h-3" />;
+    if (picking === at && !sideBySide) {
+      return (
+        <div className="py-3">
+          <BlockPicker icons={KIND_ICONS} allowed={addable} where={placeWords(at, drafts.length)} onPick={(kind) => add(kind, at, true)} onClose={cancelPicking} />
+        </div>
+      );
+    }
+    const lit = placeLit(at);
+    return (
+      <div className="flex min-h-12 items-center gap-2 py-0.5" data-drop-at={at} onDragOver={dragOverPlace} onDragLeave={dragLeavePlace} onDrop={dropOnPlace}>
+        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`} />
+        <button
+          type="button"
+          data-place={at}
+          onClick={() => addHere(at)}
+          className={`inline-flex min-h-11 items-center gap-1 rounded-full bg-white px-3 text-xs font-semibold ring-1 transition hover:text-violet-deep hover:ring-violet-brand/50 focus-visible:ring-2 focus-visible:ring-violet-brand motion-reduce:transition-none ${lit ? "text-violet-deep ring-2 ring-violet-brand forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "text-ink-soft ring-line"}`}
+          aria-label={`Add here: ${armed ? `${kindLabel(armed)}, ` : "a block "}${placeWords(at, drafts.length)}`}
+        >
+          <Icon name="plus" size={13} />
+          Add here
+        </button>
+        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`} />
+      </div>
+    );
+  };
+  const savedSections = (
+    <SavedSections
+      pageKey={pageKey}
+      allowed={site ? site.kinds : BLOCK_KINDS.map((k) => k.kind).filter((kind) => kind !== "form")}
+      blocks={drafts.map((d) => d.block)}
+      room={MAX_BLOCKS - drafts.length}
+      disabled={busy}
+      onInsert={insertSection}
+    />
   );
 
   const field = (id: string, label: string, input: React.ReactNode, extra?: React.ReactNode) => (
@@ -1289,7 +1527,7 @@ export function PageEditor({
         );
       }
       case "pictures": {
-        const elsewhere = drafts.reduce((n, d, i) => (i !== index ? n + (d.block.kind === "pictures" ? d.block.items.length : d.block.kind === "feature" && d.block.picture ? 1 : 0) : n), 0);
+        const elsewhere = picturesOutside(drafts.map((d) => d.block), index);
         return (
           <div className="space-y-4">
             {field(`${base}-h`, "Heading (optional)", <input id={`${base}-h`} className="field" maxLength={MAX_HEADING} value={block.heading} placeholder="A look inside" onChange={(e) => change(index, { heading: e.target.value })} />)}
@@ -1336,7 +1574,7 @@ export function PageEditor({
         );
       }
       case "feature": {
-        const elsewhere = drafts.reduce((n, d, i) => (i !== index ? n + (d.block.kind === "pictures" ? d.block.items.length : d.block.kind === "feature" && d.block.picture ? 1 : 0) : n), 0);
+        const elsewhere = picturesOutside(drafts.map((d) => d.block), index);
         return (
           <div className="space-y-4">
             {field(`${base}-h`, "Heading", <input id={`${base}-h`} className="field" maxLength={MAX_HEADING} value={block.heading} placeholder="What this part of it does for them" onChange={(e) => change(index, { heading: e.target.value })} />)}
@@ -1504,12 +1742,53 @@ export function PageEditor({
           </div>
         );
       }
-      case "row":
+      case "row": {
+        // Every picture the page shows, this row's own included, and those only the other version shows.
+        const shown = drafts.reduce((n, d) => n + picturesOf(d.block).length, 0);
         return (
-          <p className="text-sm text-ink-soft">
-            This row is shown on your page as it is. You can move it, hide it on some screens or remove it here; its columns cannot be changed in this editor.
-          </p>
+          <RowEditor
+            base={base}
+            block={block}
+            // By the block's id, not its place: a picture still being sent when the block moves lands in the right one.
+            onColumns={(columns) => setDrafts((all) => all.map((d) => (d.block.id === block.id && d.block.kind === "row" ? { ...d, block: { ...d.block, columns } } : d)))}
+            // A picture that arrives is added to the row as it is then, in either version, never over the columns this
+            // editor drew when it was sent: it may have been closed and reopened, or another picture landed first.
+            // False when the row is in neither version any more (deleted, or its version dropped), so nothing is added.
+            onColumnsNow={(update) => {
+              const { drafts: nowDrafts, other: nowOther } = pagesNow.current;
+              if (![...nowDrafts, ...(nowOther ?? [])].some((d) => d.block.id === block.id && d.block.kind === "row")) return false;
+              // The same list when nothing changed, so a refused picture never leaves an empty Undo step.
+              const change = (list: Draft[]) => {
+                let changed = false;
+                const out = list.map((d) => {
+                  if (d.block.id !== block.id || d.block.kind !== "row") return d;
+                  const next = update(d.block.columns);
+                  if (!next) return d;
+                  changed = true;
+                  return { ...d, block: { ...d.block, columns: next as RowElement[][] } };
+                });
+                return changed ? out : list;
+              };
+              setDrafts(change);
+              setOther((all) => (all ? change(all) : all));
+              return true;
+            }}
+            // Said here when the row's own editor is no longer drawn (closed, or its version switched away): in a
+            // notice everyone sees, not only in the status line a screen reader reads.
+            sayAside={(text) => toast(text)}
+            held={rowHeld}
+            onHeld={() => setHeldShown(new Map(rowHeld.current))}
+            sendingNow={heldShown.get(block.id) ?? NONE_HELD}
+            // Pictures being sent to other rows count too, so two rows sending at once never pass the page's room.
+            pictureRoom={MAX_PAGE_PICTURES - shown - onlyInOther - heldElsewhere(block.id)}
+            productId={product.id}
+            pageId={site?.id}
+            folder={folder}
+            defaultLabel={product.defaultLabel}
+            leadsTo={product.leadsTo}
+          />
         );
+      }
       case "booking":
         return (
           <p className="text-sm text-ink-soft">
@@ -1654,8 +1933,10 @@ export function PageEditor({
         return `${block.heading ? `${block.heading} · ` : ""}${chosen ? chosen.name : "No form chosen yet"}`;
       }
       case "row": {
-        const parts = block.columns.reduce((n, column) => n + column.length, 0);
-        return `${block.columns.length} ${block.columns.length === 1 ? "column" : "columns"} · ${parts} ${parts === 1 ? "part" : "parts"}`;
+        const parts = rowElementCount(block.columns);
+        const heading = block.columns.flat().find((element) => element.kind === "heading" && element.text.trim());
+        const titled = heading && heading.kind === "heading" ? `${heading.text} · ` : "";
+        return `${titled}${block.columns.length} ${block.columns.length === 1 ? "column" : "columns"} · ${parts} ${parts === 1 ? "part" : "parts"}`;
       }
       case "booking": {
         const chosen = featurable.find((p) => p.id === block.product);
@@ -1754,32 +2035,28 @@ export function PageEditor({
         </section>
       ) : null}
 
+      {/* Said to a screen reader after a block is chosen or added from the gallery or the side menu. */}
+      <p role="status" aria-atomic="true" className="sr-only">
+        {said}
+      </p>
+
       {view === "preview" ? (
         <div className="mt-5">
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-ink-soft">Width:</span>
-            {[false, true].map((w) => (
-              <button
-                key={String(w)}
-                type="button"
-                aria-pressed={wide === w}
-                onClick={() => setWide(w)}
-                className={`inline-flex min-h-11 items-center rounded-full px-3 font-semibold ring-1 ${wide === w ? "bg-lilac text-violet-ink ring-violet-brand/40" : "text-ink-soft ring-line"}`}
-              >
-                {w ? "Wide" : "Phone"}
-              </button>
-            ))}
+            <ScreenSwitch value={fullScreen} onChange={setScreen} />
             {dirty ? <span className="ml-auto text-xs font-semibold text-ink-soft">Showing unsaved changes</span> : null}
           </div>
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
             <span className="text-ink-soft">Style:</span>
             <PageStylePicker value={style} onChange={setStyle} compact />
           </div>
-          {pagePreview(wide)}
+          {pagePreview(fullScreen)}
         </div>
       ) : (
-        // On a wide screen the page is drawn beside the blocks as they are edited.
-        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_24.5rem] items-start gap-6" : ""}>
+        // On a wide screen the page is drawn beside the blocks as they are edited, in one column it shares with
+        // the side menu of blocks to add, switched at its top (375 [TB1]; two columns of their own left the
+        // blocks 182 pixels at 1280, lib/side-panel.ts); on a narrow screen the gallery opens where a place is pressed.
+        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_25.5rem] items-start gap-5" : ""}>
         <div className="min-w-0">
           {drafts.length === 0 ? (
             <div className="mt-6 rounded-2xl bg-paper p-5 ring-1 ring-line sm:p-6">
@@ -2008,7 +2285,8 @@ export function PageEditor({
             </section>
           ) : null}
 
-          <ol className="mt-6">
+          {drafts.length > 0 && places.includes(0) ? <div className="mt-6">{placeAt(0)}</div> : null}
+          <ol className={drafts.length > 0 && places.includes(0) ? "" : "mt-6"}>
             {drafts.map((draft, index) => {
               const block = draft.block;
               const isOpen = open === block.id;
@@ -2041,7 +2319,8 @@ export function PageEditor({
                       title={locked ? undefined : "Drag to move this block"}
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", block.id);
+                        // A type of its own, so a block dragged over a text field never writes its id into it.
+                        event.dataTransfer.setData("application/x-mm-block", block.id);
                         const row = event.currentTarget.closest("li");
                         if (row) event.dataTransfer.setDragImage(row, 24, 24);
                         setDragged(index);
@@ -2145,7 +2424,7 @@ export function PageEditor({
                             })}
                           </div>
                           <p className="mt-1 text-xs text-ink-soft">
-                            A shorter list for phones, a wide table only where it fits. Preview at Phone or Wide width to see each.
+                            A shorter list for phones, a wide table only where it fits. Preview it on Computer and on Phone to see each.
                           </p>
                         </div>
                       ) : null}
@@ -2162,27 +2441,7 @@ export function PageEditor({
                   ) : null}
                   </div>
                   {/* Between two blocks: a block added right here, rather than at the end and moved up. */}
-                  {index < drafts.length - 1 ? (
-                    picking === index + 1 && drafts.length < MAX_BLOCKS ? (
-                      <div className="py-3">
-                        <BlockPicker icons={KIND_ICONS} allowed={addable.map((k) => k.kind)} where={`after block ${index + 1}`} onPick={(kind) => add(kind, index + 1)} onClose={() => setPicking(null)} />
-                      </div>
-                    ) : drafts.length >= MAX_BLOCKS ? (
-                      <div className="h-3" />
-                    ) : (
-                      <div className="flex h-9 items-center justify-center">
-                        <button
-                          type="button"
-                          onClick={() => setPicking(index + 1)}
-                          className="inline-flex h-7 items-center gap-1 rounded-full bg-white px-2.5 text-xs font-semibold text-ink-soft ring-1 ring-line transition hover:text-violet-deep hover:ring-violet-brand/50 focus-visible:ring-2 focus-visible:ring-violet-brand"
-                          aria-label={`Add a block after block ${index + 1}`}
-                        >
-                          <Icon name="plus" size={13} />
-                          Add here
-                        </button>
-                      </div>
-                    )
-                  ) : null}
+                  {index < drafts.length - 1 ? placeAt(index + 1) : null}
                 </li>
               );
             })}
@@ -2191,28 +2450,26 @@ export function PageEditor({
           <div className="mt-4">
             {drafts.length >= MAX_BLOCKS ? (
               <p className="rounded-2xl border-2 border-dashed border-line-strong p-3 text-sm text-ink-soft sm:p-4">{`${MAX_BLOCKS} blocks is the most one page can have.`}</p>
-            ) : picking === drafts.length ? (
-              <BlockPicker icons={KIND_ICONS} allowed={addable.map((k) => k.kind)} where="at the end" onPick={(kind) => add(kind)} onClose={() => setPicking(null)} />
+            ) : picking === drafts.length && !sideBySide ? (
+              <BlockPicker icons={KIND_ICONS} allowed={addable} where={placeWords(drafts.length, drafts.length)} onPick={(kind) => add(kind, drafts.length, true)} onClose={cancelPicking} />
             ) : (
-              <button
-                type="button"
-                onClick={() => setPicking(drafts.length)}
-                className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong p-3 text-sm font-semibold text-ink-soft transition hover:border-violet-brand/60 hover:text-violet-deep sm:p-4"
-              >
-                <Icon name="plus" size={17} />
-                {`Add a block (${drafts.length} of ${MAX_BLOCKS})`}
-              </button>
+              <div data-drop-at={drafts.length} onDragOver={dragOverPlace} onDragLeave={dragLeavePlace} onDrop={dropOnPlace}>
+                <span aria-hidden="true" className={`mb-2 block h-1 rounded-full ${placeLit(drafts.length) ? "bg-violet-brand forced-colors:bg-[Highlight] forced-colors:outline forced-colors:outline-2 forced-colors:outline-[Highlight]" : "bg-transparent"}`} />
+                <button
+                  type="button"
+                  data-place={drafts.length}
+                  onClick={() => addHere(drafts.length)}
+                  className={`flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed p-3 text-sm font-semibold transition hover:border-violet-brand/60 hover:text-violet-deep motion-reduce:transition-none sm:p-4 ${placeLit(drafts.length) ? "border-violet-brand text-violet-deep" : "border-line-strong text-ink-soft"}`}
+                >
+                  <Icon name="plus" size={17} />
+                  {armed ? `Add ${kindLabel(armed)} here, ${placeWords(drafts.length, drafts.length)} (${drafts.length} of ${MAX_BLOCKS})` : `Add a block (${drafts.length} of ${MAX_BLOCKS})`}
+                </button>
+              </div>
             )}
           </div>
 
-          <SavedSections
-            pageKey={pageKey}
-            allowed={site ? site.kinds : BLOCK_KINDS.map((k) => k.kind).filter((kind) => kind !== "form")}
-            blocks={drafts.map((d) => d.block)}
-            room={MAX_BLOCKS - drafts.length}
-            disabled={busy}
-            onInsert={insertSection}
-          />
+          {/* On a wide screen the saved sections lead the side menu instead. */}
+          {sideBySide ? null : savedSections}
 
           <div className="mt-6 rounded-2xl bg-paper p-4 ring-1 ring-line sm:p-5">
             <p className="field-label">Page style</p>
@@ -2305,10 +2562,45 @@ export function PageEditor({
           </details>
         </div>
         {sideBySide ? (
+        <div className="sticky top-24 mt-6 flex max-h-[calc(100vh-7rem)] flex-col gap-3">
+        <SidePanelSwitch value={sidePanel} onChange={chooseSidePanel} controls="side-panel" />
+        {sidePanel === "add" ? (
+        <aside id="side-panel" aria-label="Blocks to add" className="min-h-0 overflow-y-auto rounded-2xl">
+          <BlockPicker
+            layout="menu"
+            icons={KIND_ICONS}
+            allowed={drafts.length >= MAX_BLOCKS ? [] : addable}
+            where={picking !== null ? placeWords(picking, drafts.length) : null}
+            chosen={armed}
+            onPick={pickInMenu}
+            onClose={cancelPicking}
+            onDragKind={(kind) => {
+              setDraggingKind(kind);
+              if (kind === null) setOverPlace(null);
+            }}
+            top={
+              <>
+                {armed ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm mt-3 w-full"
+                    onClick={() => document.querySelector<HTMLElement>("[data-place]")?.focus()}
+                  >
+                    Go to the places to add it
+                  </button>
+                ) : null}
+                {drafts.length >= MAX_BLOCKS ? <p className="mt-3 text-sm text-ink-soft">{`${MAX_BLOCKS} blocks is the most one page can have.`}</p> : null}
+                {savedSections}
+              </>
+            }
+          />
+        </aside>
+        ) : (
         <aside
+          id="side-panel"
           ref={beside}
           aria-label="The page as visitors see it"
-          className="sp-beside sticky top-24 mt-6 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl"
+          className="sp-beside min-h-0 overflow-y-auto rounded-2xl [scrollbar-gutter:stable]"
           onClick={(event) => {
             // A press on a part of the page opens its block for editing, beside it.
             const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-block]") : null;
@@ -2318,12 +2610,18 @@ export function PageEditor({
             document.getElementById(`row-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
           }}
         >
+          {/* Room above and beside it, so its focus ring is never cut by the panel's own scrolling edge (WCAG 2.4.13). */}
+          <div className="mb-2 px-1 pt-2">
+            <ScreenSwitch value={screen} onChange={setScreen} />
+          </div>
           <p className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-ink-soft">
-            <span>{`As visitors see it${other ? (onB ? ", version B" : ", version A") : ""}, on a phone · press a part to edit it`}</span>
+            <span>{`As visitors see it${other ? (onB ? ", version B" : ", version A") : ""}, on a ${screen} · press a part to edit it`}</span>
             {dirty ? <span>Unsaved</span> : null}
           </p>
-          {pagePreview(false)}
+          {pagePreview(screen)}
         </aside>
+        )}
+        </div>
         ) : null}
         </div>
       )}
@@ -2418,6 +2716,583 @@ export function PageEditor({
         ) : null}
       </div>
     </section>
+  );
+}
+
+/**
+ * The columns of a row (lib/sales-page.ts, RowBlock; 375 [TB1], unit 2):
+ * how many, and each column's parts, added, filled in, moved and removed
+ * with buttons only, never by dragging (WCAG 2.5.7). The rules are
+ * lib/row-edit-rules.ts; a removal is one step of the editor's own undo.
+ * After a move or a removal the keyboard stays where the work goes on: on
+ * the same move button at the part's new place, on the part in its new
+ * column, or on the part that took the removed one's place (else the
+ * column's Add control); what happened is said in a polite status line.
+ */
+const NONE_HELD: readonly number[] = [0, 0, 0];
+
+function RowEditor({
+  base,
+  block,
+  onColumns,
+  onColumnsNow,
+  sayAside,
+  held: heldByRow,
+  onHeld,
+  sendingNow,
+  pictureRoom,
+  productId,
+  pageId,
+  folder,
+  defaultLabel,
+  leadsTo,
+}: {
+  base: string;
+  block: RowBlock;
+  onColumns: (columns: RowElement[][]) => void;
+  /** Changes the row as it is now in the page editor's state; the update returns null to leave it as it is. */
+  onColumnsNow: (update: (now: RowColumns) => RowColumns | null) => boolean;
+  /** The page editor's own status line, for what happens once this editor is no longer drawn. */
+  sayAside: (text: string) => void;
+  /** The places held for pictures still being sent, by row id, kept by the page editor. */
+  held: React.MutableRefObject<Map<string, number[]>>;
+  /** Told when a held place changes, so the page editor draws the row again. */
+  onHeld: () => void;
+  /** The places held in this row as last drawn, for drawing; `held` is read when acting. */
+  sendingNow: readonly number[];
+  /** How many more pictures the page may show. */
+  pictureRoom: number;
+  productId: string;
+  pageId?: string;
+  folder: string;
+  defaultLabel: string;
+  leadsTo: string;
+}) {
+  const columns = block.columns;
+  const total = rowElementCount(columns);
+  // What was just done, for a screen reader: the same words said twice are said again, a space apart, so the
+  // live region always speaks (inbox C4-31).
+  const [said, setSaidNow] = useState("");
+  const again = useRef(false);
+  const setSaid = (text: string) => {
+    again.current = !again.current;
+    setSaidNow(text ? `${text}${again.current ? "\u00a0" : ""}` : "");
+  };
+  const [countNote, setCountNote] = useState<string | null>(null);
+  const [addKind, setAddKind] = useState<RowElementKind[]>(["heading", "heading", "heading"]);
+  const [addVideo, setAddVideo] = useState(["", "", ""]);
+  // Places held in each column for a picture still being sent there (lib/row-edit-rules.ts, RowHeld): drawn from
+  // `sending`, read from `held` by a picture that arrives after other changes. Nothing else can take such a place,
+  // so the file sent always gets its part; there is no way here to delete a file sent and not used.
+  // Drawn from the page editor's copy of the held places (sendingNow), read from `held` when acting: a send that began
+  // before the row was closed and reopened ends in the editor drawn now (inbox C4-31).
+  const heldNow = () => heldByRow.current.get(block.id) ?? [0, 0, 0];
+  const sending = sendingNow;
+  // What this drawing's own picture fields said they are sending: the change is added to what is held, so a send
+  // begun in an earlier drawing of the row keeps its place (lib/row-edit-rules.ts, shiftHeld).
+  const mine = useRef([0, 0, 0]);
+  const [mineShown, setMineShown] = useState(mine.current);
+  // Whether this drawing is still on screen, so what happens after it closed is said by the page editor instead.
+  const drawn = useRef(true);
+  useEffect(() => {
+    drawn.current = true;
+    return () => {
+      drawn.current = false;
+    };
+  }, []);
+  const hold = (column: number, count: number) => {
+    const by = count - mine.current[column];
+    mine.current = mine.current.map((n, i) => (i === column ? count : n));
+    setMineShown(mine.current);
+    const next = shiftHeld(heldNow(), column, by);
+    if (next.every((n) => n === 0)) heldByRow.current.delete(block.id);
+    else heldByRow.current.set(block.id, next);
+    onHeld();
+  };
+  // Why a picture that arrived could not be added, said beside that column's Add control.
+  const [uploadNote, setUploadNote] = useState<(string | null)[]>([null, null, null]);
+  const noteFor = (column: number, note: string | null) => setUploadNote((all) => all.map((n, i) => (i === column ? note : n)));
+  // A video address still being typed, kept with its own element until it is one we can play.
+  const [typed, setTyped] = useState<Map<RowElement, string>>(() => new Map());
+  // Where the keyboard goes once the change is drawn: at a later frame if the
+  // field is not there yet (lib/focus-when-drawn.ts), so the focus never stays
+  // on the Add button, where a typed space would add the part again.
+  const focusTo = useRef<string | null>(null);
+  const stopFocus = useRef<(() => void) | null>(null);
+  // The columns as last drawn, for a picture that finishes sending after other changes were made.
+  const latest = useRef(columns);
+  useEffect(() => {
+    latest.current = columns;
+    const id = focusTo.current;
+    if (!id) return;
+    focusTo.current = null;
+    stopFocus.current?.();
+    stopFocus.current = focusWhenDrawn(() => document.getElementById(id), browserFrames());
+  });
+  useEffect(() => () => stopFocus.current?.(), []);
+
+  const at = (column: number, index: number) => `${base}-c${column}e${index}`;
+  const first = (place: RowPlace, now: RowColumns) => (now[place.column]?.[place.index]?.kind === "image" ? `${at(place.column, place.index)}-pa0` : `${at(place.column, place.index)}-a`);
+  const name = (element: RowElement) => ROW_ELEMENT_NAMES[element.kind].toLowerCase();
+
+  function apply(edit: RowEdit, focus: (now: RowColumns, place: RowPlace | null) => string | null, say: (place: RowPlace | null) => string) {
+    if (!edit.ok) {
+      setSaid(ROW_EDIT_WHY[edit.why]);
+      return;
+    }
+    onColumns(edit.columns);
+    focusTo.current = focus(edit.columns, edit.at);
+    setSaid(say(edit.at));
+  }
+
+  function countTo(count: number) {
+    const edit = setColumnCount(columns, count, sending);
+    if (!edit.ok) {
+      setCountNote(ROW_EDIT_WHY[edit.why]);
+      setSaid(ROW_EDIT_WHY[edit.why]);
+      return;
+    }
+    setCountNote(null);
+    const moved = columns.slice(count).reduce((n, column) => n + column.length, 0);
+    onColumns(edit.columns);
+    setSaid(`${count} ${count === 1 ? "column" : "columns"}.${moved ? ` ${moved === 1 ? "One part" : `${moved} parts`} moved to the end of column ${count}; nothing was removed.` : ""}`);
+  }
+
+  function add(column: number, element: RowElement, from: RowColumns = columns, places: readonly number[] = sending) {
+    const edit = addElement(from, column, element, places);
+    noteFor(column, null);
+    apply(
+      edit,
+      (now, place) => (place ? first(place, now) : null),
+      (place) => `Added ${name(element)} as part ${(place?.index ?? 0) + 1} of column ${column + 1}.`,
+    );
+  }
+
+  function move(place: RowPlace, to: "up" | "down" | { column: number }) {
+    const element = columns[place.column]?.[place.index];
+    if (!element) return;
+    apply(
+      moveElement(columns, place, to, sending),
+      // Up and down keep the keyboard on the same button, so a part can be moved several places one press after another.
+      (now, there) => (!there ? null : typeof to === "string" ? `${at(there.column, there.index)}-${to}` : first(there, now)),
+      (there) => `Moved ${name(element)} to part ${(there?.index ?? 0) + 1} of column ${(there?.column ?? 0) + 1}.`,
+    );
+  }
+
+  function remove(place: RowPlace) {
+    const element = columns[place.column]?.[place.index];
+    if (!element) return;
+    apply(
+      removeElement(columns, place),
+      (now, next) => (next ? first(next, now) : `${base}-c${place.column}-add`),
+      () => `Removed ${name(element)} from column ${place.column + 1}. Undo, at the top of the editor, brings it back.`,
+    );
+  }
+
+  /**
+   * One part changed where it is now, found by the part itself: a move keeps
+   * the same part, so a description that comes back from the writing help
+   * after the part moved still lands on it, and one whose part has since
+   * changed or gone is dropped rather than written over it.
+   */
+  const replace = (old: RowElement, next: RowElement) => {
+    const from = latest.current;
+    const column = from.findIndex((elements) => elements.includes(old));
+    if (column < 0) return;
+    const edit = replaceElement(from, { column, index: from[column].indexOf(old) }, next);
+    if (edit.ok) onColumns(edit.columns);
+  };
+
+  const small =
+    "inline-flex min-h-11 items-center gap-1.5 rounded-full bg-white px-3 text-sm font-semibold text-ink-soft ring-1 ring-line transition-colors hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:opacity-60";
+
+  function fields(element: RowElement, place: RowPlace) {
+    const id = at(place.column, place.index);
+    const problem = rowElementProblem(element);
+    const problemId = `${id}-e`;
+    const flagged = (on: boolean) => (on && problem ? { "aria-invalid": true as const, "aria-describedby": problemId } : {});
+    const label = (htmlFor: string, text: string, extra?: React.ReactNode) => (
+      <div className="flex items-baseline justify-between gap-3">
+        <label htmlFor={htmlFor} className="field-label">
+          {text}
+        </label>
+        {extra}
+      </div>
+    );
+    const shown = problem ? (
+      <p id={problemId} className="mt-1 text-xs font-semibold text-danger">
+        {problem}
+      </p>
+    ) : null;
+    switch (element.kind) {
+      case "heading":
+      case "subheading": {
+        const max = element.kind === "heading" ? MAX_HEADING : MAX_SUBHEADLINE;
+        return (
+          <div>
+            {label(`${id}-a`, element.kind === "heading" ? "Heading" : "Smaller heading", counter(element.text, max))}
+            <input id={`${id}-a`} className="field" maxLength={max} value={element.text} onChange={(e) => replace(element, { ...element, text: e.target.value })} {...flagged(true)} />
+            {shown}
+          </div>
+        );
+      }
+      case "paragraph":
+        return (
+          <div>
+            {label(`${id}-a`, "Words", counter(element.text, MAX_ROW_PARAGRAPH))}
+            <textarea
+              id={`${id}-a`}
+              className="field"
+              rows={4}
+              maxLength={MAX_ROW_PARAGRAPH}
+              value={element.text}
+              placeholder="A blank line starts a new paragraph. A line starting with “- ” is a point in a list."
+              aria-describedby={problem ? `${id}-h ${problemId}` : `${id}-h`}
+              aria-invalid={problem ? true : undefined}
+              onChange={(e) => replace(element, { ...element, text: e.target.value })}
+            />
+            <p id={`${id}-h`} className="mt-1 text-xs text-ink-soft">{`Up to ${MAX_ROW_PARAGRAPH.toLocaleString("en-US")} characters.`}</p>
+            {shown}
+          </div>
+        );
+      case "list": {
+        const points = element.items.filter((item) => item.trim()).length;
+        return (
+          <div>
+            {label(`${id}-a`, "Points, one on each line")}
+            <textarea
+              id={`${id}-a`}
+              className="field"
+              rows={4}
+              value={element.items.join("\n")}
+              aria-describedby={problem ? `${id}-h ${problemId}` : `${id}-h`}
+              aria-invalid={problem ? true : undefined}
+              onChange={(e) => replace(element, { ...element, items: e.target.value.split("\n") })}
+            />
+            <p id={`${id}-h`} className="mt-1 text-xs text-ink-soft">{`${points} of ${MAX_ROW_LIST_ITEMS} points. Each point holds up to ${MAX_ITEM} characters; empty lines are left out.`}</p>
+            {shown}
+          </div>
+        );
+      }
+      case "icon":
+        return (
+          <div className="space-y-3">
+            <div>
+              {label(`${id}-a`, "Icon")}
+              <div className="flex items-center gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-lilac text-violet-deep">
+                  <Icon name={element.name} size={22} />
+                </span>
+                <select id={`${id}-a`} className="field" value={element.name} onChange={(e) => replace(element, { ...element, name: e.target.value as RowIcon })}>
+                  {ROW_ICONS.map((icon) => (
+                    <option key={icon} value={icon}>
+                      {ROW_ICON_NAMES[icon]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              {label(`${id}-l`, "What it says (optional)", counter(element.label, MAX_ICON_LABEL))}
+              <input id={`${id}-l`} className="field" maxLength={MAX_ICON_LABEL} value={element.label} aria-describedby={`${id}-lh`} onChange={(e) => replace(element, { ...element, label: e.target.value })} />
+              <p id={`${id}-lh`} className="mt-1 text-xs text-ink-soft">Leave empty if it is only decoration: screen readers then skip it. If it means something, say what in a few words.</p>
+            </div>
+          </div>
+        );
+      case "button": {
+        const badLink = Boolean(element.url.trim()) && !quoteUrl(element.url);
+        return (
+          <div className="space-y-3">
+            <div>
+              {label(`${id}-a`, "Button words", counter(element.label, MAX_CTA_LABEL))}
+              <input id={`${id}-a`} className="field" maxLength={MAX_CTA_LABEL} value={element.label} placeholder={defaultLabel} onChange={(e) => replace(element, { ...element, label: e.target.value })} {...flagged(!badLink)} />
+            </div>
+            <div>
+              {label(`${id}-u`, "Where it goes (optional)")}
+              <input
+                id={`${id}-u`}
+                className="field"
+                type="url"
+                inputMode="url"
+                maxLength={MAX_QUOTE_URL}
+                value={element.url}
+                placeholder="https://"
+                aria-describedby={badLink ? `${id}-uh ${problemId}` : `${id}-uh`}
+                aria-invalid={badLink || undefined}
+                onChange={(e) => replace(element, { ...element, url: e.target.value })}
+              />
+              <p id={`${id}-uh`} className="mt-1 text-xs text-ink-soft">
+                {`Leave it empty and the button does what this page's main button does${leadsTo ? `: ${leadsTo.charAt(0).toLowerCase()}${leadsTo.slice(1)}` : "."} Without words of its own, it says “${defaultLabel}”. A full https address opens that page in a new tab.`}
+              </p>
+            </div>
+            {shown}
+          </div>
+        );
+      }
+      case "image":
+        return (
+          <div className="space-y-3">
+            <PicturesEditor
+              base={id}
+              productId={productId}
+              pageId={pageId}
+              folder={folder}
+              items={[element.picture]}
+              room={1}
+              single
+              labelled
+              describedBy={problem ? problemId : undefined}
+              invalid={Boolean(problem)}
+              words={{ add: "", full: "", note: "" }}
+              onChange={(items) => (items[0] ? replace(element, { ...element, picture: items[0] }) : remove(place))}
+            />
+            {shown}
+            <label className="flex min-h-11 cursor-pointer items-start gap-3">
+              <input type="checkbox" id={`${id}-d`} className="mt-1 h-5 w-5 shrink-0" checked={element.decorative} aria-describedby={`${id}-dh`} onChange={(e) => replace(element, { ...element, decorative: e.target.checked })} />
+              <span className="text-sm font-semibold text-ink">This picture is only decoration</span>
+            </label>
+            <p id={`${id}-dh`} className="-mt-2 text-xs text-ink-soft">
+              Check it only when the picture adds nothing the words around it do not already say. Screen readers then skip it, and it needs no description.
+            </p>
+          </div>
+        );
+      case "video": {
+        const text = typed.get(element) ?? videoAddress(element.video);
+        const recognised = readVideo(text);
+        return (
+          <div className="space-y-3">
+            <div>
+              {label(`${id}-a`, "Video address")}
+              <input
+                id={`${id}-a`}
+                className="field"
+                inputMode="url"
+                value={text}
+                aria-describedby={`${id}-vh`}
+                aria-invalid={!recognised || undefined}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  const video = readVideo(value);
+                  if (video) {
+                    const next = { ...element, video };
+                    setTyped((map) => new Map(map).set(next, value));
+                    replace(element, next);
+                  } else setTyped((map) => new Map(map).set(element, value));
+                }}
+              />
+              <p id={`${id}-vh`} className={`mt-1 text-xs ${recognised ? "text-ink-soft" : "font-semibold text-danger"}`}>
+                {recognised
+                  ? `${PROVIDER_NAMES[recognised.provider]} video recognized. It loads only when a visitor presses play.`
+                  : `Not a video we can play. Paste a link from YouTube, Vimeo or Loom. Until then the page keeps the ${PROVIDER_NAMES[element.video.provider]} video it had.`}
+              </p>
+            </div>
+            <div>
+              {label(`${id}-t`, "Video title (optional)", counter(element.title, MAX_HEADING))}
+              <input id={`${id}-t`} className="field" maxLength={MAX_HEADING} value={element.title} aria-describedby={`${id}-th`} onChange={(e) => replace(element, { ...element, title: e.target.value })} />
+              <p id={`${id}-th`} className="mt-1 text-xs text-ink-soft">Read out to people using a screen reader before the video plays. Left empty, the product&apos;s name is used.</p>
+            </div>
+          </div>
+        );
+      }
+    }
+  }
+
+  function adder(column: number) {
+    const id = `${base}-c${column}-add`;
+    const kind = addKind[column] ?? "heading";
+    const why = addRefusal(columns, column, sending);
+    const typedVideo = addVideo[column] ?? "";
+    const video = kind === "video" ? readVideo(typedVideo) : null;
+    const reason = why
+      ? ROW_EDIT_WHY[why]
+      : kind === "image" && pictureRoom - sending.reduce((n, count) => n + count, 0) <= 0
+        ? `This page already shows ${MAX_PAGE_PICTURES} pictures, the most a page shows. Remove one first.`
+        : kind === "video" && !video
+          ? "Paste the video's address first: a link from YouTube, Vimeo or Loom."
+          : "";
+    const reasonId = `${id}-why`;
+    const press = () => {
+      if (reason) {
+        setSaid(reason);
+        return;
+      }
+      if (kind === "video" && video) {
+        add(column, { kind: "video", video, title: "" });
+        setAddVideo((all) => all.map((v, i) => (i === column ? "" : v)));
+        return;
+      }
+      const element = blankElement(kind);
+      if (element) add(column, element);
+    };
+    return (
+      <div className="mt-3 space-y-2 rounded-xl bg-white p-3 ring-1 ring-line">
+        <div className="flex flex-wrap items-end gap-2">
+          {/* Never narrower than its longest choice ("Smaller heading"): in a narrow column the Add button goes below it instead. */}
+          <div className="min-w-[min(13rem,100%)] flex-1">
+            <label htmlFor={id} className="field-label">{`Add to column ${column + 1}`}</label>
+            <select id={id} className="field" value={kind} aria-describedby={reasonId} onChange={(e) => setAddKind((all) => all.map((k, i) => (i === column ? (e.target.value as RowElementKind) : k)))}>
+              {ROW_ELEMENT_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {ROW_ELEMENT_NAMES[k]}
+                </option>
+              ))}
+            </select>
+          </div>
+          {kind === "image" && !reason ? null : (
+            <button type="button" className={small} aria-disabled={reason ? true : undefined} aria-describedby={reasonId} onClick={press}>
+              <Icon name="plus" size={15} />
+              Add
+            </button>
+          )}
+        </div>
+        {kind === "video" && !why ? (
+          <div>
+            <label htmlFor={`${id}-v`} className="field-label">
+              Video address
+            </label>
+            <input
+              id={`${id}-v`}
+              className="field"
+              inputMode="url"
+              value={typedVideo}
+              placeholder="https://www.youtube.com/watch?v=…"
+              aria-describedby={reasonId}
+              onChange={(e) => setAddVideo((all) => all.map((v, i) => (i === column ? e.target.value : v)))}
+            />
+          </div>
+        ) : null}
+        {(kind === "image" && !reason && sending[column] - mineShown[column] === 0) || mineShown[column] > 0 ? (
+          <PicturesEditor
+            base={`${id}-p`}
+            productId={productId}
+            pageId={pageId}
+            folder={folder}
+            items={[]}
+            room={1}
+            words={{ add: `Choose a picture for column ${column + 1}`, full: "", note: "Your own picture, shrunk before it is sent. You describe it next." }}
+            onSending={(count) => hold(column, count)}
+            onChange={(items) => {
+              if (!items[0]) return;
+              // Checked again now that it has arrived, against the row as it is in the page editor's state, with its own
+              // held place given back to it: never over the columns drawn when it was sent (inbox C4-31).
+              const element: RowElement = { kind: "image", picture: items[0], decorative: false };
+              const places = releaseHeld(heldNow(), column);
+              // Told once, after the update, and only what happened: an update may be run twice by React. Said by this
+              // editor while it is drawn, else by the page editor's own status line.
+              let told = false;
+              const say = (text: string) => (drawn.current ? setSaid(text) : sayAside(text));
+              const there = onColumnsNow((now) => {
+                const edit = arrivePicture(now, column, element, places);
+                queueMicrotask(() => {
+                  if (told) return;
+                  told = true;
+                  if (!edit.ok) {
+                    noteFor(column, `The picture you sent was not added: ${ROW_EDIT_WHY[edit.why]}`);
+                    say(`The picture you sent was not added to column ${column + 1}: ${ROW_EDIT_WHY[edit.why]}`);
+                    return;
+                  }
+                  noteFor(column, null);
+                  const part = edit.columns[column].indexOf(element) + 1;
+                  say(`Added picture as part ${part} of column ${column + 1}. Describe it there.`);
+                });
+                return edit.ok ? edit.columns : null;
+              });
+              if (!there) say(`The picture you sent was not added: its row is no longer on the page.`);
+            }}
+          />
+        ) : null}
+        <p id={reasonId} className={`text-xs ${uploadNote[column] || why || (kind === "image" && reason) ? "font-semibold text-danger" : "text-ink-soft"}`}>
+          {uploadNote[column] ||
+            reason ||
+            (sending[column] - mineShown[column] > 0
+              ? `A picture is still being sent to column ${column + 1}. It is added when it arrives.`
+              : null) ||
+            (video
+              ? `${PROVIDER_NAMES[video.provider]} video recognized. Press Add to put it in column ${column + 1}.`
+              : `${columns[column].length} of ${MAX_COLUMN_ELEMENTS} parts in this column, ${total} of ${MAX_ROW_ELEMENTS} in the row.`)}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    // A container: the columns below stand side by side only when this editor itself has the room for
+    // their fields (32rem for two, 48rem for three), whatever the window's width (375 [TB1]).
+    <div className="@container space-y-4">
+      <fieldset>
+        <legend className="field-label">Columns side by side</legend>
+        <div className="mt-1 flex flex-wrap gap-2">
+          {[1, 2, 3].slice(0, MAX_ROW_COLUMNS).map((count) => (
+            <label
+              key={count}
+              className={`flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full px-4 text-sm font-semibold ring-1 focus-within:ring-2 focus-within:ring-violet-brand ${columns.length === count ? "bg-lilac text-violet-ink ring-violet-brand/40" : "text-ink-soft ring-line"}`}
+            >
+              <input type="radio" name={`${base}-count`} className="h-4 w-4" checked={columns.length === count} aria-describedby={`${base}-count-h`} onChange={() => countTo(count)} />
+              {count === 1 ? "One column" : count === 2 ? "Two columns" : "Three columns"}
+            </label>
+          ))}
+        </div>
+        <p id={`${base}-count-h`} className={`mt-1 text-xs ${countNote ? "font-semibold text-danger" : "text-ink-soft"}`}>
+          {countNote ?? "On a phone the columns become one, in order. Fewer columns move the parts of the columns taken away to the end of the last one; nothing is removed."}
+        </p>
+      </fieldset>
+      <p className="text-xs text-ink-soft">{`Up to ${MAX_COLUMN_ELEMENTS} parts in a column and ${MAX_ROW_ELEMENTS} in the whole row. This row has ${total}.`}</p>
+      <p role="status" aria-atomic="true" className="sr-only">
+        {said}
+      </p>
+      <div className={`grid gap-3 ${columns.length === 3 ? "@3xl:grid-cols-3" : columns.length === 2 ? "@lg:grid-cols-2" : ""}`}>
+        {columns.map((column, c) => (
+          <div key={c} role="group" aria-labelledby={`${base}-c${c}-title`} className="min-w-0 rounded-xl bg-paper p-3 ring-1 ring-line">
+            <p id={`${base}-c${c}-title`} className="text-sm font-semibold text-ink">{`Column ${c + 1}`}</p>
+            {column.length === 0 ? <p className="mt-1 text-xs text-ink-soft">Empty. Add a part below.</p> : null}
+            <ol className="mt-2 space-y-3">
+              {column.map((element, j) => {
+                const place = { column: c, index: j };
+                const id = at(c, j);
+                const what = `part ${j + 1} of column ${c + 1}, ${name(element)}`;
+                return (
+                  <li key={j}>
+                    <div role="group" aria-labelledby={`${id}-title`} className="rounded-xl bg-white p-3 ring-1 ring-line">
+                      <p id={`${id}-title`} className="text-xs font-bold uppercase tracking-[0.08em] text-ink-mute">{`Part ${j + 1} · ${ROW_ELEMENT_NAMES[element.kind]}`}</p>
+                      <div className="mt-2">{fields(element, place)}</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button id={`${id}-up`} type="button" className={small} aria-disabled={j === 0 || undefined} aria-label={`Move up: ${what}`} onClick={() => move(place, "up")}>
+                          <Icon name="chevron-down" size={15} className="rotate-180" />
+                          Move up
+                        </button>
+                        <button id={`${id}-down`} type="button" className={small} aria-disabled={j === column.length - 1 || undefined} aria-label={`Move down: ${what}`} onClick={() => move(place, "down")}>
+                          <Icon name="chevron-down" size={15} />
+                          Move down
+                        </button>
+                        {columns.map((other, k) =>
+                          k === c ? null : (
+                            <button
+                              key={k}
+                              type="button"
+                              className={small}
+                              aria-disabled={other.length + sending[k] >= MAX_COLUMN_ELEMENTS || undefined}
+                              aria-label={`Move to column ${k + 1}: ${what}${other.length + sending[k] >= MAX_COLUMN_ELEMENTS ? ". That column is full" : ""}`}
+                              onClick={() => move(place, { column: k })}
+                            >
+                              {`Move to column ${k + 1}`}
+                            </button>
+                          ),
+                        )}
+                        <button type="button" className={`${small} hover:bg-danger-soft hover:text-danger`} aria-label={`Remove: ${what}`} onClick={() => remove(place)}>
+                          <Icon name="trash" size={15} />
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+            {adder(c)}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -2860,6 +3735,12 @@ function PicturesEditor({
   items,
   room,
   onChange,
+  words,
+  labelled = false,
+  describedBy,
+  invalid = false,
+  single = false,
+  onSending,
 }: {
   base: string;
   productId: string;
@@ -2870,6 +3751,17 @@ function PicturesEditor({
   /** How many pictures this block may hold, given what the rest of the page holds. */
   room: number;
   onChange: (items: Picture[]) => void;
+  /** Its own words where the pictures block's would not be true: the add button, the full note and the line under it. */
+  words?: { add: string; full: string; note: string };
+  /** The caption and description labels shown, not only read out. */
+  labelled?: boolean;
+  /** The id of what is said about the description, and whether it still needs something. */
+  describedBy?: string;
+  invalid?: boolean;
+  /** One picture that is a part of something else, which moves and removes it: no buttons of its own for that. */
+  single?: boolean;
+  /** How many pictures it is sending now, told when sending starts and once more (0) when it ends, after onChange. */
+  onSending?: (count: number) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(0);
@@ -2905,6 +3797,7 @@ function PicturesEditor({
     if (chosen.length === 0) return;
     setError(null);
     setBusy(chosen.length);
+    onSending?.(chosen.length);
     const added: Picture[] = [];
     try {
       for (const file of chosen) {
@@ -2935,6 +3828,7 @@ function PicturesEditor({
       }
     } finally {
       if (added.length) onChange([...items, ...added]);
+      onSending?.(0);
       setBusy(0);
       if (input.current) input.current.value = "";
     }
@@ -2957,11 +3851,20 @@ function PicturesEditor({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={imageUrl(picture)} alt="" width={picture.width} height={picture.height} className="h-20 w-20 shrink-0 rounded-lg object-cover ring-1 ring-line" />
           <div className="min-w-0 flex-1 space-y-2">
-            <label htmlFor={`${base}-pc${i}`} className="sr-only">{`A line under picture ${i + 1}`}</label>
+            <label htmlFor={`${base}-pc${i}`} className={labelled ? "block text-xs font-semibold text-ink-soft" : "sr-only"}>{labelled ? "A line under it (optional)" : `A line under picture ${i + 1}`}</label>
             <input id={`${base}-pc${i}`} className="field" maxLength={MAX_PICTURE_CAPTION} value={picture.caption} placeholder="A line under it (optional)" onChange={(e) => set(i, { caption: e.target.value })} />
-            <label htmlFor={`${base}-pa${i}`} className="sr-only">{`What picture ${i + 1} shows`}</label>
+            <label htmlFor={`${base}-pa${i}`} className={labelled ? "block text-xs font-semibold text-ink-soft" : "sr-only"}>{labelled ? "What it shows, for someone who cannot see it" : `What picture ${i + 1} shows`}</label>
             <div className="flex gap-2">
-              <input id={`${base}-pa${i}`} className="field min-w-0 flex-1" maxLength={MAX_ALT_LENGTH} value={picture.alt} placeholder="What it shows, for someone who cannot see it" onChange={(e) => set(i, { alt: e.target.value })} />
+              <input
+                id={`${base}-pa${i}`}
+                className="field min-w-0 flex-1"
+                maxLength={MAX_ALT_LENGTH}
+                value={picture.alt}
+                placeholder="What it shows, for someone who cannot see it"
+                aria-describedby={describedBy}
+                aria-invalid={invalid || undefined}
+                onChange={(e) => set(i, { alt: e.target.value })}
+              />
               {ai.on ? (
                 <button
                   type="button"
@@ -2978,6 +3881,7 @@ function PicturesEditor({
               ) : null}
             </div>
           </div>
+          {single ? null : (
           <div className="flex shrink-0 flex-col items-center">
             <button type="button" onClick={() => swap(i, -1)} disabled={i === 0} className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink disabled:opacity-30" aria-label={`Move picture ${i + 1} earlier`}>
               <Icon name="chevron-down" size={16} className="rotate-180" />
@@ -2989,22 +3893,23 @@ function PicturesEditor({
               <Icon name="close" size={16} />
             </button>
           </div>
+          )}
         </div>
       ))}
       {left > 0 ? (
         <button type="button" onClick={() => input.current?.click()} disabled={busy > 0} aria-busy={busy > 0} className="btn btn-secondary btn-sm">
           <Icon name="camera" size={15} />
-          {busy > 0 ? `Sending ${busy} ${busy === 1 ? "picture" : "pictures"}…` : `Add pictures (${items.length} of ${room})`}
+          {busy > 0 ? `Sending ${busy} ${busy === 1 ? "picture" : "pictures"}…` : (words?.add ?? `Add pictures (${items.length} of ${room})`)}
         </button>
-      ) : (
-        <p className="text-xs text-ink-soft">{`This block is full. A block holds ${MAX_PICTURES} pictures and a page ${MAX_PAGE_PICTURES}.`}</p>
+      ) : words?.full === "" ? null : (
+        <p className="text-xs text-ink-soft">{words?.full ?? `This block is full. A block holds ${MAX_PICTURES} pictures and a page ${MAX_PAGE_PICTURES}.`}</p>
       )}
       {error ? (
         <p className="text-xs font-semibold text-danger" role="alert">
           {error}
         </p>
-      ) : (
-        <p className="text-xs text-ink-soft">Your own pictures: pages of the book, a screen of the course, the finished result. Each is shrunk before it is sent, shown once, and opens full size when a visitor presses it.</p>
+      ) : words?.note === "" ? null : (
+        <p className="text-xs text-ink-soft">{words?.note ?? "Your own pictures: pages of the book, a screen of the course, the finished result. Each is shrunk before it is sent, shown once, and opens full size when a visitor presses it."}</p>
       )}
     </div>
   );

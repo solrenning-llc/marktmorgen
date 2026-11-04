@@ -403,6 +403,9 @@ export async function sesDown(why: string, seconds = HOLD_SECONDS, now = Date.no
 /* What Amazon took                                                    */
 /* ------------------------------------------------------------------ */
 
+// A rolling 24-hour interval may touch 25 UTC hourly buckets. Retain the
+// first partial hour conservatively; the same pipeline reads one extra key.
+const SES_USAGE_BUCKETS = 25;
 const hourKey = (ms: number) => `nl:ses:h:${new Date(ms).toISOString().slice(0, 13)}`;
 
 export async function countSesSent(n: number, now = Date.now()): Promise<void> {
@@ -414,19 +417,21 @@ export async function countSesSent(n: number, now = Date.now()): Promise<void> {
   ]).catch(() => {});
 }
 
-/** Recorded SES acceptances in the existing 24 hourly buckets; null when unproved. */
+/** Conservative rolling usage: the current hour and the preceding 24 whole
+ * hourly buckets. The first partial hour may overcount by less than an hour,
+ * never omit a send still within the last 24 hours. Null when unproved. */
 export async function sesSentLast24h(now = Date.now()): Promise<number | null> {
   if (!isRedisConfigured()) return null;
   try {
-    const keys = Array.from({ length: 24 }, (_, i) => hourKey(now - i * 3_600_000));
+    const keys = Array.from({ length: SES_USAGE_BUCKETS }, (_, i) => hourKey(now - i * 3_600_000));
     const rows: unknown = await redisPipeline(keys.map((key) => ["GET", key]));
     if (!Array.isArray(rows)) return null;
     const length = Object.getOwnPropertyDescriptor(rows, "length");
-    if (!length || !("value" in length) || length.value !== 24) return null;
+    if (!length || !Object.hasOwn(length, "value") || length.value !== SES_USAGE_BUCKETS) return null;
     let total = 0;
-    for (let i = 0; i < 24; i += 1) {
+    for (let i = 0; i < SES_USAGE_BUCKETS; i += 1) {
       const item = Object.getOwnPropertyDescriptor(rows, String(i));
-      if (!item || !("value" in item)) return null;
+      if (!item || !Object.hasOwn(item, "value")) return null;
       if (item.value === null) continue; // Explicit absence is known zero.
       if (typeof item.value !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(item.value)) return null;
       const count = Number(item.value);

@@ -46,6 +46,7 @@ import { POST as ordersRoute } from "@/app/api/store/orders/route";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { REDIS_TIMEOUT_MS, RESEND_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { ORDERS_MOVES_READ_COMMANDS, ordersMovesCommands } from "@/lib/buyer-orders-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { requestsIn } from "@/lib/traffic";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -174,6 +175,26 @@ test("a token not shaped like one takes nothing and reads nothing", async () => 
   assert.deepEqual(sent.filter((command) => !command.startsWith("GET nl:traffic") && !command.includes(":requests:")), []);
 });
 
+/**
+ * The requests an opening's meter takes for a store's bookings read whole, this buyer's `listed` of them listed with
+ * their video rooms: the most moves first, then what the moves used, the listing and the rooms, each paid from what is left.
+ */
+function bookingUnits(bookings: number, listed: number): number {
+  let left = 0;
+  let taken = 0;
+  const take = (commands: number) => {
+    if (commands <= left) return void (left -= commands);
+    const units = Math.ceil((commands - left) / ORDERS_UNIT_COMMANDS);
+    taken += units;
+    left += units * ORDERS_UNIT_COMMANDS - commands;
+  };
+  take(ORDERS_CALL_MOVES);
+  left += ORDERS_CALL_MOVES - ordersMovesCommands(bookings);
+  take(ORDERS_LISTING_COMMANDS);
+  take(listed * ORDERS_ROOM_COMMANDS);
+  return taken;
+}
+
 test("an opening with forty bookings takes the most moves first, and pays their listing and video rooms from what the moves left", async () => {
   const { store, product, folder, window } = await callStore(true);
   sessions = bookings(product, MAX_LISTED);
@@ -186,9 +207,29 @@ test("an opening with forty bookings takes the most moves first, and pays their 
   // Each booking's move, the product's listing, and each room: four reads, and a video room made and read back.
   const rooms = sent.filter((command) => command.includes("nl:call:room:") || command.includes("nl:meet:r:")).length;
   assert.ok(rooms > 4 * MAX_LISTED && rooms <= ORDERS_ROOM_COMMANDS * MAX_LISTED, String(rooms));
-  // ORDERS_CALL_MOVES taken before any booking is read; the forty moves, the listing and the rooms fit in it.
-  assert.ok(MAX_LISTED + ORDERS_LISTING_COMMANDS + MAX_LISTED * ORDERS_ROOM_COMMANDS <= ORDERS_CALL_MOVES);
-  const units = Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS);
+  // The forty moves were one MGET (C3-82), not forty GETs.
+  assert.deepEqual(sent.filter((command) => command.includes("nl:call:moved:")).map((command) => command.split(" ")[0]), ["MGET"]);
+  // ORDERS_CALL_MOVES taken before any booking is read; what the one MGET left pays the listing, then the rooms take more.
+  const units = bookingUnits(MAX_LISTED, MAX_LISTED);
+  assert.equal(units, 10, "ten requests, not the twenty five hundred GETs took");
+  assert.equal(opened.meter.taken, units);
+  assert.equal(await requestsIn(folder, window), ORDERS_OPEN_UNITS + units);
+});
+
+test("an opening at a store with five hundred bookings reads their moves in five MGETs and takes eleven requests, not thirty", async () => {
+  const { store, product, folder, window } = await callStore(true);
+  sessions = bookings(product, 500);
+  const link = (await ordersLinkFor(store, BUYER, "https://marktmorgen.com/@olive"))!;
+  const opened = await openOrders(store, new URL(link).searchParams.get("token")!);
+  sent.length = 0;
+  const calls = await callsFor(store, BUYER, opened.meter);
+  assert.equal(calls.length, MAX_LISTED);
+  const moves = sent.filter((command) => command.includes("nl:call:moved:"));
+  assert.deepEqual(moves.map((command) => command.split(" ")[0]), Array(5).fill("MGET"));
+  assert.ok(moves.every((command) => command.split(" ").length - 1 <= 100));
+  assert.equal(ordersMovesCommands(500), 5 * ORDERS_MOVES_READ_COMMANDS);
+  const units = bookingUnits(500, MAX_LISTED);
+  assert.equal(units, 11);
   assert.equal(opened.meter.taken, units);
   assert.equal(await requestsIn(folder, window), ORDERS_OPEN_UNITS + units);
 });
@@ -200,8 +241,9 @@ test("an opening at a store that sells calls takes the moves up front, and nothi
   assert.equal((await callsFor(store, BUYER, meter)).length, 2);
   const upFront = Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS);
   assert.equal(meter.taken, upFront);
-  // What the two moves, the listing and the two rooms left pays the opening's next reads (feeds, keys, listings).
-  const left = upFront * ORDERS_UNIT_COMMANDS - (2 + ORDERS_LISTING_COMMANDS + 2 * ORDERS_ROOM_COMMANDS);
+  // What the two moves (one MGET), the listing and the two rooms left pays the opening's next reads (feeds, keys, listings).
+  const left = upFront * ORDERS_UNIT_COMMANDS - (ordersMovesCommands(2) + ORDERS_LISTING_COMMANDS + 2 * ORDERS_ROOM_COMMANDS);
+  assert.ok(left > 0);
   await meter.take(left);
   assert.equal(meter.taken, upFront);
   await meter.take(1);
@@ -214,8 +256,10 @@ test("the opening's other reads wait for the bookings' count and use what the mo
   const meter = new OrdersMeter(store);
   const upFront = Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS);
   // Started together, as the page does: purchases' reads asked for while the bookings are still being read.
-  const left = upFront * ORDERS_UNIT_COMMANDS - (2 + ORDERS_LISTING_COMMANDS + 2 * ORDERS_ROOM_COMMANDS);
-  const [calls] = await Promise.all([callsFor(store, BUYER, meter), meter.take(left - 100), meter.take(100)]);
+  const left = upFront * ORDERS_UNIT_COMMANDS - (ordersMovesCommands(2) + ORDERS_LISTING_COMMANDS + 2 * ORDERS_ROOM_COMMANDS);
+  const half = Math.floor(left / 2);
+  assert.ok(half > 0 && left - half > 0);
+  const [calls] = await Promise.all([callsFor(store, BUYER, meter), meter.take(left - half), meter.take(half)]);
   assert.equal(calls.length, 2);
   assert.equal(meter.taken, upFront, "paid from what the moves left, not from new requests");
 });
@@ -240,7 +284,10 @@ test("a meter the store has no room for reads none of the bookings, not even the
   assert.deepEqual(sent.filter(bookingReads), []);
   // Read without a meter (the other readers of bookings), the same store reads them all.
   assert.equal((await callsFor(store, BUYER)).length, MAX_LISTED);
-  assert.ok(sent.filter(bookingReads).length >= MAX_LISTED * 5, String(sent.filter(bookingReads).length));
+  // Their forty moves in one MGET (C3-82), and four reads of each room.
+  const moves = sent.filter((command) => command.includes("nl:call:moved:"));
+  assert.deepEqual([moves.length, moves[0]?.split(" ")[0], moves[0]?.split(" ").length], [1, "MGET", 1 + MAX_LISTED]);
+  assert.ok(sent.filter(bookingReads).length >= 1 + MAX_LISTED * 4, String(sent.filter(bookingReads).length));
 });
 
 test("the moves taken before a store's bookings are read cover every booking its pages can hold", () => {
@@ -248,7 +295,7 @@ test("the moves taken before a store's bookings are read cover every booking its
   const calls = readFileSync("lib/calls.ts", "utf8");
   const pages = Number(/const MAX_PAGES = (\d+);/.exec(calls)?.[1]);
   const perPage = Number(/\/checkout\/sessions\?limit=(\d+)&status=complete/.exec(calls)?.[1]);
-  assert.ok(pages > 0 && perPage > 0 && pages * perPage <= ORDERS_CALL_MOVES, `${pages} x ${perPage} > ${ORDERS_CALL_MOVES}`);
+  assert.ok(pages > 0 && perPage > 0 && ordersMovesCommands(pages * perPage) <= ORDERS_CALL_MOVES, `${pages} x ${perPage} > ${ORDERS_CALL_MOVES}`);
 });
 
 test("a meter's takes run one after another, and a refusal is kept: nothing more is taken or read", async () => {
@@ -310,7 +357,8 @@ test("purchases take their listings, pre-orders and what was brought over before
     payment_intent: { id: `pi_test${id.padEnd(10, "0")}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
   });
   sessions = [
-    // A guide with a bundle of two inside and a box checked at checkout: four listings.
+    // A guide with a bundle of two inside and a box checked at checkout: two listings, the guide and the one checked. The bundle's
+    // two are read only when the buyer asks to see them (lib/buyer-orders.ts, bundleFor; C3-80).
     paid("a", { product: ids.Guide, bundle: `${ids.Templates},${ids.Checklist}`, bump: ids.Workbook }),
     // A pre-order: its listing, and its entry and when it ships.
     paid("b", { product: ids.Planner, preorder: "1" }),
@@ -319,8 +367,8 @@ test("purchases take their listings, pre-orders and what was brought over before
   const meter = new OrdersMeter(store);
   const purchases = await purchasesFor(store, BUYER, meter);
   assert.ok(purchases.length >= 3, String(purchases.length));
-  // Six listings (the Guide once, though bought and brought over), the pre-order's reads, and the two entries brought over.
-  const commands = 6 * ORDERS_LISTING_COMMANDS + ORDERS_PREORDER_COMMANDS + ORDERS_IMPORTED_COMMANDS + 2 * ORDERS_IMPORTED_ENTRY_COMMANDS;
+  // Four listings (the Guide once, though bought and brought over), the pre-order's reads, and the two entries brought over.
+  const commands = 4 * ORDERS_LISTING_COMMANDS + ORDERS_PREORDER_COMMANDS + ORDERS_IMPORTED_COMMANDS + 2 * ORDERS_IMPORTED_ENTRY_COMMANDS;
   assert.equal(meter.taken, Math.ceil(commands / ORDERS_UNIT_COMMANDS));
   // The store with no room reads none of them.
   const refused = { ...store, period: null };
@@ -363,14 +411,13 @@ test("a link request takes ORDERS_OPEN_UNITS after its limits, and its fixed com
   assert.ok(readFileSync("app/api/store/orders/route.ts", "utf8").includes(`export const maxDuration = ${ORDERS_OPEN_SECONDS};`));
 });
 
-test("a link request for forty bookings takes, past its units, the moves an opening takes up front, which hold their listing and rooms", async () => {
+test("a link request for forty bookings takes, past its units, the moves an opening takes up front and its listing and rooms past them", async () => {
   const { store, product, folder, window } = await callStore(true);
   sessions = bookings(product, MAX_LISTED);
   const before = await requestsIn(folder, window);
   await askLink({ store, email: BUYER, ip: "203.0.113.2", origin: ORIGIN });
-  // The moves taken up front hold the forty moves, the listing and the rooms, as for an opening.
-  assert.ok(MAX_LISTED + ORDERS_LISTING_COMMANDS + MAX_LISTED * ORDERS_ROOM_COMMANDS <= ORDERS_CALL_MOVES);
-  assert.equal((await requestsIn(folder, window)) - before, ORDERS_OPEN_UNITS + Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS));
+  // The moves taken up front, then what their one MGET left pays the listing and the rooms take more, as for an opening (C3-82).
+  assert.equal((await requestsIn(folder, window)) - before, ORDERS_OPEN_UNITS + bookingUnits(MAX_LISTED, MAX_LISTED));
 });
 
 test("a link request the store has no room for asks Stripe nothing, and the per-address limit still holds", async () => {

@@ -7,3 +7,12 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |
+| Codex F | 309 [EM1], CX-85: campaign prototype regression; lib/mail-revenue.ts shared with #2192 by explicit inbox exception | codex/f-mail-revenue-proto | `tests/mail-revenue-proto.test.ts` | 04/11/2026 |
+
+| Codex principal | CX-56(3): prove lost-dispute application fee reversal using pinned dispute list | codex/share-lost-dispute-proof | `lib/share-settle.ts`, `tests/share-lost-dispute.test.ts`, `tests/platform-share.test.ts`, `docs/share-lost-dispute-proof.md` | 04/11/2026 |
+
+| Codex E | 465 [MR2]: reject discarded customer cost evidence | codex/e-mr2-cost-evidence | `lib/net-margin-rules.ts`, `lib/reviewed-resource-envelope.ts`, `lib/funded-exposure-rules.ts`, `tests/net-margin-cost-evidence.test.ts` | 04/11/2026 |
+| Codex C | 465 [MR2]: complete protocol infrastructure profiles | codex/c-mr2-protocol-evidence | `lib/spend-cost-table.ts`, `tests/protocol-infrastructure-cost.test.ts`, `tests/contract-protocol-cost.test.ts` | 04/11/2026 |
+| Codex C | 473 [TX3]: serializable own sales evidence | codex/c-tx3-sales-evidence | `lib/tax-sales-counter.ts`, `tests/tax-sales-counter.test.ts` | 04/11/2026 |
+| Codex E | 465 [MR2]: complete plan payment dispute cost evidence | codex/e-dispute-cost-evidence | `lib/plan-payment-dispute-cost-rules.ts`, `tests/plan-payment-dispute-evidence.test.ts` | 04/11/2026 |
+| Codex C | 472 [TX2]: complete explicit incoming-exchange evidence | codex/c-tx2-exchange-evidence | `lib/receiving-costs.ts`, `tests/receiving-most-correct.test.ts` | 04/11/2026 |

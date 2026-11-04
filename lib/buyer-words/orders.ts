@@ -109,7 +109,9 @@ const en = {
   alsoIn: (option: string) => `Also in ${option}`,
   openIt: "Open it",
   openTitle: (title: string) => `Open ${title}`,
+  /** Where a link too long to show as text is kept: its host alone (lib/buyer-orders-rules.ts, LINK_SHOWN). */
   keptOn: (host: string, link: string) => `Kept on ${host}: ${link}`,
+  keptAt: (host: string) => `Kept on ${host}`,
   downloadIt: "Download it",
   downloadTitle: (title: string) => `Download ${title}`,
   importedNote: (store: string) =>
@@ -142,6 +144,27 @@ const en = {
     `This one has nothing attached right now. Reply to your order confirmation email to ask ${store} for it.`,
   bundleMissing: (count: number, store: string) =>
     `${count === 1 ? "One product" : `${count} products`} of this bundle ${count === 1 ? "is" : "are"} no longer in ${store}'s store, so there is nothing here to open for ${count === 1 ? "it" : "them"}. Reply to your order confirmation email and it reaches ${store}.`,
+  /** The button that shows a bundle's products, read only when asked for (components/orders-bundle.tsx), and the one that hides them. */
+  showInside: (title: string) => `Show the products in ${title}`,
+  loadingInside: "Getting the products…",
+  insideFailed: "These products could not be shown just now. Try again in a moment.",
+  /** Purchases whose refund did not fit in the opening's calls to Stripe (lib/buyer-orders.ts, ORDERS_STRIPE_CALLS), and the button that checks the next batch (components/older-purchases.tsx). */
+  olderNotChecked: (count: number, withAdded = false) =>
+    count === 0
+      ? "Anything added to an order after paying is not checked yet."
+      : withAdded
+        ? `${count === 1 ? "1 older purchase" : `${count} older purchases`} and anything added to an order after paying are not checked yet.`
+        : count === 1
+          ? "1 older purchase is not checked yet."
+          : `${count} older purchases are not checked yet.`,
+  checkOlder: "Check older purchases",
+  checkingOlder: "Checking older purchases…",
+  olderShown: (count: number) =>
+    count === 0 ? "None of the purchases checked can be opened again." : count === 1 ? "1 more purchase is now on the list." : `${count} more purchases are now on the list.`,
+  olderFailed: "Older purchases could not be checked just now. Try again in a moment.",
+  /** The pages drawn without JavaScript (app/[handle]/orders/page.tsx): a bundle's products, or a batch of older purchases, and the way back. */
+  backToList: "Back to all your purchases",
+  olderTitle: "Older purchases",
 
   // ---- A license key (components/licence-key-box.tsx) ------------------------------------
   yourKey: "Your license key",
@@ -159,8 +182,12 @@ const en = {
   /** The name the email comes from. */
   ordersFrom: (store: string) => `${store} via Marktmorgen`,
   ordersSubject: (store: string) => `What you bought from ${store}`,
-  ordersIntro: (store: string, count: number) =>
-    `You asked for what you bought from ${store}. ${count === 1 ? "Here it is" : `Here are all ${count}`}, ready to open again:`,
+  ordersIntro: (store: string, count: number, withAdded = false) =>
+    withAdded
+      ? count === 0
+        ? `You asked for what you bought from ${store}. Your purchases are not checked yet; the page checks them when you ask:`
+        : `You asked for what you bought from ${store}. ${count === 1 ? "Here is 1" : `Here are ${count}`}, ready to open again, and older purchases the page checks when you ask:`
+      : `You asked for what you bought from ${store}. ${count === 1 ? "Here it is" : `Here are all ${count}`}, ready to open again:`,
   ordersLinkNote: "The link works for 24 hours, on any device. After that, ask again from the store and a new one comes right away.",
   ordersIgnore: "If you did not ask for this, ignore this email; nothing happens unless the link is opened.",
   ordersSentBy: (store: string) => `Sent by Marktmorgen on behalf of ${store}.`,
@@ -349,6 +376,7 @@ const es: OrdersWords = {
   openIt: "Abrirlo",
   openTitle: (title) => `Abrir ${title}`,
   keptOn: (host, link) => `Alojado en ${host}: ${link}`,
+  keptAt: (host) => `Alojado en ${host}`,
   downloadIt: "Descargarlo",
   downloadTitle: (title) => `Descargar ${title}`,
   importedNote: (store) =>
@@ -375,6 +403,24 @@ const es: OrdersWords = {
     count === 1
       ? `Un producto de este paquete ya no está en la tienda de ${store}, así que aquí no hay nada que abrir de él. Responde al email de confirmación de tu pedido y le llegará a ${store}.`
       : `${count} productos de este paquete ya no están en la tienda de ${store}, así que aquí no hay nada que abrir de ellos. Responde al email de confirmación de tu pedido y le llegará a ${store}.`,
+  showInside: (title) => `Mostrar los productos de ${title}`,
+  loadingInside: "Cargando los productos…",
+  insideFailed: "No se han podido mostrar estos productos ahora. Inténtalo de nuevo en un momento.",
+  olderNotChecked: (count, withAdded = false) =>
+    count === 0
+      ? "Aún falta comprobar lo que se añadió a un pedido después de pagar."
+      : withAdded
+        ? `Aún falta comprobar ${count === 1 ? "1 compra anterior" : `${count} compras anteriores`} y lo que se añadió a un pedido después de pagar.`
+        : count === 1
+          ? "1 compra anterior aún no está comprobada."
+          : `${count} compras anteriores aún no están comprobadas.`,
+  checkOlder: "Comprobar compras anteriores",
+  checkingOlder: "Comprobando compras anteriores…",
+  olderShown: (count) =>
+    count === 0 ? "Ninguna de las compras comprobadas se puede volver a abrir." : count === 1 ? "1 compra más está ahora en la lista." : `${count} compras más están ahora en la lista.`,
+  olderFailed: "No se han podido comprobar las compras anteriores ahora. Inténtalo de nuevo en un momento.",
+  backToList: "Volver a todas tus compras",
+  olderTitle: "Compras anteriores",
 
   yourKey: "Tu clave de licencia",
   yourKeyFor: (title) => `Tu clave de licencia de ${title}`,
@@ -389,8 +435,12 @@ const es: OrdersWords = {
 
   ordersFrom: (store) => `${store} vía Marktmorgen`,
   ordersSubject: (store) => `Lo que le compraste a ${store}`,
-  ordersIntro: (store, count) =>
-    `Pediste lo que le compraste a ${store}. ${count === 1 ? "Aquí lo tienes, listo para abrirlo de nuevo:" : `Aquí tienes tus ${count} compras, listas para abrirlas de nuevo:`}`,
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
+      ? count === 0
+        ? `Pediste lo que le compraste a ${store}. Tus compras aún no están comprobadas; la página las comprueba cuando lo pidas:`
+        : `Pediste lo que le compraste a ${store}. ${count === 1 ? "Aquí tienes 1 compra lista para abrirla de nuevo" : `Aquí tienes ${count} compras listas para abrirlas de nuevo`}, y compras anteriores que la página comprueba cuando lo pidas:`
+      : `Pediste lo que le compraste a ${store}. ${count === 1 ? "Aquí lo tienes, listo para abrirlo de nuevo:" : `Aquí tienes tus ${count} compras, listas para abrirlas de nuevo:`}`,
   ordersLinkNote: "El enlace funciona durante 24 horas, en cualquier dispositivo. Después, vuelve a pedirlo desde la tienda y te llegará uno nuevo al instante.",
   ordersIgnore: "Si no lo pediste tú, ignora este email; no pasa nada a menos que se abra el enlace.",
   ordersSentBy: (store) => `Enviado por Marktmorgen en nombre de ${store}.`,
@@ -568,6 +618,7 @@ const fr: OrdersWords = {
   openIt: "L'ouvrir",
   openTitle: (title) => `Ouvrir ${title}`,
   keptOn: (host, link) => `Hébergé sur ${host}${S}: ${link}`,
+  keptAt: (host) => `Hébergé sur ${host}`,
   downloadIt: "Le télécharger",
   downloadTitle: (title) => `Télécharger ${title}`,
   importedNote: (store) =>
@@ -593,6 +644,24 @@ const fr: OrdersWords = {
     count < 2
       ? `Un produit de ce lot n'est plus dans la boutique de ${store}, il n'y a donc rien à ouvrir ici pour lui. Répondez à l'e-mail de confirmation de votre commande et votre message parviendra à ${store}.`
       : `${count}${S}produits de ce lot ne sont plus dans la boutique de ${store}, il n'y a donc rien à ouvrir ici pour eux. Répondez à l'e-mail de confirmation de votre commande et votre message parviendra à ${store}.`,
+  showInside: (title) => `Afficher les produits de ${title}`,
+  loadingInside: "Chargement des produits…",
+  insideFailed: "Ces produits ne peuvent pas être affichés pour le moment. Réessayez dans un instant.",
+  olderNotChecked: (count, withAdded = false) =>
+    count === 0
+      ? "Ce qui a été ajouté à une commande après le paiement n'est pas encore vérifié."
+      : withAdded
+        ? `${count < 2 ? "1 achat plus ancien" : `${count}${S}achats plus anciens`} et ce qui a été ajouté à une commande après le paiement ne sont pas encore vérifiés.`
+        : count < 2
+          ? "1 achat plus ancien n'est pas encore vérifié."
+          : `${count}${S}achats plus anciens ne sont pas encore vérifiés.`,
+  checkOlder: "Vérifier les achats plus anciens",
+  checkingOlder: "Vérification des achats plus anciens…",
+  olderShown: (count) =>
+    count === 0 ? "Aucun des achats vérifiés ne peut être rouvert." : count < 2 ? "1 achat de plus figure maintenant dans la liste." : `${count}${S}achats de plus figurent maintenant dans la liste.`,
+  olderFailed: "Les achats plus anciens ne peuvent pas être vérifiés pour le moment. Réessayez dans un instant.",
+  backToList: "Retour à tous vos achats",
+  olderTitle: "Achats plus anciens",
 
   yourKey: "Votre clé de licence",
   yourKeyFor: (title) => `Votre clé de licence pour ${title}`,
@@ -607,8 +676,12 @@ const fr: OrdersWords = {
 
   ordersFrom: (store) => `${store} via Marktmorgen`,
   ordersSubject: (store) => `Ce que vous avez acheté chez ${store}`,
-  ordersIntro: (store, count) =>
-    `Vous avez demandé ce que vous avez acheté chez ${store}. ${count < 2 ? "Le voici, prêt à être rouvert" : `Voici vos ${count}${S}achats, prêts à être rouverts`}${S}:`,
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
+      ? count === 0
+        ? `Vous avez demandé ce que vous avez acheté chez ${store}. Vos achats ne sont pas encore vérifiés${S}; la page les vérifie quand vous le demandez${S}:`
+        : `Vous avez demandé ce que vous avez acheté chez ${store}. ${count < 2 ? "En voici 1, prêt à être rouvert" : `En voici ${count}, prêts à être rouverts`}, et des achats plus anciens que la page vérifie quand vous le demandez${S}:`
+      : `Vous avez demandé ce que vous avez acheté chez ${store}. ${count < 2 ? "Le voici, prêt à être rouvert" : `Voici vos ${count}${S}achats, prêts à être rouverts`}${S}:`,
   ordersLinkNote: `Le lien est valable 24${S}heures, sur n'importe quel appareil. Ensuite, faites une nouvelle demande depuis la boutique et un nouveau lien arrive aussitôt.`,
   ordersIgnore: `Si vous n'avez rien demandé, ignorez cet e-mail${S}; rien ne se passe tant que le lien n'est pas ouvert.`,
   ordersSentBy: (store) => `Envoyé par Marktmorgen pour le compte de ${store}.`,
@@ -785,6 +858,7 @@ const de: OrdersWords = {
   openIt: "Öffnen",
   openTitle: (title) => `${title} öffnen`,
   keptOn: (host, link) => `Gespeichert auf ${host}: ${link}`,
+  keptAt: (host) => `Gespeichert auf ${host}`,
   downloadIt: "Herunterladen",
   downloadTitle: (title) => `${title} herunterladen`,
   importedNote: (store) =>
@@ -811,6 +885,24 @@ const de: OrdersWords = {
     count === 1
       ? `Ein Produkt dieses Pakets ist nicht mehr im Shop von ${store}, daher gibt es hier dafür nichts zu öffnen. Antworten Sie auf Ihre Bestellbestätigung, dann erreicht Ihre Nachricht ${store}.`
       : `${count} Produkte dieses Pakets sind nicht mehr im Shop von ${store}, daher gibt es hier dafür nichts zu öffnen. Antworten Sie auf Ihre Bestellbestätigung, dann erreicht Ihre Nachricht ${store}.`,
+  showInside: (title) => `Die Produkte in ${title} anzeigen`,
+  loadingInside: "Die Produkte werden geladen…",
+  insideFailed: "Diese Produkte können gerade nicht angezeigt werden. Versuchen Sie es gleich noch einmal.",
+  olderNotChecked: (count, withAdded = false) =>
+    count === 0
+      ? "Was nach dem Bezahlen zu einer Bestellung hinzugefügt wurde, ist noch nicht geprüft."
+      : withAdded
+        ? `${count === 1 ? "1 älterer Kauf" : `${count} ältere Käufe`} und was nach dem Bezahlen zu einer Bestellung hinzugefügt wurde, sind noch nicht geprüft.`
+        : count === 1
+          ? "1 älterer Kauf ist noch nicht geprüft."
+          : `${count} ältere Käufe sind noch nicht geprüft.`,
+  checkOlder: "Ältere Käufe prüfen",
+  checkingOlder: "Ältere Käufe werden geprüft…",
+  olderShown: (count) =>
+    count === 0 ? "Keiner der geprüften Käufe kann erneut geöffnet werden." : count === 1 ? "1 weiterer Kauf steht jetzt in der Liste." : `${count} weitere Käufe stehen jetzt in der Liste.`,
+  olderFailed: "Ältere Käufe können gerade nicht geprüft werden. Versuchen Sie es gleich noch einmal.",
+  backToList: "Zurück zu all Ihren Käufen",
+  olderTitle: "Ältere Käufe",
 
   yourKey: "Ihr Lizenzschlüssel",
   yourKeyFor: (title) => `Ihr Lizenzschlüssel für ${title}`,
@@ -825,8 +917,12 @@ const de: OrdersWords = {
 
   ordersFrom: (store) => `${store} über Marktmorgen`,
   ordersSubject: (store) => `Ihre Käufe bei ${store}`,
-  ordersIntro: (store, count) =>
-    `Sie haben angefordert, was Sie bei ${store} gekauft haben. ${count === 1 ? "Hier ist es" : `Hier sind alle ${count}`}, bereit zum erneuten Öffnen:`,
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
+      ? count === 0
+        ? `Sie haben angefordert, was Sie bei ${store} gekauft haben. Ihre Käufe sind noch nicht geprüft; die Seite prüft sie, wenn Sie es möchten:`
+        : `Sie haben angefordert, was Sie bei ${store} gekauft haben. ${count === 1 ? "Hier ist 1" : `Hier sind ${count}`}, bereit zum erneuten Öffnen, und ältere Käufe, die die Seite prüft, wenn Sie es möchten:`
+      : `Sie haben angefordert, was Sie bei ${store} gekauft haben. ${count === 1 ? "Hier ist es" : `Hier sind alle ${count}`}, bereit zum erneuten Öffnen:`,
   ordersLinkNote: "Der Link gilt 24 Stunden, auf jedem Gerät. Danach fordern Sie ihn im Shop einfach erneut an, und ein neuer kommt sofort.",
   ordersIgnore: "Wenn Sie das nicht angefordert haben, ignorieren Sie diese E-Mail; es passiert nichts, solange der Link nicht geöffnet wird.",
   ordersSentBy: (store) => `Gesendet von Marktmorgen im Auftrag von ${store}.`,
@@ -1007,6 +1103,7 @@ const it: OrdersWords = {
   openIt: "Aprilo",
   openTitle: (title) => `Apri ${title}`,
   keptOn: (host, link) => `Ospitato su ${host}: ${link}`,
+  keptAt: (host) => `Ospitato su ${host}`,
   downloadIt: "Scaricalo",
   downloadTitle: (title) => `Scarica ${title}`,
   importedNote: (store) =>
@@ -1033,6 +1130,24 @@ const it: OrdersWords = {
     count === 1
       ? `Un prodotto di questo pacchetto non è più nel negozio di ${store}, quindi qui non c'è nulla da aprire per esso. Rispondi all'email di conferma dell'ordine e il messaggio arriverà a ${store}.`
       : `${count} prodotti di questo pacchetto non sono più nel negozio di ${store}, quindi qui non c'è nulla da aprire per essi. Rispondi all'email di conferma dell'ordine e il messaggio arriverà a ${store}.`,
+  showInside: (title) => `Mostra i prodotti in ${title}`,
+  loadingInside: "Caricamento dei prodotti…",
+  insideFailed: "Non è stato possibile mostrare questi prodotti ora. Riprova tra un momento.",
+  olderNotChecked: (count, withAdded = false) =>
+    count === 0
+      ? "Ciò che è stato aggiunto a un ordine dopo il pagamento non è ancora verificato."
+      : withAdded
+        ? `${count === 1 ? "1 acquisto precedente" : `${count} acquisti precedenti`} e ciò che è stato aggiunto a un ordine dopo il pagamento non sono ancora verificati.`
+        : count === 1
+          ? "1 acquisto precedente non è ancora verificato."
+          : `${count} acquisti precedenti non sono ancora verificati.`,
+  checkOlder: "Verifica gli acquisti precedenti",
+  checkingOlder: "Verifica degli acquisti precedenti…",
+  olderShown: (count) =>
+    count === 0 ? "Nessuno degli acquisti verificati può essere riaperto." : count === 1 ? "1 acquisto in più è ora nell'elenco." : `${count} acquisti in più sono ora nell'elenco.`,
+  olderFailed: "Non è stato possibile verificare gli acquisti precedenti ora. Riprova tra un momento.",
+  backToList: "Torna a tutti i tuoi acquisti",
+  olderTitle: "Acquisti precedenti",
 
   yourKey: "La tua chiave di licenza",
   yourKeyFor: (title) => `La tua chiave di licenza per ${title}`,
@@ -1047,8 +1162,12 @@ const it: OrdersWords = {
 
   ordersFrom: (store) => `${store} tramite Marktmorgen`,
   ordersSubject: (store) => `Ciò che hai acquistato da ${store}`,
-  ordersIntro: (store, count) =>
-    `Hai chiesto ciò che hai acquistato da ${store}. ${count === 1 ? "Eccolo, pronto per essere riaperto:" : `Eccoli tutti (${count}), pronti per essere riaperti:`}`,
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
+      ? count === 0
+        ? `Hai chiesto ciò che hai acquistato da ${store}. I tuoi acquisti non sono ancora verificati; la pagina li verifica quando lo chiedi:`
+        : `Hai chiesto ciò che hai acquistato da ${store}. ${count === 1 ? "Eccone 1, pronto per essere riaperto" : `Eccone ${count}, pronti per essere riaperti`}, e acquisti precedenti che la pagina verifica quando lo chiedi:`
+      : `Hai chiesto ciò che hai acquistato da ${store}. ${count === 1 ? "Eccolo, pronto per essere riaperto:" : `Eccoli tutti (${count}), pronti per essere riaperti:`}`,
   ordersLinkNote: "Il link funziona per 24 ore, su qualsiasi dispositivo. Dopo, richiedilo di nuovo dal negozio e ne arriva subito uno nuovo.",
   ordersIgnore: "Se non l'hai chiesto tu, ignora questa email; non succede nulla finché il link non viene aperto.",
   ordersSentBy: (store) => `Inviata da Marktmorgen per conto di ${store}.`,
@@ -1225,6 +1344,7 @@ const nl: OrdersWords = {
   openIt: "Openen",
   openTitle: (title) => `${title} openen`,
   keptOn: (host, link) => `Bewaard op ${host}: ${link}`,
+  keptAt: (host) => `Bewaard op ${host}`,
   downloadIt: "Downloaden",
   downloadTitle: (title) => `${title} downloaden`,
   importedNote: (store) =>
@@ -1250,6 +1370,24 @@ const nl: OrdersWords = {
     count === 1
       ? `Eén product van deze bundel staat niet meer in de winkel van ${store}, dus hier valt daarvoor niets te openen. Beantwoord je orderbevestiging, dan komt je bericht bij ${store} aan.`
       : `${count} producten van deze bundel staan niet meer in de winkel van ${store}, dus hier valt daarvoor niets te openen. Beantwoord je orderbevestiging, dan komt je bericht bij ${store} aan.`,
+  showInside: (title) => `Toon de producten in ${title}`,
+  loadingInside: "De producten worden geladen…",
+  insideFailed: "Deze producten kunnen nu niet worden getoond. Probeer het zo opnieuw.",
+  olderNotChecked: (count, withAdded = false) =>
+    count === 0
+      ? "Wat na het betalen aan een bestelling is toegevoegd, is nog niet gecontroleerd."
+      : withAdded
+        ? `${count === 1 ? "1 oudere aankoop" : `${count} oudere aankopen`} en wat na het betalen aan een bestelling is toegevoegd, zijn nog niet gecontroleerd.`
+        : count === 1
+          ? "1 oudere aankoop is nog niet gecontroleerd."
+          : `${count} oudere aankopen zijn nog niet gecontroleerd.`,
+  checkOlder: "Oudere aankopen controleren",
+  checkingOlder: "Oudere aankopen worden gecontroleerd…",
+  olderShown: (count) =>
+    count === 0 ? "Geen van de gecontroleerde aankopen kan opnieuw worden geopend." : count === 1 ? "1 aankoop extra staat nu in de lijst." : `${count} aankopen extra staan nu in de lijst.`,
+  olderFailed: "Oudere aankopen kunnen nu niet worden gecontroleerd. Probeer het zo opnieuw.",
+  backToList: "Terug naar al je aankopen",
+  olderTitle: "Oudere aankopen",
 
   yourKey: "Je licentiesleutel",
   yourKeyFor: (title) => `Je licentiesleutel voor ${title}`,
@@ -1264,8 +1402,12 @@ const nl: OrdersWords = {
 
   ordersFrom: (store) => `${store} via Marktmorgen`,
   ordersSubject: (store) => `Wat je bij ${store} hebt gekocht`,
-  ordersIntro: (store, count) =>
-    `Je vroeg om wat je bij ${store} hebt gekocht. ${count === 1 ? "Hier is het" : `Hier zijn ze alle ${count}`}, klaar om opnieuw te openen:`,
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
+      ? count === 0
+        ? `Je vroeg om wat je bij ${store} hebt gekocht. Je aankopen zijn nog niet gecontroleerd; de pagina controleert ze wanneer je dat vraagt:`
+        : `Je vroeg om wat je bij ${store} hebt gekocht. ${count === 1 ? "Hier is er 1" : `Hier zijn er ${count}`}, klaar om opnieuw te openen, en oudere aankopen die de pagina controleert wanneer je dat vraagt:`
+      : `Je vroeg om wat je bij ${store} hebt gekocht. ${count === 1 ? "Hier is het" : `Hier zijn ze alle ${count}`}, klaar om opnieuw te openen:`,
   ordersLinkNote: "De link werkt 24 uur, op elk apparaat. Vraag daarna opnieuw aan via de winkel en er komt meteen een nieuwe.",
   ordersIgnore: "Heb je hier niet om gevraagd, negeer deze e-mail dan; er gebeurt niets zolang de link niet wordt geopend.",
   ordersSentBy: (store) => `Verstuurd door Marktmorgen namens ${store}.`,
@@ -1442,6 +1584,7 @@ const pt: OrdersWords = {
   openIt: "Abrir",
   openTitle: (title) => `Abrir ${title}`,
   keptOn: (host, link) => `Alojado em ${host}: ${link}`,
+  keptAt: (host) => `Alojado em ${host}`,
   downloadIt: "Descarregar",
   downloadTitle: (title) => `Descarregar ${title}`,
   importedNote: (store) =>
@@ -1468,6 +1611,24 @@ const pt: OrdersWords = {
     count === 1
       ? `Um produto deste pacote já não está na loja de ${store}, por isso não há nada aqui para o abrir. Responda ao email de confirmação da sua encomenda e a mensagem chega a ${store}.`
       : `${count} produtos deste pacote já não estão na loja de ${store}, por isso não há nada aqui para os abrir. Responda ao email de confirmação da sua encomenda e a mensagem chega a ${store}.`,
+  showInside: (title) => `Mostrar os produtos de ${title}`,
+  loadingInside: "A carregar os produtos…",
+  insideFailed: "Não foi possível mostrar estes produtos agora. Tente novamente daqui a pouco.",
+  olderNotChecked: (count, withAdded = false) =>
+    count === 0
+      ? "O que foi acrescentado a uma encomenda depois de pagar ainda não foi verificado."
+      : withAdded
+        ? `${count === 1 ? "1 compra anterior" : `${count} compras anteriores`} e o que foi acrescentado a uma encomenda depois de pagar ainda não foram verificados.`
+        : count === 1
+          ? "1 compra anterior ainda não foi verificada."
+          : `${count} compras anteriores ainda não foram verificadas.`,
+  checkOlder: "Verificar compras anteriores",
+  checkingOlder: "A verificar compras anteriores…",
+  olderShown: (count) =>
+    count === 0 ? "Nenhuma das compras verificadas pode ser aberta novamente." : count === 1 ? "Mais 1 compra está agora na lista." : `Mais ${count} compras estão agora na lista.`,
+  olderFailed: "Não foi possível verificar as compras anteriores agora. Tente novamente daqui a pouco.",
+  backToList: "Voltar a todas as suas compras",
+  olderTitle: "Compras anteriores",
 
   yourKey: "A sua chave de licença",
   yourKeyFor: (title) => `A sua chave de licença de ${title}`,
@@ -1482,8 +1643,12 @@ const pt: OrdersWords = {
 
   ordersFrom: (store) => `${store} via Marktmorgen`,
   ordersSubject: (store) => `O que comprou a ${store}`,
-  ordersIntro: (store, count) =>
-    `Pediu o que comprou a ${store}. ${count === 1 ? "Aqui está, pronto a abrir de novo:" : `Aqui estão as ${count} compras, prontas a abrir de novo:`}`,
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
+      ? count === 0
+        ? `Pediu o que comprou a ${store}. As suas compras ainda não foram verificadas; a página verifica-as quando pedir:`
+        : `Pediu o que comprou a ${store}. ${count === 1 ? "Aqui está 1 compra, pronta a abrir de novo" : `Aqui estão ${count} compras, prontas a abrir de novo`}, e compras anteriores que a página verifica quando pedir:`
+      : `Pediu o que comprou a ${store}. ${count === 1 ? "Aqui está, pronto a abrir de novo:" : `Aqui estão as ${count} compras, prontas a abrir de novo:`}`,
   ordersLinkNote: "A ligação funciona durante 24 horas, em qualquer dispositivo. Depois disso, peça novamente a partir da loja e chega logo uma nova.",
   ordersIgnore: "Se não pediu isto, ignore este email; nada acontece a menos que a ligação seja aberta.",
   ordersSentBy: (store) => `Enviado pela Marktmorgen em nome de ${store}.`,

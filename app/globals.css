@@ -1,5 +1,27 @@
 @import "tailwindcss";
 
+/* page-sm: — from a small tablet's width up, for what a store page's blocks
+   draw (375 [TB1]). Inside a page's .sp-body the page's own width decides (a
+   container query), so the studio's Phone preview draws what a phone draws
+   even when the studio is open on a computer; the line is Tailwind's sm:
+   (40rem of window) less the live page column's side padding (px-4, 1rem a
+   side), so the live page changes at the same window width as with sm:.
+   Anywhere else (a blog post's blocks, the reviews page) the window decides,
+   exactly as sm: did. :where() keeps each rule's weight that of sm:.
+   tests/preview-breakpoints.test.ts holds it. */
+@custom-variant page-sm {
+  @media (min-width: 40rem) {
+    &:where(:not(.sp-body *)) {
+      @slot;
+    }
+  }
+  @container (min-width: 38rem) {
+    :where(.sp-body) & {
+      @slot;
+    }
+  }
+}
+
 /* =====================================================================
    Marktmorgen design system
    One set of tokens for every page. Colour is used on purpose: one deep
@@ -789,7 +811,20 @@ html {
    than the room it has breaks onto a second line instead. Buttons that fit
    are unchanged, because text only wraps when it has to. */
 @media (max-width: 479px) {
-  .btn {
+  .btn:where(:not(.sp-body *)) {
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.25;
+    padding-block: 0.55rem;
+  }
+}
+/* Inside a store page's .sp-body the page's width decides instead, so the
+   studio's Phone preview draws it as a phone does: the window's line less the
+   page column's side padding (px-4, 16px a side), the same window width on
+   the live page (tests/preview-breakpoints.test.ts). */
+@container (max-width: 447px) {
+  :where(.sp-body) .btn {
     max-width: 100%;
     white-space: normal;
     text-align: center;
@@ -2173,10 +2208,22 @@ a.chip {
   grid-template-columns: 1fr;
 }
 @media (min-width: 640px) {
-  .st-compare-2 {
+  .st-compare-2:where(:not(.sp-body *)) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .st-compare-3 {
+  .st-compare-3:where(:not(.sp-body *)) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+/* Inside a store page's .sp-body the page's width decides instead, so the
+   studio's Phone preview draws it as a phone does: the window's line less the
+   page column's side padding (px-4, 16px a side), the same window width on
+   the live page (tests/preview-breakpoints.test.ts). */
+@container (min-width: 608px) {
+  :where(.sp-body) .st-compare-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  :where(.sp-body) .st-compare-3 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -3028,7 +3075,18 @@ a.sp-product:focus-visible {
   border: 1px solid var(--st-line);
 }
 @media (min-width: 640px) {
-  .sp-bio {
+  .sp-bio:where(:not(.sp-body *)) {
+    flex-direction: row;
+    align-items: flex-start;
+    padding: 2rem;
+  }
+}
+/* Inside a store page's .sp-body the page's width decides instead, so the
+   studio's Phone preview draws it as a phone does: the window's line less the
+   page column's side padding (px-4, 16px a side), the same window width on
+   the live page (tests/preview-breakpoints.test.ts). */
+@container (min-width: 608px) {
+  :where(.sp-body) .sp-bio {
     flex-direction: row;
     align-items: flex-start;
     padding: 2rem;
@@ -3601,7 +3659,18 @@ a.rv-line:hover {
   border: 1px solid var(--st-line);
 }
 @media (min-width: 640px) {
-  .rv-summary {
+  .rv-summary:where(:not(.sp-body *)) {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 2.5rem;
+    align-items: center;
+  }
+}
+/* Inside a store page's .sp-body the page's width decides instead, so the
+   studio's Phone preview draws it as a phone does: the window's line less the
+   page column's side padding (px-4, 16px a side), the same window width on
+   the live page (tests/preview-breakpoints.test.ts). */
+@container (min-width: 608px) {
+  :where(.sp-body) .rv-summary {
     grid-template-columns: auto minmax(0, 1fr);
     gap: 2.5rem;
     align-items: center;

@@ -146,7 +146,8 @@ import {
 // Started provider attempts stay counted even when their reply is unusable (lib/ai.ts).
 const HEADLINE_UNCONFIRMED_NOTE = "A replacement headline was not confirmed. Your current draft was kept. Started attempts count toward your monthly writing allowance. Check your allowance before trying again.";
 
-const MESSAGES: Record<string, string> = {
+/** What the editor says when the page could not be saved, by the refusal's code (exported for its test). */
+export const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   too_many: `A page can have up to ${MAX_BLOCKS} blocks.`,
   hero_first: "The hero can only be the first block: it carries the page's main headline.",
@@ -189,7 +190,7 @@ function fromLocalField(value: string): number {
 const MIN_DEPTH_VISITORS = 30;
 
 // A booking block (552 [BB1]) is not in the gallery yet, so its name is given here.
-const kindLabel = (kind: BlockKind) => (kind === "booking" ? "Booking" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
+export const kindLabel = (kind: BlockKind) => (kind === "booking" ? "Booking" : (BLOCK_KINDS.find((k) => k.kind === kind)?.label ?? kind));
 
 export type EditorProduct = {
   id: string;

@@ -91,7 +91,7 @@ export default function DevelopersPage() {
           Every answer is JSON. A list comes as <code className="font-mono">data</code>, and a long list comes a page at a
           time with <code className="font-mono">next</code>: send it back as <code className="font-mono">?cursor=</code> for
           the next page, until it is <code className="font-mono">null</code>.
-          {` A page holds up to ${API_PAGE} rows. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
+          {` A page holds about ${API_PAGE} rows. Products never has more; your list, your members and a course's students can have a few more on a page, and a page can come back empty before the last one, so keep asking until next is null. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
         </p>
         <p>
           To get only some fields of each row, add <code className="font-mono">?fields=</code> with their names,
@@ -220,6 +220,9 @@ export default function DevelopersPage() {
           <code className="font-mono">product</code> is the course product&apos;s id, from Products, and{" "}
           <code className="font-mono">total</code> is how many students the course has in all.
         </Endpoint>
+        <p>
+          {`Changed on November 4, 2026: students now come a page at a time, about ${n(API_PAGE)} a page in no set order, and no longer as the 500 most recently active. If the course changes while you page through it, a student can show up twice, or a page can come back empty before the last one, so the rows you add up may not match total.`}
+        </p>
         <p>
           {`Each page reads every student's progress, so a full page of ${n(API_PAGE)} counts as ${n(STUDENTS_PAGE_COUNTS)} of your API requests (${n(STUDENTS_PAGE_COUNTS_MOST)} when more than ${n(BLOCKED_READ_MAX)} students of the course are blocked). A smaller page counts as fewer.`}
         </p>

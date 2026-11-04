@@ -209,6 +209,22 @@ async function main(): Promise<void> {
   is("answered with none", [none.status, (await none.json()).data], [200, []]);
   is("only the door's request", (await used(plain)) - before, 1);
 
+  part("A ?fields= that cannot be read: 400 before anything more is taken or read, costing only the request");
+  const fields = await paidStore(true);
+  await setAffiliateSetting(fields.owner, { ...NO_AFFILIATES, enabled: true, percent: 25 });
+  for (const path of ["/api/v1/students?product=p1&fields=Bad-Name", "/api/v1/affiliates?fields=,", "/api/v1/bookings?fields=a%20b"]) {
+    const route = path.startsWith("/api/v1/students") ? studentsRead : path.startsWith("/api/v1/affiliates") ? affiliatesRead : bookingsRead;
+    before = await used(fields);
+    commands = [];
+    stripe = [];
+    const res = await route(get(fields.key, path));
+    is(`${path}: 400 fields`, [res.status, (await res.json()).error], [400, "fields"]);
+    is(`${path}: one request, nothing read`, [(await used(fields)) - before, commands.some((c) => ["HSCAN", "HGETALL", "HLEN", "SMEMBERS"].includes(String(c[0]))), stripe.length], [1, false, 0]);
+  }
+  // A field the rows lack is still told after the reading, as before.
+  const unknown = await bookingsRead(get(fields.key, "/api/v1/bookings?fields=nothing_here"));
+  is("an unknown field is answered after reading", unknown.status, 200);
+
   done();
 }
 

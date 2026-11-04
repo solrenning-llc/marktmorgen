@@ -1,5 +1,5 @@
 import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
-import { apiOkFields } from "@/lib/api-fields";
+import { apiOkFields, badFields } from "@/lib/api-fields";
 import { affiliates } from "@/lib/api-read";
 
 /**
@@ -9,6 +9,9 @@ import { affiliates } from "@/lib/api-read";
 export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
+  // A `?fields=` that cannot be read is refused before any further request is taken or anything read.
+  const bad = badFields(request);
+  if (bad) return bad;
   try {
     const found = await affiliates(store, (more) => takeMoreApi(store, more));
     if (found instanceof Response) return found;

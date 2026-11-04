@@ -1,5 +1,5 @@
 import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
-import { apiOkFields } from "@/lib/api-fields";
+import { apiOkFields, badFields } from "@/lib/api-fields";
 import { students } from "@/lib/api-read";
 
 /**
@@ -10,6 +10,9 @@ import { students } from "@/lib/api-read";
 export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
+  // A `?fields=` that cannot be read is refused before any further request is taken or anything read.
+  const bad = badFields(request);
+  if (bad) return bad;
   const params = new URL(request.url).searchParams;
   const product = (params.get("product") ?? "").slice(0, 60);
   if (!product) return apiError(400, "product_required", "Say which course: ?product=<the course product's id>, from /api/v1/products.");

@@ -34,6 +34,10 @@ export const API_UNIT_STRIPE_PAGES = 3;
 export const API_UNIT_ROUND_TRIPS = 20;
 /** Commands taking the further requests costs (lib/store-allowance.ts, takeAllowance): its count kept, and a store that pays nothing's place. */
 export const MORE_TAKE_COMMANDS = 4;
+/** And when they do not fit: the one command that gives them back (DECRBY). */
+export const MORE_GIVE_BACK_COMMANDS = 1;
+/** Trips to the database taking them waits on: a store that pays nothing's place, the count, and the giving back. */
+export const MORE_TAKE_ROUND_TRIPS = 3;
 
 /** What a reading does beyond the request's own key, store and answer. */
 export type ReadWork = { commands: number; bytes: number; sent: number; stripePages: number; roundTrips: number };
@@ -53,7 +57,13 @@ export function apiReadUnits(work: Partial<ReadWork>): number {
   const w = { ...NONE, ...work };
   if (Object.values(w).some((n) => !Number.isFinite(n) || n < 0)) return Number.POSITIVE_INFINITY;
   if (share(w) === 0) return 0;
-  return Math.ceil(share({ ...w, commands: w.commands + MORE_TAKE_COMMANDS }) - 1e-9);
+  // Never rounded down: a share a hair over a whole number takes one more.
+  return Math.ceil(share(withTaking(w)));
+}
+
+/** The work with what taking the further requests itself costs, at its most (refused, so given back). */
+export function withTaking(w: ReadWork): ReadWork {
+  return { ...w, commands: w.commands + MORE_TAKE_COMMANDS + MORE_GIVE_BACK_COMMANDS, roundTrips: w.roundTrips + MORE_TAKE_ROUND_TRIPS };
 }
 
 // ---------------------------------------------------------------- students
@@ -65,6 +75,8 @@ export const STUDENT_ROW_BYTES = 512;
  * room for each, for every lesson a course can hold and as many again for
  * lessons marked and later taken out of it (a review ceiling).
  */
+// Known gap: the set is not pruned when a lesson is deleted, so a course whose lessons change a lot can pass
+// this and its bytes are charged short; the real bound is the store's data room (lib/store-data.ts).
 export const DONE_SET_BYTES = 2 * MAX_LESSONS * 40;
 /** The course's blocked students are read in one command up to this many; past it, one per student on the page. */
 export const BLOCKED_READ_MAX = 200;

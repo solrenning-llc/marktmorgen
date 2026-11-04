@@ -602,6 +602,8 @@ export async function studentPage(
       if (typeof row?.e === "string") rows.push(row);
     } catch {}
   }
+  // Accepted race: the blocked list can grow between SCARD and SMEMBERS and be read past what was paid for,
+  // bounded by how fast the store blocks students.
   if (!(await allow(rows.length, blockedAll))) return null;
   const whole = blockedAll <= BLOCKED_READ_MAX;
   const blockedReads: (string | number)[][] =

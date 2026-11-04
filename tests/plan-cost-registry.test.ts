@@ -3,7 +3,7 @@ import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
 import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
-  BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork,
+  BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
@@ -277,7 +277,9 @@ test("an API reading that reads more than a page takes further requests that cov
   assert.ok(ROUND_TRIP_SECONDS >= 0.25);
   const covers = (w: ReadWork, what: string) => {
     const units = apiReadUnits(w);
-    const cost = apiReadCost(units > 0 ? { ...w, commands: w.commands + MORE_TAKE_COMMANDS } : w);
+    // Taking them is counted too: its commands, the one that gives them back, and its trips to the database.
+    const cost = apiReadCost(units > 0 ? withTaking(w) : w);
+    assert.ok(units === 0 || (withTaking(w).commands === w.commands + MORE_TAKE_COMMANDS + 1 && withTaking(w).roundTrips >= w.roundTrips + 2), `${what}: taking is priced`);
     assert.ok(Number.isSafeInteger(units) && units * UNIT_COST.api >= cost, `${what}: ${units} x ${UNIT_COST.api} < ${cost}`);
     if (apiReadCost(w) > 0) assert.ok(units >= 1, `${what} costs something and takes nothing`);
   };
@@ -294,6 +296,17 @@ test("an API reading that reads more than a page takes further requests that cov
     }
   }
   assert.equal(apiReadUnits(bookWork({ kept: false, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 9 }, BOOK_STRIPE_PAGES)), 0);
+  // Shares that are not whole: just under, at and just over each whole number, in every figure and mixed, and a seeded spread.
+  const caps: [keyof ReadWork, number][] = [["commands", API_UNIT_COMMANDS], ["bytes", API_UNIT_BYTES], ["sent", API_UNIT_SENT_BYTES], ["stripePages", API_UNIT_STRIPE_PAGES], ["roundTrips", API_UNIT_ROUND_TRIPS]];
+  for (const [field, cap] of caps) for (const whole of [1, 2, 7, 40]) for (const off of [-1e-6, -0.01, -0.3, 0, 1e-9, 0.01, 0.3]) {
+    const amount = cap * (whole + off);
+    covers(work({ [field]: amount }), `${field} ${whole}${off >= 0 ? "+" : ""}${off}`);
+  }
+  let seed = 7;
+  const next = () => ((seed = (seed * 48_271) % 2_147_483_647) / 2_147_483_647);
+  for (let i = 0; i < 5_000; i += 1) {
+    covers(work({ commands: next() * 3 * API_UNIT_COMMANDS, bytes: next() * 2 * API_UNIT_BYTES, sent: next() * API_UNIT_SENT_BYTES, stripePages: next() * 2 * API_UNIT_STRIPE_PAGES, roundTrips: next() * API_UNIT_ROUND_TRIPS }), `mixed ${i}`);
+  }
   // The bookings at their most; nothing without Stripe.
   covers(bookingsWork(true), "bookings");
   assert.equal(apiReadUnits(bookingsWork(false)), 0);

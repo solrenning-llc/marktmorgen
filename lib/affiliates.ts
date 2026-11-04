@@ -1850,6 +1850,8 @@ export function settleLine(referral: Referral, refunded: number): Line {
  * and whether Stripe is connected. One pipeline of counts, nothing else. Null
  * when a count did not come back as one: unknown is never read as small.
  */
+// Accepted race: between this count and readBook's HGETALL the records can grow for a few milliseconds and be
+// read past what was paid for, bounded by how fast the store writes them.
 export async function bookSizes(store: Store): Promise<BookSizes | null> {
   const stripe = Boolean(store.stripeAccountId);
   const products = productIds(store).length;

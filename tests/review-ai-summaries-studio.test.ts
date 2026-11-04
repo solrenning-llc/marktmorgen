@@ -42,7 +42,7 @@ is("while it is made, that is said", screenText.includes("Making the summary of 
 
 part("Review of 4 November 2026: the same sentence said again, the week kept after a delete");
 const says = source.match(/setAnnounce\(([^)]*)\)/g) ?? [];
-is("the live region is emptied first and the sentence put back on the next tick, so the same words twice are read twice", [says, /setAnnounce\(""\);\s*announceTimer\.current = window\.setTimeout\(/.test(source), (source.match(/\bsay\(/g) ?? []).length - 1], [['setAnnounce("")', "setAnnounce(text)"], true, 3]);
+is("the live region is emptied first and the sentence put back a moment later, so the same words twice are read twice", [says, /setAnnounce\(""\);\s*announceTimer\.current = window\.setTimeout\(/.test(source), (source.match(/\bsay\(/g) ?? []).length - 1], [['setAnnounce("")', "setAnnounce(text)"], true, 3]);
 const removed = draw([{ id: "p1", title: "Pottery Course", reviews: 12, summary: null, lastAt: NOW - 86_400 }]);
 is("a summary taken away by a review change: no button before the week is over, and why", [removed.includes("Make the summary"), removed.includes("The last summary was taken away because a review it counted was changed or removed. A new one can be made from")], [false, true]);
 is("a week after the last one, the button", draw([{ id: "p1", title: "Pottery Course", reviews: 12, summary: null, lastAt: NOW - SUMMARY_REFRESH_SECONDS }]).includes(">Make the summary<"), true);

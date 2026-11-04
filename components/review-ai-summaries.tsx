@@ -125,7 +125,7 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
                 ) : null}
                 {canMake ? (
                   <>
-                    <button type="button" ref={(node) => { buttonRefs.current[product.id] = node; }} className="btn btn-secondary btn-sm mt-2 min-h-11" aria-disabled={busy !== null} aria-busy={busy === product.id} aria-describedby={busy !== null && busy !== product.id ? `ai-wait-${product.id}` : undefined} onClick={() => void make(product)}>
+                    <button type="button" ref={(node) => { buttonRefs.current[product.id] = node; }} className="btn btn-secondary btn-sm mt-2 inline-flex min-h-11 items-center" aria-disabled={busy !== null} aria-busy={busy === product.id} aria-describedby={busy !== null && busy !== product.id ? `ai-wait-${product.id}` : undefined} onClick={() => void make(product)}>
                       {product.summary ? "Make this week's summary" : "Make the summary"}
                       <span className="sr-only">{` of ${product.title}'s reviews`}</span>
                     </button>

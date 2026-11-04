@@ -7,6 +7,18 @@ import { MAX_KEYS } from "@/lib/api-key-rules";
 import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
 import { API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { PLAN_TITLES } from "@/lib/plan";
+import { BLOCKED_READ_MAX, BOOKINGS_READ, apiReadUnits, bookWork, bookingsWork, studentsPageWork } from "@/lib/api-read-rules";
+import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
+
+/** What each reading that reads more than a page counts as, from the code that takes it (lib/api-read-rules.ts). */
+const STUDENTS_PAGE_COUNTS = 1 + apiReadUnits(studentsPageWork(API_PAGE, 1));
+const STUDENTS_PAGE_COUNTS_MOST = 1 + apiReadUnits(studentsPageWork(API_PAGE, BLOCKED_READ_MAX + 1));
+const BOOKINGS_COUNT = 1 + apiReadUnits(bookingsWork(true));
+const BOOK_EXAMPLE = { affiliates: 100, sales: 1_000 };
+const AFFILIATES_COUNT_LEAST = 1 + apiReadUnits(bookWork({ kept: true, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: false, products: 0 }, BOOK_STRIPE_PAGES));
+const AFFILIATES_COUNT_EXAMPLE =
+  1 + apiReadUnits(bookWork({ kept: true, entries: 2 * BOOK_EXAMPLE.affiliates + BOOK_EXAMPLE.sales, people: BOOK_EXAMPLE.affiliates, leads: 0, paypalRefunds: 0, stripe: true, products: 10 }, BOOK_STRIPE_PAGES));
+const n = (count: number) => count.toLocaleString("en-US");
 
 export const metadata: Metadata = {
   title: "Developers — Marktmorgen",
@@ -93,7 +105,7 @@ export default function DevelopersPage() {
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
         <p>
-          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Past it, the answer is 429 `}
+          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. A page of a course's students, your affiliates and your bookings count as more than one, by how much each reads, as said with each below. Past the figure, or when a read needs more than are left, the answer is 429 `}
           <code className="font-mono">monthly_limit</code>
           {", and its message says when the figure opens again, if it does. A trial or a store without a paid plan also needs one of the month's places for such stores; without one, the answer is 429 "}
           <code className="font-mono">no_place</code>
@@ -104,6 +116,7 @@ export default function DevelopersPage() {
         <Code>{`401  {"error": "unauthorized", "message": "Send your API key as: Authorization: Bearer nl_live_…"}
 429  {"error": "rate_limited", "message": "At most ${API_RATE} requests a minute per key. Try again in a minute."}
 429  {"error": "monthly_limit", "message": "Your store's API requests for this month are used: 2,000 API requests. This opens again with your next billing month, on …"}
+429  {"error": "monthly_limit", "message": "This read takes ${n(BOOKINGS_COUNT)} of your store's API requests, more than your store has left, so nothing was read."}
 429  {"error": "no_place", "message": "Stores without a paid plan are full for this month, so this can't run right now. …"}
 409  {"error": "store_full", "message": "Your store's data room is full, so nothing was added. …"}
 409  {"error": "paused_unpaid", "message": "Nothing was read: your plan's renewal payment did not go through, …"}
@@ -203,9 +216,13 @@ export default function DevelopersPage() {
 
       <LegalSection title="Students">
         <Endpoint path="/api/v1/students?product=<id>">
-          Everybody who has opened one course, with how far they got, the most recently active first, up to 500.{" "}
-          <code className="font-mono">product</code> is the course product&apos;s id, from Products.
+          Everybody who has opened one course, with how far they got, a page at a time, in no set order.{" "}
+          <code className="font-mono">product</code> is the course product&apos;s id, from Products, and{" "}
+          <code className="font-mono">total</code> is how many students the course has in all.
         </Endpoint>
+        <p>
+          {`Each page reads every student's progress, so a full page of ${n(API_PAGE)} counts as ${n(STUDENTS_PAGE_COUNTS)} of your API requests (${n(STUDENTS_PAGE_COUNTS_MOST)} when more than ${n(BLOCKED_READ_MAX)} students of the course are blocked). A smaller page counts as fewer.`}
+        </p>
         <Code>{`{
   "total": 1,
   "data": [
@@ -217,7 +234,8 @@ export default function DevelopersPage() {
       "last_seen_at": "2026-09-29T08:15:31.000Z",
       "blocked": false
     }
-  ]
+  ],
+  "next": null
 }`}</Code>
       </LegalSection>
 
@@ -390,6 +408,10 @@ export default function DevelopersPage() {
           subscribers&apos; or affiliates&apos;: what an assistant reads is kept by whoever runs the assistant,
           and the people on your list did not agree to that. The endpoints above are where your own tools read them.
         </p>
+        <p>
+          Each tool counts as one of your API requests, except your affiliates, which counts as many as{" "}
+          <code className="font-mono">/api/v1/affiliates</code> does, below.
+        </p>
       </LegalSection>
 
       <LegalSection title="Affiliates">
@@ -417,6 +439,9 @@ export default function DevelopersPage() {
   ]
 }`}</Code>
         <p>
+          {`It reads your whole program, so it counts as at least ${n(AFFILIATES_COUNT_LEAST)} of your API requests, and more as your program grows: for example, ${n(AFFILIATES_COUNT_EXAMPLE)} for ${n(BOOK_EXAMPLE.affiliates)} affiliates with ${n(BOOK_EXAMPLE.sales)} sales and your Stripe account connected. The count is made before anything is read.`}
+        </p>
+        <p>
           <code className="font-mono">payable</code> is what can be paid today; <code className="font-mono">waiting</code>{" "}
           is still inside the wait you set before a sale can be paid. When <code className="font-mono">refunds_checked</code>{" "}
           is <code className="font-mono">false</code>, Stripe could not be asked about refunds just now and the amounts may
@@ -429,6 +454,9 @@ export default function DevelopersPage() {
           Paid calls and seats in live sessions, each at the time it is booked for now — a booking its buyer moved is at
           its new time.
         </Endpoint>
+        <p>
+          {`With your Stripe account connected, it reads up to ${n(BOOKINGS_READ)} bookings from it, so it counts as ${n(BOOKINGS_COUNT)} of your API requests, however many you have. Without Stripe connected, it counts as one.`}
+        </p>
         <Code>{`{
   "data": [
     {

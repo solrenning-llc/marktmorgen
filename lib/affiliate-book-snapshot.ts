@@ -23,8 +23,12 @@ import type { Store } from "@/lib/store";
 
 /** How long a kept book is shown before a load works it out again: a day (owner's decision through the coordinator, 4 November 2026; six hours spent too much of a Store window). */
 export const BOOK_FRESH_SECONDS = 24 * 60 * 60;
-/** How long it is kept: a quarter of an hour more, so a load that waits on another's refresh reads the last one. */
-export const BOOK_KEEP_SECONDS = BOOK_FRESH_SECONDS + 15 * 60;
+/**
+ * How long it is kept: a week past being out of date, so a load that waits
+ * on another's refresh reads the last one, and so a removed affiliate still
+ * owed something is known to be (their part is in it) and may refresh it.
+ */
+export const BOOK_KEEP_SECONDS = BOOK_FRESH_SECONDS + 7 * 24 * 60 * 60;
 /** An approved affiliate missing from a fresh book (approved since) waits at least this long after it was worked out. */
 export const BOOK_NEW_AFFILIATE_SECONDS = 15 * 60;
 /** How long one refresh holds the others off. */

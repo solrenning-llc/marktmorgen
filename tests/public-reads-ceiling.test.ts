@@ -10,8 +10,8 @@
  *     reads the last one kept; what each affiliate sees is what their own
  *     book always said;
  *   - an affiliate waiting or declined sees no book and is a public page;
- *     one removed sees what they are still owed, from the kept book, and
- *     never works it out;
+ *     one removed and still owed is an approved affiliate's load, refresh
+ *     included, and one removed who never sold never refreshes;
  *   - working it out is not held against the asking connection's share of
  *     the day, which alone it can pass; the loads are;
  *   - a refused load reads nothing of the book;
@@ -168,9 +168,11 @@ async function main(): Promise<void> {
   const gone = await watched(() => admitAffiliatePage(shop, as("dddddddddddd", "removed"), stale));
   const goneBook = gone.value.admitted && gone.value.book && gone.value.book !== "soon" ? gone.value.book.book : null;
   is("a removed affiliate with a balance sees it: five sales at $6.00", [goneBook?.rows[0]?.affiliate.id, goneBook?.rows[0]?.owed, goneBook?.rows[0]?.sales], ["dddddddddddd", 3_000, 5]);
-  is(`paid as a load (${load} requests), from the book kept, though it is out of date`, gone.taken, load);
-  is("and never works the book out on their own: no record read, no refresh claimed", [count(gone.names, "HGETALL"), count(gone.names, "SET")], [0, 0]);
-  is("a removed affiliate who never sold: no book, the page as it was", await admitAffiliatePage(shop, as("eeeeeeeeeeee", "removed"), stale), { admitted: true, book: null });
+  is("the book out of date, they work it out once, as an approved affiliate would, paid the same", [count(gone.names, "HGETALL"), gone.taken], [7, load + full]);
+  const again = await watched(() => admitAffiliatePage(shop, as("dddddddddddd", "removed"), stale));
+  is("a second load the same day reads the kept book and pays its own part", [again.value.admitted && again.value.book !== null && again.value.book !== "soon", count(again.names, "HGETALL"), again.taken], [true, 0, load]);
+  const never = await watched(() => admitAffiliatePage(shop, as("eeeeeeeeeeee", "removed"), stale + (BOOK_FRESH_SECONDS + 60) * 1000));
+  is("a removed affiliate who never sold: no book, the page as it was, and no refresh though the book is out of date", [never.value, count(never.names, "HGETALL"), count(never.names, "SET")], [{ admitted: true, book: null }, 0, 0]);
 
   part("A refused load reads nothing");
   await takePublicRequest(shop, "buyer", Date.now(), requestLimitFor(shop));

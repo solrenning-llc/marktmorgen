@@ -85,7 +85,7 @@ import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
-import { BOOK_KEEP_SECONDS, BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
+import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
@@ -265,9 +265,11 @@ const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_S
 /**
  * What working out a program's book costs at the most, for a book of that
  * size (lib/affiliate-page-admission.ts, refreshBook): its reads, every
- * page of Stripe it may read, and the book kept for every approved
- * affiliate, written and held BOOK_KEEP_SECONDS (at most
- * BOOK_SNAPSHOT_MAX_BYTES, past which it is not kept).
+ * page of Stripe it may read, and the book kept written (at most
+ * BOOK_SNAPSHOT_MAX_BYTES, past which it is not kept). Holding it is store
+ * data, priced all month at that cap in the store's data line
+ * (tests/store-data-registry.ts, nl:aff:@lib/affiliate-book-snapshot.ts),
+ * so not again here.
  */
 export function affiliatePageRead(size: AffiliatePageSize): number {
   const rows = Math.min(size.rows, AFFILIATE_ROW_CAP);
@@ -275,8 +277,7 @@ export function affiliatePageRead(size: AffiliatePageSize): number {
   const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES);
   const writes = Math.ceil(kept / 512_000) + 1;
   return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + 2 * writes, bytes + kept) + perMegabyte(bytes + kept)
-    + size.stripePages * stripePage()
-    + kept * DB_BYTE_MONTH * (BOOK_KEEP_SECONDS / (30 * 86_400));
+    + size.stripePages * stripePage();
 }
 /** What one load of an approved affiliate's page costs at the most: the page, its own part of the kept book, its listings, and its codes when it reads them. */
 export function affiliateLoadRead(size: AffiliateLoadSize): number {

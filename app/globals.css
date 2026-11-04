@@ -2403,6 +2403,9 @@ a.chip {
    shadow animations only while keyboard-focused. */
 .st-btn:focus-visible,
 .st-btn-ghost:focus-visible,
+.st-page .btn-secondary:focus-visible,
+.st-page .btn-primary:focus-visible,
+.st-page .st-footer-link:focus-visible,
 .st-social:focus-visible {
   outline: 3px solid #000;
   outline-offset: 3px;
@@ -2411,6 +2414,9 @@ a.chip {
 @media (forced-colors: active) {
   .st-btn:focus-visible,
   .st-btn-ghost:focus-visible,
+  .st-page .btn-secondary:focus-visible,
+  .st-page .btn-primary:focus-visible,
+  .st-page .st-footer-link:focus-visible,
   .st-social:focus-visible {
     outline: 3px solid CanvasText;
     box-shadow: none !important;

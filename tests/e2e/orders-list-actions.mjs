@@ -72,6 +72,14 @@ try {
   const button = page.getByRole("button", { name: "Check older purchases", exact: true });
   await button.waitFor();
   const settled = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  const focusedStyle = async (control) => {
+    await control.focus();
+    // Read after the actual focus transitions finish, including box-shadow.
+    await control.evaluate(async (node) => {
+      void getComputedStyle(node).boxShadow;
+      await Promise.allSettled(node.getAnimations().filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished));
+    });
+  };
   await page.evaluate(() => window.mount([
     { ok: true, cards: [window.card("First batch")], older: "cursor-2", left: "One batch left", said: "One added" },
     { ok: true, cards: [window.card("First of final batch"), window.card("Second of final batch")], older: null, left: "", said: "Two added" },
@@ -106,7 +114,7 @@ try {
     await page.keyboard.press("Tab");
     for (const id of ["secondary", "primary", "footer"]) {
       const control = page.locator(`#${id}`);
-      await control.focus();
+      await focusedStyle(control);
       check(`${theme} ${id}: keyboard focus uses the black ring and white halo`, await control.evaluate((node) => {
         const style = getComputedStyle(node);
         return { focused: document.activeElement === node, visible: node.matches(":focus-visible"), width: style.outlineWidth, color: style.outlineColor, halo: style.boxShadow.includes("rgb(255, 255, 255)") };
@@ -116,7 +124,7 @@ try {
   await page.emulateMedia({ forcedColors: "active" });
   for (const id of ["secondary", "primary", "footer"]) {
     const control = page.locator(`#${id}`);
-    await control.focus();
+    await focusedStyle(control);
     check(`${id}: forced colors keep a visible system ring`, await control.evaluate((node) => {
       const style = getComputedStyle(node);
       const sample = document.createElement("span"); sample.style.color = "CanvasText"; node.append(sample);

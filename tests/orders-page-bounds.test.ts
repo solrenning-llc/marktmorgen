@@ -1019,7 +1019,7 @@ test("without JavaScript, the older purchases' button checks the next batch on t
   const before = await requestsIn(folder, window);
   const batch = renderToStaticMarkup(await pageTree(store, { token, older: cursor }));
   assert.ok((await requestsIn(folder, window)) - before >= 1 + ORDERS_OLDER_UNITS, "its call and its units");
-  assert.ok(batch.includes(`>${words.olderTitle}</h1>`) && batch.includes(words.olderShown(ORDERS_OLDER_MOST)));
+  assert.ok(batch.includes(`>${words.olderTitle}</h1>`) && batch.includes(words.olderBatchShown(ORDERS_OLDER_MOST)));
   assert.equal(listed(batch).length, ORDERS_OLDER_MOST);
   const next = batch.match(/name="older" value="([^"]+)"/)?.[1] ?? "";
   assert.ok(next && next !== cursor, "and the next batch is one more press of the same button");

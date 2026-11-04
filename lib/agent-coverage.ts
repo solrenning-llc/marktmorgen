@@ -209,6 +209,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/person": row("buyers", execute, "Erasing a person cannot be undone: confirmed one person at a time, never in a batch."),
   "POST store/phone": row("settings", never(BROWSER)),
   "POST store/photo": row("pages", draft),
+  "POST store/pipeline-access": row("access", never(ACCESS)),
   "POST store/pixels": row("settings", draft),
   "POST store/podcast": row("podcast", draft),
   "POST store/preorder": row("products", draft),

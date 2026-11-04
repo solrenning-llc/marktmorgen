@@ -258,6 +258,17 @@ export async function noteData(store: DataStore, changes: DataChange[], now = Da
   await run(store, changes, true, now / 1000).catch(() => undefined);
 }
 
+/**
+ * Counts a record as noteData does, never refusing for room, but throws when
+ * the count could not be made: for a write that goes ahead whatever the room
+ * holds and must never be left uncounted (lib/pipeline-access.ts, a
+ * teammate's restrictions moved with their sign-in).
+ */
+export async function forceData(store: DataStore, changes: DataChange[], now = Date.now()): Promise<void> {
+  const counted = await run(store, changes, true, now / 1000);
+  if (!counted.ok) throw new Error("the store's data room could not be counted");
+}
+
 /** One slot shrunk by `bytes`. Never refuses and never throws. */
 export function giveDataBytes(store: DataStore, slot: string, bytes: number, now = Date.now()): Promise<void> {
   return giveData(store, [{ slot, bytes }], now);

@@ -39,5 +39,5 @@ part("The board");
 const board = readFileSync("components/deals-board.tsx", "utf8");
 is("opens the copy as a new pipeline to read first", board.includes("const copy = copyPipeline(pipeline, pipelines); setPipelineDraft({ ...copy, isNew: true"), true);
 is("only while the plan has room for one more", board.split("pipelines.length < pipelineMax ?").length - 1 >= 1 && board.includes("pipelines.length < pipelineMax && canChange ?"), true);
-is("the button names what it copies", board.includes("{`Duplicate “${pipeline.name}”`}"), true);
+is("the button names what it copies", board.includes("{`Duplicate “${nameOf(pipeline)}”`}"), true);
 done();

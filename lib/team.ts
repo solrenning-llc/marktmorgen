@@ -32,6 +32,7 @@
  * just taken off could be back on it.
  */
 import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
+import { type AccessLog, parseAccessLog } from "@/lib/pipeline-access-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
@@ -48,6 +49,12 @@ export const MAX_TEAM = 5;
 export { INVITE_DAYS };
 /** How many lines of the activity log are kept. */
 export const LOG_LINES = 500;
+/**
+ * The most one stored log line weighs, its JSON in UTF-8 bytes (logTeam):
+ * with what Redis keeps beside a list entry, within the 512 bytes a line
+ * tests/store-data-registry.ts counts for the log.
+ */
+export const LOG_LINE_BYTES = 448;
 /** Invitations one store may send in a day, so an inbox is never flooded from here. */
 const INVITES_PER_DAY = 20;
 
@@ -65,6 +72,17 @@ const teamLockKey = (sid: string) => `nl:team:lock:${sid}`;
 /** Runs one change to a store's team with its lock held: five seconds at most, waiting up to four. */
 function withTeam<T>(sid: string, work: () => Promise<T>): Promise<T> {
   return withLock(teamLockKey(sid), 5, 4_000, work);
+}
+
+/**
+ * The same lock, for a change outside this file that must see the team as it
+ * is while it writes (639 [GL7](7): a teammate's pipeline access, so a
+ * sign-in moving at the same moment never leaves the new address without
+ * it). Throws LockBusyError when the team stays busy. Never call
+ * logTeam or another function of this file that takes the lock inside it.
+ */
+export function withTeamLocked<T>(sid: string, work: () => Promise<T>): Promise<T> {
+  return withTeam(sid, work);
 }
 
 export type Member = {
@@ -103,6 +121,12 @@ export type LogLine = {
   role: Role;
   /** What they did, in a few words. */
   what: string;
+  /**
+   * A change of a teammate's pipeline access (639 [GL7](7)), by pipeline id:
+   * the team page words it with the pipelines' names as they are when shown
+   * (accessLogWords), `what` being the same words with the names then.
+   */
+  access?: AccessLog;
 };
 
 const EMPTY: Team = { members: [], invites: [] };
@@ -224,13 +248,29 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
   return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
 }
 
+/**
+ * One log line as stored, never over LOG_LINE_BYTES: a pipeline-access
+ * change's details (`access`) are kept only while the line fits, and the
+ * line's own words (`what`, which name every pipeline) stay; past that, the
+ * words, then the address, are shortened. So the log's room is what the
+ * data registry counts, whatever a line holds.
+ */
+export function logLineRecord(entry: LogLine): string {
+  const bytes = (value: LogLine) => Buffer.byteLength(JSON.stringify(value), "utf8");
+  let line: LogLine = entry;
+  if (bytes(line) > LOG_LINE_BYTES && line.access) line = { at: line.at, who: line.who, role: line.role, what: line.what };
+  while (bytes(line) > LOG_LINE_BYTES && line.what.length) line = { ...line, what: [...line.what].slice(0, -8).join("") };
+  while (bytes(line) > LOG_LINE_BYTES && line.who.length) line = { ...line, who: [...line.who].slice(0, -8).join("") };
+  return JSON.stringify(line);
+}
+
 /** Writes one line into a store's activity log. Never throws. */
 export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<void> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return;
-  const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200) };
+  const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200), ...(line.access ? { access: line.access } : {}) };
   try {
     await redisPipeline([
-      ["LPUSH", logKey(sid), JSON.stringify(entry)],
+      ["LPUSH", logKey(sid), logLineRecord(entry)],
       ["LTRIM", logKey(sid), 0, LOG_LINES - 1],
     ]);
   } catch (error) {
@@ -248,7 +288,8 @@ export async function readLog(sid: string): Promise<LogLine[]> {
       const value = JSON.parse(String(row)) as Partial<LogLine>;
       if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") continue;
       const role: Role = value.role === "owner" ? "owner" : parseTeamRole(value.role) ?? "support";
-      lines.push({ at: value.at, who: value.who, role, what: value.what });
+      const access = parseAccessLog(value.access);
+      lines.push({ at: value.at, who: value.who, role, what: value.what, ...(access ? { access } : {}) });
     } catch {
       // A line that cannot be read is skipped, not shown half.
     }
@@ -405,11 +446,12 @@ export async function removeMember(store: Store, email: string): Promise<boolean
     const team = await readTeam(store.sid);
     if (!team.members.some((m) => m.email === address)) return false;
     await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
+    // What they could do with each pipeline (639 [GL7](7)) goes with them, under the same lock, so someone
+    // added back at once and restricted again never has that new restriction deleted by this removal.
+    await forgetPipelineAccess(store, address).catch(() => {});
     return true;
   });
   if (removed) await redisPipeline([["SREM", indexKey(address), store.sid]]).catch(() => {});
-  // What they could do with each pipeline (639 [GL7](7)) goes with them.
-  if (removed) await forgetPipelineAccess(store, address).catch(() => {});
   return removed;
 }
 
@@ -534,11 +576,12 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
         return null;
       }
       await saveTeam(sid, { members: team.members.map((m) => (m.email === before ? { ...m, email: after } : m)), invites: team.invites });
+      // The old address's restrictions go only once the team names the new one, still under the lock, so
+      // someone who joins on the old address at once and is restricted never has that restriction deleted.
+      await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
       return team.members.find((m) => m.email === before)?.role ?? "support";
     });
     if (!role) continue;
-    // The old address's restrictions go only once the team names the new one.
-    await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
     await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
   }

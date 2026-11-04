@@ -23,6 +23,7 @@ import { AiPosts } from "@/components/ai-posts";
 import { PageCoach } from "@/components/page-coach";
 import { PageStylePicker } from "@/components/page-style-picker";
 import { BlockPicker } from "@/components/block-picker";
+import { addedSaying, chosenSaying, insertAt, insertionPlaces, offeredKinds, placeWords } from "@/lib/block-insert";
 import { SharePanel } from "@/components/share-panel";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { BlockRewrite } from "@/components/block-rewrite";
@@ -480,6 +481,14 @@ export function PageEditor({
   const fullScreen = screenFor("full", chosenScreen);
   // Where the block picker is open: the place a new block would take, or null when closed.
   const [picking, setPicking] = useState<number | null>(null);
+  // The side menu beside the page (375 [TB1]): the card chosen before its place, the card
+  // being dragged from it and the place it is over; what the status region says last;
+  // the new block whose first field takes the focus once it is drawn.
+  const [chosenKind, setChosenKind] = useState<BlockKind | null>(null);
+  const [draggingKind, setDraggingKind] = useState<BlockKind | null>(null);
+  const [overPlace, setOverPlace] = useState<number | null>(null);
+  const [said, setSaid] = useState("");
+  const focusNew = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -536,8 +545,11 @@ export function PageEditor({
   // Nothing typed here is lost to a closed tab or a link pressed by mistake.
   useLeaveGuard(dirty && !busy);
   const hasHero = drafts[0]?.block.kind === "hero";
-  const hasReviews = drafts.some((d) => d.block.kind === "reviews");
-  const addable = BLOCK_KINDS.filter((k) => (site ? site.kinds.includes(k.kind) : k.kind !== "form") && (k.kind === "hero" ? !hasHero : k.kind === "reviews" ? !hasReviews : true));
+  // What can still be added, and where (lib/block-insert.ts): the gallery, the side menu and every place use the same.
+  const addable = offeredKinds(drafts.map((d) => d.block.kind), site?.kinds);
+  const places = insertionPlaces(drafts.map((d) => d.block.kind));
+  // A card chosen in the side menu counts only while the menu is there.
+  const armed = sideBySide ? chosenKind : null;
 
   function change(index: number, patch: Partial<PageBlock>) {
     setDrafts((all) => all.map((d, i) => (i === index ? { ...d, block: { ...d.block, ...patch } as PageBlock } : d)));
@@ -550,21 +562,92 @@ export function PageEditor({
     );
   }
 
-  /** A new block at `at` (the end when left out); a hero always goes on top. */
-  function add(kind: BlockKind, at?: number) {
-    if (drafts.length >= MAX_BLOCKS) return;
+  /**
+   * A new block at `at` (the end when left out); a hero always goes on top
+   * (lib/block-insert.ts). Chosen in the gallery or the side menu (`chosen`),
+   * its first field takes the focus and the status region says where it went.
+   */
+  function add(kind: BlockKind, at?: number, chosen = false) {
     const block = emptyBlock(kind, newBlockId());
-    const draft: Draft = { block, video: "" };
-    setDrafts((all) => {
-      if (kind === "hero") return [draft, ...all];
-      const place = at === undefined ? all.length : Math.max(all[0]?.block.kind === "hero" ? 1 : 0, Math.min(at, all.length));
-      const copy = [...all];
-      copy.splice(place, 0, draft);
-      return copy;
-    });
+    const result = insertAt(drafts, (d) => d.block.kind, { block, video: "" }, kind, at, { siteKinds: site?.kinds });
+    if (!result.ok) {
+      if (chosen) setSaid(result.why === "full" ? `${MAX_BLOCKS} blocks is the most one page can have.` : `${kindLabel(kind)} cannot be added to this page now.`);
+      return;
+    }
+    setDrafts(result.items);
     setOpen(block.id);
     setPicking(null);
+    setChosenKind(null);
+    if (chosen) {
+      focusNew.current = block.id;
+      setSaid(addedSaying(kindLabel(kind), result.at));
+    }
   }
+
+  // A block just chosen: its first field takes the focus once its panel is drawn.
+  useEffect(() => {
+    const id = focusNew.current;
+    if (!id || open !== id) return;
+    focusNew.current = null;
+    const panel = document.getElementById(`panel-${id}`);
+    const first = panel?.querySelector<HTMLElement>("input:not([disabled]):not([type=hidden]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])");
+    (first ?? document.querySelector<HTMLElement>(`#row-${CSS.escape(id)} button[aria-expanded]`))?.focus();
+  }, [open, drafts]);
+
+  /** "Add here" at a place: the card chosen goes there, or the place waits for a card (in the side menu, or the gallery opened here). */
+  function addHere(at: number) {
+    if (armed) {
+      add(armed, at, true);
+      return;
+    }
+    setPicking(at);
+    if (sideBySide) {
+      setSaid(`Choose a block to add ${placeWords(at, drafts.length)}.`);
+      document.getElementById("menu-block-find")?.focus();
+    }
+  }
+
+  /** A card pressed in the side menu: into the place waiting for it, or chosen until its place is pressed. */
+  function pickInMenu(kind: BlockKind) {
+    if (picking !== null) {
+      add(kind, picking, true);
+      return;
+    }
+    if (chosenKind === kind) {
+      setChosenKind(null);
+      setSaid(`${kindLabel(kind)} no longer chosen.`);
+      return;
+    }
+    setChosenKind(kind);
+    setSaid(chosenSaying(kindLabel(kind)));
+  }
+
+  /** The side menu or the gallery closed with nothing added: the focus goes back to the place it was opened from. */
+  function cancelPicking() {
+    const from = picking;
+    setPicking(null);
+    setChosenKind(null);
+    setSaid("");
+    backToPlace.current = from;
+  }
+  // Escape anywhere forgets the card chosen in the side menu, as its own Cancel does.
+  useEffect(() => {
+    if (!chosenKind) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      setChosenKind(null);
+      setSaid("Nothing chosen to add.");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chosenKind]);
+  const backToPlace = useRef<number | null>(null);
+  useEffect(() => {
+    const at = backToPlace.current;
+    if (at === null || picking !== null) return;
+    backToPlace.current = null;
+    document.querySelector<HTMLElement>(`[data-place="${at}"]`)?.focus();
+  }, [picking]);
 
   /** A saved section's blocks (components/saved-sections.tsx), at the end of the page. */
   function insertSection(blocks: PageBlock[]) {
@@ -987,6 +1070,71 @@ export function PageEditor({
               </div>
             </div>
           </PreviewFrame>
+  );
+
+  /** Whether a place is lit: the side menu's card is dragged over it, or it waits for a card in the side menu. */
+  const placeLit = (at: number) => (draggingKind !== null && overPlace === at) || (sideBySide && picking === at);
+  /** A place a card from the side menu can be dropped on: the same insertion as "Add here". */
+  const placeOf = (event: React.DragEvent<HTMLElement>) => Number(event.currentTarget.dataset.dropAt);
+  function dragOverPlace(event: React.DragEvent<HTMLElement>) {
+    if (draggingKind === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    const at = placeOf(event);
+    if (overPlace !== at) setOverPlace(at);
+  }
+  function dragLeavePlace(event: React.DragEvent<HTMLElement>) {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    if (overPlace === placeOf(event)) setOverPlace(null);
+  }
+  function dropOnPlace(event: React.DragEvent<HTMLElement>) {
+    if (draggingKind === null) return;
+    event.preventDefault();
+    add(draggingKind, placeOf(event), true);
+    setDraggingKind(null);
+    setOverPlace(null);
+  }
+  /**
+   * A place between blocks (or before the first): "Add here", by a press or the
+   * keyboard, with a line across when a card is dragged over it. On a narrow
+   * screen the gallery opens in its stead; on a wide one the side menu answers.
+   */
+  const placeAt = (at: number) => {
+    if (!places.includes(at)) return <div className="h-3" />;
+    if (picking === at && !sideBySide) {
+      return (
+        <div className="py-3">
+          <BlockPicker icons={KIND_ICONS} allowed={addable} where={placeWords(at, drafts.length)} onPick={(kind) => add(kind, at, true)} onClose={cancelPicking} />
+        </div>
+      );
+    }
+    const lit = placeLit(at);
+    return (
+      <div className="flex min-h-12 items-center gap-2 py-0.5" data-drop-at={at} onDragOver={dragOverPlace} onDragLeave={dragLeavePlace} onDrop={dropOnPlace}>
+        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand" : "bg-transparent"}`} />
+        <button
+          type="button"
+          data-place={at}
+          onClick={() => addHere(at)}
+          className={`inline-flex min-h-11 items-center gap-1 rounded-full bg-white px-3 text-xs font-semibold ring-1 transition hover:text-violet-deep hover:ring-violet-brand/50 focus-visible:ring-2 focus-visible:ring-violet-brand motion-reduce:transition-none ${lit ? "text-violet-deep ring-2 ring-violet-brand" : "text-ink-soft ring-line"}`}
+          aria-label={`Add here: ${armed ? `${kindLabel(armed)}, ` : "a block "}${placeWords(at, drafts.length)}`}
+        >
+          <Icon name="plus" size={13} />
+          Add here
+        </button>
+        <span aria-hidden="true" className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand" : "bg-transparent"}`} />
+      </div>
+    );
+  };
+  const savedSections = (
+    <SavedSections
+      pageKey={pageKey}
+      allowed={site ? site.kinds : BLOCK_KINDS.map((k) => k.kind).filter((kind) => kind !== "form")}
+      blocks={drafts.map((d) => d.block)}
+      room={MAX_BLOCKS - drafts.length}
+      disabled={busy}
+      onInsert={insertSection}
+    />
   );
 
   const field = (id: string, label: string, input: React.ReactNode, extra?: React.ReactNode) => (
@@ -1803,6 +1951,11 @@ export function PageEditor({
         </section>
       ) : null}
 
+      {/* Said to a screen reader after a block is chosen or added from the gallery or the side menu. */}
+      <p role="status" aria-atomic="true" className="sr-only">
+        {said}
+      </p>
+
       {view === "preview" ? (
         <div className="mt-5">
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
@@ -1817,7 +1970,8 @@ export function PageEditor({
         </div>
       ) : (
         // On a wide screen the page is drawn beside the blocks as they are edited.
-        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_24.5rem] items-start gap-6" : ""}>
+        // Between them, the side menu of blocks to add (375 [TB1]); on a narrow screen the gallery opens where a place is pressed.
+        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_15rem_24.5rem] items-start gap-5" : ""}>
         <div className="min-w-0">
           {drafts.length === 0 ? (
             <div className="mt-6 rounded-2xl bg-paper p-5 ring-1 ring-line sm:p-6">
@@ -2046,7 +2200,8 @@ export function PageEditor({
             </section>
           ) : null}
 
-          <ol className="mt-6">
+          {drafts.length > 0 && places.includes(0) ? <div className="mt-6">{placeAt(0)}</div> : null}
+          <ol className={drafts.length > 0 && places.includes(0) ? "" : "mt-6"}>
             {drafts.map((draft, index) => {
               const block = draft.block;
               const isOpen = open === block.id;
@@ -2200,27 +2355,7 @@ export function PageEditor({
                   ) : null}
                   </div>
                   {/* Between two blocks: a block added right here, rather than at the end and moved up. */}
-                  {index < drafts.length - 1 ? (
-                    picking === index + 1 && drafts.length < MAX_BLOCKS ? (
-                      <div className="py-3">
-                        <BlockPicker icons={KIND_ICONS} allowed={addable.map((k) => k.kind)} where={`after block ${index + 1}`} onPick={(kind) => add(kind, index + 1)} onClose={() => setPicking(null)} />
-                      </div>
-                    ) : drafts.length >= MAX_BLOCKS ? (
-                      <div className="h-3" />
-                    ) : (
-                      <div className="flex h-9 items-center justify-center">
-                        <button
-                          type="button"
-                          onClick={() => setPicking(index + 1)}
-                          className="inline-flex h-7 items-center gap-1 rounded-full bg-white px-2.5 text-xs font-semibold text-ink-soft ring-1 ring-line transition hover:text-violet-deep hover:ring-violet-brand/50 focus-visible:ring-2 focus-visible:ring-violet-brand"
-                          aria-label={`Add a block after block ${index + 1}`}
-                        >
-                          <Icon name="plus" size={13} />
-                          Add here
-                        </button>
-                      </div>
-                    )
-                  ) : null}
+                  {index < drafts.length - 1 ? placeAt(index + 1) : null}
                 </li>
               );
             })}
@@ -2229,28 +2364,26 @@ export function PageEditor({
           <div className="mt-4">
             {drafts.length >= MAX_BLOCKS ? (
               <p className="rounded-2xl border-2 border-dashed border-line-strong p-3 text-sm text-ink-soft sm:p-4">{`${MAX_BLOCKS} blocks is the most one page can have.`}</p>
-            ) : picking === drafts.length ? (
-              <BlockPicker icons={KIND_ICONS} allowed={addable.map((k) => k.kind)} where="at the end" onPick={(kind) => add(kind)} onClose={() => setPicking(null)} />
+            ) : picking === drafts.length && !sideBySide ? (
+              <BlockPicker icons={KIND_ICONS} allowed={addable} where={placeWords(drafts.length, drafts.length)} onPick={(kind) => add(kind, drafts.length, true)} onClose={cancelPicking} />
             ) : (
-              <button
-                type="button"
-                onClick={() => setPicking(drafts.length)}
-                className="flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong p-3 text-sm font-semibold text-ink-soft transition hover:border-violet-brand/60 hover:text-violet-deep sm:p-4"
-              >
-                <Icon name="plus" size={17} />
-                {`Add a block (${drafts.length} of ${MAX_BLOCKS})`}
-              </button>
+              <div data-drop-at={drafts.length} onDragOver={dragOverPlace} onDragLeave={dragLeavePlace} onDrop={dropOnPlace}>
+                <span aria-hidden="true" className={`mb-2 block h-1 rounded-full ${placeLit(drafts.length) ? "bg-violet-brand" : "bg-transparent"}`} />
+                <button
+                  type="button"
+                  data-place={drafts.length}
+                  onClick={() => addHere(drafts.length)}
+                  className={`flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed p-3 text-sm font-semibold transition hover:border-violet-brand/60 hover:text-violet-deep motion-reduce:transition-none sm:p-4 ${placeLit(drafts.length) ? "border-violet-brand text-violet-deep" : "border-line-strong text-ink-soft"}`}
+                >
+                  <Icon name="plus" size={17} />
+                  {armed ? `Add ${kindLabel(armed)} here, ${placeWords(drafts.length, drafts.length)} (${drafts.length} of ${MAX_BLOCKS})` : `Add a block (${drafts.length} of ${MAX_BLOCKS})`}
+                </button>
+              </div>
             )}
           </div>
 
-          <SavedSections
-            pageKey={pageKey}
-            allowed={site ? site.kinds : BLOCK_KINDS.map((k) => k.kind).filter((kind) => kind !== "form")}
-            blocks={drafts.map((d) => d.block)}
-            room={MAX_BLOCKS - drafts.length}
-            disabled={busy}
-            onInsert={insertSection}
-          />
+          {/* On a wide screen the saved sections lead the side menu instead. */}
+          {sideBySide ? null : savedSections}
 
           <div className="mt-6 rounded-2xl bg-paper p-4 ring-1 ring-line sm:p-5">
             <p className="field-label">Page style</p>
@@ -2342,6 +2475,38 @@ export function PageEditor({
             </div>
           </details>
         </div>
+        {sideBySide ? (
+        <aside aria-label="Blocks to add" className="sticky top-24 mt-6 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl">
+          <BlockPicker
+            layout="menu"
+            icons={KIND_ICONS}
+            allowed={drafts.length >= MAX_BLOCKS ? [] : addable}
+            where={picking !== null ? placeWords(picking, drafts.length) : null}
+            chosen={armed}
+            onPick={pickInMenu}
+            onClose={cancelPicking}
+            onDragKind={(kind) => {
+              setDraggingKind(kind);
+              if (kind === null) setOverPlace(null);
+            }}
+            top={
+              <>
+                {armed ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm mt-3 w-full"
+                    onClick={() => document.querySelector<HTMLElement>("[data-place]")?.focus()}
+                  >
+                    Go to the places to add it
+                  </button>
+                ) : null}
+                {drafts.length >= MAX_BLOCKS ? <p className="mt-3 text-sm text-ink-soft">{`${MAX_BLOCKS} blocks is the most one page can have.`}</p> : null}
+                {savedSections}
+              </>
+            }
+          />
+        </aside>
+        ) : null}
         {sideBySide ? (
         <aside
           ref={beside}

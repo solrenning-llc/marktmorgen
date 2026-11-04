@@ -20,6 +20,7 @@
  * their confirmation — and their reminders — do not wait for somebody to open
  * the store or the studio.
  */
+import { placeLine } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import type { Listing, Store } from "@/lib/store";
@@ -65,7 +66,8 @@ async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark:
   if (!product || !isCallProduct(product) || !call.email) return false;
   const setup = product.call;
   const tz = isTimeZone(call.buyerTz) ? call.buyerTz : setup.tz;
-  const room = await roomOf(store.callsId, { product: product.id, setup, session: call.session, start: call.start, end: call.end });
+  // In person (lib/call-place.ts): no link, not even a room kept from when it was online.
+  const room = setup.place ? null : await roomOf(store.callsId, { product: product.id, setup, session: call.session, start: call.start, end: call.end });
   const minutes = Math.round((call.end - call.start) / 60_000);
   // In the store's language (lib/buyer-words/booking.ts), times in its locale.
   const b = bookingWords(store.language);
@@ -80,7 +82,8 @@ async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark:
       "",
       b.whenLength(`${readableTime(call.start, tz, locale)} (${zoneName(call.start, tz, locale)})`, minutes),
       "",
-      room ? b.joinAtThatTime(room) : b.willSendOrReply(store.name),
+      // In person (lib/call-place.ts): the address, and no link.
+      setup.place ? b.whereAt(placeLine(setup.place)) : room ? b.joinAtThatTime(room) : b.willSendOrReply(store.name),
       ...(isVideoRoom(room) ? [b.videoRoomNote] : []),
       "",
       b.addToCalendar(icsLink(origin, store, call.session)),
@@ -94,7 +97,8 @@ async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark:
 async function remindCreator(store: Store, product: Listing, paid: PaidCall[], call: PaidCall, mark: "24" | "1"): Promise<boolean> {
   if (!product || !isCallProduct(product)) return false;
   const setup = product.call;
-  const room = await roomOf(store.callsId, { product: product.id, setup, session: call.session, start: call.start, end: call.end });
+  // In person (lib/call-place.ts): no link, not even a room kept from when it was online.
+  const room = setup.place ? null : await roomOf(store.callsId, { product: product.id, setup, session: call.session, start: call.start, end: call.end });
   const people = paid.filter((c) => c.product === call.product && c.start === call.start);
   const emails = people.map((c) => c.email ?? "a buyer who gave no address");
   const seats = seatsAt(setup, call.start);
@@ -111,7 +115,9 @@ async function remindCreator(store: Store, product: Listing, paid: PaidCall[], c
       group ? `${people.length} of ${seats} ${seats === 1 ? "seat" : "seats"} booked:` : "Booked by:",
       ...emails.map((email) => `- ${email}`),
       "",
-      room
+      setup.place
+        ? `In person, at: ${placeLine(setup.place)}`
+        : room
         ? isVideoRoom(room)
           ? `The private video room, which they have: ${room}\n${VIDEO_ROOM_NOTE} Open it a few minutes early and sign in, so nobody is left waiting.`
           : roomKind(room) === "meet"
@@ -218,6 +224,8 @@ export async function sendCallReminders(
               currency: call.currency,
               lead: call.lead,
               pi: call.pi,
+              due: call.due,
+              cancel: call.cancel,
               origin,
             });
             counts.confirmed += 1;

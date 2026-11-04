@@ -313,6 +313,12 @@ const en = {
   askShows: (store: string) =>
     `Your review appears on ${store}'s page marked as a verified purchase, under the name you choose. Your email address is never shown. The same link lets you change or delete it for 60 days.`,
   askOnly: "This is the only email about reviewing this order.",
+  /** With the one reminder on (636 [GL4](a)): said in the first email instead of askOnly. */
+  askOneMore: (days: number) => `If you have not reviewed it ${days} days from now, you get one reminder, and that is the last email about it.`,
+  againSubject: (title: string) => `A reminder: how is ${title}?`,
+  againLead: (what: string, store: string, date: string) =>
+    `A few days ago ${store} asked what you think of ${what}, bought on ${date}. If you have a minute, a few words are welcome, good or bad.`,
+  againOnly: "This is the last email about reviewing this order.",
   askWhy: (store: string) => `You are getting this because you bought from ${store}.`,
   askStopLabel: "Stop review requests",
   askStopAfter: (store: string) => `from ${store} in one click.`,
@@ -638,6 +644,11 @@ const es: GivingWords = {
   askShows: (store) =>
     `Tu reseña aparece en la página de ${store} marcada como compra verificada, con el nombre que elijas. Tu dirección de email nunca se muestra. El mismo enlace te permite cambiarla o eliminarla durante 60 días.`,
   askOnly: "Este es el único email sobre la reseña de este pedido.",
+  askOneMore: (days) => `Si dentro de ${days} días aún no lo has reseñado, recibirás un recordatorio, y será el último email sobre esto.`,
+  againSubject: (title) => `Un recordatorio: ¿qué tal ${title}?`,
+  againLead: (what, store, date) =>
+    `Hace unos días, ${store} te preguntó qué te parece ${what}, comprado el ${date}. Si tienes un minuto, unas palabras son bienvenidas, para bien o para mal.`,
+  againOnly: "Este es el último email sobre la reseña de este pedido.",
   askWhy: (store) => `Recibes esto porque compraste en ${store}.`,
   askStopLabel: "Dejar de recibir solicitudes de reseña",
   askStopAfter: (store) => `de ${store} con un clic.`,
@@ -953,6 +964,11 @@ const fr: GivingWords = {
   askShows: (store) =>
     `Votre avis apparaît sur la page de ${store}, marqué comme achat vérifié, sous le nom de votre choix. Votre adresse e-mail n'est jamais affichée. Le même lien vous permet de le modifier ou de le supprimer pendant 60 jours.`,
   askOnly: "C'est le seul e-mail concernant l'avis sur cette commande.",
+  askOneMore: (days) => `Si vous n'avez pas donné votre avis d'ici ${days}${S}jours, vous recevrez un rappel, et ce sera le dernier e-mail à ce sujet.`,
+  againSubject: (title) => `Un rappel${S}: que pensez-vous de ${title}${S}?`,
+  againLead: (what, store, date) =>
+    `Il y a quelques jours, ${store} vous a demandé ce que vous pensez de ${what}, acheté le ${date}. Si vous avez une minute, quelques mots sont les bienvenus, en bien ou en mal.`,
+  againOnly: "C'est le dernier e-mail concernant l'avis sur cette commande.",
   askWhy: (store) => `Vous recevez ceci parce que vous avez acheté chez ${store}.`,
   askStopLabel: "Ne plus recevoir de demandes d'avis",
   askStopAfter: (store) => `de ${store} en un clic.`,
@@ -1268,6 +1284,11 @@ const de: GivingWords = {
   askShows: (store) =>
     `Ihre Bewertung erscheint auf der Seite von ${store}, als verifizierter Kauf gekennzeichnet, unter dem Namen, den Sie wählen. Ihre E-Mail-Adresse wird nie angezeigt. Mit demselben Link können Sie sie 60 Tage lang ändern oder löschen.`,
   askOnly: "Das ist die einzige E-Mail zur Bewertung dieser Bestellung.",
+  askOneMore: (days) => `Wenn Sie in ${days} Tagen noch keine Bewertung geschrieben haben, erhalten Sie eine Erinnerung, und das ist die letzte E-Mail dazu.`,
+  againSubject: (title) => `Eine Erinnerung: Wie gefällt Ihnen ${title}?`,
+  againLead: (what, store, date) =>
+    `Vor ein paar Tagen hat ${store} Sie gefragt, was Sie von ${what} halten, gekauft am ${date}. Wenn Sie eine Minute haben, sind ein paar Worte willkommen – ob gut oder schlecht.`,
+  againOnly: "Das ist die letzte E-Mail zur Bewertung dieser Bestellung.",
   askWhy: (store) => `Sie erhalten diese E-Mail, weil Sie bei ${store} gekauft haben.`,
   askStopLabel: "Keine Bewertungsanfragen mehr",
   askStopAfter: (store) => `von ${store} – mit einem Klick.`,
@@ -1587,6 +1608,11 @@ const it: GivingWords = {
   askShows: (store) =>
     `La tua recensione compare sulla pagina di ${store} segnata come acquisto verificato, con il nome che scegli. Il tuo indirizzo email non viene mai mostrato. Lo stesso link ti permette di modificarla o eliminarla per 60 giorni.`,
   askOnly: "Questa è l'unica email sulla recensione di questo ordine.",
+  askOneMore: (days) => `Se tra ${days} giorni non avrai ancora scritto una recensione, riceverai un promemoria, e sarà l'ultima email al riguardo.`,
+  againSubject: (title) => `Un promemoria: com'è ${title}?`,
+  againLead: (what, store, date) =>
+    `Qualche giorno fa ${store} ti ha chiesto cosa pensi di ${what}, acquistato in data ${date}. Se hai un minuto, qualche parola è benvenuta, nel bene o nel male.`,
+  againOnly: "Questa è l'ultima email sulla recensione di questo ordine.",
   askWhy: (store) => `Ricevi questa email perché hai acquistato da ${store}.`,
   askStopLabel: "Non ricevere più richieste di recensione",
   askStopAfter: (store) => `da ${store} con un clic.`,
@@ -1899,6 +1925,11 @@ const nl: GivingWords = {
   askShows: (store) =>
     `Je beoordeling verschijnt op de pagina van ${store}, gemarkeerd als geverifieerde aankoop, onder de naam die je kiest. Je e-mailadres wordt nooit getoond. Met dezelfde link kun je haar 60 dagen lang wijzigen of verwijderen.`,
   askOnly: "Dit is de enige e-mail over het beoordelen van deze bestelling.",
+  askOneMore: (days) => `Heb je over ${days} dagen nog geen beoordeling gegeven, dan krijg je één herinnering, en dat is de laatste e-mail hierover.`,
+  againSubject: (title) => `Een herinnering: hoe bevalt ${title}?`,
+  againLead: (what, store, date) =>
+    `Een paar dagen geleden vroeg ${store} wat je vindt van ${what}, gekocht op ${date}. Als je een minuutje hebt, zijn een paar woorden welkom, goed of slecht.`,
+  againOnly: "Dit is de laatste e-mail over het beoordelen van deze bestelling.",
   askWhy: (store) => `Je ontvangt dit omdat je bij ${store} hebt gekocht.`,
   askStopLabel: "Geen beoordelingsverzoeken meer",
   askStopAfter: (store) => `van ${store}, met één klik.`,
@@ -2218,6 +2249,11 @@ const pt: GivingWords = {
   askShows: (store) =>
     `A sua avaliação aparece na página de ${store} marcada como compra verificada, com o nome que escolher. O seu endereço de email nunca é mostrado. A mesma ligação permite-lhe alterá-la ou eliminá-la durante 60 dias.`,
   askOnly: "Este é o único email sobre a avaliação desta encomenda.",
+  askOneMore: (days) => `Se daqui a ${days} dias ainda não a tiver avaliado, recebe um lembrete, e será o último email sobre isto.`,
+  againSubject: (title) => `Um lembrete: o que achou de ${title}?`,
+  againLead: (what, store, date) =>
+    `Há alguns dias, ${store} perguntou-lhe o que achou de ${what}, comprado em ${date}. Se tiver um minuto, algumas palavras são bem-vindas, seja bom ou mau.`,
+  againOnly: "Este é o último email sobre a avaliação desta encomenda.",
   askWhy: (store) => `Recebe isto porque comprou a ${store}.`,
   askStopLabel: "Deixar de receber pedidos de avaliação",
   askStopAfter: (store) => `de ${store} com um clique.`,

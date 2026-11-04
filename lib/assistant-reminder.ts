@@ -160,6 +160,27 @@ export async function forgetAssistReminderPerson(statsId: string | null, email: 
   return Number(gone) || 0;
 }
 
+/**
+ * The checkout reminders a person asked for with the assistant's box, for the
+ * copy of their data (619 [SZ3], lib/person-copy.ts): the address they typed,
+ * the sentence they checked, its version and when. Only reads.
+ */
+export async function remindersOf(statsId: string | null, email: string): Promise<{ address: string; sentence: string; version: string; at: number }[]> {
+  if (!statsId || !email || !isRedisConfigured()) return [];
+  const [members] = await redisPipeline([["SMEMBERS", whoKey(statsId, email)]]);
+  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
+  if (!sessions.length) return [];
+  const raws = await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)]));
+  return raws.flatMap((raw) => {
+    try {
+      const v = JSON.parse(String(raw)) as Partial<Consent>;
+      return typeof v.e === "string" ? [{ address: v.e, sentence: String(v.t ?? ""), version: String(v.v ?? ""), at: Number(v.at) || 0 }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 // ----------------------------------------------------------------- the AI line
 
 /** One product as the model reads it: what its card says in public, without its price. */

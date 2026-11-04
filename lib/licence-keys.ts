@@ -636,6 +636,26 @@ export async function checkKey(store: Store, product: Listing, key: string): Pro
   return info.revokedAt ? "revoked" : "valid";
 }
 
+/**
+ * The license keys these products gave a person, with the sale each came
+ * from, for the copy of their data (619 [SZ3], lib/person-copy.ts). Kept on
+ * purpose (lib/person-data.ts): the key is what was bought. Only reads.
+ */
+export async function keysOf(store: Store, productIds: string[], email: string): Promise<(IssuedKey & { product: string })[]> {
+  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
+  const address = email.trim().toLowerCase();
+  const replies = await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })]));
+  return productIds.flatMap((product, i) => {
+    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const out: (IssuedKey & { product: string })[] = [];
+    for (let k = 0; k + 1 < flat.length; k += 2) {
+      const entry = parseInfo(String(flat[k]), flat[k + 1]);
+      if (entry && entry.email.trim().toLowerCase() === address) out.push({ ...entry, product });
+    }
+    return out;
+  });
+}
+
 // ---------------------------------------------------------------- email
 
 function displayName(name: string): string {

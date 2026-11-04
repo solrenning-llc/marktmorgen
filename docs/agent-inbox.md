@@ -189,6 +189,9 @@ Pergunta do dono (03h00): fazer todos os testes no GitHub não libera vocês par
 ### C2-56 — 04/11/2026 03h05 — Testes de segurança também no GitHub
 Ordem do dono (03h05): "pode mandar ao github regra de mais segurança". O item (5) da mensagem das 03h00 muda: os testes de borda de dinheiro, cobrança, impostos e segurança também vão para o GitHub. Eles têm de estar escritos como arquivos de teste no próprio PR (nada de teste só de cabeça ou só local), para o CI rodá-los em toda mudança, hoje e depois. Na sua máquina fica só o mesmo do item (1): os arquivos de teste ligados ao que mudou, a checagem de tipos e o check de dados públicos. Zero erros continua igual: nada é incorporado sem CI verde e sem a revisão do diff inteiro, e todo PR de dinheiro, cobrança, impostos ou segurança passa pela revisão independente antes de incorporar. 
 
+### C2-57 — 04/11/2026 03h20 — O GitHub agora bloqueia merge sem os testes verdes
+Pedido do dono, ativo desde 03h20: o main tem uma regra no próprio GitHub (ruleset "main: tests before merge"). Merge só por PR; os 9 checks "All checks (...)" (product-checks, as seis matrizes de acessibilidade, codeql e dependency-security) precisam estar verdes; apagar o main e forçar push ficam bloqueados. O que muda para você: (1) o botão de merge (ou gh pr merge) recusa enquanto algum desses 9 não passar; espere o CI numa única espera em segundo plano e siga na próxima unidade; (2) **nunca** use desvio da regra (--admin, "bypass") nem empurre direto para o main; (3) um check vermelho se corrige na causa, com teste; job instável se repete uma vez e, se falhar de novo, se corrige; (4) PR só de documento passa nos 9 em menos de 1 minuto, pelo escopo de documentação. Nada mais muda nas regras de testes (C2-55/C2-56 e equivalentes).
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -490,6 +493,9 @@ Pergunta do dono (03h00): fazer todos os testes no GitHub não libera vocês par
 ### C3-61 — 04/11/2026 03h05 — Testes de segurança também no GitHub
 Ordem do dono (03h05): "pode mandar ao github regra de mais segurança". O item (5) da mensagem das 03h00 muda: os testes de borda de dinheiro, cobrança, impostos e segurança também vão para o GitHub. Eles têm de estar escritos como arquivos de teste no próprio PR (nada de teste só de cabeça ou só local), para o CI rodá-los em toda mudança, hoje e depois. Na sua máquina fica só o mesmo do item (1): os arquivos de teste ligados ao que mudou, a checagem de tipos e o check de dados públicos. Zero erros continua igual: nada é incorporado sem CI verde e sem a revisão do diff inteiro, e todo PR de dinheiro, cobrança, impostos ou segurança passa pela revisão independente antes de incorporar. 
 
+### C3-62 — 04/11/2026 03h20 — O GitHub agora bloqueia merge sem os testes verdes
+Pedido do dono, ativo desde 03h20: o main tem uma regra no próprio GitHub (ruleset "main: tests before merge"). Merge só por PR; os 9 checks "All checks (...)" (product-checks, as seis matrizes de acessibilidade, codeql e dependency-security) precisam estar verdes; apagar o main e forçar push ficam bloqueados. O que muda para você: (1) o botão de merge (ou gh pr merge) recusa enquanto algum desses 9 não passar; espere o CI numa única espera em segundo plano e siga na próxima unidade; (2) **nunca** use desvio da regra (--admin, "bypass") nem empurre direto para o main; (3) um check vermelho se corrige na causa, com teste; job instável se repete uma vez e, se falhar de novo, se corrige; (4) PR só de documento passa nos 9 em menos de 1 minuto, pelo escopo de documentação. Nada mais muda nas regras de testes (C2-55/C2-56 e equivalentes).
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -626,4 +632,7 @@ Pergunta do dono (03h00): fazer todos os testes no GitHub não libera vocês par
 
 ### CX-38 — 04/11/2026 03h05 — Testes de segurança também no GitHub (muda o item 5 da CX-37)
 Ordem do dono (03h05): "pode mandar ao github regra de mais segurança". O item (5) da mensagem das 03h00 muda: os testes de borda de dinheiro, cobrança, impostos e segurança também vão para o GitHub. Eles têm de estar escritos como arquivos de teste no próprio PR (nada de teste só de cabeça ou só local), para o CI rodá-los em toda mudança, hoje e depois. Na sua máquina fica só o mesmo do item (1): os arquivos de teste ligados ao que mudou, a checagem de tipos e o check de dados públicos. Zero erros continua igual: nada é incorporado sem CI verde e sem a revisão do diff inteiro, e todo PR de dinheiro, cobrança, impostos ou segurança passa pela revisão independente antes de incorporar. 
+
+### CX-39 — 04/11/2026 03h20 — O GitHub agora bloqueia merge sem os testes verdes
+Pedido do dono, ativo desde 03h20: o main tem uma regra no próprio GitHub (ruleset "main: tests before merge"). Merge só por PR; os 9 checks "All checks (...)" (product-checks, as seis matrizes de acessibilidade, codeql e dependency-security) precisam estar verdes; apagar o main e forçar push ficam bloqueados. O que muda para você: (1) o botão de merge (ou gh pr merge) recusa enquanto algum desses 9 não passar; espere o CI numa única espera em segundo plano e siga na próxima unidade; (2) **nunca** use desvio da regra (--admin, "bypass") nem empurre direto para o main; (3) um check vermelho se corrige na causa, com teste; job instável se repete uma vez e, se falhar de novo, se corrige; (4) PR só de documento passa nos 9 em menos de 1 minuto, pelo escopo de documentação. Nada mais muda nas regras de testes (C2-55/C2-56 e equivalentes).
 

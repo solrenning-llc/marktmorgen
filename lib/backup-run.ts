@@ -125,6 +125,16 @@ const STALE_MS = 48 * 3_600_000;
 const LAST_OK = "nl:backup:last-ok";
 const LAST_FAIL = "nl:backup:last-fail";
 const LOCK = "nl:backup:lock";
+/** The owner's report when the last good copy was found gone from the bucket. */
+const LOST_NOTE = "last good copy lost";
+/**
+ * Days the bucket's lifecycle rule must keep an object beyond the retention (Reviewer 1 on e81007570): the run keeps
+ * the last good copy past the retention while new ones fail, and a rule as short as the retention would take it. The
+ * rule is the owner's, on the bucket; the stored ceiling is the code's, so a longer rule costs nothing more.
+ */
+export const BACKUP_LIFECYCLE_EXTRA_DAYS = 30;
+/** The bucket's lifecycle rule to set: the retention and BACKUP_LIFECYCLE_EXTRA_DAYS. */
+export const backupLifecycleDays = (review: Pick<BackupCostReview, "retentionDays">) => review.retentionDays + BACKUP_LIFECYCLE_EXTRA_DAYS;
 /** A copy's id, as the store names it: a random UUID. */
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** The last failure's life: 8 days, or the retention and two days when longer. The last good copy's mark has no end. */
@@ -292,8 +302,11 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   }
 
   const cutoff = Date.now() + Math.min(options.cutoffMs ?? BACKUP_RUN_CUTOFF_MS, BACKUP_RUN_CUTOFF_MS);
+  // Set when the last good copy was found lost while making room: the owner's report says so.
+  let lost = false;
   const result: BackupRunResult = await withCutoff(cutoff, async () => {
     const room = await makeRoom(review, store, key);
+    lost = room.lost;
     if (!room.ok) return { ok: false, reason: room.reason };
     const copied = await copy(review, store, key, now);
     // A failed day deletes nothing after it (Codex G on e95705e66): the last good copy stays, past the retention if
@@ -313,9 +326,13 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
             ["SET", LAST_OK, JSON.stringify({ at: now, set: result.id })],
             // Done: no new try today; the count goes past the day's limit.
             ["INCRBY", day, BACKUP_RUNS_PER_DAY],
-            ...(result.prune === "done" ? [] : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.prune }), "EX", keep]]),
+            ...(result.prune !== "done"
+              ? [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.prune, ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep]]
+              : lost
+                ? [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: "last_good_copy_lost", note: LOST_NOTE }), "EX", keep]]
+                : []),
           ]
-        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason }), "EX", keep]],
+        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason, ...(lost ? { note: LOST_NOTE } : {}) }), "EX", keep]],
     );
   } catch {
     // The copy stands as it is; a lost note only makes the report look older.
@@ -345,6 +362,8 @@ async function listAll(review: BackupCostReview, store: BackupBucket): Promise<B
 /** The ids of the last verified copy that are still in the bucket: its manifest and every part it names. */
 /** The last verified copy could not be known for sure: nothing is deleted to make room. */
 class Unverified extends Error {}
+/** The mark names a copy the bucket no longer lists (its lifecycle rule took it): the last good copy is lost. */
+class LostLastGood extends Error {}
 
 /**
  * The ids of the last verified copy: its manifest and every part it names, all of them listed. Fails closed (Codex G
@@ -358,7 +377,9 @@ async function lastVerified(store: BackupBucket, key: Uint8Array, listed: Backup
   const replies: unknown = await redisPipeline([["GET", LAST_OK]]);
   if (!Array.isArray(replies) || replies.length !== 1 || typeof replies[0] !== "string") throw new Unverified();
   const set = readLastOk(replies[0])?.set;
-  if (!set || !ID.test(set) || !listed.some((o) => o.id === set)) throw new Unverified();
+  if (!set || !ID.test(set)) throw new Unverified();
+  // Gone from the bucket (Reviewer 1 on e81007570): said as such; makeRoom then keeps every verified set still there.
+  if (!listed.some((o) => o.id === set)) throw new LostLastGood();
   let manifest: ReturnType<typeof openManifest>;
   try {
     manifest = openManifest(await store.read(set, manifestBound(MAX_PARTS)), key);
@@ -369,39 +390,77 @@ async function lastVerified(store: BackupBucket, key: Uint8Array, listed: Backup
 }
 
 /**
+ * Every verified set still in the bucket, when the last good copy is lost: each listed object small enough to be a
+ * manifest is read and opened, and every manifest that opens is kept with every part it names. An object that cannot
+ * be read throws Unverified (nothing deleted on doubt); one that reads but does not open as a manifest is not one.
+ * Reads at most backupKeptObjects objects (Class B, priced in lib/backup-cost.ts).
+ */
+async function verifiedInBucket(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[]): Promise<Set<string>> {
+  const keep = new Set<string>();
+  for (const object of listed) {
+    if (object.bytes > manifestBound(MAX_PARTS)) continue;
+    if (timeLeft() <= 0) throw new RangeError("cutoff");
+    let bytes: Uint8Array;
+    try {
+      bytes = await store.read(object.id, manifestBound(MAX_PARTS));
+    } catch {
+      throw new Unverified();
+    }
+    try {
+      const manifest = openManifest(bytes, key);
+      keep.add(object.id);
+      for (const part of manifest.parts) keep.add(part.id);
+    } catch {
+      // Not a manifest that opens with this key: a part, or a failed run's leftover.
+    }
+  }
+  return keep;
+}
+
+/**
  * Before the write (step 1): room for one more set at its bound under the review's ceiling, in bytes and in objects,
- * made by deleting the oldest copies first and never the last verified one; or a reason, and nothing written.
+ * made by deleting the oldest copies first and never the last verified one; or a reason, and nothing written. When
+ * the last good copy is lost (the bucket's rule took it), room is made from objects of no verified set only, every
+ * verified set still there is kept, and `lost` says so for the owner's report.
  */
 async function makeRoom(
   review: BackupCostReview,
   store: BackupBucket,
   key: Uint8Array,
-): Promise<{ ok: true; deleted: number } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified" }> {
+): Promise<{ ok: true; deleted: number; lost: boolean } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified"; lost: boolean }> {
   const need = objectBound(review);
   const objects = runLimits(review).maxParts + 1;
   const most = backupKeptObjects(review);
+  let lost = false;
   try {
     const listed = await listAll(review, store);
-    if (!listed) return { ok: false, reason: "room_pages" };
+    if (!listed) return { ok: false, reason: "room_pages", lost };
     let bytes = listed.reduce((n, o) => n + o.bytes, 0);
     let count = listed.length;
     const fits = () => bytes + need <= review.maxStoredBytes && count + objects <= most;
-    if (fits()) return { ok: true, deleted: 0 };
-    const keep = await lastVerified(store, key, listed);
+    if (fits()) return { ok: true, deleted: 0, lost };
+    let keep: Set<string>;
+    try {
+      keep = await lastVerified(store, key, listed);
+    } catch (error) {
+      if (!(error instanceof LostLastGood)) throw error;
+      lost = true;
+      keep = await verifiedInBucket(store, key, listed);
+    }
     const oldest = listed.filter((o) => !keep.has(o.id)).sort((a, b) => a.writtenAt - b.writtenAt || (a.id < b.id ? -1 : 1));
     let deleted = 0;
     for (const object of oldest) {
       if (fits()) break;
-      if (timeLeft() <= 0) return { ok: false, reason: "room_cutoff" };
+      if (timeLeft() <= 0) return { ok: false, reason: "room_cutoff", lost };
       await store.delete(object.id);
       bytes -= object.bytes;
       count -= 1;
       deleted += 1;
     }
-    return fits() ? { ok: true, deleted } : { ok: false, reason: "room_error" };
+    return fits() ? { ok: true, deleted, lost } : { ok: false, reason: "room_error", lost };
   } catch (error) {
-    if (error instanceof Unverified) return { ok: false, reason: "room_unverified" };
-    return { ok: false, reason: timeLeft() <= 0 ? "room_cutoff" : "room_error" };
+    if (error instanceof Unverified) return { ok: false, reason: "room_unverified", lost };
+    return { ok: false, reason: timeLeft() <= 0 ? "room_cutoff" : "room_error", lost };
   }
 }
 
@@ -448,12 +507,13 @@ export async function backupStale(now: number = Date.now()): Promise<boolean> {
 }
 
 /** The latest failure kept, if any. */
-export async function backupLastFailure(): Promise<{ at: number; reason: string } | null> {
+export async function backupLastFailure(): Promise<{ at: number; reason: string; note?: string } | null> {
   const [raw] = await redisPipeline([["GET", LAST_FAIL]]);
   if (typeof raw !== "string") return null;
   try {
-    const parsed = JSON.parse(raw) as { at: unknown; reason: unknown };
-    return typeof parsed.at === "number" && typeof parsed.reason === "string" ? { at: parsed.at, reason: parsed.reason } : null;
+    const parsed = JSON.parse(raw) as { at: unknown; reason: unknown; note?: unknown };
+    if (typeof parsed.at !== "number" || typeof parsed.reason !== "string") return null;
+    return typeof parsed.note === "string" ? { at: parsed.at, reason: parsed.reason, note: parsed.note } : { at: parsed.at, reason: parsed.reason };
   } catch {
     return null;
   }

@@ -28,7 +28,7 @@
  */
 import { readFileSync } from "node:fs";
 import { REDIS_TIMEOUT_MS } from "@/lib/fetch-timeout";
-import { BACKUP_COST_REVIEW, BACKUP_LOCK_MS, BACKUP_RUN_CUTOFF_MS, backupKeptObjects, backupKey, backupLastFailure, backupListPages, backupPeakSets, backupStale, runBackup, validReview, type BackupCostReview } from "@/lib/backup-run";
+import { BACKUP_COST_REVIEW, BACKUP_LOCK_MS, backupLifecycleDays, BACKUP_RUN_CUTOFF_MS, backupKeptObjects, backupKey, backupLastFailure, backupListPages, backupPeakSets, backupStale, runBackup, validReview, type BackupCostReview } from "@/lib/backup-run";
 import { openManifest } from "@/lib/backup-parts";
 import { BACKUP_SCAN_PAGES } from "@/lib/backup-parts";
 import type { BackupBucket } from "@/lib/backup-roundtrip";
@@ -48,6 +48,8 @@ let failDelete = false;
 const objects = new Map<string, Uint8Array>();
 const writtenAt = new Map<string, number>();
 const deletes: string[] = [];
+/** What each object the run deleted held, to tell a verified manifest from anything else. */
+const deletedBytes = new Map<string, Uint8Array>();
 let lists = 0;
 /** The most the bucket held, in bytes and in objects, right after any write. */
 let peakBytes = 0;
@@ -74,6 +76,7 @@ const store: BackupBucket = {
   delete: async (id) => {
     if (failDelete) throw new Error("delete refused");
     deletes.push(id);
+    deletedBytes.set(id, objects.get(id)!);
     objects.delete(id);
     writtenAt.delete(id);
   },
@@ -343,7 +346,6 @@ async function main(): Promise<void> {
       ["a value that is not text", null, 7],
       ["a value that is not the kept shape", null, "{not json"],
       ["an old mark with a time and no manifest", null, String(T0)],
-      ["a manifest the bucket does not list", null, JSON.stringify({ at: T0, set: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" })],
       ["no mark at all, with copies in the bucket", null, null],
     ] as [string, unknown[] | null, unknown][]) {
       const good = await fill(500);
@@ -354,6 +356,61 @@ async function main(): Promise<void> {
       (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = real;
       is(`${name}: no copy deleted to make room, nothing written, said so`, [result, deletes.length, objects.has(good), (await backupLastFailure())?.reason], [{ ok: false, reason: "room_unverified" }, 0, true, "room_unverified"]);
     }
+  }
+
+  part("The bucket's rule outlives the retention, and a last good copy lost to it never stops the backup (Reviewer 1 on e81007570)");
+  {
+    is(`the bucket's lifecycle rule to set: ${backupLifecycleDays(review)} days, longer than the ${review.retentionDays}-day retention`, backupLifecycleDays(review) > review.retentionDays, true);
+    is("30 days more than the retention", backupLifecycleDays({ ...review, retentionDays: 3 }), 33);
+    // Today's rule on the bucket is 30 days: here it deletes everything older than that before each run, the last good
+    // copy too, while 32 days of runs fail after writing their part.
+    objects.clear();
+    writtenAt.clear();
+    deletedBytes.clear();
+    wipe();
+    redis.run(["SET", "nl:store:one", "a shop"]);
+    weigh = () => Math.floor((SET_BOUND * 6) / 10);
+    const lifecycle = (now: number) => {
+      for (const [id, when] of [...writtenAt]) {
+        if (when < now - 30 * DAY) {
+          objects.delete(id);
+          writtenAt.delete(id);
+        }
+      }
+    };
+    const start = T0 + 800 * DAY;
+    at(start);
+    const good = await runBackup({ now: clock, review, store, key });
+    const goodIds = good.ok ? [good.id, ...openManifest(objects.get(good.id)!, key).parts.map((p) => p.id)] : [];
+    // Every later write's read-back differs; the last good copy itself still reads back whole.
+    const failing: BackupBucket = { ...store, read: async (id) => (goodIds.includes(id) ? store.read(id, 0) : new Uint8Array([1, 2, 3])) };
+    let lostSeen = false;
+    for (let day = 1; day <= 32; day += 1) {
+      for (const hour of [0, 1]) {
+        at(start + day * DAY + hour * HOUR);
+        lifecycle(clock);
+        await runBackup({ now: clock, review, store: failing, key });
+        if ((await backupLastFailure())?.note === "last good copy lost") lostSeen = true;
+      }
+    }
+    at(start + 33 * DAY);
+    lifecycle(clock);
+    const back = await runBackup({ now: clock, review, store, key });
+    const failure = await backupLastFailure();
+    weigh = (id: string) => objects.get(id)!.byteLength;
+    is("the last good copy was taken by the bucket's rule", goodIds.length > 1 && goodIds.every((id) => !objects.has(id)), true);
+    is("the first good run after it writes again", back.ok, true);
+    is("and the report says the last good copy was lost", lostSeen || failure?.reason === "last_good_copy_lost", true);
+    is("the run's own note: last good copy lost", failure?.reason, "last_good_copy_lost");
+    const opens = (bytes: Uint8Array) => {
+      try {
+        openManifest(bytes, key);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    is("only objects with no valid manifest were deleted to make room", deletedBytes.size > 0 && [...deletedBytes.values()].every((bytes) => !opens(bytes)), true);
   }
 
   part("A failed day deletes nothing after it: the last good copy stays past the retention while new ones fail (Codex G on e95705e66)");

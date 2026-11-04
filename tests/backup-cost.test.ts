@@ -50,8 +50,9 @@ is("R2 storage: the review's ceiling of 32 sets, plus a GB-month of rounding", l
 // One listing page: 32 sets × 2 objects = 64 names, under 1,000. 64 runs × (2 objects × 2 + 2 listings of 1 page) = 384,
 // and the deletion of every object alive when the month starts (64): 448; (448 / 1,000,000 + 1) × 4,500,000 = 4,502,016.
 is("R2 Class A: each object written and deleted, those alive at the month's start deleted, two listings a run, plus a million of rounding", line("r2-class-a"), 4_502_016);
-// 64 × (2 read-backs + 1 manifest read) = 192; (192 / 1,000,000 + 1) × 360,000 = 360,069.12 → 360,070.
-is("R2 Class B: each object read back, the last verified manifest read once a run, plus a million of rounding", line("r2-class-b"), 360_070);
+// 64 × (2 read-backs + up to 64 reads to find the verified copies, when the last good copy is lost) = 4,224;
+// (4,224 / 1,000,000 + 1) × 360,000 = 361,520.64 → 361,521.
+is("R2 Class B: each object read back, every object the bucket holds read when the last good copy is lost, plus a million of rounding", line("r2-class-b"), 361_521);
 // 64 × 20,210 + 32 × 2 = 1,293,504 commands × 2 = 2,587,008.
 is("Upstash commands: every one the caps allow and the report's two reads a day", line("upstash-commands"), 2_587_008);
 // A run: 200 pages × 500 × 1,024 = 102,400,000 + 4,194,304 + 10,000 × 2,112 + 6 × 1,024 = 127,720,448 bytes;
@@ -61,10 +62,10 @@ is("Upstash bytes: at most 200 full SCAN pages, every copied byte, each name sen
 is("Upstash storage: the backup's six marks", line("upstash-storage"), 2);
 // 64 × (2 × 300/3,600 × 10,600 + 300/3,600 × 128,000 + 0.6) = 64 × 12,433.93 = 795,771.73 → 795,772.
 is("Vercel: the whole 300 s at 2 GB, CPU all along", line("vercel"), 795_772);
-// 17,077 + 4,502,016 + 360,070 + 2,587,008 + 245,224 + 2 + 795,772 = 8,507,169; × 10% = 850,716.9 → 850,717.
-is("the provider allowance on all of it", line("provider-allowance"), 850_717);
-// 8,507,169 + 850,717 = 9,357,886: $9.36 a month, $112.29 a year.
-is("the month: $9.36", month?.knownMicroUsd, 9_357_886);
+// 17,077 + 4,502,016 + 361,521 + 2,587,008 + 245,224 + 2 + 795,772 = 8,508,620; × 10% = 850,862.
+is("the provider allowance on all of it", line("provider-allowance"), 850_862);
+// 8,508,620 + 850,862 = 9,359,482: $9.36 a month, $112.31 a year.
+is("the month: $9.36", month?.knownMicroUsd, 9_359_482);
 is("no free quota anywhere: storage, operations and bytes all above zero", [line("r2-storage"), line("r2-class-a"), line("r2-class-b"), line("upstash-transfer")].every((n) => n > 0), true);
 // With fewer commands than the page cap, the walk can read only what its commands allow: 30 - 10 = 20 pages.
 const fewCommands = backupWorstMonth({ ...builtAsIs, maxRows: 2, maxCommands: 30 }, 300)?.lines.find((l) => l.id === "upstash-transfer")?.basis ?? "";

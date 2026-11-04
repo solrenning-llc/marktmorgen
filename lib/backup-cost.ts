@@ -29,7 +29,9 @@
  *     Class B when read back; the objects alive when the month starts (at
  *     most backupKeptObjects) may be deleted in it too; each run lists twice
  *     (before it writes and after), backupListPages pages each, Class A, and
- *     may read the last verified manifest once (Class B) to keep it; the
+ *     may read the last verified manifest (or, when the bucket's rule took
+ *     it, every object the bucket can hold, to keep every verified set) to
+ *     keep it, Class B; the
  *     rounding adds one more million of each class;
  *   - Upstash: every command each run may send (maxCommands) and the two reads
  *     a day the report makes; the bytes a run may move: every SCAN page it may
@@ -130,8 +132,9 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
   const storage = up(((review.maxStoredBytes / GB) + 1) * R2_STORAGE_MICRO_USD_PER_GB_MONTH);
   // Deleted in a month: what it writes, and what was alive when it started (at most `kept` objects); two listings a run.
   const classA = up(((runs * (2 * objects + 2 * listPages) + kept) / 1_000_000 + 1) * R2_CLASS_A_MICRO_USD_PER_MILLION);
-  // Each object read back, and the last verified manifest read once a run when room must be made.
-  const classB = up(((runs * (objects + 1)) / 1_000_000 + 1) * R2_CLASS_B_MICRO_USD_PER_MILLION);
+  // Each object read back, and, when room must be made, the last verified manifest, or every object the bucket can
+  // hold when that copy is lost (lib/backup-run.ts, verifiedInBucket): at most `kept` reads a run.
+  const classB = up(((runs * (objects + kept)) / 1_000_000 + 1) * R2_CLASS_B_MICRO_USD_PER_MILLION);
   const commands = runs * review.maxCommands + days * BACKUP_REPORT_READS_PER_DAY;
   const upstashCommands = up((commands / 1_000_000) * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS);
   const runTransfer =
@@ -147,7 +150,7 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
   const used: BackupCostLine[] = [
     { id: "r2-storage", microUsd: storage, basis: `the review's ceiling of ${review.maxStoredBytes} bytes (at least ${sets} sets of ${setBytes}), never passed, plus one GB-month of rounding` },
     { id: "r2-class-a", microUsd: classA, basis: `${runs} runs × (${objects} objects × 2 (written, then deleted) + 2 listings of ${listPages} page) + ${kept} objects alive at the month's start, deleted, plus one million of rounding` },
-    { id: "r2-class-b", microUsd: classB, basis: `${runs} runs × (${objects} read-backs + 1 manifest read to keep the last verified copy), plus one million of rounding` },
+    { id: "r2-class-b", microUsd: classB, basis: `${runs} runs × (${objects} read-backs + up to ${kept} reads to find the verified copies to keep), plus one million of rounding` },
     { id: "upstash-commands", microUsd: upstashCommands, basis: `${runs} × ${review.maxCommands} commands + ${days} × ${BACKUP_REPORT_READS_PER_DAY} report reads` },
     { id: "upstash-transfer", microUsd: upstashTransfer, basis: `${runs} runs × ${runTransfer} bytes: ${scanPages} SCAN pages of ${BACKUP_SCAN_NAMES_PER_PAGE} names of ${BACKUP_SCAN_NAME_BYTES} bytes, ${runBytes} copied bytes, each key's name sent twice, the marks and the report's reads` },
     { id: "upstash-storage", microUsd: marks, basis: `${MARK_KEYS} marks of at most ${MARK_BYTES} bytes kept` },

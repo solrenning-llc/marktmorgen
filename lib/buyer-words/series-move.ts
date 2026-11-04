@@ -25,7 +25,12 @@ import type { MoveCase } from "@/lib/call-series-billing";
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 
 export type MoveBy = "creator" | "buyer";
-/** `until`: the buyer's last moment to cancel for a full refund (SeriesCharge.cancelBy), written in the store's language. */
+/**
+ * `until`: moveCase's `until`, written in the store's language: the buyer's
+ * last moment to cancel for a full refund (paid_refundable_until), or the
+ * moment the pay link stops working (pay_by_link: payBy of the step that
+ * failed, never a cancelBy already passed).
+ */
 export type MoveInput = { date: string; store: string; hours: number; by: MoveBy; until: string };
 type Lines = (input: MoveInput) => string[];
 export type SeriesMoveWords = { buyer: Record<MoveCase, Lines>; creator: Record<MoveCase, Lines> };

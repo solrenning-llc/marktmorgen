@@ -151,14 +151,41 @@
  *     out for the new start, before anything else, so a paid session the
  *     buyer moved inside its deadline stays kept whatever moves it later.
  *   - Start each attempt with startAttempt (its parameters on the
- *     allow-list, attemptKeyRefused back to false); read a create's error
- *     with createErrorStep and a refund's with refundOutcome.
- *   - Send a refund without an amount (what is left is refunded). A refund
- *     or capture Stripe refuses has its error cached on its key for 24
- *     hours: store a refused refund in ChargeRecord.refused and report it
- *     to the creator, never retry it; a disputed charge is never refunded.
+ *     allow-list, attemptKeyRefused and attemptFailed back to false); read
+ *     a create's error with createErrorStep and a refund's with
+ *     refundOutcome.
+ *   - Send a refund without an amount (what is left is refunded). A
+ *     capture, cancel or refund Stripe answers with an error has it cached
+ *     on its key for 24 hours, so every try goes under its own key
+ *     (tryKey). Store a refund refused for good in ChargeRecord.refused and
+ *     report it to the creator; a disputed charge is never refunded.
  *   - Take every decision under the series' lock, after reading the
  *     session again: a stopped one takes only what toStop says.
+ *
+ * The next unit's checklist (round-8 review, 4 November 2026):
+ *   - Store per session its SeriesCharge, movedBy and the moment it was
+ *     worked out, and pass 0 hours to failedCharge, payBy and the words for
+ *     a session the creator moved inside its deadline (its cancelBy is its
+ *     start).
+ *   - Decide under the series' lock with `at` the moment a cancellation is
+ *     accepted there, never a time the request carries; a charge counts as
+ *     kept for a stop only when it was made before that moment.
+ *   - List every page (has_more) with expand[]=data.latest_charge, and read
+ *     each hold's capture_before from it.
+ *   - Schedule each step: holds at charge.at, captures at captureMoment,
+ *     non-payment cancels at payBy, retries after listing again.
+ *   - startAttempt before every create; store the PaymentIntent, its
+ *     attempt, heldAt and capture_before on every reply; set attemptFailed
+ *     on a definitive refusal that made no PaymentIntent, then follow
+ *     failedCharge and create the unconfirmed PaymentIntent for the pay
+ *     link (chargeAttempt "link").
+ *   - Count every capture, cancel and refund in ChargeRecord.tries and send
+ *     the next try under tryKey; record a refund refused for good and tell
+ *     the creator.
+ *   - Check, against Stripe's and the card networks' dated official rules,
+ *     the wording the buyer agrees to for merchant-initiated charges on a
+ *     saved card, and the create parameters on ATTEMPT_BODY_KEYS.
+ *   - Send every email of these rules in the seven store languages.
  */
 
 /** The deadlines a series may be charged at: the creator's cancellation deadlines, all shorter than a week. Zero or none: the session's start. */
@@ -342,6 +369,8 @@ export type ChargeRecord = {
   attemptBody: Readonly<Record<string, string>> | null;
   /** Stripe answered the latest attempt's key with an idempotency_error (other parameters): that key was used, so the list decides, never a wait on the key. Back to false with each new attempt (startAttempt); an idempotency_key_in_use (409) is a wait, never this (createErrorStep). */
   attemptKeyRefused: boolean;
+  /** Stripe refused the latest attempt's create for good without making a PaymentIntent (a request error, a card removed): it is not unknown, failedCharge decides, and the pay link gets an unconfirmed PaymentIntent (chargeAttempt "link"). Back to false with each new attempt. */
+  attemptFailed: boolean;
   /** The latest one, stored as soon as Stripe answers, with the attempt it belongs to; null until then. */
   intent: Intent | null;
   /** Its charge was refunded in full already. */
@@ -352,12 +381,12 @@ export type ChargeRecord = {
    * PaymentIntents whose refund Stripe refused for good (the charge
    * disputed, or a request error no retry changes): never sent again,
    * reported. A passing error (a 5xx, the network, a rate limit) is not one:
-   * it is counted in refundTries, and the next try, after listing again,
-   * goes under a new key (a refund without an amount returns what is left).
+   * it is counted in tries, and the next try, after listing again, goes
+   * under a new key (a refund without an amount returns what is left).
    */
   refused: readonly string[];
-  /** How many refunds were sent for each PaymentIntent: the next one goes under the next key. */
-  refundTries: Readonly<Record<string, number>>;
+  /** How many calls were sent for each step on each PaymentIntent, by "step:id" ("capture:pi_…", "cancel:pi_…", "refund:pi_…"): the next one goes under the next key. */
+  tries: Readonly<Record<string, number>>;
 };
 
 /**
@@ -378,19 +407,39 @@ export function seriesMetadata(seriesId: string, index: number, attempt: number)
  * with an IP address or user agent), and what is stored is exactly what is
  * sent again.
  */
-export const ATTEMPT_BODY_KEYS = ["amount", "currency", "customer", "payment_method", "capture_method", "confirm", "off_session", "setup_future_usage", "mandate", "description", "statement_descriptor_suffix"] as const;
+export const ATTEMPT_BODY_KEYS = [
+  "amount",
+  "currency",
+  "customer",
+  "payment_method",
+  "capture_method",
+  "confirm",
+  "off_session",
+  "setup_future_usage",
+  "mandate",
+  "description",
+  "statement_descriptor_suffix",
+  "return_url",
+  "automatic_payment_methods[enabled]",
+  "automatic_payment_methods[allow_redirects]",
+] as const;
 
 /**
  * The record as a new attempt starts, written under the lock before its
  * create is sent: the next attempt, its time, exactly the parameters it is
- * sent with, and attemptKeyRefused back to false (it belongs to the
- * attempt). Throws on a parameter outside ATTEMPT_BODY_KEYS or metadata[mm_*].
+ * sent with, and attemptKeyRefused and attemptFailed back to false (they
+ * belong to the attempt). Throws on a parameter outside ATTEMPT_BODY_KEYS,
+ * payment_method_types[] or metadata[mm_*]. The list is the parameters an
+ * off-session charge on a saved card needs as read from Stripe's API
+ * reference for PaymentIntents (create); not yet checked against its dated
+ * page in this unit: to verify against the dated docs before the first
+ * real charge.
  */
 export function startAttempt(record: ChargeRecord, now: number, body: Readonly<Record<string, string>>): ChargeRecord {
   for (const key of Object.keys(body)) {
-    if (!(ATTEMPT_BODY_KEYS as readonly string[]).includes(key) && !/^metadata\[mm_[a-z_]+\]$/.test(key)) throw new Error(`startAttempt: ${key} is not a parameter an attempt may carry`);
+    if (!(ATTEMPT_BODY_KEYS as readonly string[]).includes(key) && !/^metadata\[mm_[a-z_]+\]$/.test(key) && !/^payment_method_types\[\d*\]$/.test(key)) throw new Error(`startAttempt: ${key} is not a parameter an attempt may carry`);
   }
-  return { ...record, attempt: record.attempt + 1, attemptAt: now, attemptBody: { ...body }, attemptKeyRefused: false };
+  return { ...record, attempt: record.attempt + 1, attemptAt: now, attemptBody: { ...body }, attemptKeyRefused: false, attemptFailed: false };
 }
 
 /**
@@ -398,7 +447,8 @@ export function startAttempt(record: ChargeRecord, now: number, body: Readonly<R
  * idempotency_key_in_use (409, the first request still in flight): wait,
  * list again and decide again; idempotency_error (the key was used with
  * other parameters): it was processed, so set attemptKeyRefused and let
- * the list decide; anything else: the attempt failed.
+ * the list decide; anything else: the attempt failed (set attemptFailed
+ * when Stripe made no PaymentIntent, then failedCharge decides).
  */
 export function createErrorStep(code: string | undefined): "wait" | "decide_from_list" | "failed" {
   if (code === "idempotency_key_in_use") return "wait";
@@ -439,9 +489,14 @@ export function stepKey(step: "capture" | "cancel" | "refund", id: string, tryNu
   return tryNumber === undefined ? `series:${step}:${id}` : `series:${step}:${id}:${tryNumber}`;
 }
 
-/** The key the next refund of a PaymentIntent goes under: one per try, so a passing error cached on one key never blocks the next try. */
+/** The key the next call of a step on a PaymentIntent goes under: one per try, so a passing error cached on one key never blocks the next try. */
+export function tryKey(record: ChargeRecord, step: "capture" | "cancel" | "refund", id: string): string {
+  return stepKey(step, id, (record.tries[`${step}:${id}`] ?? 0) + 1);
+}
+
+/** The key the next refund of a PaymentIntent goes under (tryKey). */
 export function refundKey(record: ChargeRecord, id: string): string {
-  return stepKey("refund", id, (record.refundTries[id] ?? 0) + 1);
+  return tryKey(record, "refund", id);
 }
 
 /**
@@ -457,13 +512,14 @@ export function keptOnCharge(record: ChargeRecord, chargedAt: number, charge: Se
 
 /**
  * Whether a session's charge is kept after a move, worked out from the
- * charge for its new start: kept already, or paid (not refunded) and moved
+ * charge for its new start and the PaymentIntents just listed: kept
+ * already, or paid (not refunded in full) and moved
  * to where its cancelBy has passed (the buyer moving a paid session inside
  * its deadline: a late cancellation is paid). Never clears `kept`, so a
  * later move by the creator does not make it refundable again.
  */
-export function keptOnMove(record: ChargeRecord, charge: SeriesCharge): boolean {
-  return record.kept || (record.intent?.status === "succeeded" && !record.refunded && charge.cancelBy <= charge.at);
+export function keptOnMove(series: SeriesKey, record: ChargeRecord, found: readonly FoundIntent[], charge: SeriesCharge): boolean {
+  return record.kept || (sessionIntents(series, record, found).some((i) => i.status === "succeeded" && !i.full) && charge.cancelBy <= charge.at);
 }
 
 /**
@@ -569,8 +625,11 @@ export function sessionIntents(series: SeriesKey, record: ChargeRecord, found: r
  * buyer is never charged again without an explicit decision); or a
  * SeriesKey whose application is not a ca_ id (`config`). Each is reported
  * to the creator. Blockers are read before anything else: while one stands,
- * nothing is reused, captured or created for the session, and a hold is
- * neither captured nor released. At its deadline and at its start such a
+ * nothing is reused, captured or created for the session; a late stop's
+ * good hold is postponed (neither captured nor released), while toStop
+ * still releases holds and cancels open PaymentIntents of the session that
+ * are not the mismatch and refunds its own payments as its rules say,
+ * since none of that charges the buyer. At its deadline and at its start such a
  * session stands as booked: nothing is charged and it is not canceled for
  * non-payment; the creator decides (refund, cancel, or charge again
  * explicitly) and the buyer is told the payment is being checked.
@@ -585,7 +644,7 @@ function blockers(series: SeriesKey, record: ChargeRecord, all: readonly Live[])
   return null;
 }
 function unknownAttempt(record: ChargeRecord, all: readonly Live[], now: number): boolean {
-  if (record.attempt === 0 || record.attemptAt === null || record.attemptBody === null || record.attemptKeyRefused) return false;
+  if (record.attempt === 0 || record.attemptAt === null || record.attemptBody === null || record.attemptKeyRefused || record.attemptFailed) return false;
   if (record.intent?.attempt === record.attempt || all.some((i) => i.attempt === record.attempt)) return false;
   return now - record.attemptAt < KEY_KEPT_HOURS * HOUR;
 }
@@ -601,17 +660,17 @@ function unknownAttempt(record: ChargeRecord, all: readonly Live[], now: number)
  */
 export type Close = { id: string; action: "refund_in_full" | "release" | "cancel" | "wait" | "report"; key: string | null };
 
-function closeStep(id: string, action: Close["action"], record?: ChargeRecord): Close {
+function closeStep(id: string, action: Close["action"], record: ChargeRecord): Close {
   if (action === "wait" || action === "report") return { id, action, key: null };
-  return { id, action, key: action === "refund_in_full" ? (record ? refundKey(record, id) : stepKey("refund", id, 1)) : stepKey("cancel", id) };
+  return { id, action, key: tryKey(record, action === "refund_in_full" ? "refund" : "cancel", id) };
 }
 
 /** How an unwanted PaymentIntent is closed: a payment refunded unless it cannot be, a hold released (or captured when `paid`), one processing waited on. */
 function closeOf(i: Live, record: ChargeRecord, stale: boolean): Close | null {
-  if (stale) return closeStep(i.id, "release");
+  if (stale) return closeStep(i.id, "release", record);
   const action = paidAfterStop(i.status, false, i.full);
   if (action === "none" || action === "capture") return null;
-  if (action === "refund_in_full" && (i.disputed || record.refused.includes(i.id))) return closeStep(i.id, "report");
+  if (action === "refund_in_full" && (i.disputed || record.refused.includes(i.id))) return closeStep(i.id, "report", record);
   return closeStep(i.id, action, record);
 }
 
@@ -634,6 +693,14 @@ function closeOf(i: Live, record: ChargeRecord, stale: boolean): Close | null {
  *     never both paid.
  *   - Any other one is reused, the furthest along first, and the rest
  *     closed (one processing is waited on, never counted paid).
+ *   - A failed one (waiting on the buyer) from an earlier plan: before the
+ *     session's planned time it is canceled and the session waits for that
+ *     time (moved later); a failed hold for a session now charged at once
+ *     (the buyer moved it inside its deadline) is canceled and the session
+ *     charged now, off-session; otherwise it is reused, for its pay link.
+ *   - After a create refused for good with no PaymentIntent
+ *     (attemptFailed): `link`, one unconfirmed PaymentIntent for the pay
+ *     link, never the same request again.
  *   - With none left, nothing new before the session's planned time
  *     (`wait`, at that time, never earlier); from it, one is created under
  *     the next attempt's key, only once the latest attempt's PaymentIntent
@@ -651,7 +718,8 @@ export function chargeAttempt(
   | { do: "report"; why: Blocked["why"]; ids: string[] }
   | { do: "reuse"; id: string; close: Close[] }
   | { do: "wait"; at: number; close: Close[] }
-  | { do: "create"; attempt: number; key: string; capture: "manual" | "automatic"; close: Close[] } {
+  | { do: "create"; attempt: number; key: string; capture: "manual" | "automatic"; close: Close[] }
+  | { do: "link"; attempt: number; key: string; capture: "manual" | "automatic"; close: Close[] } {
   if (input.stopped) return { do: "stop" };
   const all = allIntents(series, record, found);
   if (unknownAttempt(record, all, input.now)) return { do: "repeat", attempt: record.attempt, key: chargeKey(series.id, record.index, record.attempt), body: record.attemptBody as Readonly<Record<string, string>> };
@@ -672,10 +740,18 @@ export function chargeAttempt(
   const refundedOutside = live.filter((i) => i.status === "succeeded" && i.full);
   const open = best && best.status !== "succeeded" && best.status !== "requires_capture" && best.status !== "processing";
   if (refundedOutside.length && (!best || open)) return { do: "report", why: "refunded", ids: refundedOutside.map((i) => i.id) };
-  if (best) return { do: "reuse", id: best.id, close: close([best.id]) };
-  if (input.now < input.charge.at) return { do: "wait", at: input.charge.at, close: close([]) };
   const attempt = record.attempt + 1;
   const capture = input.charge.way === "hold" && input.now < input.charge.captureAt ? "manual" : "automatic";
+  if (best && open) {
+    // A failed one from an earlier plan (the session moved later): canceled, and the session planned again at its time.
+    if (input.now < input.charge.at) return { do: "wait", at: input.charge.at, close: close([]) };
+    // A failed hold and the session now charged at once (the buyer moved it inside its deadline): canceled, and charged now.
+    if (input.charge.way === "charge" && best.capture === "manual") return { do: "create", attempt, key: chargeKey(series.id, record.index, attempt), capture: "automatic", close: close([]) };
+  }
+  if (best) return { do: "reuse", id: best.id, close: close([best.id]) };
+  if (input.now < input.charge.at) return { do: "wait", at: input.charge.at, close: close([]) };
+  // Refused for good with no PaymentIntent made: one unconfirmed, for the pay link (failedCharge).
+  if (record.attemptFailed) return { do: "link", attempt, key: chargeKey(series.id, record.index, attempt), capture, close: close([]) };
   return { do: "create", attempt, key: chargeKey(series.id, record.index, attempt), capture, close: close([]) };
 }
 
@@ -696,7 +772,10 @@ export function unpaidCancel(series: SeriesKey, record: ChargeRecord, found: rea
   if (blocked) return { do: "report", why: blocked.why, ids: blocked.ids };
   const live = sessionIntents(series, record, found);
   if (live.some((i) => (i.status === "succeeded" && !i.full) || i.status === "requires_capture" || i.status === "processing")) return { do: "keep" };
-  return { do: "cancel", close: live.filter((i) => i.status !== "succeeded").map((i) => closeStep(i.id, "cancel")) };
+  // Paid and refunded in full outside these rules: the creator decides; never "you were not charged".
+  const refundedOutside = live.filter((i) => i.status === "succeeded" && i.full);
+  if (refundedOutside.length) return { do: "report", why: "refunded", ids: refundedOutside.map((i) => i.id) };
+  return { do: "cancel", close: live.filter((i) => i.status !== "succeeded").map((i) => closeStep(i.id, "cancel", record)) };
 }
 
 export type AfterStop = "refund_in_full" | "release" | "capture" | "cancel" | "wait" | "none";
@@ -726,9 +805,12 @@ export type Refund = { id: string; index: number; key: string; cents: number };
  * Whether a paid PaymentIntent is kept from the buyer: the record's `kept`
  * for the one stored; for one never stored (found only on the list), a
  * captured hold always (a hold is captured only from its cancelBy on), a
- * charge at once when it was made from the cancelBy on.
+ * charge at once when it was made from the cancelBy on. Only a charge made
+ * before `at` (the moment the cancellation was accepted under the series'
+ * lock) counts: one made after it never keeps a stop accepted in time.
  */
-function keptCharge(i: Live, record: ChargeRecord, cancelBy: number): boolean {
+function keptCharge(i: Live, record: ChargeRecord, cancelBy: number, at: number): boolean {
+  if (holdTime(i) >= at) return false;
   if (record.intent?.id === i.id) return record.kept;
   return i.capture === "manual" || holdTime(i) >= cancelBy;
 }
@@ -750,6 +832,7 @@ export type StopSteps = {
  * What stopping canceled sessions at `at` does, decided on the
  * PaymentIntents just listed for the series (`found`, every page, matched
  * by metadata, amount, currency and application) merged with the records,
+ * `at` is the moment the cancellation was accepted under the series' lock,
  * so a PaymentIntent whose id was never stored, or a second one made for
  * the same session, is dealt with too. Each call carries its key.
  * `cancelBy` is each session's own (SeriesCharge.cancelBy), required for
@@ -793,7 +876,7 @@ export function toStop(
   for (const index of canceled) {
     const start = input.starts[index];
     if (!(start > input.at)) continue;
-    const record = byIndex.get(index) ?? { index, cents: input.cents, attempt: 0, attemptAt: null, attemptBody: null, attemptKeyRefused: false, intent: null, refunded: false, kept: false, refused: [], refundTries: {} };
+    const record = byIndex.get(index) ?? { index, cents: input.cents, attempt: 0, attemptAt: null, attemptBody: null, attemptKeyRefused: false, attemptFailed: false, intent: null, refunded: false, kept: false, refused: [], tries: {} };
     const cancelBy = input.cancelBy[index];
     if (!Number.isFinite(cancelBy)) throw new Error(`toStop: no cancelBy for session ${index}`);
     const all = allIntents(input.series, record, input.found);
@@ -804,7 +887,7 @@ export function toStop(
     const late = input.by === "buyer" && input.at > cancelBy;
     const paid = live.filter((i) => i.status === "succeeded" && !i.full);
     // The one payment the buyer keeps paying for: after a late stop, or a kept charge; never when the creator stopped it.
-    const stays = input.by === "buyer" ? paid.find((i) => late || keptCharge(i, record, cancelBy)) : undefined;
+    const stays = input.by === "buyer" ? paid.find((i) => late || keptCharge(i, record, cancelBy, input.at)) : undefined;
     for (const i of paid) {
       if (i.id === stays?.id) continue;
       if (i.disputed) out.unrefundable.push({ id: i.id, index, why: "disputed" });
@@ -823,7 +906,7 @@ export function toStop(
         out.postpone.push({ id: good.id, index, until: holdGoodUntil(holdTime(good), good.captureBefore) });
         keep = good.id;
       } else if (good) {
-        out.capture.push({ id: good.id, key: stepKey("capture", good.id) });
+        out.capture.push({ id: good.id, key: tryKey(record, "capture", good.id) });
         keep = good.id;
       } else if (processing.length || blocked) {
         // Nothing new while one is processing (decided again once it has settled), nor beside a mismatch (reported).
@@ -844,8 +927,8 @@ export function toStop(
         out.charge.push({ index, attempt, key: chargeKey(input.series.id, index, attempt), capture: "automatic", body: null });
       }
     } else if (!stays && !(late && paid.length)) out.never.push(index);
-    for (const h of holds) if (h.id !== keep) out.close.push(closeStep(h.id, "release"));
-    for (const i of open) if (i.id !== keep) out.close.push(closeStep(i.id, "cancel"));
+    for (const h of holds) if (h.id !== keep) out.close.push(closeStep(h.id, "release", record));
+    for (const i of open) if (i.id !== keep) out.close.push(closeStep(i.id, "cancel", record));
   }
   return out;
 }
@@ -892,19 +975,35 @@ export type MoveCase = "held_until_start" | "planned" | "kept" | "charged_now" |
  * once, kept); `paid_refundable_until` when it was paid already and not
  * kept, and the buyer may still cancel for a full refund until its cancelBy
  * (a paid one whose cancelBy has passed reads as `kept`); `pay_by_link`
- * when its payment failed (a hold or charge waiting on the buyer): never
- * "your card is only reserved", the pay link instead; otherwise
- * `planned`, paid as before for the new time.
+ * when its payment failed and still waits on the buyer at the new time:
+ * never "your card is only reserved", the pay link instead, which works
+ * until payBy of the step that failed (the start for a failed charge or a
+ * session the creator moved inside its deadline), never a cancelBy already
+ * passed; a failed hold the buyer moved inside the deadline is charged now
+ * (`charged_now`), and one moved later is planned again (`planned`);
+ * otherwise `planned`, paid as before for the new time. Read from the
+ * PaymentIntents just listed (sessionIntents), with `until` the moment the
+ * words name and `movedAt` when the move was made.
  */
-export function moveCase(charge: SeriesCharge, record: ChargeRecord | null, start: number, deadlineHours: number): MoveCase {
-  if (record?.kept) return "kept";
-  if (record?.intent?.status === "succeeded" && !record.refunded) return charge.cancelBy > charge.at ? "paid_refundable_until" : "kept";
-  const failed: IntentStatus[] = ["requires_payment_method", "requires_action", "requires_confirmation"];
-  if (record?.intent && failed.includes(record.intent.status)) return "pay_by_link";
-  // Moved by the creator to a start whose deadline had passed: held now, captured at the start (sessionCharge).
-  if (charge.movedBy === "creator" && charge.way === "hold" && deadlineHours > 0 && charge.captureAt === start && charge.cancelBy === start) return "held_until_start";
-  if (charge.way === "charge" && !charge.refundFee) return "charged_now";
-  return "planned";
+export function moveCase(series: SeriesKey, record: ChargeRecord, found: readonly FoundIntent[], input: { charge: SeriesCharge; start: number; deadlineHours: number; movedAt: number }): { case: MoveCase; until: number } {
+  const { charge, start, deadlineHours, movedAt } = input;
+  const live = sessionIntents(series, record, found);
+  const at = (which: MoveCase, until = charge.cancelBy) => ({ case: which, until });
+  if (record.kept) return at("kept");
+  if (live.some((i) => i.status === "succeeded" && !i.full)) return charge.cancelBy > movedAt ? at("paid_refundable_until") : at("kept");
+  // Moved by the creator to a start whose deadline had passed: its cancelBy is its start.
+  const creatorInside = charge.movedBy === "creator" && charge.way === "hold" && deadlineHours > 0 && charge.captureAt === start && charge.cancelBy === start;
+  const best = live[0];
+  if (best && best.status !== "requires_capture" && best.status !== "processing") {
+    // A failed payment: charged now when the buyer moved it inside the deadline; planned again when its time is later; otherwise its pay link, until payBy of the step that failed.
+    if (charge.way === "charge" && !charge.refundFee) return at("charged_now");
+    if (charge.at > movedAt) return at("planned");
+    const step = best.capture === "manual" ? "hold" : "charge";
+    return at("pay_by_link", payBy(start, creatorInside ? 0 : deadlineHours, step));
+  }
+  if (creatorInside) return at("held_until_start");
+  if (charge.way === "charge" && !charge.refundFee) return at("charged_now");
+  return at("planned");
 }
 
 export type BillingProblem = "deposit" | "code" | "package";

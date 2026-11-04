@@ -17,6 +17,7 @@ const REFUSALS: Record<string, string> = {
   slow: "Too many AI requests a moment ago. Try again in a minute.",
   // The try is counted before the model answers (lib/ai.ts keeps it counted on purpose), so this never says otherwise.
   failed: "The summary could not be made just now. This try counts as one of this month's AI jobs. Try again later.",
+  empty: "No theme came out that two or more reviews share in their own words, so nothing was kept. This try counts as one of this month's AI jobs. You can try again another day.",
 };
 
 /**

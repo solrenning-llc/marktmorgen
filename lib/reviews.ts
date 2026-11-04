@@ -398,6 +398,7 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       ["ZREM", newKey(statsId), `${productId}|${id}`],
     ]);
     await recount(statsId, productId);
+    await forgetReviewSummary(statsId, productId);
     return "deleted" as const;
   });
   return result;
@@ -424,8 +425,15 @@ async function creatorChange(
     else if (room && grown < 0) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: -grown }]);
     await write(statsId, after);
     await recount(statsId, productId);
+    // A review hidden or refunded leaves the product's AI summary of its reviews (lib/review-ai-summary.ts) behind: it goes.
+    if ((after.hidden && !before.hidden) || (after.refunded && !before.refunded)) await forgetReviewSummary(statsId, productId);
     return after;
   });
+}
+
+/** The product's AI summary of its reviews (lib/review-ai-summary.ts), which counts reviews that are gone: deleted. */
+async function forgetReviewSummary(statsId: string, productId: string): Promise<void> {
+  await redisPipeline([["DEL", `nl:rsum:${statsId}:${productId}`]]).catch((error: unknown) => console.error("forgetting a review summary failed", error));
 }
 
 /**
@@ -617,6 +625,7 @@ export async function dropReviews(statsId: string | null, productId: string): Pr
     ["DEL", productKey(statsId, productId)],
     ["DEL", visibleKey(statsId, productId)],
     ["HDEL", summaryKey(statsId), productId],
+    ["DEL", `nl:rsum:${statsId}:${productId}`],
     ...(members.length ? [["ZREM", allKey(statsId), ...members], ["ZREM", newKey(statsId), ...members]] : []),
   ]);
   return photos;

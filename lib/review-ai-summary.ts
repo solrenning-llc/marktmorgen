@@ -10,6 +10,7 @@
  *   nl:rsum:<statsId>:<productId>   the summary, eight days
  *   nl:rsum:lock:<statsId>           one at a time, a minute
  */
+import { randomBytes } from "node:crypto";
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_SUMMARY_REVIEWS, MAX_SUMMARY_THEMES, MIN_SUMMARY_REVIEWS, MAX_THEME_TITLE, type SummaryInput, type SummaryTheme, maySummarise, readThemes, summaryInputs } from "@/lib/review-ai-summary-rules";
@@ -17,7 +18,7 @@ import { visibleReviews } from "@/lib/reviews";
 import type { Store } from "@/lib/store";
 
 export type ReviewSummary = { at: number; read: number; themes: SummaryTheme[] };
-export type ReviewSummaryResult = { ok: true; summary: ReviewSummary; fresh: boolean; left: number | null } | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed"; reviews?: number };
+export type ReviewSummaryResult = { ok: true; summary: ReviewSummary; fresh: boolean; left: number | null } | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed" | "empty"; reviews?: number };
 
 const KEEP_SECONDS = 8 * 86_400;
 const PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -60,9 +61,14 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
   const inputs = summaryInputs(await visibleReviews(statsId, productId, 0, MAX_SUMMARY_REVIEWS), productId);
   if (inputs.length < MIN_SUMMARY_REVIEWS && !kept) return { ok: false, reason: "few", reviews: inputs.length };
   if (!maySummarise(inputs, kept?.at ?? 0, Math.floor(now / 1000))) return kept ? { ok: true, summary: kept, fresh: false, left: null } : { ok: false, reason: "few", reviews: inputs.length };
-  const [claimed] = await redisPipeline([["SET", lockKey(statsId), "1", "NX", "EX", 60]]);
+  // The store's lock, under a value of this call's own, so only this call lets go of it.
+  const mine = randomBytes(12).toString("hex");
+  const [claimed] = await redisPipeline([["SET", lockKey(statsId), mine, "NX", "EX", 60]]);
   if (claimed === null) return { ok: false, reason: "busy" };
   try {
+    // Read again under the lock: a summary made by a call that held it just before is this one's answer, not a second AI job.
+    const now2 = await readReviewSummary(statsId, productId);
+    if (now2 && !maySummarise(inputs, now2.at, Math.floor(now / 1000))) return { ok: true, summary: now2, fresh: false, left: null };
     const done = await counted(store, now, async () => {
       const system = [
         "You sort the reviews of one product into the few themes reviewers repeat.",
@@ -76,9 +82,13 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
       return { at: Math.floor(now / 1000), read: inputs.length, themes: readThemes(json, inputs) } satisfies ReviewSummary;
     });
     if (!done.ok) return { ok: false, reason: done.reason === "notes" ? "failed" : done.reason };
+    // No theme held to the reviews' words: nothing kept, so the week is not taken by an empty summary.
+    if (!done.value.themes.length) return { ok: false, reason: "empty" };
     await redisPipeline([["SET", summaryKey(statsId, productId), JSON.stringify(done.value), "EX", KEEP_SECONDS]]);
     return { ok: true, summary: done.value, fresh: true, left: done.left };
   } finally {
-    await redisPipeline([["DEL", lockKey(statsId)]]).catch(() => {});
+    // Let go only of this call's own lock: one that ran out and was taken by another call is left to it.
+    const [held] = await redisPipeline([["GET", lockKey(statsId)]]).catch(() => [null]);
+    if (held === mine) await redisPipeline([["DEL", lockKey(statsId)]]).catch(() => {});
   }
 }

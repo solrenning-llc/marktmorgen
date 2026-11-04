@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
   if (!statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   const id = typeof body.id === "string" ? body.id.slice(0, 20) : "";
   const person = typeof body.person === "string" ? body.person : "";
-  const refuse = (error: CompanyRefusal) => Response.json({ ok: false, error, message: COMPANY_REFUSALS[error] }, { status: error === "unknown" ? 404 : 400 });
+  const refuse = (error: CompanyRefusal) => Response.json({ ok: false, error, message: COMPANY_REFUSALS[error] }, { status: error === "unknown" ? 404 : error === "busy" ? 409 : 400 });
   try {
     let result;
     if (body.action === "add" || body.action === "edit") {

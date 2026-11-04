@@ -7,6 +7,11 @@
  * another moves them.
  *
  *   nl:crm:co:<statsId>   hash: <company id> -> the company, as JSON
+ *   nl:crm:co:lock:<statsId>   held for at most 10 seconds while one change is written
+ *
+ * One change at a time (the lock): two people saving at once never write
+ * over each other, and a person linked to two companies at once is never
+ * left in both. The second change is refused ("busy") and writes nothing.
  *
  * Each write takes, or gives back, room in the store's data room first, for
  * what the record grows or shrinks by; what is read back is checked again;
@@ -28,7 +33,7 @@ const PERSON = /^[0-9a-f]{32}$/;
 
 export type Company = { id: string; name: string; website: string; note: string; people: string[]; createdAt: number };
 
-export type CompanyRefusal = "name" | "taken" | "website" | "note" | "full" | "people" | "unknown";
+export type CompanyRefusal = "name" | "taken" | "website" | "note" | "full" | "people" | "unknown" | "busy";
 
 /** What each refusal tells the creator, in plain words, with what to do. */
 export const COMPANY_REFUSALS: Record<CompanyRefusal, string> = {
@@ -39,6 +44,7 @@ export const COMPANY_REFUSALS: Record<CompanyRefusal, string> = {
   full: `Your store has ${MAX_COMPANIES} companies, the most it can keep. Delete one you no longer need first.`,
   people: `A company can have up to ${MAX_COMPANY_PEOPLE} people. Take someone off it first.`,
   unknown: "That company is no longer there. Reload the page.",
+  busy: "Someone else is changing your companies right now. Try again in a moment.",
 };
 
 export type CompanyResult = { ok: true; companies: Company[] } | { ok: false; error: CompanyRefusal };
@@ -122,6 +128,20 @@ export function companyOf(companies: readonly Company[], person: string): Compan
 
 const companiesKey = (statsId: string) => `nl:crm:co:${statsId}`;
 const COMPANIES_SLOT = "crm:co";
+const lockKey = (statsId: string) => `nl:crm:co:lock:${statsId}`;
+const LOCK_SECONDS = 10;
+
+/** The store's companies held for one change, or null when another change holds them. */
+async function takeLock(statsId: string): Promise<string | null> {
+  const token = randomBytes(12).toString("hex");
+  const [claimed] = await redisPipeline([["SET", lockKey(statsId), token, "NX", "EX", LOCK_SECONDS]]);
+  return claimed === "OK" ? token : null;
+}
+
+async function letGo(statsId: string, token: string): Promise<void> {
+  const [held] = await redisPipeline([["GET", lockKey(statsId)]]).catch(() => [null]);
+  if (held === token) await redisPipeline([["DEL", lockKey(statsId)]]).catch(() => {});
+}
 const MAX_STORED_COMPANY = (MAX_COMPANY_NAME + 200 + MAX_COMPANY_NOTE) * 6 + MAX_COMPANY_PEOPLE * 35 + 256;
 
 /** Every company of the store, oldest first; none when they cannot be read. */
@@ -171,24 +191,49 @@ async function writeChanges(statsId: string, before: readonly Company[], after: 
   if (grown < 0) await giveData(room, [{ slot: COMPANIES_SLOT, bytes: -grown }]);
 }
 
-/** Reads the companies, applies the change, and writes what it changed; a refusal writes nothing. */
+/**
+ * Reads the companies, applies the change, and writes what it changed, all
+ * under the lock; a refusal writes nothing, and so does a change while
+ * another is being written ("busy").
+ */
 export async function changeCompanies(statsId: string, room: DataStore, change: (companies: Company[]) => CompanyResult): Promise<CompanyResult> {
-  const before = await readCompanies(statsId);
-  const result = change(before);
-  if (result.ok) await writeChanges(statsId, before, result.companies, room);
-  return result;
+  const token = await takeLock(statsId);
+  if (!token) return { ok: false, error: "busy" };
+  try {
+    const before = await readCompanies(statsId);
+    const result = change(before);
+    if (result.ok) await writeChanges(statsId, before, result.companies, room);
+    return result;
+  } finally {
+    await letGo(statsId, token);
+  }
 }
 
 /** A company id made by the store (COMPANY_ID): ten lowercase hex characters. */
 export const newCompanyId = () => randomBytes(5).toString("hex");
 
-/** A person deleted from the store taken off every company; how many companies changed. */
-export async function forgetCompanyPerson(statsId: string | null, person: string): Promise<number> {
+/**
+ * A person deleted from the store taken off every company; how many
+ * companies changed. A deletion is never skipped: it waits for a change
+ * being written (up to the lock's own 10 seconds) and throws when it still
+ * cannot take the lock, so the deletion is reported as not done.
+ */
+export async function forgetCompanyPerson(statsId: string | null, person: string, waitMs = LOCK_SECONDS * 1_000): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
-  const before = await readCompanies(statsId);
-  const after = unlinkPerson(before, person);
-  const changed = after.filter((c, i) => c.people.length !== before[i].people.length);
-  if (!changed.length) return 0;
-  await redisPipeline(changed.map((c) => ["HSET", companiesKey(statsId), c.id, JSON.stringify(c)]));
-  return changed.length;
+  let token = await takeLock(statsId);
+  for (let waited = 0; !token && waited < waitMs; waited += 250) {
+    await new Promise((done) => setTimeout(done, 250));
+    token = await takeLock(statsId);
+  }
+  if (!token) throw new Error("companies busy: the person could not be taken off them");
+  try {
+    const before = await readCompanies(statsId);
+    const after = unlinkPerson(before, person);
+    const changed = after.filter((c, i) => c.people.length !== before[i].people.length);
+    if (!changed.length) return 0;
+    await redisPipeline(changed.map((c) => ["HSET", companiesKey(statsId), c.id, JSON.stringify(c)]));
+    return changed.length;
+  } finally {
+    await letGo(statsId, token);
+  }
 }

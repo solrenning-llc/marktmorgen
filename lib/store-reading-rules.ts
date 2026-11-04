@@ -21,7 +21,7 @@ export const HEAVY_READINGS_PER_DAY = 1;
  * (C4-36 (B)), from a count of their own: the most the margin allows, held
  * by tests/read-ceilings.test.ts.
  */
-export const SINCE_READINGS_PER_DAY = 24;
+export const SINCE_READINGS_PER_DAY = 23;
 /** The largest kept inputs of the sales numbers, in bytes; larger, the next reading is whole. */
 export const SALES_INPUTS_MAX_BYTES = 524_288;
 /** How long a reading is shown as it is before it is read again. */

@@ -21,6 +21,12 @@ export const STALE_SECONDS = 6 * 3600;
  */
 export const CALENDAR_CREDITS_PER_DAY = 5;
 /**
+ * Makings that failed (Stripe did not answer) and are given back a UTC day, so
+ * the app's next check tries again (inbox C4-53): one. Past it a failure is
+ * counted, since what it read was spent; priced in the feed's line.
+ */
+export const CALENDAR_RETRIES_PER_DAY = 1;
+/**
  * Answers one store's feed gets in an hour: four, two calendar apps (a phone
  * and a computer) each asking every thirty minutes, the file's own
  * REFRESH-INTERVAL. A third app asks more than this and is told to come back.

@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $117.75 | $1,210.65 | $69 / $690 |
-| Studio | $171.58 | $1,838.95 | $449 / $4,490 |
-| Scale | $265.78 | $2,935.28 | $999 / $9,990 |
+| Store | $117.75 | $1,209.95 | $69 / $690 |
+| Studio | $171.58 | $1,838.55 | $449 / $4,490 |
+| Scale | $265.78 | $2,935.10 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -42,8 +42,8 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $79 / $790 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $129 / $1,290 **(recommended)** | 17.6% | 60.26% | 60.05% | $77.74 | 0.49 |
-| $149 / $1,490 | 70.0% | 60.29% | 60.06% | $89.84 | 0.43 |
+| $129 / $1,290 **(recommended)** | 17.9% | 60.26% | 60.05% | $77.74 | 0.49 |
+| $149 / $1,490 | 70.6% | 60.26% | 60.04% | $89.80 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.43% | 60.21% | $102.13 | 0.38 |
 | $199 / $1,990 | 100.0% | 60.92% | 60.73% | $121.24 | 0.32 |
 
@@ -57,7 +57,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $199 / $1,990 | 0.8% | 60.35% | 60.03% | $120.11 | 2.23 |
 | $249 / $2,490 **(recommended)** | 16.0% | 60.36% | 60.03% | $150.30 | 1.78 |
 | $299 / $2,990 | 30.0% | 60.41% | 60.07% | $180.65 | 1.48 |
-| $449 / $4,490 | 72.9% | 60.38% | 60.03% | $271.15 | 0.99 |
+| $449 / $4,490 | 72.9% | 60.39% | 60.03% | $271.16 | 0.99 |
 
 ### Scale
 
@@ -82,7 +82,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Price, monthly / yearly | **$129 / $1,290** | **$249 / $2,490** | **$399 / $3,990** |
 | Today (#553) | $69 / $690 | $449 / $4,490 | $999 / $9,990 |
 | Before #553 | $29 / $300 | $99 / $948 | $249 / $2,388 |
-| Visits a month: included · #553 · before #553 | **590** · 3,400 · 3,000 | **1,500** · 10,000 · 10,000 | **4,400** · 40,000 · 40,000 |
+| Visits a month: included · #553 · before #553 | **600** · 3,400 · 3,000 | **1,500** · 10,000 · 10,000 | **4,400** · 40,000 · 40,000 |
 | Orders a month: included · #553 · before #553 | **35** · 200 · 200 | **71** · 450 · 450 | **160** · 1,500 · 1,500 |
 | List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **1,100** · 7,000 · 5,000 | **1,100** · 10,000 · 8,000 |
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **6 + 39** · 40 + 250 · 40 + 250 | **8 + 44** · 80 + 400 · 80 + 400 |

@@ -75,21 +75,26 @@ export const CALENDAR_FILE_BYTES = CALENDAR_FILE_MAX_BYTES;
  * (ZADD, ZREMRANGEBYSCORE, ZCARD, EXPIRE and, when refused, ZREM: 5), the
  * copy, the store's handle, the changed mark and the day's credits (one
  * MGET), and, for a store whose handle was let go, its copy deleted (DEL): 9;
- * the copy sent. An answer refused for the pace stops after the pace: 7
- * commands and no copy (CALENDAR_REFUSED_SHAPE).
+ * the copy sent. The day's counts (tries, own makings, credits used) are read
+ * in the same MGET, so an answer with no making left takes no count (inbox
+ * C4-53); one that takes them is a try, priced as a making. An answer refused
+ * for the pace stops after the pace: 7 commands and no copy
+ * (CALENDAR_REFUSED_SHAPE).
  */
 export const CALENDAR_POLL_SHAPE: ReadShape = {
   seconds: 1,
   cpu: 0.1,
   commands: 2 + 5 + 1 + 1,
-  dbBytes: 2 * 4_096 + CALENDAR_FILE_BYTES + 2 * 256,
+  dbBytes: 2 * 4_096 + CALENDAR_FILE_BYTES + 2 * 256 + 3 * 32,
   outBytes: CALENDAR_FILE_BYTES,
   stripePages: 0,
 };
 /**
- * The file made again, besides its poll: the day's credits used and the
- * day's own makings (SET NX, INCRBY, EXPIRE NX and, when refused, DECRBY: 4
- * each, 8); the store (its handle and its record: 2 GET) and its settings
+ * The file made again, besides its poll, or a try of it: the day's tries (SET
+ * NX, INCRBY, EXPIRE NX and, when refused, DECRBY: 4), the day's credits used
+ * and the day's own makings (SET NX,
+ * INCRBY, EXPIRE NX and, when refused, DECRBY: 4 each, 8); when it fails,
+ * the day's retry (4) and the making given back (DECRBY, INCRBY, EXPIRE: 3); the store (its handle and its record: 2 GET) and its settings
  * written again when it was renamed (lib/calendar-sync.ts, ensureFeedToken:
  * GET and SET, 2); its Stripe pages; every call listing (one GET each, up to
  * MAX_PRODUCTS, the catalog's head aside); each booking's moves
@@ -104,7 +109,7 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
 export const CALENDAR_BUILD_PER_BOOKING = 1 + 4 + 2;
 /** Commands of a making for a store of `listings` call listings and `calls` bookings (tests/read-ceilings.test.ts measures it). */
 export function calendarBuildCommands(listings: number, calls: number): number {
-  return 8 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 3 + 2;
+  return 4 + 8 + 4 + 3 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 3 + 2;
 }
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,

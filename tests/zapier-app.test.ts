@@ -156,6 +156,7 @@ async function main(): Promise<void> {
     .then(() => "", (error: ZapierError) => error.code);
   is("a key made to read cannot subscribe a Zap", readerFailed, "read_only");
   const subscribed = await sale.performSubscribe!(makeZ(writer.key), bundle({ targetUrl: "https://hooks.zapier.com/hooks/catch/1/abc" }));
+  await new Promise<void>(resolve => setImmediate(resolve));
   is("the endpoint is added, with an id", /^we_[0-9a-f]{16}$/.test(subscribed.id), true);
   is("the creator is told, as for one added in the studio", emails.some((e) => /webhook was added/i.test(e.subject)), true);
 
@@ -186,6 +187,7 @@ async function main(): Promise<void> {
 
   part("Turning the Zap off removes its endpoint");
   await sale.performUnsubscribe!(makeZ(writer.key), bundle({ subscribeData: { id: subscribed.id } }));
+  await new Promise<void>(resolve => setImmediate(resolve));
   is("the creator is told it was removed", emails.some((e) => /webhook.*removed/i.test(e.subject)), true);
   const gone = await deleteHook(new Request("https://marktmorgen.com/api/v1/hooks", { method: "DELETE", headers: { Authorization: `Bearer ${writer.key}`, "Content-Type": "application/json" }, body: JSON.stringify({ id: subscribed.id }) }));
   is("removing the same endpoint again says it is not there", gone.status, 404);

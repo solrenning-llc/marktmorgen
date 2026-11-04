@@ -15,7 +15,10 @@
  *   - the rule's words for the help missing a figure.
  */
 import { readFileSync } from "node:fs";
-import { ReadingsUsed, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, HEAVY_READINGS_PER_DAY, keptReading, readingsBackAt, readingsLeft } from "@/lib/store-readings";
+import { NotRead, ReadingFailed, ReadingsUsed, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, HEAVY_READINGS_PER_DAY, keptReading, readingsBackAt, readingsLeft } from "@/lib/store-readings";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ReadingLine } from "@/components/stats-panel";
 import { clockWords, nextUtcMidnight, utcAndLocal } from "@/lib/local-clock";
 import { READINGS_RULE_WORDS } from "@/lib/store-reading-rules";
 import { store as redis } from "./redis-stub";
@@ -51,12 +54,12 @@ async function main(): Promise<void> {
   // The sales brought up to date since the day's whole one (C4-36 (B)) have their own count: used here, so only the
   // counts below decide.
   redis.run(["SET", `nl:reading:day:${store.statsId}:${day}:since`, String(SINCE_READINGS_PER_DAY), "EX", 86_400]);
-  is("the day used: nothing left", await readingsLeft(store, t), { any: false, heavy: false });
+  is("the day used: nothing left", await readingsLeft(store, t), { any: false, heavy: false, anyLeft: 0, heavyLeft: 0 });
   redis.run(["SET", `nl:reading:day:${store.statsId}:${day}`, "2", "EX", 86_400]);
   redis.run(["SET", `nl:reading:day:${store.statsId}:${day}:heavy`, String(HEAVY_READINGS_PER_DAY), "EX", 86_400]);
-  is("light ones left, the heavy ones used", await readingsLeft(store, t), { any: true, heavy: false });
+  is("light ones left, the heavy ones used", await readingsLeft(store, t), { any: true, heavy: false, anyLeft: STORE_READINGS_PER_DAY - 2, heavyLeft: 0 });
   redis.run(["DEL", `nl:reading:day:${store.statsId}:${day}:heavy`]);
-  is("both left", await readingsLeft(store, t), { any: true, heavy: true });
+  is("both left", await readingsLeft(store, t), { any: true, heavy: true, anyLeft: STORE_READINGS_PER_DAY - 2, heavyLeft: HEAVY_READINGS_PER_DAY });
 
   part("The studio says it");
   const panel = read("components/stats-panel.tsx");
@@ -67,6 +70,31 @@ async function main(): Promise<void> {
 
   part("The rule, in words ready for the help (lib/help-content.ts is another agent's file today; inbox C4-33 (5))");
   is("in plain words, with the figures", [READINGS_RULE_WORDS.includes(`Your sales are read whole once a day (UTC) and brought up to date from what changed up to ${SINCE_READINGS_PER_DAY} more times`), READINGS_RULE_WORDS.includes("00:00 UTC")], [true, true]);
+  part("A heavy reading that fails after calling Stripe is counted, and said so; one stopped before is given back (inbox C4-53)");
+  {
+    const shop = { statsId: "f".repeat(32) };
+    const at = Date.UTC(2031, 4, 2, 9, 0);
+    const nextDay = at + 86_400_000;
+    // The day's whole reading made, kept; the next day's whole reading fails after Stripe was called.
+    const ok = await keptReading(shop, "sales", async () => ({ n: 1 }), at, true);
+    const beforeFail = await readingsLeft(shop, nextDay);
+    const counted = await keptReading(shop, "sales", async () => { throw new Error("Stripe answered 500"); }, nextDay, true);
+    const afterFail = await readingsLeft(shop, nextDay);
+    is("a failure after the call: the kept reading shown, marked failed", [ok?.failed ?? false, counted?.stale, counted?.failed, (counted?.value as unknown as { n: number }).n], [false, true, true, 1]);
+    is("and the day's whole reading of the sales counted", [beforeFail.heavyLeft - afterFail.heavyLeft, Number(redis.run(["GET", `nl:reading:day:${shop.statsId}:2031-05-03:heavy`]))], [HEAVY_READINGS_PER_DAY, HEAVY_READINGS_PER_DAY]);
+    const fresh = { statsId: "g".repeat(32) };
+    const before = await readingsLeft(fresh, at);
+    const stopped = await keptReading(fresh, "sales", async () => { throw new NotRead(); }, at, true).then(() => "read", (e: unknown) => (e instanceof NotRead ? "not read" : String(e)));
+    const afterStop = await readingsLeft(fresh, at);
+    is("one stopped before calling anyone: given back, nothing below zero", [stopped, afterStop.heavyLeft === before.heavyLeft, afterStop.anyLeft], ["not read", true, STORE_READINGS_PER_DAY]);
+    const none = await keptReading({ statsId: "h".repeat(32) }, "sales", async () => { throw new Error("Stripe timed out"); }, at, true).then(() => "read", (e: unknown) => (e instanceof ReadingFailed ? "failed, counted" : String(e)));
+    is("with no copy to show, the failure is said as one that was counted", none, "failed, counted");
+    const line = renderToStaticMarkup(createElement(ReadingLine, { reading: { at, canRefresh: true, refreshHref: "/studio?numbers=fresh", backAt: at, salesUsed: false, failed: true, left: 1 } }));
+    is("the creator reads it: failed, counted, and what is left today", line.includes("The last reading failed and was counted; 1 reading left today."), true);
+    const lineNone = renderToStaticMarkup(createElement(ReadingLine, { reading: { at, canRefresh: false, refreshHref: "/studio?numbers=fresh", backAt: at, salesUsed: false, failed: true, left: 0 } }));
+    is("and with none left, 0 readings", lineNone.includes("The last reading failed and was counted; 0 readings left today."), true);
+  }
+
   done();
 }
 

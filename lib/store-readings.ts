@@ -67,25 +67,76 @@ export class ReadingsUsed extends Error {
 }
 
 /**
+ * Thrown by a reading that stopped before calling any supplier (its own check,
+ * a lock held, a local refusal): nothing was spent, so its unit of the day is
+ * given back (inbox C4-53).
+ */
+export class NotRead extends Error {
+  constructor(why = "the reading stopped before calling anyone") {
+    super(why);
+    this.name = "NotRead";
+  }
+}
+
+/**
+ * Thrown when a reading failed after a supplier was called and there is no
+ * copy to show: it was counted, since what it spent was spent (inbox C4-53).
+ */
+export class ReadingFailed extends Error {
+  constructor() {
+    super("the store's reading failed and was counted");
+    this.name = "ReadingFailed";
+  }
+}
+
+/**
  * Whether the day still has a reading, and one of the sales (whole, or brought
  * up to date since the day's whole one), left: three GET, for a
  * page that offers to read again. Unknown is none, so nothing is offered that
  * would be refused.
  */
-export async function readingsLeft(store: Pick<Store, "statsId">, now = Date.now()): Promise<{ any: boolean; heavy: boolean }> {
-  if (!store.statsId || !isRedisConfigured()) return { any: false, heavy: false };
+export type ReadingsLeft = { any: boolean; heavy: boolean; anyLeft: number; heavyLeft: number };
+
+export async function readingsLeft(store: Pick<Store, "statsId">, now = Date.now()): Promise<ReadingsLeft> {
+  const none: ReadingsLeft = { any: false, heavy: false, anyLeft: 0, heavyLeft: 0 };
+  if (!store.statsId || !isRedisConfigured()) return none;
   const key = dayKey(store.statsId, utcDay(now));
   try {
     const [raw, rawHeavy, rawSince] = await redisPipeline([["GET", key], ["GET", `${key}:heavy`], ["GET", `${key}:since`]]);
     const n = raw === null ? 0 : Number(raw);
     const h = rawHeavy === null ? 0 : Number(rawHeavy);
     const sinceN = rawSince === null ? 0 : Number(rawSince);
-    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(h) || !Number.isSafeInteger(sinceN)) return { any: false, heavy: false };
-    // The sales may be read again whole, or, after the day's whole reading, brought up to date (C4-36 (B)).
-    const sales = (n < STORE_READINGS_PER_DAY && h < HEAVY_READINGS_PER_DAY) || (h >= 1 && sinceN < SINCE_READINGS_PER_DAY);
-    return { any: n < STORE_READINGS_PER_DAY, heavy: sales };
+    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(h) || !Number.isSafeInteger(sinceN)) return none;
+    const anyLeft = Math.max(0, STORE_READINGS_PER_DAY - n);
+    // The sales: read whole while the day has one, and, after the day's whole one, brought up to date (C4-36 (B)).
+    const wholeLeft = Math.max(0, Math.min(anyLeft, HEAVY_READINGS_PER_DAY - h));
+    const sinceLeft = h >= 1 || wholeLeft > 0 ? Math.max(0, SINCE_READINGS_PER_DAY - sinceN) : 0;
+    const heavy = wholeLeft > 0 || (h >= 1 && sinceN < SINCE_READINGS_PER_DAY);
+    return { any: anyLeft > 0, heavy, anyLeft, heavyLeft: wholeLeft + sinceLeft };
   } catch {
-    return { any: false, heavy: false };
+    return none;
+  }
+}
+
+/**
+ * A reading's unit given back, the day's and, for a heavy one, its own: only
+ * for a reading that stopped before calling anyone (NotRead). DECRBY, and a
+ * count found below zero (it had expired) set back to zero with its expiry, so
+ * the day is counted higher, never lower.
+ */
+async function giveStoreReading(store: Pick<Store, "statsId">, now: number, heavy: boolean): Promise<void> {
+  if (!store.statsId || !isRedisConfigured()) return;
+  const key = dayKey(store.statsId, utcDay(now));
+  const keys = heavy ? [key, `${key}:heavy`] : [key];
+  try {
+    const left = await redisPipeline(keys.map((k) => ["DECRBY", k, 1]));
+    const fix = keys.flatMap((k, i) => {
+      const after = Number(left[i]);
+      return Number.isSafeInteger(after) && after < 0 ? [["INCRBY", k, -after], ["EXPIRE", k, 2 * 86_400]] : [];
+    });
+    if (fix.length) await redisPipeline(fix);
+  } catch {
+    // Counted higher, never lower.
   }
 }
 
@@ -116,15 +167,18 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
   }
 }
 
-export type Kept<T> = { value: T; at: number; stale: boolean };
+/** A reading kept: its value, when it was read, whether it is older than the day's budget let it be, and whether the last try failed (counted). */
+export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean };
 
 /**
  * A reading of `kind`, kept: the one kept when it is fresh (unless `fresh`
  * asks to read again); otherwise, when the day's budget allows, `read` again
  * and kept; otherwise the last one kept, `stale`. With none kept: null when
  * the store has no counts at all, ReadingsUsed when none may be read today.
- * A reading that fails leaves the last one kept, stale, or throws when there
- * is none.
+ * A reading that fails after calling a supplier is counted (what it spent
+ * was spent; inbox C4-53): the last one kept is shown, stale and `failed`, or
+ * ReadingFailed is thrown when there is none. One that stopped before calling
+ * anyone (NotRead) gives its unit back.
  */
 export async function keptReading<T>(
   store: Pick<Store, "statsId">,
@@ -133,6 +187,7 @@ export async function keptReading<T>(
   now = Date.now(),
   fresh = false,
   take: () => Promise<boolean> = () => takeStoreReading(store, now, kind === "sales"),
+  give: () => Promise<void> = () => giveStoreReading(store, now, kind === "sales"),
 ): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
@@ -155,8 +210,13 @@ export async function keptReading<T>(
   try {
     value = await read();
   } catch (error) {
-    if (kept) return { ...kept, stale: true };
-    throw error;
+    if (error instanceof NotRead) {
+      await give();
+      if (kept) return { ...kept, stale: true };
+      throw error;
+    }
+    if (kept) return { ...kept, stale: true, failed: true };
+    throw new ReadingFailed();
   }
   const text = JSON.stringify({ at: now, value });
   if (value !== null && value !== undefined && Buffer.byteLength(text, "utf8") <= READING_COPY_MAX_BYTES) {
@@ -216,7 +276,9 @@ export async function keptSales(store: Store, now = Date.now(), fresh = false): 
     await keepInputs(store, compactSalesInputs(store, whole, now), now);
     return salesFromInputs(store, whole, now);
   };
-  const kept = await keptReading(store, "sales", read, now, fresh, take);
+  // A reading that stopped before calling anyone gives back what it took: the count it was taken from (C4-53).
+  const give = () => (mode === "since" ? giveCount(store, "since", now) : giveStoreReading(store, now, true));
+  const kept = await keptReading(store, "sales", read, now, fresh, take, give);
   if (!kept) throw new ReadingsUsed();
   return kept;
 }
@@ -297,8 +359,8 @@ export async function keptNumbers(store: Store, now = Date.now()): Promise<Stats
 /**
  * A store's kept readings, gone (inbox C4-33, light d): at its deletion, all
  * of them; at a person's erasure, its sales, which name its biggest buyers by
- * their address (lib/person-erasure.ts). Read again, the next one leaves the
- * person out. The day's counts name no one and stay.
+ * their address (lib/person-erasure.ts). Read again, it is made from the
+ * store's Stripe account, which keeps the purchase. The day's counts name no one and stay.
  */
 export async function forgetStoreReadings(statsId: string | null | undefined): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
@@ -306,13 +368,15 @@ export async function forgetStoreReadings(statsId: string | null | undefined): P
 }
 
 /**
- * A person's erasure: the store's kept sales reading goes; returns how many
- * copies went. Not yet one of lib/person-erasure.ts's steps: each step needs
- * its line in lib/person-data.ts, another agent's file today (inbox C4-33,
- * light d); until then the copy names a buyer at most READING_KEEP_SECONDS.
+ * A person's erasure (lib/person-erasure.ts, a step of every door; inbox
+ * C4-48): the store's kept sales reading goes, which may name them among the
+ * biggest buyers, and its kept memberships reading, which keeps what members
+ * wrote when they left; returns how many copies went. The next reading is
+ * made again from the store's Stripe account, which keeps the purchase
+ * (lib/person-data.ts says so), so a buyer there is read again as one.
  */
 export async function forgetReadingsPerson(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId), inputsKey(statsId)]]);
+  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId), inputsKey(statsId), copyKey("members", statsId)]]);
   return Number(gone) || 0;
 }

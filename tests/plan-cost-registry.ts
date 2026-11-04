@@ -194,7 +194,52 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
   return buyerNoticeCap(tier, paid) * CLOSING_BUYER_COST;
 }
 
-/** What one order costs at the most: its confirmation, the email that says it shipped, its compute, and what it leaves for its store's closing. */
+/** The existing two-email order envelope: confirmation, shipment email,
+ * compute and its share of closure. It does NOT price the new durable
+ * shipment outbox's indefinite pending/source/fence storage, copies,
+ * reservation pools, provider retries or repeated reconciliation. Those
+ * remain unpriced, not zero: CURRENT_SHIPMENT_MAIL_POLICY is null. The
+ * CURRENT_SHIPMENT_MAIL_LIFECYCLE is never_activated: status returns
+ * not_recorded and cleanup returns0 without Redis, and the UI does no GET.
+ * New storage/dispatch require active AND a valid independent policy. A finite
+ * active-month/closing-days room is not funding for an unknown pending tail.
+ * In active/retired, status and erasure remain available even with policy
+ * null; retirement permits no new enqueue or dispatch. Cleanup may write
+ * fences for an empty index, with an indefinite failure tail. Funding for
+ * cleanup/failures/retention must precede first activation; lifecycle is not
+ * financial evidence. Never restore never_activated after any use while
+ * payloads or uncertain reserves remain. Future tails are unknown/rejected.
+ * The new account-wide Resend budget is also NOT funded by this order
+ * coefficient or by a paid provider quota alone. Its permanent schema1
+ * ledger, schema2 claims, pending/unknown holds without TTL, exact35-day
+ * terminal receipts and partial-error reconciliation need their full own
+ * retention/copies/command/cleanup envelope. Measured EVAL+internal paths:
+ * 4 initialize,11 reserve,11 dispatch,14 accepted,10 receipt read,13 cancel.
+ * These are command observations, not an invoice or financial approval;
+ * CURRENT_RESEND_FALLBACK_REVIEW remains null, never an automatic bootstrap.
+ * The restricted physical-item createCheckout caller now reserves a complete
+ * confirmation origin BEFORE its payment POST/URL, but remains never_activated
+ * with policy null. This is a constructed pre-URL slice, not completed durable
+ * confirmation: no payment/accounting/email worker or origin erasure exists.
+ * Its five own families and five shared pool/index/fence references are in
+ * store-data-registry, not a second allocation of the shipment pool. A full
+ * future row reservation is not evidence of lifetime storage/copy/cleanup
+ * funding. No TTL bounds pending/unknown origins;23h limits creation replay
+ * only. Original-account read-only recovery persists its pagination cursor.
+ * Observed EVAL+internal commands:27 shared enqueue,17 create,18 bind,
+ * 15 already-bound replay,17 cursor; TS read adds3 and reserve adds1 TIME.
+ * Open/recovery repeats Redis/provider reads, so these are NOT a full call or
+ * lifetime envelope. Activation remains blocked on missing lifecycle work
+ * and unknown/rejected full retention/failure/cleanup costs.
+ * Its accounting hooks remain unconnected to a payment worker. Their68-byte
+ * OCI/OC1 receipt horizon is ORIGINAL window end+400
+ * days (at most767 from capture), first apply23 commands; the200-byte MEMORY
+ * fixture is not universal storage coverage. The legacy45-day '1' marker's
+ * priced part excludes this new path. Other effects can lose TTL after a
+ * partial Lua failure; the whole tail is unknown, not bounded by the receipt.
+ * No PER_EMAIL/ORDER_COST coefficient, real review, quota protection, paid
+ * financial envelope or retention approval is changed/certified here.
+ */
 export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
@@ -861,6 +906,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
       // A deal entering a stage takes one more studio request before the workflow its stage starts is checked (17 October 2026).
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
+      // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
+      { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
+      // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).
+      { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).
       { file: "lib/path.ts", names: ["PATH_READ_UNITS", "countStudio(store, null, units)"] },
       { file: "lib/path-atomic.ts", names: ["WRITE_PATH", "FORGET_PATH", "PATH_DATA_CHANGE"] },
@@ -916,12 +965,13 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/call-records.ts", names: ["bookingsChangedKey", "bookingCreditsKey", "changedCommands(callsId"] },
       { file: "app/api/store/calendar/[token]/route.ts", names: ["bookedCalendarFeed(owner"] },
       { file: "lib/read-ceilings.ts", names: ["CALENDAR_POLL_SHAPE", "CALENDAR_BUILD_SHAPE", "CALENDAR_FILE_BYTES", "CALENDAR_REFUSED_SHAPE", "CALENDAR_REFUSED_PRICED_PER_HOUR"] },
-      { file: "lib/calendar-limits.ts", names: ["CALENDAR_REFUSED_PER_HOUR"] },
+      { file: "lib/calendar-limits.ts", names: ["CALENDAR_REFUSED_PER_HOUR", "CALENDAR_RETRIES_PER_DAY"] },
+      { file: "lib/calendar-sync.ts", names: ["calendarAttemptsKey"] },
       { file: "lib/calendar-sync.ts", names: ["stopFeedToken"] },
       { file: "lib/store.ts", names: ["handleLeadsToStore", "storeHandleKey"] },
       { file: "app/api/store/stores/route.ts", names: ["forgetStoreCalendar(result.store.statsId)"] },
     ],
-    basis: "A store's feed answers its calendar app from the last good copy of the file, at most CALENDAR_POLLS_PER_HOUR times in any sixty minutes (a sliding hour), counted before the copy is read (each a CALENDAR_POLL_SHAPE: the token, its settings, the pace and the copy, the copy sent); the file is made again only after a booking was made, moved or let go, or once the copy is CALENDAR_REFRESH_SECONDS old, at most CALENDAR_BUILDS_PER_DAY times a UTC day and once more for each booking made, moved or let go that day up to CALENDAR_CREDITS_PER_DAY (its credits, given where the change is marked), counted before it is made (each a CALENDAR_BUILD_SHAPE: the store, five Stripe pages, every call listing, each booking's moves and room, the copy kept); the copy itself kept CALENDAR_COPY_SECONDS at its largest. One feed a store (a new address replaces the old). Refused answers past the pace read only the token, its settings and the pace, and are counted (CALENDAR_REFUSED_SHAPE); every one the address may get in an hour before it stops, and the stop, are priced (CALENDAR_REFUSED_PRICED_PER_HOUR, lib/calendar-sync.ts CALENDAR_REFUSED_PER_HOUR). Past that the address is let go (its token deleted, the studio showing a new one and why), so what still asks it is an unknown address, answered from the token's one read like any address that leads nowhere. A store deleted or closed is refused with the copy's own read (its handle let go, or leading to another store: a tombstone in the copy's place), and a deleted store's feed is forgotten at its deletion (forgetStoreCalendar). None of it is the studio's requests: an app asking on its own must never spend a figure the creator sees.",
+    basis: "A store's feed answers its calendar app from the last good copy of the file, at most CALENDAR_POLLS_PER_HOUR times in any sixty minutes (a sliding hour), counted before the copy is read (each a CALENDAR_POLL_SHAPE: the token, its settings, the pace and the copy, the copy sent); the file is made again only after a booking was made, moved or let go, or once the copy is CALENDAR_REFRESH_SECONDS old, at most CALENDAR_BUILDS_PER_DAY times a UTC day and once more for each booking made, moved or let go that day up to CALENDAR_CREDITS_PER_DAY (its credits, given where the change is marked), counted before it is made (each a CALENDAR_BUILD_SHAPE: the store, five Stripe pages, every call listing, each booking's moves and room, the copy kept); the copy itself kept CALENDAR_COPY_SECONDS at its largest. One feed a store (a new address replaces the old). Refused answers past the pace read only the token, its settings and the pace, and are counted (CALENDAR_REFUSED_SHAPE); every one the address may get in an hour before it stops, and the stop, are priced (CALENDAR_REFUSED_PRICED_PER_HOUR, lib/calendar-sync.ts CALENDAR_REFUSED_PER_HOUR). Past that the address is let go (its token deleted, the studio showing a new one and why), so what still asks it is an unknown address, answered from the token's one read like any address that leads nowhere. A store deleted or closed is refused with the copy's own read (its handle let go, or leading to another store: a tombstone in the copy's place), and a deleted store's feed is forgotten at its deletion (forgetStoreCalendar). None of it is the studio's requests: an app asking on its own must never spend a figure the creator sees. A making that failed (Stripe did not answer) is given back CALENDAR_RETRIES_PER_DAY a day (inbox C4-53), inside the same priced figure: every try of the day, made or failed, is one of CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY (calendarAttemptsKey), so no failure is unpriced.",
   },
   {
     id: "rest-api",
@@ -1382,6 +1432,8 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/imports.ts": MONTHLY, "lib/product-updates.ts": MONTHLY, "lib/review-requests.ts": MONTHLY,
   "lib/mail.ts": ["monthly", "company"],
   "lib/call-packages.ts": ORDER, "lib/call-reminders.ts": ORDER, "lib/free.ts": ORDER, "lib/gifts.ts": ORDER, "lib/group-buy.ts": ["order", "store"],
+  // Active shipment delivery uses sendQueuedShipmentMail in lib/email.ts.
+  // The never-activated deployment retains its original one-shot ORDER sender.
   "lib/paypal-sales.ts": ORDER, "lib/preorders.ts": ORDER, "lib/shipments.ts": ORDER,
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,

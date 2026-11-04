@@ -41,6 +41,7 @@ import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { CrmPersonGone, carriedGeneration, erasedGuard, erasedKey, generationKey } from "@/lib/crm";
 import { dataBytes } from "@/lib/store-data-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
@@ -164,24 +165,51 @@ export async function readPersonNotes(statsId: string | null, person: string): P
 }
 
 /**
+ * A note and its person's place on the store's list of people with notes,
+ * written in one step, unless the person is deleted or the note carries
+ * another generation than theirs (lib/crm.ts, erasedGuard): 0, and nothing
+ * written, then; once written, {1, the person's notes as they are now}, read
+ * in the same step. Inside: the mark and the generation read, the four writes
+ * and the read (ADD_NOTE_CALLS).
+ */
+export const ADD_PERSON_NOTE = `-- marktmorgen:person-note-add:v1
+${erasedGuard(3, 4, 5, "0")}
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+redis.call("EXPIRE", KEYS[1], ARGV[4])
+redis.call("SADD", KEYS[2], ARGV[3])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
+return {1, redis.call("HGETALL", KEYS[1])}`;
+/**
+ * What ADD_PERSON_NOTE runs inside, which Upstash bills one by one beside the EVAL: the guard's two reads, the note's
+ * four writes (sent on their own before) and the notes read back (a trip of its own before).
+ */
+export const ADD_NOTE_CALLS = 7;
+
+/**
  * Adds a note about one person, written by `by` (the signed-in address).
  * Each note is a field of its own, so two people writing at once both keep
  * theirs. Over MAX_PERSON_NOTES, the oldest go. Null when the words are empty.
+ * `generation` is the person's as the page read it, or as a workflow step
+ * read it when it started (lib/crm.ts, readGeneration; 0 for a page that
+ * sends none): while the person is deleted, or for a page read before a
+ * deletion, nothing is written (CrmPersonGone, with the room taken given
+ * back).
  */
-export async function addPersonNote(statsId: string, person: string, by: string, textRaw: unknown, room: DataStore, now = Date.now()): Promise<PersonNote[] | null> {
+export async function addPersonNote(statsId: string, person: string, by: string, textRaw: unknown, room: DataStore, now = Date.now(), generation = 0): Promise<PersonNote[] | null> {
   const text = personNoteText(textRaw);
   if (!text || !PERSON_KEY.test(person) || !isRedisConfigured()) return null;
   const id = randomBytes(4).toString("hex");
   const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
   // Its room in the store's data room first (DataRoomError when it does not fit), its person's place with it.
-  await needData(room, [{ slot: NOTES_SLOT, bytes: dataBytes([id, json], 1) + dataBytes([person], 1) }]);
-  await redisPipeline([
-    ["HSET", notesKey(statsId, person), id, json],
-    ["EXPIRE", notesKey(statsId, person), NOTES_SECONDS],
-    ["SADD", whoKey(statsId), person],
-    ["EXPIRE", whoKey(statsId), NOTES_SECONDS],
-  ]);
-  const notes = await readPersonNotes(statsId, person);
+  const taken = dataBytes([id, json], 1) + dataBytes([person], 1);
+  await needData(room, [{ slot: NOTES_SLOT, bytes: taken }]);
+  const [written] = await redisPipeline([["EVAL", ADD_PERSON_NOTE, 4, notesKey(statsId, person), whoKey(statsId), erasedKey(statsId, person), generationKey(statsId, person), id, json, person, NOTES_SECONDS, carriedGeneration(generation)]]);
+  if (written === 0) {
+    await giveData(room, [{ slot: NOTES_SLOT, bytes: taken }]).catch(() => {});
+    throw new CrmPersonGone();
+  }
+  // The notes as the script read them right after writing; an answer of another shape is read again.
+  const notes = Array.isArray(written) && written[0] === 1 && Array.isArray(written[1]) ? parsePersonNotes(written[1]) : await readPersonNotes(statsId, person);
   if (notes.length > MAX_PERSON_NOTES) {
     const dropped = notes.slice(MAX_PERSON_NOTES);
     await redisPipeline([["HDEL", notesKey(statsId, person), ...dropped.map((n) => n.id)]]);

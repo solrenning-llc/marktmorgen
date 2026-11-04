@@ -765,13 +765,23 @@ async function actOnPeople(
     // Read when needed: the buyer's page reads the sequences too (lib/buyer-profile.ts), so not at the top.
     const { addPersonNote } = await import("@/lib/buyer-profile");
     const out: Acted[] = [];
-    for (const email of emails) {
+    // Their generations, read once as the step starts (lib/crm.ts): one deleted since is never written about, even if
+    // they came back meanwhile; one deleted and not come back is refused whatever it reads.
+    let generations: number[];
+    try {
+      generations = await readGenerations(statsId, emails.map((email) => personKey(statsId, email)));
+    } catch {
+      return each(emails, "failed", "The note was not written: the people could not be read just now.");
+    }
+    for (const [i, email] of emails.entries()) {
       try {
-        const kept = await addPersonNote(statsId, personKey(statsId, email), "sequence", `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`, store);
+        const kept = await addPersonNote(statsId, personKey(statsId, email), "sequence", `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`, store, Date.now(), generations[i]);
         out.push(kept ? { email, state: "confirmed", changed: true, note: "Note written on their page." } : { email, state: "failed", note: "The note could not be written." });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).
         if (error instanceof DataRoomError) out.push({ email, state: "failed", note: "The note was not written: the store's data room is full." });
+        // The person was deleted from the store, and has not come back, or since this step started (lib/crm.ts, erasedGuard).
+        else if (error instanceof CrmPersonGone) out.push({ email, state: "failed", note: "The note was not written: this person was deleted from your store." });
         else out.push({ email, state: "uncertain", note: "Whether the note was written could not be confirmed." });
       }
     }

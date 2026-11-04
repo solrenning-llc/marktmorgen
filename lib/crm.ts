@@ -160,14 +160,14 @@ const PERSON = /^[0-9a-f]{32}$/;
  * order, a confirmed sign-up, a free product claimed, a form they sent
  * (personReturned). A request's own word never does (C3-125).
  */
-const erasedKey = (statsId: string, person: string) => `nl:crm:erased:${statsId}:${person}`;
+export const erasedKey = (statsId: string, person: string) => `nl:crm:erased:${statsId}:${person}`;
 /**
  * The person's generation: 0 until they are first deleted, one more at each
  * deletion. A page reads it with the person, and a save from it carries it:
  * one read before a deletion differs, and is refused, even after the person
  * came back (SET_CRM_VALUE). Kept ERASED_MARK_SECONDS from the last deletion.
  */
-const generationKey = (statsId: string, person: string) => `nl:crm:gen:${statsId}:${person}`;
+export const generationKey = (statsId: string, person: string) => `nl:crm:gen:${statsId}:${person}`;
 /**
  * How long the mark and the generation are kept: at least the longest a page
  * read before the deletion can still save, which is the longest of
@@ -181,6 +181,31 @@ const generationKey = (statsId: string, person: string) => `nl:crm:gen:${statsId
  * itself, and a value set after it is a new one, as for anyone.
  */
 export const ERASED_MARK_SECONDS = 31 * 86_400;
+
+/**
+ * The first lines of every script that writes something about a person (a
+ * value, their tasks, a note: SET_CRM_VALUE, WRITE_PERSON_TASKS,
+ * lib/buyer-profile.ts ADD_PERSON_NOTE): `refuse`, with nothing written,
+ * while their deletion mark (KEYS[k]) is there, or when the write carries
+ * another generation (ARGV[p]) than theirs (KEYS[g]): a page read, or a
+ * workflow step started, before a deletion. It never takes the mark away
+ * (personReturned does, on the server's own paths). Inside: the mark and the
+ * generation read (ERASED_GUARD_CALLS).
+ */
+export function erasedGuard(k: number, g: number, p: number, refuse: string): string {
+  return `if redis.call("EXISTS", KEYS[${k}]) == 1 then return ${refuse} end
+if tonumber(redis.call("GET", KEYS[${g}]) or "0") ~= tonumber(ARGV[${p}]) then return ${refuse} end`;
+}
+/** What erasedGuard runs inside its script, which Upstash bills one by one beside the EVAL. */
+export const ERASED_GUARD_CALLS = 2;
+/**
+ * A generation a write carries, as a script compares it: one the person can
+ * have (0 or more), or -1, none they can, which is refused wherever they were
+ * deleted (and written for no one: a person never deleted is at 0).
+ */
+export function carriedGeneration(generation: number | undefined): number {
+  return typeof generation === "number" && Number.isSafeInteger(generation) && generation >= 0 ? generation : -1;
+}
 
 /** The person's generation as it is now (generationKey): what a page reads with them, and a save from it carries. */
 export async function readGeneration(statsId: string | null, person: string): Promise<number> {
@@ -275,7 +300,7 @@ export async function readValues(statsId: string | null, person: string, fields:
  */
 export const CRM_VALUE_MOST_BYTES = 3 * Math.max(MAX_FIELD_VALUE, MAX_FIELD_OPTIONS * MAX_FIELD_OPTION + MAX_FIELD_OPTIONS - 1);
 /** What SET_CRM_VALUE runs inside, at the most, which Upstash bills one by one beside the EVAL: the mark and the generation read, the value read and written. */
-export const CRM_VALUE_SCRIPT_CALLS = 4;
+export const CRM_VALUE_SCRIPT_CALLS = ERASED_GUARD_CALLS + 2;
 /**
  * A field saved from the studio (app/api/store/crm/route.ts, "value"), at the
  * most, measured through the real route in tests/crm-contact-writes.test.ts
@@ -309,8 +334,7 @@ export const CRM_VALUE_SAVE_UNITS = 2;
  * read, the value read and written (CRM_VALUE_SCRIPT_CALLS).
  */
 export const SET_CRM_VALUE = `-- marktmorgen:crm-value-set:v4
-if redis.call("EXISTS", KEYS[2]) == 1 then return 2 end
-if tonumber(redis.call("GET", KEYS[3]) or "0") ~= tonumber(ARGV[3]) then return 2 end
+${erasedGuard(2, 3, 3, "2")}
 local before = redis.call("HGET", KEYS[1], ARGV[1])
 if ARGV[2] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[2]) end
 if before then return {1, before} end
@@ -336,7 +360,7 @@ export async function setValue(statsId: string, person: string, field: CrmField,
   if (value === null) return false;
   // Not a generation: none the person can have, so refused wherever they were deleted, and written for anyone else
   // only when they were never deleted (0).
-  const carried = Number.isSafeInteger(generation) && generation >= 0 ? generation : -1;
+  const carried = carriedGeneration(generation);
   const weight = (v: unknown) => (typeof v === "string" && v ? dataBytes([person, v], 1) : 0);
   const charged = weight(value);
   if (charged > 0) await needData(room, [{ slot: VALUES_SLOT, bytes: charged }]);
@@ -818,14 +842,24 @@ return {value, redis.call("HDEL", KEYS[1], ARGV[4])}`;
  * the person's tasks are no longer what was read (a lock that ran out let
  * another change in); 1 once written; 2 once written when a count that was
  * not a whole number was dropped or replaced, whose room goes back. A count
- * that is there is moved by the change.
+ * that is there is moved by the change. KEYS[2] and KEYS[3] are the person's
+ * deletion mark and generation, ARGV[7] the generation the change carries:
+ * 3, with nothing written, while they are deleted or for a page read before a
+ * deletion (erasedGuard). ARGV[8] is MAX_STORE_TASKS: 4, with nothing
+ * written, for a change that adds past it, checked against the count as it is
+ * in the same step. With the person's tasks compared to what was read, nothing
+ * a change read can be stale when it writes, so the lock is not held again
+ * before it. Inside: the mark and the generation read, the tasks and the
+ * count read, the tasks and the count written (WRITE_TASKS_CALLS).
  */
-export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v1
+export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v2
+${erasedGuard(2, 3, 7, "3")}
 local before = redis.call("HGET", KEYS[1], ARGV[1]) or ""
 if before ~= ARGV[2] then return -1 end
-if ARGV[3] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[3]) end
 local kept = redis.call("HGET", KEYS[1], ARGV[6])
 local n = kept and string.match(kept, "^%d+$") and tonumber(kept)
+if n and tonumber(ARGV[4]) > 0 and n + tonumber(ARGV[4]) > tonumber(ARGV[8]) then return 4 end
+if ARGV[3] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[3]) end
 if n then
   redis.call("HSET", KEYS[1], ARGV[6], tostring(math.max(0, n + tonumber(ARGV[4]))))
 elseif ARGV[5] ~= "" then
@@ -836,6 +870,8 @@ elseif kept then
   return 2
 end
 return 1`;
+/** What WRITE_PERSON_TASKS runs inside, at the most, which Upstash bills one by one beside the EVAL. */
+export const WRITE_TASKS_CALLS = ERASED_GUARD_CALLS + 4;
 
 /**
  * The store's count saved on its own, once every task was read to make it:
@@ -927,6 +963,10 @@ export async function readAllTasks(statsId: string | null): Promise<DueTask[]> {
  * does not fit); a shorter list gives it back. The read, the change, the
  * room and the write happen under the store's tasks lock, the write and the
  * count in one script, so each real change is kept and counted exactly once;
+ * a change about a person who is deleted, or from a page read before a
+ * deletion (`generation`, as the page read it: lib/crm.ts readGeneration;
+ * a page that sends none is read as 0), is refused "gone" in that script,
+ * with nothing written (erasedGuard);
  * a change that cannot take it within TASKS_LOCK_WAIT_MS throws
  * LockBusyError, with nothing written or counted.
  */
@@ -936,9 +976,11 @@ export async function changePersonTasks(
   room: DataStore,
   change: (tasks: PersonTask[]) => TaskResult,
   pay: (units: number) => Promise<{ ok: true } | { ok: false; reason: string; message: string }> = async () => ({ ok: false, reason: "used", message: "" }),
+  generation = 0,
 ): Promise<TaskResult> {
   if (!PERSON.test(person)) return { ok: false, error: "unknown" };
-  const first = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, 0, held));
+  const carried = carriedGeneration(generation);
+  const first = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, 0, held, carried));
   if ("result" in first) return first.result;
   // A recount: one at a time for the store, so two changes never both pay.
   // Its first pass looks again, and pays nothing when the one before made it.
@@ -948,7 +990,7 @@ export async function changePersonTasks(
     // more people were added meanwhile than were paid for. The last one
     // never pays: nothing would read after it.
     for (let pass = 0; pass < RECOUNT_PASSES; pass += 1) {
-      const outcome = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, paid, held));
+      const outcome = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, paid, held, carried));
       if ("result" in outcome) return outcome.result;
       if (pass === RECOUNT_PASSES - 1) break;
       const answer = await pay(outcome.units - paid);
@@ -963,7 +1005,7 @@ export async function changePersonTasks(
 }
 
 /** One pass of changePersonTasks, under the lock: its answer, or the studio requests a recount needs before it can be made. */
-async function changeOnce(statsId: string, person: string, room: DataStore, change: (tasks: PersonTask[]) => TaskResult, paid: number, held: Held): Promise<{ result: TaskResult } | { units: number }> {
+async function changeOnce(statsId: string, person: string, room: DataStore, change: (tasks: PersonTask[]) => TaskResult, paid: number, held: Held, carried: number): Promise<{ result: TaskResult } | { units: number }> {
   // A change that waited while the store was deleted writes nothing back:
   // its tasks are gone with it (forgetCrm). One EXISTS of the store's id
   // key; a store whose id is not of today's form (none is made any more)
@@ -1009,19 +1051,24 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   if (added > 0 && (count ?? 0) + added > MAX_STORE_TASKS) return { result: { ok: false, error: "store_full" } };
   const value = result.tasks.length ? JSON.stringify(result.tasks) : "";
   const grown = taskWeight(person, value) - taskWeight(person, before) + (start ? TASK_COUNT_WEIGHT : 0);
-  // A lock that ran out meanwhile (a stalled request) may have let another
-  // change in: what was read may be stale, so nothing is counted or written.
-  if (!(await holdLock(held))) throw new LockBusyError();
+  // A lock that ran out meanwhile (a stalled request) may have let another change in: the script writes only over the
+  // tasks as read (-1 otherwise) and checks the cap against the count as it is (4), so nothing stale is counted or written.
   // Room is taken before a write that grows, and given back only after a
   // write that shrinks is confirmed: one that may not have landed keeps it.
   if (grown > 0) await needData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
   let written: unknown;
   try {
-    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 1, tasksKey(statsId), person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD]]);
-    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 1 && response[0] !== 2 && response[0] !== -1)) throw new CrmValueWriteUnconfirmed();
+    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 3, tasksKey(statsId), erasedKey(statsId, person), generationKey(statsId, person), person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD, carried, MAX_STORE_TASKS]]);
+    if (!Array.isArray(response) || response.length !== 1 || ![1, 2, 3, 4, -1].includes(response[0] as number)) throw new CrmValueWriteUnconfirmed();
     written = response[0];
   } catch {
     throw new CrmValueWriteUnconfirmed();
+  }
+  if (written === 3 || written === 4) {
+    // The person is deleted, or the page was read before a deletion; or the store filled meanwhile: nothing written,
+    // the room taken for it goes back.
+    if (grown > 0) await giveData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
+    return { result: { ok: false, error: written === 3 ? "gone" : "store_full" } };
   }
   if (written === -1) {
     // Nothing was written: the room taken for it goes back, and the change is refused as busy.

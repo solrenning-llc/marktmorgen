@@ -7,7 +7,7 @@
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS, MAX_TASK_TEXT, TASKS_BUSY, studioRefusal, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
 import { createHash } from "node:crypto";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
-import { CrmValueWriteUnconfirmed, TASKS_RECOUNT_UNITS, TASK_COUNT_FIELD, TASK_COUNT_WEIGHT, TASK_KEPT_BYTES, TasksRecountRefused, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks, tasksRecountUnits } from "@/lib/crm";
+import { CrmValueWriteUnconfirmed, readGeneration, TASKS_RECOUNT_UNITS, TASK_COUNT_FIELD, TASK_COUNT_WEIGHT, TASK_KEPT_BYTES, TasksRecountRefused, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks, tasksRecountUnits } from "@/lib/crm";
 import { LockBusyError } from "@/lib/redis-lock";
 import { dataUsed } from "@/lib/store-data";
 import { dataBytes, utf8Length } from "@/lib/store-data-rules";
@@ -90,7 +90,13 @@ async function main(): Promise<void> {
   const used = async () => (await dataUsed(ROOM))?.used ?? 0;
   const stored = async (person: string) => (await redis.pipeline([["HGET", `nl:crm:tasks:${SAME}`, person]]))[0];
   const weighs = (person: string, value: unknown) => (typeof value === "string" && value ? dataBytes([person, value], 1) : 0);
-  const at = (person: string, fn: (tasks: PersonTask[]) => ReturnType<typeof addTask>) => changePersonTasks(SAME, person, ROOM, fn);
+  // These parts hold the lock and the room: a person deleted in one of them comes back, as if by a purchase (their
+  // deletion's mark taken away, lib/crm.ts personReturned), and the page that changes their tasks is read since. What
+  // the mark and the generation do is held in tests/person-erased-writes.test.ts.
+  const at = async (person: string, fn: (tasks: PersonTask[]) => ReturnType<typeof addTask>) => {
+    await redis.pipeline([["DEL", `nl:crm:erased:${SAME}:${person}`]]);
+    return changePersonTasks(SAME, person, ROOM, fn, undefined, await readGeneration(SAME, person));
+  };
   const roomBefore = await used();
   const both = await Promise.all([at(ANA, (t) => addTask(t, input({ text: "First" }), id(11), NOW)), at(ANA, (t) => addTask(t, input({ text: "Second" }), id(12), NOW))]);
   is("two adds at once: both answered ok", both.map((r) => r.ok), [true, true]);

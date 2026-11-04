@@ -423,10 +423,21 @@ export class MemoryRedis {
           this.run(["HSET", args[1], args[2], args[3]]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:lesson-comments-take:v1\n")) {
+        if (key.startsWith("-- marktmorgen:lesson-comments-add:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, comments, lesson, all, replies, id, raw, at, lastRank, parent] = args;
+          if (parent !== "" && this.run(["HEXISTS", comments, parent]) !== 1) return "gone";
+          this.run(["HSET", comments, id, raw]);
+          this.run(["ZADD", lesson, at, id]);
+          this.run(["ZADD", all, at, id]);
+          this.run(["ZREMRANGEBYRANK", all, 0, lastRank]);
+          if (parent !== "") this.run(["HINCRBY", replies, parent, 1]);
+          return "ok";
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comments-take:v2\n")) {
           const count = Number(args[0]);
           const [comments, all, replies, ...lessonKeys] = args.slice(1, 1 + count);
-          const asked = args.slice(1 + count);
+          const drop = args[1 + count] === "drop";
+          const asked = drop ? lessonKeys.flatMap((k) => (this.run(["ZREVRANGE", k, 0, -1]) as string[]).reverse()) : args.slice(2 + count);
           const askedSet = new Set(asked);
           const taken = new Set<string>();
           const tops = new Set<string>();
@@ -463,6 +474,7 @@ export class MemoryRedis {
               gone.push(raw);
             }
           }
+          if (drop) for (const k of lessonKeys) this.run(["DEL", k]);
           return gone;
         }
         if (key.startsWith("-- marktmorgen:list-blank:v1\n")) {

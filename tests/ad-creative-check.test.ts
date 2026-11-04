@@ -82,5 +82,7 @@ is("England's and Scotland's flags", [rules({ headline: "Bread for England \u{1F
 is("Mongolian with its variation selectors", rules({ headline: "ᠠ᠋ ᠨ᠌" }).includes("disguised"), false);
 is("but a tag character alone, or a selector after a Latin letter, still is", [rules({ headline: "Bread\u{E0041} at home" }), rules({ headline: "Bre᠋ad at home" })].map((r) => r.includes("disguised")), [true, true]);
 
+is("Wales's flag too", rules({ headline: "Cakes \u{1F3F4}\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F} today" }).includes("disguised"), false);
+is("a short hidden word shaped like a subdivision code is refused", rules({ headline: "Bread \u{1F3F4}\u{E0066}\u{E0072}\u{E0065}\u{E0065}\u{E007F} home" }).includes("disguised"), true);
 is("hidden words in tags dressed as a flag are still refused", rules({ headline: "Bread \u{1F3F4}\u{E006C}\u{E0069}\u{E006D}\u{E0069}\u{E0074}\u{E0065}\u{E0064}\u{E0020}\u{E0074}\u{E0069}\u{E006D}\u{E0065}\u{E007F} home" }).includes("disguised"), true);
 done();

@@ -56,6 +56,15 @@ is(
   ["package", "deposit", "series", "move"],
 );
 is(
+  "a deposit is read from the call itself too, so a caller that forgets to say it never mixes it with an add-on; an online call never takes one",
+  [
+    callAddOnsClosed(item("dep", "In person", 12000, { file: null, call: { kind: "weekly", minutes: 60, deposit: 3000, place: { kind: "address" } } }), open),
+    callAddOnsClosed(item("onl", "Online", 12000, { file: null, call: { kind: "weekly", minutes: 60, deposit: 3000 } }), open),
+  ],
+  ["deposit", null],
+);
+is("a form naming more boxes than a call can hold is read no further", chosenCallAddOns(activeCallAddOns(products, coaching, open), ["x", "y", "z", "q", "wb"]).length, 0);
+is(
   "never on a product that is not a paid call: a one-off product keeps its own boxes (lib/product-extras.ts), a free call, one with buyers' own price or several prices",
   [workbook, { ...coaching, priceCents: 0 }, { ...coaching, pwyw: true }, { ...coaching, options: [{ id: "o1" }] }, { ...coaching, recurring: { interval: "month" } }].map((p) => callAddOnsClosed(p as Listing, open)),
   ["notCall", "notCall", "notCall", "notCall", "notCall"],
@@ -97,17 +106,36 @@ is("a product the form names that is not on offer adds nothing, nor does anythin
 is("what they add to the price", callAddOnsTotal(chosenCallAddOns(active, ["wb", "rec", "chk"])), 4300);
 
 part("When a booking with add-ons ends before it takes place");
-is("the buyer cancels: only the call is refunded; the add-on was delivered with their consent", callAddOnRefund("buyer"), "call");
-is("the creator cancels, or the store could not hold the time: the add-ons are refunded too", [callAddOnRefund("creator"), callAddOnRefund("store")], ["callAndAddOns", "callAndAddOns"]);
+const H = 3_600_000;
+const start = Date.UTC(2026, 11, 10, 15);
+is(
+  "the buyer cancels on time: only the call is refunded; the add-on was delivered with their consent",
+  [callAddOnRefund("buyer", { hours: 48, late: false }, start, start - 48 * H), callAddOnRefund("buyer", { hours: 48, late: false }, start, start - 72 * H)],
+  ["call", "call"],
+);
+is(
+  "the buyer cancels 1 ms inside the deadline, booked inside it, or on a call with no deadline: nothing is refunded",
+  [callAddOnRefund("buyer", { hours: 48, late: false }, start, start - 48 * H + 1), callAddOnRefund("buyer", { hours: 48, late: false }, start, start - 1 * H), callAddOnRefund("buyer", { hours: 48, late: true }, start, start - 72 * H), callAddOnRefund("buyer", null, start, start - 72 * H), callAddOnRefund("buyer", { hours: 48, late: false }, NaN, start)],
+  ["nothing", "nothing", "nothing", "nothing", "nothing"],
+);
+is(
+  "the creator cancels, or the store could not hold the time: the add-ons are refunded too, whatever the deadline",
+  [callAddOnRefund("creator", null, start, start - H), callAddOnRefund("store", { hours: 48, late: true }, start, start - H)],
+  ["callAndAddOns", "callAndAddOns"],
+);
 const timely = callAddOnKeepWords({ hours: 24, late: false }, "Lena");
 const late = callAddOnKeepWords({ hours: 24, late: true }, "Lena");
 const none = callAddOnKeepWords(null, "Lena");
 is(
   "with the creator's deadline, before it: the call refunded only if canceled in time, and the extra kept",
-  [timely.includes("Cancel the call at least 24 hours before it starts to get it refunded. You keep the extra."), callAddOnKeepWords({ hours: 1, late: false }, "Lena").includes("at least 1 hour before")],
+  [timely.includes("Cancel the call at least 24 hours before it starts to get the call's price back. You keep the extra."), callAddOnKeepWords({ hours: 2, late: false }, "Lena").includes("at least 2 hours before")],
   [true, true],
 );
-is("booked already inside the deadline: no refund is promised for canceling now", [late.includes("canceling it now gets no refund"), late.includes("to get it refunded")], [true, false]);
+is(
+  "booked already inside the deadline: as cancelTooLate says it, the store does not have to refund, and the law's rights stand",
+  [late.includes("If you cancel now, Lena does not have to refund the call."), late.includes("This does not affect your rights under the law."), late.includes("price back"), late.includes("gets no refund")],
+  [true, true, false, false],
+);
 is("a call without a deadline promises no refund: canceling is asked of the creator", [none.includes("ask Lena"), /to get it refunded|call refunded/.test(none)], [true, false]);
 is("in every case, the creator canceling refunds the extra too", [timely, late, none].every((w) => w.endsWith("If Lena cancels the call, you get the extra refunded too.")), true);
 is("in plain words: every sentence under twenty words", [timely, late, none].every((w) => w.split(/(?<=[.!?])\s/).every((sentence) => sentence.split(/\s+/).length <= 20)), true);

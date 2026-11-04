@@ -76,7 +76,9 @@ export function callAddOnsClosed(product: Listing, context: CallAddOnContext): C
   if (context.move) return "move";
   if (context.fromPackage) return "package";
   if (context.series) return "series";
-  if (context.deposit) return "deposit";
+  // Read from the call itself too, so a caller that forgets to pass it never mixes a deposit and an add-on in one charge
+  // (a deposit is taken online only for a call in person, as chargeNow reads it).
+  if (context.deposit || Boolean(product.call?.deposit && product.call?.place)) return "deposit";
   return null;
 }
 
@@ -120,7 +122,8 @@ export type CallAddOnLine = { productId: string; title: string; cents: number };
  * nothing added: a box is never checked for the buyer.
  */
 export function chosenCallAddOns(active: readonly { bump: Bump; target: Listing }[], raw: unknown): CallAddOnLine[] {
-  const asked = (Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw]).filter((value): value is string => typeof value === "string").map((value) => value.trim());
+  // Read no further than a form can hold, as the one-off checkout does (lib/store-checkout.ts).
+  const asked = (Array.isArray(raw) ? raw.slice(0, MAX_BUMPS + 1) : raw === undefined || raw === null ? [] : [raw]).filter((value): value is string => typeof value === "string").map((value) => value.trim());
   const lines: CallAddOnLine[] = [];
   for (const { bump, target } of active) {
     if (!asked.includes(target.id) || lines.some((line) => line.productId === target.id)) continue;
@@ -138,13 +141,19 @@ export function callAddOnsTotal(lines: readonly CallAddOnLine[]): number {
 export type CallEndedBy = "buyer" | "creator" | "store";
 
 /**
- * What is refunded when a booking with add-ons ends before it takes place:
- * the call alone when the buyer cancels it (the add-on was delivered with
- * their consent and is theirs), the call and every add-on when the creator
- * cancels it or the store could not hold its time.
+ * What is refunded when a booking with add-ons ends before it takes place.
+ * The creator canceling it, or the store not holding its time, refunds the
+ * call and every add-on. The buyer canceling it refunds the call only where
+ * the sale promised it (CancelPromise): a deadline was set, the booking was not
+ * made already inside it, and the buyer cancels at least that many hours
+ * before the start, the same boundary as cancelLate in lib/calls.ts (exactly
+ * on the deadline is still on time). The add-on was delivered with the
+ * buyer's consent and is theirs either way. Times are in milliseconds.
  */
-export function callAddOnRefund(by: CallEndedBy): "call" | "callAndAddOns" {
-  return by === "buyer" ? "call" : "callAndAddOns";
+export function callAddOnRefund(by: CallEndedBy, promise: CancelPromise | null, startMs: number, canceledAtMs: number): "nothing" | "call" | "callAndAddOns" {
+  if (by !== "buyer") return "callAndAddOns";
+  if (!promise || promise.late || !Number.isFinite(startMs) || !Number.isFinite(canceledAtMs)) return "nothing";
+  return startMs - canceledAtMs >= promise.hours * 3_600_000 ? "call" : "nothing";
 }
 
 /**
@@ -158,9 +167,11 @@ export function callAddOnKeepWords(promise: CancelPromise | null, store: string)
   const yours = "An extra is yours as soon as you pay.";
   const theirs = `If ${store} cancels the call, you get the extra refunded too.`;
   if (!promise) return `${yours} If you want to cancel the call, ask ${store}. You keep the extra either way. ${theirs}`;
-  const hours = promise.hours === 1 ? "1 hour" : `${promise.hours} hours`;
-  if (promise.late) return `${yours} This call starts in less than ${hours}, so canceling it now gets no refund. You keep the extra. ${theirs}`;
-  return `${yours} Cancel the call at least ${hours} before it starts to get it refunded. You keep the extra. ${theirs}`;
+  // Every deadline is at least 2 hours (CANCEL_HOURS), so it is always said in hours.
+  const hours = `${promise.hours} hours`;
+  // As cancelTooLate says it (lib/buyer-words/booking.ts): the store does not have to refund, which leaves it free to, and the law's rights stand.
+  if (promise.late) return `${yours} This call starts in less than ${hours}. If you cancel now, ${store} does not have to refund the call. This does not affect your rights under the law. You keep the extra. ${theirs}`;
+  return `${yours} Cancel the call at least ${hours} before it starts to get the call's price back. You keep the extra. ${theirs}`;
 }
 
 /** What the creator is told when an add-on set on a call is not offered, naming what to change. */
@@ -168,7 +179,7 @@ export function callAddOnPauseWords(pause: CallAddOnPause, offer: string | null)
   const name = offer ? `"${offer}"` : "That product";
   switch (pause) {
     case "notCall":
-      return "Add-ons are offered on a paid call only. Give this call a price first.";
+      return "Add-ons are offered only on a call sold at one set price, paid once.";
     case "package":
       return "Add-ons are not offered on a session paid by a package, because that session costs nothing here. They are offered when someone books and pays for one call.";
     case "deposit":

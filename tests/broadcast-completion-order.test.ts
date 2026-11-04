@@ -5,6 +5,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 async function main() {
   redis.clear();
   const owner = "batch-owner@example.com";
@@ -16,21 +17,9 @@ async function main() {
   const emails = ["reader0@example.com", "reader1@example.com", "reader2@example.com"];
   for (const email of emails) await upsertContact(store.listId!, email, { agreed: true, explicit: true, source: "free" }, ROOM);
   process.env.RESEND_API_KEY = "re_test_recipient_batch_only";
-  let messages: { to: string[] }[] = [];
-  let delivery: "ok" | "lost" | "server-error" | "refused" = "ok";
-  let attempts = 0;
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (url, init) => {
-    if (String(url).includes("api.resend.com/emails/batch")) {
-      attempts += 1;
-      if (delivery === "refused") return new Response("synthetic confirmed refusal", { status: 404 });
-      messages.push(...JSON.parse(String(init?.body)));
-      if (delivery === "lost") throw new TypeError("synthetic reply lost after acceptance");
-      if (delivery === "server-error") return new Response("synthetic server error after acceptance", { status: 500 });
-      return new Response(JSON.stringify({ data: [] }));
-    }
-    return new Response("{}", { status: 404 });
-  }) as typeof fetch;
+  const mail = installSesMailFixture();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   const id = "111111111111111111111111", key = "nl:mail:bc:" + id, toKey = key + ":to";
   const base = { id, listId: store.listId, handle: store.handle, subject: "Subject", body: "Message", productId: null, notProductId: null, who: "all", narrow: null, status: "sending", createdAt: 100, sendAt: 100, finishedAt: 0, total: 2, sent: 0, note: "", failures: 0, listed: true, tagged: true, test: null };
   const original = redis.pipeline;
@@ -50,7 +39,10 @@ async function main() {
     return original.call(redis, commands);
   };
   const seed = async () => {
-    messages = []; attempts = 0; delivery = "ok"; terminalStatus = "sent"; events.length = 0; applyFinal = false;
+    mail.clearCaptured();
+    mail.setSesOutcome("ok");
+    mail.clearBatch(`bc:${id}:0:0:2`, emails.slice(0, 2));
+    terminalStatus = "sent"; events.length = 0; applyFinal = false;
     await original.call(redis, [["SET", key, JSON.stringify(base)], ["DEL", toKey], ["RPUSH", toKey, ...emails.slice(0, 2)], ["SADD", "nl:mail:queue", id]]);
   };
   const advance = () => advanceBroadcast(id, storeForHandle, Date.now() + 5000);
@@ -66,10 +58,10 @@ async function main() {
       is("campaign remains queued", (await original.call(redis, [["SISMEMBER", "nl:mail:queue", id]]))[0], 1);
       const progress = JSON.parse(String((await original.call(redis, [["GET", key]]))[0]));
       is("last confirmed progress retains processed offset", [progress.status, progress.sent], ["sending", 2]);
-      is("only the original synthetic messages were sent", messages.length, 2);
+      is("only the original synthetic SES messages were sent", [mail.ses.length, mail.resend.length], [2, 0]);
       finalReply = ["OK"]; applyFinal = true;
       is("retry completes from saved offset", (await advance())?.status, "sent");
-      is("retry does not resend the processed batch", messages.length, 2);
+      is("retry does not resend or switch provider", [mail.ses.length, mail.resend.length], [2, 0]);
       is("confirmed completion precedes cleanup", events.slice(-2), ["terminal-save", "snapshot-delete"]);
       is("confirmed completion leaves queue", (await original.call(redis, [["SISMEMBER", "nl:mail:queue", id]]))[0], 0);
     }
@@ -81,13 +73,13 @@ async function main() {
     is("snapshot retained after lost acknowledgement", events, ["terminal-save"]);
     is("applied terminal status stays saved", JSON.parse(String((await original.call(redis, [["GET", key]]))[0])).status, "sent");
     is("next run recognizes saved completion", (await advance())?.status, "sent");
-    is("completed campaign is not sent twice", messages.length, 2);
+    is("completed campaign is not sent twice or through Resend", [mail.ses.length, mail.resend.length], [2, 0]);
     is("next run removes completed campaign from queue", (await original.call(redis, [["SISMEMBER", "nl:mail:queue", id]]))[0], 0);
 
     part("An uncertain provider outcome stops automatic campaign retries");
     for (const loss of ["lost", "server-error"] as const) {
       await seed();
-      delivery = loss; terminalStatus = "failed"; finalReply = ["OK"]; applyFinal = true;
+      mail.setSesOutcome(loss); terminalStatus = "failed"; finalReply = ["OK"]; applyFinal = true;
       await original.call(redis, [["EXPIRE", toKey, 60 * 86_400]]);
       const originalTtl = Number((await original.call(redis, [["TTL", toKey]]))[0]);
       const uncertain = (await advance())!;
@@ -101,17 +93,17 @@ async function main() {
       const remainingTtl = Number((await original.call(redis, [["TTL", toKey]]))[0]);
       is(`${loss}: existing recipient retention is neither removed nor extended`,
         remainingTtl <= originalTtl && remainingTtl >= originalTtl - 60, true);
-      is(`${loss}: one possible provider acceptance and no snapshot deletion`, [attempts, messages.length, events], [1, 2, ["terminal-save"]]);
+      is(`${loss}: one possible provider acceptance and no snapshot deletion`, [mail.calls.ses, mail.sesAttempts.length, mail.ses.length, mail.resendAttempts.length, events], [2, 2, 0, 0, ["terminal-save"]]);
       is(`${loss}: confirmed terminal state precedes existing queue cleanup`,
         (await original.call(redis, [["SISMEMBER", "nl:mail:queue", id]]))[0], 0);
       await advance();
       await advance();
-      is(`${loss}: later workers do not repeat the possibly accepted batch`, [attempts, messages.length], [1, 2]);
+      is(`${loss}: later workers do not repeat the possibly accepted batch`, [mail.calls.ses, mail.sesAttempts.length, mail.resendAttempts.length], [2, 2, 0]);
     }
 
     part("An applied uncertain-state write with a lost reply stays terminal");
     await seed();
-    delivery = "lost"; terminalStatus = "failed"; finalReply = []; applyFinal = true;
+    mail.setSesOutcome("lost"); terminalStatus = "failed"; finalReply = []; applyFinal = true;
     let uncertaintyWriteLost = false;
     try { await advance(); } catch { uncertaintyWriteLost = true; }
     is("unknown terminal acknowledgement throws without cleanup", [uncertaintyWriteLost, events], [true, ["terminal-save"]]);
@@ -121,19 +113,19 @@ async function main() {
       (await original.call(redis, [["SISMEMBER", "nl:mail:queue", id]]))[0], 1);
     is("next reader recognizes terminal uncertainty", (await advance())?.status, "failed");
     is("next reader cleans the queue without another provider attempt",
-      [attempts, messages.length, (await original.call(redis, [["SISMEMBER", "nl:mail:queue", id]]))[0]], [1, 2, 0]);
+      [mail.calls.ses, mail.sesAttempts.length, mail.resendAttempts.length, (await original.call(redis, [["SISMEMBER", "nl:mail:queue", id]]))[0]], [2, 2, 0, 0]);
 
     part("Confirmed refusal keeps the existing bounded retry policy");
     await seed();
-    delivery = "refused";
+    mail.setSesOutcome("refused");
     for (let count = 1; count <= 5; count += 1) {
       const refused = (await advance())!;
       is(`known refusal ${count}: no unknown-acceptance shortcut`,
         [refused.status, refused.failures, refused.sent], [count === 5 ? "failed" : "sending", count, 0]);
     }
     is("known refusals still allow exactly the existing five tries and accept nobody",
-      [attempts, messages.length], [5, 0]);
-  } finally { redis.pipeline = original; globalThis.fetch = originalFetch; }
+      [mail.calls.ses, mail.ses.length, mail.resendAttempts.length], [10, 0, 0]);
+  } finally { redis.pipeline = original; mail.restore(); }
   done();
 }
 void main();

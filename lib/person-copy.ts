@@ -74,12 +74,18 @@ import { packagesKey, readBought } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
 import { callScope, readRecords } from "@/lib/meet-records";
 import { heldPaymentsOf } from "@/lib/closing-holds";
+import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
+import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 
 /** What the copy does with each module the erasure reaches, said in a few words to the person. */
 export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>> = {
+  "lib/shipment-mail-outbox.ts": { how: "copied", what: "Your saved shipping-update messages and their pending state, if the queue has been activated; deletion fences are kept as one-way marks" },
+  "lib/order-confirmation-outbox.ts": { how: "copied", what: "Your linked purchase confirmations, original payment reference, amount and pending state, if the queue has been activated; erasure and duplicate-prevention fences are kept as one-way marks" },
+  "lib/resend-fallback-budget.ts": { how: "marks", what: "Linked financial send-intent and message fingerprints, quota holds and outcome marks, without a plain address or message; no account-wide ledger of other people's sends is included" },
+  "lib/orders.ts": { how: "marks", what: "Order-reference and accounting fingerprints that prevent counting a payment twice; they contain no plain email message and do not prove delivery" },
   "lib/flows.ts": { how: "copied", what: "Which of the store's sequences and workflows you are in, and each step taken" },
   "lib/mail-clicks.ts": { how: "copied", what: "Which of the store's sequence emails you used a link in" },
   "lib/mail-health.ts": { how: "marks", what: "A mark that your address was counted in this week's delivery checks, with nothing else in it" },
@@ -171,6 +177,8 @@ const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([[
 
 /** One reader per copied module, each only reading. */
 export const COPIERS: Readonly<Record<string, Copier>> = {
+  "lib/shipment-mail-outbox.ts": s => shipmentMailOf(s.statsId, s.email),
+  "lib/order-confirmation-outbox.ts": s => orderConfirmationMailOf(s.statsId, s.email),
   "lib/contacts.ts": async (s) => {
     if (!s.listId) return [];
     const [raw] = await redisPipeline([["HGET", leadsKey(s.listId), s.email]]);

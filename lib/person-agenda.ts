@@ -1,5 +1,5 @@
 import { personKey } from "@/lib/person-key";
-import { type DueTask, tasksDue } from "@/lib/person-tasks";
+import { type DueTask, MAX_STORE_TASKS, MAX_TASK_TEXT, tasksDue } from "@/lib/person-tasks";
 import { buyerLedger } from "@/lib/segments";
 import type { Store } from "@/lib/store";
 
@@ -14,6 +14,26 @@ import type { Store } from "@/lib/store";
 
 /** Tasks listed in each group; the rest are counted. */
 export const AGENDA_SHOWN = 50;
+/** The most rows the agenda sends: each of its four groups at AGENDA_SHOWN, for each of the three days it is made for. */
+export const AGENDA_MAX_ROWS = 3 * 4 * AGENDA_SHOWN;
+/** The most one task weighs as kept, in bytes: its words at three bytes a character, its teammate's address, its id, date and times. */
+export const MAX_TASK_RECORD_BYTES = 3 * MAX_TASK_TEXT + 254 + 160;
+/** The most every task of a store weighs, all read for the agenda (lib/crm.ts, readAllTasks). */
+export const AGENDA_TASKS_BYTES = MAX_STORE_TASKS * MAX_TASK_RECORD_BYTES;
+/**
+ * The most one row of the agenda sends to the browser, in bytes: its task,
+ * the person's address and the link, written in the page and again, escaped,
+ * in what React reads to take it over (two and a half times, at the most).
+ */
+export const AGENDA_ROW_SENT_BYTES = Math.ceil(2.5 * (MAX_TASK_RECORD_BYTES + 2 * 254 + 200));
+/**
+ * Studio requests the agenda counts before it reads (on top of the buyers
+ * page's own): every task of the store and its rows sent on
+ * (tests/plan-cost-registry.ts, AGENDA_READ). Reading the buyers from the
+ * creator's Stripe account again, when the ten-minute copy ran out, counts
+ * BUYER_LEDGER_UNITS more just before it happens (lib/segments.ts).
+ */
+export const AGENDA_UNITS = 4;
 /** A person's key, as in the address of their page from the agenda. */
 export const PERSON_KEY = /^[0-9a-f]{32}$/;
 
@@ -34,17 +54,21 @@ export function addressesOf(statsId: string, persons: ReadonlySet<string>, email
   return found;
 }
 
-/** The addresses of these people among the store's buyers, and whether that reading of buyers was cut short. */
-export async function personAddresses(store: Store, persons: ReadonlySet<string>): Promise<{ addresses: Map<string, string>; partial: boolean }> {
+/**
+ * The addresses of these people among the store's buyers, and whether that
+ * reading of buyers was cut short. `count` is asked before Stripe is read
+ * again (buyerLedger), so a page counts that reading only when it happens.
+ */
+export async function personAddresses(store: Store, persons: ReadonlySet<string>, count?: () => Promise<boolean>): Promise<{ addresses: Map<string, string>; partial: boolean }> {
   if (!store.statsId || !persons.size) return { addresses: new Map(), partial: false };
-  const ledger = await buyerLedger(store);
+  const ledger = await buyerLedger(store, count);
   return { addresses: addressesOf(store.statsId, persons, ledger.buyers.keys()), partial: ledger.partial };
 }
 
 /** The address of one person among the store's buyers, for their page opened from the agenda. */
-export async function addressForPerson(store: Store, person: string): Promise<string | null> {
+export async function addressForPerson(store: Store, person: string, count?: () => Promise<boolean>): Promise<string | null> {
   if (!PERSON_KEY.test(person)) return null;
-  const { addresses } = await personAddresses(store, new Set([person]));
+  const { addresses } = await personAddresses(store, new Set([person]), count);
   return addresses.get(person) ?? null;
 }
 

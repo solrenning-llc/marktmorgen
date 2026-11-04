@@ -53,14 +53,44 @@ export const TASK_REFUSALS: Readonly<Record<TaskRefusal, string>> = {
 /** What a change refused while another one is being saved says (lib/crm.ts, changePersonTasks; answered 409 "busy"). */
 export const TASKS_BUSY = "Someone else is changing tasks in this store right now. Try again in a moment.";
 
-const line = (raw: unknown) => (typeof raw === "string" ? raw.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim() : "");
+/**
+ * Signs that change how the words around them are drawn without being seen,
+ * as lib/sequence-import.ts takes them out: the soft hyphen, the zero-width
+ * space, the direction marks, embeddings, overrides and isolates (words shown
+ * backwards, Unicode Technical Report 36), the word joiner and invisible
+ * "function" signs, and the byte order mark. The joiners U+200C and U+200D
+ * stay on purpose: Persian, the Indic scripts and emoji need them.
+ */
+const UNSEEN = /[\u00ad\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+/**
+ * Tag characters (U+E0000 to U+E007F), which are never drawn and can carry
+ * words no one sees, except in the three flags written with them (England,
+ * Scotland and Wales: the black flag, "gbeng", "gbsct" or "gbwls" in tag
+ * letters, and the cancel tag), as lib/ad-creative-check.ts keeps them.
+ */
+const TAG_FLAG = /(\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F})/u;
+const TAG = /[\u{E0000}-\u{E007F}]/gu;
+const withoutTags = (text: string) => text.split(TAG_FLAG).map((part, i) => (i % 2 ? part : part.replace(TAG, ""))).join("");
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+
+/**
+ * One line: control characters (C0 and C1) and runs of spaces made single
+ * spaces, the unseen signs taken out, half a character pair (a lone
+ * surrogate, never typed) shown as U+FFFD, in the composed form (NFC); trimmed.
+ */
+const line = (raw: unknown) =>
+  typeof raw === "string" ? withoutTags(raw).replace(LONE_SURROGATE, "\ufffd").normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(UNSEEN, "").replace(/\s+/g, " ").trim() : "";
+
+/** True when the words have a character that is drawn: not only spaces, joiners, marks or fillers. */
+const seen = (value: string) => /[^\s\p{C}\p{M}\u115f\u1160\u3164\uffa0\u2800]/u.test(value);
 
 export type TaskInput = { text: string; due: string; assignee: string };
 
 /** A task's words, date and teammate as typed, checked. `isAssignee` says who may be responsible. */
 export function readTaskInput(raw: { text?: unknown; due?: unknown; assignee?: unknown }, isAssignee: (email: string) => boolean): { ok: true; value: TaskInput } | { ok: false; error: TaskRefusal } {
   const text = line(raw.text);
-  if (!text) return { ok: false, error: "text" };
+  // Words no one can see (only zero-width spaces, joiners or fillers) are no task.
+  if (!text || !seen(text)) return { ok: false, error: "text" };
   if (text.length > MAX_TASK_TEXT) return { ok: false, error: "long" };
   const due = raw.due === undefined || raw.due === "" ? "" : raw.due;
   if (due !== "" && !validCrmDate(due)) return { ok: false, error: "date" };

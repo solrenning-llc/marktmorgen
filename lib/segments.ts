@@ -68,7 +68,27 @@ const RENEWALS_SECONDS = 25;
  * currencies do not add up, so "spent with you" counts the store's currency
  * only (22 [E5], unit 2c).
  */
-export async function buyerLedger(store: Store): Promise<Ledger> {
+/** Thrown by buyerLedger when what reading Stripe again costs could not be counted first: nothing was read. */
+export class LedgerNotCounted extends Error {
+  constructor() {
+    super("the reading of the store's buyers could not be counted");
+    this.name = "LedgerNotCounted";
+  }
+}
+
+/**
+ * Studio requests one reading of the buyers from Stripe costs at the most,
+ * when its ten-minute copy ran out (tests/plan-cost-registry.ts,
+ * BUYER_LEDGER): for a caller that counts them (`count`, below).
+ */
+export const BUYER_LEDGER_UNITS = 8;
+
+/**
+ * `count`, when given, is asked just before Stripe is read (never when the
+ * ten-minute copy answers) and answers whether what that costs was counted;
+ * when it was not, nothing is read and LedgerNotCounted is thrown.
+ */
+export async function buyerLedger(store: Store, count?: () => Promise<boolean>): Promise<Ledger> {
   if (!readsSales(store) && !store.pastBuyers) return { buyers: new Map(), partial: false };
   if (store.statsId && isRedisConfigured()) {
     const [cached] = await redisPipeline([["GET", ledgerKey(store.statsId)]]);
@@ -83,6 +103,7 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
       }
     }
   }
+  if (count && !(await count().catch(() => false))) throw new LedgerNotCounted();
   // Checkouts and offers after paying; and, on a Stripe account, the renewals
   // of memberships and payment plans, and what refunds and disputes took back
   // (270 [GR1], unit 2): a member who pays every month is not quiet since they

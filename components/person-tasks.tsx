@@ -14,7 +14,66 @@ export function browserDay(nowMs = Date.now()): string {
   return dayIn(nowMs, Intl.DateTimeFormat().resolvedOptions().timeZone);
 }
 
-const noSubscription = () => () => {};
+/** Milliseconds from `nowMs` to a second past the next midnight where this browser is. */
+export function untilNextDay(nowMs: number): number {
+  const now = new Date(nowMs);
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1).getTime() - nowMs;
+}
+
+/** What watching the day needs from the browser, given in a test. */
+export type DayClock = {
+  now: () => number;
+  setTimer: (run: () => void, ms: number) => unknown;
+  clearTimer: (timer: unknown) => void;
+  /** Where "visibilitychange" and "focus" are heard: the document and the window. */
+  listen: (run: () => void) => () => void;
+};
+
+const browserClock = (): DayClock => ({
+  now: () => Date.now(),
+  setTimer: (run, ms) => setTimeout(run, ms),
+  clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  listen: (run) => {
+    const seen = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    document.addEventListener("visibilitychange", seen);
+    window.addEventListener("focus", run);
+    return () => {
+      document.removeEventListener("visibilitychange", seen);
+      window.removeEventListener("focus", run);
+    };
+  },
+});
+
+/**
+ * Tells `onChange` when the day may have changed: just past each midnight
+ * where this browser is, and when the page is seen again (a laptop opened
+ * the next morning, whose timers slept). React reads the day again then, and
+ * draws again only when it did change.
+ */
+export function watchDay(onChange: () => void, clock: DayClock = browserClock()): () => void {
+  let timer: unknown;
+  const arm = () => {
+    clock.clearTimer(timer);
+    // Never longer than a timer can wait (about 24.8 days), so a far midnight is never read as now.
+    timer = clock.setTimer(() => {
+      onChange();
+      arm();
+    }, Math.min(Math.max(untilNextDay(clock.now()), 1_000), 2 ** 31 - 1));
+  };
+  arm();
+  const stop = clock.listen(() => {
+    onChange();
+    arm();
+  });
+  return () => {
+    clock.clearTimer(timer);
+    stop();
+  };
+}
+
+const watchBrowserDay = (onChange: () => void) => watchDay(onChange);
 
 type Field = "text" | "due" | "assignee";
 /** Where the focus goes once the screen has drawn a change, so it is never left on a button that went away (AAA audit C1). */
@@ -27,10 +86,59 @@ const FIELD_OF: Partial<Record<string, Field>> = { text: "text", long: "text", d
  * drawn with `serverDay` (the server cannot know the creator's time zone);
  * once in the browser, React draws again with the browser's day, so a task
  * due today in Fortaleza at 22:30 is due today there, not past, and the
- * first drawing never mismatches the server's.
+ * first drawing never mismatches the server's. A page left open past
+ * midnight moves to the new day by itself (watchDay).
  */
 export function useCreatorDay(serverDay: string): string {
-  return useSyncExternalStore(noSubscription, () => browserDay(), () => serverDay);
+  return useSyncExternalStore(watchBrowserDay, () => browserDay(), () => serverDay);
+}
+
+/**
+ * What an undo of a removal sends: the task's words, date and teammate. A
+ * teammate who is no longer among those who may be responsible (they left
+ * the team, or lost access to deals) is not sent, so the task comes back
+ * with nobody named instead of not coming back at all; `unassigned` says so.
+ */
+export function undoBody(task: PersonTask, assignees: readonly string[]): { body: Record<string, unknown>; unassigned: boolean } {
+  const stays = !task.assignee || assignees.includes(task.assignee);
+  return { body: { action: "add", text: task.text, due: task.due, assignee: stays ? task.assignee : "" }, unassigned: !stays };
+}
+
+/**
+ * The task an add put in: the one in `after` that was not in `before`
+ * (never the last one another tab added). When another tab added one at the
+ * same moment, the new one with the words, date and teammate sent (`like`);
+ * null only when none of the new ones has them.
+ */
+export function addedTask(before: readonly PersonTask[], after: readonly PersonTask[], like?: { text: string; due: string; assignee: string }): PersonTask | null {
+  const known = new Set(before.map((task) => task.id));
+  const added = after.filter((task) => !known.has(task.id));
+  if (added.length === 1) return added[0];
+  const same = like ? added.filter((task) => task.text === like.text && task.due === like.due && task.assignee === like.assignee) : [];
+  return same.length ? same[same.length - 1] : null;
+}
+
+/**
+ * What an undo says once it is done, in one message: put back, with nobody
+ * named when its teammate may no longer be responsible, and done again when
+ * it was done; or, when the task put back could not be told apart from one
+ * added elsewhere at the same moment, or done again did not save ("failed"),
+ * that it is open and can be marked done.
+ */
+export function undoWords(task: PersonTask, unassigned: boolean, doneAgain: boolean | null | "failed"): string {
+  const back = unassigned ? `Task put back with nobody named, since ${task.assignee} can no longer be responsible for tasks.` : "Task put back.";
+  if (!task.done) return back;
+  if (doneAgain === "failed") return `${back} It is open again: marking it done did not save. Mark it done if it still is.`;
+  return doneAgain ? `${back} Marked done again.` : `${back} It is open: mark it done if it still is.`;
+}
+
+/**
+ * Refusals that mean this screen is out of date (another tab or teammate
+ * removed the task, or filled the person's list, or the teammate chosen left
+ * the team): the tasks are read again so what is shown is what is kept.
+ */
+export function staleRefusal(error: string | undefined): boolean {
+  return error === "unknown" || error === "full" || error === "store_full" || error === "assignee";
 }
 
 /**
@@ -55,6 +163,8 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
   const [errorAsk, setErrorAsk] = useState(0);
   const [focusAsk, setFocusAsk] = useState(0);
   const working = useRef(false);
+  // The code of the last refusal, so an undo refused for its teammate can be put back with nobody (round 3, M3).
+  const lastRefusal = useRef("");
   const focusNext = useRef<FocusTo | null>(null);
   const textField = useRef<HTMLInputElement>(null);
   const dueField = useRef<HTMLInputElement>(null);
@@ -64,6 +174,21 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
   const countLine = useRef<HTMLParagraphElement>(null);
   const boxes = useRef(new Map<string, HTMLInputElement>());
   const full = tasks.length >= MAX_PERSON_TASKS;
+
+  /** The person's tasks read again, after a refusal that says this screen is out of date; true when they were. */
+  async function reread(): Promise<boolean> {
+    try {
+      const response = await fetch(`/api/store/person-tasks?person=${encodeURIComponent(person)}`, { headers: { Accept: "application/json" } });
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; tasks?: PersonTask[] };
+      if (answer.ok && Array.isArray(answer.tasks)) {
+        setTasks(answer.tasks);
+        return true;
+      }
+    } catch {
+      // Left as shown; the refusal below still says what happened.
+    }
+    return false;
+  }
 
   function focusAfterDrawing(next: FocusTo) {
     focusNext.current = next;
@@ -119,10 +244,10 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
         if (done) toast(done);
         return answer.tasks;
       }
-      refuse(
-        answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need first." : "That did not save. Try again in a moment."),
-        form ? (FIELD_OF[answer.error ?? ""] ?? null) : null,
-      );
+      lastRefusal.current = answer.error ?? "";
+      const said = answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need first." : "That did not save. Try again in a moment.");
+      // Changed elsewhere since this page was drawn: what is kept now is shown, and the refusal says why.
+      refuse(staleRefusal(answer.error) && (await reread()) ? `${said} The list now shows the tasks as they are.` : said, form ? (FIELD_OF[answer.error ?? ""] ?? null) : null);
     } catch {
       refuse("That did not save. Check your connection and try again.", null);
     } finally {
@@ -140,14 +265,31 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
     }
   }
 
-  /** The removed task put back with its words, date and teammate, done again if it was; said once. */
+  /**
+   * The removed task put back with its words, date and teammate, done again
+   * if it was; with nobody named when that teammate may no longer be
+   * responsible, and said so; all of it said once.
+   */
   async function undoRemove(task: PersonTask) {
     if (busy || full) return;
-    const back = await send({ action: "add", text: task.text, due: task.due, assignee: task.assignee }, task.done ? null : "Task put back.");
+    let { body, unassigned } = undoBody(task, assignees);
+    const before = tasks;
+    // Said once, when all of it is done (round 2, A-L): never a message for the add and another for done again.
+    let back = await send(body, task.done ? null : undoWords(task, unassigned, null));
+    // The teammate left after this page was drawn (round 3, M3): put back once more with nobody responsible, and said so.
+    if (!back && lastRefusal.current === "assignee" && body.assignee) {
+      unassigned = true;
+      body = { ...body, assignee: "" };
+      back = await send(body, task.done ? null : undoWords(task, unassigned, null));
+    }
     if (!back) return;
     setRemoved(null);
-    const added = back[back.length - 1];
-    if (task.done && added) await send({ action: "done", id: added.id, done: true }, "Task put back.");
+    const added = addedTask(before, back, { text: String(body.text), due: String(body.due), assignee: String(body.assignee) });
+    if (task.done) {
+      if (!added) toast(undoWords(task, unassigned, false));
+      // Put back, but done again did not save (round 3, L5): it is said to be open.
+      else if (!(await send({ action: "done", id: added.id, done: true }, undoWords(task, unassigned, true)))) refuse(undoWords(task, unassigned, "failed"), null);
+    }
     focusAfterDrawing(added ? { to: "task", id: added.id } : { to: "count" });
   }
 

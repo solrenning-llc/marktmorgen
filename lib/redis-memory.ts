@@ -538,47 +538,6 @@ export class MemoryRedis {
           }
           return 1;
         }
-        // lib/redis-take.ts: read and deleted in one step.
-        if (key.startsWith("-- marktmorgen:hash-take-all:v1\n") && args[0] === "1" && args.length === 2) {
-          const held = this.run(["HGETALL", args[1]]) as string[];
-          // Deleted either way: reading a missing hash here leaves an empty one behind, which Redis never has.
-          this.run(["DEL", args[1]]);
-          return held;
-        }
-        if (key.startsWith("-- marktmorgen:hash-take-field:v1\n") && args[0] === "1" && args.length === 3) {
-          const value = this.run(["HGET", args[1], args[2]]);
-          if (typeof value === "string") this.run(["HDEL", args[1], args[2]]);
-          return value ?? null;
-        }
-        if (key.startsWith("-- marktmorgen:hash-swap-if:v1\n") && args[0] === "1" && args.length === 5) {
-          if (this.run(["HGET", args[1], args[2]]) !== args[3]) return 0;
-          this.run(["HSET", args[1], args[2], args[4]]);
-          return 1;
-        }
-        if (key.startsWith("-- marktmorgen:hash-del-if:v1\n") && args[0] === "1" && args.length === 4) {
-          if (this.run(["HGET", args[1], args[2]]) !== args[3]) return 0;
-          return this.run(["HDEL", args[1], args[2]]);
-        }
-        if (key.startsWith("-- marktmorgen:set-take-count:v1\n") && args[0] === "1" && args.length === 2) {
-          const n = Number(this.run(["SCARD", args[1]])) || 0;
-          this.run(["DEL", args[1]]);
-          return n;
-        }
-        if (key.startsWith("-- marktmorgen:set-and-values-take:v1\n")) {
-          const count = Number(args[0]);
-          const keys = args.slice(1, 1 + count);
-          if (!count || keys.length !== count || args.length !== 1 + count) throw new Error("MemoryRedis: unsupported EVAL");
-          // Counted before reading: a read of a missing key here leaves an empty one behind, which Redis never has.
-          const gone = keys.filter((k) => {
-            this.live(k);
-            const held = this.data.get(k);
-            return held !== undefined && !((held instanceof Map || held instanceof Set) && held.size === 0) && !(Array.isArray(held) && held.length === 0);
-          }).length;
-          const members = Number(this.run(["SCARD", keys[0]])) > 0 ? (this.run(["SMEMBERS", keys[0]]) as string[]) : [];
-          const values = keys.slice(1).map((k) => this.run(["GET", k]) ?? null);
-          this.run(["DEL", ...keys]);
-          return [members, values, gone];
-        }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");

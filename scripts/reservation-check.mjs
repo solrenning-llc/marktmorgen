@@ -16,7 +16,8 @@ import { execFileSync } from "node:child_process";
  * of its own new studio routes without touching the others (inbox C3-14).
  * They are never reserved.
  */
-export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts"]);
+// tests/plan-cost-registry.ts and tests/test-config.mjs (inbox CX-29): registries where each unit adds its own rows; each agent adds or changes only its own rows and keeps both in a conflict.
+export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts", "tests/plan-cost-registry.ts", "tests/test-config.mjs"]);
 
 /** The folder of each agent's own reservations file. */
 export const RESERVATIONS_DIR = "docs/reservations/";

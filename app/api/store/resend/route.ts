@@ -17,7 +17,8 @@ const ANSWERS: Record<string, number> = { unknown: 404, call: 400, refunded: 409
  * buyer paid with, never to one typed here.
  */
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "orders", 1_000);
+  // A locked session (lib/two-step.ts) may rewrite the thank-you note, which this email carries: never sent from it.
+  const guarded = await guardStoreWrite(request, "orders", 1_000, () => "resend");
   if (!guarded.ok) return guarded.response;
   const { store, body } = guarded;
   const reference = text(body.reference, 220);

@@ -11,6 +11,9 @@ import {
   storeForEmail,
 } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { readListing } from "@/lib/catalog";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import {
   IMAGE_CONTENT_TYPES,
   MAX_ALT_LENGTH,
@@ -72,6 +75,8 @@ export async function POST(request: NextRequest) {
     if (action === "attach") {
       const store = await storeForEmail(ref);
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
+      // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
+      if ((await lockedFor(request, "products", "replace")) && (await readListing(store, id))?.image) return refusedJson("locked");
       const path = text(body.path, 200);
       if (!ownsImagePath(path, await imageFolder(ref))) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });

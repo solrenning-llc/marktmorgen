@@ -4,6 +4,9 @@ import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
 import { dropStamped } from "@/lib/pdf-stamp";
+import { readListing } from "@/lib/catalog";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 
 /**
  * Puts the file that was just uploaded onto the product, or takes it off.
@@ -18,7 +21,8 @@ import { dropStamped } from "@/lib/pdf-stamp";
  * exists if the write failed in between.
  */
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "products");
+  // Taking the file off deletes it and the buyers' stamped copies: named apart (lib/two-step.ts).
+  const guarded = await guardStoreWrite(request, "products", 4_000, (sent) => (sent.detach === true ? "detach" : ""));
   if (!guarded.ok) return guarded.response;
   const { ref, body } = guarded;
 
@@ -34,6 +38,10 @@ export async function POST(request: NextRequest) {
     if (!store) {
       return Response.json({ ok: false, error: "none" }, { status: 400 });
     }
+
+    // A new file deletes the one there, with the buyers' stamped copies: not from a session let in
+    // without its second step (lib/two-step.ts).
+    if (!detach && (await lockedFor(request, "products", "replace")) && (await readListing(store, id))?.file) return refusedJson("locked");
 
     let file: ProductFile | null = null;
     if (!detach) {

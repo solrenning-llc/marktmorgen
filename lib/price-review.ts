@@ -254,3 +254,76 @@ export function optionPriceReview(
     note: notes.join(" "),
   };
 }
+
+/**
+ * What removing one price option really changes, said after "Remove “…”."
+ * in its confirmation (VR: nothing said may be untrue):
+ *
+ *   - the file on it goes with it (app/api/store/option/route.ts);
+ *   - anyone who bought at it, when it handed over its own file or link,
+ *     can no longer get that from their order (lib/buyer-orders.ts,
+ *     deliveryOf: a removed option leaves the order's delivery empty), unless
+ *     it was the last and the product has its own file or link, which they
+ *     then get instead. A course or podcast is opened by the product, not the
+ *     option, so its buyers keep it, but lose the option's extra file or link;
+ *   - the last one: buyers then pay the product's own price, per period on
+ *     a membership, with the introductory and yearly prices the checkout
+ *     would then offer (lib/intro-price.ts activeIntro, lib/yearly-price.ts
+ *     activeYearly, read for the product without it), or, when the product
+ *     hands nothing over on its own, it cannot be bought until it does, said
+ *     by what it lacks (lib/store-checkout.ts, canSellProduct);
+ *   - on a membership, members who joined at it keep being charged;
+ *   - a payment plan that starts or stops being offered without it
+ *     (lib/product-extras.ts, activePlan).
+ *
+ * "Nothing else on the product changes" only when none of that is so.
+ */
+export function optionRemovalWords(
+  /** `delivers`: it has its own file or link; `extra`: on a course or podcast, where that is something extra. */
+  option: { hasFile: boolean; delivers: boolean; extra: boolean },
+  product: {
+    options: number;
+    interval: Interval | null;
+    hidden: boolean;
+    ownPriceCents: number;
+    /** What the product lacks to be sold on its own, or null when it hands something over by itself. */
+    missing: "lesson" | "episode" | "delivery" | null;
+    /** Whether it has a file or link of its own, which buyers of a removed last option then get. */
+    ownDelivery: boolean;
+    /** Whether the checkout would offer its introductory and its yearly price once this option is gone. */
+    introKept: boolean;
+    yearlyKept: boolean;
+    planBefore: boolean;
+    planAfter: boolean;
+  },
+  money: (cents: number) => string,
+): string {
+  const said: string[] = [];
+  const last = product.options === 1;
+  if (option.hasFile) said.push("The file on it is deleted with it.");
+  if (option.delivers) {
+    said.push(
+      last && product.ownDelivery
+        ? "Anyone who bought at it gets the product's own file or link from their order instead."
+        : option.extra
+          ? "Anyone who bought at it keeps access, but can no longer get its extra file or link from their order."
+          : "Anyone who bought at it can no longer get its file or link from their order.",
+    );
+  }
+  if (last) {
+    if (product.missing) {
+      const lacks = product.missing === "lesson" ? "a lesson" : product.missing === "episode" ? "an episode" : "its own file or link";
+      said.push(`It is the last price, so this cannot be bought until it has ${lacks}.`);
+    } else {
+      // The checkout offers one of the two at most (lib/intro-price.ts, lib/yearly-price.ts).
+      const kept = product.introKept ? ", with its introductory price" : product.yearlyKept ? ", with its yearly price" : "";
+      // A membership's price is said with its period, as buyers see it: "$20 a month".
+      const own = `${money(product.ownPriceCents)}${product.interval ? ` a ${product.interval}` : ""}`;
+      said.push(`It is the last price, so ${product.hidden ? "once published, buyers pay" : "buyers then pay"} its own price, ${own}${kept}.`);
+    }
+  }
+  if (product.interval) said.push("Members who joined at it keep being charged what they joined at until they or you cancel.");
+  if (product.planBefore && !product.planAfter) said.push("Your payment plan stops being offered.");
+  if (!product.planBefore && product.planAfter) said.push("Your payment plan is offered again.");
+  return said.length ? said.join(" ") : "Nothing else on the product changes.";
+}

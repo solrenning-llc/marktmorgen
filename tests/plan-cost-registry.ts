@@ -45,8 +45,8 @@
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
 import { RENEWAL_NOTICE_ROWS, RENEWAL_NOTICE_SCRIPT } from "@/lib/renewal-mail-notice";
-import { CURRENT_SHIPMENT_MAIL_LIFECYCLE, SHIPMENT_MAIL_MAX_ROW_BYTES } from "@/lib/shipment-mail-outbox";
-import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
+import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-mail-outbox";
+import { STUDIO_PAGE_UNITS, ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
@@ -370,13 +370,21 @@ export type CostLine = {
 
 const ALL_TIERS_SAME = (usd: number) => () => usd;
 
+/** CX-64, checked 2026-11-04: https://upstash.com/pricing/redis and
+ * https://upstash.com/docs/redis/howto/insights. $0.20/100k commands,
+ * $0.03/GB bandwidth at the full marginal rate (no free allowance).
+ * The aggregate response fits 4 KiB; price script ingress too conservatively.
+ * Lua-internal row bytes are not client/database transfer. */
+export function renewalNoticeCost(tier: Tier): number {
+  return Math.floor(STORE_ALLOWANCES[tier].studio / STUDIO_PAGE_UNITS) * request("studio", 4 + RENEWAL_NOTICE_ROWS, Buffer.byteLength(RENEWAL_NOTICE_SCRIPT) + 4096);
+}
 export const COST_LINES: CostLine[] = [
   {
     id: "renewal-mail-owner-notice",
     feature: "Bounded owner reconciliation notice for uncertain download-link requests (CX-59)",
-    monthlyUsd: tier => CURRENT_SHIPMENT_MAIL_LIFECYCLE === "never_activated" ? 0 : STORE_ALLOWANCES[tier].studio * request("studio", 4 + RENEWAL_NOTICE_ROWS, Buffer.byteLength(RENEWAL_NOTICE_SCRIPT) + RENEWAL_NOTICE_ROWS * (SHIPMENT_MAIL_MAX_ROW_BYTES + 1) + 4096),
-    sources: [{file:"lib/renewal-mail-notice.ts",names:["RENEWAL_NOTICE_ROWS","RENEWAL_NOTICE_SCRIPT","renewalMailSummary"]}, {file:"components/renewal-mail-notice.tsx",names:["RenewalMailNotice"]}],
-    basis: "Never-activated lifecycle returns before all IO (actual use zero, not an unknown provider rate). Activation must price this line and pass every margin check; the active projection currently fails the Scale/Pro relative-margin invariant, so it is not approved. Conservative one aggregate read for every studio allowance unit, although an owner page takes four: TYPE/SCARD/SMEMBERS, up to eight bounded GETRANGEs and EVAL itself. Prices the script plus all internal row bytes as if transferred, and the existing studio function/CPU ceiling. Only aggregates leave Redis; no retry, provider request or pending-row mutation. Missing funding/lifecycle prevents the read. Future funding must include this line; no cost or activation certification from a null policy.",
+    monthlyUsd: tier => CURRENT_SHIPMENT_MAIL_LIFECYCLE === "never_activated" ? 0 : renewalNoticeCost(tier),
+    sources: [{file:"lib/order-confirmation-outbox.ts",names:["RENEWAL_NOTICE_ROWS","RENEWAL_NOTICE_SCRIPT","renewalMailSummary"]}, {file:"components/renewal-mail-notice.tsx",names:["RenewalMailNotice"]}],
+    basis: "Never-activated lifecycle returns before all IO (actual use zero, not an unknown provider rate). Activation must price this line and pass every margin check; the CX-64 projected delta now preserves the Scale/Pro relative-margin invariant monthly and yearly; real funding/activation remain unapproved. One aggregate read per owner studio page, which is counted before rendering at STUDIO_PAGE_UNITS=4; floor(studio allowance/4) pages at most: TYPE/SCARD/SMEMBERS, up to eight bounded GETRANGEs and EVAL itself. CX-64 official Upstash pricing/insights checked 2026-11-04: $0.20/100k commands and $0.03/GB at the full marginal rate; script ingress plus 4 KiB aggregate egress, not Lua-internal reads; existing studio function/CPU review ceiling remains. Only aggregates leave Redis; no retry, provider request or pending-row mutation. Missing funding/lifecycle prevents the read. Future funding must include this line; no cost or activation certification from a null policy.",
   },
   {
     id: "storage",
@@ -966,6 +974,9 @@ export const NOT_A_COST: Record<string, string> = {
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   MAX_PAGES_PER_STORE: "Pages of Stripe sessions the five-minute job reads per store per run: a scheduled job, bounded by its schedule (a company fixed cost).",
+  STRIPE_LOOKUPS_PER_STORE: "Calls to the creator's Stripe account the five-minute job makes per store per run to tell whose a refunded charge is and to read a canceled member's address (lib/webhooks.ts, watchStore): a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call, and a membership's charge (three calls) is taken from the same ten, so no run asks more than before.",
+  GIVEN_UP_LINES_PER_DAY: "A cap on the lines passed-over Stripe events leave for each endpoint of a store a day, at most MAX_ENDPOINTS endpoints a store a day, past which one summary line an endpoint counts the rest (lib/webhooks.ts, markGivenUp): no endpoint is called and no delivery taken; what the lines keep is bounded in tests/store-data-registry.ts (nl:hooks:d:, nl:hooks:evt:), and the job that writes them is the five-minute schedule's (a company fixed cost).",
+  DISPUTE_LOOKUPS_PER_STORE: "The same job's separate budget of calls per store per run to tell whose a disputed payment is (lib/webhooks.ts, paymentMeta): inside the same schedule, the same ten as before, each call of a membership's lookup counted.",
   TAX_OBSERVATION_LIMITS: "Inactive diagnostic processing bounds: CURRENT_TAX_OBSERVATION_POLICY is null, so no production journal IO is enabled. Activation requires explicit scope, absolute retention, atomic data-room reservation and full-lifetime paid storage/work cost evidence; these limits are not a zero cost or a funded allowance.",
   QUIET_PER_HOUR: "Sale notifications to the creator's phone: one per counted order at most, inside the order's compute.",
   VERCEL_CPU_MICRO_USD_PER_HOUR: "A rate, not a cap.",

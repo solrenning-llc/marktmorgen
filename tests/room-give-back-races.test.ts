@@ -17,7 +17,10 @@ import { forgetQuizPerson, readQuiz, resetTries, saveQuiz, submitQuiz } from "@/
 import type { Course } from "@/lib/course";
 import { forgetRsvpsPerson, rsvp, type CommunityEvent } from "@/lib/community-events";
 import { forgetImportedPerson, grantImported, takeGiven } from "@/lib/imported-purchases";
-import { dataUsed, type DataStore } from "@/lib/store-data";
+import { dataKey, dataUsed, monthOf, noteData, type DataStore } from "@/lib/store-data";
+import { waitlistTokenKey } from "@/lib/waitlist-tokens";
+import { WAIT_SECONDS } from "@/lib/waitlist-rules";
+import { forgetNoted } from "@/lib/erasure-index";
 import { dataBytes } from "@/lib/store-data-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -122,35 +125,110 @@ async function waitlists(): Promise<void> {
   is("her place is gone", await exists("eve@example.com"), 0);
   is("her room came back once", await used(store), base);
 
-  part("A launch with nobody confirmed gives the waitlist back");
+  // A launch gives the places back, and keeps each link to leave counted, in
+  // the month it expires, until it has expired (the launch email carries it).
+  const room = dataKey(store)!;
+  const expiry = `~${monthOf(Date.now() + WAIT_SECONDS * 1000)}`;
+  const held = async () => Number((await redis.pipeline([["HGET", room, expiry]]))[0] ?? 0);
+  const weigh = async (productId: string) => {
+    const [flat] = await redis.pipeline([["HGETALL", `nl:wl:${store.statsId}:${productId}`]]);
+    let places = 0;
+    let links = 0;
+    for (let i = 0; i + 1 < (flat as string[]).length; i += 2) {
+      const [email, raw] = [(flat as string[])[i], (flat as string[])[i + 1]];
+      places += dataBytes([email, raw], 1);
+      links += dataBytes([waitlistTokenKey(JSON.parse(raw).t), JSON.stringify({ s: store.statsId, h: "x".repeat(LONGEST_HANDLE), p: productId, e: email, k: "leave" })], 1);
+    }
+    return { places, links };
+  };
+  const launched = async (productId: string, run: () => Promise<unknown>) => {
+    const { places, links } = await weigh(productId);
+    const [u0, h0] = [await used(store), await held()];
+    await run();
+    is("the waitlist is gone", (await redis.pipeline([["HEXISTS", room, `wl:${productId}`]]))[0], 0);
+    is("its links are counted until they expire", (await held()) - h0, links);
+    // The places and the waitlist's own field go; the expiring month's field comes the first time.
+    is("and the places' room came back", (await used(store)) - u0, -places - 64 + (h0 ? 0 : 64));
+  };
+
+  part("A launch of three places with nobody confirmed");
   const two = await product("The Cake Book");
   store = (await storeForEmail("owner@example.com"))!;
-  const beforeTwo = await used(store);
-  is("Finn joins", await join("finn@example.com", two), "sent");
-  is("launched, nobody to email", await launch(store, two, { note: "", address: "" }), { ok: true, total: 0 });
-  is("the waitlist's room came back", await used(store), beforeTwo);
+  for (const email of ["finn@example.com", "gabi@example.com", "hugo@example.com"]) is("joins", await join(email, two), "sent");
+  await launched(two.id, async () => is("launched, nobody to email", await launch(store, two, { note: "", address: "" }), { ok: true, total: 0 }));
 
-  part("A launch that emailed everyone gives the waitlist back when it is done");
+  part("A launch that emailed everyone, when it is done");
   const three = await product("The Pie Book");
   store = (await storeForEmail("owner@example.com"))!;
-  const beforeThree = await used(store);
   is("Gus joins", await join("gus@example.com", three), "sent");
   is("Gus confirms", (await confirmSpot(lastToken("token"), store)).ok, true);
   is("Hana joins and does not confirm", await join("hana@example.com", three), "sent");
   is("launched to one", await launch(store, three, { note: "Out now.", address: "1 Main St, Springfield" }), { ok: true, total: 1 });
-  await runLaunches(storeForHandle, readListing, Date.now() + 10_000);
-  is("the waitlist's room came back", await used(store), beforeThree);
+  await launched(three.id, () => runLaunches(storeForHandle, readListing, Date.now() + 10_000));
+
+  part("Once the links have expired, their room comes back");
+  const kept = await held();
+  const beforeExpiry = await used(store);
+  await noteData(store, [{ slot: "probe", bytes: 0 }], Date.now() + (WAIT_SECONDS + 40 * 86_400) * 1000);
+  is("the expiring month is gone", await held(), 0);
+  is("with exactly what it held", beforeExpiry - (await used(store)), kept + 64);
+
+  // A second store, with its own share of confirmation emails.
+  await claimHandle("baker@example.com", "bakery", "The Bakery", "");
+  await ensureStatsId("baker@example.com");
+  await ensureListId("baker@example.com");
+  const made = await addProduct("baker@example.com", "The Rye Book", "", "39", null);
+  if (!made.ok) throw new Error("no product");
+  store = (await storeForEmail("baker@example.com"))!;
+  const rye = (await readListing(store, made.product.id))!;
+  await setSoon(store, rye.id, true);
+  const ryeKey = `nl:wl:${store.statsId}:${rye.id}`;
+  const enter = (email: string) => joinWaitlist({ store, product: rye, email, consent: false, ip: `10.0.1.${ip++}`, origin: "https://marktmorgen.com" });
+
+  part("A double click on joining: the second finds the first's place and asks again");
+  const beforeJo = await used(store);
+  let other: string | null = null;
+  after(reads("HGET", ryeKey), async () => {
+    other = await enter("jo@example.com");
+  });
+  is("the first answers sent", await enter("jo@example.com"), "sent");
+  is("so does the second", other, "sent");
+  await forgetWaitlistPerson(store.statsId, [rye.id], "jo@example.com", store);
+  is("one place, counted once", await used(store), beforeJo);
+
+  part("The links are written before the place: a deletion in between takes them too");
+  const beforeKai = await used(store);
+  after(reads("HSETNX", ryeKey), async () => {
+    await forgetWaitlistPerson(store.statsId, [rye.id], "kai@example.com", store);
+    await forgetNoted(store.statsId, "kai@example.com");
+  });
+  is("Kai's request answers", await enter("kai@example.com"), "sent");
+  const kaiLeave = lastToken("leave");
+  const kaiConfirm = lastToken("token");
+  is("no link with the address is left", (await redis.pipeline([["EXISTS", waitlistTokenKey(kaiLeave)], ["EXISTS", waitlistTokenKey(kaiConfirm)]])).map(Number), [0, 0]);
+  is("nor any room", await used(store), beforeKai);
+
+  part("A place that cannot be read is replaced when its address asks again");
+  const beforeLia = await used(store);
+  await redis.pipeline([["HSET", ryeKey, "lia@example.com", "not json"]]);
+  // Counted as it is, the way any write is.
+  await noteData(store, [{ slot: `wl:${rye.id}`, bytes: dataBytes(["lia@example.com", "not json"], 1) }]);
+  is("asking again works", await enter("lia@example.com"), "sent");
+  const [lia] = await redis.pipeline([["HGET", ryeKey, "lia@example.com"]]);
+  is("the place is readable again", typeof JSON.parse(String(lia)).t, "string");
+  await forgetWaitlistPerson(store.statsId, [rye.id], "lia@example.com", store);
+  is("and its room comes back whole", await used(store), beforeLia);
 
   part("A store renamed afterwards gets back exactly what a place took");
   is("the longest handle is the pattern's", [HANDLE_PATTERN.test("a".repeat(LONGEST_HANDLE)), HANDLE_PATTERN.test("a".repeat(LONGEST_HANDLE + 1))], [true, false]);
   const beforeIvy = await used(store);
-  is("Ivy joins", await join("ivy@example.com"), "sent");
+  is("Ivy joins", await enter("ivy@example.com"), "sent");
   const took = (await used(store)) - beforeIvy;
-  is("renamed to the longest handle", (await renameHandle("owner@example.com", "harbor-kitchen-and-bread")).ok, true);
-  store = (await storeForEmail("owner@example.com"))!;
+  is("renamed to the longest handle", (await renameHandle("baker@example.com", "bakery-bread-and-rye-pie")).ok, true);
+  store = (await storeForEmail("baker@example.com"))!;
   is("the new handle is the longest", store.handle.length, LONGEST_HANDLE);
   const renamed = await used(store);
-  await forgetWaitlistPerson(store.statsId, [one.id], "ivy@example.com", store);
+  await forgetWaitlistPerson(store.statsId, [rye.id], "ivy@example.com", store);
   is("exactly what she took came back", renamed - (await used(store)), took);
 }
 

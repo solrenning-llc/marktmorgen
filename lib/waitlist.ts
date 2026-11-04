@@ -109,43 +109,68 @@ export async function joinWaitlist(input: {
   if (!(await withinStore("waitlist-ip", `${sid}:${ip}`, 10, 3_600, store))) return "limited";
   if (!(await withinLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
 
-  const [existing, size] = await redisPipeline([
-    ["HGET", listKey(sid, product.id), email],
-    ["HLEN", listKey(sid, product.id)],
-  ]);
-  const before = parseEntry(existing);
-  if (!before && Number(size) >= MAX_WAITLIST) return "full";
-
-  const leave = before?.t ?? newToken();
-  const asked = Boolean(before?.c) || consent;
-  const entry: WaitEntry = { at: before?.at ?? now(), ok: before?.ok ?? 0, c: asked, ...(asked && (before?.k || (consent && input.clicks)) ? { k: true } : {}), t: leave };
   const confirm = newToken();
-  const grant = (k: TokenGrant["k"]): string => JSON.stringify({ s: sid, h: store.handle, p: product.id, e: email, k } satisfies TokenGrant);
-  const value = JSON.stringify(entry);
-  if (before) {
-    // Rewritten only over the place as it was read: a place deleted or changed
-    // in between is never written back, and its room is counted once.
-    const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(sid, product.id), email, existing as string, value]]);
-    if (Number(swapped) !== 1) return "error";
-    await settleEntry(store, product.id, email, existing as string, value);
-  } else {
-    // A new address takes room in the store's data room, with its link to leave
-    // (kept as long as the list); with no room the list is full for it.
-    const taken = dataBytes([email, value], 1) + leaveBytes(sid, product.id, email, leave);
-    if (!(await takeData(store, [{ slot: waitSlot(product.id), bytes: taken }])).ok) return "full";
-    const [added] = await redisPipeline([["HSETNX", listKey(sid, product.id), email, value]]);
-    if (Number(added) !== 1) {
-      // The same address joined at the same moment: its room goes back, and this one is tried again.
+  const grant = (k: TokenGrant["k"], t: string): (string | number)[] => ["SET", tokenKey(t), JSON.stringify({ s: sid, h: store.handle, p: product.id, e: email, k } satisfies TokenGrant), "EX", k === "confirm" ? CONFIRM_SECONDS : WAIT_SECONDS];
+  // The links go before the place, noted for a deletion of the person: one
+  // that runs in between deletes them too, and never leaves a link with the
+  // address on it or a link to leave nobody counted.
+  const links = (leave: string) =>
+    redisPipeline([grant("confirm", confirm), grant("leave", leave), ...noteForErasure(sid, email, tokenKey(confirm)), ...noteForErasure(sid, email, tokenKey(leave))]);
+
+  // A place written by another request between the read and the write (a
+  // double click) is read again and asked again; one deleted in between is
+  // not made again.
+  let leave = "";
+  let mustExist = false;
+  let lastLink = "";
+  for (let tries = 0; tries < 3 && !leave; tries += 1) {
+    const [existing, size] = await redisPipeline([
+      ["HGET", listKey(sid, product.id), email],
+      ["HLEN", listKey(sid, product.id)],
+    ]);
+    if (typeof existing !== "string") {
+      if (mustExist) {
+        // Deleted in between: the links this request wrote go with it.
+        await redisPipeline([["DEL", tokenKey(confirm), ...(lastLink ? [tokenKey(lastLink)] : [])]]);
+        return "error";
+      }
+      if (Number(size) >= MAX_WAITLIST) return "full";
+      const t = newToken();
+      const value = JSON.stringify({ at: now(), ok: 0, c: consent, ...(consent && input.clicks ? { k: true } : {}), t } satisfies WaitEntry);
+      // A new address takes room in the store's data room, with its link to leave
+      // (kept as long as the list); with no room the list is full for it.
+      const taken = placeBytes(sid, product.id, email, value);
+      if (!(await takeData(store, [{ slot: waitSlot(product.id), bytes: taken }])).ok) return "full";
+      await links(t);
+      const [added] = await redisPipeline([["HSETNX", listKey(sid, product.id), email, value]]);
+      if (Number(added) === 1) {
+        leave = t;
+        break;
+      }
+      // Another request wrote it first: this one's room and its unused link to leave go, and it asks again.
       await giveData(store, [{ slot: waitSlot(product.id), bytes: taken }]);
-      return "error";
+      await redisPipeline([["DEL", tokenKey(t)]]);
+      mustExist = true;
+      continue;
     }
+    // Asked again: written only over the place as it was read, counted at what
+    // it changed. A place that cannot be read is replaced by a new one.
+    const before = parseEntry(existing);
+    const t = before?.t ?? newToken();
+    const asked = Boolean(before?.c) || consent;
+    const value = JSON.stringify({ at: before?.at ?? now(), ok: before?.ok ?? 0, c: asked, ...(asked && (before?.k || (consent && input.clicks)) ? { k: true } : {}), t } satisfies WaitEntry);
+    await links(t);
+    lastLink = t;
+    const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(sid, product.id), email, existing, value]]);
+    if (Number(swapped) === 1) {
+      await settleEntry(store, sid, product.id, email, existing, value);
+      leave = t;
+      break;
+    }
+    if (!before) await redisPipeline([["DEL", tokenKey(t)]]);
+    mustExist = true;
   }
-  await redisPipeline([
-    ["SET", tokenKey(confirm), grant("confirm"), "EX", CONFIRM_SECONDS],
-    ["SET", tokenKey(leave), grant("leave"), "EX", WAIT_SECONDS],
-    ...noteForErasure(sid, email, tokenKey(confirm)),
-    ...noteForErasure(sid, email, tokenKey(leave)),
-  ]);
+  if (!leave) return "error";
 
   const link = `${origin}/@${store.handle}/waitlist?token=${confirm}`;
   const g = givingWords(store.language);
@@ -196,7 +221,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     const next = JSON.stringify({ ...read, ok: now() });
     const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(grant.s, grant.p), grant.e, raw as string, next]]);
     if (Number(swapped) !== 1) continue;
-    await settleEntry(store, grant.p, grant.e, raw as string, next);
+    await settleEntry(store, grant.s, grant.p, grant.e, raw as string, next);
     entry = read;
   }
   if (!entry) return { ok: false };
@@ -228,11 +253,22 @@ function placeBytes(sid: string, productId: string, email: string, raw: string):
   return dataBytes([email, raw], 1) + (entry ? leaveBytes(sid, productId, email, entry.t) : 0);
 }
 
-/** Every place of one product's waitlist, read and deleted in one step, given back to `room`. */
-async function takeList(room: DataStore, sid: string, productId: string): Promise<void> {
+/**
+ * Every place of one product's waitlist, read and deleted in one step, for a
+ * launch: the places' room goes back to `room`, but each link to leave is
+ * still kept (the launch email carries it), so what it takes moves to a
+ * record that comes off by itself once the link has expired.
+ */
+async function takeList(room: DataStore, sid: string, productId: string, at = Date.now()): Promise<void> {
   const [taken] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, listKey(sid, productId)]]);
-  const freed = takenPairs(taken).reduce((sum, [email, raw]) => sum + placeBytes(sid, productId, email, raw), 0);
-  if (freed > 0) await giveData(room, [{ slot: waitSlot(productId), bytes: freed }]);
+  const places = takenPairs(taken);
+  const freed = places.reduce((sum, [email, raw]) => sum + placeBytes(sid, productId, email, raw), 0);
+  const kept = places.reduce((sum, [email, raw]) => {
+    const entry = parseEntry(raw);
+    return sum + (entry ? leaveBytes(sid, productId, email, entry.t) : 0);
+  }, 0);
+  if (freed > 0) await giveData(room, [{ slot: waitSlot(productId), bytes: freed }], at);
+  if (kept > 0) await noteData(room, [{ until: at + WAIT_SECONDS * 1000, bytes: kept }], at);
 }
 
 /**
@@ -240,8 +276,9 @@ async function takeList(room: DataStore, sid: string, productId: string): Promis
  * boxes checked), as it is and never refused, so the room always holds what
  * each place weighs and a deletion gives back exactly that.
  */
-async function settleEntry(store: DataStore, productId: string, email: string, before: string, after: string): Promise<void> {
-  const grown = dataBytes([email, after], 1) - dataBytes([email, before], 1);
+async function settleEntry(store: DataStore, sid: string, productId: string, email: string, before: string, after: string): Promise<void> {
+  // Its link to leave too: a place that could not be read held none counted.
+  const grown = placeBytes(sid, productId, email, after) - placeBytes(sid, productId, email, before);
   if (grown > 0) await noteData(store, [{ slot: waitSlot(productId), bytes: grown }]);
   else if (grown < 0) await giveData(store, [{ slot: waitSlot(productId), bytes: -grown }]);
 }

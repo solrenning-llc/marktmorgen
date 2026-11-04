@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
-import { framePlayer, messagePlayer } from "@/lib/player-origin";
+import { framePlayer, frameTarget, messagePlayer } from "@/lib/player-origin";
 import { WHY_NOT, type WhyNot } from "@/lib/why-not-rules";
 import type { WhyNotWords } from "@/lib/buyer-words/why-not";
 
@@ -104,8 +104,11 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
       for (const frame of document.querySelectorAll<HTMLIFrameElement>(".sp-video iframe")) {
         try {
           const player = framePlayer(frame.src);
-          if (player === "youtube") frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), "*");
-          if (player === "vimeo") frame.contentWindow?.postMessage(JSON.stringify({ method: "addEventListener", value: "timeupdate" }), "*");
+          // Sent to the frame's own player origin only, never "*" (lib/player-origin.ts).
+          const target = frameTarget(frame.src);
+          if (!target) continue;
+          if (player === "youtube") frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), target);
+          if (player === "vimeo") frame.contentWindow?.postMessage(JSON.stringify({ method: "addEventListener", value: "timeupdate" }), target);
         } catch {}
       }
     };

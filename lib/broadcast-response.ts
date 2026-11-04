@@ -2,7 +2,7 @@ import { MIN_TEST_REACH, newTest } from "@/lib/mail-test";
 import type { MailAnswer } from "@/lib/mail-response";
 import { readNarrow, sameNarrow } from "@/lib/segments-rules";
 import { readTags } from "@/lib/contact-rules";
-const REFUSALS = new Set(["subject", "body", "when", "product", "empty", "allowance", "setup", "plan", "test_subject", "test_small", "test_links", "placeholder", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request"]);
+const REFUSALS = new Set(["subject", "body", "when", "product", "empty", "allowance", "setup", "plan", "test_subject", "test_small", "test_links", "placeholder", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request", "studio_used", "store_full"]);
 const positive = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
 const association = (value: unknown) => typeof value === "string" && value ? value : null;
 /** Confirm creation, not delivery. Unknown write outcomes must not invite an immediate retry. */
@@ -49,7 +49,7 @@ export function broadcastAnswer(responseOk: boolean, raw: unknown, input: Record
   return { ...answer, draftCleanupConfirmed };
 }
 
-const CANCEL_REFUSALS = new Set(["unknown", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request"]);
+const CANCEL_REFUSALS = new Set(["unknown", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request", "studio_used"]);
 /** A generic success cannot confirm cancellation of the campaign the user chose. */
 export function cancellationAnswer(responseOk: boolean, raw: unknown, id: unknown): MailAnswer {
   const unknown: MailAnswer = { ok: false, error: "broadcast_cancel_unconfirmed" };

@@ -35,13 +35,14 @@ export const COUNTED_FAMILIES: readonly string[] = [
 
 /** Families bounded some other way, which a measure of the room leaves out. */
 export const ELSEWHERE_FAMILIES: readonly string[] = [
-  "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lockedset:", "nl:2fa:rescue:",
+  "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lock:", "nl:2fa:lockedset:", "nl:2fa:once:", "nl:2fa:rescue:",
   "nl:2fa:setup:", "nl:ab:paid:", "nl:account:stores:", "nl:adsrv:", "nl:adsrv:last:", "nl:adsrv:sub:",
   "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:",
   "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:alert:",
   "nl:alert:seen:", "nl:allow:", "nl:api:k:", "nl:api:keys:", "nl:ask:", "nl:ask:a:", "nl:ask:missed:",
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
-  "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:rec:",
+  "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:moving:", "nl:auth:rec:",
+  "nl:auth:second:",
   "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
   "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:tok:",
@@ -50,7 +51,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
-  "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
+  "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
@@ -76,7 +77,8 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
   "nl:orders:open:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
   "nl:pause:last:", "nl:pay:currencies:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
-  "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan:closing:",
+  "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk",
+  "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan:closing:",
   "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:lock", "nl:plans:pending",
   "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:stores", "nl:ppsell:o:",
   "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:sales:",
@@ -178,10 +180,10 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:": E, // a meter's records (lib/usage-billing.ts), named by the store's folder; "nl:" alone is no key
   "nl:*": C,
   // ---------------------------------------------------------------- an account's sign-in: a person's, not a store's
-  "nl:2fa:": C, "nl:2fa:hold:": C, "nl:2fa:locked:": C, "nl:2fa:lockedset:": C, "nl:2fa:rescue:": C, "nl:2fa:setup:": C,
-  "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:rec:": C, "nl:auth:rec:link:": C,
-  "nl:auth:rec:set:": C, "nl:auth:rec:until:": C, "nl:auth:session:": C, "nl:auth:sessions:": C,
-  "nl:pk:": C, "nl:pk:auth:": C, "nl:pk:cred:": C, "nl:pk:reg:": C, "nl:rl:address:": C, "nl:rl:signin:": C,
+  "nl:2fa:": C, "nl:2fa:hold:": C, "nl:2fa:locked:": C, "nl:2fa:lock:": C, "nl:2fa:lockedset:": C, "nl:2fa:once:": C, "nl:2fa:rescue:": C, "nl:2fa:setup:": C,
+  "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:move-broken:": C, "nl:auth:moving:": C, "nl:auth:rec:": C, "nl:auth:rec:link:": C,
+  "nl:auth:rec:set:": C, "nl:auth:rec:until:": C, "nl:auth:second:": C, "nl:auth:session:": C, "nl:auth:sessions:": C,
+  "nl:pk:": C, "nl:pk:auth:": C, "nl:pk:cred:": C, "nl:pk:drop:": C, "nl:pk:lock:": C, "nl:pk:reg:": C, "nl:rl:address:": C, "nl:rl:signin:": C,
   "nl:account:stores:": D("prepare"),
   // ---------------------------------------------------------------- a-b
   "nl:ab:": E, "nl:ab:paid:": X(40),
@@ -226,7 +228,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:cotrouble:": E, "nl:cotrouble:mail:": E,
   "nl:course:": E, "nl:courses:drip": I, "nl:courses:lock": C,
   "nl:creators:responses": C,
-  "nl:crm:deals:": E, "nl:crm:fields:": E, "nl:crm:pacc:": E, "nl:crm:pipes:": E, "nl:crm:stages:": E, "nl:crm:tasklock:": X(1), "nl:crm:tasks:": E, "nl:crm:v:": E,
+  "nl:crm:deals:": E, "nl:crm:fields:": E, "nl:crm:pacc:": E, "nl:crm:pipes:": E, "nl:crm:stages:": E, "nl:crm:tasklock:": X(1), "nl:crm:taskrecount:": X(1), "nl:crm:tasks:": E, "nl:crm:v:": E,
   // ---------------------------------------------------------------- d-f
   "nl:data:": E,
   "nl:dc:addr:": E, "nl:dc:due": I, "nl:dc:lock": C, "nl:dc:mem:": E, "nl:dc:ok:": E, "nl:dc:prod:": E, "nl:dc:srv:": E, "nl:dc:state:": X(1),
@@ -313,6 +315,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:pictures:doors:": X(1),
   "nl:pinv:": Cr(30),
   "nl:pkg:": T("nl:pkg:s:"), "nl:pkg:s:": E, "nl:pkg:t:": T("nl:pkg:s:"),
+  "nl:held:stores": I, "nl:held:retry:": Cr(2), "nl:held:month:": Cr(400), "nl:held:walk": C,
   "nl:plan-disputes:seen": C, "nl:plan-refund:": C, "nl:plan-refund:ending": C, "nl:plan:closing:": Cr(400), "nl:plan:closing:after": C, "nl:plan:ended": I, "nl:plan:paying": I,
   "nl:plans:lock": C, "nl:plans:pending": I,
   "nl:pod:": E, "nl:pod:by:": E, "nl:pod:n:": X(2), "nl:pod:ok:": E, "nl:pod:t:": T("nl:pod:by:"),

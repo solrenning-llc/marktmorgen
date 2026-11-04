@@ -55,6 +55,7 @@ import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
+import { TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
@@ -287,8 +288,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pictures:doors:@lib/picture-door.ts": { what: "A store's picture uploads not yet put on anything", parts: [capped(1_000 * 128, "One sorted set a store, trimmed to a day and to its newest 1,000 notes (PICTURE_DOOR_MAX) each time one is added, and expiring a day after the last.")] },
   "nl:auth:devices:@lib/auth.ts": company("Devices an account signed in on", "An account's, not a store's."),
   "nl:auth:fresh:@lib/auth.ts": company("A fresh sign-in", "An account's, minutes."),
+  "nl:auth:second:@lib/auth.ts": company("The second step a session was opened with", "An account's, as long as its session."),
   "nl:auth:link:@lib/auth.ts": company("A sign-in link", "An account's, minutes."),
   "nl:auth:move:@lib/auth.ts": company("An address change", "An account's, a day."),
+  "nl:auth:moving:@lib/auth.ts": company("An address in the middle of a move", "An account's, minutes."),
+  "nl:auth:move-broken:@lib/auth.ts": company("A move that could be neither finished nor undone", "An account's, until it is repaired at the next login or move."),
   "nl:auth:session:@lib/auth.ts": company("A session", "An account's."),
   "nl:auth:sessions:@lib/auth.ts": company("An account's sessions", "An account's."),
   "nl:rl:address:@lib/auth.ts": company("Sign-in links per address", "An account's, an hour."),
@@ -456,9 +460,15 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ref:owed@lib/creator-invites.ts": company("Credits owed", "The company's program for creators."),
   "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research."),
   "nl:crm:deals:@lib/crm.ts": { what: "Deals: one slot a deal, at what it weighs, at most MAX_DEALS", room: ["lib/crm.ts"] },
-  "nl:crm:tasks:@lib/crm.ts": { what: "Tasks about a person, at what they weigh, at most MAX_STORE_TASKS", room: ["lib/crm.ts"] },
+  "nl:crm:tasks:@lib/crm.ts": {
+    what: "Tasks about a person, at what they weigh, at most MAX_STORE_TASKS, and the store's count of them (TASK_COUNT_WEIGHT)",
+    room: ["lib/crm.ts"],
+    // room + TASK_COUNT_WEIGHT: a paid recount saves the count and notes its field even past a full room (noteData, never refused), so at most this much over the room, once a store.
+    parts: [capped(TASK_COUNT_WEIGHT, "The count's field noted once past a full room, when a paid recount saves it.", src("lib/crm.ts", "TASK_COUNT_WEIGHT", "noteData(room, [{ slot: TASKS_SLOT, bytes: TASK_COUNT_WEIGHT }])"))],
+  },
   "nl:crm:tasks:@lib/person-agenda-read.ts": { what: "Tasks about a person, only counted here (one HLEN, tasksKept) before the agenda reads them; kept and counted by lib/crm.ts", room: ["lib/crm.ts"] },
   "nl:crm:tasklock:@lib/crm.ts": short("One change of a store's tasks at a time, ten seconds at the most", "studio", 1, 128),
+  "nl:crm:taskrecount:@lib/crm.ts": short("One paid recount of a store's tasks at a time, thirty seconds at the most", "studio", 1, 128),
   "nl:crm:fields:@lib/crm.ts": { what: "The store's own fields", parts: [capped(MAX_CRM_FIELDS * (MAX_FIELD_OPTIONS + 2) * 160, "MAX_CRM_FIELDS fields and their choices.", src("lib/crm-rules.ts", "MAX_CRM_FIELDS", "MAX_FIELD_OPTIONS"))] },
   "nl:crm:stages:@lib/crm.ts": { what: "The first pipeline's stages, as the board kept them before pipelines", parts: [capped(MAX_STAGES * 256, "MAX_STAGES stages.", src("lib/crm-rules.ts", "MAX_STAGES"))] },
   "nl:crm:pipes:@lib/crm.ts": { what: "The deals' pipelines and their stages (17 October 2026): one slot, at what the record weighs", room: ["lib/crm.ts"] },
@@ -518,6 +528,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:transparency:acted:@lib/transparency.ts": company("The notices acted on each year, so each counts once", "The company's: notice ids only, one set a year."),
   "nl:transparency:since@lib/transparency.ts": company("The day counting began", "The company's: one key for the whole platform, a date and nothing else."),
   "nl:erase:link:@lib/erasure-request.ts": company("A person's link to delete themselves from the stores they ask, an hour", "A person's, across stores, behind a per-address limit."),
+  "nl:held:walk@lib/plan-closing.ts": company("Final closing continuation", "One global rank cursor, at most1KiB,30days TTL; resumes past a full first page of coverage holds. Partial/changing walks never certify a monthly complete observation; included in HELD_EXPOSURE."),
+  "nl:held:stores@lib/held-stores.ts": company("Held closing stores awaiting complete billing evidence", "One private reference up to1280bytes plus score/member overhead per existing obligation; funded post_cancellation case ceiling bounds financed cases, overflow stays counted and funding is unknown. Pruned on deletion; never expires an unresolved obligation. Cost in HELD_EXPOSURE of tests/plan-cost-registry.ts."),
+  "nl:held:retry:@lib/held-stores.ts": company("Daily held recheck claims", "At most HELD_RECHECKS_PER_DAY hashed identities and one count, two days TTL (up to3 dated hashes overlap). Global funded work ceiling; no raw store/address in the hash. Cost in HELD_EXPOSURE."),
+  "nl:held:month:@lib/held-stores.ts": company("Monthly held store aggregate", "Count, observed peak, last observation day and completeness only; at most15 monthly keys alive for400days. Cost in HELD_EXPOSURE; unknown/partial is never zero."),
   "nl:exposure:v1:YYYY-MM@lib/exposure-budget-policy.ts": company("The exposure ledger's name", "The company's ledger."),
   "nl:exposure:v1:@lib/exposure-budget.ts": company("The company's exposure ledger, a month", "The company's ledger, carried by its fixed costs."),
   "nl:fair:c:@lib/fair-coupon.ts": { what: "A fair-price coupon made on the creator's Stripe", parts: [capped(96 * KEY, "One per percent offered.")] },
@@ -658,6 +672,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pk:@lib/passkeys.ts": company("An account's passkeys", "An account's."),
   "nl:pk:auth:@lib/passkeys.ts": company("A passkey sign-in", "An account's, minutes."),
   "nl:pk:cred:@lib/passkeys.ts": company("A passkey's credential", "An account's."),
+  "nl:pk:drop:@lib/passkeys.ts": company("Passkeys waiting to be removed", "An account's, until the day comes and it is applied at the next login or check."),
+  "nl:pk:lock:@lib/passkeys.ts": company("An account's passkeys being changed", "An account's, seconds."),
   "nl:pk:reg:@lib/passkeys.ts": company("A passkey being added", "An account's, minutes."),
   "nl:pwyw:@lib/pay-what-you-want.ts": short("A price made for a pay-what-you-want amount: at most one an order, a year", "order", 365, KEY),
   "nl:agree:r:@lib/agreement-store.ts": room("A proposal or agreement: who it is for, each version's fingerprint and signature; counted with room for its signatures and its two index entries before it is written, until it goes by itself (recordRoomBytes)", "lib/agreement-store.ts"),
@@ -811,7 +827,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),
-  "nl:allow:@lib/store-allowance.ts": { what: "Each figure taken in the window", parts: [capped(8 * 2 * KEY, "Eight figures, the window and the one before.")] },
+  "nl:allow:@lib/store-allowance.ts": { what: "Each figure taken in the window", parts: [capped((8 * 2 + 13) * KEY, "Eight figures, the window and the one before; and the studio requests held for scheduled emails in each month ahead, at most 13 (a year ahead, lib/store-allowance.ts holdAllowanceAt).")] },
   "nl:blog:body:@lib/store-blog.ts": { what: "Blog posts' words", room: ["lib/store-blog.ts"] },
   "nl:blog:meta:@lib/store-blog.ts": { what: "Blog posts", room: ["lib/store-blog.ts"] },
   "nl:blog:pub:@lib/store-blog.ts": { what: "Published blog posts", room: ["lib/store-blog.ts"] },
@@ -863,6 +879,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:nudge:@lib/trial-nudges.ts": company("A trial's nudges sent", "The company's emails to a creator about their own plan."),
   "nl:2fa:@lib/two-step.ts": company("An account's second step", "An account's."),
   "nl:2fa:hold:@lib/two-step.ts": company("A second step held", "An account's."),
+  "nl:2fa:once:@lib/two-step.ts": company("A code used once", "An account's, minutes to a day."),
+  "nl:2fa:lock:@lib/two-step.ts": company("An account's two-step record being changed", "An account's, seconds."),
   "nl:2fa:locked:@lib/two-step.ts": company("A session let in without its second step", "An account's."),
   "nl:2fa:lockedset:@lib/two-step.ts": company("An account's locked sessions", "An account's."),
   "nl:2fa:rescue:@lib/two-step.ts": company("A rescue link", "An account's."),

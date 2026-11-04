@@ -63,10 +63,10 @@ export const MIN_COURSE_LIST = 3;
 
 /**
  * A course name Google would not take: a price, a discount or a call to buy
- * in it. Read after plainText, so fullwidth digits, hidden characters and
+ * in it. Read after readText, so fullwidth digits, hidden characters and
  * doubled spaces cannot slip a price past it. "Free" alone is a plain word.
  */
-const PROMOTIONAL_NAME = /\p{Sc}\s?\p{Nd}|\p{Nd}\s?\p{Sc}|\p{Nd}\s?(?:%|percent\b)|\b\p{Nd}+\s?off\b|\b(?:on sale|discount(?:ed)?|buy now|order now|enroll? now|half price|limited time|save \p{Nd}+|only \p{Nd}+|\p{Nd}+ (?:dollars?|euros?|pounds?|reais|yen))\b/iu;
+const PROMOTIONAL_NAME = /\p{Sc}\s?\p{Nd}|\p{Nd}\s?\p{Sc}|\p{Nd}\s?(?:%|percent\b)|\b\p{Nd}+\s?off\b|\b(?:on sale|discount(?:ed)?|buy now|order now|enroll? now|half price|limited time|save \p{Nd}+|only \p{Nd}+|\p{Nd}+ (?:dollars?|euros?|reais|yen)|enroll today|today only)\b/iu;
 /** A price in a currency's code, written in capitals as codes are ("30 USD", "EUR 30"). */
 const CURRENCY_CODE_PRICE = /\b(?:USD|EUR|GBP|JPY|CAD|AUD|NZD|CHF|BRL|MXN|INR|CNY|SEK|NOK|DKK|ZAR|KRW|PLN|CZK|HUF|SGD|HKD)\s?\p{Nd}|\p{Nd}\s?(?:USD|EUR|GBP|JPY|CAD|AUD|NZD|CHF|BRL|MXN|INR|CNY|SEK|NOK|DKK|ZAR|KRW|PLN|CZK|HUF|SGD|HKD)\b/u;
 /** The longest description sent: Google shows 60 characters of it. */
@@ -74,19 +74,29 @@ const MAX_COURSE_DESCRIPTION = 5_000;
 
 export type CourseFacts = { name: string; description: string; url: string };
 
-/** Text as a reader sees it: compatibility forms folded, hidden format characters gone, spaces single. */
-function plainText(text: string): string {
+/** Text as the page shows it: one form (NFC), spaces single, as HTML collapses them. Nothing visible is changed. */
+function shownText(text: string): string {
+  return text.normalize("NFC").replace(/\s+/gu, " ").trim();
+}
+
+/** Text as the filters read it: compatibility forms folded and hidden format characters gone, so nothing hides a price. */
+function readText(text: string): string {
   return text.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/gu, " ").trim();
 }
 
-/** A course's own page, on the store's own site, as one address: no fragment, no trailing slash. Null otherwise. */
+/**
+ * A course's own page, on the store's own site, as one address: https, the
+ * store's host, a path of its own (not the store's root), no credentials,
+ * no query and no fragment, no trailing slash. Null otherwise.
+ */
 function courseUrl(url: string, site: string): string | null {
   try {
     const at = new URL(url);
     const home = new URL(site);
-    if (at.protocol !== "https:" || at.host !== home.host) return null;
-    at.hash = "";
-    return at.href.replace(/\/+$/, "") || null;
+    if (at.protocol !== "https:" || at.host !== home.host || at.username || at.password) return null;
+    const path = at.pathname.replace(/\/+$/, "");
+    if (!path) return null;
+    return `${at.origin}${path}`;
   } catch {
     return null;
   }
@@ -94,11 +104,12 @@ function courseUrl(url: string, site: string): string | null {
 
 /** One course, as its own page describes it; null when its name, description or address cannot be marked up. */
 export function courseData(course: CourseFacts, provider: { name: string; url: string }): object | null {
-  const name = plainText(course.name);
-  const description = Array.from(plainText(course.description)).slice(0, MAX_COURSE_DESCRIPTION).join("");
+  const name = shownText(course.name);
+  const description = Array.from(shownText(course.description)).slice(0, MAX_COURSE_DESCRIPTION).join("");
   const url = courseUrl(course.url, provider.url);
-  if (!name || !description || !url || PROMOTIONAL_NAME.test(name) || CURRENCY_CODE_PRICE.test(name)) return null;
-  const by = plainText(provider.name);
+  const read = readText(course.name);
+  if (!readText(name) || !readText(description) || !url || PROMOTIONAL_NAME.test(read) || CURRENCY_CODE_PRICE.test(read)) return null;
+  const by = shownText(provider.name);
   return {
     "@context": "https://schema.org",
     "@type": "Course",

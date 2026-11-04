@@ -49,6 +49,14 @@ async function main(): Promise<void> {
   is("no provider is sent without its name", "provider" in (courseData(knife, { ...provider, name: " " }) as object), false);
   is("a very long description is cut, by characters, never inside one", Array.from((courseData({ ...knife, description: "😀".repeat(6000) }, provider) as { description: string }).description).length, 5000);
 
+  part("Courses: the markup says what the page shows, and one address per course");
+  is("the name and description are sent as shown, not folded", [(courseData({ ...knife, name: "ＡＢＣ Bread ①" }, provider) as { name: string }).name, (courseData({ ...knife, description: "Lessons  on x² and ﬁne crumbs." }, provider) as { description: string }).description], ["ＡＢＣ Bread ①", "Lessons on x² and ﬁne crumbs."]);
+  is("joiners that shape a word or an emoji are kept", (courseData({ ...knife, name: "Family 👨\u200d👩\u200d👧 Baking" }, provider) as { name: string }).name, "Family 👨\u200d👩\u200d👧 Baking");
+  is("a query is not part of the course's address", (courseData({ ...knife, url: `${knife.url}?utm_source=x` }, provider) as { url: string }).url, knife.url);
+  is("the store's own root, or an address with credentials, is no course page", [courseData({ ...knife, url: "https://marktmorgen.com/" }, provider), courseData({ ...knife, url: "https://user@marktmorgen.com/@harbor/p/knife" }, provider)], [null, null]);
+  is("a weight is not a price", courseData({ ...knife, name: "Lose 10 pounds of stress" }, provider) !== null, true);
+  is("enroll today and today only are calls to buy", [courseData({ ...knife, name: "Bread: enroll today" }, provider), courseData({ ...knife, name: "Bread, today only" }, provider)], [null, null]);
+
   part("On the page");
   const source = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
   is("both are given to search engines", [source.includes("<JsonLd data={breadcrumbData("), source.includes("{faq ? <JsonLd data={faq} /> : null}")], [true, true]);

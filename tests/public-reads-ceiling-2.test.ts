@@ -1,26 +1,17 @@
 /**
- * Three more public reads paid for before they read (4 November 2026,
- * lib/page-read-rules.ts; the inventory of reads with no ceiling, items 12,
- * 14 and 17), against the in-memory Redis double and synthetic stores only:
+ * Two more public reads paid for before they read (4 November 2026,
+ * lib/page-read-rules.ts; the inventory of reads with no ceiling, items 12
+ * and 17), against the in-memory Redis double and synthetic stores only:
  *
  *   - a license check takes its request before it reads the product or the
  *     key, and refused reads neither;
  *   - a collection page takes a request for each few of its products before
- *     it reads them;
- *   - a community search takes its requests (the room, each conversation)
- *     before it searches, and each access check of a page of lessons or
- *     events before it is made;
- *   - the one walk of a community's archive into its index pays each step
- *     before it reads or writes, never sends more than a step paid for, and
- *     refused reads and writes nothing more and stays to be done.
+ *     it reads them.
  */
 import { readFileSync } from "node:fs";
 import type { NextRequest } from "next/server";
 import { GET as licence } from "@/app/api/store/licence/route";
-import { addProduct, claimHandle, ensureStatsId, setCommunity, setSubscription, storeForEmail } from "@/lib/store";
-import { createEvent } from "@/lib/community-events";
-import { needsWalk, walkCommunity } from "@/lib/community-walk";
-import { WALK_BYTES_PER_UNIT, WALK_COMMANDS_PER_UNIT } from "@/lib/page-read-rules";
+import { addProduct, claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { requestLimitFor } from "@/lib/traffic-rules";
 import { store as redis } from "./redis-stub";
@@ -77,51 +68,6 @@ async function main(): Promise<void> {
   part("A collection pays for its products before it reads them");
   const collection = readFileSync("app/[handle]/shop/[collection]/page.tsx", "utf8");
   is("its products' requests come before their listings, and refused it rests", [between(collection, "collectionUnits(ids.length)", "await readListings(store, ids)"), collection.includes('collectionUnits(ids.length)))) return <StoreResting store={store} />;')], [true, true]);
-
-  part("A community search pays before it searches");
-  const search = readFileSync("app/[handle]/community/search/page.tsx", "utf8");
-  is("the search's requests before the walk and the searches", [between(search, "searchUnits({ room: config.chat.on, conversations })", "await walkCommunity("), between(search, "searchUnits({ room: config.chat.on, conversations })", "await searchEverything(")], [true, true]);
-  is("each access check of a page of lessons or events before it is made", [between(search, "checkUnits(checks)", "await lessonsFound("), between(search, "checkUnits(checks)", "await eventsFound(")], [true, true]);
-
-  part("The walk of a community's archive pays each step before it");
-  const C = "club@example.com";
-  await claimHandle(C, "club", "Club", "");
-  await ensureStatsId(C);
-  await setSubscription(C, { customerId: "cus_club", subscriptionId: "sub_club", active: true, tier: "pro", period: paidPeriod() });
-  const club = (await setCommunity(C, true))!;
-  const communityId = club.community!.id;
-  for (let i = 0; i < 12; i += 1) {
-    const event = await createEvent(club, { title: `Bread night ${i}`, about: "Sourdough, rye and spelt, with a long ferment and a hot oven. ".repeat(4), start: Date.now() + (i + 1) * 86_400_000, minutes: 60, tz: "UTC", cap: 0, where: "room", link: "", meet: null, only: [] });
-    if (!event.ok) throw new Error("no event");
-  }
-  await redis.pipeline([["DEL", `nl:cm:${communityId}:sv`]]);
-
-  const nothing = await watched(() => walkCommunity(club, async () => false));
-  is("refused at its first step: no event or member read, nothing written, still to be done", [nothing.value, nothing.names.filter((n) => ["ZRANGEBYSCORE", "ZREVRANGEBYSCORE", "ZADD", "SADD", "MGET", "HMGET"].includes(n)), await needsWalk(communityId)], [false, [], true]);
-
-  // Every command between two payments is inside the one paid before it. Before the first, only the
-  // walk's opening (its mark read, its lock taken, the events counted), inside the search's own requests;
-  // after the last, its mark written and its lock let go.
-  const original = redis.pipeline;
-  let sent = 0;
-  let allowed = 3;
-  let over = 0;
-  redis.pipeline = async (commands) => {
-    sent += commands.length;
-    if (sent > allowed) over = Math.max(over, sent - allowed);
-    return original.call(redis, commands);
-  };
-  let paid = 0;
-  const walked = await walkCommunity(club, async (units) => {
-    paid += units;
-    sent = 0;
-    allowed = units * WALK_COMMANDS_PER_UNIT + 2;
-    return true;
-  });
-  redis.pipeline = original;
-  is("paid as it went, the walk is done and marked", [walked, await needsWalk(communityId)], [true, false]);
-  is("no step sent more commands than it paid for", over, 0);
-  console.log(`  a walk of twelve events and no members: ${paid} requests, at ${WALK_COMMANDS_PER_UNIT} commands or ${WALK_BYTES_PER_UNIT} bytes each`);
 
   done();
 }

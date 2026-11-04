@@ -43,7 +43,7 @@ import { index, unindex } from "@/lib/community-search";
  * its tail ordered together, which is a far better failure than a course whose
  * results run backwards.
  */
-export const LESSON_CEILING = 100_000;
+const LESSON_CEILING = 100_000;
 
 /** How a lesson is named in the index: the product gates it, the lesson is it. */
 export const lessonRef = (productId: string, lessonId: string) => `${productId}.${lessonId}`;
@@ -64,38 +64,23 @@ export function readLessonRef(ref: string): { productId: string; lessonId: strin
  * happens when a creator saves rather than when a member reads.
  */
 export async function reindexCourse(communityId: string, product: Listing, course: Course): Promise<void> {
-  const entries = lessonEntries(product, course, await lessonBodies(course));
-  await Promise.all(entries.map((e) => index(communityId, "lesson", e.thing, e.score, e.parts).catch(() => {})));
-}
-
-/** Every lesson's body, in the course's order; an unreadable one is empty. */
-export async function lessonBodies(course: Course): Promise<string[]> {
-  return Promise.all(lessonsInOrder(course).map(({ lesson }) => readBody(course.id, lesson.id).catch(() => "")));
-}
-
-/** What each lesson of a course is indexed as: its name in the index, its place, and the words it is found by. */
-export function lessonEntries(product: Listing, course: Course, bodies: string[]): { thing: string; score: number; parts: string[] }[] {
-  return lessonsInOrder(course).map(({ lesson, unit }, at) => ({
-    thing: lessonRef(product.id, lesson.id),
-    score: LESSON_CEILING - at,
-    // The module's title too: a lesson called "Part 3" under a module
-    // called "Pricing" should be findable by the word pricing.
-    parts: [lesson.title, unit.title, product.title, bodies[at] ?? ""],
-  }));
-}
-
-/** What an event is indexed as. */
-export function eventEntry(event: CommunityEvent): { thing: string; score: number; parts: string[] } {
-  return { thing: event.id, score: Math.floor(event.start / 1000), parts: [event.title, event.about] };
-}
-
-/** What a member is indexed as, or null when they are not listed (and are taken out instead). */
-export function memberEntry(member: Member): { thing: string; score: number; parts: string[] } | null {
-  const listed = member.dir && member.n && !member.removed;
-  // Already in seconds (lib/community.ts, now()). The first version divided
-  // it by a thousand as if it were milliseconds, which kept the order but
-  // tied everybody who came within the same quarter of an hour.
-  return listed ? { thing: member.k, score: member.at || 1, parts: [member.n, member.h] } : null;
+  const inOrder = lessonsInOrder(course);
+  const bodies = await Promise.all(
+    inOrder.map(({ lesson }) => readBody(course.id, lesson.id).catch(() => "")),
+  );
+  await Promise.all(
+    inOrder.map(({ lesson, unit }, at) =>
+      index(
+        communityId,
+        "lesson",
+        lessonRef(product.id, lesson.id),
+        LESSON_CEILING - at,
+        // The module's title too: a lesson called "Part 3" under a module
+        // called "Pricing" should be findable by the word pricing.
+        [lesson.title, unit.title, product.title, bodies[at]],
+      ).catch(() => {}),
+    ),
+  );
 }
 
 /** Takes one lesson out: it was deleted, or its course was. */
@@ -136,8 +121,13 @@ export async function courseChanged(
 }
 
 export async function indexEvent(communityId: string, event: CommunityEvent): Promise<void> {
-  const e = eventEntry(event);
-  await index(communityId, "event", e.thing, e.score, e.parts).catch(() => {});
+  await index(
+    communityId,
+    "event",
+    event.id,
+    Math.floor(event.start / 1000),
+    [event.title, event.about],
+  ).catch(() => {});
 }
 
 export async function unindexEvent(communityId: string, eventId: string): Promise<void> {
@@ -153,12 +143,21 @@ export async function unindexEvent(communityId: string, eventId: string): Promis
  * found by, and somebody the creator removed is not there at all.
  */
 export async function indexMember(communityId: string, member: Member): Promise<void> {
-  const e = memberEntry(member);
-  if (!e) {
+  const listed = member.dir && member.n && !member.removed;
+  if (!listed) {
     await unindex(communityId, "member", member.k).catch(() => {});
     return;
   }
-  await index(communityId, "member", e.thing, e.score, e.parts).catch(() => {});
+  await index(
+    communityId,
+    "member",
+    member.k,
+    // Already in seconds (lib/community.ts, now()). The first version divided
+    // it by a thousand as if it were milliseconds, which kept the order but
+    // tied everybody who came within the same quarter of an hour.
+    member.at || 1,
+    [member.n, member.h],
+  ).catch(() => {});
 }
 
 export async function unindexMember(communityId: string, key: string): Promise<void> {

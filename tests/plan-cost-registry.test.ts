@@ -1,8 +1,7 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
-import { checkUnits, collectionUnits, searchUnits, walkUnits } from "@/lib/page-read-rules";
+import { collectionUnits } from "@/lib/page-read-rules";
 import { MAX_COLLECTION_PRODUCTS } from "@/lib/store-collections";
-import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
-import { ACCESS_CHECK_READ, collectionRead, searchRead, walkRead } from "./plan-cost-registry";
+import { collectionRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import { PATH_REMINDER_UNITS } from "@/lib/path-reminder-rules";
@@ -200,17 +199,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.
   assert.ok(PICTURE_REQUEST_UNITS * laterPageCost() >= PICTURE_READ, `${PICTURE_REQUEST_UNITS} x ${laterPageCost()} < ${PICTURE_READ}`);
-  // A collection's products, a community search, its access checks and each step of the walk of its archive (lib/page-read-rules.ts,
-  // 4 November 2026): at every size the requests taken cost more than what they read.
+  // A collection's products (lib/page-read-rules.ts, 4 November 2026): at every size the requests taken cost more than what they read.
   for (let products = 1; products <= MAX_COLLECTION_PRODUCTS; products += 1) assert.ok(collectionUnits(products) * laterPageCost() >= collectionRead(products), `collection of ${products}`);
-  for (const room of [false, true]) for (let conversations = 0; conversations <= SEARCH_CONVERSATIONS; conversations += 1) {
-    assert.ok(searchUnits({ room, conversations }) * laterPageCost() >= searchRead({ room, conversations }), `search ${room} ${conversations}`);
-  }
-  for (const checks of [1, 2, 20]) assert.ok(checkUnits(checks) * laterPageCost() >= checks * ACCESS_CHECK_READ, `${checks} checks`);
-  for (const commands of [0, 1, 24, 25, 26, 600, 30_000]) for (const bytes of [0, 1, 999_999, 1_000_000, 1_000_001, 51_200_000]) {
-    assert.ok(walkUnits(commands, bytes) * laterPageCost() >= walkRead(commands, bytes), `walk step ${commands} commands ${bytes} bytes`);
-  }
-  console.log(`a collection of 8 products: ${1 + collectionUnits(8)} requests with its page; a community search: ${1 + searchUnits({ room: false, conversations: 0 })} with its page, ${1 + searchUnits({ room: true, conversations: 3 })} with the room and three conversations ($${searchRead({ room: true, conversations: 3 }).toFixed(6)})`);
+  console.log(`a collection of 8 products: ${1 + collectionUnits(8)} requests with its page ($${collectionRead(8).toFixed(6)} past it), ${1 + collectionUnits(MAX_COLLECTION_PRODUCTS)} at the largest`);
   // The Store assistant's next product after a purchase is NEXT_OFFER_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(NEXT_OFFER_REQUEST_UNITS * laterPageCost() >= NEXT_OFFER_READ, `${NEXT_OFFER_REQUEST_UNITS} x ${laterPageCost()} < ${NEXT_OFFER_READ}`);
   console.log(`next product after a purchase: $${NEXT_OFFER_READ.toFixed(6)} at most, counted as ${NEXT_OFFER_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);

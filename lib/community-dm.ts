@@ -359,17 +359,6 @@ export function dmKeys(id: string, who: string): string[] {
 
 /** How many of a person's conversations one search reads, the most recent first. */
 export const SEARCH_CONVERSATIONS = 30;
-
-/** How many conversations a search of this person's messages reads (SEARCH_CONVERSATIONS at the most): one command, before it reads them (lib/page-read-rules.ts). Null when it cannot be counted. */
-export async function searchedConversations(id: string, who: string): Promise<number | null> {
-  try {
-    const [n] = await redisPipeline([["ZCARD", inboxKey(id, who)]]);
-    const count = Number(n);
-    return Number.isSafeInteger(count) && count >= 0 ? Math.min(count, SEARCH_CONVERSATIONS) : null;
-  } catch {
-    return null;
-  }
-}
 /** How many of the latest messages of each it reads. */
 export const SEARCH_MESSAGES = 200;
 /** How many conversations are read in one request, so no reply is ever large. */

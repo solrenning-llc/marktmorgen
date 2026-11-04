@@ -5,10 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { postNumbers, readMembers, readPosts } from "@/lib/community";
-import { SEARCH_CONVERSATIONS, SEARCH_MESSAGES, mayMessage, pairOf, requestCount, searchMessages, searchedConversations } from "@/lib/community-dm";
-import { readLessonRef } from "@/lib/community-index";
-import { checkUnits, searchUnits } from "@/lib/page-read-rules";
-import { takePublicRequest } from "@/lib/traffic";
+import { SEARCH_CONVERSATIONS, SEARCH_MESSAGES, mayMessage, pairOf, requestCount, searchMessages } from "@/lib/community-dm";
 import { CREATOR } from "@/lib/community";
 import { searchRoom } from "@/lib/community-chat";
 import { unreadCount } from "@/lib/community-notify";
@@ -112,15 +109,7 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   // here, the first time anybody searches. It happens before the search rather
   // than after it, because a first search that answers "nothing" about a course
   // full of answers is worse than a first search that takes a moment.
-  // A search, paid for before it searches (lib/page-read-rules.ts, 4 November 2026): the four indexes,
-  // the room where it is on, and each of the member's conversations it reads; past the window, the
-  // resting page, and nothing searched. The one walk of the archive into the index is paid as it goes,
-  // for the whole community, not from this connection's share of the day.
-  if (wanted.length) {
-    const conversations = config.dm.on ? await searchedConversations(id, key) : 0;
-    if (conversations === null || !(await takePublicRequest(store, "buyer", undefined, searchUnits({ room: config.chat.on, conversations })))) redirect(`/@${store.handle}/resting`);
-    await walkCommunity(store, (units) => takePublicRequest(store, "buyer", undefined, units, { shared: true })).catch(() => {});
-  }
+  if (wanted.length) await walkCommunity(store).catch(() => {});
 
   // All four at once, so the tabs can carry real numbers rather than making
   // somebody press each one to find out whether it holds anything. Each comes
@@ -159,9 +148,6 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
     tab === "post" && page.posts.length
       ? (await readPosts(id, page.posts)).filter((p) => (owner || !p.hid) && !shut.has(p.sp))
       : [];
-  // Who holds each product or event shown may be asked of Stripe: each check paid before it is made.
-  const checks = tab === "lesson" ? new Set(page.posts.map((ref) => readLessonRef(ref)?.productId ?? "")).size : tab === "event" ? page.posts.length : 0;
-  if (checks && !(await takePublicRequest(store, "buyer", undefined, checkUnits(checks)))) redirect(`/@${store.handle}/resting`);
   const lessons = tab === "lesson" ? await lessonsFound(store, config, page.posts, gate) : [];
   const events = tab === "event" ? await eventsFound(store, config, page.posts, gate) : [];
   const people = tab === "member" ? await membersFound(id, page.posts) : [];

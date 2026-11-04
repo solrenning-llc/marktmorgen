@@ -840,7 +840,7 @@ export async function rsvpsOf(id: string, who: string): Promise<{ event: string;
   return events.flatMap((event, i) => (replies[i] === null || replies[i] === undefined ? [] : [{ event, at: Number(replies[i]) || 0 }]));
 }
 
-/** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts), and what the walk of its archive reads (lib/community-walk.ts). */
+/** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts). */
 export async function eventCount(id: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const [n] = await redisPipeline([["ZCARD", indexKey(id)]]);

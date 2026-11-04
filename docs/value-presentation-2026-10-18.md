@@ -85,7 +85,7 @@ Generated from the actual CI renderer for MR; amounts are registered-model calcu
 | Unit | Current price | Revenue | Receiving and reserves | Full usage | Taxes | Net profit | Net margin | Cost room | With room | On sale |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Store monthly ($69) | $69.00 | $54.33 | $9.14 | $2.59 | $36.03 | $6.57 | 12.09% | $0.25 | positive | no |
-| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $28.96 | $362.32 | $66.37 | 12.21% | $1.00 | positive | no |
+| Store yearly ($690) | $690.00 | $543.30 | $85.65 | $28.97 | $362.32 | $66.36 | 12.21% | $1.00 | positive | no |
 | Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $19.85 | $234.81 | $42.91 | 12.13% | $0.25 | positive | no |
 | Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $224.12 | $2,332.47 | $424.86 | 12.01% | $1.00 | positive | no |
 | Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $43.82 | $523.30 | $95.73 | 12.16% | $0.25 | positive | no |

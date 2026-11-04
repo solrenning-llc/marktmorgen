@@ -1,5 +1,6 @@
 "use client";
 
+import { type ImportReportLine, type ImportedStep, SequenceImportBox, reportWords } from "@/components/sequence-import-box";
 import type { LibraryEmailDraft, LibrarySequenceDraft } from "@/lib/template-library-intents";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { sendCount } from "@/lib/send-count";
@@ -74,6 +75,7 @@ const MESSAGES: Record<string, string> = {
   form: "Choose one of your forms that asks for an email address.",
   stage: "Choose one of your pipelines' stages.",
   stage_taken: "Another workflow already starts from that stage. A stage starts one workflow; that one can start others with a step.",
+  signed_taken: "Another workflow already starts when someone signs. Signing starts one workflow; that one can start others with a step.",
   unknown: "That is not there anymore. Reload the page.",
   send: "The email service did not take it just now. Nothing was sent; try again in a moment.",
   signed_out: "Your session ended. Log in again.",
@@ -346,7 +348,7 @@ export function EmailStudio(props: {
   /** Paid products in the selected store catalog, for sequence ending checks. */
   paidProducts?: string[];
   /** The store's forms that ask for an address, its own fields and its deal stages, for the sequences (lib/flows.ts). */
-  automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[] };
+  automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[]; signing?: boolean };
   /** The plan's workflow limits and today's runs (lib/flow-limits.ts, lib/flow-runs.ts). */
   workflowLimits?: WorkflowLimits;
   /** Who may be made responsible for a deal: the owner and teammates who can see orders. */
@@ -2042,7 +2044,7 @@ function Flows({
   readFailed?: boolean;
   products: { id: string; title: string }[];
   currency: string;
-  automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[] };
+  automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[]; signing?: boolean };
   /** The products that are courses, for "finishes a course" and the conditions on one. */
   courses?: string[];
   /** The products that are calls: a sequence that starts with one says "books" (548 [TR1]). */
@@ -2073,6 +2075,13 @@ function Flows({
   const availableCounts = SEQUENCE_DRAFT_COUNTS.filter(count => count <= availableSlots);
   const invalidWait = draft?.steps.some(step => flowWaitHours(step.wait, step.unit) === null) ?? false;
   const [draftBaseline, setDraftBaseline] = useState<string | null>(null);
+  // What a file brought in left out or changed (544 [SQ9]): shown in the editor until the sequence is saved or closed.
+  const [imported, setImported] = useState<ImportReportLine[] | null>(null);
+  const importedHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    // The editor that opened takes the focus the box's button had, at its report's heading.
+    if (imported) importedHeading.current?.focus();
+  }, [imported]);
   useLeaveGuard(aiBusy || (draft !== null && JSON.stringify(draft) !== draftBaseline));
   const [draftCount, setDraftCount] = useState<number>(DEFAULT_SEQUENCE_DRAFT);
   const requestedCount = availableCounts.some(count => count === draftCount) ? draftCount : (availableCounts[0] ?? DEFAULT_SEQUENCE_DRAFT);
@@ -2104,12 +2113,38 @@ function Flows({
         ? `Starts when someone who agreed to hear from you opens ${products.find((p) => p.id === f.productId)?.title ?? "a course"} for the first time`
       : f.trigger === "abandoned"
         ? `Starts when someone on your list, who agreed on the checkout page to hear from you, leaves a checkout of ${products.find((p) => p.id === f.productId)?.title ?? "a product"} unpaid`
+      : f.trigger === "signed"
+        ? "Starts when someone who agreed to hear from you signs one of your proposals or agreements"
       : f.trigger === "stage"
         ? `Starts when a deal with someone on your list enters “${automation.stages.find((x) => x.id === f.stageId)?.name ?? "a stage no longer in your pipelines"}”`
       : f.trigger === "bought"
         ? "Starts the first time someone who agreed to hear from you buys anything"
         : // A paid call starts the sequences of its product (lib/buyer-list.ts): said as booking it.
           `Starts when someone who agreed to hear from you ${f.productId && calls.includes(f.productId) ? "books" : "gets"} ${products.find((p) => p.id === f.productId)?.title ?? "a product"}`;
+
+  /**
+   * A sequence brought in from a file (544 [SQ9]): its emails open here as a
+   * new sequence, for the creator to pick what starts it, read every email and
+   * save it, paused. Nothing is saved until they do.
+   */
+  function openImported(steps: ImportedStep[], report: ImportReportLine[]) {
+    if (locked || draft !== null) return;
+    const first = products[0]?.id ?? "";
+    const next: FlowDraft = {
+      ...toDraft(null, products),
+      name: "Brought in",
+      steps: steps.map((s) => ({
+        ...blankStep(s.delayHours % 24 === 0 ? String(s.delayHours / 24) : String(s.delayHours), s.delayHours % 24 === 0 ? "days" : "hours", first),
+        subject: s.subject,
+        body: s.body,
+      })),
+    };
+    // Unsaved from the start, so leaving the page asks first.
+    setDraftBaseline(null);
+    setError(null);
+    setImported(report);
+    setDraft(next);
+  }
 
   function openDraft(flow: FlowRow | null) {
     if (locked || draft !== null) return;
@@ -2161,6 +2196,7 @@ function Flows({
       return;
     }
     setDraft(null);
+    setImported(null);
     toast(draft.id ? "Sequence saved." : "Saved, paused. Preview it and switch it on from its card when it is ready.");
     refreshFlows();
   }
@@ -2399,6 +2435,20 @@ function Flows({
             save();
           }}
         >
+          {imported ? (
+            <div className="rounded-[var(--r-sm)] border border-line bg-lilac/30 p-3" data-imported-report="">
+              <h3 ref={importedHeading} tabIndex={-1} className="font-semibold text-ink">Brought in from your file: read each email, pick what starts it, then save</h3>
+              {imported.length ? (
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink-soft">
+                  {imported.map((r, i) => (
+                    <li key={i}>{reportWords(r)}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-sm text-ink-soft">Every email in the file came in as it was.</p>
+              )}
+            </div>
+          ) : null}
           <fieldset disabled={busy} className="min-w-0 space-y-4">
           <legend className="sr-only">Sequence configuration</legend>
           <label className="block">
@@ -2414,7 +2464,7 @@ function Flows({
                 setDraft((current) => {
                   if (!current) return current;
                   const trigger: FlowTrigger =
-                    e.target.value === "product" ? "product" : e.target.value === "bought" ? "bought" : e.target.value === "tagged" ? "tagged" : e.target.value === "finished" ? "finished" : e.target.value === "form" ? "form" : e.target.value === "started" ? "started" : e.target.value === "abandoned" ? "abandoned" : e.target.value === "stage" ? "stage" : "joined";
+                    e.target.value === "product" ? "product" : e.target.value === "bought" ? "bought" : e.target.value === "tagged" ? "tagged" : e.target.value === "finished" ? "finished" : e.target.value === "form" ? "form" : e.target.value === "started" ? "started" : e.target.value === "abandoned" ? "abandoned" : e.target.value === "stage" ? "stage" : e.target.value === "signed" ? "signed" : "joined";
                   // Finishing and opening are only for a course: the first course, when the product chosen is not one.
                   const productId = (trigger === "finished" || trigger === "started") && !courses.includes(current.productId) ? (courses[0] ?? current.productId) : current.productId;
                   // A sequence that starts with a purchase cannot end at one.
@@ -2436,6 +2486,7 @@ function Flows({
               {products.length ? <option value="abandoned">Someone on your list leaves a checkout unpaid, having agreed to hear from you</option> : null}
               {automation.forms.length ? <option value="form">Someone on your list sends a form</option> : null}
               {automation.stages.length ? <option value="stage">A deal with someone on your list enters a stage</option> : null}
+              {automation.signing || draft.trigger === "signed" ? <option value="signed">Someone who agreed to hear from you signs a proposal or agreement</option> : null}
             </select>
           </label>
           {draft.trigger === "stage" ? (
@@ -2932,7 +2983,14 @@ function Flows({
           )}
           <div className="flex flex-wrap items-center gap-3">
             <button type="submit" aria-busy={busy} disabled={locked || invalidWait || overCapacity} className="btn btn-primary">Save the sequence</button>
-            <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" onClick={() => setDraft(null)}>
+            <button
+              type="button"
+              className="text-sm font-bold text-ink-soft underline underline-offset-4"
+              onClick={() => {
+                setDraft(null);
+                setImported(null);
+              }}
+            >
               Close
             </button>
           </div>
@@ -2940,9 +2998,12 @@ function Flows({
           </fieldset>
         </form>
       ) : flows.length < MAX_FLOWS ? (
-        <button type="button" className="btn btn-secondary mt-5" disabled={locked} onClick={() => openDraft(null)}>
-          New sequence
-        </button>
+        <>
+          <button type="button" className="btn btn-secondary mt-5" disabled={locked} onClick={() => openDraft(null)}>
+            New sequence
+          </button>
+          <SequenceImportBox disabled={locked} onRead={openImported} describe={(code) => MESSAGES[code] ?? null} />
+        </>
       ) : null}
     </section>
   );

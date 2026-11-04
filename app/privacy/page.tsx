@@ -1196,10 +1196,12 @@ export default function PrivacyPage() {
           deleted when the creator disconnects the server.
         </p>
         <p id="stamping">
-          <strong className="text-black">Stamped PDFs.</strong> When a creator
-          switches on stamping for a product, every page of the PDF a buyer
-          downloads carries the buyer&apos;s email address, the date and the
-          end of the order number. The stamped copy is made by our own code, is
+          <strong className="text-black">Stamped PDFs and EPUBs.</strong> When a
+          creator switches on stamping for a product, every page of the PDF a
+          buyer downloads carries the buyer&apos;s email address, the date and
+          the end of the order number, and an EPUB carries the same line
+          hidden inside the book&apos;s files, where reading apps do not show
+          it but a copy keeps it. The stamped copy is made by our own code, is
           kept privately beside the creator&apos;s file so a later download
           gets the same copy, and is deleted with that file; a note of which
           copy belongs to which sale is kept for about 400 days. Anyone the
@@ -2000,6 +2002,12 @@ export default function PrivacyPage() {
           names your address into a stage they chose; it starts only while you
           are on their list and agreed to hear from them, and nothing new is
           kept about you for it beyond the deal and the workflow&apos;s record.
+          An automatic email sequence may start when you sign a creator&apos;s
+          proposal or agreement, for the address it was sent to.
+          It starts only while you are on their list and agreed to hear from
+          them. Signing never adds you to the list. The only new things kept for
+          it are the sequence&apos;s own record, described above, and its
+          emails waiting to be sent.
         </p>
         <p>
           A community&apos;s posts, comments, pictures and member records are

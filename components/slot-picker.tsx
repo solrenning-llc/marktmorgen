@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState, useSyncExternalStore } from "react";
+import { NewTab } from "@/components/new-tab";
 
 const noop = () => () => {};
 
@@ -110,6 +111,7 @@ export function SlotPicker({
   minutes,
   newTab,
   embed,
+  shownCents,
   words,
 }: {
   starts: number[];
@@ -130,6 +132,8 @@ export function SlotPicker({
   newTab?: boolean;
   /** Opened by the checkout script on a listed site: the site and where to send the buyer back to, checked again by the booking route. */
   embed?: { site: string; back: string | null } | null;
+  /** Beside it, the price the page showed for it, in cents: only compared with the creator's record, never charged (price-changed). */
+  shownCents?: number;
   words: SlotWords;
 }) {
   const { locale } = words;
@@ -175,6 +179,7 @@ export function SlotPicker({
         {minutes && !move ? <input type="hidden" name="minutes" value={minutes} /> : null}
         {embed && !move ? <input type="hidden" name="site" value={embed.site} /> : null}
         {embed?.back && !move ? <input type="hidden" name="return" value={embed.back} /> : null}
+        {minutes && !move && shownCents !== undefined ? <input type="hidden" name="shown" value={shownCents} /> : null}
         {host && !move ? (
           <>
             <input type="hidden" name="host" value={host.key} />
@@ -252,6 +257,8 @@ export function SlotPicker({
           ) : null}
           <button type="submit" className="btn st-btn btn-lg btn-block">
             {words.submit}
+            {/* In a frame, Stripe's page opens in a new tab: said in the button's name, in the page's language (3.2.5, G201). */}
+            {newTab && !move ? <NewTab /> : null}
           </button>
           <p className="st-muted mt-3 text-center text-xs">{words.note}</p>
         </div>

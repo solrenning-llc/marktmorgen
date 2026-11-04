@@ -97,6 +97,16 @@ async function main(): Promise<void> {
   is("other lengths are a named group, one person a time only, each price with its hint, each row removable by name", [editor.includes('<legend className="field-label">Other lengths (optional)</legend>'), editor.includes("{Number(draft.seats) === 1 ? ("), editor.includes("aria-describedby={said}") && editor.includes("`lengths-price-${id}`"), editor.includes("{`Remove ${row.minutes} minutes`}")], [true, true, true, true]);
   is("a group says before saving that it removes the other lengths; a row no longer longer is marked on itself", [editor.includes("Saving it as a group removes the other lengths"), editor.includes("is not longer than the call's own length of"), editor.includes("aria-invalid={marked || undefined}")], [true, true, true]);
   is("rows keep their own keys, and focus follows an added or removed row", [editor.includes("<div key={row.id}"), editor.includes("focusSoon(`length-${id}-${added.id}`)"), editor.includes("focusSoon(`lengths-hint-${id}`)")], [true, true, true]);
+  is(
+    "every refusal of the lengths the route or the record can send has its own words, never \"something went wrong\"",
+    ["lengths_package:", "lengths_price:", "  lengths: \""].map((key) => editor.includes(key)),
+    [true, true, true],
+  );
+  is(
+    "the line the server marks is kept by its row, said on that row, and unmarked once that row is changed or removed",
+    [editor.includes("setWrongLength(draft.extra[data.index - 1]?.id ?? null)"), editor.includes("const flagged = wrong === row.id;"), editor.includes("flagged ? errorId : \"\""), editor.includes("if (draft.extra[index]?.id === wrong) clearWrong();"), editor.includes("if (flagged) clearWrong();"), editor.includes('<p id={`call-error-${product.id}`} className="notice notice-error" role="alert">')],
+    [true, true, true, true, true, true],
+  );
   is("the team and package editors say why", [readFileSync("components/team-event-editor.tsx", "utf8").includes("team_lengths:"), readFileSync("components/package-editor.tsx", "utf8").includes("lengths:")], [true, true]);
 }
 

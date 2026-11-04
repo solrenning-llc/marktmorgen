@@ -67,6 +67,10 @@ const MESSAGES: Record<string, string> = {
   bundle: "A bundle cannot be a call. Stop it being a bundle first.",
   pwyw: "A call has a set price. Stop letting buyers choose the price first.",
   unknown: "That product is not there anymore. Reload the page.",
+  // The other lengths (637 [GL5]): refused where they are kept (lib/store.ts, setProductCall) or sent in a shape the editor never sends.
+  lengths_package: "This call now sells a package of sessions, and a package's sessions are free once bought, so it offers one length. Remove the other lengths, or stop selling the package first.",
+  lengths_price: "This product's price changed while you were editing, so the other lengths were not saved. Close the hours, open them again and save.",
+  lengths: "The other lengths could not be read, so nothing was saved. Close the hours, open them again and save.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
@@ -401,11 +405,14 @@ const OWN_PRICE = "This product's price is outside what your store's currency al
  * always the first; each other one is longer, so the price on the store is
  * the call's own. Optional: none keeps the call exactly as it is.
  */
-function OtherLengths({ draft, setDraft, currency, id, wrong }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string; wrong: number | null }) {
+function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong, errorId }: { draft: Draft; setDraft: (d: Draft) => void; currency: Currency; id: string; wrong: string | null; clearWrong: () => void; errorId: string }) {
   const longer = CALL_LENGTHS.filter((m) => m > draft.minutes);
   const unused = longer.filter((m) => !draft.extra.some((row) => row.minutes === m));
-  const setRow = (index: number, change: Partial<Draft["extra"][number]>) =>
+  // A line the server marked is unmarked once the creator changes or removes it; the others keep their marks (3.3.1).
+  const setRow = (index: number, change: Partial<Draft["extra"][number]>) => {
+    if (draft.extra[index]?.id === wrong) clearWrong();
     setDraft({ ...draft, extra: draft.extra.map((row, i) => (i === index ? { ...row, ...change } : row)) });
+  };
   // Focus follows the change (2.4.3): to a new row's length, or back to the group's explanation once a row is gone.
   const focusSoon = (target: string) => requestAnimationFrame(() => document.getElementById(target)?.focus());
   return (
@@ -417,13 +424,15 @@ function OtherLengths({ draft, setDraft, currency, id, wrong }: { draft: Draft; 
       {draft.extra.map((row, index) => {
         // Not longer than the call's own length any more (its length was changed above): said on the row, kept until the creator decides.
         const notLonger = row.minutes <= draft.minutes;
-        const marked = notLonger || wrong === index + 1;
-        const said = [notLonger ? `length-short-${id}-${row.id}` : "", `lengths-price-${id}`].filter(Boolean).join(" ");
+        const flagged = wrong === row.id;
+        const marked = notLonger || flagged;
+        // The message the server sent is said on the line it is about, not only above the save button (3.3.1).
+        const said = [notLonger ? `length-short-${id}-${row.id}` : "", flagged ? errorId : "", `lengths-price-${id}`].filter(Boolean).join(" ");
         return (
         <div key={row.id} className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto]">
           <label className="block">
             <span className="field-label">{`Length ${index + 2}`}</span>
-            <select id={`length-${id}-${row.id}`} className="field mt-2" value={row.minutes} aria-invalid={marked || undefined} aria-describedby={notLonger ? `length-short-${id}-${row.id}` : undefined} onChange={(e) => setRow(index, { minutes: Number(e.target.value) })}>
+            <select id={`length-${id}-${row.id}`} className="field mt-2" value={row.minutes} aria-invalid={marked || undefined} aria-describedby={[notLonger ? `length-short-${id}-${row.id}` : "", flagged ? errorId : ""].filter(Boolean).join(" ") || undefined} onChange={(e) => setRow(index, { minutes: Number(e.target.value) })}>
               {[row.minutes, ...unused].filter((m, i, all) => all.indexOf(m) === i).sort((a, b) => a - b).map((m) => (
                 <option key={m} value={m}>{`${m} minutes`}</option>
               ))}
@@ -438,7 +447,7 @@ function OtherLengths({ draft, setDraft, currency, id, wrong }: { draft: Draft; 
               required
               value={row.price}
               onChange={(e) => setRow(index, { price: e.target.value })}
-              aria-invalid={wrong === index + 1 || undefined}
+              aria-invalid={flagged || undefined}
               aria-describedby={said}
             />
           </label>
@@ -446,6 +455,7 @@ function OtherLengths({ draft, setDraft, currency, id, wrong }: { draft: Draft; 
             type="button"
             className="btn btn-secondary"
             onClick={() => {
+              if (flagged) clearWrong();
               setDraft({ ...draft, extra: draft.extra.filter((_, i) => i !== index) });
               focusSoon(`lengths-hint-${id}`);
             }}
@@ -488,8 +498,8 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
   const [draft, setDraft] = useState<Draft>(() => toDraft(product.call, product.call?.kind ?? "weekly", currency));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The other length the server said is wrong, by its line (1 is the first other one), so the editor marks it.
-  const [wrongLength, setWrongLength] = useState<number | null>(null);
+  // The other length the server said is wrong, kept by its row (not its place), so removing another row never moves the mark.
+  const [wrongLength, setWrongLength] = useState<string | null>(null);
 
   const eligible =
     product.priceCents > 0 &&
@@ -525,7 +535,8 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         // Line 0 is the call's own length at this product's price, which is not typed here.
         if (data.index === 0 && data.problem === "price") setError(OWN_PRICE);
         else setError(data.problem === "shorter" ? SHORTER_LENGTH : lengthsProblemWords(data.problem as LengthsProblem, currency, data.minutes));
-        if (typeof data.index === "number" && data.index > 0) setWrongLength(data.index);
+        // The server counts lines from the call's own length (0); the editor's rows start at 1.
+        if (typeof data.index === "number" && data.index > 0) setWrongLength(draft.extra[data.index - 1]?.id ?? null);
         return;
       }
       setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
@@ -943,7 +954,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
       </div>
 
       {Number(draft.seats) === 1 ? (
-        <OtherLengths draft={draft} setDraft={setDraft} currency={currency} id={product.id} wrong={wrongLength} />
+        <OtherLengths draft={draft} setDraft={setDraft} currency={currency} id={product.id} wrong={wrongLength} clearWrong={() => setWrongLength(null)} errorId={`call-error-${product.id}`} />
       ) : draft.extra.length ? (
         // A group shares one time, so it has one length: said before saving, never dropped in silence.
         <p className="field-hint font-semibold text-ink" role="status">
@@ -1101,7 +1112,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         {`When someone books, it shows under Upcoming calls in your studio. The buyer gets an email with a calendar file. You get one too, or the host does on a team call. If the call is already in that person's Google Calendar, their email has no file. You and the buyer get reminders a day and an hour before. A reminder that would come less than an hour after the booking is skipped. On a team call, your reminders still come to you. Buyers can move their booking to another open time themselves, twice at most, up to your notice before it starts. A buyer can reply to their email to reach you, and the reply goes to ${email}.`}
       </p>
 
-      {error ? <p className="notice notice-error" role="alert">{error}</p> : null}
+      {error ? <p id={`call-error-${product.id}`} className="notice notice-error" role="alert">{error}</p> : null}
 
       <div className="flex flex-wrap gap-2">
         <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary">

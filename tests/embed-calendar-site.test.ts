@@ -32,6 +32,11 @@ is("nothing without one, or with anything but a secure address", [body({}).has("
 const full = new URLSearchParams(Array.from({ length: 50 }, (_, i) => [`metadata[f${i}]`, "x"]));
 keepEmbedSite(full, "https://lena.example", false);
 is("written last, after the platform's share, and never past Stripe's fifty metadata fields", [readFileSync("lib/calls.ts", "utf8").indexOf("keepEmbedSite(body, input.embedSite") > readFileSync("lib/calls.ts", "utf8").indexOf("applyShare(body, store, { recurring: false"), full.has("metadata[embed_site]")], [true, false]);
+is(
+  "back from Stripe's page, the booking page still has the site, so a second try is still the site's; never from a package",
+  [new URL(body({ embedSite: "https://lena.example/book" }).get("cancel_url") ?? "").searchParams.get("site"), new URL(body({}).get("cancel_url") ?? "").searchParams.has("site"), body({ embedSite: "https://lena.example", fromPackage: { id: "cs_test_pkg", coupon: "c1", email: "ana@example.com", back: "https://marktmorgen.com/@lena" } }).get("cancel_url")],
+  ["https://lena.example/book", false, "https://marktmorgen.com/@lena"],
+);
 is("never on a session from a package, which pays nothing here", body({ embedSite: "https://lena.example", fromPackage: { id: "cs_test_pkg", coupon: "c1", email: "ana@example.com", back: "https://marktmorgen.com/@lena" } }).has("metadata[embed_site]"), false);
 
 part("Checked against the creator's list again");
@@ -41,6 +46,18 @@ const limit = Number(/const MAX_BODY_BYTES = ([\d_]+);/.exec(route)?.[1].replace
 const longest = new URLSearchParams({ handle: "a".repeat(40), product: "p".repeat(40), start: "1".repeat(14), tz: "America/Argentina/ComodRivadavia", pkg: "k".repeat(60), code: "c".repeat(60), host: "5", host_label: "\u00e9".repeat(60), minutes: "120", site: `https://${"s".repeat(292)}`, return: `https://${"r".repeat(600)}?a=${"\u00e9".repeat(30)}` }).toString();
 is("the whole form fits the route's limit at every field's longest, form-encoded", [longest.length < limit, limit <= 4_000], [true, true]);
 is("the booking route checks what the form sent before handing it on", route.includes("embedSite: listedReturn(store.embedSites, returnAsked) ?? listedSite(store.embedSites, siteAsked) ?? null,"), true);
+
+is(
+  "after a refusal, the booking route sends the listed site and the way back with the buyer, only as listed, never with a package",
+  [route.includes("const keptSite = listedSite(store.embedSites, siteAsked);"), route.includes("const keptBack = keptSite ? listedReturn(store.embedSites, returnAsked) : null;"), route.includes("const keptEmbed = keptSite && !pkg ?"), route.includes("${keptLength}${keptEmbed}`")],
+  [true, true, true, true],
+);
+const bookPage = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");
+is(
+  "and the booking page hands them back to its own form, read against the creator's list again",
+  [bookPage.includes("const embedSite = listedSite(store.embedSites, typeof query.site === \"string\" ? query.site : null);"), bookPage.includes("const embed = embedSite && !pkgOf(query) ? { site: embedSite, back: embedBack } : null;"), bookPage.includes("embed={embed}")],
+  [true, true, true],
+);
 
 part("Sent by the calendar's own form");
 const words: SlotWords = { locale: "en-US", pickDay: "Pick a day", pickTime: "Pick a time", noneTitle: "None", noneBody: "None", yours: "Times are in your time zone, {zone}.", creators: "", chosen: "", submit: "Continue", note: "" };

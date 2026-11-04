@@ -28,6 +28,7 @@ import { broadcastMoney, flowMoney, readMailRevenue } from "@/lib/mail-revenue";
 import { flowStats, readFlows } from "@/lib/flows";
 import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
+import { type Charge, chargeBook } from "@/lib/api-read";
 import { insightsFrom } from "@/lib/insights";
 import { readPaths } from "@/lib/next-bought";
 import { campaignResultsFrom } from "@/lib/campaign-results";
@@ -278,9 +279,16 @@ export async function emailsTool(store: Store) {
   };
 }
 
-/** The affiliate program, each affiliate by their link's code, never their address. */
-export async function affiliatesTool(store: Store) {
+/**
+ * The affiliate program, each affiliate by their link's code, never their
+ * address. Reading it takes the further API requests its size costs first
+ * (lib/api-read.ts, chargeBook), as /api/v1/affiliates does: the refusal is
+ * handed back as it is, with nothing read.
+ */
+export async function affiliatesTool(store: Store, charge: Charge) {
   if (!affiliatesOn(store)) return { program: null, note: "The affiliate program is off." };
+  const refused = await chargeBook(store, charge);
+  if (refused) return refused;
   const book = await readBook(store);
   return {
     currency: book.currency,

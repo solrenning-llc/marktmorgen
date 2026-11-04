@@ -158,10 +158,23 @@ async function main(): Promise<void> {
   is("with what matters locked for a week", [Math.round(((await lockedUntil(lockedSession)) - Date.now()) / 86_400_000), (await lockedUntil(lockedSession)) === until], [RESET_DAYS, true]);
   const asStudio = (need: string, session: string) =>
     studioAccess(new NextRequest("https://marktmorgen.com/api/store/x", { method: "POST", headers: { cookie: `nl_session=${session}` } }), need as never);
-  const lockedAnswers = await Promise.all(["payments", "billing", "team", "delete", "export", "settings", "send", "import"].map(async (need) => (await asStudio(need, lockedSession)).ok === false && ((await asStudio(need, lockedSession)) as { reason: string }).reason));
-  is("payments, the plan, the team, deleting, exports, settings, sending and imports wait", lockedAnswers, new Array(8).fill("locked"));
+  const lockedAnswers = await Promise.all(["payments", "billing", "team", "delete", "export", "settings", "send", "import", "erase"].map(async (need) => (await asStudio(need, lockedSession)).ok === false && ((await asStudio(need, lockedSession)) as { reason: string }).reason));
+  is("payments, the plan, the team, deleting, exports, settings, sending, imports and erasing a person wait", lockedAnswers, new Array(9).fill("locked"));
   const openAnswers = await Promise.all(["products", "page", "orders", "stats", "draft", "reviews"].map(async (need) => { const a = await asStudio(need, lockedSession); return a.ok ? "open" : (a as { reason: string }).reason; }));
   is("products, pages, orders, numbers, drafts and reviews do not", openAnswers.every((a) => a !== "locked"), true);
+  // C2-76 (4 November 2026): what cannot be undone waits too, under a permission the session otherwise keeps.
+  const reasonOf = async (need: string, action: string) => {
+    const a = await studioAccess(new NextRequest("https://marktmorgen.com/api/store/x", { method: "POST", headers: { cookie: `nl_session=${lockedSession}` } }), need as never, action);
+    return a.ok ? "open" : (a as { reason: string }).reason;
+  };
+  is("deleting a person and everything kept about them waits", await reasonOf("erase", "erase"), "locked");
+  is("removing a product waits; adding and editing one do not", [await reasonOf("products", "remove"), await reasonOf("products", "edit") !== "locked", await reasonOf("products", "add") !== "locked"], ["locked", true, true]);
+  const { POST: personRoute } = await import("@/app/api/store/person/route");
+  const erased = await personRoute(new NextRequest("https://marktmorgen.com/api/store/person", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "erase", token: "x".repeat(40), confirm: "DELETE" }) }));
+  is("the erase route itself refuses it, before anything is read or deleted", ((await erased.json()) as { error?: string }).error, "locked");
+  const { POST: passkeyRoute } = await import("@/app/api/auth/passkey/route");
+  const removedKey = await passkeyRoute(new NextRequest("https://marktmorgen.com/api/auth/passkey", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "remove", id: "a-passkey" }) }));
+  is("and a passkey cannot be taken away from the owner either", [removedKey.status, ((await removedKey.json()) as { error?: string }).error], [403, "locked"]);
   const { POST: twoStepRoute } = await import("@/app/api/auth/two-step/route");
   const tried = await twoStepRoute(new NextRequest("https://marktmorgen.com/api/auth/two-step", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "cancel" }) }));
   is("two-step login cannot be changed from it", [tried.status, ((await tried.json()) as { error?: string }).error], [403, "locked"]);

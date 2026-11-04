@@ -3372,7 +3372,7 @@ const pt: CommunityWords = {
     pinfull: "Já há três publicações afixadas. Desafixe uma primeiro.",
     gone: "Isso já não existe.",
     forbidden: "Não lhe cabe alterar isso.",
-    locked: "Você entrou sem a sua segunda etapa, então apagar e enviar e-mail a todos os membros esperam até o login em duas etapas se desligar. Entre com o código do seu app ou uma chave de acesso para fazer isso agora.",
+    locked: "Entrou sem a sua segunda etapa, por isso apagar e enviar email a todos os membros aguardam até que o início de sessão em duas etapas se desligue. Inicie sessão com o código da sua aplicação ou uma chave de acesso para o fazer já.",
     going: "Vai participar. O acesso aparece nesta página 15 minutos antes do início.",
     goingnomail: "Vai participar. O acesso aparece nesta página 15 minutos antes do início. Para receber lembretes por email um dia e uma hora antes, assinale a caixa «Enviem-me um email» na sua página Eu.",
     notgoing: "A sua participação foi cancelada.",

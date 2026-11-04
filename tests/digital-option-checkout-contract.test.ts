@@ -5,7 +5,8 @@ import {addOption,addProduct,claimHandle,ensureStatsId,setProductFile,setStripeA
 import {readProduct} from "@/lib/catalog";
 import {createCheckout} from "@/lib/store-checkout";
 import {selectedDigitalOptionFromOriginal} from "@/lib/digital-option-confirmation";
-import {digitalOptionBodyMatches} from "@/lib/digital-option-body";
+import {confirmationBodyDigest} from "@/lib/order-confirmation-outbox";
+import {digitalOptionBodyMatches,captureDigitalOptionRequestSnapshot} from "@/lib/digital-option-body";
 import {store as redis} from "./redis-stub";
 import {paidPeriod} from "./billing-period-fixture";
 import {TEST_CONSENT} from "./digital-consent-fixture";
@@ -39,6 +40,11 @@ test("both explicit paid-file choices match the actual original checkout body wi
    const form=new URLSearchParams(last.body),consent=form.get("metadata[dc]");assert.ok(consent);
    assert.equal(form.get("metadata[option]"),option.id);assert.equal(form.get("line_items[0][price_data][unit_amount]"),String(option.priceCents));
    assert.equal(digitalOptionBodyMatches(last.body,{options:[selected]},option.id,folder,{storeHandle:store.handle,productId:product.id,title:product.title,currency:store.currency,consent,summary:product.summary},60000),true,"actual Checkout wire matches only the selected original option and summary");
+   const prepared=new URLSearchParams(last.body),nonce="a".repeat(64);
+   prepared.set("metadata[mm_order_origin]","digital-option-v1");prepared.set("metadata[mm_order_intent]",nonce);prepared.set("metadata[mm_order_hash]",confirmationBodyDigest(prepared.toString()));
+   const snapshot=captureDigitalOptionRequestSnapshot({store,product,optionId:option.id,folder,body:prepared.toString(),nonce,consent,maximumBytes:60000});
+   assert.ok(snapshot,"the original real wire, with explicit future-private markers, fits the closed snapshot");
+   assert.equal(snapshot.selected.id,option.id);assert.equal(snapshot.selected.priceCents,option.priceCents);assert.equal(snapshot.permitsCheckout,false);assert.equal(snapshot.grantsAccess,false);
    assert.equal(JSON.stringify(product),before);
    for(const other of product.options.filter(o=>o.id!==option.id))assert.equal(digitalOptionBodyMatches(last.body,{options:[selected]},other.id,folder,{storeHandle:store.handle,productId:product.id,title:product.title,currency:store.currency,consent,summary:product.summary},60000),false);
   }

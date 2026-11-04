@@ -33,12 +33,12 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | Class | Files |
 | --- | --- |
 | FOLLOW-UP-CHARGE | 8 |
-| NEW-CHARGE | 13 |
+| NEW-CHARGE | 14 |
 | TOTALS | 34 |
 | PAST-SALE | 9 |
 | SETTING | 40 |
 | OTHER | 1 |
-| All | 105 |
+| All | 106 |
 
 ## The files
 
@@ -46,6 +46,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | --- | --- | --- | --- |
 | `app/[handle]/book/[product]/page.tsx` | NEW-CHARGE | 83: whether a booking with a deposit offers its discount code field, read against the price in the store's currency (520 [LB1], unit 5c) | no |
 | `app/api/store/book/route.ts` | NEW-CHARGE | 97, 101: a booking's deposit and a code taken off its whole price, in the store's currency (520 [LB1], unit 5c) | no |
+| `app/embed/[handle]/[product]/page.tsx` | NEW-CHARGE | 225: the embedded calendar's deposit and amount to pay now, read against the chosen length's price in the store's currency (637 [GL5], unit 6) | no |
 | `app/api/store/call/route.ts` | NEW-CHARGE | 60, 62: a call's other lengths, each price typed and read in the store's currency beside the product's own price (637 [GL5], unit 3) | no |
 | `app/[handle]/manage/page.tsx` | FOLLOW-UP-CHARGE | 215: no switch offered to a membership paid in another currency than the store's, with a line that says why (unit 2b) | yes |
 | `app/[handle]/manage/switch/page.tsx` | FOLLOW-UP-CHARGE | 163: the yearly switch's saving labelled with the store's currency, not the subscription's | partly: yearlyChoice is null when the subscription's currency differs |
@@ -61,7 +62,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `app/api/store/payment-requests/route.ts` | NEW-CHARGE | 30: a payment request drafted in the store's currency | partly: the request keeps its own currency |
 | `app/api/store/tip/route.ts` | NEW-CHARGE | 42–43: a buyer's tip held to the store's currency's range | no |
 | `app/studio/requests/page.tsx` | NEW-CHARGE | 47–48: a request's amount prefilled in the store's currency; 73 the list labelled with it | partly: each record carries a currency the list ignores |
-| `lib/call-series-billing.ts` | FOLLOW-UP-CHARGE | 412–414: a series' later sessions charged in the store's currency (SeriesKey); 586: each PaymentIntent read back with its own amount and currency, never another's | partly: rules only, nothing charged yet |
+| `lib/call-series-billing.ts` | FOLLOW-UP-CHARGE | 415: each session's record keeps the currency the series was booked in, never the store's now (C2-94); 529: a create refused unless its amount and currency are the record's; 668: each PaymentIntent read back with its own amount and the record's currency, never another's; 749–750: a SeriesKey whose currency is not its records' charges nothing, and toStop refuses a session without its booked record; the store's currency cannot change while a series runs (lib/call-series-open.ts, app/api/store/currency/route.ts 68–69) | partly: rules only, nothing charged yet |
 | `lib/call-packages.ts` | NEW-CHARGE | 124: a package's checkout line in the store's currency; 212 the session's | partly |
 | `lib/calls.ts` | NEW-CHARGE | 670: a call's checkout line; 1341 the phone alert of what was paid, in the store's currency | no: 1341 ignores the paid currency |
 | `lib/checkout-recovery.ts` | SETTING | 449: a call's deposit read against its price in the store's currency, for the reminder of an abandoned checkout (520 [LB1], unit 5b-1); the reminder also says each of a call's lengths at its price in the store's currency (637 [GL5], unit 2c) | no |

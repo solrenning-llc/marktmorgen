@@ -677,6 +677,9 @@ export async function createCheckout(
   // Stripe's own box only where Stripe offers it (a US account). Asking for
   // it anywhere else is a checkout refused and opened again without it.
   if (recovering && store.recovery.asks) applyRecovery(body);
+  // Not Stripe's recovery link on a checkout that holds a limited unit (3 November 2026): it opens a new checkout with
+  // none held, so the last unit could be sold twice. The consent question stays; the reminder links to the store.
+  if (extras.held) body.delete("after_expiration[recovery][enabled]");
   // And the way back from the checkout leads to a page that says nothing was
   // charged and offers one reminder, which the buyer asks for themselves
   // (lib/checkout-ask.ts). Not for a call: its checkout holds a time.

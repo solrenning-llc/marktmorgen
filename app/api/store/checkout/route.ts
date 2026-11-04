@@ -7,7 +7,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { countHit } from "@/lib/visit";
-import { heldCheckout, holdCookieValue, releaseStockHold, withStockHold } from "@/lib/stock";
+import { HOLD_COOKIE_PATH, heldCheckouts, holdCookieNames, holdCookieValue, releaseCartStockHolds, releaseStockHold, withStockHold } from "@/lib/stock";
 import { activePlan } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
@@ -37,8 +37,6 @@ import { assistReminderOffered, keepAssistReminder } from "@/lib/assistant-remin
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type DigitalConsent, DigitalConsentMissing, consentFromForm, deliversDigitally } from "@/lib/digital-consent";
 
-/** The checkout this browser last opened for a limited product. */
-const HOLD_COOKIE = "nl_stock_hold";
 
 /**
  * Starts a purchase.
@@ -217,9 +215,11 @@ export async function POST(request: NextRequest) {
   try {
     // A buyer who went back from Stripe's page hands back the unit they held
     // before holding another.
-    // Only a checkout named by the signed cookie this route gave (lib/stock.ts, heldCheckout), so nobody can close another person's.
-    const previous = heldCheckout(store, request.cookies.get(HOLD_COOKIE)?.value);
-    if (previous) await releaseStockHold(store, product, previous).catch(() => {});
+    // Only checkouts named by the store's signed cookies (lib/stock.ts, heldCheckouts), so nobody can close another person's:
+    // the last one for a product bought alone, and the cart's when it holds this product's unit.
+    const cookies = heldCheckouts(store, (name) => request.cookies.get(name)?.value);
+    if (cookies.product) await releaseStockHold(store, product, cookies.product).catch(() => {});
+    if (cookies.cart) await releaseCartStockHolds(store, [product], cookies.cart, { ifHolding: true }).catch(() => {});
 
     // When offers follow the payment, this browser gets a secret, and only
     // its fingerprint travels with the charge.
@@ -314,7 +314,7 @@ export async function POST(request: NextRequest) {
     const secure = origin.startsWith("https://") ? "; Secure" : "";
     const signed = product.stock !== null ? holdCookieValue(store, held.value.id) : null;
     if (signed) {
-      headers.append("Set-Cookie", `${HOLD_COOKIE}=${signed}; Path=/api/store/checkout; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
+      headers.append("Set-Cookie", `${holdCookieNames(store).product}=${signed}; Path=${HOLD_COOKIE_PATH}; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
     }
     if (upsell) {
       headers.append("Set-Cookie", `${UPSELL_COOKIE}=${upsell.secret}; Path=/; Max-Age=7200; HttpOnly; SameSite=Lax${secure}`);

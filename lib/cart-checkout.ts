@@ -220,6 +220,9 @@ export async function createCartCheckout(
   // one reminder of the whole cart, which the buyer asks for themselves.
   const recovering = recoveryOn(store);
   if (recovering && store.recovery.asks) applyRecovery(body);
+  // Not Stripe's recovery link on a checkout that holds a limited unit (3 November 2026): it opens a new checkout with
+  // none held, so the last unit could be sold twice. The consent question stays; the reminder links to the store.
+  if (extras.held) body.delete("after_expiration[recovery][enabled]");
   if (recovering) body.set("cancel_url", `${origin}/@${store.handle}/left?cart=${asPut.map((p) => encodeURIComponent(p.id)).join(",")}`);
   let asking = recovering && store.recovery.asks;
   let named = isHouseStore(store);

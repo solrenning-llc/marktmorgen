@@ -323,7 +323,9 @@ async function main(): Promise<void> {
   const unaQ = makePasskey(UNA, "cred-una-q");
   await unaP.keep();
   await unaQ.keep();
+  await keepRecoveryAddress(UNA, "una-rec@example.org");
   const atUna = await scheduleRemoval(UNA, "cred-una-p", "e".repeat(64), true, t0);
+  is("the confirmed recovery address is told too (MM-SA-19)", mails.some((m) => m.to === "una-rec@example.org" && m.subject === "A passkey is set to be removed from your Marktmorgen account" && m.text.includes(`It will be removed on ${removalWhen(atUna!)}.`)), true);
   const unaMail = [...mails].reverse().find((m) => m.to === UNA && m.subject === "A passkey is set to be removed from your Marktmorgen account")?.text ?? "";
   is(
     "with another passkey and the app: when, and what to do if it was not them; only Keep it stops it",

@@ -1222,9 +1222,12 @@ export async function switchPlan(
   if (typeof itemId !== "string") throw new Error("The subscription has no item to change");
   const price = await ensurePrice(choice.tier, choice.cycle);
 
-  // Only what a pending update may carry. Stripe refuses any other field —
-  // metadata included — when the change waits on a payment, so the plan's
-  // name is written separately below, once the change has actually happened.
+  // Only what a pending update may carry. Before API version 2026-05-27.dahlia
+  // Stripe refused any other field — metadata included — when the change waits
+  // on a payment (from that version it keeps metadata in pending_update.metadata:
+  // docs.stripe.com/changelog/dahlia/2026-05-27/pending-subscription-update-metadata).
+  // This file sends no pinned Stripe-Version here, so the plan's name is still
+  // written separately below, once the change has actually happened.
   const body = new URLSearchParams({
     "items[0][id]": itemId,
     "items[0][price]": price,

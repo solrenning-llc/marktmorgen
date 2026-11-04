@@ -222,7 +222,7 @@ export async function studioAccess(
  * a page drawn. What the owner needs to leave or pay is taken from a small
  * daily figure instead, so it is never shut out by the month's.
  */
-export async function countStudio(store: Store, need: Need | null, units = 1): Promise<{ ok: true; store?: Store } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string }> {
+export async function countStudio(store: Store, need: Need | null, units = 1): Promise<{ ok: true; store?: Store } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string; left?: number; reset?: string }> {
   if (need && ESSENTIAL_NEEDS.includes(need)) {
     return (await withinEssentialLimit("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400))
       ? { ok: true }
@@ -231,7 +231,7 @@ export async function countStudio(store: Store, need: Need | null, units = 1): P
   // A paying store whose billing month is not known has it read from Stripe first (lib/billing-sync.ts).
   const current = await refreshPeriod(store);
   const taken = await takeAllowance(current, "studio", units);
-  if (!taken.ok) return { ok: false, reason: taken.reason, message: taken.message };
+  if (!taken.ok) return { ok: false, reason: taken.reason, message: taken.message, left: taken.left, reset: taken.reset };
   return current === store ? { ok: true } : { ok: true, store: current };
 }
 

@@ -33,7 +33,7 @@ import { membershipLine } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
-import { withLock } from "@/lib/redis-lock";
+import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { forgetPaid } from "@/lib/learn";
 import { forgetTicket } from "@/lib/community-access";
 import type { Listing, Store } from "@/lib/store";
@@ -268,7 +268,7 @@ export async function switchTier(store: Store, token: string, subscription: stri
       return { ok: true, title: found.to.title };
     });
   } catch (error) {
-    if (error instanceof Error && error.name === "LockBusyError") return { ok: false, reason: "busy" };
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     if (!(error instanceof StripeError)) console.error("switching a tier failed", error);
     return { ok: false, reason: "error" };
   }

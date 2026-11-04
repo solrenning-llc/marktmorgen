@@ -46,6 +46,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SITE_URL } from "@/lib/site-url";
 import { withLock } from "@/lib/redis-lock";
 import { removalWhen } from "@/lib/removal-time";
+import { recoveryAddressOf } from "@/lib/two-step";
 
 /** Passkeys one account may hold. */
 export const MAX_PASSKEYS = 10;
@@ -150,13 +151,18 @@ async function saveList(email: string, list: Passkey[]): Promise<void> {
   await redisPipeline([list.length ? ["SET", listKey(email), JSON.stringify(list)] : ["DEL", listKey(email)]]);
 }
 
-/** A short plain notice to the account's address when its passkeys change. */
-async function tell(email: string, subject: string, line: string, own?: { ifYou: string; ifNotYou: string[] }): Promise<void> {
+/**
+ * A short plain notice to the account's address when its passkeys change, or
+ * to `own.to`, its recovery address (MM-SA-19); `own.ifYou` and
+ * `own.ifNotYou` replace the closing lines where a notice has its own.
+ */
+async function tell(email: string, subject: string, line: string, own: { to?: string; ifYou?: string; ifNotYou?: string[] } = {}): Promise<void> {
+  const to = own.to ?? email;
   if (!isSenderConfigured()) return;
   const when = new Date().toISOString().replace("T", " ").slice(0, 16);
   await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
-    to: normaliseEmail(email),
+    to: normaliseEmail(to),
     replyTo: "support@marktmorgen.com",
     subject,
     text: [
@@ -164,12 +170,12 @@ async function tell(email: string, subject: string, line: string, own?: { ifYou:
       "",
       `When: ${when} UTC`,
       "",
-      own?.ifYou ?? "If this was you, there is nothing to do.",
+      own.ifYou ?? "If this was you, there is nothing to do.",
       "",
-      ...(own?.ifNotYou ?? [
+      ...(own.ifNotYou ?? [
         "If it was not you: log in at",
         `${SITE_URL}/signin`,
-        "with this email address, remove any passkey you do not recognize, choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.",
+        `${to === email ? "with this email address" : `as ${normaliseEmail(email)}`}, remove any passkey you do not recognize, choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.`,
       ]),
     ].join("\n"),
   }).catch(() => false);
@@ -303,6 +309,17 @@ async function writeDrop(email: string, record: DropRecord): Promise<void> {
   await redisPipeline([["SET", dropKey(email), JSON.stringify(record)]]);
 }
 
+/**
+ * The same notice to the confirmed recovery address too, which whoever holds
+ * the sign-in inbox cannot read (MM-SA-19), read as two-step login reads it.
+ */
+async function tellRecovery(address: string, subject: string, line: string, own: { ifYou?: string; ifNotYou?: string[] } = {}): Promise<void> {
+  const backup = await recoveryAddressOf(address).catch(() => "");
+  if (backup && normaliseEmail(backup) !== address) {
+    await tell(address, subject, `This is the recovery address for the Marktmorgen account ${address}, so you get this notice too.\n\n${line}`, { ...own, to: backup });
+  }
+}
+
 /** The passkey a session was opened with, from its mark ("passkey:<id>"), or "" for any other. */
 async function sessionPasskey(email: string, session: string | undefined): Promise<string> {
   const mark = await sessionMark(session, email);
@@ -343,26 +360,26 @@ export async function scheduleRemoval(email: string, id: string, session: string
     // Owner C3-96 and the review of 3467adf6d: when it happens, and what to do if it was not them, in plain words.
     const when = removalWhen(asked.at);
     const canStop = asked.another || appOn;
-    await tell(
-      address,
-      "A passkey is set to be removed from your Marktmorgen account",
-      `Somebody logged in to your Marktmorgen account (${address}) without a passkey or an app code and asked to remove the passkey called “${headerText(asked.name, 60)}”. Every browser that logged in with it was logged out.\n\nIt will be removed on ${when}.`,
-      {
-        ifYou: "If this was you, there is nothing to do: it is removed on that day.",
-        ifNotYou: canStop
-          ? [
-              `If it was not you, stop it before ${when}:`,
-              `1. Log in at ${SITE_URL}/signin with ${asked.another ? "another of your passkeys" : ""}${asked.another && appOn ? ", or " : ""}${appOn ? "the emailed link and the code from your authenticator app" : ""}.`,
-              "2. Open Account in your studio and press “Keep it” next to the passkey. Only “Keep it” stops the removal: logging in alone does not, and logging in with the passkey that is being removed cannot.",
-              "Then choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.",
-            ]
-          : [
-              "If it was not you: every passkey on your account is set to be removed and you have no authenticator app, so nothing can stop it. That also means nobody can use these passkeys to add new ones in the meantime.",
-              `On ${when}, log in at ${SITE_URL}/signin with the emailed link, and add a new passkey or turn on an authenticator app under Account in your studio.`,
-              "Now, choose “Log out of all devices” at the bottom of your studio, change your email password, and reply to this email so we can help.",
-            ],
-      },
-    );
+    const subject = "A passkey is set to be removed from your Marktmorgen account";
+    const line = `Somebody logged in to your Marktmorgen account (${address}) without a passkey or an app code and asked to remove the passkey called “${headerText(asked.name, 60)}”. Every browser that logged in with it was logged out.\n\nIt will be removed on ${when}.`;
+    const own = {
+      ifYou: "If this was you, there is nothing to do: it is removed on that day.",
+      ifNotYou: canStop
+        ? [
+            `If it was not you, stop it before ${when}:`,
+            `1. Log in at ${SITE_URL}/signin with ${asked.another ? "another of your passkeys" : ""}${asked.another && appOn ? ", or " : ""}${appOn ? "the emailed link and the code from your authenticator app" : ""}.`,
+            "2. Open Account in your studio and press “Keep it” next to the passkey. Only “Keep it” stops the removal: logging in alone does not, and logging in with the passkey that is being removed cannot.",
+            "Then choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.",
+          ]
+        : [
+            "If it was not you: every passkey on your account is set to be removed and you have no authenticator app, so nothing can stop it. That also means nobody can use these passkeys to add new ones in the meantime.",
+            `On ${when}, log in at ${SITE_URL}/signin with the emailed link, and add a new passkey or turn on an authenticator app under Account in your studio.`,
+            "Now, choose “Log out of all devices” at the bottom of your studio, change your email password, and reply to this email so we can help.",
+          ],
+    };
+    await tell(address, subject, line, own);
+    // Told to the confirmed recovery address too, as whoever asked may hold the sign-in inbox (MM-SA-19).
+    await tellRecovery(address, subject, line, own);
   }
   return asked.at;
 }
@@ -466,7 +483,11 @@ export async function removePasskey(email: string, id: string, keep?: string, no
   await afterDue(address, due);
   if (typeof answer === "string") return answer;
   await dropSecondStep(address, (mark) => mark === `passkey:${id}`, keep);
-  await tell(address, "A passkey was removed from your Marktmorgen account", `The passkey called “${headerText(answer.name, 60)}” was removed from your Marktmorgen account (${address}). It cannot log in anymore.`);
+  const line = `The passkey called “${headerText(answer.name, 60)}” was removed from your Marktmorgen account (${address}). It cannot log in anymore.`;
+  await tell(address, "A passkey was removed from your Marktmorgen account", line);
+  // A passkey is one of the ways the owner calls off a login without two-step login (lib/two-step.ts),
+  // so its removal is told to the confirmed recovery address too (MM-SA-19).
+  await tellRecovery(address, "A passkey was removed from your Marktmorgen account", line);
   return "removed";
 }
 

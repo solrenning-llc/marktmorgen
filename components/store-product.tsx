@@ -27,6 +27,7 @@ import { productSegment } from "@/lib/product-slug";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { pickWords } from "@/lib/buyer-words/pick";
+import { cartWords } from "@/lib/buyer-words/cart";
 import { PickBundleForm } from "@/components/pick-bundle-form";
 import { AddToCart } from "@/components/store-cart";
 import { AssistReminderBox } from "@/components/assistant-reminder-box";
@@ -533,6 +534,23 @@ export function ClicksBox({ id, label, className = "", always = false }: { id: s
   );
 }
 
+/**
+ * How many of a limited product are left, said where the price is (the
+ * product's page and its card). None free: "Sold out" only when every unit
+ * is known to be sold; when some are only in other buyers' checkouts, says
+ * so and when to try again (heldMinutes, lib/stock.ts, stockShown), in the
+ * cart's own words (4 November 2026, review of 513 [PF1]). Said in words,
+ * not by color alone; nothing to buy is drawn beside it either way.
+ */
+export function StockLine({ store, remaining, heldMinutes = null, className }: { store: Store; remaining: number; heldMinutes?: number | null; className: string }) {
+  const { w, num } = speech(store);
+  return (
+    <p className={className} style={{ color: "var(--st-accent-text)" }}>
+      {remaining > 0 ? w.left(remaining, num(remaining)) : heldMinutes ? cartWords(store.language).held(heldMinutes) : w.soldOut}
+    </p>
+  );
+}
+
 export function BuyBox({
   store,
   product,
@@ -1016,6 +1034,8 @@ export function pageAction(
   soon = false,
   /** Coming soon and taking pre-orders: the buttons lead to the pre-order (lib/preorders.ts). */
   preorder: string | null = null,
+  /** None free, but some only in other buyers' checkouts: when they may come back (lib/stock.ts, stockShown). */
+  heldMinutes: number | null = null,
 ): { action: PageAction; label: string } {
   const { w, money } = speech(store);
   if (soon && !isFree(product) && preorder) {
@@ -1032,7 +1052,7 @@ export function pageAction(
       ? { action: { kind: "link", href: `/@${store.handle}/book/${product.id}` }, label: product.call.kind === "live" ? w.pickSession : w.pickTime }
       : { action: { kind: "none", text: w.noDates }, label: "" };
   }
-  if (remaining === 0) return { action: { kind: "none", text: w.soldOutStop }, label: "" };
+  if (remaining === 0) return { action: { kind: "none", text: heldMinutes ? cartWords(store.language).held(heldMinutes) : w.soldOutStop }, label: "" };
   // A bundle its buyer builds is chosen in its buy box before it is bought.
   const pick = picks(product);
   if (pick && canSellProduct(store, product)) return { action: { kind: "link", href: "#buy" }, label: pickWords(store.language).legend(pick) };
@@ -1089,12 +1109,15 @@ export function ProductCard({
   preorder = null,
   cart = false,
   sold = null,
+  heldMinutes = null,
 }: {
   store: Store;
   product: Listing;
   /** Other products read with this one: the one its order bump offers, when it has one. */
   related: Listing[];
   remaining: number | null;
+  /** None free, but some only in other buyers' checkouts: when they may come back (lib/stock.ts, stockShown). */
+  heldMinutes?: number | null;
   writes: boolean;
   selling: boolean;
   manageable: boolean;
@@ -1120,11 +1143,10 @@ export function ProductCard({
   sold?: string | null;
 }) {
   const href = productPath(store, product);
-  const { w, num } = speech(store);
+  const { w } = speech(store);
   const image = product.image;
   const style = image ? product.display : "button";
   const plan = activePlan(product);
-  const soldOut = remaining === 0;
 
   const picture = image ? (
     // A plain img: the picture was already sized in the creator's browser and
@@ -1181,11 +1203,7 @@ export function ProductCard({
       {plan && canSellProduct(store, product) && !soon ? (
         <p className="st-muted mt-1 text-sm font-semibold">{w.orPlan(planLine(store, plan))}</p>
       ) : null}
-      {remaining !== null && !soon ? (
-        <p className="mt-2 text-sm font-bold" style={{ color: "var(--st-accent-text)" }}>
-          {soldOut ? w.soldOut : w.left(remaining, num(remaining))}
-        </p>
-      ) : null}
+      {remaining !== null && !soon ? <StockLine store={store} remaining={remaining} heldMinutes={heldMinutes} className="mt-2 text-sm font-bold" /> : null}
       <BuyBox
         store={store}
         product={product}

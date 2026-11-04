@@ -66,7 +66,7 @@ import { STORE_SCOPE, readToken } from "@/lib/page-read";
 import { countSearchMiss } from "@/lib/stats";
 import { isBot } from "@/lib/source-rules";
 import { ExitOfferSlot } from "@/components/exit-offer-slot";
-import { stockLeft } from "@/lib/stock";
+import { type StockShown, stockShown } from "@/lib/stock";
 import { outOfKeys } from "@/lib/licence-keys";
 import { ProductCard } from "@/components/store-product";
 import { canWrite } from "@/lib/mail";
@@ -255,10 +255,10 @@ export default async function StorePage({ params, searchParams }: Params) {
   const counts = await Promise.all(
     listings.map(async (product) => {
       const [stock, out] = await Promise.all([
-        stockLeft(store, product).catch(() => null),
+        stockShown(store, product).catch(() => null),
         outOfKeys(store, product).catch(() => false),
       ]);
-      return out ? 0 : stock;
+      return out ? ({ left: 0, heldMinutes: null } satisfies StockShown) : stock;
     }),
   );
   const rated = await ratings;
@@ -268,9 +268,12 @@ export default async function StorePage({ params, searchParams }: Params) {
   const coming = await soonState(store).catch(() => ({ soon: new Set<string>(), days: new Map<string, string>() }));
   const soon = coming.soon;
   const left = new Map<string, number>();
+  // None free, but some only in other buyers' checkouts: said so on the card, not "Sold out" (lib/stock.ts, stockShown).
+  const held = new Map<string, number>();
   listings.forEach((product, i) => {
     const count = counts[i];
-    if (count !== null) left.set(product.id, count);
+    if (count !== null) left.set(product.id, count.left);
+    if (count?.heldMinutes) held.set(product.id, count.heldMinutes);
   });
 
   // Which parts of the page have something to show (lib/store-order.ts): only those are drawn.
@@ -447,6 +450,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                             related={known}
                             // A count is only worth showing where the product can be bought.
                             remaining={left.has(product.id) && canSellProduct(store, product) ? left.get(product.id)! : null}
+                            heldMinutes={held.get(product.id) ?? null}
                             writes={writes}
                             selling={selling}
                             manageable={manageable}

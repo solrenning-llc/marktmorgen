@@ -37,12 +37,9 @@ import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { deliversDigitally } from "@/lib/digital-consent";
-import { CART_READ_STOCK_UNITS, HOLD_COOKIE_PATH, type ReleaseOutcome, STOCK_ATTEMPT_UNITS, type StripeChecks, heldCheckouts, holdCookieNames, holdCookieValue, releaseCartStockHolds, releaseStockHold, shownOnly, stockLeft, stockReading, withCartStockHolds } from "@/lib/stock";
+import { CART_READ_STOCK_UNITS, HOLD_COOKIE_PATH, HOLD_MINUTES, type ReleaseOutcome, STOCK_ATTEMPT_UNITS, type StripeChecks, heldCheckouts, holdCookieNames, holdCookieValue, releaseCartStockHolds, releaseStockHold, shownOnly, stockLeft, stockReading, withCartStockHolds } from "@/lib/stock";
 import { takePublicRequest } from "@/lib/traffic";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
-
-/** At most how long a unit held by another buyer's checkout stays held, in whole minutes (lib/stock.ts). */
-const HOLD_MINUTES = Math.ceil(HOLD_SECONDS / 60);
 
 
 /**
@@ -92,7 +89,7 @@ export async function GET(request: NextRequest) {
     const reading = left.get(id);
     const soldOut = reading !== undefined && reading !== null && reading.left === 0 && reading.unchecked === 0;
     // None free, but some only held by other buyers' checkouts (or not settled yet): said so, with when they come back
-    // (HOLD_SECONDS), never "buy it from its own page": that page then says sold out with no button (4 November 2026,
+    // (HOLD_SECONDS), as the product's own page says it (HOLD_MINUTES, lib/stock.ts, stockShown; 4 November 2026,
     // review of 513 [PF1]).
     const held = reading !== undefined && reading !== null && reading.left === 0 && reading.unchecked > 0;
     // A count that cannot be read (or was not taken): not available in a cart right now.

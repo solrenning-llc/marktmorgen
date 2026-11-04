@@ -9,7 +9,7 @@ import { readListing, readListings } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { lookStyle } from "@/lib/store-look";
 import { imageUrl } from "@/lib/product-image";
-import { stockLeft } from "@/lib/stock";
+import { stockShown } from "@/lib/stock";
 import { outOfKeys } from "@/lib/licence-keys";
 import { preorderDay, soonOne } from "@/lib/preorders";
 import { sellsInTestMode } from "@/lib/stripe-connect";
@@ -149,15 +149,17 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   const selling = canSell(store);
   const [coming, stock, noKeys, related, summary] = await Promise.all([
     soonOne(store, product.id).catch(() => ({ soon: false, day: null })),
-    stockLeft(store, product).catch(() => null),
+    stockShown(store, product).catch(() => null),
     outOfKeys(store, product).catch(() => false),
     product.bumps.length ? readListings(store, bumpTargets(product)).catch(() => []) : Promise.resolve([]),
     summaryOf(store.statsId, product.id).catch(() => null),
   ]);
   const soon = coming.soon;
-  const count = noKeys ? 0 : stock;
+  const count = noKeys ? 0 : stock?.left ?? null;
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
-  const computed = pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day));
+  // None free, but some only in other buyers' checkouts: said so, not "Sold out" (lib/stock.ts, stockShown).
+  const heldMinutes = remaining === 0 && !noKeys ? stock?.heldMinutes ?? null : null;
+  const computed = pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day), heldMinutes);
   const page = tag(productPath(store, product));
   // A card the script opened on a site the creator did not list, past the
   // store's visits or past the opens one connection gets, and one pasted

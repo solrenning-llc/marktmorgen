@@ -11,7 +11,7 @@ import { MAX_CART, cartable } from "@/lib/cart-rules";
 import { bumpTargets } from "@/lib/product-extras";
 import { offeredItems } from "@/lib/bundles";
 import { preorderDay, soonState } from "@/lib/preorders";
-import { stockLeft } from "@/lib/stock";
+import { type StockShown, stockShown } from "@/lib/stock";
 import { outOfKeys } from "@/lib/licence-keys";
 import { canWrite } from "@/lib/mail";
 import { canManage } from "@/lib/membership-manage";
@@ -125,15 +125,19 @@ export default async function CollectionPage({ params }: Params) {
     store.reviewed ? summaries(store.statsId).catch(() => new Map()) : Promise.resolve(new Map()),
     Promise.all(
       products.map(async (product) => {
-        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => null), outOfKeys(store, product).catch(() => false)]);
-        return out ? 0 : stock;
+        const [stock, out] = await Promise.all([stockShown(store, product).catch(() => null), outOfKeys(store, product).catch(() => false)]);
+        return out ? ({ left: 0, heldMinutes: null } satisfies StockShown) : stock;
       }),
     ),
   ]);
   const soon = coming.soon;
   const left = new Map<string, number>();
+  // None free, but some only in other buyers' checkouts: said so on the card, not "Sold out" (lib/stock.ts, stockShown).
+  const held = new Map<string, number>();
   products.forEach((product, i) => {
-    if (counts[i] !== null) left.set(product.id, counts[i] as number);
+    const count = counts[i];
+    if (count !== null) left.set(product.id, count.left);
+    if (count?.heldMinutes) held.set(product.id, count.heldMinutes);
   });
   const inCart = cartOn ? products.filter((p) => cartable(p) && canSellProduct(store, p) && !soon.has(p.id) && left.get(p.id) !== 0).map((p) => p.id) : [];
 
@@ -180,6 +184,7 @@ export default async function CollectionPage({ params }: Params) {
               product={product}
               related={related}
               remaining={left.has(product.id) && canSellProduct(store, product) ? left.get(product.id)! : null}
+              heldMinutes={held.get(product.id) ?? null}
               writes={writes}
               selling={selling}
               manageable={manageable}

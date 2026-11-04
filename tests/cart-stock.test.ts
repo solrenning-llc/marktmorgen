@@ -28,14 +28,22 @@
  *   - the open cart never offers a sold out pick, product bought together
  *     or bundle, reading at most MAX_SUGGEST counts for each;
  *   - the store page, the product page, "Goes well with" and the cart's
- *     reminder leave a sold out one out (read in their source).
+ *     reminder leave a sold out one out (read in their source);
+ *   - with none free and not all sold (units in other buyers' checkouts),
+ *     the product's page, its cards and its buttons say so and when to try
+ *     again, as the cart does, with nothing to buy; "Sold out" only when the
+ *     units sold alone reach the limit (stockShown, StockLine, pageAction).
  */
 import { NextRequest } from "next/server";
 import { readFileSync } from "node:fs";
 import { cartable } from "@/lib/cart-rules";
 import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
-import { CART_READ_STOCK_UNITS, MAX_LAPSED, SHOWN_READ_COMMANDS, STOCK_ATTEMPT_UNITS, STOCK_ENTRIES_MAX, STOCK_ENTRY_BYTES, STOCK_ORDER_COMMANDS, STOCK_SESSION_MAX, confirmCartStock, confirmStock, heldCheckout, holdCookieNames, holdCookieValue, releaseCartStockHolds, shownOnly, stockLeft, stockReading, withCartStockHolds, withStockHold } from "@/lib/stock";
+import { CART_READ_STOCK_UNITS, MAX_LAPSED, SHOWN_READ_COMMANDS, STOCK_ATTEMPT_UNITS, STOCK_ENTRIES_MAX, STOCK_ENTRY_BYTES, STOCK_ORDER_COMMANDS, STOCK_SESSION_MAX, confirmCartStock, confirmStock, heldCheckout, holdCookieNames, holdCookieValue, releaseCartStockHolds, shownOnly, stockLeft, stockReading, stockShown, withCartStockHolds, withStockHold } from "@/lib/stock";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ProductCard, StockLine, pageAction } from "@/components/store-product";
+import { LANGUAGE_CODES } from "@/lib/store-language";
 import { cartItems } from "@/lib/checkout-recovery";
 import { CART_WORDS } from "@/lib/buyer-words/cart";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
@@ -219,7 +227,7 @@ async function main(): Promise<void> {
   const lapsedAfter = ((await redis.pipeline([["HGETALL", key("print7")]]))[0] as string[]).filter((_, i) => i % 2 === 0);
   is("a provisional hold that lapsed is free, let go by the page's count without asking Stripe, and the open cart then says the same",
     [shownBefore, lapsedFree, lapsedKept, shownAfter, lapsedHold.ok, gets.some((id) => id.startsWith("p_")), lapsedAfter],
-    [{ left: 0, unchecked: 1, holds: 1 }, 1, 0, { left: 1, unchecked: 0, holds: 0 }, true, false, ["cs_test_cartstocklapse01"]]);
+    [{ left: 0, unchecked: 1, holds: 1, sold: 0 }, 1, 0, { left: 1, unchecked: 0, holds: 0, sold: 0 }, true, false, ["cs_test_cartstocklapse01"]]);
   await redis.pipeline([["HSET", key("print8"), "cs_test_cartstockold00001", JSON.stringify({ until: Date.now() - 1000 })]]);
   onGet = async () => {
     await redis.pipeline([["DEL", `nl:stock:lock:${creator.statsId}:print8`]]);
@@ -356,6 +364,46 @@ async function main(): Promise<void> {
   is("its words, in plain English", CART_WORDS.en.held(32), "All that are left are in other buyers' checkouts right now. Try again in about 32 minutes.");
   is("said in every language, never as the line for what cannot go in a cart", Object.values(CART_WORDS).every((words) => words.held(32).includes("32") && words.held(32) !== words.gone), true);
   is("the cart shows it, and keeps \"buy it from its own page\" for the rest", readFileSync("components/store-cart.tsx", "utf8").includes("{line.soldOut ? c.soldOut : line.heldMinutes ? c.held(line.heldMinutes) : c.gone}"), true);
+  // Review of 513 [PF1], 4 November 2026 (round 7): the product's own page, its card on the store page and in a collection,
+  // and the embedded card said "Sold out" with no button for the same five open checkouts, though nothing was sold and the
+  // units come back when those checkouts close. They now say what the cart says, still with nothing to buy.
+  const posterListing = (await (await import("@/lib/catalog")).readListing(owner, made.Poster))!;
+  is("the pages' reading: none free, none sold, held for the hold's minutes", await stockShown(owner, posterListing), { left: 0, heldMinutes: 32 });
+  const cardOf = (on: Store, remaining: number, heldMinutes: number | null) =>
+    renderToStaticMarkup(createElement(ProductCard, { store: on, product: posterListing, related: [], remaining, heldMinutes, writes: false, selling: true, manageable: false }));
+  const heldCard = cardOf(owner, 0, 32);
+  is("its card says the units are in other buyers' checkouts and when to try again, never sold out", [heldCard.includes(CART_WORDS.en.held(32).replaceAll("'", "&#x27;")), heldCard.includes(">Sold out<")], [true, false]);
+  is("and offers nothing to buy", [heldCard.includes("/api/store/checkout"), heldCard.includes('type="submit"')], [false, false]);
+  is("said in words where the count is said, in the count's own color", /<p class="mt-2 text-sm font-bold" style="color:var\(--st-accent-text\)">All that are left are in other buyers&#x27; checkouts right now\. Try again in about 32 minutes\.<\/p>/.test(heldCard), true);
+  is("the page's line says it in every store language", LANGUAGE_CODES.map((code) => renderToStaticMarkup(createElement(StockLine, { store: { ...owner, language: code } as Store, remaining: 0, heldMinutes: 32, className: "mt-1 text-sm font-bold" })).includes(CART_WORDS[code].held(32).replaceAll("'", "&#x27;"))), LANGUAGE_CODES.map(() => true));
+  is("the page's buttons and its bar at the bottom of a phone say it too, with nothing to press", pageAction(owner, posterListing, 0, true, [], false, null, 32), { action: { kind: "none", text: CART_WORDS.en.held(32) }, label: "" });
+  const productPageSource = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
+  is("the product's page reads it, says it where the count is said, and passes it to its buttons and its search data", [
+    productPageSource.includes("stockShown(store, product).catch(() => null)"),
+    productPageSource.includes("const heldMinutes = remaining === 0 && !noKeys ? stock?.heldMinutes ?? null : null;"),
+    productPageSource.includes('<StockLine store={store} remaining={remaining} heldMinutes={heldMinutes} className="mt-1 text-sm font-bold" />'),
+    productPageSource.includes("pageAction(store, product, remaining, selling, related, soon, preorder, heldMinutes)"),
+    productPageSource.includes('out === "held" ? "OutOfStock"'),
+  ], [true, true, true, true, true]);
+  is("the store page, a collection and the embedded card read it the same way", [
+    readFileSync("app/[handle]/page.tsx", "utf8").includes("heldMinutes={held.get(product.id) ?? null}"),
+    readFileSync("app/[handle]/shop/[collection]/page.tsx", "utf8").includes("heldMinutes={held.get(product.id) ?? null}"),
+    readFileSync("app/embed/[handle]/[product]/page.tsx", "utf8").includes("preorderDay(store, product, coming.soon, coming.day), heldMinutes)"),
+  ], [true, true, true]);
+  // Three sold and two in other checkouts: still not sold out.
+  await redis.pipeline([["DEL", posterKey], ["HSET", posterKey, ...[1, 2].flatMap((n) => [`cs_test_otherbuyer0000${n}`, JSON.stringify({ until: Date.now() + 600_000 })])], ["SET", `nl:stock:sold:${owner.statsId}:${made.Poster}`, "3"]]);
+  is("three sold and two in other checkouts: held, not sold out", await stockShown(owner, posterListing), { left: 0, heldMinutes: 32 });
+  // Sold out only when the units sold alone reach the limit.
+  await redis.pipeline([["DEL", posterKey], ["SET", `nl:stock:sold:${owner.statsId}:${made.Poster}`, "5"]]);
+  const soldShown = await stockShown(owner, posterListing);
+  is("all five sold: sold out, with no minutes", soldShown, { left: 0, heldMinutes: null });
+  const soldCard = cardOf(owner, 0, soldShown?.heldMinutes ?? null);
+  is("its card says sold out, and nothing about other checkouts", [soldCard.includes(">Sold out</p>"), soldCard.includes("other buyers")], [true, false]);
+  is("and its buttons say sold out", pageAction(owner, posterListing, 0, true, [], false, null, soldShown?.heldMinutes ?? null).action, { kind: "none", text: "Sold out." });
+  is("a card or a page not told of any hold still says sold out", [cardOf(owner, 0, null).includes(">Sold out</p>"), pageAction(owner, posterListing, 0, true, []).action], [true, { kind: "none", text: "Sold out." }]);
+  // A unit in another checkout and none sold, with units free: the count, as before.
+  await redis.pipeline([["DEL", `nl:stock:sold:${owner.statsId}:${made.Poster}`], ["HSET", posterKey, "cs_test_otherbuyer00001", JSON.stringify({ until: Date.now() + 600_000 })]]);
+  is("with some free, the count as before", await stockShown(owner, posterListing), { left: 4, heldMinutes: null });
   await redis.pipeline([["DEL", posterKey], ...(posterKept.length ? [["HSET", posterKey, ...posterKept]] : [])]);
   await redis.pipeline([["DEL", `nl:stock:sold:${owner.statsId}:${made.Poster}`]]);
 
@@ -364,7 +412,7 @@ async function main(): Promise<void> {
   const ranOut = JSON.stringify({ until: Date.now() - 1000 });
   await redis.pipeline([["HSET", key("print30"), "cs_test_shownonly000001", ranOut]]);
   const asked = gets.length;
-  is("a reading only shown counts a hold that ran out as used, says it is unchecked, and asks Stripe nothing", [await stockReading(creator, limited("print30", 1), Date.now(), { checks: shownOnly() }), gets.length - asked], [{ left: 0, unchecked: 1, holds: 1 }, 0]);
+  is("a reading only shown counts a hold that ran out as used, says it is unchecked, and asks Stripe nothing", [await stockReading(creator, limited("print30", 1), Date.now(), { checks: shownOnly() }), gets.length - asked], [{ left: 0, unchecked: 1, holds: 1, sold: 0 }, 0]);
   const shownWrites: string[] = [];
   const watching = redis.pipeline.bind(redis);
   redis.pipeline = async (commands) => {
@@ -621,7 +669,7 @@ async function main(): Promise<void> {
   is("Goes well with: a count that cannot be read is offered, as the store page does (the cart's own read refuses it)", [
     productPage.includes("(await stockLeft(store, p, Date.now(), { checks: shownOnly() }).catch(() => null)) === 0 ? p.id : null"),
     productPage.includes("stockLeft(store, p).catch(() => 0)"),
-    readFileSync("app/[handle]/page.tsx", "utf8").includes("stockLeft(store, product).catch(() => null)"),
+    readFileSync("app/[handle]/page.tsx", "utf8").includes("stockShown(store, product).catch(() => null)"),
   ], [true, false, true]);
   is("the thanks page marks the cart's limited products sold", readFileSync("app/[handle]/thanks/page.tsx", "utf8").includes("confirmCartStock(store, order.bumps.map((added) => added.product), sessionId)"), true);
   is("nor in the cart's reminder", readFileSync("lib/checkout-recovery.ts", "utf8").includes("return kept.filter((_, i) => left[i] !== 0);"), true);

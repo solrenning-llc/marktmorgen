@@ -85,10 +85,40 @@ export type StockOptions = {
 
 /**
  * A count, how many of the units counted as used are so only because a hold
- * was not settled (Stripe not asked, or no answer), and how many holds the
- * hash keeps that may still be paid (`holds`, bounded by STOCK_ENTRIES_MAX).
+ * was not settled (Stripe not asked, or no answer), how many holds the
+ * hash keeps that may still be paid (`holds`, bounded by STOCK_ENTRIES_MAX),
+ * and how many units are known to be sold (`sold`: the sold count, units
+ * marked sold the old way, and holds this reading found paid or took for
+ * sold). A unit in another buyer's open checkout, or a hold not settled, is
+ * never in `sold` (4 November 2026).
  */
-export type StockReading = { left: number; unchecked: number; holds: number };
+export type StockReading = { left: number; unchecked: number; holds: number; sold: number };
+
+/** How long a hold keeps a unit at the most, in whole minutes: when units in other buyers' checkouts may come back (HOLD_SECONDS). */
+export const HOLD_MINUTES = Math.ceil(HOLD_SECONDS / 60);
+
+/**
+ * What a page says of a limited product (4 November 2026, review of 513
+ * [PF1]): how many units are free, and, when none is but not every unit is
+ * known to be sold, the minutes after which units held by other buyers'
+ * checkouts may come back (`heldMinutes`), so the page says that and not
+ * "Sold out". "Sold out" only when the units known sold alone reach the
+ * limit. Either way nothing is offered while none is free; the count under
+ * the lock still decides every sale (withStockHold, withCartStockHolds).
+ */
+export type StockShown = { left: number; heldMinutes: number | null };
+
+/** stockReading for a page: null when the product is not limited. */
+export async function stockShown(store: Store, product: Listing, now = Date.now(), options: StockOptions = {}): Promise<StockShown | null> {
+  const reading = await stockReading(store, product, now, options);
+  return reading ? { left: reading.left, heldMinutes: heldMinutesOf(product, reading) } : null;
+}
+
+/** When none is free but not every unit is known to be sold: HOLD_MINUTES; otherwise null. */
+export function heldMinutesOf(product: Listing, reading: StockReading): number | null {
+  const limit = limitedStock(product);
+  return limit !== null && reading.left === 0 && reading.sold < limit ? HOLD_MINUTES : null;
+}
 
 /**
  * The most holds a product's hash may keep (4 November 2026): a new hold is
@@ -289,6 +319,7 @@ export async function stockReading(store: Store, product: Listing, now = Date.no
   if (!Array.isArray(receipt) || receipt.length !== 2) throw new Error("Stock reading unavailable");
   const entries = entriesOf(receipt[0]);
   let used = soldOf(receipt[1]);
+  let sold = used;
   let unchecked = 0;
   let holds = 0;
   let lapsed = 0;
@@ -300,6 +331,7 @@ export async function stockReading(store: Store, product: Listing, now = Date.no
     if (entry.paid) {
       // Marked sold the old way: counted as it is, and moved to the sold count under the lock, once (STOCK_SOLD).
       used += 1;
+      sold += 1;
       if (options.underLock && migrated < MIGRATE_MAX) {
         writes.push(soldCommand(statsId, product.id, session));
         migrated += 1;
@@ -344,6 +376,7 @@ export async function stockReading(store: Store, product: Listing, now = Date.no
       if (isSettled(found)) {
         writes.push(soldCommand(statsId, product.id, session));
         used += 1;
+        sold += 1;
       } else if (found.status === "expired") {
         writes.push(["HDEL", key, session]);
       } else {
@@ -359,6 +392,7 @@ export async function stockReading(store: Store, product: Listing, now = Date.no
         // it can never be paid or let go, so it is taken for sold. It stops costing questions, and never becomes a
         // free unit, the safe way to be wrong. No email to the creator is sent for it yet (docs/codex-queue.md, 513 [PF1]).
         writes.push(soldCommand(statsId, product.id, session));
+        sold += 1;
       } else {
         writes.push(asked(session, entry));
         unchecked += 1;
@@ -366,7 +400,7 @@ export async function stockReading(store: Store, product: Listing, now = Date.no
     }
   }
   if (writes.length) await redisPipeline(writes).catch(() => {});
-  return { left: Math.max(0, limit - used), unchecked, holds };
+  return { left: Math.max(0, limit - used), unchecked, holds, sold };
 }
 
 /**
@@ -391,7 +425,7 @@ async function shownReading(key: string, sold: string, limit: number, mine: stri
   }
   const soldCount = soldOf(receipt[1]);
   const used = soldCount + count - own;
-  return { left: Math.max(0, limit - used), unchecked: Math.max(0, count - own), holds: count };
+  return { left: Math.max(0, limit - used), unchecked: Math.max(0, count - own), holds: count, sold: soldCount };
 }
 
 /**

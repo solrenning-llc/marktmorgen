@@ -43,7 +43,7 @@ import { IMAGE_SIZES } from "@/lib/product-image";
 import { aboutBlocks, aboutExcerpt, readAbout } from "@/lib/product-about";
 import { activePlan, bumpTargets } from "@/lib/product-extras";
 import { activePwyw } from "@/lib/pay-what-you-want";
-import { shownOnly, stockLeft } from "@/lib/stock";
+import { shownOnly, stockLeft, stockShown } from "@/lib/stock";
 import { takePublicRequest } from "@/lib/traffic";
 import { outOfKeys } from "@/lib/licence-keys";
 import { canWrite } from "@/lib/mail";
@@ -56,7 +56,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { EMPTY_PAGE, type SalesPage, asVersion, livePage, runningTest, declaredMeasure } from "@/lib/sales-page";
 import { readPage } from "@/lib/sales-page-store";
 import { type Summary, REVIEWS_ON_PAGE, average, showsRating, summaryOf, visibleReviews } from "@/lib/reviews";
-import { BuyBox, GiftBox, GroupBox, PriceTag, ProductFacts, RemindBox, pageAction, productPath, saleNow } from "@/components/store-product";
+import { BuyBox, GiftBox, GroupBox, PriceTag, ProductFacts, RemindBox, StockLine, pageAction, productPath, saleNow } from "@/components/store-product";
 import { askable } from "@/lib/checkout-ask";
 import { type BlockContext, HeroView, PageSections } from "@/components/sales-blocks";
 import { pageFacts } from "@/lib/page-facts";
@@ -177,10 +177,11 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * is what the page itself offers: a free product while it can be given
  * (canGiveProduct), a paid one while Stripe or the creator's PayPal takes it.
  */
-function productData(store: Store, product: Listing, description: string, soldOut: boolean, summary: Summary | null, soon = false, preorder = false, sellable = false) {
+function productData(store: Store, product: Listing, description: string, out: false | "sold" | "held", summary: Summary | null, soon = false, preorder = false, sellable = false) {
   const url = `${SITE_URL}${productPath(store, product)}`;
   const options = sellableOptions(product);
-  const availability = `https://schema.org/${preorder ? "PreOrder" : soon ? "OutOfStock" : soldOut ? "SoldOut" : "InStock"}`;
+  // None free while some are only in other buyers' checkouts: out of stock for now, not sold out (lib/stock.ts, stockShown).
+  const availability = `https://schema.org/${preorder ? "PreOrder" : soon ? "OutOfStock" : out === "sold" ? "SoldOut" : out === "held" ? "OutOfStock" : "InStock"}`;
   const offers = !sellable || product.recurring
     ? null
     : options.length > 1
@@ -294,7 +295,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
     ) : null;
   const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
-    stockLeft(store, product).catch(() => null),
+    stockShown(store, product).catch(() => null),
     outOfKeys(store, product).catch(() => false),
     pageOf(store, product),
     summaryOf(store.statsId, product.id).catch(() => null),
@@ -347,9 +348,12 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // The reviews the creator picked to show first, on a page built from blocks (lib/sales-page.ts, ReviewsBlock).
   const pickedFirst = page.blocks.find((block) => block.kind === "reviews")?.first ?? [];
   const reviews = summary && summary.visible > 0 ? await visibleReviews(store.statsId, product.id, 0, REVIEWS_ON_PAGE, pickedFirst).catch(() => []) : [];
-  const count = noKeys ? 0 : stock;
+  const count = noKeys ? 0 : stock?.left ?? null;
   const blocks = aboutBlocks(about);
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
+  // None free, but not every unit sold: some are only in other buyers' checkouts, and come back when those close
+  // (lib/stock.ts, stockShown). Said so instead of "Sold out", still with nothing to buy (4 November 2026).
+  const heldMinutes = remaining === 0 && !noKeys ? stock?.heldMinutes ?? null : null;
   // Bought for somebody else, where it can be: on sale, not coming soon, not sold out (lib/gift-rules.ts).
   const giftable = selling && !soon && remaining !== 0 && bundleReady && canSellProduct(store, product) && canGift(product);
   // And for several people at once, where a gift can be and nothing is limited (lib/group-rules.ts).
@@ -402,11 +406,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       {pwyw && canSellProduct(store, product) ? (
         <p className="st-muted text-sm font-semibold">{w.youChoose(money(product.priceCents))}</p>
       ) : null}
-      {remaining !== null ? (
-        <p className="mt-1 text-sm font-bold" style={{ color: "var(--st-accent-text)" }}>
-          {remaining === 0 ? w.soldOut : w.left(remaining, num(remaining))}
-        </p>
-      ) : null}
+      {remaining !== null ? <StockLine store={store} remaining={remaining} heldMinutes={heldMinutes} className="mt-1 text-sm font-bold" /> : null}
       {product.preview > 0 && product.file && previewable(product.file) ? (
         /* The first pages only, as a file of their own (lib/pdf-preview.ts). */
         <p className="mb-4 text-sm font-semibold">
@@ -513,7 +513,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   // Where the buy box is and what its button says, for the page's own blocks
   // and for the bar held at the bottom of a phone's screen (components/sticky-buy.tsx).
-  const { action, label } = pageAction(store, product, remaining, selling, related, soon, preorder);
+  const { action, label } = pageAction(store, product, remaining, selling, related, soon, preorder, heldMinutes);
   const sticky =
     action.kind === "none" ? null : (
       <StickyBuy target={free ? "get" : "buy"} label={label} price={<PriceTag store={store} product={product} />} />
@@ -527,7 +527,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
+      <JsonLd data={productData(store, product, description, remaining === 0 ? (heldMinutes ? "held" : "sold") : false, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
       <JsonLd data={breadcrumbData({ name: store.name, url: `${SITE_URL}/@${store.handle}` }, { title: product.title, url: `${SITE_URL}${productPath(store, product)}` })} />
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />

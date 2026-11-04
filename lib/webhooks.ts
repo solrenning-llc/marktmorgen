@@ -1228,12 +1228,19 @@ function stripeEventPage(value: unknown): StripeEvent[] {
   return page.data as StripeEvent[];
 }
 
-/** What a Stripe event that can wait would have been sent as, and the Stripe object it is about, in the creator's words. */
-function waitedAs(event: StripeEvent): { type: WebhookEvent; about: string } | null {
+/**
+ * What a Stripe event that can wait would have been sent as, the Stripe
+ * object it is about, in the creator's words, and whether it is known to be
+ * the store's: a membership's change is (its subscription names the store,
+ * checked before the address is asked for); a refund or a dispute waits
+ * only because whose its payment is could not be told, so it may be a
+ * charge made on the same Stripe account outside Marktmorgen.
+ */
+function waitedAs(event: StripeEvent): { type: WebhookEvent; about: string; known: boolean } | null {
   const id = str(event.data?.object?.id) ?? "an unknown id";
-  if (event.type === "charge.dispute.created") return { type: "dispute.opened", about: `dispute ${id}` };
-  if (event.type === "charge.refunded") return { type: "refund.issued", about: `the refund of charge ${id}` };
-  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") return { type: "membership.canceled", about: `subscription ${id}` };
+  if (event.type === "charge.dispute.created") return { type: "dispute.opened", about: `dispute ${id}`, known: false };
+  if (event.type === "charge.refunded") return { type: "refund.issued", about: `the refund of charge ${id}`, known: false };
+  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") return { type: "membership.canceled", about: `subscription ${id}`, known: true };
   return null;
 }
 
@@ -1241,21 +1248,45 @@ function waitedAs(event: StripeEvent): { type: WebhookEvent; about: string } | n
  * The line a passed-over Stripe event leaves in the store's delivery log,
  * which the studio shows ("Not sent", with the reason), for each endpoint
  * that hears what it would have been, so the creator can look it up in
- * Stripe. Each line is one of the store's webhook deliveries for its month,
- * taken before it is written, as a delivery not sent while paused is; when
- * none can be taken, only the server log says it.
+ * Stripe. Written once per event, whatever happens after: the same mark an
+ * event that was sent leaves (eventKey) is set first, so a visit that dies
+ * later, or a store read again from far back, never writes or charges a
+ * second line.
+ *
+ * Only an event known to be the store's takes the store's webhook
+ * deliveries for its month, one per line, taken before the lines are
+ * written (as a try in attempt is: a write that fails after it leaves the
+ * deliveries counted without the lines). One that may not be the store's
+ * takes none and says so; it is at most one a day per store, the job's
+ * visits being five minutes apart and the wait STRIPE_WAIT_RUNS of them
+ * (tests/store-data-registry.ts). Returns false when the deliveries could
+ * not be counted at all (a passing failure): nothing is written and the
+ * event waits for the next visit. With the month's deliveries used, or no
+ * place in the month's pool, only the server log says it.
  */
-async function markGivenUp(store: Store, statsId: string, config: Config, event: StripeEvent, visits: number, now = Date.now()): Promise<void> {
+async function markGivenUp(store: Store, statsId: string, config: Config, event: StripeEvent, visits: number, now = Date.now()): Promise<boolean> {
   const as = waitedAs(event);
-  if (!as) return;
+  if (!as) return true;
+  const listening = config.endpoints.filter((e) => e.events.includes(as.type));
+  if (!listening.length) return true;
   const eventId = eventIdFor(statsId, as.type, `given-up|${str(event.id) ?? ""}`);
-  const commands: (string | number)[][] = [];
-  for (const endpoint of config.endpoints.filter((e) => e.events.includes(as.type))) {
-    const taken = await takeAllowance(store, "webhook", 1, now);
+  const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);
+  if (fresh === null) return true;
+  if (as.known) {
+    const taken = await takeAllowance(store, "webhook", listening.length, now);
+    if (!taken.ok && taken.reason === "unknown") {
+      await redisPipeline([["DEL", eventKey(eventId)]]);
+      console.error("a passed-over Stripe event's line could not be counted; it waits for the next visit", store.handle, str(event.id));
+      return false;
+    }
     if (!taken.ok) {
       console.error("a passed-over Stripe event could not be written in the store's log:", taken.message, store.handle, str(event.id));
-      continue;
+      return true;
     }
+  }
+  const words = `Stripe kept refusing or failing to answer about ${as.about}, so it was skipped after ${visits} tries.${as.known ? "" : " It may not be from this store."} Look it up in your Stripe dashboard.`;
+  const commands: (string | number)[][] = [];
+  for (const endpoint of listening) {
     const id = `dlv_${randomBytes(12).toString("hex")}`;
     const line: Delivery = {
       id,
@@ -1268,14 +1299,15 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
       state: "failed",
       next: 0,
       lastStatus: 0,
-      lastError: `Not sent. Stripe kept failing to answer about ${as.about}, so it was skipped after ${visits} tries. Look it up in your Stripe dashboard.`,
+      lastError: words,
       lastAt: now,
       createdAt: now,
       givenUp: true,
     };
     commands.push(["SET", deliveryKey(id), JSON.stringify(line), "EX", DELIVERY_SECONDS], ["LPUSH", logKey(statsId), id]);
   }
-  if (commands.length) await redisPipeline([...commands, ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]]);
+  await redisPipeline([...commands, ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1]]);
+  return true;
 }
 
 /** One store: its Stripe events since the last one read, oldest first. */
@@ -1303,7 +1335,11 @@ async function watchStore(store: Store, statsId: string, config: Config): Promis
         // Passed over, not handled: not counted among the events read, and
         // said where the creator sees it as well as in the server's log.
         console.error(`WEBHOOK EVENT GIVEN UP: a Stripe event waited ${waiting.runs} visits on a lookup that kept failing; it is passed over and not sent`, store.handle, id, event.type);
-        await markGivenUp(store, statsId, config, event, waiting.runs);
+        // The endpoints as they are now, so one added during this visit is told too.
+        if (!(await markGivenUp(store, statsId, (await readConfig(statsId)) ?? config, event, waiting.runs))) {
+          stuck = id;
+          return false;
+        }
       } else if (!(await fromStripe(store, event, lookups, heard))) {
         stuck = id;
         return false;

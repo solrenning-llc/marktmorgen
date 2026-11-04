@@ -874,8 +874,15 @@ export const FAMILIES: Record<string, Family> = {
   "nl:watch:sec:@lib/watch.ts": { what: "Seconds watched in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:hooks:anchor:@lib/webhooks.ts": { what: "The last Stripe event read", parts: [capped(KEY, "One a store.")] },
   "nl:hooks:cfg:@lib/webhooks.ts": { what: "The store's endpoints", parts: [capped(MAX_ENDPOINTS * 2 * KB, "MAX_ENDPOINTS endpoints.", src("lib/webhooks.ts", "MAX_ENDPOINTS"))] },
-  "nl:hooks:d:@lib/webhooks.ts": short("One delivery and how it went, a week", "webhook", 7, 4 * KB),
-  "nl:hooks:evt:@lib/webhooks.ts": { what: "An event already sent", parts: [per("order", 30, MARK, "A sale."), per("webhook", 30, MARK, "Any other.")] },
+  "nl:hooks:d:@lib/webhooks.ts": { what: "One delivery and how it went, a week", parts: [
+    per("webhook", 7, 4 * KB, "One delivery and how it went, a week"),
+    // A passed-over Stripe event that may not be the store's leaves its line without taking a delivery: at most one a day (one event waits STRIPE_WAIT_RUNS five-minute visits), one line an endpoint, for a week.
+    capped(7 * MAX_ENDPOINTS * 2 * KB, "Lines of passed-over events not known to be the store's: seven a week at most, one an endpoint.", src("lib/webhooks.ts", "STRIPE_WAIT_RUNS", "MAX_ENDPOINTS")),
+  ] },
+  "nl:hooks:evt:@lib/webhooks.ts": { what: "An event already sent", parts: [
+    per("order", 30, MARK, "A sale."), per("webhook", 30, MARK, "Any other."),
+    capped(30 * MARK, "The mark of a passed-over event not known to be the store's: one a day at most, thirty days.", src("lib/webhooks.ts", "STRIPE_WAIT_RUNS")),
+  ] },
   "nl:hooks:log:@lib/webhooks.ts": { what: "The store's last deliveries", parts: [capped(HOOK_LOG * 64, "The newest LOG_SIZE.", src("lib/webhooks.ts", "LOG_SIZE"))] },
   "nl:hooks:pos@lib/webhooks.ts": company("Where the webhook job stopped", "One key, the company's job."),
   "nl:hooks:q@lib/webhooks.ts": company("Deliveries waiting for a try", "One sorted set, members gone within a week: each a webhook's."),

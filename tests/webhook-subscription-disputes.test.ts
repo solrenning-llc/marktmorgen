@@ -8,9 +8,10 @@
  * only; the endpoint's name resolves to a private address, so nothing leaves
  * this machine.
  */
-import { DISPUTE_LOOKUPS_PER_STORE, STRIPE_LOOKUPS_PER_STORE, STRIPE_WAIT_RUNS, addEndpoint, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
+import { DISPUTE_LOOKUPS_PER_STORE, STRIPE_LOOKUPS_PER_STORE, STRIPE_WAIT_RUNS, addEndpoint, eventIdFor, recentMessages, resendDelivery, setSendHooksForTests, watchStripe, webhooksView } from "@/lib/webhooks";
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
+import { allowanceUsed } from "@/lib/store-allowance";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -228,12 +229,14 @@ async function main() {
   store = await setup(["dispute.opened"]);
   // A paid plan, so the store has webhook deliveries this month for the line the passed-over event leaves.
   await setSubscription(OWNER, { customerId: "cus_SubDisputesPlan", subscriptionId: "sub_SubDisputesPlan", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+  store = (await storeForEmail(OWNER))!;
   timeline = [
     evt("evt_KBefore", "charge.dispute.created", 1_790_090_000, dispute("dp_kbefore", "pi_Once")),
     evt("evt_Refused", "charge.dispute.created", 1_790_090_100, dispute("dp_refused", "pi_Member")),
     evt("evt_KAfter", "charge.dispute.created", 1_790_090_200, dispute("dp_kafter", "pi_Once")),
   ];
   failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "403" };
+  const usedBeforeDispute = await allowanceUsed(store, "webhook");
   await watchStripe(Date.now() + 10_000);
   is("the first run sends what came before and counts one run of waiting", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_kbefore"], "evt_KBefore", "evt_Refused|1"]);
   // Two days go by: the anchor's expiry is renewed while it does not move (without it, 28 days would be left).
@@ -253,14 +256,16 @@ async function main() {
   const view = await webhooksView(store);
   const line = view.log.find((d) => d.givenUp);
   is("it leaves a line in the store's delivery log, which the studio shows", [line?.type, line?.state, line?.attempts, line?.endpoint], ["dispute.opened", "failed", 0, "hooks.example.net/in"]);
-  is("saying what was skipped and where to look", [line?.lastError.includes("dispute dp_refused"), line?.lastError.includes(`after ${STRIPE_WAIT_RUNS} tries`), line?.lastError.includes("Stripe dashboard")], [true, true, true]);
+  is("saying what was skipped and where to look, without repeating the label", [line?.lastError.startsWith("Stripe kept refusing or failing to answer about dispute dp_refused"), line?.lastError.includes(`after ${STRIPE_WAIT_RUNS} tries`), line?.lastError.includes("Stripe dashboard"), line?.lastError.includes("Not sent")], [true, true, true, false]);
+  is("a dispute may not be the store's: the line says so and takes none of its deliveries", [line?.lastError.includes("It may not be from this store."), await allowanceUsed(store, "webhook")], [true, usedBeforeDispute]);
   is("with nothing to send again by hand", (await resendDelivery(store, line?.id ?? "dlv_000000000000000000000000")).ok, false);
   is("and no message made of it", (await recentMessages(store, "dispute.opened", 10)).map((m) => (m.data as { dispute: string }).dispute).sort(), ["dp_kafter", "dp_kbefore"]);
   is("said loudly in the log", said.some((line) => line.startsWith("WEBHOOK EVENT GIVEN UP") && line.includes("evt_Refused")), true);
   is("what came after is sent, the anchor moves on and the wait is let go", [await sentIds(store, "dispute.opened", "dispute"), await anchor(), await waitRecord()], [["dp_kafter", "dp_kbefore"], "evt_KAfter", null]);
   store = await setup(["dispute.opened"]);
-  timeline = [evt("evt_NoRoom", "charge.dispute.created", 1_790_095_000, dispute("dp_noroom", "pi_Member"))];
-  failing["/v1/invoices/in_Member01"] = { left: 1_000_000, how: "403" };
+  store = await setup(["membership.canceled"]);
+  timeline = [{ ...cancel(90), id: "evt_NoRoom", data: { object: cancel(90).data.object, previous_attributes: cancelPrevious } }];
+  failing["/v1/customers/cus_Cancel90"] = { left: 1_000_000, how: "403" };
   await redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `evt_NoRoom|${STRIPE_WAIT_RUNS}`, "EX", 30 * 86400]]);
   await watchStripe(Date.now() + 10_000);
   is("a store with no webhook delivery left this month: passed over, said in the server log only", [(await webhooksView(store)).log.some((d) => d.givenUp), said.some((l) => l.includes("could not be written in the store's log")), await anchor()], [false, true, "evt_NoRoom"]);
@@ -322,6 +327,68 @@ async function main() {
   const { forgetStoreWebhooks } = await import("@/lib/webhooks");
   await forgetStoreWebhooks(statsId);
   is("no wait record left", await waitRecord(), null);
+
+  part("A given-up line is written and charged once, and only for an event known to be the store's");
+  const givenUpLines = async () => (await webhooksView(store)).log.filter((d) => d.givenUp);
+  const seedWait = (evtId: string) => redis.pipeline([["SET", `nl:hooks:wait:${statsId}`, `${evtId}|${STRIPE_WAIT_RUNS}`, "EX", 30 * 86400]]);
+  // A paid plan, and the store read again with it, so its month's deliveries can be counted.
+  const paid = async () => {
+    await setSubscription(OWNER, { customerId: "cus_SubDisputesPlan", subscriptionId: "sub_SubDisputesPlan", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+    return (await storeForEmail(OWNER))!;
+  };
+  const heldCancel = (n: number) => ({ ...cancel(n), data: { object: cancel(n).data.object, previous_attributes: cancelPrevious } });
+  const realPipeline = redis.pipeline.bind(redis);
+  const breakWhen = (bad: (command: (string | number)[]) => boolean) => {
+    redis.pipeline = ((commands: (string | number)[][]) => (commands.some(bad) ? Promise.reject(new Error("synthetic store failure")) : realPipeline(commands))) as typeof redis.pipeline;
+  };
+  const mend = () => { redis.pipeline = realPipeline as typeof redis.pipeline; };
+
+  store = await setup(["membership.canceled", "sale.completed"]);
+  store = await paid();
+  failing["/v1/customers/cus_Cancel0"] = { left: 1_000_000, how: "403" };
+  const sale = evt("evt_SaleAfter", "checkout.session.completed", 1_790_110_000, { id: "cs_Throw01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } });
+  timeline = [heldCancel(0), sale];
+  await seedWait("evt_Cancel0");
+  const used0 = await allowanceUsed(store, "webhook");
+  // The next event of the same visit dies on the store, so the visit ends before its anchor and its wait are written.
+  const saleMark = `nl:hooks:evt:${eventIdFor(statsId, "sale.completed", "cs_Throw01")}`;
+  breakWhen((command) => command[1] === saleMark);
+  await watchStripe(Date.now() + 10_000);
+  mend();
+  is("a visit that gives up and then dies: one line, one delivery taken, the wait still at the cap", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, await waitRecord(), await anchor()], [1, 1, `evt_Cancel0|${STRIPE_WAIT_RUNS}`, null]);
+  is("a known event's line does not say it may not be the store's", (await givenUpLines())[0]?.lastError.includes("may not be"), false);
+  await watchStripe(Date.now() + 10_000);
+  is("the next visit gives up again but writes and charges nothing more, and sends the sale", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0, (await recentMessages(store, "sale.completed")).length, await anchor(), await waitRecord()], [1, 1, 1, "evt_SaleAfter", null]);
+  // Stripe lost the anchor: everything is read again from far back and the same event waits to the cap again.
+  await redis.pipeline([["DEL", `nl:hooks:anchor:${statsId}`]]);
+  await seedWait("evt_Cancel0");
+  await watchStripe(Date.now() + 10_000);
+  is("read again from far back and given up again: still one line, one delivery", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used0], [1, 1]);
+
+  store = await setup(["membership.canceled"]);
+  store = await paid();
+  is("a second endpoint that hears something else is kept", (await addEndpoint(store, "https://hooks.example.org/sales", ["sale.completed"])).ok, true);
+  failing["/v1/customers/cus_Cancel1"] = { left: 1_000_000, how: "403" };
+  timeline = [heldCancel(1)];
+  await seedWait("evt_Cancel1");
+  const used1 = await allowanceUsed(store, "webhook");
+  await watchStripe(Date.now() + 10_000);
+  is("two endpoints, one hearing it: one line, for that one, and exactly one delivery", [(await givenUpLines()).map((d) => d.endpoint), (await allowanceUsed(store, "webhook")) - used1], [["hooks.example.net/in"], 1]);
+
+  store = await setup(["membership.canceled"]);
+  store = await paid();
+  failing["/v1/customers/cus_Cancel2"] = { left: 1_000_000, how: "403" };
+  timeline = [heldCancel(2)];
+  await seedWait("evt_Cancel2");
+  const used2 = await allowanceUsed(store, "webhook");
+  // The month's count cannot be made (the store blinks on the count itself).
+  breakWhen((command) => command[0] === "INCRBY");
+  await watchStripe(Date.now() + 10_000);
+  mend();
+  const lineMark = `nl:hooks:evt:${eventIdFor(statsId, "membership.canceled", "given-up|evt_Cancel2")}`;
+  is("a count that could not be made writes nothing, leaves no mark and keeps waiting", [(await givenUpLines()).length, (await redis.pipeline([["GET", lineMark]]))[0], await waitRecord(), await anchor()], [0, null, `evt_Cancel2|${STRIPE_WAIT_RUNS + 1}`, null]);
+  await watchStripe(Date.now() + 10_000);
+  is("the next visit writes the line and takes the one delivery", [(await givenUpLines()).length, (await allowanceUsed(store, "webhook")) - used2, await anchor(), await waitRecord()], [1, 1, "evt_Cancel2", null]);
 
   part("The call budget per run is the same as before");
   is("ten calls for refunds and addresses, ten for disputes", [STRIPE_LOOKUPS_PER_STORE, DISPUTE_LOOKUPS_PER_STORE], [10, 10]);

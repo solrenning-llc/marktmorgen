@@ -255,6 +255,37 @@ export async function listRequests(store: Store, now = Date.now()): Promise<Paym
   }
 }
 
+/**
+ * One person's requests in the store, from their own set (at most
+ * MAX_PER_PERSON, and twice that read at most): two commands whatever the
+ * store keeps, for a page about one buyer (lib/buyer-waiting.ts). A record
+ * gone is skipped; one that does not read as this store's is null, never a
+ * guess.
+ */
+export async function requestsOfPerson(store: Pick<Store, "sid">, email: string): Promise<PaymentRequest[] | null> {
+  if (!isRedisConfigured() || !store.sid) return null;
+  try {
+    const [members] = await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]);
+    if (!Array.isArray(members)) return null;
+    const ids = members.map(String).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
+    if (!ids.length) return [];
+    const [values] = await redisPipeline([["MGET", ...ids.map(recordKey)]]);
+    if (!Array.isArray(values) || values.length !== ids.length) return null;
+    const out: PaymentRequest[] = [];
+    ids.forEach((id, i) => {
+      const raw = values[i];
+      if (raw === null) return;
+      const request = typeof raw === "string" ? parseRequest(JSON.parse(raw)) : null;
+      if (!request || request.sid !== store.sid || request.id !== id) throw new Error("Payment request record unreadable");
+      out.push(request);
+    });
+    return out;
+  } catch (error) {
+    console.error("reading a person's payment requests failed", error);
+    return null;
+  }
+}
+
 /** How many of the store's requests are open now. */
 export async function openCount(sid: string, now = Date.now()): Promise<number> {
   if (!isRedisConfigured() || !sid) throw new Error("Payment request count unavailable");

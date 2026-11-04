@@ -1098,50 +1098,66 @@ export async function readPaidSales(store: Store, since: number, pages: number):
   };
   // The two lists are read side by side, so a whole store's sales wait on the longer of them, not both (lib/store-export.ts).
   const checkouts = walk("/checkout/sessions?limit=100", (raw) => {
-    const row = raw as Row;
-    const meta = row.metadata ?? {};
-    if (!handles.has(meta.store ?? "")) return;
-    if (row.status !== "complete" || row.payment_status !== "paid") return;
-    const details = (raw.customer_details ?? {}) as { address?: { country?: unknown } | null };
-    const country = typeof details.address?.country === "string" && /^[A-Z]{2}$/.test(details.address.country) ? details.address.country : "";
-    sales.push({
-      created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
-      product: meta.product ?? "",
-      cents: typeof row.amount_total === "number" ? row.amount_total : 0,
-      currency: currencyOf(row),
-      row: raw,
-      upsell: false,
-      ...saleChannel(meta),
-      country,
-      paymentIntent: typeof raw.payment_intent === "string" ? raw.payment_intent : "",
-    });
+    const sale = saleOfCheckout(raw, handles);
+    if (sale) sales.push(sale);
   });
   // Products taken in one click after paying are charges of their own.
   const extras = walk("/payment_intents?limit=100", (pi) => {
-    const meta = (pi.metadata ?? {}) as Record<string, string>;
-    if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || pi.status !== "succeeded") return;
-    sales.push({
-      created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
-      product: meta.product ?? "",
-      cents: typeof pi.amount === "number" ? pi.amount : 0,
-      currency: currencyOf(pi),
-      row: pi,
-      upsell: true,
-      // An upsell is taken in one click after a checkout that already has
-      // its channel. It belongs to the same visit, and the sale it followed
-      // carries the tag, so this is left blank rather than guessed at.
-      source: "",
-      medium: "",
-      campaign: "",
-      first: "",
-      content: "",
-      country: "",
-      paymentIntent: typeof pi.id === "string" ? pi.id : "",
-    });
+    const sale = saleOfUpsell(pi, handles);
+    if (sale) sales.push(sale);
   });
   await Promise.all([checkouts, extras]);
   sales.sort((a, b) => b.created - a.created);
   return { sales, partial };
+}
+
+/**
+ * A paid checkout of this store as a sale, or null (another store's, not
+ * complete or not paid). Pure: the whole reading and a reading brought up to
+ * date from Stripe's events read a checkout the same way (C4-36 (B)).
+ */
+export function saleOfCheckout(raw: Record<string, unknown>, handles: ReadonlySet<string>): Sale | null {
+  const row = raw as Row;
+  const meta = row.metadata ?? {};
+  if (!handles.has(meta.store ?? "")) return null;
+  if (row.status !== "complete" || row.payment_status !== "paid") return null;
+  const details = (raw.customer_details ?? {}) as { address?: { country?: unknown } | null };
+  const country = typeof details.address?.country === "string" && /^[A-Z]{2}$/.test(details.address.country) ? details.address.country : "";
+  return {
+    created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
+    product: meta.product ?? "",
+    cents: typeof row.amount_total === "number" ? row.amount_total : 0,
+    currency: currencyOf(row),
+    row: raw,
+    upsell: false,
+    ...saleChannel(meta),
+    country,
+    paymentIntent: typeof raw.payment_intent === "string" ? raw.payment_intent : "",
+  };
+}
+
+/** A product taken in one click after paying, as a sale, or null. Pure, as saleOfCheckout. */
+export function saleOfUpsell(pi: Record<string, unknown>, handles: ReadonlySet<string>): Sale | null {
+  const meta = (pi.metadata ?? {}) as Record<string, string>;
+  if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || pi.status !== "succeeded") return null;
+  return {
+    created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
+    product: meta.product ?? "",
+    cents: typeof pi.amount === "number" ? pi.amount : 0,
+    currency: currencyOf(pi),
+    row: pi,
+    upsell: true,
+    // An upsell is taken in one click after a checkout that already has
+    // its channel. It belongs to the same visit, and the sale it followed
+    // carries the tag, so this is left blank rather than guessed at.
+    source: "",
+    medium: "",
+    campaign: "",
+    first: "",
+    content: "",
+    country: "",
+    paymentIntent: typeof pi.id === "string" ? pi.id : "",
+  };
 }
 
 /** The metadata of the subscription an invoice is for, where either of Stripe's API versions keeps it. */
@@ -1372,12 +1388,8 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (typeof row.status !== "string" || !DISPUTE_TAKES.has(row.status)) continue;
-      const raw = row.payment_intent;
-      const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
-      if (!cents) continue;
-      out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency: currencyOf(row), paymentIntent: pi, ...(typeof row.id === "string" ? { id: row.id } : {}) });
+      const dispute = disputeOfRow(row);
+      if (dispute) out.push(dispute);
     }
     if (!list.has_more) break;
     const last = rows[rows.length - 1];
@@ -1386,6 +1398,32 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
     if (page === pages - 1) partial = true;
   }
   return { rows: out, partial };
+}
+
+/**
+ * A dispute the numbers count (the bank holding the money or the buyer
+ * having won it), or null. Pure: the whole reading and the events read a
+ * dispute the same way (C4-36 (B)).
+ */
+export function disputeOfRow(row: Record<string, unknown>): DisputeRow | null {
+  if (typeof row.status !== "string" || !DISPUTE_TAKES.has(row.status)) return null;
+  const raw = row.payment_intent;
+  const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
+  const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
+  if (!cents) return null;
+  return { created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency: currencyOf(row), paymentIntent: pi, ...(typeof row.id === "string" ? { id: row.id } : {}) };
+}
+
+/** A refund the numbers count (gone through or on its way), or null. Pure, as disputeOfRow. */
+export function refundOfRow(row: Record<string, unknown>): RefundRow | null {
+  if (row.status !== "succeeded" && row.status !== "pending") return null;
+  return {
+    created: typeof row.created === "number" ? row.created * 1000 : 0,
+    cents: typeof row.amount === "number" ? row.amount : 0,
+    currency: currencyOf(row),
+    paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
+    ...(typeof row.id === "string" ? { id: row.id } : {}),
+  };
 }
 
 /** One refund as Stripe lists it: when, how much, in what, and the payment it gave back. */
@@ -1405,14 +1443,8 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (row.status !== "succeeded" && row.status !== "pending") continue;
-      out.push({
-        created: typeof row.created === "number" ? row.created * 1000 : 0,
-        cents: typeof row.amount === "number" ? row.amount : 0,
-        currency: currencyOf(row),
-        paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
-        ...(typeof row.id === "string" ? { id: row.id } : {}),
-      });
+      const refund = refundOfRow(row);
+      if (refund) out.push(refund);
     }
     if (!list.has_more) break;
     const last = rows[rows.length - 1];

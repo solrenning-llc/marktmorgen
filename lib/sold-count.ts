@@ -25,14 +25,13 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
 import { type Together, parseTogether } from "@/lib/also-bought";
-import { paypalKept } from "@/lib/paypal-sales";
-import { paidSalesReadUnits } from "@/lib/segments";
-import { countStudio } from "@/lib/studio-route";
 
 /** Below this, nothing is said. */
 export const SHOWN_FROM = 10;
 /** How long a reading is used as it is before it is read again in the background. */
 export const SOLD_FRESH_MS = 6 * 60 * 60 * 1000;
+/** How long one store's reading holds the next one off: as long as its counts stay fresh. */
+export const SOLD_LOCK_SECONDS = SOLD_FRESH_MS / 1000;
 /** How long a reading is kept at all: a page never shows a count older than this. */
 const SOLD_KEEP_SECONDS = 7 * 24 * 60 * 60;
 
@@ -72,12 +71,9 @@ export function stale(counts: SoldCounts | null, now = Date.now()): boolean {
 
 /**
  * Reads the counts again from Stripe and keeps them. One store reads at most
- * once at a time, whoever asks; meant to run after a page has been sent
- * (next/server's after), never while a visitor waits. What reading every
- * sale again can cost is counted in the store's studio requests first, at
- * the most (the all-time copy may answer instead): not counted, nothing is
- * read, the counts kept stay as they are, and a later visit tries again once
- * the lock has run out.
+ * once every SOLD_LOCK_SECONDS, whoever asks and whatever came of the last
+ * reading; meant to run after a page has been sent
+ * (next/server's after), never while a visitor waits.
  */
 export async function refreshSoldCounts(
   store: Store,
@@ -85,13 +81,11 @@ export async function refreshSoldCounts(
   now = Date.now(),
 ): Promise<SoldCounts | null> {
   if (!store.look.sold || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return null;
-  const [mine] = await redisPipeline([["SET", lockKey(store.statsId), "1", "NX", "EX", 300]]);
+  // Held as long as counts stay fresh, whether the reading worked or not: at most one reading of every sale a store
+  // each SOLD_FRESH_MS, the bound its cost is priced at (tests/plan-cost-registry.ts, SOLD_READ).
+  const [mine] = await redisPipeline([["SET", lockKey(store.statsId), "1", "NX", "EX", SOLD_LOCK_SECONDS]]);
   if (mine !== "OK") return null;
   try {
-    const kept = await paypalKept(store.statsId, false).catch(() => null);
-    if (!kept) return null;
-    const counted = await countStudio(store, null, paidSalesReadUnits(store, kept.sales)).catch(() => null);
-    if (!counted?.ok) return null;
     const all = await read(store);
     if (!all) return null;
     const p: Record<string, number> = {};

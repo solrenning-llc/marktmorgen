@@ -348,11 +348,6 @@ export async function claimWeek(handle: string, now = Date.now()): Promise<boole
   return ok !== null;
 }
 
-/** Lets this week's claim go, when what reading the numbers costs could not be counted, so a later run tries again. */
-export async function releaseWeek(handle: string, now = Date.now()): Promise<void> {
-  if (isRedisConfigured()) await redisPipeline([["DEL", sentKey(weekOf(now), handle)]]);
-}
-
 const CHANNEL_WORDS: Record<string, string> = {
   direct: "direct or unknown",
   instagram: "Instagram",
@@ -457,6 +452,17 @@ function goalLine(data: StatsData, goal: number, money: (cents: number) => strin
 // ---- The monthly email ------------------------------------------------------------
 
 const monthSentKey = (month: string, handle: string) => `nl:monthly:sent:${month}:${handle}`;
+const monthTriesKey = (month: string, handle: string) => `nl:monthly:tries:${month}:${handle}`;
+const monthWaitKey = (month: string, handle: string) => `nl:monthly:wait:${month}:${handle}`;
+
+/**
+ * Readings of a store's numbers for one month's email at the most. Each
+ * waits on dozens of pages of the creator's Stripe account, and the job runs
+ * every hour of two days: without a cap, a store whose reading kept failing
+ * would be read 48 times. The plan prices this many
+ * (tests/plan-cost-registry.ts, SCHEDULED_READS.monthly).
+ */
+export const MONTHLY_TRIES = 6;
 
 /** The month before the one `now` is in, "2026-09". */
 export function lastMonthOf(now = Date.now()): string {
@@ -471,9 +477,28 @@ export async function claimMonth(handle: string, month: string): Promise<boolean
   return ok !== null;
 }
 
-/** Lets a month's claim go, when the numbers could not be read, so a later run tries again. */
-export async function releaseMonth(handle: string, month: string): Promise<void> {
-  if (isRedisConfigured()) await redisPipeline([["DEL", monthSentKey(month, handle)]]);
+/** Whether a month let go after a failed reading may be tried again now: once its wait is over. */
+export async function monthWaitOver(handle: string, month: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const [waiting] = await redisPipeline([["EXISTS", monthWaitKey(month, handle)]]);
+  return Number(waiting) === 0;
+}
+
+/**
+ * Lets a month's claim go when the numbers could not be read, so a later run
+ * tries again: at most MONTHLY_TRIES readings in all, each after a wait that
+ * doubles (one hour, then two, four, eight and sixteen, all inside the job's
+ * two days). After the last, the claim is kept and that month's email is not
+ * sent. True when it was let go.
+ */
+export async function letMonthGo(handle: string, month: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const [tries] = await redisPipeline([["INCR", monthTriesKey(month, handle)], ["EXPIRE", monthTriesKey(month, handle), 40 * 86400]]);
+  const n = Number(tries);
+  if (!Number.isSafeInteger(n) || n < 1 || n >= MONTHLY_TRIES) return false;
+  // The wait is written before the claim goes, so no run finds the month free without it.
+  await redisPipeline([["SET", monthWaitKey(month, handle), "1", "EX", 3600 * 2 ** (n - 1)], ["DEL", monthSentKey(month, handle)]]);
+  return true;
 }
 
 /**

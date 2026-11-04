@@ -89,6 +89,9 @@ import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
+import { SOLD_LOCK_SECONDS } from "@/lib/sold-count";
+import { MIN_TEST_REACH } from "@/lib/mail-test";
+import { MONTHLY_TRIES } from "@/lib/stats-report";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes } from "./store-data-registry";
@@ -311,6 +314,45 @@ export const BUYER_LEDGER_BYTES = 2 * ALL_TIME_PAGES * 100 * 320;
 export const PAYPAL_LEDGER_BYTES = (ALL_TIME_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES;
 export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
+/**
+ * The pages of the creator's Stripe account one reading of the store's
+ * numbers waits on at the most (lib/stats.ts, readSales): its paid sales
+ * (two lists of NUMBERS_SALE_PAGES side by side), renewals, refunds and
+ * disputes, priced as if read one after another.
+ */
+export const NUMBERS_SALE_PAGES = 20;
+export const NUMBERS_STRIPE_PAGES = NUMBERS_SALE_PAGES + 10 + 5 + 3;
+/**
+ * One reading of the store's numbers at the most, without a studio page
+ * (lib/stats-report.ts readNumbers, lib/store-alerts.ts checkAlerts): the
+ * visits of the 90 days and the 90 before (readStats, about three hundred
+ * commands, at a studio page's 400 KB), the PayPal sales of those pages
+ * and refunds at their heaviest, and every Stripe page waited on at 2 GB.
+ */
+export const NUMBERS_READ = request("heavy", 300, 400_000 + (NUMBERS_SALE_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES) + NUMBERS_STRIPE_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
+/** One reading of every sale for the counts on store pages (lib/sold-count.ts): a reading of the buyers reads these pages and more, with the PayPal sales. */
+export const SOLD_READ = BUYER_LEDGER + PAYPAL_LEDGER;
+/** A subject test's sales (lib/broadcasts.ts, countTest): five pages of each list since the email went, and the PayPal sales of five pages. */
+export const TEST_SALES_PAGES = 5;
+export const TEST_SALES_READ = request("heavy", 8, 2 * TEST_SALES_PAGES * 100 * 320 + TEST_SALES_PAGES * 100 * MAX_PAID_BYTES) + TEST_SALES_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
+/**
+ * How many times each scheduled reading runs for one store in a month at the
+ * most, from its schedule (vercel.json) and its own claim: the weekly email
+ * once a week (claimWeek; at most five Mondays in a month), the monthly one
+ * MONTHLY_TRIES times when each reading fails and lets the month go after a
+ * doubling wait (letMonthGo), the alerts once a UTC day, and the sold counts
+ * once each SOLD_LOCK_SECONDS whatever came of the last.
+ */
+export const SCHEDULED_READS = {
+  weekly: 5,
+  monthly: MONTHLY_TRIES,
+  alerts: 31,
+  sold: Math.ceil((31 * 86_400) / SOLD_LOCK_SECONDS),
+} as const;
+/** The store's scheduled readings of its sales in a month at the most: priced with the plan, never taken from the studio's requests. */
+export function scheduledReadsCost(tier: Tier): number {
+  return (SCHEDULED_READS.weekly + SCHEDULED_READS.monthly + SCHEDULED_READS.alerts) * NUMBERS_READ + SCHEDULED_READS.sold * SOLD_READ + Math.floor(monthlyEmails(tier) / MIN_TEST_REACH) * TEST_SALES_READ;
+}
 /**
  * The tasks agenda on the buyers page at the most (app/studio/people/page.tsx,
  * TasksAgenda; 639 [GL7](6)): every task of the store read and its rows sent
@@ -623,6 +665,23 @@ export const COST_LINES: CostLine[] = [
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
     ],
     basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead.",
+  },
+  {
+    id: "scheduled-reads",
+    feature: "The store's sales read again on a schedule, not asked for: the weekly and monthly emails' numbers, the daily alerts, the counts of copies sold on store pages and a subject test's sales (4 November 2026)",
+    monthlyUsd: (tier) => scheduledReadsCost(tier),
+    sources: [
+      { file: "vercel.json", names: ["/api/cron/weekly", "20 * * * 1,2", "/api/cron/monthly", "25 * 1,2 * *", "/api/cron/quiet", "50 * * * *"] },
+      { file: "app/api/cron/weekly/route.ts", names: ["claimWeek(store.handle)", "readNumbers(store)"] },
+      { file: "app/api/cron/monthly/route.ts", names: ["monthWaitOver(store.handle, month)", "claimMonth(store.handle, month)", "letMonthGo(store.handle, month)", "readNumbers(store)"] },
+      { file: "lib/stats-report.ts", names: ["MONTHLY_TRIES", "MONTHLY_TRIES = 6", "n >= MONTHLY_TRIES", "3600 * 2 ** (n - 1)"] },
+      { file: "lib/store-alerts.ts", names: ["seenKey(today, store.statsId)", "readSales(store, now)"] },
+      { file: "lib/stats.ts", names: ["readPaidSales(store, sinceBefore, 20)", "readRenewals(store, since, now, 10)", "readRefunds(store, since, 5)", "DISPUTE_PAGES = 3"] },
+      { file: "lib/sold-count.ts", names: ["SOLD_LOCK_SECONDS", "\"EX\", SOLD_LOCK_SECONDS"] },
+      { file: "lib/broadcasts.ts", names: ["readPaidSales(store, b.sendAt - 60, 5)"] },
+      { file: "lib/mail-test.ts", names: ["MIN_TEST_REACH"] },
+    ],
+    basis: "Each scheduled reading at its most, as often as its schedule and its own claim let it run for one store in a month (SCHEDULED_READS): the numbers' Stripe pages waited on one after another and their PayPal sales at their heaviest, the sold counts as a whole reading of the buyers once each SOLD_LOCK_SECONDS whether it worked or not, and a subject test's sales once for every MIN_TEST_REACH of the month's emails a test needs. They are the plan's, not the studio's: none is taken from the store's requests.",
   },
   {
     id: "rest-api",

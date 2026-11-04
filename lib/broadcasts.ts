@@ -29,7 +29,7 @@ import { broadcastCampaign, isOwnLink, variantCampaign } from "@/lib/mail-links"
 import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest, parseTest, partAt, splitFor } from "@/lib/mail-test";
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
-import { LedgerNotCounted, type Narrow, isNarrowed, keepFor, readNarrow, salesCount } from "@/lib/segments";
+import { LedgerNotCounted, type Narrow, isNarrowed, keepFor, readNarrow } from "@/lib/segments";
 import { countLedger } from "@/lib/person-agenda-read";
 import { sameNarrow } from "@/lib/segments-rules";
 
@@ -368,16 +368,6 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
 }
 
 /**
- * Why a subject test waits when reading its sales could not be counted: the
- * refusal's own sentence, and that the better subject is chosen later.
- */
-export function testNotCountedNote(said: string): string {
-  const after = " Which subject did better is chosen once its sales can be read; nothing more was sent. It is tried again automatically.";
-  const words = said && said.length + after.length <= NOTE_ROOM ? said : "Your studio's requests could not be counted just now, so the test's sales were not read.";
-  return `${words}${after}`;
-}
-
-/**
  * Why a narrowed broadcast waits when reading the store's buyers could not be
  * counted: the refusal's own sentence (how many this needs, how many are left
  * and when they come back), and that it goes on by itself.
@@ -523,14 +513,7 @@ export async function advanceBroadcast(
           b = { ...b, status: "waiting", note: "" };
           break;
         }
-        const testCounting = countLedger(store);
-        const counted = await countTest(store, b, testCounting);
-        if (counted === "not_counted") {
-          // Its sales could not be counted in the studio's requests: nothing read, the winner not chosen, nothing
-          // more sent; it waits, saying why, and the scheduled job tries again.
-          b = { ...b, status: "waiting", note: testNotCountedNote(testCounting.said.message) };
-          break;
-        }
+        const counted = await countTest(store, b);
         const chosen = chooseSubject(running, counted.visits, counted.sales);
         b = { ...b, test: { ...(b.test as SubjectTest), winner: chosen.winner, why: chosen.why, visits: counted.visits, sales: counted.sales } };
         // Written down before anything more is sent, so a run cut short here
@@ -637,7 +620,7 @@ function shuffle(list: string[]): void {
  * account. Either is null when it could not be read; neither is guessed.
  * Sales are read only for a test that is decided by them.
  */
-async function countTest(store: Store, b: Broadcast, counting: { count: (units: number) => Promise<boolean> }): Promise<{ visits: Counted; sales: Counted } | "not_counted"> {
+async function countTest(store: Store, b: Broadcast): Promise<{ visits: Counted; sales: Counted }> {
   const a = variantCampaign(b.id, "a");
   const bee = variantCampaign(b.id, "b");
   let visits: Counted = null;
@@ -651,8 +634,6 @@ async function countTest(store: Store, b: Broadcast, counting: { count: (units: 
     console.error("reading a subject test's visits failed", error);
   }
   if (b.test?.by === "sales" && store.stripeAccountId) {
-    // Counted before Stripe and the PayPal sales are read again, as a reading of every sale (more than these pages).
-    if (!(await salesCount(store, counting.count).read())) return "not_counted";
     try {
       const read = await readPaidSales(store, b.sendAt - 60, 5);
       const by = moneyByCampaign(read.sales, store.currency);

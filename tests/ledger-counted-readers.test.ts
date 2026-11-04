@@ -6,9 +6,12 @@
  *     background reading of what buyers get next): the studio's requests,
  *     refused with the figure's own sentence (or NOT_COUNTED), nothing read;
  *   - automatic (the sold counts on store pages, the daily alerts, the weekly
- *     and monthly emails, a subject test's sales): the studio's requests,
- *     and when not counted nothing is read, nothing is marked done, and a
- *     later run tries again;
+ *     and monthly emails, a subject test's sales): the plan's, never the
+ *     studio's requests, priced at their worst month in
+ *     tests/plan-cost-registry.ts (SCHEDULED_READS), each bounded by its
+ *     schedule and its own claim: the sold counts once each SOLD_LOCK_SECONDS
+ *     whatever came of the last, the monthly email at most MONTHLY_TRIES
+ *     readings with a doubling wait;
  *   - with an API key (GET /api/v1/stats and the MCP tools that read sales):
  *     API_NUMBERS_UNITS of the API requests, refused as the API refuses
  *     (429 monthly_limit), and documented.
@@ -19,8 +22,8 @@ import { paidSalesReadUnits, salesCount } from "@/lib/segments";
 import { refreshSoldCounts } from "@/lib/sold-count";
 import { checkAlerts } from "@/lib/store-alerts";
 import { takeMoreApi } from "@/lib/api-guard";
-import { NOTE_ROOM, testNotCountedNote } from "@/lib/broadcasts";
-import { claimWeek, releaseWeek } from "@/lib/stats-report";
+import { MONTHLY_TRIES, claimMonth, letMonthGo, monthWaitOver } from "@/lib/stats-report";
+import { SOLD_LOCK_SECONDS } from "@/lib/sold-count";
 import { MCP_INSTRUCTIONS } from "@/lib/mcp-catalog";
 import { API_NUMBERS_UNITS } from "@/lib/store-allowance-rules";
 import { allowanceFor } from "@/lib/store-allowance-rules";
@@ -81,33 +84,35 @@ async function main(): Promise<void> {
   is("and the studio shows it", [flat("components/stats-panel.tsx").includes('? all.message ?? "Stripe did not answer"'), flat("components/custom-range.tsx").includes('else if (data.error === "studio_used" && typeof data.message === "string" && data.message) setError(data.message);')], [true, true]);
   is("the studio's background reading of what buyers get next is counted too", flat("app/studio/page.tsx").includes("after(() => readAllTimeSales(store, salesCount(store, countLedger(store).count))"), true);
 
-  part("Automatic: counted before reading; not counted, nothing read or marked, tried again later");
-  await spend(3);
+  part("Automatic: the plan's, never the studio's requests; each bounded by its schedule and its claim");
+  await spend(0);
   stripeCalls = 0;
   const sold = { ...store, look: { ...store.look, sold: true } } as Store;
-  await redisPipeline([["SET", `nl:sold:${store.statsId}`, JSON.stringify({ at: 1, p: { kept: 4 }, t: {} })]]);
-  const refreshed = await refreshSoldCounts(sold, (s) => readAllTimeSales(s));
-  is("the sold counts on store pages: nothing read, the counts kept stay", [refreshed, stripeCalls, JSON.parse(String((await redisPipeline([["GET", `nl:sold:${store.statsId}`]]))[0])).p.kept], [null, 0, 4]);
-  await redisPipeline([["DEL", `nl:sold:lock:${store.statsId}`]]);
-  await spend(BUYER_LEDGER_UNITS + 1);
   const before = await used();
-  const counts = await refreshSoldCounts(sold, (s) => readAllTimeSales(s));
-  is("with room, counted first and then read", [counts !== null, (await used()) - before, stripeCalls > 0], [true, paidSalesReadUnits(store, 0), true]);
-  await spend(3);
-  stripeCalls = 0;
-  const alerts = await checkAlerts(store, Date.parse("2026-11-04T12:00:00Z"));
-  is("the daily alerts: nothing read or said, tomorrow's pass reads again", [alerts, stripeCalls], [{ said: 0, skipped: true }, 0]);
+  const counts = await refreshSoldCounts(sold, async () => null);
+  const lockTtl = Number((await redisPipeline([["TTL", `nl:sold:lock:${store.statsId}`]]))[0]);
+  is("the sold counts take nothing from the studio's requests, even with none left", (await used()) - before, 0);
+  is("and a reading that failed holds the next one off as long as fresh counts would (six hours), not five minutes", [counts, lockTtl > 300, lockTtl <= SOLD_LOCK_SECONDS, SOLD_LOCK_SECONDS], [null, true, true, 6 * 3600]);
+  is("so a second visit right after reads nothing", [await refreshSoldCounts(sold, async () => { throw new Error("read again"); })], [null]);
+  const alerted = await checkAlerts(store, Date.parse("2026-11-04T12:00:00Z"));
+  is("the daily alerts read without counting in the studio's requests", [alerted.skipped, (await used()) - before], [false, 0]);
   await redisPipeline([["SET", studioKey, "0"]]);
-  const week = Date.parse("2026-11-02T12:00:00Z");
-  await claimWeek(store.handle, week);
-  await releaseWeek(store.handle, week);
-  is("a week let go can be claimed again by a later run", await claimWeek(store.handle, week), true);
-  const weekly = flat("app/api/cron/weekly/route.ts");
+  const month = "2026-10";
+  const tries: boolean[] = [];
+  const waits: number[] = [];
+  for (let i = 0; i < MONTHLY_TRIES; i += 1) {
+    await claimMonth(store.handle, month);
+    tries.push(await letMonthGo(store.handle, month));
+    const ttl = Number((await redisPipeline([["TTL", `nl:monthly:wait:${month}:${store.handle}`]]))[0]);
+    waits.push(ttl);
+    if (i < MONTHLY_TRIES - 1) is(`after a failed reading the month waits (try ${i + 1})`, await monthWaitOver(store.handle, month), false);
+    await redisPipeline([["DEL", `nl:monthly:wait:${month}:${store.handle}`]]);
+  }
+  is("the monthly email lets its month go five times, each after a wait that doubles, and keeps it after the sixth reading", [tries, waits.slice(0, MONTHLY_TRIES - 1)], [[true, true, true, true, true, false], [3600, 7200, 14_400, 28_800, 57_600]]);
+  is("so no later run can claim it: at most MONTHLY_TRIES readings a month", [MONTHLY_TRIES, await claimMonth(store.handle, month)], [6, false]);
   const monthly = flat("app/api/cron/monthly/route.ts");
-  is("the weekly and monthly emails count before reading the numbers, and let the week or month go when not counted", [weekly.indexOf("countUnits(store, STUDIO_PAGE_UNITS)") > 0 && weekly.indexOf("countUnits(store, STUDIO_PAGE_UNITS)") < weekly.indexOf("readNumbers(store)"), weekly.includes("await releaseWeek(store.handle).catch(() => undefined); out.deferred += 1; continue;"), monthly.indexOf("countUnits(store, STUDIO_PAGE_UNITS)") > 0 && monthly.indexOf("countUnits(store, STUDIO_PAGE_UNITS)") < monthly.indexOf("readNumbers(store)"), monthly.includes("await releaseMonth(store.handle, month).catch(() => undefined); out.deferred += 1; continue;")], [true, true, true, true]);
-  const sends = flat("lib/broadcasts.ts");
-  is("a subject test's sales: counted first; not counted, it waits saying why, its winner not chosen", [sends.includes('if (!(await salesCount(store, counting.count).read())) return "not_counted";'), sends.includes('b = { ...b, status: "waiting", note: testNotCountedNote(testCounting.said.message) }; break;')], [true, true]);
-  is("its note fits the record and says it is tried again", [testNotCountedNote("").endsWith("It is tried again automatically."), testNotCountedNote("x".repeat(NOTE_ROOM)).length <= NOTE_ROOM], [true, true]);
+  is("the monthly job waits, claims, and lets go only through the cap", [monthly.indexOf("monthWaitOver(store.handle, month)") < monthly.indexOf("claimMonth(store.handle, month)"), monthly.includes("await letMonthGo(store.handle, month).catch(() => false);"), monthly.includes("releaseMonth")], [true, true, false]);
+  is("no scheduled reading counts in the studio's requests", ["app/api/cron/weekly/route.ts", "app/api/cron/monthly/route.ts", "lib/store-alerts.ts", "lib/sold-count.ts", "lib/broadcasts.ts"].map((f) => flat(f).includes("countUnits(") || flat(f).includes("countStudio(store, null, paidSalesReadUnits")), [false, false, false, false, false]);
 
   part("With an API key: API_NUMBERS_UNITS of the API requests, refused as the API refuses");
   await countStudio(store, null, 0);

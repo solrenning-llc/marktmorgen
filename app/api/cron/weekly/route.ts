@@ -7,9 +7,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimWeek, readNumbers, releaseWeek, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
-import { countUnits } from "@/lib/person-agenda-read";
-import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { claimWeek, readNumbers, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { readSpends } from "@/lib/ad-spend";
@@ -51,7 +49,7 @@ export async function GET(request: NextRequest) {
   if (got === null) return Response.json({ ok: true, busy: true });
 
   const started = Date.now();
-  const out = { looked: 0, sent: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0, deferred: 0 };
+  const out = { looked: 0, sent: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
   try {
     const now = new Date();
     const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
@@ -72,14 +70,6 @@ export async function GET(request: NextRequest) {
         continue;
       }
       if (!(await claimWeek(store.handle))) continue;
-      // Its numbers are read again from Stripe, as the studio page that shows them does: counted in the store's
-      // studio requests first. Not counted, nothing is read or sent, and the week is let go for a later run.
-      const counted = await countUnits(store, STUDIO_PAGE_UNITS).catch(() => null);
-      if (!counted?.ok) {
-        await releaseWeek(store.handle).catch(() => undefined);
-        out.deferred += 1;
-        continue;
-      }
       out.looked += 1;
       const data = await readNumbers(store).catch(() => null);
       // Its rates, for the ranges stores its size are set beside (lib/benchmarks.ts): read here anyway.

@@ -40,8 +40,6 @@ import { SITE_URL } from "@/lib/site-url";
 import { formatMoney } from "@/lib/money";
 import type { Store } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
-import { countUnits } from "@/lib/person-agenda-read";
-import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { type DayStats, type SalesStats, readSales, readStats } from "@/lib/stats";
 import { weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { alertCreator } from "@/lib/phone-alerts";
@@ -203,10 +201,6 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
   const today = new Date(now).toISOString().slice(0, 10);
   const [first] = await redisPipeline([["SET", seenKey(today, store.statsId), "1", "NX", "EX", 2 * 86400]]);
   if (first === null) return { said: 0, skipped: true };
-  // Its sales are read again from Stripe, as the studio page that shows them does: counted in the store's studio
-  // requests first. Not counted, nothing is read or said today, and tomorrow's pass reads it again.
-  const counted = await countUnits(store, STUDIO_PAGE_UNITS).catch(() => null);
-  if (!counted?.ok) return { said: 0, skipped: true };
 
   const [stats, sales, goal] = await Promise.all([readStats(store, now), readSales(store, now), readSalesGoal(store.statsId, store.currency)]);
   if (!stats || !sales) return { said: 0, skipped: false };

@@ -248,6 +248,38 @@ test("Path page and its actual usage count fit its reserved studio page", () => 
  assert.ok(PATH_PAGE <= UNIT_COST.studio * STUDIO_PAGE_UNITS);
 });
 
+test("the scheduled readings of the store's sales are the plan's, at their worst month, from their schedule and their own claims", async () => {
+  const { BUYER_LEDGER: ledger, NUMBERS_READ, PAYPAL_LEDGER, SCHEDULED_READS, SOLD_READ, TEST_SALES_READ, scheduledReadsCost } = await import("./plan-cost-registry");
+  const { readFileSync } = await import("node:fs");
+  const { SOLD_FRESH_MS, SOLD_LOCK_SECONDS } = await import("@/lib/sold-count");
+  const { MONTHLY_TRIES } = await import("@/lib/stats-report");
+  const { MIN_TEST_REACH } = await import("@/lib/mail-test");
+  const { monthlyEmails } = await import("@/lib/plan");
+  const crons = (JSON.parse(readFileSync("vercel.json", "utf8")) as { crons: { path: string; schedule: string }[] }).crons;
+  const at = (path: string) => crons.find((c) => c.path === path)?.schedule;
+  // The weekly email runs on Mondays and Tuesdays and claims each store once a week: a month holds five such weeks at most.
+  assert.equal(at("/api/cron/weekly"), "20 * * * 1,2");
+  assert.equal(SCHEDULED_READS.weekly, 5);
+  // The monthly one runs every hour of two days; its readings are capped at MONTHLY_TRIES, not at its 48 runs.
+  assert.equal(at("/api/cron/monthly"), "25 * 1,2 * *");
+  assert.ok(MONTHLY_TRIES <= 48);
+  assert.equal(SCHEDULED_READS.monthly, MONTHLY_TRIES);
+  // The alerts are read in the hourly pass, once a UTC day for each store.
+  assert.equal(at("/api/cron/quiet"), "50 * * * *");
+  assert.equal(SCHEDULED_READS.alerts, 31);
+  // The sold counts: one reading each lock, held as long as the counts are fresh, whatever came of the last.
+  assert.equal(SOLD_LOCK_SECONDS * 1000, SOLD_FRESH_MS);
+  assert.equal(SCHEDULED_READS.sold, Math.ceil((31 * 86_400) / SOLD_LOCK_SECONDS));
+  // A sold reading is a whole reading of the buyers with the PayPal sales at their heaviest (a store selling with PayPal).
+  assert.equal(SOLD_READ, ledger + PAYPAL_LEDGER);
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    const line = COST_LINES.find((l) => l.id === "scheduled-reads");
+    assert.ok(line, "the scheduled readings have their line");
+    assert.equal(line.monthlyUsd(tier), scheduledReadsCost(tier));
+    assert.equal(scheduledReadsCost(tier), (SCHEDULED_READS.weekly + SCHEDULED_READS.monthly + SCHEDULED_READS.alerts) * NUMBERS_READ + SCHEDULED_READS.sold * SOLD_READ + Math.floor(monthlyEmails(tier) / MIN_TEST_REACH) * TEST_SALES_READ);
+  }
+});
+
 test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {
  assert.ok(BUYER_LEDGER <= UNIT_COST.studio * BUYER_LEDGER_UNITS, `${BUYER_LEDGER} > ${BUYER_LEDGER_UNITS} x ${UNIT_COST.studio}`);
  assert.ok(BUYER_LEDGER > UNIT_COST.studio * (BUYER_LEDGER_UNITS - 1), `${BUYER_LEDGER} <= ${BUYER_LEDGER_UNITS - 1} x ${UNIT_COST.studio}: lower BUYER_LEDGER_UNITS`);

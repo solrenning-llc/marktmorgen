@@ -49,6 +49,7 @@ import { takePublicRequest } from "@/lib/traffic";
 import {
   DOWNLOAD_LOOKUP_MS,
   DOWNLOAD_LOOKUP_UNITS,
+  ORDERS_CALL_MOVES,
   ORDERS_IMPORTED_COMMANDS,
   ORDERS_IMPORTED_ENTRY_COMMANDS,
   ORDERS_LISTING_COMMANDS,
@@ -69,6 +70,7 @@ export {
   DOWNLOAD_LOOKUP_COMMANDS,
   DOWNLOAD_LOOKUP_MS,
   DOWNLOAD_LOOKUP_UNITS,
+  ORDERS_CALL_MOVES,
   ORDERS_FEED_COMMANDS,
   ORDERS_IMPORTED_COMMANDS,
   ORDERS_IMPORTED_ENTRY_COMMANDS,
@@ -122,9 +124,19 @@ export class OrdersMeter {
     if (this.ended === "busy") throw new OrdersBusy();
     if (this.ended === "late") throw new OrdersLate();
   }
-  /** The opening is out of time: nothing more is read through this meter. */
+  /**
+   * The opening is out of time: nothing more is read through this meter. A take
+   * already asking the store when it stops keeps what it took without reading
+   * for it: at most one take's requests, of an opening that already paid its own.
+   */
   stop(): void {
     this.ended ??= "late";
+  }
+  /** Commands taken for reads that turned out fewer: kept for this opening's next reads, never handed back to the store. */
+  giveBack(commands: number): void {
+    if (commands > 0) this.queue = this.queue.then(() => {
+      this.left += commands;
+    });
   }
   private async takeNow(commands: number): Promise<void> {
     this.alive();
@@ -332,13 +344,14 @@ export async function callsFor(store: Store, email: string, meter?: OrdersMeter)
   if (!store.stripeAccountId || !sellsAny(store, "call")) return [];
   const who = normaliseEmail(email);
   const now = Date.now();
-  // With a meter (the orders page), each read is taken: this buyer's listings and rooms before they are read. The move of
-  // every booking the store's pages hold is read inside lib/calls.ts with the pages, before their number can be known
-  // here, so it is taken as soon as it is (one command each, at most five pages of a hundred): an opening the store has
-  // no more room for then reads nothing more.
-  meter?.alive();
+  // With a meter (the orders page), each read is taken before it is made. The move of every booking the store's pages
+  // hold is read inside lib/calls.ts with the pages, before their number can be known here, so the most it can be,
+  // ORDERS_CALL_MOVES, is taken first; what those moves did not use is given back to the same opening's meter, which pays
+  // this buyer's listings, rooms, feeds and keys from it. (Until lib/calls.ts says how many it is about to read.)
+  await meter?.take(ORDERS_CALL_MOVES);
   const paid = await paidCalls(store);
-  await meter?.take(paid.length);
+  if (paid.length > ORDERS_CALL_MOVES) await meter?.take(paid.length - ORDERS_CALL_MOVES);
+  else meter?.giveBack(ORDERS_CALL_MOVES - paid.length);
   const mine = paid
     .filter((call) => call.email !== null && normaliseEmail(call.email) === who && call.end > now)
     .sort((a, b) => a.start - b.start)

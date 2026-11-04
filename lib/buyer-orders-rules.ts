@@ -68,3 +68,11 @@ export const DOWNLOAD_LOOKUP_UNITS = 2;
 export const DOWNLOAD_LOOKUP_MS = 10_000;
 /** Commands a download's lookup makes besides its metered reads: the grant; for one brought over, how many ids there are, the ids and the one entry. */
 export const DOWNLOAD_LOOKUP_COMMANDS = 4;
+/**
+ * Moves an opening of a store that sells calls takes before its bookings are
+ * read: lib/calls.ts (paidCalls) reads the move of every booking on its pages,
+ * at most five pages of a hundred checkouts, before their number is known
+ * outside it (tests/orders-open.test.ts holds it to that file). What they do
+ * not use pays the same opening's next reads.
+ */
+export const ORDERS_CALL_MOVES = 5 * 100;

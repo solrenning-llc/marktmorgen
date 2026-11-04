@@ -42,9 +42,9 @@ async function main(): Promise<void> {
   await upsertContact(store.listId!, "buyer@example.com", { agreed: false, explicit: false, source: "buyer", sid: store.sid, productId: "prod_x", title: "X", at: new Date().toISOString() }, orderRoom(store));
   is("counted with the order's records", slot("o") > ordersBefore, true);
   is("and not twice in the contacts' slot", slot("ct"), contactsBefore);
-  const legacyBefore = slot("o");
-  await upsertContact(store.listId!, "buyer2@example.com", { agreed: false, explicit: false, source: "buyer", sid: store.sid, productId: "prod_x", title: "X", at: new Date().toISOString() }, { order: store });
-  is("the older form, an object holding only `order`, is still an order's", [slot("o") > legacyBefore, slot("ct")], [true, contactsBefore]);
+  const thanks = readFileSync("app/[handle]/thanks/page.tsx", "utf8");
+  is("the thanks page marks its writes with orderRoom, never the older `{ order: store }`", [(thanks.match(/orderRoom\(store\)\)\.catch/g) ?? []).length, thanks.includes("{ order: store }")], [3, false]);
+  is("the older form is no longer read as an order's", readFileSync("lib/contacts.ts", "utf8").includes("LegacyOrderRoom"), false);
   part("A paste that fills the room partway: what went in is said, and nothing else is written");
   const used = await dataUsed(store);
   // All but room for about one chunk of 500 taken, as a store near its plan's room would be.

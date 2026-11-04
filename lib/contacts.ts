@@ -38,7 +38,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
-import { DataRoomError, type DataStore, needData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -137,6 +137,21 @@ async function needContacts(room: ContactRoom, pairs: { before: Contact | null; 
   if (!room || isOrderRoom(room)) return;
   const grown = pairs.reduce((sum, { before, next }) => sum + Math.max(0, contactBytes(next) - contactBytes(before)), 0);
   if (grown > 0) await needData(room, [{ slot: CONTACTS_SLOT, bytes: grown }]);
+}
+
+/**
+ * Puts the room right after writes needContacts was charged for: gives back
+ * the growth of each one not written (it lost the race, and is charged again
+ * when tried again), and what each one written shrank the record by (a label
+ * taken off). Nothing when the writes are an order's.
+ */
+async function settleContacts(room: ContactRoom, pairs: { before: Contact | null; next: Contact }[], written: boolean[]): Promise<void> {
+  if (!room || isOrderRoom(room)) return;
+  const back = pairs.reduce((sum, { before, next }, i) => {
+    const grown = contactBytes(next) - contactBytes(before);
+    return sum + (written[i] ? Math.max(0, -grown) : Math.max(0, grown));
+  }, 0);
+  if (back > 0) await giveData(room, [{ slot: CONTACTS_SLOT, bytes: back }]);
 }
 
 export const leadsKey = (listId: string) => `nl:store:leads:${listId}`;
@@ -604,7 +619,10 @@ const CAS_HSET = [
  * Writes each field that still holds what was read; says which were written.
  * Upstash runs the script; where a Redis does not (the local stand-ins), the
  * same check is made as a read just before the write, which keeps the rule
- * and only narrows the gap rather than closing it.
+ * and only narrows the gap rather than closing it. A field that already holds
+ * what was to be written counts as written: the script ran and only its
+ * answer was lost, and reporting it as lost would leave that write out of
+ * what its caller answers (and of an undo).
  */
 async function casWrite(key: string, writes: { email: string; value: string; was: string }[]): Promise<boolean[]> {
   try {
@@ -613,13 +631,13 @@ async function casWrite(key: string, writes: { email: string; value: string; was
     throw new Error("unexpected answer");
   } catch {
     const [now] = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]);
-    const same = writes.map((w, i) => {
-      const raw = Array.isArray(now) ? now[i] : null;
-      return (typeof raw === "string" ? sha1(raw) : "") === w.was;
-    });
+    const read = writes.map((_, i) => (Array.isArray(now) ? now[i] : null));
+    // A field that already holds what was to be written was written (the script ran and its answer was lost): not written again, never reported as lost.
+    const landed = writes.map((w, i) => read[i] === w.value);
+    const same = writes.map((w, i) => !landed[i] && (typeof read[i] === "string" ? sha1(read[i] as string) : "") === w.was);
     const pairs = writes.flatMap((w, i) => (same[i] ? [w.email, w.value] : []));
     if (pairs.length) await redisPipeline([["HSET", key, ...pairs]]);
-    return same;
+    return writes.map((_, i) => landed[i] || same[i]);
   }
 }
 
@@ -630,42 +648,83 @@ async function casWrite(key: string, writes: { email: string; value: string; was
  * only if the contact still holds what was read (casWrite), so an
  * unsubscribe or a purchase noted in the same moment is never written over;
  * one that changed is read again and decided again, three times at most.
+ * `gone` lists those no longer on the list when read. With `keepWritten`, a
+ * round that fails stops there and what the earlier rounds wrote is still
+ * answered: its contacts come back in `noRoom` when their new labels do not
+ * fit in the data room, or in `failed` on any other error (a write that may
+ * or may not have been made), with the `error` and `unsure` when the write
+ * itself failed (it may have landed); without it the error is thrown.
  */
 export async function changeLabels(
   listId: string,
   emails: string[],
-  change: (tags: string[]) => string[] | "same" | "skip",
+  /** Called with each contact's labels as read and its address. */
+  change: (tags: string[], email: string) => string[] | "same" | "skip",
   /** The store whose data room new labels take from (DataRoomError when they do not fit). */
   room: DataStore,
-): Promise<{ changed: string[]; same: string[] }> {
+  options: { keepWritten?: boolean } = {},
+): Promise<{ changed: string[]; same: string[]; gone: string[]; noRoom: string[]; failed: string[]; error?: unknown; unsure: boolean }> {
   const key = leadsKey(listId);
   const changed: string[] = [];
   const same: string[] = [];
+  const gone: string[] = [];
+  let noRoom: string[] = [];
+  let failed: string[] = [];
+  let failure: unknown;
+  let unsure = false;
   let pending = [...new Set(emails)];
   for (let round = 0; round < 3 && pending.length; round += 1) {
-    const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
     const writes: { email: string; value: string; was: string }[] = [];
     const sizes: { before: Contact | null; next: Contact }[] = [];
-    pending.forEach((email, i) => {
-      const raw = Array.isArray(rows) ? rows[i] : null;
-      const contact = parseContact(raw);
-      if (!contact || typeof raw !== "string") return;
-      const next = change(contact.tags);
-      if (next === "same") same.push(email);
-      else if (next !== "skip") {
-        writes.push({ email, value: JSON.stringify({ ...contact, tags: next }), was: sha1(raw) });
-        sizes.push({ before: contact, next: { ...contact, tags: next } });
-      }
-    });
-    if (!writes.length) break;
-    await needContacts(room, sizes);
-    const written = await casWrite(key, writes);
+    try {
+      const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
+      pending.forEach((email, i) => {
+        const raw = Array.isArray(rows) ? rows[i] : null;
+        const contact = parseContact(raw);
+        if (!contact || typeof raw !== "string") {
+          gone.push(email);
+          return;
+        }
+        const next = change(contact.tags, email);
+        if (next === "same") same.push(email);
+        else if (next !== "skip") {
+          writes.push({ email, value: JSON.stringify({ ...contact, tags: next }), was: sha1(raw) });
+          sizes.push({ before: contact, next: { ...contact, tags: next } });
+        }
+      });
+      if (!writes.length) break;
+      await needContacts(room, sizes);
+    } catch (error) {
+      if (!options.keepWritten) throw error;
+      // Nothing of this round was written: what it would have written is left, by why.
+      const left = writes.length ? writes.map((w) => w.email) : pending;
+      if (error instanceof DataRoomError) noRoom = left;
+      else failed = left;
+      failure = error;
+      break;
+    }
+    let written: boolean[];
+    try {
+      written = await casWrite(key, writes);
+    } catch (error) {
+      // Its charge is given back only when a read after it shows that none of them landed; unknown stays counted.
+      const landed = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]])
+        .then(([now]) => (Array.isArray(now) && now.length === writes.length ? writes.some((w, i) => now[i] === w.value) : true))
+        .catch(() => true);
+      if (!landed) await settleContacts(room, sizes, writes.map(() => false));
+      if (!options.keepWritten) throw error;
+      failed = writes.map((w) => w.email);
+      failure = error;
+      unsure = true;
+      break;
+    }
+    await settleContacts(room, sizes, written);
     pending = writes.filter((_, i) => !written[i]).map((w) => w.email);
     writes.forEach((w, i) => {
       if (written[i]) changed.push(w.email);
     });
   }
-  return { changed, same };
+  return { changed, same, gone, noRoom, failed, unsure, ...(failure === undefined ? {} : { error: failure }) };
 }
 
 /**

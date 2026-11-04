@@ -8,7 +8,7 @@ import { useHydrated } from "@/components/use-hydrated";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { CalendarView } from "@/lib/calendar-sync";
-import { CALENDAR_CREDITS_PER_DAY } from "@/lib/calendar-limits";
+import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-limits";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { LOOKAHEAD_DAYS, MAX_FEEDS } from "@/lib/calendar-limits";
 
@@ -234,10 +234,19 @@ export function CalendarEditor({ view: initial, weekly }: { view: CalendarView; 
         <p className="mt-1 text-sm text-ink-soft">
           Subscribe to this private address from Google Calendar (&ldquo;From URL&rdquo;), Outlook (&ldquo;Subscribe from
           web&rdquo;) or Apple Calendar (&ldquo;New Calendar Subscription&rdquo;), and every booked call and dated session
-          shows up with who booked it. Calendar apps check it on their own schedule, from every half hour to about a
-          day. A booking made or moved shows at your app&apos;s next check, for up to {CALENDAR_CREDITS_PER_DAY} changes a
-          day; a refund, a cancellation or anything past that shows within a day.
+          shows up with who booked it. Calendar apps check it on their own schedule, from every few minutes to about a
+          day (Google). It answers up to {CALENDAR_POLLS_PER_HOUR} times an hour; an app that asks more often is told
+          to come back later and keeps what it has. Set your app to check every 15 minutes or less often: asked more
+          than {CALENDAR_REFUSED_PER_HOUR} times too often in an hour, as an app checking every 5 minutes does, the
+          address stops and a new one shows here. A booking made, moved, refunded or canceled shows at your
+          app&apos;s next check, for up to {CALENDAR_CREDITS_PER_DAY} changes a day; anything past that shows within a
+          day.
         </p>
+        {view.stoppedAt ? (
+          <p className="notice notice-warn mt-3 text-sm text-ink" role="note">
+            {`Your previous address was asked too often (more than ${CALENDAR_REFUSED_PER_HOUR} times too often in an hour), so it stopped on ${new Date(view.stoppedAt).toUTCString().slice(5, 22)} UTC. This is a new one: subscribe to it again, and set your calendar app to check every 15 minutes or less often.`}
+          </p>
+        ) : null}
         {view.subscribeUrl ? (
           <>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row">

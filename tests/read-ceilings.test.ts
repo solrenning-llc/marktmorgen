@@ -24,14 +24,14 @@ import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CALENDAR_BUILDS_PER_DAY, CALENDAR_CREDITS_PER_DAY, CALENDAR_FILE_MAX_BYTES, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS,
-  FeedGone, bookedCalendar, bookedCalendarFeed, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
+  CALENDAR_BUILDS_PER_DAY, CALENDAR_CREDITS_PER_DAY, CALENDAR_FILE_MAX_BYTES, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS, CALENDAR_REFUSED_PER_HOUR,
+  FeedGone, bookedCalendar, bookedCalendarFeed, calendarView, ensureFeedToken, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
   CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
-  KEPT_READINGS_SHAPE, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
+  CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading, takeUpdateSearch } from "@/lib/store-readings";
@@ -187,6 +187,33 @@ async function main(): Promise<void> {
   token = url.slice(url.lastIndexOf("/") + 1);
   is("the copy is still there for the new address", [keptBefore !== null, redis.run(["GET", `nl:cal:out:${owner.statsId}`]) === keptBefore], [true, true]);
 
+  part("Refusals have a ceiling: past CALENDAR_REFUSED_PER_HOUR in an hour the address stops, and the studio says so (C4-33, light a)");
+  {
+    // Later than any answer above, and from an hour with nothing in it yet.
+    const at = Date.UTC(2033, 0, 9, 10, 0);
+    redis.run(["DEL", `nl:cal:pace:${owner.statsId}`, `nl:cal:refused:${owner.statsId}`]);
+    const quick = async () => "BEGIN:VCALENDAR\r\nEND:VCALENDAR";
+    url = (await calendarView(await load())).subscribeUrl ?? "";
+    token = url.slice(url.lastIndexOf("/") + 1).replace(/\.ics$/, "");
+    const asked = { ...owner, token };
+    const states: string[] = [];
+    for (let i = 0; i < CALENDAR_POLLS_PER_HOUR + CALENDAR_REFUSED_PER_HOUR; i += 1) states.push((await bookedCalendarFeed(asked, quick, at + i * 1_000)).state);
+    is(`the ${CALENDAR_REFUSED_PER_HOUR} refusals the line prices leave the address as it is`, [states.filter((x) => x === "paced").length, (await storeIdForToken(token))?.statsId], [CALENDAR_REFUSED_PER_HOUR, owner.statsId]);
+    const one = await counted(() => bookedCalendarFeed(asked, quick, at + 60_000));
+    is("the refusal that stops it: the pace, its count and the stop, within a refused shape and the stop priced as one more (its token's two reads aside)", [one.value.state, one.commands <= CALENDAR_REFUSED_SHAPE.commands - 2 + 4], ["paced", true]);
+    is("one more: the address is let go", await storeIdForToken(token), null);
+    const stopped = await calendarView(await load());
+    is("the studio shows no address and says it was stopped, with when", [stopped.subscribeUrl, typeof stopped.stoppedAt === "string" && Date.parse(stopped.stoppedAt) === at + 60_000], [null, true]);
+    await ensureFeedToken(await load());
+    const made = await calendarView(await load());
+    is("the studio makes a new one in its place and keeps saying why", [made.subscribeUrl !== null && made.subscribeUrl !== url, made.stoppedAt !== null], [true, true]);
+    url = (await newFeedToken(await load())).subscribeUrl ?? "";
+    token = url.slice(url.lastIndexOf("/") + 1).replace(/\.ics$/, "");
+    is("a new address the creator asks for clears the note", (await calendarView(await load())).stoppedAt, null);
+    const editor = read("components/calendar-editor.tsx");
+    is("the editor says the rule and how to keep the address: every 15 minutes or less often", editor.includes("Set your app to check every 15 minutes or less often") && editor.includes("view.stoppedAt ?"), true);
+  }
+
   part("The file keeps what is still to come first");
   const now = Date.now();
   const slots = [
@@ -225,7 +252,10 @@ async function main(): Promise<void> {
     const perBooking = (forty - ten) / 30;
     is(`each booking adds what the count gives it (${perBooking.toFixed(2)} <= ${CALENDAR_BUILD_PER_BOOKING})`, perBooking <= CALENDAR_BUILD_PER_BOOKING, true);
     is(`forty bookings, measured (${forty}), within the count for forty (${calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands})`, forty <= calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands, true);
-    is("and the count at its worst is the shape's", calendarBuildCommands(MAX_PRODUCTS, CALENDAR_STRIPE_PAGES * 100), CALENDAR_BUILD_SHAPE.commands);
+    // Measured, not the shape's own expression again (review C4-33 (c)): the fixed part measured here, with every
+    // listing (one GET each) and every booking at the measured rate, is within the shape.
+    const fixedMeasured = forty - 40 * perBooking - CALENDAR_POLL_SHAPE.commands;
+    is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + MAX_PRODUCTS + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
   }
 
   part("Every figure costs at least the worst it stands for");

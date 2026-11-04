@@ -39,7 +39,7 @@ import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import { MAX_UPDATE_RECIPIENTS } from "@/lib/product-updates-rules";
 import { ALL_TIME_PAGES, DAY_FIELDS_MAX, KEPT_DAYS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
-import { CALENDAR_FILE_MAX_BYTES } from "@/lib/calendar-sync";
+import { CALENDAR_FILE_MAX_BYTES, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-sync";
 import { READING_COPY_MAX_BYTES } from "@/lib/store-readings";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 
@@ -100,13 +100,15 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  * (lib/call-records.ts, readMoves: one GET a booking); four reads of each
  * booking's room and, for a video room not made yet, its making (SET NX and
  * GET: lib/call-rooms.ts, roomsFor); the copy kept (lib/calendar-sync.ts,
- * KEEP_COPY: the EVAL and the EXISTS and SET it runs, billed one by one: 3).
+ * KEEP_COPY: the EVAL and the EXISTS and SET it runs, billed one by one: 3);
+ * and the store kept in the list whose refunds are read (ZSCORE and ZADD: 2,
+ * inbox C4-33).
  */
 /** Commands one booking adds to a making: its moves (GET), its room's four reads and its room's making (SET NX and GET). */
 export const CALENDAR_BUILD_PER_BOOKING = 1 + 4 + 2;
 /** Commands of a making for a store of `listings` call listings and `calls` bookings (tests/read-ceilings.test.ts measures it). */
 export function calendarBuildCommands(listings: number, calls: number): number {
-  return 8 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 3;
+  return 8 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 3 + 2;
 }
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,
@@ -117,16 +119,21 @@ export const CALENDAR_BUILD_SHAPE: ReadShape = {
   stripePages: CALENDAR_STRIPE_PAGES,
 };
 
-/** An answer refused for the sliding hour's pace: the token, its settings and the pace (7 commands), nothing read or sent besides. */
-export const CALENDAR_REFUSED_SHAPE: ReadShape = { seconds: 0.2, cpu: 0.01, commands: 2 + 5, dbBytes: 2 * 4_096, outBytes: 64, stripePages: 0 };
 /**
- * Refused answers priced in the feed's line, an hour: as many again as it
- * answers. Their number is set by whoever holds the feed's secret address
- * (its creator's own apps), not by a figure: past it each costs a
- * CALENDAR_REFUSED_SHAPE, a few millionths of a dollar, and replacing the
- * address in the studio stops them.
+ * An answer refused for the sliding hour's pace: the token and its settings
+ * (2 GET), the pace (ZADD, ZREMRANGEBYSCORE, ZCARD, EXPIRE: 4) and, refused,
+ * its mark taken back and the refusal counted (ZREM, INCR, EXPIRE: 3): 9
+ * commands, nothing read or sent besides.
  */
-export const CALENDAR_REFUSED_PRICED_PER_HOUR = 4;
+export const CALENDAR_REFUSED_SHAPE: ReadShape = { seconds: 0.2, cpu: 0.01, commands: 2 + 4 + 3, dbBytes: 2 * 4_096, outBytes: 64, stripePages: 0 };
+/**
+ * Refused answers priced in the feed's line, an hour: every one the address
+ * may get before it stops (lib/calendar-sync.ts, CALENDAR_REFUSED_PER_HOUR;
+ * inbox C4-33, light a), and the stop itself (GET, DEL, DEL, SET) at one
+ * more. Past it the address is let go and what still asks it is an unknown
+ * address, answered from the token's one read.
+ */
+export const CALENDAR_REFUSED_PRICED_PER_HOUR = CALENDAR_REFUSED_PER_HOUR + 1;
 
 // ---- Telling a product's buyers it was updated ------------------------------
 

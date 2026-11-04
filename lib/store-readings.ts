@@ -214,3 +214,21 @@ export async function keptNumbers(store: Store, now = Date.now()): Promise<Stats
     return studioStats(store, stats, null, "error", []);
   }
 }
+
+/**
+ * A store's kept readings, gone (inbox C4-33, light d): at its deletion, all
+ * of them; at a person's erasure, its sales, which name its biggest buyers by
+ * their address (lib/person-erasure.ts). Read again, the next one leaves the
+ * person out. The day's counts name no one and stay.
+ */
+export async function forgetStoreReadings(statsId: string | null | undefined): Promise<void> {
+  if (!statsId || !isRedisConfigured()) return;
+  await redisPipeline([["DEL", ...READING_KINDS.map((kind) => copyKey(kind, statsId))]]);
+}
+
+/** A person's erasure: the store's kept sales reading goes; returns how many copies went. */
+export async function forgetReadingsPerson(statsId: string | null): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId)]]);
+  return Number(gone) || 0;
+}

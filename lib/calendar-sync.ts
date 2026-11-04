@@ -50,9 +50,10 @@ import { idsOfKind, readListing, recordListings } from "@/lib/catalog";
 import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
 import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";
-import { CALENDAR_CREDITS_PER_DAY } from "@/lib/calendar-limits";
+import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-limits";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
+import { MEET_STORES } from "@/lib/meet-links";
 
 /** Calendars one store may read, and how far ahead (lib/calendar-limits.ts, which the studio and the feature page read too). */
 export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
@@ -73,24 +74,24 @@ export const CALENDAR_COPY_SECONDS = 40 * 86_400;
 /**
  * The copy is made again when a booking changed (lib/call-records.ts,
  * bookingsChangedKey: a booking made or moved, a time let go, or a call
- * refunded in full, lib/call-meetings.ts), or once it is this old. What marks
- * nothing yet (a cancellation, a live session the creator adds: their paths
- * are other agents' files) shows at the next making: within this, or up to a
- * day when the UTC day's makings (CALENDAR_BUILDS_PER_DAY) are spent. A
+ * refunded in full, a cancellation included, lib/call-meetings.ts, which
+ * reads the refunds of every store whose feed is read, meeting rooms or not),
+ * or once it is this old. What marks nothing yet (a live session the creator
+ * adds: its path is another agent's file) shows at the next making: within
+ * this, or up to a day when the UTC day's makings (CALENDAR_BUILDS_PER_DAY)
+ * are spent. A
  * booking whose dispute was lost stays in the file: it reads the payment
  * (lib/calls.ts, callFromRow), which a lost dispute does not show refunded.
  */
 export const CALENDAR_REFRESH_SECONDS = 12 * 3_600;
+/** How long after a making the store's refunds are read for its feed (lib/call-meetings.ts, readRefunds). */
+export const FEED_REFUNDS_SECONDS = 2 * 86_400;
 /** Times a store's file may be made again in a UTC day, every reason together. */
 export const CALENDAR_BUILDS_PER_DAY = 2;
 /** More makings a UTC day, one for each booking made, moved or let go (lib/calendar-limits.ts, CALENDAR_CREDITS_PER_DAY). */
 export { CALENDAR_CREDITS_PER_DAY };
-/**
- * Answers one store's feed gets in an hour: four, two calendar apps (a phone
- * and a computer) each asking every thirty minutes, the file's own
- * REFRESH-INTERVAL. A third app asks more than this and is told to come back.
- */
-export const CALENDAR_POLLS_PER_HOUR = 4;
+/** Answers and refusals an hour (lib/calendar-limits.ts, where the studio's editor reads them too). */
+export { CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR };
 /**
  * The largest copy kept and sent, in bytes: CALENDAR_MAX_EVENTS events at
  * 2 KB and the bookings of five Stripe pages (lib/calls.ts, MAX_PAGES) at
@@ -105,7 +106,7 @@ const FEED_ID_PATTERN = /^[0-9a-f]{16}$/;
 
 type Feed = { id: string; url: string; addedAt: string };
 /** `callsId`: the store's id for its calls (lib/store.ts), which its bookings' changed mark is kept by; written with the handle. */
-type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string; callsId?: string | null };
+type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string; callsId?: string | null; stoppedAt?: string };
 export type Reading = { at: number; busy: [number, number][]; events: number; unsupported: number; truncated: boolean };
 
 const cfgKey = (statsId: string) => `nl:cal:cfg:${statsId}`;
@@ -145,6 +146,7 @@ function parseConfig(raw: unknown): Config | null {
       token: typeof value.token === "string" && TOKEN_PATTERN.test(value.token) ? value.token : null,
       tokenAt: typeof value.tokenAt === "string" ? value.tokenAt : "",
       callsId: typeof value.callsId === "string" && /^[0-9a-f]{8,40}$/.test(value.callsId) ? value.callsId : null,
+      ...(typeof value.stoppedAt === "string" && value.stoppedAt ? { stoppedAt: value.stoppedAt } : {}),
     };
   } catch {
     return null;
@@ -304,12 +306,14 @@ export type CalendarView = {
   feeds: FeedView[];
   /** The private subscription address, or null before one is made. */
   subscribeUrl: string | null;
+  /** When the address before this one was stopped for being asked too often (CALENDAR_REFUSED_PER_HOUR), or null. */
+  stoppedAt: string | null;
 };
 
 /** What the studio shows: the calendars, without their addresses, and how each last went. */
 export async function calendarView(store: Store): Promise<CalendarView> {
   const config = await readConfig(store);
-  if (!config) return { feeds: [], subscribeUrl: null };
+  if (!config) return { feeds: [], subscribeUrl: null, stoppedAt: null };
   const replies = config.feeds.length
     ? await redisPipeline(config.feeds.flatMap((f) => [["GET", goodKey(f.id)], ["GET", errKey(f.id)]]))
     : [];
@@ -333,7 +337,7 @@ export async function calendarView(store: Store): Promise<CalendarView> {
       unsupported: good?.unsupported ?? 0,
     };
   });
-  return { feeds, subscribeUrl: config.token ? subscribeUrl(config.token) : null };
+  return { feeds, subscribeUrl: config.token ? subscribeUrl(config.token) : null, stoppedAt: config.stoppedAt ?? null };
 }
 
 export function subscribeUrl(token: string): string {
@@ -393,7 +397,7 @@ export async function removeFeed(store: Store, id: string): Promise<CalendarView
  * Makes the store's subscription address, or a new one in place of the old,
  * which stops answering at once.
  */
-export async function newFeedToken(store: Store): Promise<CalendarView> {
+export async function newFeedToken(store: Store, keepStopped = false): Promise<CalendarView> {
   const config = (await readConfig(store)) ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
   const token = randomBytes(24).toString("hex");
   const commands: (string | number)[][] = [["SET", tokenKey(token), store.statsId as string]];
@@ -405,7 +409,9 @@ export async function newFeedToken(store: Store): Promise<CalendarView> {
     const [kept] = await redisPipeline([["GET", outKey(store.statsId)]]);
     if (parseKept(kept).gone) await redisPipeline([["DEL", outKey(store.statsId)]]);
   }
-  await writeConfig(store, { ...config, token, tokenAt: new Date().toISOString() });
+  // A new address the creator asked for clears the note that the one before was stopped; one made in its place does not.
+  const { stoppedAt, ...rest } = config;
+  await writeConfig(store, { ...rest, ...(keepStopped && stoppedAt ? { stoppedAt } : {}), token, tokenAt: new Date().toISOString() });
   return calendarView(store);
 }
 
@@ -418,11 +424,11 @@ export async function ensureFeedToken(store: Store): Promise<void> {
     if (config.handle !== store.handle || (config.callsId ?? null) !== (store.callsId ?? null)) await writeConfig(store, config);
     return;
   }
-  await newFeedToken(store);
+  await newFeedToken(store, true);
 }
 
 /** The store a subscription address belongs to, or null. */
-export async function storeIdForToken(token: string): Promise<{ statsId: string; handle: string; callsId: string | null } | null> {
+export async function storeIdForToken(token: string): Promise<{ statsId: string; handle: string; callsId: string | null; token: string } | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
   const [statsId] = await redisPipeline([["GET", tokenKey(token)]]);
   if (typeof statsId !== "string" || !statsId) return null;
@@ -431,7 +437,7 @@ export async function storeIdForToken(token: string): Promise<{ statsId: string;
   // A replaced token is deleted, and this second check covers a lookup that
   // raced the replacement.
   if (!config || config.token !== token) return null;
-  return { statsId, handle: config.handle, callsId: config.callsId ?? null };
+  return { statsId, handle: config.handle, callsId: config.callsId ?? null, token };
 }
 
 // ---- Clashes the studio points out -----------------------------------------
@@ -636,7 +642,18 @@ export class FeedGone extends Error {}
  * when past CALENDAR_POLLS_PER_HOUR. Never more than the pace, however late in
  * an hour an app asks. A count that cannot be made is a refusal.
  */
-async function withinPace(statsId: string, now: number): Promise<boolean> {
+const refusedKey = (statsId: string) => `nl:cal:refused:${statsId}`;
+
+/** The address let go for being asked too often: its token deleted, the settings told when, so the studio says so. */
+async function stopFeedToken(statsId: string, token: string, now: number): Promise<void> {
+  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
+  const config = parseConfig(raw);
+  const commands: (string | number)[][] = [["DEL", tokenKey(token)], ["DEL", refusedKey(statsId)]];
+  if (config && config.token === token) commands.push(["SET", cfgKey(statsId), JSON.stringify({ ...config, token: null, stoppedAt: new Date(now).toISOString() })]);
+  await redisPipeline(commands);
+}
+
+async function withinPace(statsId: string, now: number, token?: string): Promise<boolean> {
   const key = paceKey(statsId);
   // One answer's mark: its time and a few random bytes, nothing about who asked.
   const mark = `${now}:${randomBytes(4).toString("hex")}`;
@@ -650,7 +667,9 @@ async function withinPace(statsId: string, now: number): Promise<boolean> {
     const count = Number(n);
     if (!Number.isSafeInteger(count)) return false;
     if (count <= CALENDAR_POLLS_PER_HOUR) return true;
-    await redisPipeline([["ZREM", key, mark]]).catch(() => {});
+    // Refused: its mark goes, and it is counted; past CALENDAR_REFUSED_PER_HOUR in the hour the address stops.
+    const [, refused] = await redisPipeline([["ZREM", key, mark], ["INCR", refusedKey(statsId)], ["EXPIRE", refusedKey(statsId), 3_600, "NX"]]).catch(() => [null, 0]);
+    if (token && Number(refused) > CALENDAR_REFUSED_PER_HOUR) await stopFeedToken(statsId, token, now).catch(() => {});
     return false;
   } catch {
     return false;
@@ -697,8 +716,8 @@ export async function forgetStoreCalendar(statsId: string | null | undefined): P
   await redisPipeline([["DEL", cfgKey(statsId), outKey(statsId), ...calendarKeys(parsed)]]);
 }
 
-export async function bookedCalendarFeed(owner: { statsId: string; handle: string; callsId?: string | null }, make: () => Promise<string>, now = Date.now()): Promise<FeedAnswer> {
-  if (!(await withinPace(owner.statsId, now))) return { state: "paced" };
+export async function bookedCalendarFeed(owner: { statsId: string; handle: string; callsId?: string | null; token?: string }, make: () => Promise<string>, now = Date.now()): Promise<FeedAnswer> {
+  if (!(await withinPace(owner.statsId, now, owner.token))) return { state: "paced" };
   const day = new Date(now).toISOString().slice(0, 10);
   let raw: unknown[];
   try {
@@ -758,5 +777,16 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // Kept only while the store's settings are still there: a deletion that ran while this was being made
   // (forgetStoreCalendar) is not undone by a copy written after it, with its buyers' names.
   await redisPipeline([["EVAL", KEEP_COPY, 2, cfgKey(owner.statsId), outKey(owner.statsId), file, CALENDAR_COPY_SECONDS]]).catch(() => {});
+  // A store whose feed is read has its refunds read by the five-minute job, meeting rooms or not, so a call refunded
+  // or cancelled marks its bookings changed and the feed is made again at the app's next check (inbox C4-33, M3):
+  // for FEED_REFUNDS_SECONDS after each making, which a feed that is read makes at least every CALENDAR_REFRESH_SECONDS.
+  // Never lowered: a meeting further ahead keeps the score its booking gave (lib/meet-links.ts).
+  if (owner.callsId) {
+    const member = `${owner.callsId}|${owner.handle}`;
+    const until = now + FEED_REFUNDS_SECONDS * 1000;
+    await redisPipeline([["ZSCORE", MEET_STORES, member]])
+      .then(([score]) => (Number(score) >= until ? undefined : redisPipeline([["ZADD", MEET_STORES, until, member]])))
+      .catch(() => {});
+  }
   return { state: "made", ics };
 }

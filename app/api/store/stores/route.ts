@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { forgetCrm } from "@/lib/crm";
 import { forgetRecentSales } from "@/lib/recent-sales";
+import { forgetStoreReadings } from "@/lib/store-readings";
 import { away, creatorFrom, storeCookie } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
 import { forgetStoreWorkflows } from "@/lib/flows";
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
       // notes its team wrote about buyers (lib/buyer-profile.ts), its
       // workflows, its webhook endpoints with their secrets, its API keys, and its
       // calendar feeds with the last copy of its bookings file (lib/calendar-sync.ts).
-      await Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetStoreWebhooks(result.store.statsId), revokeAllKeys(result.store.sid), forgetPath(result.store), forgetStoreCalendar(result.store.statsId)]).catch((error: unknown) =>
+      await Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetStoreWebhooks(result.store.statsId), revokeAllKeys(result.store.sid), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
         console.error("forgetting a deleted store's integrations failed", error),
       );
       // Back to the owner's first store, and the switcher forgets this one.

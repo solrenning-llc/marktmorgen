@@ -73,10 +73,12 @@ export async function describeMove(email: string): Promise<Record<string, unknow
  * other: clearing it would let a login by the emailed link into the store
  * with no second step again. Its two addresses are logged out.
  */
-export async function clearBrokenMoveByHand(email: string, confirm: string): Promise<"cleared" | "none" | "confirm" | "split"> {
+export async function clearBrokenMoveByHand(email: string, confirm: string): Promise<"cleared" | "none" | "confirm" | "split" | "running"> {
   const broken = await readBrokenMove(email);
   if (!broken) return "none";
   if (confirm.trim().toLowerCase() !== email.trim().toLowerCase()) return "confirm";
+  // Never while a move of either address is running: its own record is this one (app/api/auth/move).
+  if ((await moveRunning(broken.from)) || (await moveRunning(broken.to))) return "running";
   const holds = async (address: string) => ({
     store: Boolean(await storeForEmail(address)),
     ways: (await listPasskeys(address)).length > 0 || (await pendingNow(address)) !== null || (await twoStepOn(address)),

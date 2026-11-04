@@ -40,9 +40,12 @@ import { done, is, part } from "./check";
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.RESEND_API_KEY = "re_test_second_step_gate_only";
 const mails: { to: string; subject: string; text: string }[] = [];
+/** Addresses the email provider answers 503 for, as if it were down. */
+const mailDown = new Set<string>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   if (String(input).includes("resend")) {
     const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
+    if (mailDown.has(Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""))) return new Response("{}", { status: 503 });
     mails.push({ to: Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""), subject: String(body.subject ?? ""), text: String(body.text ?? "") });
     return new Response(JSON.stringify({ id: "email_1" }), { status: 200 });
   }
@@ -1031,6 +1034,106 @@ async function main(): Promise<void> {
   const lcaToken = /token=([0-9a-f]{64})/.exec([...mails].reverse().find((m) => m.to === "lca-backup@example.org" && /token=/.test(m.text))?.text ?? "")?.[1] ?? "";
   is("it goes to the code page", (await lostConfirm(form(`${ORIGIN}/api/auth/lost/confirm`, { token: lcaToken }))).headers.get("location"), `${ORIGIN}/signin/code`);
   await endMoving(LCA, "lca-elsewhere@example.com", lcaMark!);
+
+  part("A session logged out while its request waited for the lock keeps and removes nothing (C3-110)");
+  const RAC = "rac-owner@example.com";
+  const racP = makePasskey(RAC, "cred-rac-p");
+  const racQ = makePasskey(RAC, "cred-rac-q");
+  await racP.keep();
+  await racQ.keep();
+  const racThief = await signInWithPasskey(racP);
+  const racOwnerLink = await linkSession(RAC);
+  /** Runs `thief` and `owner` together through the real routes, the owner's landing between the thief's check and its lock. */
+  const raced = async (thief: () => Promise<{ status: number; error?: string }>, owner: () => Promise<unknown>) => {
+    const pipe = redis.pipeline.bind(redis);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let finish: () => void = () => {};
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    let first = true;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (first && commands.some((c) => c[0] === "SET" && c[1] === lockOf(RAC) && c.includes("NX"))) {
+        first = false;
+        release();
+        await finished;
+      }
+      return pipe(commands);
+    }) as typeof redis.pipeline;
+    const [answer] = await Promise.all([thief(), gate.then(async () => { try { await owner(); } finally { finish(); } })]);
+    redis.pipeline = pipe;
+    return answer;
+  };
+  // The owner asks for P's removal (and so logs out the thief's P session) while the thief's "Keep it" for P waits.
+  await scheduleRemoval(RAC, "cred-rac-p", "a".repeat(64), false);
+  await cancelRemoval(RAC, "cred-rac-p", await signInWithPasskey(racQ));
+  const racThief2 = await signInWithPasskey(racP);
+  const keepAnswer = await raced(() => passkeys(racThief2, { action: "keep", id: "cred-rac-p" }), () => passkeys(racOwnerLink, { action: "remove", id: "cred-rac-p" }));
+  is("“Keep it” from the thief's session, logged out meanwhile: refused, P stays set to go", [keepAnswer.error, (await pendingRemoval(RAC))?.ids], ["second_step", ["cred-rac-p"]]);
+  await cancelRemoval(RAC, "cred-rac-p", await signInWithPasskey(racQ));
+  const racThief3 = await signInWithPasskey(racP);
+  const removeAnswer = await raced(() => passkeys(racThief3, { action: "remove", id: "cred-rac-q" }), () => passkeys(racOwnerLink, { action: "remove", id: "cred-rac-p" }));
+  is("removing Q at once from it: refused, Q stays", [removeAnswer.error, (await listPasskeys(RAC)).map((p) => p.id).sort()], ["second_step", ["cred-rac-p", "cred-rac-q"]]);
+  void racThief;
+  const NAP = "nap-noapp@example.com";
+  await makePasskey(NAP, "cred-nap").keep();
+  await scheduleRemoval(NAP, "cred-nap", "a".repeat(64), false);
+  is("a session marked by the app, on an account whose app is off, keeps nothing", await cancelRemoval(NAP, "cred-nap", await openSession(NAP, "app")), "second_step");
+
+  part("A removal nobody was told about is never set (C3-110)");
+  const UNS = "uns-owner@example.com";
+  await makePasskey(UNS, "cred-uns-1").keep();
+  await makePasskey(UNS, "cred-uns-2").keep();
+  const unsLink = await linkSession(UNS);
+  mailDown.add(UNS);
+  const unsAnswer = await passkeys(unsLink, { action: "remove", id: "cred-uns-1" });
+  mailDown.delete(UNS);
+  is("the provider is down: the request answers as such, and nothing waits to be removed", [unsAnswer.status, unsAnswer.error, await pendingRemoval(UNS)], [503, "unsent", null]);
+  is("with the email going out, it is set", typeof (await passkeys(unsLink, { action: "remove", id: "cred-uns-1" })).removeOn, "number");
+
+  part("Moving passkeys whose last answer was lost keeps them at the new address (C3-110)");
+  const LOF = "lof-from@example.com";
+  const LOT = "lof-dest@example.com";
+  await makePasskey(LOF, "cred-lof").keep();
+  const lofList = `nl:pk:${hex(`nimbus-passkeys:${LOF}`).slice(0, 40)}`;
+  const lofPipe = redis.pipeline.bind(redis);
+  let lofLost = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!lofLost && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-del:") && c.includes(lofList))) {
+      lofLost = true;
+      await lofPipe(commands);
+      throw new Error("the answer was lost");
+    }
+    return lofPipe(commands);
+  }) as typeof redis.pipeline;
+  const lofMoved = await movePasskeys(LOF, LOT).then(() => "moved", () => "refused");
+  redis.pipeline = lofPipe;
+  is("the passkey is at the new address, nowhere lost", [lofMoved, (await listPasskeys(LOT)).map((p) => p.id), (await listPasskeys(LOF)).length, (await redis.pipeline([["GET", `nl:pk:cred:${hex("nimbus-passkey-id:cred-lof").slice(0, 40)}`]]))[0]], ["moved", ["cred-lof"], 0, LOT]);
+
+  part("Small items of C3-110");
+  const KRA = "kra-owner@example.com";
+  await makePasskey(KRA, "cred-kra-1").keep();
+  const kra2 = makePasskey(KRA, "cred-kra-2");
+  await kra2.keep();
+  await keepRecoveryAddress(KRA, "kra-rec@example.org");
+  await scheduleRemoval(KRA, "cred-kra-1", "a".repeat(64), false);
+  mails.length = 0;
+  await passkeys(await signInWithPasskey(kra2), { action: "keep", id: "cred-kra-1" });
+  is("“Keep it” is told to the recovery address too", mails.some((m) => m.to === "kra-rec@example.org" && m.subject === "Your passkey stays on your Marktmorgen account"), true);
+  const RUN1 = "run-a@example.com";
+  const RUN2 = "run-b@example.com";
+  const runMark = await markMoving(RUN1, RUN2);
+  await markBrokenMove(RUN1, RUN2);
+  is("clearing by hand waits for a move that is running", await clearBrokenMoveByHand(RUN1, RUN1), "running");
+  await endMoving(RUN1, RUN2, runMark!);
+  const AGN = "agn-owner@example.com";
+  const agnP = makePasskey(AGN, "cred-agn-p");
+  await agnP.keep();
+  await makePasskey(AGN, "cred-agn-q").keep();
+  const agnLink = await linkSession(AGN);
+  await passkeys(agnLink, { action: "remove", id: "cred-agn-p" });
+  const agnOwner = await signInWithPasskey(agnP);
+  await passkeys(agnLink, { action: "remove", id: "cred-agn-p" });
+  is("asking again for the same removal does not log the owner out again", await emailForSession(agnOwner), AGN);
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";

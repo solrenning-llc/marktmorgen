@@ -46,7 +46,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SITE_URL } from "@/lib/site-url";
 import { type Held, LockBusyError, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
 import { removalWhen } from "@/lib/removal-time";
-import { recoveryAddressOf } from "@/lib/two-step";
+import { recoveryAddressOf, twoStepOn } from "@/lib/two-step";
 
 /** Passkeys one account may hold. */
 export const MAX_PASSKEYS = 10;
@@ -172,11 +172,11 @@ async function saveList(held: Held, email: string, list: Passkey[]): Promise<voi
  * to `own.to`, its recovery address (MM-SA-19); `own.ifYou` and
  * `own.ifNotYou` replace the closing lines where a notice has its own.
  */
-async function tell(email: string, subject: string, line: string, own: { to?: string; ifYou?: string; ifNotYou?: string[] } = {}): Promise<void> {
+async function tell(email: string, subject: string, line: string, own: { to?: string; ifYou?: string; ifNotYou?: string[] } = {}): Promise<boolean> {
   const to = own.to ?? email;
-  if (!isSenderConfigured()) return;
+  if (!isSenderConfigured()) return false;
   const when = new Date().toISOString().replace("T", " ").slice(0, 16);
-  await sendEmail({ meter: { by: "company" },
+  return sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: normaliseEmail(to),
     replyTo: "support@marktmorgen.com",
@@ -353,17 +353,42 @@ function without(record: DropRecord, gone: (id: string) => boolean): DropRecord 
  * The same notice to the confirmed recovery address too, which whoever holds
  * the sign-in inbox cannot read (MM-SA-19), read as two-step login reads it.
  */
-async function tellRecovery(address: string, subject: string, line: string, own: { ifYou?: string; ifNotYou?: string[] } = {}): Promise<void> {
+async function tellRecovery(address: string, subject: string, line: string, own: { ifYou?: string; ifNotYou?: string[] } = {}): Promise<boolean> {
   const backup = await recoveryAddressOf(address).catch(() => "");
-  if (backup && normaliseEmail(backup) !== address) {
-    await tell(address, subject, `This is the recovery address for the Marktmorgen account ${address}, so you get this notice too.\n\n${line}`, { ...own, to: backup });
+  if (!backup || normaliseEmail(backup) === address) return false;
+  return tell(address, subject, `This is the recovery address for the Marktmorgen account ${address}, so you get this notice too.\n\n${line}`, { ...own, to: backup });
+}
+
+/**
+ * Whether the session asking still has a valid second step, read under the
+ * account's lock (security review C3-110): a session that is gone (logged
+ * out by a removal asked meanwhile, or by the app turned off) has none, and
+ * fails closed; the app's marks hold only while the app is on; a passkey's
+ * only while it is listed and not set to go.
+ */
+async function validUnderLock(address: string, session: string | undefined, list: Passkey[], record: DropRecord | null): Promise<boolean> {
+  const mark = await sessionMark(session, address);
+  if (!mark) return false;
+  if (mark === "app" || mark === "recovery") return twoStepOn(address);
+  if (!mark.startsWith("passkey:")) return false;
+  const id = mark.slice("passkey:".length);
+  return id !== "" && list.some((p) => p.id === id) && !record?.ids.includes(id);
+}
+
+/** Thrown when the email that tells the account about a passkey set to go could not be sent: nothing was set. */
+export class RemovalUnsentError extends Error {
+  constructor() {
+    super("the notice could not be sent");
+    this.name = "RemovalUnsentError";
   }
 }
 
-/** The passkey a session was opened with, from its mark ("passkey:<id>"), or "" for any other. */
-async function sessionPasskey(email: string, session: string | undefined): Promise<string> {
-  const mark = await sessionMark(session, email);
-  return mark?.startsWith("passkey:") ? mark.slice("passkey:".length) : "";
+/** Thrown when moving passkeys failed in a way that could not be put back cleanly: the move is left for the repair. */
+export class MoveSplitError extends Error {
+  constructor() {
+    super("moving passkeys could not be put back");
+    this.name = "MoveSplitError";
+  }
 }
 
 /**
@@ -392,12 +417,13 @@ export async function scheduleRemoval(email: string, id: string, session: string
     if (isNew) atOf[id] = now + REMOVAL_DAYS * 86_400_000;
     const tellNow = isNew || !before || now - before.told >= RETELL_MS;
     await writeDrop(held, address, dropOf(atOf, tellNow ? now : (before?.told ?? now)));
-    // Logged out under the same lock: nothing P opened stays open past this request.
-    await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session);
+    // Logged out under the same lock, the first time it is asked: nothing P opened stays open past this request
+    // (asked again, the owner's own sessions are not logged out again).
+    if (isNew) await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session);
     // Whether a second step is left that can still keep it: another passkey not set to go, or the app.
     const another = list.some((p) => atOf[p.id] === undefined);
     const waiting = list.filter((p) => atOf[p.id] !== undefined).map((p) => ({ name: p.name, at: atOf[p.id] }));
-    return { at: atOf[id], name: row.name, tellNow, another, waiting };
+    return { at: atOf[id], name: row.name, tellNow, another, waiting, isNew, told: before?.told ?? 0 };
   });
   await afterDue(address, gone);
   if (!asked) return null;
@@ -423,9 +449,19 @@ export async function scheduleRemoval(email: string, id: string, session: string
             "Now, choose “Log out of all devices” at the bottom of your studio, change your email password, and reply to this email so we can help.",
           ],
     };
-    await tell(address, subject, line, own);
+    const toAccount = await tell(address, subject, line, own);
     // Told to the confirmed recovery address too, as whoever asked may hold the sign-in inbox (MM-SA-19).
-    await tellRecovery(address, subject, line, own);
+    const toRecovery = await tellRecovery(address, subject, line, own);
+    if (!toAccount && !toRecovery) {
+      // No email went out: a removal nobody was told about is never kept (security review C3-110). A new one is
+      // taken back, an older one keeps its moment and is told again next time; the request answers as busy.
+      await withPasskeys(address, async (held) => {
+        const record = await readDrop(address);
+        if (!record) return;
+        await writeDrop(held, address, asked.isNew ? without(record, (x) => x === id) : dropOf(record.atOf, asked.told));
+      });
+      throw new RemovalUnsentError();
+    }
   }
   return asked.at;
 }
@@ -497,14 +533,18 @@ export async function cancelRemoval(email: string, id: string, session: string |
   const answer = await withPasskeys(address, async (held): Promise<"kept" | "unknown" | "second_step"> => {
     gone = (await removeDue(held, address, now)) ?? NONE;
     const record = await readDrop(address);
-    const own = await sessionPasskey(address, session);
-    if (own && (record?.ids.includes(own) || !(await listPasskeys(address)).some((p) => p.id === own))) return "second_step";
+    if (session !== undefined && !(await validUnderLock(address, session, await listPasskeys(address), record))) return "second_step";
     if (!record || !record.ids.includes(id)) return "unknown";
     await writeDrop(held, address, without(record, (x) => x === id));
     return "kept";
   });
   await afterDue(address, gone);
-  if (answer === "kept") await tell(address, "Your passkey stays on your Marktmorgen account", `“Keep it” was pressed in the studio of your account (${address}), so a passkey that was set to be removed stays.`);
+  if (answer === "kept") {
+    const line = `“Keep it” was pressed in the studio of your account (${address}), so a passkey that was set to be removed stays.`;
+    await tell(address, "Your passkey stays on your Marktmorgen account", line);
+    // The recovery address too (MM-SA-19): keeping a passkey is a change whoever holds the sign-in inbox should not hide.
+    await tellRecovery(address, "Your passkey stays on your Marktmorgen account", line);
+  }
   return answer;
 }
 
@@ -522,8 +562,9 @@ export async function removePasskey(email: string, id: string, keep?: string, no
     due = (await removeDue(held, address, now)) ?? NONE;
     const list = await listPasskeys(address);
     const record = await readDrop(address);
-    const own = await sessionPasskey(address, keep);
-    if (own && (record?.ids.includes(own) || !list.some((p) => p.id === own))) return "second_step";
+    // Asked by a request (a session given, even an empty one): checked under the lock, failing closed. Left out only
+    // by the application's own calls, which act for the account itself.
+    if (keep !== undefined && !(await validUnderLock(address, keep, list, record))) return "second_step";
     const row = list.find((p) => p.id === id);
     if (!row) return "unknown";
     await saveList(held, address, list.filter((p) => p.id !== id));
@@ -680,11 +721,21 @@ export async function movePasskeys(from: string, to: string, now = Date.now()): 
         if (pending) await writeDrop(heldTo, address, pending);
         await fencedDel(heldFrom, [listKey(source), dropKey(source)]);
       } catch (error) {
-        // A lock lost midway: what was copied goes back, so the passkeys are never on both addresses or neither.
-        await redisPipeline([
-          ...copied.map((id) => ["SET", credKey(id), source]),
-          ["DEL", listKey(address), dropKey(address)],
-        ]).catch((undo) => console.error("putting passkeys back failed", undo));
+        // The old address's list already gone (the answer of the last step was lost, not the step): the move
+        // happened, and the new address keeps it all (security review C3-110).
+        if (list.length && copied.length === list.length && (await listPasskeys(source)).length === 0) return;
+        // A lock lost midway: what was copied goes back, fenced, so the passkeys are never on both addresses or
+        // neither; when even that cannot be done, the move is left for the repair (MoveSplitError).
+        try {
+          for (const id of copied) await fencedSet(heldFrom, credKey(id), source);
+          // The new address's lock is the one that may have run out: taken again for the undo when it did.
+          await fencedDel(heldTo, [listKey(address), dropKey(address)]).catch(() =>
+            withPasskeys(address, (again) => fencedDel(again, [listKey(address), dropKey(address)])),
+          );
+        } catch (undo) {
+          console.error("putting passkeys back failed", undo);
+          throw new MoveSplitError();
+        }
         throw error;
       }
     }),

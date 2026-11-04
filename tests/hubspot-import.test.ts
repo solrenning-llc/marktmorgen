@@ -307,6 +307,9 @@ async function main(): Promise<void> {
   const closedOnly = await importHubSpotDeals(slot.store, { header: HEADER, rows: [row("13", "Old win", "Closed won", "P3")] }, { write: false });
   is("a dry run past the plan's pipelines refuses that pipeline's deals", closedOnly.ok && closedOnly.summary.refused.map((r) => r.column), ["Pipeline"]);
 
+  const eleven = await importHubSpotDeals(slot.store, { header: HEADER, rows: Array.from({ length: 11 }, (_, i) => row(String(100 + i), `Deal ${i}`, "Pitch", `Line ${i}`)) }, { write: false });
+  is("every row of a pipeline past the store's room says the store's own room, never more", eleven.ok && [...new Set(eleven.summary.refused.map((r) => r.reason))], [pipelineRoomReason(0)]);
+
   part("What the file says, read strictly");
   const noId = await call({ action: "save", header: ["Deal name", "Deal stage", "Pipeline"], rows: [["One", "New", "Sales"]] });
   is("a deals file with no Record ID column says to export with all properties", [noId.status, noId.body.error, noId.body.message], [400, "no_record_id", HUBSPOT_IMPORT_WORDS.no_record_id]);

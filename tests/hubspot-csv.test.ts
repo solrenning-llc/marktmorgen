@@ -129,7 +129,7 @@ is("a currency column that holds no code is said as such, never read as one", [r
 is("only a column labeled exactly Currency is the currency column", [hubSpotDealColumns([...DEALS_HEADER, "Amount in company currency"]).currency, hubSpotDealColumns([...DEALS_HEADER, "Amount in company currency", "Currency"]).currency], [-1, DEALS_HEADER.length + 1]);
 is("a code in the cell is read before such a column", readHubSpotAmount("USD 40", "usd", "US Dollar").cents, 4000);
 is("yen has no decimals", readHubSpotAmount("5000", "jpy", "", "jpy").cents, 5000);
-is("trailing zero decimals are fine", readHubSpotAmount("10.500", "usd", "", "usd").cents, 1050);
+is("more digits after the point than the currency has are refused, zeros too (10.500 may be ten thousand five hundred)", readHubSpotAmount("10.500", "usd", "", "usd").cents, null);
 is("no currency stated: no amount, and why", readHubSpotAmount("1500", "usd").cents, null);
 is("the sentence says what to do", /Say which currency/.test(readHubSpotAmount("1500", "usd").note), true);
 is("another currency: no amount, never converted", readHubSpotAmount("EUR 1500", "usd", "", "usd").cents, null);
@@ -145,6 +145,23 @@ is("more than a deal holds: no amount, never cut", readHubSpotAmount("9999999999
 const amounts = ok(plan([row("1", "A", "Contract sent", "P", "1500"), row("2", "B", "Contract sent", "P", "lots")], { statedCurrency: "" }));
 is("in a plan, an amount without a currency comes in as none", amounts.deals.map((d) => d.cents), [null, null]);
 is("an unreadable amount still lets the deal in, with its note", amounts.deals[1].amountNote.startsWith('"lots" is not an amount'), true);
+
+part("Edge cases read strictly");
+is("a point between thousands is never read as cents", ["1.500", "12.500", "1.5000", "EUR 1.500"].map((a) => readHubSpotAmount(a, "usd", "", "usd").cents), [null, null, null, null]);
+is("and the note says it could be read two ways", /more digits after the point than USD has, so it could be read two ways/.test(readHubSpotAmount("1.500", "usd", "", "usd").note), true);
+is("a currency with no cents is never given a cents example", [/like 1500,/.test(readHubSpotAmount("lots", "jpy", "", "jpy").note), /1500\.50/.test(readHubSpotAmount("lots", "jpy", "", "jpy").note), readHubSpotAmount("1.5", "jpy", "", "jpy").cents, readHubSpotAmount("1500", "jpy", "", "jpy").cents], [true, false, null, 1500]);
+is("a day that does not exist is said as such", [readHubSpotDate("2026-02-29").date, /is not a real day/.test(readHubSpotDate("2026-02-29").note), readHubSpotDate("0000-01-01").date, /is not a real day/.test(readHubSpotDate("0000-01-01").note)], [null, true, null, true]);
+is("a time after the day must be a real time", [readHubSpotDate("2026-11-04 25:61").date, readHubSpotDate("2026-11-04T9").date, readHubSpotDate("2026-11-04T09:30:00.000Z").date, readHubSpotDate("2026-11-04 17:45").date, readHubSpotDate("2028-02-29").date], [null, null, "2026-11-04", "2026-11-04", "2028-02-29"]);
+const dotted = ok(plan([row("1", "Dotted", "Contract sent", "P", "", "", "Jane (jane@example.com.)")]));
+is("a dot that ends a sentence is not kept in an address", dotted.deals[0].email, "jane@example.com");
+is("rooms that are not numbers are no room", [planHubSpotDeals({ header: DEALS_HEADER, rows: [row("1", "A", "Contract sent")] }, { currency: "usd", pipelineRoom: Number.NaN }).ok && (planHubSpotDeals({ header: DEALS_HEADER, rows: [row("1", "A", "Contract sent")] }, { currency: "usd", pipelineRoom: Number.NaN }) as { deals: unknown[] }).deals.length, planHubSpotDeals({ header: DEALS_HEADER, rows: [row("1", "A", "Contract sent")] }, { currency: "usd", pipelineRoom: 1, dealRoom: Number.NaN }).ok], [0, false]);
+is("a stage named Won or Lost is the won or lost one", [stageKindOf("Won"), stageKindOf("LOST"), stageKindOf("Won big")], ["won", "lost", "open"]);
+const ownWon = ok(plan([row("1", "A", "Pitch", "Own"), row("2", "B", "Won", "Own"), row("3", "C", "Lost", "Own"), row("4", "D", "Closed won", "Own")]));
+is("so a pipeline never has two stages of one name", ownWon.pipelines[0].stages.map((st) => `${st.name}:${st.kind}`), ["Pitch:open", "Won:won", "Lost:lost"]);
+is("and a second won label goes to the won stage", ownWon.deals.map((d) => d.stage), ["Pitch", "Won", "Lost", "Won"]);
+const firstRefused = ok(plan([row("8", "Other", "Contract sent", "P"), row("7", "Too far", "Contract sent", "Third"), row("7", "Same id", "Contract sent", "P")], { pipelineRoom: 1 }));
+is("a first copy refused for its pipeline does not refuse the second", [firstRefused.deals.map((d) => d.title), firstRefused.refused.map((r) => [r.line, r.column])], [["Other", "Same id"], [[3, "Pipeline"]]]);
+is("a name with a line break or a NUL is one line", hubSpotContactRow(["1", "x@example.com", "Ada\nB\u0000"], { email: 1, firstName: 2, lastName: -1, ignored: [] })[1], "Ada B");
 
 part("Dates and associated contacts");
 is("a US-style date is not guessed", readHubSpotDate("12/01/2026").date, null);

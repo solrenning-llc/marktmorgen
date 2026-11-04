@@ -312,8 +312,16 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
   try {
     if (options.write) held = await takeCrmLock(statsId);
     const snapshot = await importSnapshot(statsId);
-    const plan = planHubSpotDeals(file, { currency: store.currency, statedCurrency: options.statedCurrency ?? "", pipelineRoom: MAX_PIPELINES, dealRoom: MAX_DEALS, firstPipeline: snapshot.pipelines[0].name });
+    // The file's pipelines may be as many as a store holds, less the store's own ones the file does not name.
+    const firstPipeline = snapshot.pipelines[0].name;
+    const pipelineAt = hubSpotDealColumns(file.header).pipeline;
+    const named = new Set(file.rows.map((r) => ((pipelineAt >= 0 ? (r[pipelineAt] ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim() : "") || firstPipeline).toLowerCase()));
+    const fileRoom = MAX_PIPELINES - snapshot.pipelines.filter((p) => !named.has(p.name.toLowerCase())).length;
+    const plan = planHubSpotDeals(file, { currency: store.currency, statedCurrency: options.statedCurrency ?? "", pipelineRoom: fileRoom, dealRoom: MAX_DEALS, firstPipeline });
     if (!plan.ok) return refuse("too_many", plan.sentence);
+    // A pipeline past what a store holds is past the plan's too: its rows say the plan's room.
+    const planRoom = Math.max(0, Math.min(pipelineLimit(store, nowSeconds), MAX_PIPELINES) - snapshot.pipelines.length);
+    for (const r of plan.refused) if (r.reason === pipelineRoomReason(fileRoom)) r.reason = pipelineRoomReason(planRoom);
     const taken = [...new Set(plan.deals.flatMap((d) => (d.recordId && RECORD_ID.test(d.recordId) && snapshot.dealIds.has(hubSpotDealId(d.recordId)) ? [hubSpotDealId(d.recordId)] : [])))];
     const marks = await readDealMarks(statsId, taken);
     const { summary, pipelines, deals } = planAgainst(store, plan, snapshot, marks, nowSeconds);

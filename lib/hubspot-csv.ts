@@ -138,7 +138,7 @@ export function hubSpotContactColumns(header: readonly string[]): HubSpotContact
  * file has neither. The import's own checks then apply as to any file.
  */
 export function hubSpotContactRow(row: readonly string[], columns: HubSpotContactColumns): string[] {
-  const cell = (at: number) => (at >= 0 ? (row[at] ?? "").trim() : "");
+  const cell = (at: number) => (at >= 0 ? oneLine(row[at]) : "");
   const name = [cell(columns.firstName), cell(columns.lastName)].filter(Boolean).join(" ");
   return [cell(columns.email), name, "", ""];
 }
@@ -195,8 +195,9 @@ function narrowSymbol(currency: string): string {
  * from a code in the cell, then from a currency column, then from what the
  * creator said the file is in (`statedCurrency`). A currency nobody stated is
  * never assumed. Plain amounts read: 1500, 1500.50. A comma is never read
- * (1,500 may be one and a half), nor a currency column that is not a
- * three-letter code. Anything else, more decimals than the
+ * (1,500 may be one and a half), nor a point followed by more digits than
+ * the currency has (1.500 may be fifteen hundred), nor a currency column
+ * that is not a three-letter code. Anything else, more decimals than the
  * currency has (other than zeros), or more than a deal holds, is no amount,
  * with a sentence saying why: never a rounded or guessed one.
  */
@@ -204,7 +205,10 @@ export function readHubSpotAmount(raw: string, storeCurrency: string, columnCurr
   const text = oneLine(raw);
   if (text === "") return { cents: null, note: "" };
   const store = storeCurrency.toLowerCase();
-  const unreadable = { cents: null, note: `"${text}" is not an amount this import can read, so this deal comes in with no amount. Type it on the deal, like 1500 or 1500.50, without commas.` } as const;
+  const digits = decimalsOf(store);
+  // An example the store's currency can hold: 1500 for one with no cents, 1500 or 1500.50 for one with two.
+  const example = digits > 0 ? `like 1500 or 1500.${"5".padEnd(digits, "0")}` : "like 1500";
+  const unreadable = { cents: null, note: `"${text}" is not an amount this import can read, so this deal comes in with no amount. Type it on the deal, ${example}, without commas.` } as const;
   const shaped = AMOUNT.exec(text);
   if (!shaped) return unreadable;
   const [, before = "", sign = "", number, after = ""] = shaped;
@@ -218,9 +222,11 @@ export function readHubSpotAmount(raw: string, storeCurrency: string, columnCurr
   if (!currency) return { cents: null, note: "The file does not say which currency this amount is in, so this deal comes in with no amount. Say which currency the file uses on the next step to keep amounts." };
   if (currency !== store) return { cents: null, note: `This amount is in ${currency.toUpperCase()} and your store uses ${store.toUpperCase()}, so this deal comes in with no amount. Type the amount in ${store.toUpperCase()} on the deal if you want one.` };
   if (sign && sign !== narrowSymbol(store)) return unreadable;
-  const [whole, fraction = ""] = number.replace(/,/g, "").split(".");
-  const digits = decimalsOf(store);
-  if (/[^0]/.test(fraction.slice(digits))) return unreadable;
+  const [whole, fraction = ""] = number.split(".");
+  // More digits after the point than the currency has: 1.500 may be fifteen hundred, written with a point between thousands.
+  if (fraction.length > digits) {
+    return { cents: null, note: `"${text}" has more digits after the point than ${store.toUpperCase()} has, so it could be read two ways and this deal comes in with no amount. Type it on the deal, ${example}.` };
+  }
   const units = whole.replace(/^0+(?=\d)/, "") + fraction.slice(0, digits).padEnd(digits, "0");
   const cents = units.length > 16 ? Number.POSITIVE_INFINITY : Number(units);
   if (!Number.isSafeInteger(cents) || cents > MAX_DEAL_CENTS) {
@@ -233,15 +239,19 @@ export function readHubSpotAmount(raw: string, storeCurrency: string, columnCurr
 export function readHubSpotDate(raw: string): { date: string | null; note: string } {
   const text = oneLine(raw);
   if (text === "") return { date: null, note: "" };
-  const day = /^(\d{4}-\d{2}-\d{2})(?:[T ][0-9:.]+(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(text)?.[1];
-  const at = day ? Date.parse(`${day}T00:00:00Z`) : Number.NaN;
-  if (!day || !Number.isFinite(at) || new Date(at).toISOString().slice(0, 10) !== day) {
-    return { date: null, note: `The close date "${text}" is not written as year-month-day, like 2026-11-04, so it was left out. Add it on the deal if you want it.` };
+  // A time after the day, when there is one, is a real time of day: hours, minutes, seconds, a zone.
+  const shaped = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?$/.exec(text);
+  if (!shaped) return { date: null, note: `The close date "${text}" is not written as year-month-day, like 2026-11-04, so it was left out. Add it on the deal if you want it.` };
+  const day = `${shaped[1]}-${shaped[2]}-${shaped[3]}`;
+  const at = Date.parse(`${day}T00:00:00Z`);
+  if (shaped[1] === "0000" || !Number.isFinite(at) || new Date(at).toISOString().slice(0, 10) !== day) {
+    return { date: null, note: `The close date "${text}" is not a real day, so it was left out. Add it on the deal if you want it.` };
   }
   return { date: day, note: "" };
 }
 
-const ADDRESS = /[^\s@;,<>()"']{1,64}@[^\s@;,<>()"']{1,255}\.[^\s@;,<>()"']{2,}/g;
+/** An address in a cell: its last part letters, digits or dashes, so a dot that ends a sentence is never kept. */
+const ADDRESS = /[^\s@;,<>()"']{1,64}@[^\s@;,<>()"']{1,255}\.[A-Za-z0-9-]{2,}/g;
 
 /** A deal as it would come in, before anything is saved: names, not ids, for the pipeline and stage. */
 export type HubSpotDealDraft = {
@@ -289,11 +299,11 @@ export type HubSpotDealsOptions = {
   firstPipeline?: string;
 };
 
-/** The kind a HubSpot stage label stands for: "Closed won" and "Closed lost" by name, any other open. */
+/** The kind a HubSpot stage label stands for: "Closed won" or "Won" and "Closed lost" or "Lost" by name (any case), any other open. */
 export function stageKindOf(label: string): StageKind {
   const value = oneLine(label).toLowerCase();
-  if (value === "closed won") return "won";
-  if (value === "closed lost") return "lost";
+  if (value === "closed won" || value === "won") return "won";
+  if (value === "closed lost" || value === "lost") return "lost";
   return "open";
 }
 
@@ -366,12 +376,6 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
     if (stage.length > MAX_STAGE_NAME) return refuse(columns.stage, stage, `A stage name here holds up to ${MAX_STAGE_NAME} characters, and this one is longer. Rename the stage in HubSpot, then export again.`);
     const pipeline = cell(columns.pipeline) || options.firstPipeline || FIRST_PIPELINE_NAME;
     if (pipeline.length > MAX_PIPELINE_NAME) return refuse(columns.pipeline, pipeline, `A pipeline name here holds up to ${MAX_PIPELINE_NAME} characters, and this one is longer. Rename the pipeline in HubSpot, then export again.`);
-    // Checked once the row itself reads, so a row refused above never takes its Record ID.
-    if (recordId) {
-      const first = seen.get(recordId);
-      if (first !== undefined) return refuse(columns.recordId, recordId, `Row ${first} has this Record ID too. Only the first row with a Record ID is read, so this row was not brought in.`);
-      seen.set(recordId, line);
-    }
     const amount = readHubSpotAmount(cell(columns.amount), options.currency, cell(columns.currency), options.statedCurrency ?? "");
     const close = readHubSpotDate(cell(columns.closeDate));
     const addresses = columns.contacts.flatMap((at) => (row[at] ?? "").match(ADDRESS) ?? []).map((a) => a.toLowerCase());
@@ -393,7 +397,8 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
   });
 
   // Pipelines in the order they first appear, each named as first written; past the store's room, refused.
-  const pipelineRoom = Math.max(0, Math.min(MAX_PIPELINES, Math.floor(options.pipelineRoom)));
+  const finite = (n: number | undefined, otherwise: number) => (n === undefined ? otherwise : Number.isFinite(n) ? n : 0);
+  const pipelineRoom = Math.max(0, Math.min(MAX_PIPELINES, Math.floor(finite(options.pipelineRoom, 0))));
   const order: string[] = [];
   const named = new Map<string, string>();
   const labelsOf = new Map<string, string[]>();
@@ -412,7 +417,13 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
   for (const key of order.slice(0, pipelineRoom)) {
     const made = stagesOf(labelsOf.get(key) as string[]);
     pipelines.push({ name: named.get(key) as string, stages: made.stages, deals: 0 });
-    stageName.set(key, new Map(made.stages.filter((s) => s.fromFile).map((s) => [s.name.toLowerCase(), s.name])));
+    const names = new Map(made.stages.filter((s) => s.fromFile).map((s) => [s.name.toLowerCase(), s.name]));
+    // A second won or lost label ("Won" beside "Closed won") goes to the pipeline's one stage of that kind.
+    for (const l of labelsOf.get(key) as string[]) {
+      const kind = stageKindOf(l);
+      if (kind !== "open") names.set(l.toLowerCase(), made.stages.find((s) => s.kind === kind)!.name);
+    }
+    stageName.set(key, names);
     over.set(key, new Set(made.over.map((l) => l.toLowerCase())));
   }
   const deals: HubSpotDealDraft[] = [];
@@ -436,6 +447,15 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
       });
       continue;
     }
+    // Only over the deals that come in: a row refused for itself, or for its pipeline or stage, never holds its Record ID.
+    if (deal.recordId) {
+      const first = seen.get(deal.recordId);
+      if (first !== undefined) {
+        refused.push({ line: deal.line, column: label(columns.recordId), value: deal.recordId, reason: `Row ${first} has this Record ID too. Only the first row with a Record ID is read, so this row was not brought in.` });
+        continue;
+      }
+      seen.set(deal.recordId, deal.line);
+    }
     const stage = names.get(deal.stage.toLowerCase()) ?? deal.stage;
     deals.push({ ...deal, pipeline: named.get(key) as string, stage });
     const pipeline = pipelines.find((p) => p.name === named.get(key));
@@ -443,7 +463,7 @@ export function planHubSpotDeals(file: { header: readonly string[]; rows: readon
   }
   refused.sort((a, b) => a.line - b.line);
 
-  const room = Math.max(0, Math.min(MAX_DEALS, Math.floor(options.dealRoom ?? MAX_DEALS)));
+  const room = Math.max(0, Math.min(MAX_DEALS, Math.floor(finite(options.dealRoom, MAX_DEALS))));
   if (deals.length > room) {
     return { ok: false, reason: "too_many", count: deals.length, room, sentence: tooManyDealsSentence(deals.length, room) };
   }

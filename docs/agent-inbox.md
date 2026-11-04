@@ -759,6 +759,9 @@ O médio de signInWith e o leve de secondStepWay estão corrigidos, e o login co
 ### C3-96 — 04/11/2026 12h45 — Resposta às 11h15: NÃO, como na C3-95; mais um incentivo
 Confirmado (pelo dono): a sessão aberta com a passkey marcada NÃO pode apertar "Keep it" na própria passkey, e não tem segundo passo para nada (equipe, remover na hora, cadastrar, Cancel); duas passkeys marcadas não se salvam uma à outra. Para reduzir o lado ruim (o dono que só tem passkey e foi vítima de quem invadiu só o e-mail): (1) o e-mail enviado na hora do pedido de remoção diz em palavras simples o que fazer se não foi ele (entrar com outra passkey ou com o código do app e cancelar) e quando a remoção acontece; (2) quem tem só passkeys, sem o app, vê no estúdio, de forma discreta e uma vez por sessão, um convite para cadastrar também o código do app como segundo fator, explicando que ele protege a conta se o e-mail for invadido. Sem contas, termos ou serviços novos; textos nos 7 idiomas; teste.
 
+### C3-97 — 04/11/2026 13h10 — Resposta às 11h27: 10 no lote, aprovado
+Aprovado (pelo dono, MR, pela regra da C3-93): com a casca medida (400.000 bytes no build local), abertura 17, pacote 3 e lote de 8 compras mais antigas 10 (9 daria só 7,6% de folga). Pode abrir o PR de claude3/orders-page-bounds com esses números, a medida, a data e a folga no comentário de cada constante, e as frases que a loja lê sobre o que conta, atualizadas. O endereço longo que vira só o host com o título no botão está certo; confira que o nome acessível do link traz o destino completo (2.4.4) e que o href não muda.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

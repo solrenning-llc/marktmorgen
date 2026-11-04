@@ -70,11 +70,13 @@ const MESSAGES: Record<string, string> = {
   route: "A branch must go forward: choose a later step of this workflow, or the end.",
   active_limit: "Your plan has as many workflows switched on as it allows. Pause one first, or save this one paused.",
   email: "Type an email address.",
-  step: "Every email needs a subject, some text, and a wait of up to a year. A condition needs its product, or its label, and one on the email before needs an email right before it. A label needs its words, and another sequence has to still be there. A field needs a value it keeps, a deal a stage, and a note its words.",
+  step: "Every email needs a subject, some text, and a wait of up to a year. A condition needs its product, or its label, and one on the email before needs an email right before it. A label needs its words, and another sequence has to still be there. A field needs a value it keeps, a deal a stage, a note its words, and a next action its words (up to 200 characters), due in 0 to 365 days.",
   tag: "Write the label that starts the sequence.",
   form: "Choose one of your forms that asks for an email address.",
   stage: "Choose one of your pipelines' stages.",
   stage_taken: "Another workflow already starts from that stage. A stage starts one workflow; that one can start others with a step.",
+  signed_taken: "Another workflow already starts when someone signs. Signing starts one workflow; that one can start others with a step.",
+  paid_request_taken: "Another workflow already starts when someone pays a payment request. Paying one starts one workflow; that one can start others with a step.",
   unknown: "That is not there anymore. Reload the page.",
   send: "The email service did not take it just now. Nothing was sent; try again in a moment.",
   signed_out: "Your session ended. Log in again.",
@@ -347,7 +349,7 @@ export function EmailStudio(props: {
   /** Paid products in the selected store catalog, for sequence ending checks. */
   paidProducts?: string[];
   /** The store's forms that ask for an address, its own fields and its deal stages, for the sequences (lib/flows.ts). */
-  automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[] };
+  automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[]; signing?: boolean; requests?: boolean };
   /** The plan's workflow limits and today's runs (lib/flow-limits.ts, lib/flow-runs.ts). */
   workflowLimits?: WorkflowLimits;
   /** Who may be made responsible for a deal: the owner and teammates who can see orders. */
@@ -1761,7 +1763,7 @@ type StepDraft = {
   editorKey: string;
   id?: string;
   /** An email, or a step that acts instead (lib/flow-rules.ts, FlowAction). */
-  kind: "email" | "tag" | "untag" | "start" | "webhook" | "field" | "deal" | "note" | "notify" | "wait" | "assign";
+  kind: "email" | "tag" | "untag" | "start" | "webhook" | "field" | "deal" | "note" | "notify" | "wait" | "assign" | "next" | "rotate";
   actionTag: string;
   /** For a step that makes a teammate responsible for the person's deal. */
   actionAssignee: string;
@@ -1772,8 +1774,10 @@ type StepDraft = {
   /** For a step that puts the person's deal in a stage: which stage, and a new deal's title. */
   actionStage: string;
   actionTitle: string;
-  /** For a step that writes a note on the person's page. */
+  /** For a step that writes a note on the person's page, or the next action on their deal. */
   actionText: string;
+  /** For a step that sets the next action on their deal: in how many days it is due. */
+  actionDays: string;
   wait: string;
   unit: "hours" | "days";
   subject: string;
@@ -1835,7 +1839,7 @@ function newStepId(): string {
 }
 
 function blankStep(wait: string, unit: "hours" | "days", firstProduct: string): StepDraft {
-  return { editorKey: crypto.randomUUID(), id: newStepId(), kind: "email", actionTag: "", actionAssignee: "", actionFlow: "", actionField: "", actionValue: "", actionStage: "", actionTitle: "", actionText: "", wait, unit, subject: "", body: "", when: "", whenProduct: firstProduct, whenTag: "", otherwise: "skip", jump: "", next: "" };
+  return { editorKey: crypto.randomUUID(), id: newStepId(), kind: "email", actionTag: "", actionAssignee: "", actionDays: "3", actionFlow: "", actionField: "", actionValue: "", actionStage: "", actionTitle: "", actionText: "", wait, unit, subject: "", body: "", when: "", whenProduct: firstProduct, whenTag: "", otherwise: "skip", jump: "", next: "" };
 }
 
 /** What a step that acts does, as one line reads it: "gives the label “warm”". */
@@ -1851,6 +1855,8 @@ function actionWords(action: FlowAction, flows: { id: string; name: string }[]):
   if (action.do === "notify") return "emails you who reached it";
   if (action.do === "wait") return "only waits";
   if (action.do === "assign") return `makes ${action.assignee} responsible for their deal`;
+  if (action.do === "rotate") return "gives their deal to whoever on your team has the fewest open deals";
+  if (action.do === "next") return `sets the next action on their deal: “${action.text}”, ${action.days === 0 ? "due the day it runs" : `due in ${action.days} ${action.days === 1 ? "day" : "days"}`}`;
   return action.do === "tag" ? `gives the label “${action.tag}”` : `takes off the label “${action.tag}”`;
 }
 
@@ -1873,6 +1879,9 @@ function actionOf(s: StepDraft): FlowAction | null {
   if (s.kind === "notify") return { do: "notify" };
   if (s.kind === "wait") return { do: "wait" };
   if (s.kind === "assign") return { do: "assign", assignee: s.actionAssignee };
+  // Empty is no number of days, never today: the save says what is missing.
+  if (s.kind === "rotate") return { do: "rotate" };
+  if (s.kind === "next") return { do: "next", text: s.actionText, days: /^\d{1,3}$/.test(s.actionDays) ? Number(s.actionDays) : Number.NaN };
   return null;
 }
 
@@ -1884,6 +1893,7 @@ function stepToDraft(s: FlowStep, firstProduct: string): StepDraft {
     kind: s.action ? s.action.do : "email",
     actionTag: s.action && "tag" in s.action ? s.action.tag : "",
     actionAssignee: s.action && "assignee" in s.action ? s.action.assignee : "",
+    actionDays: s.action && "days" in s.action ? String(s.action.days) : "3",
     actionFlow: s.action && "flowId" in s.action ? s.action.flowId : "",
     actionField: s.action && "field" in s.action ? s.action.field : "",
     actionValue: s.action && "value" in s.action ? s.action.value : "",
@@ -2043,7 +2053,7 @@ function Flows({
   readFailed?: boolean;
   products: { id: string; title: string }[];
   currency: string;
-  automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[] };
+  automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[]; signing?: boolean; requests?: boolean };
   /** The products that are courses, for "finishes a course" and the conditions on one. */
   courses?: string[];
   /** The products that are calls: a sequence that starts with one says "books" (548 [TR1]). */
@@ -2112,6 +2122,10 @@ function Flows({
         ? `Starts when someone who agreed to hear from you opens ${products.find((p) => p.id === f.productId)?.title ?? "a course"} for the first time`
       : f.trigger === "abandoned"
         ? `Starts when someone on your list, who agreed on the checkout page to hear from you, leaves a checkout of ${products.find((p) => p.id === f.productId)?.title ?? "a product"} unpaid`
+      : f.trigger === "signed"
+        ? "Starts when someone who agreed to hear from you signs one of your proposals or agreements"
+      : f.trigger === "paid_request"
+        ? "Starts when someone who agreed to hear from you pays one of your payment requests"
       : f.trigger === "stage"
         ? `Starts when a deal with someone on your list enters “${automation.stages.find((x) => x.id === f.stageId)?.name ?? "a stage no longer in your pipelines"}”`
       : f.trigger === "bought"
@@ -2461,7 +2475,7 @@ function Flows({
                 setDraft((current) => {
                   if (!current) return current;
                   const trigger: FlowTrigger =
-                    e.target.value === "product" ? "product" : e.target.value === "bought" ? "bought" : e.target.value === "tagged" ? "tagged" : e.target.value === "finished" ? "finished" : e.target.value === "form" ? "form" : e.target.value === "started" ? "started" : e.target.value === "abandoned" ? "abandoned" : e.target.value === "stage" ? "stage" : "joined";
+                    e.target.value === "product" ? "product" : e.target.value === "bought" ? "bought" : e.target.value === "tagged" ? "tagged" : e.target.value === "finished" ? "finished" : e.target.value === "form" ? "form" : e.target.value === "started" ? "started" : e.target.value === "abandoned" ? "abandoned" : e.target.value === "stage" ? "stage" : e.target.value === "signed" ? "signed" : e.target.value === "paid_request" ? "paid_request" : "joined";
                   // Finishing and opening are only for a course: the first course, when the product chosen is not one.
                   const productId = (trigger === "finished" || trigger === "started") && !courses.includes(current.productId) ? (courses[0] ?? current.productId) : current.productId;
                   // A sequence that starts with a purchase cannot end at one.
@@ -2483,6 +2497,8 @@ function Flows({
               {products.length ? <option value="abandoned">Someone on your list leaves a checkout unpaid, having agreed to hear from you</option> : null}
               {automation.forms.length ? <option value="form">Someone on your list sends a form</option> : null}
               {automation.stages.length ? <option value="stage">A deal with someone on your list enters a stage</option> : null}
+              {automation.signing || draft.trigger === "signed" ? <option value="signed">Someone who agreed to hear from you signs a proposal or agreement</option> : null}
+              {automation.requests || draft.trigger === "paid_request" ? <option value="paid_request">Someone who agreed to hear from you pays one of your payment requests</option> : null}
             </select>
           </label>
           {draft.trigger === "stage" ? (
@@ -2674,7 +2690,7 @@ function Flows({
                       value={s.kind}
                       onChange={(e) => {
                         const v = e.target.value;
-                        const kind = v === "tag" || v === "untag" || v === "start" || v === "webhook" || v === "field" || v === "deal" || v === "note" || v === "notify" || v === "wait" || v === "assign" ? v : "email";
+                        const kind = v === "tag" || v === "untag" || v === "start" || v === "webhook" || v === "field" || v === "deal" || v === "note" || v === "notify" || v === "wait" || v === "assign" || v === "next" || v === "rotate" ? v : "email";
                         setStep(s.editorKey, {
                           kind,
                           actionAssignee: s.actionAssignee || assignees[0] || "",
@@ -2695,6 +2711,8 @@ function Flows({
                       <option value="notify">Emails you who reached it</option>
                       <option value="wait">Only waits (for a branch)</option>
                       {assignees.length ? <option value="assign">Makes a teammate responsible for their deal</option> : null}
+                      {automation.stages.length ? <option value="next">Sets the next action and its due date on their deal</option> : null}
+                      {(automation.stages.length && assignees.length > 1) || s.kind === "rotate" ? <option value="rotate">Gives their deal to the teammate with the fewest open deals</option> : null}
                     </select>
                   </label>
                 </div>
@@ -2813,6 +2831,22 @@ function Flows({
                     </select>
                     <span className="mt-1 block text-sm text-ink-soft">For their open deal on your deals board. Someone with no open deal is skipped, and the run goes on.</span>
                   </label>
+                ) : s.kind === "rotate" ? (
+                  <p className="mt-3 text-sm text-ink-soft">
+                    Their open deal goes to whoever on your team has the fewest open deals: you, or a teammate who can see orders. Someone who left the team, or can no longer see orders, is never chosen, and a deal they held goes to someone who can. A deal that already has someone responsible keeps them, and someone with no open deal is skipped.
+                  </p>
+                ) : s.kind === "next" ? (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <label className="block">
+                      <span className="text-sm text-ink-soft">Next action</span>
+                      <input className="field mt-1" maxLength={200} value={s.actionText} placeholder="Call to check in" aria-describedby={`next-hint-${s.editorKey}`} onChange={(e) => setStep(s.editorKey, { actionText: e.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="text-sm text-ink-soft">Due in how many days</span>
+                      <input className="field mt-1 w-28" inputMode="numeric" value={s.actionDays} aria-describedby={`next-hint-${s.editorKey}`} onChange={(e) => setStep(s.editorKey, { actionDays: e.target.value.replace(/[^0-9]/g, "").slice(0, 3) })} />
+                    </label>
+                    <span id={`next-hint-${s.editorKey}`} className="block text-sm text-ink-soft sm:col-span-2">From 0, the day the step runs, to 365. For their most recently changed open deal, shown on your deals board under Overdue, Due today or Upcoming, with dates in UTC as there. Someone with no open deal is skipped, and the run goes on.</span>
+                  </div>
                 ) : s.kind === "wait" ? (
                   <p className="mt-3 text-sm text-ink-soft">
                     Does nothing but wait the time above. With a condition below, it is a branch: those it holds for go one way, everyone else another.

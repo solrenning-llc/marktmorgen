@@ -18,3 +18,4 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex E | 465 [MR2]: complete plan payment dispute cost evidence | codex/e-dispute-cost-evidence | `lib/plan-payment-dispute-cost-rules.ts`, `tests/plan-payment-dispute-evidence.test.ts` | 04/11/2026 |
 | Codex C | 472 [TX2]: complete explicit incoming-exchange evidence | codex/c-tx2-exchange-evidence | `lib/receiving-costs.ts`, `tests/receiving-most-correct.test.ts` | 04/11/2026 |
 | Codex F | 309 [EM1], CX-74/CX-76: conservative rolling SES usage, 25 hourly buckets in one grouped read | codex/f-ses-rolling-window | `lib/ses.ts`, `tests/ses-rolling-window.test.ts`, `tests/ses-sender.test.ts` | 04/11/2026 |
+| Codex F | 309 [EM1]: email attribution only on the store's served origins | codex/f-mail-link-origins | `lib/mail-links.ts`, `tests/mail-link-origins.test.ts` | 04/11/2026 |

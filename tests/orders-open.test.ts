@@ -15,6 +15,7 @@ import {
   MAX_LISTED,
   ORDERS_LISTING_COMMANDS,
   ORDERS_OPEN_COMMANDS,
+  ORDERS_CALL_MOVES,
   ORDERS_IMPORTED_COMMANDS,
   ORDERS_IMPORTED_ENTRY_COMMANDS,
   ORDERS_OPEN_SECONDS,
@@ -125,7 +126,7 @@ test("a token not shaped like one takes nothing and reads nothing", async () => 
   assert.deepEqual(sent.filter((command) => !command.startsWith("GET nl:traffic") && !command.includes(":requests:")), []);
 });
 
-test("an opening with forty bookings takes the requests their moves, listing and video rooms cost, each before its read", async () => {
+test("an opening with forty bookings takes the most moves first, and pays their listing and video rooms from what the moves left", async () => {
   const { store, product, folder, window } = await callStore(true);
   sessions = bookings(product, MAX_LISTED);
   const link = (await ordersLinkFor(store, BUYER, "https://marktmorgen.com/@olive"))!;
@@ -137,32 +138,47 @@ test("an opening with forty bookings takes the requests their moves, listing and
   // Each booking's move, the product's listing, and each room: four reads, and a video room made and read back.
   const rooms = sent.filter((command) => command.includes("nl:call:room:") || command.includes("nl:meet:r:")).length;
   assert.ok(rooms > 4 * MAX_LISTED && rooms <= ORDERS_ROOM_COMMANDS * MAX_LISTED, String(rooms));
-  const units = Math.ceil((MAX_LISTED + ORDERS_LISTING_COMMANDS + MAX_LISTED * ORDERS_ROOM_COMMANDS) / ORDERS_UNIT_COMMANDS);
+  // ORDERS_CALL_MOVES taken before any booking is read; the forty moves, the listing and the rooms fit in it.
+  assert.ok(MAX_LISTED + ORDERS_LISTING_COMMANDS + MAX_LISTED * ORDERS_ROOM_COMMANDS <= ORDERS_CALL_MOVES);
+  const units = Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS);
   assert.equal(opened.meter.taken, units);
   assert.equal(await requestsIn(folder, window), ORDERS_OPEN_UNITS + units);
 });
 
-test("a store with few bookings pays for few: the moves taken are the bookings read, not five pages of them", async () => {
+test("an opening at a store that sells calls takes the moves up front, and nothing more until what they left is used", async () => {
   const { store, product } = await callStore(true);
   sessions = bookings(product, 2);
   const meter = new OrdersMeter(store);
   assert.equal((await callsFor(store, BUYER, meter)).length, 2);
-  assert.equal(meter.taken, Math.ceil((2 + ORDERS_LISTING_COMMANDS + 2 * ORDERS_ROOM_COMMANDS) / ORDERS_UNIT_COMMANDS));
-  assert.ok(meter.taken * ORDERS_UNIT_COMMANDS < 500 / 10);
+  const upFront = Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS);
+  assert.equal(meter.taken, upFront);
+  // What the two moves, the listing and the two rooms left pays the opening's next reads (feeds, keys, listings).
+  const left = upFront * ORDERS_UNIT_COMMANDS - (2 + ORDERS_LISTING_COMMANDS + 2 * ORDERS_ROOM_COMMANDS);
+  await meter.take(left);
+  assert.equal(meter.taken, upFront);
+  await meter.take(1);
+  assert.equal(meter.taken, upFront + 1);
 });
 
-test("a meter the store has no room for stops before the listings and rooms of the bookings", async () => {
+test("a meter the store has no room for reads none of the bookings, not even their moves", async () => {
   const { store, product } = await callStore();
   sessions = bookings(product, MAX_LISTED);
   const refused = { ...store, period: null };
   sent.length = 0;
   await assert.rejects(callsFor(refused, BUYER, new OrdersMeter(refused)), OrdersBusy);
-  // The moves are read in lib/calls.ts with the store's pages, before their number is known; nothing after them is.
-  const after = (command: string) => /nl:call:room:|nl:catalog:[^ ]*:l:|nl:meet:/.test(command);
-  assert.deepEqual(sent.filter(after), []);
+  const bookingReads = (command: string) => /nl:call:|nl:catalog:[^ ]*:l:|nl:meet:/.test(command);
+  assert.deepEqual(sent.filter(bookingReads), []);
   // Read without a meter (the other readers of bookings), the same store reads them all.
   assert.equal((await callsFor(store, BUYER)).length, MAX_LISTED);
-  assert.ok(sent.filter(after).length >= MAX_LISTED * 4, String(sent.filter(after).length));
+  assert.ok(sent.filter(bookingReads).length >= MAX_LISTED * 5, String(sent.filter(bookingReads).length));
+});
+
+test("the moves taken before a store's bookings are read cover every booking its pages can hold", () => {
+  // lib/calls.ts reads at most MAX_PAGES pages of a hundred checkouts and every booking's move on them (withMoves).
+  const calls = readFileSync("lib/calls.ts", "utf8");
+  const pages = Number(/const MAX_PAGES = (\d+);/.exec(calls)?.[1]);
+  const perPage = Number(/\/checkout\/sessions\?limit=(\d+)&status=complete/.exec(calls)?.[1]);
+  assert.ok(pages > 0 && perPage > 0 && pages * perPage <= ORDERS_CALL_MOVES, `${pages} x ${perPage} > ${ORDERS_CALL_MOVES}`);
 });
 
 test("a meter's takes run one after another, and a refusal is kept: nothing more is taken or read", async () => {

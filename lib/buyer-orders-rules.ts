@@ -48,3 +48,11 @@ export const ORDERS_KEY_COMMANDS = 24;
  * not be read, inside ORDERS_OPEN_SECONDS so the page answers before it is cut.
  */
 export const ORDERS_READ_MS = 25_000;
+/**
+ * Moves an opening of a store that sells calls takes before its bookings are
+ * read: lib/calls.ts (paidCalls) reads the move of every booking on its pages,
+ * at most five pages of a hundred checkouts, before their number is known
+ * outside it (tests/orders-open.test.ts holds it to that file). What they do
+ * not use pays the same opening's next reads.
+ */
+export const ORDERS_CALL_MOVES = 5 * 100;

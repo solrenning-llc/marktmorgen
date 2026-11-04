@@ -596,7 +596,8 @@ function ListCard({
             const a = await call({ action: "import", text, confirm });
             setBusy(false);
             if (a.ok) {
-              setDone(`${n(Number(a.added))} added. ${n(Number(a.already))} were already on your list or had left it, and stay as they were.${Number(a.skipped) ? ` ${n(Number(a.skipped))} did not look like email addresses.` : ""}`);
+              const roomFull = a.roomFull as { left?: unknown; message?: unknown } | null | undefined;
+              setDone(`${n(Number(a.added))} added. ${n(Number(a.already))} were already on your list or had left it, and stay as they were.${Number(a.skipped) ? ` ${n(Number(a.skipped))} did not look like email addresses.` : ""}${roomFull ? ` ${n(Number(roomFull.left))} were not added: ${String(roomFull.message ?? "your store has no room left for more records.")}` : ""}`);
               setText("");
               setConfirm(false);
               router.refresh();

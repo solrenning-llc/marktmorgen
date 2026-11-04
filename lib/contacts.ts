@@ -38,7 +38,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
-import { type DataStore, needData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -320,7 +320,7 @@ export async function importContacts(
   listId: string,
   emails: string[],
   data: DataStore,
-): Promise<{ added: number; already: number; full: boolean }> {
+): Promise<{ added: number; already: number; full: boolean; roomFull?: { left: number; message: string } }> {
   if (!isRedisConfigured() || !listId || !emails.length) return { added: 0, already: emails.length, full: false };
   const key = leadsKey(listId);
   const [size] = await redisPipeline([["HLEN", key]]);
@@ -368,7 +368,15 @@ export async function importContacts(
       newlyAgreed += 1;
     });
     if (pairs.length) {
-      await needContacts(data, sizes);
+      try {
+        await needContacts(data, sizes);
+      } catch (error) {
+        // The store's data room is full: what was added stays and is said, the
+        // rest is not written, and the caller still starts the ramp for those added.
+        if (!(error instanceof DataRoomError)) throw error;
+        const left = emails.length - i;
+        return { added, already: i - added, full, roomFull: { left, message: error.message } };
+      }
       await redisPipeline([
         ["HSET", key, ...pairs],
         ["INCRBY", agreedKey(listId), newlyAgreed],

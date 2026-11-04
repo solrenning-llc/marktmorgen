@@ -7,9 +7,11 @@
  * order's write is marked only by orderRoom and still goes through
  * lib/order-data.ts.
  */
+import { readFileSync } from "node:fs";
 import { store as redis } from "./redis-stub";
 import { changeLabels, importContacts, orderRoom, upsertContact } from "@/lib/contacts";
-import { dataKey } from "@/lib/store-data";
+import { dataKey, dataUsed } from "@/lib/store-data";
+import { contentRoomFor } from "@/lib/store-data-rules";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { done, is, part } from "./check";
 
@@ -43,6 +45,21 @@ async function main(): Promise<void> {
   const legacyBefore = slot("o");
   await upsertContact(store.listId!, "buyer2@example.com", { agreed: false, explicit: false, source: "buyer", sid: store.sid, productId: "prod_x", title: "X", at: new Date().toISOString() }, { order: store });
   is("the older form, an object holding only `order`, is still an order's", [slot("o") > legacyBefore, slot("ct")], [true, contactsBefore]);
+  part("A paste that fills the room partway: what went in is said, and nothing else is written");
+  const used = await dataUsed(store);
+  // All but room for about one chunk of 500 taken, as a store near its plan's room would be.
+  const fill = contentRoomFor(store, Date.now() / 1000) - used!.used - 600_000;
+  redis.run(["HINCRBY", dataKey(store)!, "ct", fill]);
+  redis.run(["HINCRBY", dataKey(store)!, "#", fill]);
+  const pasted = Array.from({ length: 1_200 }, (_, i) => `paste${i}@example.com`);
+  const answer = await importContacts(store.listId!, pasted, store);
+  is("some went in, the rest are said to be left out, and why", [answer.added > 0, answer.roomFull !== undefined, (answer.roomFull?.left ?? 0) > 0, answer.added + (answer.roomFull?.left ?? 0) + answer.already], [true, true, true, pasted.length]);
+  const route = readFileSync("app/api/store/mail/route.ts", "utf8");
+  is("the paste starts the ramp for those added, full or not, and says so", route.includes("await startRamp(healthId(store), added);") && route.includes("roomFull: roomFull ?? null"), true);
+  const studio = readFileSync("components/email-studio.tsx", "utf8");
+  is("the studio says how many were not added and why", studio.includes("were not added: ${String(roomFull.message"), true);
+  const imports = readFileSync("lib/imports.ts", "utf8");
+  is("a file of contacts that fills the room starts the ramp for those already in", imports.includes('if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);\n            job.state = "failed";') || /DataRoomError[\s\S]{0,400}if \(job\.kind === "contacts"\) await startRamp\(job\.sid, job\.counts\.added\)/.test(imports), true);
   done();
 }
 

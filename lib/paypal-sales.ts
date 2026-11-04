@@ -775,19 +775,54 @@ export async function readPayPalSales(statsId: string | null, since: number, lim
 /** The keys a PayPal order kept, by the order: for a closed store's deletion (lib/closed-store-data.ts). */
 export const paypalOrderKeys = (order: string): string[] => (ORDER_ID.test(order) ? [orderKey(order), paidKey(order)] : []);
 
-/** PayPal sales refunded in full since `since` (seconds): the payment, how much, in what, and when the refund was seen. */
+/** The most refunded PayPal sales one reading of them takes. */
+export const PAYPAL_REFUNDS_READ = 500;
+/**
+ * The most one PayPal sale's record weighs as kept, in bytes: its twenty
+ * fields of what the visit carried (cleanMeta: a name of 40 letters and a
+ * value of 200 characters, each written as a six-byte escape at the worst),
+ * and the order, payment, address, product and amounts beside them.
+ */
+export const MAX_PAID_BYTES = 20 * (40 + 6 + 6 * 200) + 2_000;
+
+/**
+ * How many PayPal sales and refunds the store keeps (ZCARD, ZCOUNT): what a
+ * reading of them all (readPayPalSales, readPayPalRefundsWithCoverage) moves
+ * is counted from these before it reads (lib/segments.ts, buyerLedger).
+ */
+export async function paypalKept(statsId: string | null): Promise<{ sales: number; refunds: number }> {
+  if (!statsId || !isRedisConfigured()) return { sales: 0, refunds: 0 };
+  const [sales, refunds] = await redisPipeline([["ZCARD", salesKey(statsId)], ["ZCARD", refundedKey(statsId)]]);
+  return { sales: Number(sales) || 0, refunds: Number(refunds) || 0 };
+}
+
+/**
+ * PayPal sales refunded in full since `since` (seconds): the payment, how
+ * much, in what, and when the refund was seen. At most PAYPAL_REFUNDS_READ,
+ * their records read in one MGET.
+ */
 export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { rows: [], partial: false };
-  const [orders] = await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(Math.max(0, since)), "+inf", "WITHSCORES", "LIMIT", "0", "501"]]);
+  const [orders] = await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(Math.max(0, since)), "+inf", "WITHSCORES", "LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)]]);
   const flat = Array.isArray(orders) ? (orders as string[]) : [];
+  const listed: { order: string; at: number }[] = [];
+  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) || 0 });
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
-  let missing = false;
-  for (let i = 0; i + 1 < Math.min(flat.length, 1000); i += 2) {
-    const paid = await readPaid(flat[i]);
-    if (paid && paid.store === statsId) out.push({ order: paid.order, capture: paid.capture, cents: paid.cents, currency: paid.currency, at: Number(flat[i + 1]) || 0 });
+  let missing = listed.some((entry) => !ORDER_ID.test(entry.order));
+  const readable = listed.filter((entry) => ORDER_ID.test(entry.order));
+  const [records] = readable.length ? await redisPipeline([["MGET", ...readable.map((entry) => paidKey(entry.order))]]) : [[]];
+  const raws = Array.isArray(records) ? (records as unknown[]) : [];
+  readable.forEach((entry, i) => {
+    let paid: Paid | null = null;
+    try {
+      paid = typeof raws[i] === "string" ? (JSON.parse(raws[i] as string) as Paid) : null;
+    } catch {
+      paid = null;
+    }
+    if (paid && paid.store === statsId) out.push({ order: paid.order, capture: paid.capture, cents: paid.cents, currency: paid.currency, at: entry.at });
     else missing = true;
-  }
-  return { rows: out, partial: flat.length > 1000 || missing };
+  });
+  return { rows: out, partial: flat.length > 2 * PAYPAL_REFUNDS_READ || missing };
 }
 
 export async function readPayPalRefunds(statsId: string | null, since: number): Promise<{ order: string; capture: string; cents: number; currency: string; at: number }[]> {

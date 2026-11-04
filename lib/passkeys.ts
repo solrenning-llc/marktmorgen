@@ -310,10 +310,17 @@ export type PendingRemoval = { ids: string[]; atOf: Record<string, number> };
  * other request to remove a passkey of the account answers busy (try again) until it is delivered or taken back.
  */
 type Telling = { token: string; since: number };
-type DropRecord = PendingRemoval & { told: number; telling?: Telling };
+/**
+ * `untold`: the passkeys set to go whose notice no delivery has confirmed yet. None of them is ever removed (C3-115):
+ * a request that ended between writing the record and settling it (its process stopped) leaves them here, and once
+ * its `telling` mark is old they are taken off the record under the lock, the passkeys kept, never removed untold.
+ */
+type DropRecord = PendingRemoval & { told: number; telling?: Telling; untold: string[] };
 
-function dropOf(atOf: Record<string, number>, told: number, telling?: Telling): DropRecord {
-  return telling ? { ids: Object.keys(atOf), atOf, told, telling } : { ids: Object.keys(atOf), atOf, told };
+function dropOf(atOf: Record<string, number>, told: number, extra: { telling?: Telling; untold?: string[] } = {}): DropRecord {
+  const ids = Object.keys(atOf);
+  const untold = (extra.untold ?? []).filter((id, i, all) => ids.includes(id) && all.indexOf(id) === i);
+  return extra.telling ? { ids, atOf, told, telling: extra.telling, untold } : { ids, atOf, told, untold };
 }
 
 /**
@@ -338,7 +345,7 @@ async function readDrop(email: string): Promise<DropRecord | null> {
   if (!isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", dropKey(email)]]);
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as { atOf?: unknown; ids?: unknown; at?: unknown; told?: unknown; telling?: unknown }) : null;
+    const value = typeof raw === "string" ? (JSON.parse(raw) as { atOf?: unknown; ids?: unknown; at?: unknown; told?: unknown; telling?: unknown; untold?: unknown }) : null;
     if (!value) return null;
     const atOf: Record<string, number> = {};
     if (value.atOf && typeof value.atOf === "object" && !Array.isArray(value.atOf)) {
@@ -350,7 +357,8 @@ async function readDrop(email: string): Promise<DropRecord | null> {
     const ids = Object.keys(atOf).slice(0, MAX_PASSKEYS);
     const t = value.telling as { token?: unknown; since?: unknown } | undefined;
     const telling = t && typeof t === "object" && typeof t.token === "string" && /^[0-9a-f]{32}$/.test(t.token) && typeof t.since === "number" && Number.isFinite(t.since) ? { token: t.token, since: t.since } : undefined;
-    return ids.length ? dropOf(Object.fromEntries(ids.map((id) => [id, atOf[id]])), typeof value.told === "number" ? value.told : 0, telling) : null;
+    const untold = Array.isArray(value.untold) ? value.untold.filter((id): id is string => typeof id === "string") : [];
+    return ids.length ? dropOf(Object.fromEntries(ids.map((id) => [id, atOf[id]])), typeof value.told === "number" ? value.told : 0, { telling, untold }) : null;
   } catch {
     return null;
   }
@@ -364,12 +372,12 @@ async function readDrop(email: string): Promise<DropRecord | null> {
  */
 async function writeDrop(held: Held, email: string, record: DropRecord): Promise<void> {
   if (!record.ids.length) await fencedDel(held, [dropKey(email)]);
-  else await fencedSet(held, dropKey(email), JSON.stringify({ atOf: record.atOf, told: record.told, ...(record.telling ? { telling: record.telling } : {}) }));
+  else await fencedSet(held, dropKey(email), JSON.stringify({ atOf: record.atOf, told: record.told, ...(record.telling ? { telling: record.telling } : {}), ...(record.untold.length ? { untold: record.untold } : {}) }));
 }
 
 /** The record without `gone`, the passkeys it no longer waits on (a notice going out stays marked). */
 function without(record: DropRecord, gone: (id: string) => boolean): DropRecord {
-  return dropOf(Object.fromEntries(Object.entries(record.atOf).filter(([id]) => !gone(id))), record.told, record.telling);
+  return dropOf(Object.fromEntries(Object.entries(record.atOf).filter(([id]) => !gone(id))), record.told, { telling: record.telling, untold: record.untold });
 }
 
 /**
@@ -443,7 +451,9 @@ export async function scheduleRemoval(email: string, id: string, session: string
     // A notice marked as going out long ago was never confirmed: this request sends it.
     const tellNow = isNew || !before || now - before.told >= RETELL_MS || !!before.telling;
     const token = randomBytes(16).toString("hex");
-    await writeDrop(held, address, dropOf(atOf, before?.told ?? 0, tellNow ? { token, since: now } : undefined));
+    // A new passkey is untold until a delivery is confirmed; one already waiting keeps what it was.
+    const untold = [...(before?.untold ?? []), ...(isNew ? [id] : [])];
+    await writeDrop(held, address, dropOf(atOf, before?.told ?? 0, { telling: tellNow ? { token, since: now } : undefined, untold }));
     // Logged out under the same lock, the first time it is asked: nothing P opened stays open past this request
     // (asked again, the owner's own sessions are not logged out again).
     if (isNew) await dropSecondStep(address, (mark) => mark === `passkey:${id}`, session);
@@ -492,7 +502,7 @@ export async function scheduleRemoval(email: string, id: string, session: string
       // taken back, an older one keeps its moment and is told again next time; the request answers as busy.
       const undo = (record: DropRecord) => {
         const kept = asked.isNew ? without(record, (x) => x === id) : record;
-        return dropOf(kept.atOf, kept.told);
+        return dropOf(kept.atOf, kept.told, { untold: kept.untold });
       };
       // Tried twice (the lock may be held a moment by another change); were both to fail, the mark ages out and the
       // next request for the account tells again, every passkey set to go listed in it.
@@ -501,6 +511,7 @@ export async function scheduleRemoval(email: string, id: string, session: string
     }
     // Delivered: now it is told, and the account's other requests go on. Not marked (the lock or the write failed),
     // the mark ages out and the next request tells again: more email, never a removal answered as set untold.
+    // The email listed every passkey set to go: none is untold any more.
     await settle((record) => dropOf(record.atOf, now)).catch(() => {});
   }
   return asked.at;
@@ -515,9 +526,21 @@ type Due = { gone: Passkey[]; ids: string[] };
 const NONE: Due = { gone: [], ids: [] };
 
 async function removeDue(held: Held, address: string, now: number): Promise<Due | null> {
-  const record = await readDrop(address);
-  const due = (id: string) => (record?.atOf[id] ?? Infinity) <= now;
-  if (!record || !record.ids.some(due)) return null;
+  let record = await readDrop(address);
+  if (!record) return null;
+  // Never applied while a notice is unconfirmed (C3-115): a request still sending it leaves the record as it is.
+  if (record.telling && now - record.telling.since < TELLING_MS) return null;
+  // One that stopped before settling (its mark old): its untold passkeys are taken off the record and kept, never
+  // removed; the rest were told and keep their moments. A later request asks again and tells.
+  if (record.telling || record.untold.length) {
+    const cleaned = without(record, (id) => record!.untold.includes(id));
+    record = dropOf(cleaned.atOf, cleaned.told);
+    await writeDrop(held, address, record);
+    if (!record.ids.length) return null;
+  }
+  const kept = record;
+  const due = (id: string) => (kept.atOf[id] ?? Infinity) <= now;
+  if (!kept.ids.some(due)) return null;
   const list = await listPasskeys(address);
   const removed = list.filter((p) => due(p.id));
   await saveList(held, address, list.filter((p) => !due(p.id)));

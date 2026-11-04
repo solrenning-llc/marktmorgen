@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { emailForSession, openSession, sessionSecondStep } from "@/lib/auth";
-import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingRemoval, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
+import { PASSKEY_COOKIE, REMOVAL_DAYS, cancelRemoval, listPasskeys, movePasskeys, pendingNow, pendingRemoval, removePasskey, scheduleRemoval, unlessSetToGo } from "@/lib/passkeys";
 import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
 import { RESET_DAYS, cancelReset, checkCode, finishSetup, lockedUntil, moveTwoStep, replaceCodes, resetIfDue, spendRescue, startSetup, turnOff, twoStepOn, twoStepStatus } from "@/lib/two-step";
@@ -1121,6 +1121,23 @@ async function main(): Promise<void> {
   const toldMails = mails.length;
   const again = await passkeys(drrLink, { action: "remove", id: "cred-drr-1" });
   is("asked again once the notice was delivered: answered set, keeping its moment, and not emailed again within the hour", [again.removeOn, mails.length], [sentFirst.removeOn, toldMails]);
+
+  part("A request that stopped before its notice was confirmed never has its passkey removed (C3-115)");
+  const STL = "stale-owner@example.com";
+  await makePasskey(STL, "cred-stale-1").keep();
+  await makePasskey(STL, "cred-stale-2").keep();
+  const stlLink = await linkSession(STL);
+  // Its process stops after writing the record and before settling it: here, its email held until the end.
+  let stlOpen = () => {};
+  mailHeld.set(STL, { wait: new Promise<void>((resolve) => { stlOpen = resolve; }), fail: true });
+  const stopped = passkeys(stlLink, { action: "remove", id: "cred-stale-1" });
+  for (let i = 0; i < 200 && mailHeld.has(STL); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  is("while it sends, the passkey waits as asked", (await pendingNow(STL))?.ids, ["cred-stale-1"]);
+  // Its seven days pass with nobody asking again; a login or a check applies what is due.
+  const stlLater = Date.now() + 8 * 86_400_000;
+  is("past its day, the untold removal is not applied: taken off the record, both passkeys kept", [await pendingRemoval(STL, stlLater), (await listPasskeys(STL)).map((p) => p.id).sort()], [null, ["cred-stale-1", "cred-stale-2"]]);
+  stlOpen();
+  is("the stopped request, ending late, changes nothing it no longer holds", [(await stopped).error, await pendingNow(STL), (await listPasskeys(STL)).length], ["unsent", null, 2]);
 
   part("Moving passkeys whose last answer was lost keeps them at the new address (C3-110)");
   const LOF = "lof-from@example.com";

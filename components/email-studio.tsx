@@ -1,5 +1,6 @@
 "use client";
 
+import { type ImportReportLine, type ImportedStep, SequenceImportBox, reportWords } from "@/components/sequence-import-box";
 import type { LibraryEmailDraft, LibrarySequenceDraft } from "@/lib/template-library-intents";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { sendCount } from "@/lib/send-count";
@@ -13,6 +14,7 @@ import { useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore,
 import { useRouter } from "next/navigation";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { isAiEmailCopy, isAiSequenceDraft } from "@/lib/ai-response";
+import { RFM_GROUPS, type RfmGroup } from "@/lib/rfm-rules";
 import { MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
 import { confirmedRecipientCount, confirmedDraftId, draftRemovalAnswer, confirmedMailCopy, keptWaitHours, mailAnswer, type MailAnswer } from "@/lib/mail-response";
 import { toast } from "@/components/toast";
@@ -36,7 +38,7 @@ import { subjectTestPreview, type SubjectTestPreview } from "@/lib/mail-test-pre
 import { readMailSchedule } from "@/lib/mail-schedule";
 import { PUBLISH_WARNING } from "@/lib/letter-rules";
 import { channelName } from "@/lib/channel-names";
-import { type Narrow, MAX_SPENT, readSegmentSpend, QUIET_DAYS, type Segment } from "@/lib/segments-rules";
+import { type Narrow, ACTIVE_DAYS, MAX_SPENT, readSegmentSpend, QUIET_DAYS, type Segment } from "@/lib/segments-rules";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -95,10 +97,10 @@ const MESSAGES: Record<string, string> = {
     "This email was narrowed two ways at once, and an email in a sequence keeps one condition. Write it again instead, and choose who it goes to.",
   goal: "That ending would stop the sequence before its first email, or the trigger needs one. A workflow about an abandoned checkout must end once they buy. Choose another ending.",
   keep_money:
-    "This email was sent to people chosen by what they spent, where they came from or when they last bought, and a sequence cannot choose that way. Write it again instead.",
+    "This email was sent to people chosen by what they spent, where they came from, when they last bought or the kind of buyer they are, and a sequence cannot choose that way. Write it again instead.",
   stripe: "Your Stripe account could not be read just now, so spending, channels and last purchases cannot be counted. Try again in a moment.",
   segment_name: "Give the group a name.",
-  segment_empty: "Choose who the group is first: a kind of reader, a product, someone to leave out, a label, or one of the three ways below.",
+  segment_empty: "Choose who the group is first: a kind of reader, a product, someone to leave out, a label, or one of the five ways below.",
   segment_product: "That product is not in your store anymore.",
   segment_full: "A store keeps 20 saved groups at most. Remove one first.",
   keep_already: "This email is already going to new people by itself. It is under Sequences.",
@@ -148,7 +150,7 @@ type BroadcastRow = {
   who: Who;
   /** Left out the people who own this product. */
   notProductId: string | null;
-  /** Narrowed by spending, first channel or quiet days (lib/segments.ts); null for none. */
+  /** Narrowed by spending, first channel, quiet days, recent purchase or kind of buyer (lib/segments.ts); null for none. */
   narrow?: Narrow | null;
   /** Only people with this label (lib/contacts.ts, 99 [E2-TAG-BROADCAST]); null or absent for none. */
   label?: string | null;
@@ -217,6 +219,8 @@ function narrowWords(narrow: Narrow, currency: string): string {
     narrow.minSpent ? `spent at least ${formatMoney(narrow.minSpent, currency)}` : "",
     narrow.channel ? `first came through ${channelName(narrow.channel)}` : "",
     narrow.quietDays ? `had not bought in ${narrow.quietDays} days` : "",
+    narrow.activeDays ? `bought in the last ${narrow.activeDays} days` : "",
+    narrow.group ? `are among your \u201c${RFM_GROUPS.find((g) => g.id === narrow.group)?.name ?? narrow.group}\u201d` : "",
   ].filter(Boolean);
   return `Only those who ${parts.join(", ")}.`;
 }
@@ -228,7 +232,7 @@ function AudienceSummary({ audience, products, currency }: {
   currency: string;
 }) {
   const narrow = audience.narrow;
-  const narrowed = narrow && Boolean(narrow.minSpent || narrow.channel || narrow.quietDays);
+  const narrowed = narrow && Boolean(narrow.minSpent || narrow.channel || narrow.quietDays || narrow.group || narrow.activeDays);
   return <div className="mt-1 break-words text-sm text-ink-soft">
     <p><span className="font-semibold">Audience criteria: </span>{mailAudienceWords(audience, products)}</p>
     {audience.label ? <p className="mt-1">{`Only people with the label “${audience.label}”.`}</p> : null}
@@ -252,7 +256,7 @@ function SubjectTestReview({ preview }: { preview: SubjectTestPreview | null }) 
 }
 
 function keepable(b: Pick<BroadcastRow, "who" | "productId" | "notProductId" | "narrow" | "label">): boolean {
-  // Chosen by spending, a channel or quiet days: a sequence cannot choose that way (lib/mail-reuse.ts).
+  // Chosen by spending, a channel, quiet days, a recent purchase or a kind of buyer: a sequence cannot choose that way (lib/mail-reuse.ts).
   if (b.narrow) return false;
   return [Boolean(b.notProductId), b.who === "leads", b.who === "buyers" && Boolean(b.productId), Boolean(b.label)].filter(Boolean).length < 2;
 }
@@ -338,6 +342,8 @@ export function EmailStudio(props: {
   segments?: Segment[];
   /** The products that are courses (lib/catalog.ts, "course"). */
   courses?: string[];
+  /** The products that are calls: a sequence that starts with one says "books" (548 [TR1]). */
+  calls?: string[];
   /** Paid products in the selected store catalog, for sequence ending checks. */
   paidProducts?: string[];
   /** The store's forms that ask for an address, its own fields and its deal stages, for the sequences (lib/flows.ts). */
@@ -445,7 +451,7 @@ export function EmailStudio(props: {
             <History readFailed={props.broadcastsReadFailed ?? false} writeUnconfirmed={writeUnconfirmed} onWriteUnconfirmed={onWriteUnconfirmed} flowsReadFailed={props.flowsReadFailed ?? false} broadcasts={props.broadcasts} products={props.products} canSend={props.canSend} onOpen={openDraft} currency={props.currency} />
             {props.canSend ? (
               <AiOn value={props.ai ?? { on: false, left: 0 }}>
-                <Flows initialSequence={props.initialSequence} writeUnconfirmed={writeUnconfirmed} onWriteUnconfirmed={onWriteUnconfirmed} flows={props.flows} readFailed={props.flowsReadFailed ?? false} products={props.products} currency={props.currency} sells={props.sells} courses={props.courses ?? []} paidProducts={props.paidProducts} automation={props.automation} limits={props.workflowLimits} assignees={props.assignees ?? []} />
+                <Flows initialSequence={props.initialSequence} writeUnconfirmed={writeUnconfirmed} onWriteUnconfirmed={onWriteUnconfirmed} flows={props.flows} readFailed={props.flowsReadFailed ?? false} products={props.products} currency={props.currency} sells={props.sells} courses={props.courses ?? []} calls={props.calls ?? []} paidProducts={props.paidProducts} automation={props.automation} limits={props.workflowLimits} assignees={props.assignees ?? []} />
               </AiOn>
             ) : null}
           </>
@@ -629,7 +635,7 @@ function ListCard({
 type ComposerSnapshot = {
   subject: string; body: string; productId: string; notProductId: string; who: Who; draftId: string; draftSavedAt: string;
   later: boolean; at: string; testing: boolean; subjectB: string; share: number; hours: number; by: TestBy;
-  spentText: string; channel: string; quietDays: number; more: boolean; savedContent: string; label: string;
+  spentText: string; channel: string; quietDays: number; activeDays?: number; more: boolean; savedContent: string; label: string; buyerGroup?: RfmGroup | "";
   /** A draft save that could not be confirmed: saving stays blocked when brought back, so a draft is never made twice. */
   uncertain: boolean;
 };
@@ -705,6 +711,8 @@ function Compose(props: {
   const [spentText, setSpentText] = useState(props.restore ? props.restore.spentText : props.draft?.narrow?.minSpent ? plainAmount(props.draft.narrow.minSpent, props.currency) : "");
   const [channel, setChannel] = useState(props.restore ? props.restore.channel : props.draft?.narrow?.channel ?? "");
   const [quietDays, setQuietDays] = useState(props.restore ? props.restore.quietDays : props.draft?.narrow?.quietDays ?? 0);
+  // Bought in the last…, 461 [EL5]: the buyers still active.
+  const [activeDays, setActiveDays] = useState(props.restore ? props.restore.activeDays ?? 0 : props.draft?.narrow?.activeDays ?? 0);
   // Only people with this label (99 [E2-TAG-BROADCAST]); empty is everyone chosen above.
   const [label, setLabel] = useState(props.restore ? props.restore.label ?? "" : props.draft?.label ?? "");
   // Cleaned once, as the server keeps a label (lib/contact-rules.ts), and used everywhere the audience goes.
@@ -716,16 +724,20 @@ function Compose(props: {
     const wait = setTimeout(() => setCountedLabel(cleanLabel), 400);
     return () => clearTimeout(wait);
   }, [cleanLabel, countedLabel]);
-  const [more, setMore] = useState(props.restore ? props.restore.more : Boolean(props.draft?.narrow && (props.draft.narrow.minSpent || props.draft.narrow.channel || props.draft.narrow.quietDays)));
+  // One group of the buyers, by how recently and how often they bought (270 [GR1], unit 3b); "" for none.
+  const [buyerGroup, setBuyerGroup] = useState<RfmGroup | "">(props.restore ? props.restore.buyerGroup ?? "" : props.draft?.narrow?.group ?? "");
+  const [more, setMore] = useState(props.restore ? props.restore.more : Boolean(props.draft?.narrow && (props.draft.narrow.minSpent || props.draft.narrow.channel || props.draft.narrow.quietDays || props.draft.narrow.group || props.draft.narrow.activeDays)));
   const [channels, setChannels] = useState<string[] | null>(null);
+  // How many buyers are of each kind, from the ledger the choices below read (270 [GR1], unit 3c); null until read.
+  const [kinds, setKinds] = useState<Partial<Record<RfmGroup, number>> | null>(null);
   const [partial, setPartial] = useState(false);
   const [segments, setSegments] = useState<Segment[]>(props.segments);
   const [groupName, setGroupName] = useState("");
   const parsedSpent = readSegmentSpend(spentText, props.currency as Currency);
   const invalidSpent = parsedSpent === null;
   const minSpent = parsedSpent ?? 0;
-  const narrow: Narrow = { minSpent, channel, quietDays };
-  const countKey = JSON.stringify([productId, notProductId, who, minSpent, channel, quietDays, more, countRevision, invalidSpent, countedLabel]);
+  const narrow: Narrow = { minSpent, channel, quietDays, ...(buyerGroup ? { group: buyerGroup } : {}), ...(activeDays ? { activeDays } : {}) };
+  const countKey = JSON.stringify([productId, notProductId, who, minSpent, channel, quietDays, activeDays, buyerGroup, more, countRevision, invalidSpent, countedLabel]);
   // A label still being typed is not counted yet: no count is shown for a label other than the one typed.
   const reach = !invalidSpent && cleanLabel === countedLabel && reachResult?.key === countKey ? reachResult.count : null;
   const monthCount = reach !== null && !later && props.month ? sendCount(reach, props.month.used, props.month.allowance) : null;
@@ -746,24 +758,28 @@ function Compose(props: {
   const [goal, setGoal] = useState<EmailGoal>("announce");
   const [about, setAbout] = useState("");
   const draftSubjectTest: DraftSubjectTest | null = testing ? { subjectB, share, hours, by } : null;
-  const content = JSON.stringify([subject, body, productId, who, notProductId, spentText, channel, quietDays, draftSubjectTest, label]);
+  const content = JSON.stringify([subject, body, productId, who, notProductId, spentText, channel, quietDays, activeDays, buyerGroup, draftSubjectTest, label]);
   const [savedContent, setSavedContent] = useState(props.restore ? props.restore.savedContent : !props.draft && props.initialTemplate ? "" : content);
   const dirty = (!draftId && Boolean(props.draft)) || content !== savedContent || later || at !== "";
   useLeaveGuard(dirty || aiBusy);
   // What is set aside when another email is opened over unsaved changes, so they can be brought back (485 [IT2]).
-  const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, more, savedContent, uncertain: draftSaveBlocked, label });
+  const snapshot = (): ComposerSnapshot => ({ subject, body, productId, notProductId, who, draftId, draftSavedAt, later, at, testing, subjectB, share, hours, by, spentText, channel, quietDays, activeDays, more, savedContent, uncertain: draftSaveBlocked, label, buyerGroup });
   useImperativeHandle(props.composerState, () => ({ dirty, busy: locked, snapshot }));
 
   useEffect(() => {
     if (invalidSpent) return;
     let live = true;
-    call({ action: "count", productId, notProductId, who, narrow: { minSpent, channel, quietDays }, label: countedLabel, channels: more && channels === null }).then((a) => {
+    call({ action: "count", productId, notProductId, who, narrow, label: countedLabel, channels: more && channels === null }).then((a) => {
       if (!live) return;
       const count = confirmedRecipientCount(a);
       setReachResult({ key: countKey, count });
       setConfirming(false);
       if (count !== null) {
         if (Array.isArray(a.channels)) setChannels(a.channels.filter((c): c is string => typeof c === "string"));
+        if (a.kinds && typeof a.kinds === "object" && !Array.isArray(a.kinds)) {
+          const read = a.kinds as Record<string, unknown>;
+          setKinds(Object.fromEntries(RFM_GROUPS.flatMap((g) => (Number.isSafeInteger(read[g.id]) && (read[g.id] as number) >= 0 ? [[g.id, read[g.id] as number]] : []))));
+        }
         if (typeof a.partial === "boolean") setPartial(a.partial);
       } else if (a.error === "stripe") setError(message(a));
     });
@@ -772,7 +788,7 @@ function Compose(props: {
     };
     // `channels` is asked for once, when the choices are first opened.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId, notProductId, who, minSpent, channel, quietDays, more, countRevision, invalidSpent, countedLabel]);
+  }, [productId, notProductId, who, minSpent, channel, quietDays, activeDays, buyerGroup, more, countRevision, invalidSpent, countedLabel]);
 
   async function group(payload: Record<string, unknown>, done: string) {
     if (locked || (payload.action === "segment-save" && invalidSpent)) return;
@@ -796,8 +812,10 @@ function Compose(props: {
     setSpentText(segment.minSpent ? plainAmount(segment.minSpent, props.currency) : "");
     setChannel(segment.channel);
     setQuietDays(segment.quietDays);
+    setActiveDays(segment.activeDays ?? 0);
+    setBuyerGroup(segment.group ?? "");
     setGroupName(segment.name);
-    if (segment.minSpent || segment.channel || segment.quietDays) setMore(true);
+    if (segment.minSpent || segment.channel || segment.quietDays || segment.group || segment.activeDays) setMore(true);
   }
 
   async function send(payload: Record<string, unknown>, success: string) {
@@ -831,7 +849,7 @@ function Compose(props: {
     if (locked || draftSaveBlocked || invalidSpent) return;
     setBusy(true);
     setError(null);
-    const audience = { who, notProductId: notProductId || null, narrow: minSpent || channel || quietDays ? narrow : null, ...(cleanLabel ? { label: cleanLabel } : {}) };
+    const audience = { who, notProductId: notProductId || null, narrow: minSpent || channel || quietDays || buyerGroup || activeDays ? narrow : null, ...(cleanLabel ? { label: cleanLabel } : {}) };
     const a = await call({ action: "draft-save", id: draftId || undefined, subject, body, productId, audience, subjectTest: draftSubjectTest, expectedSavedAt: draftId ? draftSavedAt : undefined });
     setBusy(false);
     if (!a.ok) {
@@ -1070,13 +1088,13 @@ function Compose(props: {
           </span>
         </div>
         {/*
-          And three ways no list can choose by itself: what they spent, where
+          And four ways no list can choose by itself: what they spent, where
           they first found the store, and how long since they last bought.
           Read from the creator's own Stripe account when the email goes out
           (lib/segments.ts); nothing is recorded about anybody to do it.
         */}
         <details className="rounded-[12px] bg-paper px-4 py-3 ring-1 ring-line" open={more} onToggle={(e) => setMore((e.currentTarget as HTMLDetailsElement).open)}>
-          <summary className="cursor-pointer text-sm font-semibold text-ink">More ways to choose: what they spent, where they came from, when they last bought</summary>
+          <summary className="cursor-pointer text-sm font-semibold text-ink">More ways to choose: what they spent, where they came from, when they last bought, what kind of buyer they are</summary>
           <div className="mt-3 space-y-4">
             <label className="block">
               <span className="field-label">Spent with you at least</span>
@@ -1107,15 +1125,43 @@ function Compose(props: {
             </label>
             <label className="block">
               <span className="field-label">Has not bought in the last</span>
-              <select className="field mt-2" value={quietDays} onChange={(e) => setQuietDays(Number(e.target.value))}>
+              <select className="field mt-2" value={quietDays} onChange={(e) => setQuietDays(Number(e.target.value))} aria-describedby="mail-active-help">
                 <option value={0}>Any time</option>
                 {QUIET_DAYS.map((d) => (
                   <option key={d} value={d}>{`${d} days, but has bought before`}</option>
                 ))}
               </select>
             </label>
+            {/* 461 [EL5]: the buyers still active, from the same buyers' ledger. */}
+            <label className="block">
+              <span className="field-label">Bought in the last</span>
+              <select className="field mt-2" value={activeDays} onChange={(e) => setActiveDays(Number(e.target.value))} aria-describedby="mail-active-help">
+                <option value={0}>Any time, or never</option>
+                {ACTIVE_DAYS.map((d) => (
+                  <option key={d} value={d}>{`${d} days`}</option>
+                ))}
+              </select>
+              <span id="mail-active-help" className="field-hint mt-1 block" aria-live="polite">
+                {quietDays && activeDays && activeDays <= quietDays ? "Nobody can both have bought in these days and not have bought in the days above. Change one of them." : "Your buyers who are still active: those who bought from you in these days."}
+              </span>
+            </label>
+            {/* 270 [GR1], unit 3b: the groups of lib/rfm-rules.ts, each with its rule, from the same buyers' ledger as the three above. */}
+            <div>
+              <label className="block" htmlFor="mail-group">
+                <span className="field-label">Only one kind of buyer</span>
+              </label>
+              <select id="mail-group" className="field mt-2" value={buyerGroup} aria-describedby="mail-group-hint" onChange={(e) => setBuyerGroup(e.target.value as RfmGroup | "")}>
+                <option value="">No kind: everyone chosen above</option>
+                {RFM_GROUPS.map((g) => (
+                  <option key={g.id} value={g.id}>{kinds && kinds[g.id] !== undefined ? `${g.name} (${n(kinds[g.id] as number)} ${kinds[g.id] === 1 ? "buyer" : "buyers"})` : g.name}</option>
+                ))}
+              </select>
+              <span id="mail-group-hint" className="field-hint mt-1 block">
+                {`${buyerGroup ? RFM_GROUPS.find((g) => g.id === buyerGroup)?.rule ?? "" : "Each kind is one rule about how recently and how often someone bought, and nobody is two kinds at once. Choose one to see its rule."}${kinds ? " The number beside each kind is all your buyers of that kind, on your list or not, before the choices above." : ""}`}
+              </span>
+            </div>
             <p className="text-xs text-ink-soft">
-              Only buyers can match these three. They are read from your Stripe account and your PayPal sales when the email goes
+              Only buyers can match these four. They are read from your Stripe account and your PayPal sales when the email goes
               out; support for your work is not counted. Payments of memberships and payment plans count toward what someone spent
               and when they last paid. A purchase or a payment refunded, or held or lost in a dispute, does not count; for PayPal, only a sale refunded in full
               is taken off. A sale in another currency counts as a purchase for where
@@ -1132,7 +1178,7 @@ function Compose(props: {
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-0 flex-1">
             <span className="field-label">Save who this goes to as a group</span>
-            <input className="field mt-2" maxLength={60} placeholder="Best customers" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
+            <input className="field mt-2" maxLength={60} placeholder="Spring launch buyers" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
           </label>
           <button
             type="button"
@@ -1982,6 +2028,7 @@ function Flows({
   currency,
   sells,
   courses = [],
+  calls = [],
   paidProducts,
   automation = { forms: [], fields: [], stages: [] },
   limits,
@@ -1999,6 +2046,8 @@ function Flows({
   automation?: { forms: { id: string; name: string; outcomes?: { id: string; title: string }[] }[]; fields: { id: string; name: string; type: string; options: string[] }[]; stages: { id: string; name: string }[] };
   /** The products that are courses, for "finishes a course" and the conditions on one. */
   courses?: string[];
+  /** The products that are calls: a sequence that starts with one says "books" (548 [TR1]). */
+  calls?: string[];
   paidProducts?: string[];
   /** Whether the store sells anything for money, so a first purchase can happen at all. */
   sells: boolean;
@@ -2025,6 +2074,13 @@ function Flows({
   const availableCounts = SEQUENCE_DRAFT_COUNTS.filter(count => count <= availableSlots);
   const invalidWait = draft?.steps.some(step => flowWaitHours(step.wait, step.unit) === null) ?? false;
   const [draftBaseline, setDraftBaseline] = useState<string | null>(null);
+  // What a file brought in left out or changed (544 [SQ9]): shown in the editor until the sequence is saved or closed.
+  const [imported, setImported] = useState<ImportReportLine[] | null>(null);
+  const importedHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    // The editor that opened takes the focus the box's button had, at its report's heading.
+    if (imported) importedHeading.current?.focus();
+  }, [imported]);
   useLeaveGuard(aiBusy || (draft !== null && JSON.stringify(draft) !== draftBaseline));
   const [draftCount, setDraftCount] = useState<number>(DEFAULT_SEQUENCE_DRAFT);
   const requestedCount = availableCounts.some(count => count === draftCount) ? draftCount : (availableCounts[0] ?? DEFAULT_SEQUENCE_DRAFT);
@@ -2060,7 +2116,32 @@ function Flows({
         ? `Starts when a deal with someone on your list enters “${automation.stages.find((x) => x.id === f.stageId)?.name ?? "a stage no longer in your pipelines"}”`
       : f.trigger === "bought"
         ? "Starts the first time someone who agreed to hear from you buys anything"
-        : `Starts when someone who agreed to hear from you gets ${products.find((p) => p.id === f.productId)?.title ?? "a product"}`;
+        : // A paid call starts the sequences of its product (lib/buyer-list.ts): said as booking it.
+          `Starts when someone who agreed to hear from you ${f.productId && calls.includes(f.productId) ? "books" : "gets"} ${products.find((p) => p.id === f.productId)?.title ?? "a product"}`;
+
+  /**
+   * A sequence brought in from a file (544 [SQ9]): its emails open here as a
+   * new sequence, for the creator to pick what starts it, read every email and
+   * save it, paused. Nothing is saved until they do.
+   */
+  function openImported(steps: ImportedStep[], report: ImportReportLine[]) {
+    if (locked || draft !== null) return;
+    const first = products[0]?.id ?? "";
+    const next: FlowDraft = {
+      ...toDraft(null, products),
+      name: "Brought in",
+      steps: steps.map((s) => ({
+        ...blankStep(s.delayHours % 24 === 0 ? String(s.delayHours / 24) : String(s.delayHours), s.delayHours % 24 === 0 ? "days" : "hours", first),
+        subject: s.subject,
+        body: s.body,
+      })),
+    };
+    // Unsaved from the start, so leaving the page asks first.
+    setDraftBaseline(null);
+    setError(null);
+    setImported(report);
+    setDraft(next);
+  }
 
   function openDraft(flow: FlowRow | null) {
     if (locked || draft !== null) return;
@@ -2112,6 +2193,7 @@ function Flows({
       return;
     }
     setDraft(null);
+    setImported(null);
     toast(draft.id ? "Sequence saved." : "Saved, paused. Preview it and switch it on from its card when it is ready.");
     refreshFlows();
   }
@@ -2350,6 +2432,20 @@ function Flows({
             save();
           }}
         >
+          {imported ? (
+            <div className="rounded-[var(--r-sm)] border border-line bg-lilac/30 p-3" data-imported-report="">
+              <h3 ref={importedHeading} tabIndex={-1} className="font-semibold text-ink">Brought in from your file: read each email, pick what starts it, then save</h3>
+              {imported.length ? (
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink-soft">
+                  {imported.map((r, i) => (
+                    <li key={i}>{reportWords(r)}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-sm text-ink-soft">Every email in the file came in as it was.</p>
+              )}
+            </div>
+          ) : null}
           <fieldset disabled={busy} className="min-w-0 space-y-4">
           <legend className="sr-only">Sequence configuration</legend>
           <label className="block">
@@ -2380,7 +2476,7 @@ function Flows({
             >
               <option value="joined">Someone joins your list</option>
               <option value="bought">Someone who agreed to hear from you buys anything, the first time</option>
-              {products.length ? <option value="product">Someone who agreed to hear from you gets a product</option> : null}
+              {products.length ? <option value="product">{calls.length ? "Someone who agreed to hear from you gets a product or books a call" : "Someone who agreed to hear from you gets a product"}</option> : null}
               <option value="tagged">A sequence gives someone a label</option>
               {courses.length ? <option value="finished">Someone who agreed to hear from you finishes a course</option> : null}
               {courses.length ? <option value="started">Someone who agreed to hear from you opens a course for the first time</option> : null}
@@ -2883,7 +2979,14 @@ function Flows({
           )}
           <div className="flex flex-wrap items-center gap-3">
             <button type="submit" aria-busy={busy} disabled={locked || invalidWait || overCapacity} className="btn btn-primary">Save the sequence</button>
-            <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" onClick={() => setDraft(null)}>
+            <button
+              type="button"
+              className="text-sm font-bold text-ink-soft underline underline-offset-4"
+              onClick={() => {
+                setDraft(null);
+                setImported(null);
+              }}
+            >
               Close
             </button>
           </div>
@@ -2891,9 +2994,12 @@ function Flows({
           </fieldset>
         </form>
       ) : flows.length < MAX_FLOWS ? (
-        <button type="button" className="btn btn-secondary mt-5" disabled={locked} onClick={() => openDraft(null)}>
-          New sequence
-        </button>
+        <>
+          <button type="button" className="btn btn-secondary mt-5" disabled={locked} onClick={() => openDraft(null)}>
+            New sequence
+          </button>
+          <SequenceImportBox disabled={locked} onRead={openImported} describe={(code) => MESSAGES[code] ?? null} />
+        </>
       ) : null}
     </section>
   );

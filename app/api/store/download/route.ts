@@ -13,6 +13,11 @@ import { originFrom } from "@/lib/request-origin";
 import type { ProductFile } from "@/lib/product-file";
 import { BUMP_KEYS } from "@/lib/bundle-rules";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { createHash, randomBytes } from "node:crypto";
+import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { readSingleDigitalAccess, singleDigitalRenewalCovered, singleDigitalRenewalIdentity } from "@/lib/single-digital-access";
+import { confirmationOutboxPolicy, enqueueSingleDigitalRenewal } from "@/lib/order-confirmation-outbox";
+import type { ShipmentMailRuntime } from "@/lib/shipment-mail-outbox";
 
 /**
  * Hands the buyer the file they paid for.
@@ -27,8 +32,10 @@ import { ordersWords } from "@/lib/buyer-words/orders";
  * to a page that says so and offers the way back (lib/membership-access.ts).
  *
  * A PDF on a product whose creator switched stamping on goes out with the
- * buyer's email on every page (lib/pdf-stamp.ts), which can take a few
- * seconds the first time for a big book: hence the longer time limit.
+ * buyer's email on every page (lib/pdf-stamp.ts), and an EPUB with the same
+ * line as an invisible mark inside the book (lib/epub-stamp.ts), which can
+ * take a few seconds the first time for a big book: hence the longer time
+ * limit.
  */
 export const maxDuration = 60;
 
@@ -52,7 +59,7 @@ const STATUSES = {
   refunded: 410,
 } as const;
 
-/** The file, stamped with its buyer's email when the product asks for it. */
+/** The file, stamped with its buyer's email when the product asks for it (a PDF or an EPUB). */
 async function deliver(
   store: Store,
   product: Listing,
@@ -82,7 +89,18 @@ function toRenew(request: NextRequest, store: Store, product: Pick<Listing, "id"
   });
 }
 
-export async function GET(request: NextRequest) {
+function htmlValue(value: string): string {
+  return value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
+}
+
+function privatePage(title: string, body: string): Response {
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${htmlValue(title)}</title></head><body><main><h1>${htmlValue(title)}</h1>${body}</main></body></html>`, {
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex", "Content-Security-Policy": "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'", "Referrer-Policy": "no-referrer" },
+  });
+}
+
+/** Production GET and directed tests share the complete paid-file branch. */
+export async function paidDownloadGet(request: NextRequest, runtime: ShipmentMailRuntime = {}) {
   const handle = normaliseHandle(
     request.nextUrl.searchParams.get("handle") ?? "",
   );
@@ -103,6 +121,24 @@ export async function GET(request: NextRequest) {
       status: 429,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "600", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
     });
+  }
+  // Presence, including an invalid/empty value, selects this exact original
+  // paid reference. It must never fall back to the recent40 purchase scan.
+  if (request.nextUrl.searchParams.has("origin")) {
+    const capsule = request.nextUrl.searchParams.get("origin") ?? "";
+    try {
+      const access = await readSingleDigitalAccess(store, token ?? "", capsule);
+      if (access?.product.file) return deliver(store, access.product, access.product.file, access);
+      const policy = confirmationOutboxPolicy(runtime, false);
+      if (singleDigitalRenewalCovered(policy) && singleDigitalRenewalIdentity(store, capsule)) {
+        const fields = { handle: store.handle, origin: capsule, request: randomBytes(32).toString("hex") };
+        return privatePage("Request a new download link", `<p>A new link can be emailed to the inbox used for this purchase.</p><form method="post" action="/api/store/download">${Object.entries(fields).map(([name, value]) => `<input type="hidden" name="${name}" value="${htmlValue(value)}">`).join("")}<button type="submit">Email a new link</button></form>`);
+      }
+      return plain(410, say.linkExpired);
+    } catch {
+      console.error("checking an original paid file failed");
+      return plain(502, say.purchaseCheckFailed);
+    }
   }
   if (token) {
     let purchase;
@@ -223,4 +259,35 @@ export async function GET(request: NextRequest) {
   }
 
   return deliver(store, order.product, file, sale);
+}
+
+export async function GET(request: NextRequest) {
+  return paidDownloadGet(request);
+}
+
+/** Only an explicitly funded renewal intent is saved. No grant, payment,
+ * provider send or fresh token is issued by this request. */
+export async function paidDownloadRenewalPost(request: NextRequest, runtime: ShipmentMailRuntime = {}): Promise<Response> {
+  if (fromAnotherSite(request)) return plain(403, "This request must come from this site.");
+  if (!singleDigitalRenewalCovered(confirmationOutboxPolicy(runtime))) return plain(503, "A new link cannot be requested right now. Please try again later.");
+  if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/x-www-form-urlencoded") return plain(415, "Please use the download link's form.");
+  let fields: URLSearchParams;
+  try { fields = new URLSearchParams(await (await limited(request, 16_384)).text()); }
+  catch { return plain(400, "This request could not be read."); }
+  const names = [...fields.keys()];
+  if (names.length !== 3 || new Set(names).size !== 3 || names.some(name => !["handle", "origin", "request"].includes(name))) return plain(400, "This request is incomplete.");
+  const handle = normaliseHandle(fields.get("handle") ?? ""), capsule = fields.get("origin") ?? "", nonce = fields.get("request") ?? "";
+  if (!handle || !/^[a-f0-9]{64}$/.test(nonce)) return plain(400, "This request is incomplete.");
+  const store = await storeForHandle(handle);
+  if (!store) return plain(404, "We could not find this store.");
+  const identity = singleDigitalRenewalIdentity(store, capsule);
+  if (!identity) return plain(404, "This download link could not be checked.");
+  const person = createHash("sha256").update(`${store.sid}\n${identity.email}`).digest("hex");
+  if (!(await withinStore("download", `${store.handle}:renew:${person}`, 5, 3600, store, "buyer"))) return plain(429, "Please wait before requesting another link.");
+  if (!(await enqueueSingleDigitalRenewal(store, capsule, nonce, runtime)).ok) return plain(503, "A new link cannot be requested right now. Please try again later.");
+  return privatePage("Your request is saved", "<p>A new link will be emailed to the inbox used for this purchase when sending is available.</p>");
+}
+
+export async function POST(request: NextRequest) {
+  return paidDownloadRenewalPost(request);
 }

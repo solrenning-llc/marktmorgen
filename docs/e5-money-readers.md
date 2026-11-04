@@ -33,17 +33,19 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | Class | Files |
 | --- | --- |
 | FOLLOW-UP-CHARGE | 8 |
-| NEW-CHARGE | 13 |
+| NEW-CHARGE | 18 |
 | TOTALS | 34 |
 | PAST-SALE | 11 |
-| SETTING | 41 |
+| SETTING | 42 |
 | OTHER | 2 |
-| All | 109 |
+| All | 115 |
 
 ## The files
 
 | File | Class | Where and why | Already handles another currency? |
 | --- | --- | --- | --- |
+| `app/[handle]/book/[product]/page.tsx` | NEW-CHARGE | 83: whether a booking with a deposit offers its discount code field, read against the price in the store's currency (520 [LB1], unit 5c) | no |
+| `app/api/store/book/route.ts` | NEW-CHARGE | 97, 101: a booking's deposit and a code taken off its whole price, in the store's currency (520 [LB1], unit 5c) | no |
 | `app/[handle]/manage/page.tsx` | FOLLOW-UP-CHARGE | 215: no switch offered to a membership paid in another currency than the store's, with a line that says why (unit 2b) | yes |
 | `app/[handle]/manage/switch/page.tsx` | FOLLOW-UP-CHARGE | 163: the yearly switch's saving labelled with the store's currency, not the subscription's | partly: yearlyChoice is null when the subscription's currency differs |
 | `app/[handle]/thanks/page.tsx` | FOLLOW-UP-CHARGE | 548: the offer after paying only when the order is in the store's currency; 1158–1175 its prices; 1366/1381 the sale's own currency | partly: the offer is turned off, not charged in the order's currency |
@@ -53,12 +55,16 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/yearly-ask.ts` | FOLLOW-UP-CHARGE | 83/116: the yearly offer email and its saving in the store's currency | partly: no email on a mismatch |
 | `lib/yearly-switch.ts` | FOLLOW-UP-CHARGE | 96/113: the yearly Price made in the store's currency; 182/250 preview and receipt in the invoice's | partly: guarded by yearlyChoice |
 | `app/api/store/discount/route.ts` | NEW-CHARGE | 61–68, 98–105: a fixed-amount code and its minimum made in the store's currency | no |
+| `app/api/v1/codes/route.ts` | NEW-CHARGE | 38–39: a fixed-amount code and its minimum read in the store's currency, through the same reader as the studio (lib/discount-input.ts), and its refusal said in it | no |
 | `app/api/store/payment-requests/route.ts` | NEW-CHARGE | 30: a payment request drafted in the store's currency | partly: the request keeps its own currency |
 | `app/api/store/tip/route.ts` | NEW-CHARGE | 42–43: a buyer's tip held to the store's currency's range | no |
 | `app/studio/requests/page.tsx` | NEW-CHARGE | 47–48: a request's amount prefilled in the store's currency; 73 the list labelled with it | partly: each record carries a currency the list ignores |
 | `lib/call-packages.ts` | NEW-CHARGE | 124: a package's checkout line in the store's currency; 212 the session's | partly |
 | `lib/calls.ts` | NEW-CHARGE | 670: a call's checkout line; 1341 the phone alert of what was paid, in the store's currency | no: 1341 ignores the paid currency |
+| `lib/checkout-recovery.ts` | SETTING | 444: a call's deposit read against its price in the store's currency, for the reminder of an abandoned checkout (520 [LB1], unit 5b-1) | no |
 | `lib/cart-checkout.ts` | NEW-CHARGE | 143: each cart line's price_data in the store's currency | no |
+| `lib/cart-shipping.ts` | NEW-CHARGE | 149: a cart's shipping rate in the store's currency | no |
+| `lib/verify-stripe.ts` | NEW-CHARGE | 242: the daily Stripe check's test cart lines in the store's currency | no |
 | `lib/order-confirmation-outbox.ts` | NEW-CHARGE | 310–311: reserved digital construction compares the original rights, product price and payment-body currency with the immutable store snapshot | yes: only the original currency and amount may match; no conversion or current-setting lookup, and digital payment remains closed until original access is proved |
 | `lib/pay-what-you-want.ts` | NEW-CHARGE | 123–137: the Price with a custom amount, in the store's currency | no |
 | `lib/payment-request-store.ts` | NEW-CHARGE | 92: a payment request saved with the store's currency | partly: kept per request |

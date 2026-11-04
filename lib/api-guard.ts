@@ -12,7 +12,8 @@
  * page can copy, and a browser refusing the request is the kinder way to learn
  * that.
  */
-import { keyFromHeader, resolveKey } from "@/lib/api-keys";
+import { type AgentScope, keyFromHeader, resolveKey } from "@/lib/api-keys";
+import { agentMay } from "@/lib/api-key-rules";
 import { storeForId, type Store } from "@/lib/store";
 import { BodyTooLarge, limited, withinLimit } from "@/lib/request-guard";
 import { takeAllowance } from "@/lib/store-allowance";
@@ -89,11 +90,38 @@ export async function apiAdder(
 
 const readOnly = () => apiError(403, "read_only", "This key reads only. Make a key that can also write, in your studio under API keys.");
 
+/**
+ * 631 [AA1] (c): the store an AI agent may prepare a change for, with its key
+ * and that key's scope, or the response that refuses it. `need` is the kind
+ * of change: "draft" (the creator may confirm several at once) or "execute"
+ * (it reaches people or cannot be taken back, so it is confirmed alone). A
+ * key made without an agent scope is refused, whatever else it may do: a key
+ * that writes leads is not a key that prepares changes. While the plan's
+ * renewal is unpaid or a payment for it is disputed, preparing waits like any
+ * write, before any of the month is taken. Nothing here carries a change out.
+ */
+export async function apiAgent(
+  request: Request,
+  need: "draft" | "execute",
+): Promise<{ store: Store; keyId: string; agent: AgentScope } | Response> {
+  const found = await apiKeyed(request, need, async (store) => {
+    const paused = integrationPauseWord(store);
+    return paused ? apiError(409, paused, API_WRITE_PAUSED_WORDS[paused]) : null;
+  });
+  if (found instanceof Response) return found;
+  if (!agentMay(found.agent, need)) {
+    return need === "draft"
+      ? apiError(403, "cannot_prepare", "This key cannot prepare changes for you to confirm.")
+      : apiError(403, "cannot_prepare_execute", "This key cannot prepare emails or other changes that reach people.");
+  }
+  return { store: found.store, keyId: found.keyId, agent: found.agent };
+}
+
 async function apiKeyed(
   request: Request,
-  purpose: "read" | "write",
+  purpose: "read" | "write" | "draft" | "execute",
   hold?: (store: Store) => Promise<Response | null>,
-): Promise<{ store: Store; keyId: string; write: boolean } | Response> {
+): Promise<{ store: Store; keyId: string; write: boolean; agent: AgentScope } | Response> {
   const presented = keyFromHeader(request.headers.get("authorization"));
   const unauthorized = () =>
     apiError(401, "unauthorized", "Send your API key as: Authorization: Bearer nl_live_…", {
@@ -117,7 +145,9 @@ async function apiKeyed(
   }
   // 232 [CA1] unit 4c: a write that adds or changes waits the same way, for a
   // key that may write (a read-only key still hears it reads only).
-  if (hold && found.write) {
+  // An agent's preparation waits the same way, for a key that may prepare it.
+  const may = purpose === "write" ? found.write : purpose === "draft" || purpose === "execute" ? agentMay(found.agent, purpose) : true;
+  if (hold && may) {
     const held = await hold(store);
     if (held) return held;
   }
@@ -129,7 +159,7 @@ async function apiKeyed(
   // Each request is one of the store's window (lib/store-allowance-rules.ts), taken before any work.
   const taken = await takeAllowance(store, "api");
   if (!taken.ok) return apiError(429, taken.reason === "used" ? "monthly_limit" : taken.reason === "pool" ? "no_place" : "unavailable", taken.message);
-  return { store, keyId: found.id, write: found.write };
+  return { store, keyId: found.id, write: found.write, agent: found.agent };
 }
 
 /** Most a write request's body may weigh. */

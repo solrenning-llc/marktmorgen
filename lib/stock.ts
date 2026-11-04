@@ -232,7 +232,8 @@ export async function withCartStockHolds<T extends { id: string }>(
     }
     if (out.length > 0) return { ok: false, reason: "soldout", ids: out };
     if (!(await Promise.all(taken.map((held) => holdLock(held)))).every(Boolean)) return { ok: false, reason: "busy" };
-    const receipt = await redisPipeline(limited.map((product) => ["HSET", stockKey(statsId, product.id), pending, JSON.stringify({ until: Date.now() + PENDING_MS })]));
+    // A write whose reply is lost may still have landed: a throw is taken back as an unconfirmed reply is.
+    const receipt = await redisPipeline(limited.map((product) => ["HSET", stockKey(statsId, product.id), pending, JSON.stringify({ until: Date.now() + PENDING_MS })])).catch(() => null);
     if (!acknowledged(receipt, limited.length)) {
       await redisPipeline(limited.map((product) => ["HDEL", stockKey(statsId, product.id), pending])).catch(() => {});
       return { ok: false, reason: "busy" };
@@ -253,7 +254,11 @@ export async function withCartStockHolds<T extends { id: string }>(
   // Counted from after the checkout exists, so its hold outlasts it; the provisional one goes.
   const hold = JSON.stringify({ until: Date.now() + HOLD_MS });
   const receipt = await redisPipeline(limited.flatMap((product) => [["HSET", stockKey(statsId, product.id), value.id, hold], ["HDEL", stockKey(statsId, product.id), pending]])).catch(() => null);
-  const written = acknowledged(receipt, limited.length * 2);
+  // Each HDEL must say it took the provisional hold away (1): that hold was there until the checkout's own was written just
+  // before it, so no other checkout could count the unit in between. A 0 means it was already gone (it lapsed, which the
+  // open's own time limits rule out, or Redis lost it); then the unit may have been counted free meanwhile, so the checkout
+  // is treated as unwritten and closed.
+  const written = acknowledged(receipt, limited.length * 2) && limited.every((_, i) => (receipt as unknown[])[2 * i + 1] === 1);
   if (!written) {
     // Nobody is sent to a checkout whose units are not written as its own: it is closed at Stripe. Once Stripe says it is
     // closed, its holds are let go; otherwise the provisional ones lapse on their own (fewer sold, never more).

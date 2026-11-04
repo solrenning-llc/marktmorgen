@@ -26,7 +26,7 @@ import { POST } from "@/app/api/store/import/hubspot/route";
 import { POST as CRM_POST } from "@/app/api/store/crm/route";
 import { crmAnswer } from "@/lib/crm-response";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { CRM_LOCK_WAIT_MS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
+import { CRM_LOCK_WAIT_MS, IMPORT_CRM_DEALS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
 import { MAX_DEALS, MAX_STAGES, PIPELINES_BY_TIER, allStages } from "@/lib/crm-rules";
 import { STAGE_PAST_REASON, pipelineRoomReason } from "@/lib/hubspot-csv";
 import { HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
@@ -59,8 +59,43 @@ async function paidStore(handle: string): Promise<{ store: Store; owner: string;
   return { store: (await storeForEmail(owner))!, owner, session: await openSession(owner) };
 }
 
+/**
+ * IMPORT_CRM_DEALS (lib/crm.ts) as Redis runs it, for the in-memory store this test uses: its own shim, so
+ * lib/redis-memory.ts stays as it is on main. All or nothing: -1 when the pipelines changed, -2 when an id is
+ * taken (with each one there), -3 past the ceiling; otherwise the pipelines (when sent) and every deal.
+ */
+function runDealsImportLikeRedis(): void {
+  const plain = redis.pipeline.bind(redis);
+  const isImport = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]) === IMPORT_CRM_DEALS && c[2] === 3 && c.length >= 10 && (c.length - 10) % 2 === 0;
+  const run = async (c: (string | number)[]): Promise<unknown> => {
+    const [deals, pipes, stages, expected, next, copy, max, ...pairs] = c.slice(3).map(String);
+    const [held] = await plain([["GET", pipes]]);
+    const current = typeof held === "string" ? held : "";
+    const ids = pairs.filter((_, i) => i % 2 === 0);
+    const taken: string[] = [];
+    for (const id of ids) {
+      const [there] = await plain([["HGET", deals, id]]);
+      if (typeof there === "string") taken.push(id, there);
+    }
+    if (current !== expected) return [-1, current, ...taken];
+    if (taken.length) return [-2, current, ...taken];
+    const [size] = await plain([["HLEN", deals]]);
+    if (Number(size) + ids.length > Number(max)) return [-3, current];
+    if (next !== "") await plain([["SET", pipes, next], ["SET", stages, copy]]);
+    if (pairs.length) await plain([["HSET", deals, ...pairs]]);
+    return [ids.length];
+  };
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!commands.some(isImport)) return plain(commands);
+    const out: unknown[] = [];
+    for (const c of commands) out.push(...(isImport(c) ? [await run(c)] : await plain([c])));
+    return out;
+  }) as typeof redis.pipeline;
+}
+
 async function main(): Promise<void> {
   redis.clear();
+  runDealsImportLikeRedis();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
   process.env.STRIPE_SECRET_KEY = "sk_test_hubspot_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_hubspot_only_a_stand_in";

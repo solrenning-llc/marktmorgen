@@ -9,6 +9,7 @@
  */
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/crm/route";
+import { dealVersion } from "@/lib/crm";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { DEFAULT_STAGES, FIRST_PIPELINE_ID, type Pipeline } from "@/lib/crm-rules";
 import { PIPELINE_ACCESS_REFUSAL, accessOf, parseAccessMap, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
@@ -57,7 +58,9 @@ async function main(): Promise<void> {
   };
   const addedPipeline = await post("owner", { action: "pipeline", pipeline: workshops, moves: {} });
   is("the owner adds a second pipeline", [addedPipeline.status, addedPipeline.body.error], [200, undefined]);
-  const deal = async (who: keyof typeof cookies, stage: string, id?: string) => post(who, { action: "deal", deal: { ...(id ? { id } : {}), title: "Ten seats", email: "", cents: 50_000, stage, note: "" } });
+  // A change to a deal sends the version of its record as stored now (635 [GL3]).
+  const versionOf = async (id: string) => dealVersion(String((await redisPipeline([["HGET", "nl:crm:deals:" + statsId, id]]))[0]));
+  const deal = async (who: keyof typeof cookies, stage: string, id?: string) => post(who, { action: "deal", ...(id ? { version: await versionOf(id) } : {}), deal: { ...(id ? { id } : {}), title: "Ten seats", email: "", cents: 50_000, stage, note: "" } });
 
   const free = await deal("sam", "wnew01");
   is("unrestricted, a teammate adds a deal anywhere, as before", free.status, 200);
@@ -89,7 +92,7 @@ async function main(): Promise<void> {
   const ownerDeal = (await deal("owner", "wnew01")).body.deal!.id;
   const stringMoves = await post("sam", { action: "pipeline", pipeline: { ...workshops, stages: workshops.stages.filter((st) => st.id !== "wnew01") }, moves: "lead00" });
   is("a removed stage's deals sent by one stage for all (a string) into a pipeline they cannot change: refused", stringMoves.status, 403);
-  is("and the deal did not move", (await post("owner", { action: "deal", deal: { id: ownerDeal, title: "Ten seats", email: "", cents: 50_000, stage: "wnew01", note: "" } })).status, 200);
+  is("and the deal did not move", (await post("owner", { action: "deal", version: await versionOf(ownerDeal), deal: { id: ownerDeal, title: "Ten seats", email: "", cents: 50_000, stage: "wnew01", note: "" } })).status, 200);
   is("a deal that is not there, or cannot be read, is never removed by someone limited", (await post("sam", { action: "undeal", id: "zzzzzzzzzz" })).status, 403);
   const roomOf = async () => Number((await redisPipeline([["HGET", dataKey(store)!, "crm:pacc"]]))[0] ?? 0);
   const roomBefore = await roomOf();

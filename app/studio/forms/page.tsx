@@ -41,7 +41,7 @@ export default async function StudioFormsPage({ searchParams }: Params) {
   const reads = can(view.role, "export");
   const forms = await readForms(store.statsId);
   const canCreateDeals = reads && can(view.role, "orders") && forms.length > 0;
-  const emptyReview: OpportunityReviewData = { available: false, stages: [], deals: [], pipelines: [] };
+  const emptyReview: OpportunityReviewData = { available: false, stages: [], deals: [], pipelines: [], versions: {} };
   const [reviewData, team] = canCreateDeals
     ? await Promise.all([readOpportunityReview(store.statsId), readTeam(store.sid).catch(() => null)])
     : [emptyReview, null] as const;

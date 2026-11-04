@@ -14,6 +14,7 @@
  * about them is), one hash a field, so the list's file reads each field once
  * however long the list is.
  */
+import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
@@ -312,11 +313,22 @@ export async function readDeals(statsId: string | null, stages: readonly Stage[]
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export type OpportunityReviewData = { available: boolean; stages: Stage[]; deals: Deal[]; pipelines: Pipeline[] };
+/**
+ * A deal's version: a hash of its exact stored record, so any change to it,
+ * a stage moved by a pipeline change included (which leaves updatedAt as it
+ * was), gives another one. The board sends it back with an edit, and the
+ * edit lands only over that record (635 [GL3]). Server only.
+ */
+export function dealVersion(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex").slice(0, 32);
+}
+
+/** `versions` holds each deal's version (dealVersion) by id, read in the same step as the deals. */
+export type OpportunityReviewData = { available: boolean; stages: Stage[]; deals: Deal[]; pipelines: Pipeline[]; versions: Record<string, string> };
 
 /** A complete link/contact review read; unknown storage never means no opportunities. */
 export async function readOpportunityReview(statsId: string | null): Promise<OpportunityReviewData> {
-  const unavailable: OpportunityReviewData = { available: false, stages: [], deals: [], pipelines: [] };
+  const unavailable: OpportunityReviewData = { available: false, stages: [], deals: [], pipelines: [], versions: {} };
   if (!statsId || !isRedisConfigured()) return unavailable;
   try {
     const replies = await redisPipeline([["GET", stagesKey(statsId)], ["HGETALL", dealsKey(statsId)], ["GET", pipesKey(statsId)]]);
@@ -336,7 +348,7 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
       if (!Array.isArray(raw) || !parsed || parsed.length !== raw.length) return unavailable;
       stages = parsed;
     }
-    const deals: Deal[] = [], seen = new Set<string>();
+    const deals: Deal[] = [], seen = new Set<string>(), versions: Record<string, string> = {};
     const pairs: unknown[] = replies[1];
     for (let i = 0; i < pairs.length; i += 2) {
       const id = pairs[i], value = pairs[i + 1];
@@ -350,8 +362,9 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
       if (raw.email !== undefined && (typeof raw.email !== "string" || (raw.email.trim() && !deal.email))) return unavailable;
       seen.add(id);
       deals.push(deal);
+      versions[id] = dealVersion(value);
     }
-    return { available: true, stages, deals: deals.sort((a, b) => b.updatedAt - a.updatedAt), pipelines: pipelines ?? [firstPipeline(stages)] };
+    return { available: true, stages, deals: deals.sort((a, b) => b.updatedAt - a.updatedAt), pipelines: pipelines ?? [firstPipeline(stages)], versions };
   } catch { return unavailable; }
 }
 

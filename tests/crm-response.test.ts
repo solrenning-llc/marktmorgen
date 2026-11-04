@@ -17,4 +17,12 @@ for(const key of ["deal","fields","stages"]) {
   is("even an undefined result property stays contradictory",crmAnswer(false,{ok:false,error:"title",[key]:undefined}),uncertain);
 }
 is("inherited refusal is not accepted",crmAnswer(false,Object.create({ok:false,error:"title"})),uncertain);
+part("An edit's conflict carries the deal as it is now (635 [GL3])");
+const current = { deal: { id: "abcdefghij", title: "Six sessions", email: "dana@example.com", cents: 90000, stage: "lead00", note: "", assignee: "maya@example.com", nextAction: "Call back", dueDate: "2026-11-10", createdAt: 1, updatedAt: 2 }, version: "0123456789abcdef0123456789abcdef" };
+is("crm_conflict with a well-formed current: a refusal holding it",crmAnswer(false,{ok:false,error:"crm_conflict",current}),{ok:false,error:"crm_conflict",current});
+is("crm_conflict without current (pipelines changed): a plain refusal, as before",crmAnswer(false,{ok:false,error:"crm_conflict"}),{ok:false,error:"crm_conflict"});
+for(const bad of [null,{},[],"x",{deal:current.deal},{version:current.version},{...current,version:"0123"},{...current,version:"0123456789ABCDEF0123456789ABCDEF"},{...current,deal:{...current.deal,id:"bad"}},{...current,deal:{...current.deal,title:7}},{...current,deal:{...current.deal,cents:-1}},{...current,deal:{...current.deal,assignee:null}},{...current,deal:[]}])
+  is("a malformed current is never put in the editor",crmAnswer(false,{ok:false,error:"crm_conflict",current:bad}),uncertain);
+is("current on another error stays uncertain",crmAnswer(false,{ok:false,error:"unknown",current}),uncertain);
+is("a bare deal on a conflict stays uncertain, as before",crmAnswer(false,{ok:false,error:"crm_conflict",deal:current.deal}),uncertain);
 done();

@@ -25,6 +25,7 @@ is("a deal moves to a stage of any pipeline", html.includes('<optgroup label="Co
 is("only the chosen pipeline's deals are on its board", html.includes("Deal d000000001") && !html.includes("Deal d000000003"), true);
 is("a deal with a person still links to a payment request, filled in", html.includes("/studio/requests?store=s1&amp;email=dana%40example.com&amp;for=Deal+d000000001&amp;amount=1500"), true);
 is("a new pipeline can be added below the plan's number", html.includes("New pipeline"), true);
+is("the alert region is always there, empty and visually hidden without an error, so a message put in it is announced", html.includes('<p class="sr-only" role="alert"></p>'), true);
 const full = renderToStaticMarkup(createElement(DealsBoard, { ...props, pipelineMax: 2 }));
 is("and not at it", full.includes("New pipeline"), false);
 const one = renderToStaticMarkup(createElement(DealsBoard, { ...props, pipelines: undefined, stages: DEFAULT_STAGES, deals: deals.slice(0, 2), pipelineMax: 1 }));

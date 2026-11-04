@@ -2,13 +2,13 @@ import type { NextRequest } from "next/server";
 import { StoreFullError } from "@/lib/store-full";
 import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
-import { DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
+import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
 import { PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage } from "@/lib/pipeline-access-rules";
 import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dropDeal, readDeal, readFields, readPipelines, readStages, setValue, writeDeal, writeFields, writeStages } from "@/lib/crm";
+import { CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dealVersion, dropDeal, readDeal, readDealExact, readFields, readPipelines, readStages, setValue, writeDeal, writeDealOver, writeFields, writeStages } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -25,6 +25,9 @@ const MAX_BODY_BYTES = 20_000;
  *   { action: "unpipeline", id, moveTo }        removes a pipeline; its deals go to the stage `moveTo`
  *   { action: "deal", deal }                    saves a deal, new without an id; a deal that enters
  *                                              a stage starts the workflow that stage starts
+ *   { action: "deal", version, deal: { id, … } } changes a deal: only the fields sent, and only over
+ *                                              the record whose version (dealVersion) the board read;
+ *                                              otherwise 409 crm_conflict with the deal as it is now
  *   { action: "undeal", id }                    removes one
  */
 export async function POST(request: NextRequest) {
@@ -87,15 +90,26 @@ export async function POST(request: NextRequest) {
     if (body.action === "deal") {
       const raw = body.deal && typeof body.deal === "object" ? (body.deal as Record<string, unknown>) : {};
       const asked = typeof raw.id === "string" && DEAL_ID.test(raw.id) ? raw.id : "";
-      const existing = asked ? await readDeal(statsId, asked, stages) : null;
+      // A change lands only over the exact record the board read (635 [GL3]): never over what a workflow step, a
+      // pipeline change or a teammate wrote since. The board sends only the fields the creator changed.
+      const exact = asked ? await readDealExact(statsId, asked, stages) : null;
+      const existing = exact?.deal ?? null;
       if (asked && !existing) return refuse("unknown", 404);
-      if (restricted) {
-        const pipelines = await readPipelines(statsId);
+      const pipelines = restricted ? await readPipelines(statsId) : null;
+      if (pipelines) {
         const target = typeof raw.stage === "string" ? raw.stage : (existing?.stage ?? "");
         // Both the pipeline it is in and the one it goes to must be theirs to change.
         if ((existing && !mayEdit(pipelineOfStage(pipelines, existing.stage))) || !mayEdit(pipelineOfStage(pipelines, target))) return noAccess();
       }
-      const follow = readFollowUp({ ...existing, ...raw });
+      // The deal as it is now, for the board to put the creator's changes back on; never to someone who may not see it.
+      const conflict = (current: { deal: Deal | null; raw: string | null }) => {
+        if (!current.deal || current.raw === null) return refuse("unknown", 404);
+        const hidden = pipelines !== null && accessOf(guarded.role, access, pipelineOfStage(pipelines, current.deal.stage) ?? "") === "none";
+        return Response.json({ ok: false, error: "crm_conflict", ...(hidden ? {} : { current: { deal: current.deal, version: dealVersion(current.raw) } }) }, { status: 409 });
+      };
+      if (exact && (typeof body.version !== "string" || body.version !== dealVersion(exact.raw!))) return conflict(exact);
+      const merged = { ...existing, ...raw };
+      const follow = readFollowUp(merged);
       if (!follow.ok) return refuse(follow.error);
       if (follow.value.assignee && follow.value.assignee !== existing?.assignee) {
         const team = await readTeam(store.sid);
@@ -103,12 +117,15 @@ export async function POST(request: NextRequest) {
         if (!eligible) return refuse("assignee");
       }
       const now = Math.floor(Date.now() / 1000);
-      const deal = parseDeal({ ...existing, ...raw, ...follow.value, formResponseRef: existing?.formResponseRef, id: existing?.id ?? newCrmId(10), createdAt: existing?.createdAt ?? now, updatedAt: now }, stages);
-      if (!deal) return refuse(typeof raw.title === "string" && raw.title.trim() ? "stage" : "title");
-      if (!(await writeDeal(statsId, deal, store))) return refuse("full");
+      const deal = parseDeal({ ...merged, ...follow.value, formResponseRef: existing?.formResponseRef, id: existing?.id ?? newCrmId(10), createdAt: existing?.createdAt ?? now, updatedAt: now }, stages);
+      if (!deal) return refuse(typeof merged.title === "string" && merged.title.trim() ? "stage" : "title");
+      if (exact) {
+        // Changed between the read and the write: nothing written; the board gets the deal as it is now.
+        if ((await writeDealOver(statsId, deal, exact.raw!, store)) === "changed") return conflict(await readDealExact(statsId, asked, stages));
+      } else if (!(await writeDeal(statsId, deal, store))) return refuse("full");
       // Saved first: the workflow its stage starts never holds up, or undoes, the deal itself.
       const workflows = await dealEnteredStage(store, deal, existing);
-      return Response.json({ ok: true, deal, workflows });
+      return Response.json({ ok: true, deal, version: dealVersion(JSON.stringify(deal)), workflows });
     }
     if (body.action === "undeal") {
       const id = typeof body.id === "string" ? body.id : "";

@@ -192,6 +192,12 @@ Ordem do dono (03h05): "pode mandar ao github regra de mais segurança". O item 
 ### C2-57 — 04/11/2026 03h20 — O GitHub agora bloqueia merge sem os testes verdes
 Pedido do dono, ativo desde 03h20: o main tem uma regra no próprio GitHub (ruleset "main: tests before merge"). Merge só por PR; os 9 checks "All checks (...)" (product-checks, as seis matrizes de acessibilidade, codeql e dependency-security) precisam estar verdes; apagar o main e forçar push ficam bloqueados. O que muda para você: (1) o botão de merge (ou gh pr merge) recusa enquanto algum desses 9 não passar; espere o CI numa única espera em segundo plano e siga na próxima unidade; (2) **nunca** use desvio da regra (--admin, "bypass") nem empurre direto para o main; (3) um check vermelho se corrige na causa, com teste; job instável se repete uma vez e, se falhar de novo, se corrige; (4) PR só de documento passa nos 9 em menos de 1 minuto, pelo escopo de documentação. Nada mais muda nas regras de testes (C2-55/C2-56 e equivalentes).
 
+### C2-58 — 04/11/2026 03h40 — Decisão do dono sobre o #1496 (CV1): manter 260
+Decisão do dono (03h40, "faça o correto", sobre a recomendação de manter): **(b) ROOM_LIVE_PARTS fica 260** (16 visitas por hora de sala com conversa). Os Termos (app/terms 2.3), CURRENT_COMMERCIAL_TERMS e a data dos Termos não mudam. No #1496: (1) volte lib/traffic-rules.ts:71 para 260; (2) ajuste tests/room.test.ts para que o teste confira o que importa, que o número cobre o custo medido (260 ≥ 217,6, com o custo como teto) e não fique a mais de uma folga declarada e justificada no próprio teste; nada de folga larga só para passar; (3) corrija a descrição do PR sobre o plan-margin #14 (Scale 95,1% × Pro 95,2%) e deixe a pendência registrada em MR2, como propôs; (4) siga com o resto do PR pelas regras de sempre (CI verde, revisão independente). Não mude nenhum outro limite, preço, comissão, flag ou trava.
+
+### C2-59 — 04/11/2026 03h50 — De volta a 6 subagentes
+Às 03h20 você estava com 4 (2 construindo, 1 lendo). A C2-50 continua: 6 ocupados o tempo todo (2 construindo, 4 lendo e testando). Ponha já mais 3 leitores, por exemplo: revisão independente do IT4 e do PF1 antes do PR, testes de borda da pilha GL5 juntos sobre o main depois de cada merge, e conferência das suas linhas de custo (MR) dos ramos que vão entrar. Quando um terminar, ponha outro no lugar na mesma hora. O CV1 (#1496, C2-58) entra no próximo construtor livre, como você disse.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens

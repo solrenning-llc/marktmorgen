@@ -24,6 +24,7 @@ import { PageCoach } from "@/components/page-coach";
 import { PageStylePicker } from "@/components/page-style-picker";
 import { BlockPicker } from "@/components/block-picker";
 import { addedSaying, chosenSaying, insertAt, insertionPlaces, offeredKinds, placeWords } from "@/lib/block-insert";
+import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
 import { SharePanel } from "@/components/share-panel";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { BlockRewrite } from "@/components/block-rewrite";
@@ -584,15 +585,23 @@ export function PageEditor({
     }
   }
 
-  // A block just chosen: its first field takes the focus once its panel is drawn.
+  // A block just chosen, from "Add here", the gallery or the side menu alike: its
+  // first field takes the focus once its panel is drawn, at a later frame if
+  // the panel is not there yet (lib/focus-when-drawn.ts), never dropped.
+  const stopFocusNew = useRef<(() => void) | null>(null);
   useEffect(() => {
     const id = focusNew.current;
     if (!id || open !== id) return;
     focusNew.current = null;
-    const panel = document.getElementById(`panel-${id}`);
-    const first = panel?.querySelector<HTMLElement>("input:not([disabled]):not([type=hidden]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])");
-    (first ?? document.querySelector<HTMLElement>(`#row-${CSS.escape(id)} button[aria-expanded]`))?.focus();
+    stopFocusNew.current?.();
+    stopFocusNew.current = focusWhenDrawn(() => {
+      const panel = document.getElementById(`panel-${id}`);
+      if (!panel) return null;
+      const first = panel.querySelector<HTMLElement>("input:not([disabled]):not([type=hidden]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])");
+      return first ?? document.querySelector<HTMLElement>(`#row-${CSS.escape(id)} button[aria-expanded]`);
+    }, browserFrames());
   }, [open, drafts]);
+  useEffect(() => () => stopFocusNew.current?.(), []);
 
   /** "Add here" at a place: the card chosen goes there, or the place waits for a card (in the side menu, or the gallery opened here). */
   function addHere(at: number) {
@@ -2679,16 +2688,22 @@ function RowEditor({
   const noteFor = (column: number, note: string | null) => setUploadNote((all) => all.map((n, i) => (i === column ? note : n)));
   // A video address still being typed, kept with its own element until it is one we can play.
   const [typed, setTyped] = useState<Map<RowElement, string>>(() => new Map());
-  // Where the keyboard goes once the change is drawn.
+  // Where the keyboard goes once the change is drawn: at a later frame if the
+  // field is not there yet (lib/focus-when-drawn.ts), so the focus never stays
+  // on the Add button, where a typed space would add the part again.
   const focusTo = useRef<string | null>(null);
+  const stopFocus = useRef<(() => void) | null>(null);
   // The columns as last drawn, for a picture that finishes sending after other changes were made.
   const latest = useRef(columns);
   useEffect(() => {
     latest.current = columns;
-    if (!focusTo.current) return;
-    document.getElementById(focusTo.current)?.focus();
+    const id = focusTo.current;
+    if (!id) return;
     focusTo.current = null;
+    stopFocus.current?.();
+    stopFocus.current = focusWhenDrawn(() => document.getElementById(id), browserFrames());
   });
+  useEffect(() => () => stopFocus.current?.(), []);
 
   const at = (column: number, index: number) => `${base}-c${column}e${index}`;
   const first = (place: RowPlace, now: RowColumns) => (now[place.column]?.[place.index]?.kind === "image" ? `${at(place.column, place.index)}-pa0` : `${at(place.column, place.index)}-a`);
@@ -2986,7 +3001,8 @@ function RowEditor({
     return (
       <div className="mt-3 space-y-2 rounded-xl bg-white p-3 ring-1 ring-line">
         <div className="flex flex-wrap items-end gap-2">
-          <div className="min-w-0 flex-1">
+          {/* Never narrower than its longest choice ("Smaller heading"): in a narrow column the Add button goes below it instead. */}
+          <div className="min-w-[min(13rem,100%)] flex-1">
             <label htmlFor={id} className="field-label">{`Add to column ${column + 1}`}</label>
             <select id={id} className="field" value={kind} aria-describedby={reasonId} onChange={(e) => setAddKind((all) => all.map((k, i) => (i === column ? (e.target.value as RowElementKind) : k)))}>
               {ROW_ELEMENT_KINDS.map((k) => (

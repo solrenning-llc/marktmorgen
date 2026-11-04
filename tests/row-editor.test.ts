@@ -231,6 +231,15 @@ part("The editor uses the rules, with buttons");
   is("a full column says why, and is not silently disabled", rowEditor.includes("aria-disabled") && rowEditor.includes("aria-describedby={reasonId}") && !/[^-]disabled=\{/.test(rowEditor), true);
   is("what happened is said in a status line", rowEditor.includes('role="status"'), true);
   is("a part is checked before the page is sent", editor.includes("rowProblem(b.columns)"), true);
+  // Seen in a browser at 1280 pixels: in the narrow block list beside the side menu and the page, the choice shrank to 64 pixels and showed "H".
+  is("the Add to column choice is never narrower than its longest name; the Add button goes below it instead", rowEditor.includes('<div className="flex flex-wrap items-end gap-2">') && rowEditor.includes('<div className="min-w-[min(13rem,100%)] flex-1">\n            <label htmlFor={id} className="field-label">{`Add to column ${column + 1}`}</label>'), true);
+  {
+    // 13rem against the longest name at a generous 0.6em a letter, the field's padding (2 × 0.9rem), the arrow (1.5rem) and the border.
+    const longest = Math.max(...Object.values(ROW_ELEMENT_NAMES).map((n) => n.length));
+    is("13rem holds the longest name, \"Smaller heading\"", [longest, longest * 0.6 + 1.8 + 1.5 + 0.125 <= 13], [15, true]);
+  }
+  is("the Add button stays a 44 pixel target", rowEditor.includes('"inline-flex min-h-11 items-center gap-1.5 rounded-full'), true);
+  is("after a change the keyboard goes to the new field once it is drawn, at a later frame if need be, never left on Add", rowEditor.includes("stopFocus.current = focusWhenDrawn(() => document.getElementById(id), browserFrames());") && !rowEditor.includes("document.getElementById(focusTo.current)?.focus();"), true);
   is("a copied row leaves its pictures out", editor.includes('if (block.kind === "row") block.columns = block.columns.map((column) => column.filter((element) => element.kind !== "image"));'), true);
 }
 

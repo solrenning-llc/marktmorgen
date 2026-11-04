@@ -117,7 +117,10 @@ async function main(): Promise<void> {
   is("each place is a 44 pixel button whose name holds its visible words", editor.includes('className={`inline-flex min-h-11 items-center gap-1 rounded-full') && editor.includes("aria-label={`Add here: ${armed"), true);
   is("a card dropped on a place goes through the same insertion", editor.includes("add(draggingKind, placeOf(event), true);"), true);
   is("the destination line is shape, not only color", editor.includes('className={`h-1 flex-1 rounded-full ${lit ? "bg-violet-brand" : "bg-transparent"}`}'), true);
-  is("the new block's first field takes the focus", editor.includes("focusNew.current = block.id;") && editor.includes('panel?.querySelector<HTMLElement>("input:not([disabled])'), true);
+  is("the new block's first field takes the focus", editor.includes("focusNew.current = block.id;") && editor.includes('panel.querySelector<HTMLElement>("input:not([disabled])'), true);
+  is("from the gallery too, at every place, through the same insertion", (editor.match(/onPick=\{\(kind\) => add\(kind, (?:at|drafts\.length), true\)\}/g) ?? []).length, 2);
+  is("and from the side menu", editor.includes("add(kind, picking, true);") && editor.includes("add(armed, at, true);"), true);
+  is("the focus waits for the panel to be drawn, frame by frame, instead of being dropped", editor.includes("stopFocusNew.current = focusWhenDrawn(() => {") && editor.includes("if (!panel) return null;"), true);
   is("the status region says where it went", editor.includes("setSaid(addedSaying(kindLabel(kind), result.at));") && editor.includes('<p role="status" aria-atomic="true" className="sr-only">\n        {said}'), true);
   is("the side menu stands only beside the page on a wide screen", editor.includes('{sideBySide ? (\n        <aside aria-label="Blocks to add"'), true);
   is("the side menu is the same picker", editor.includes('layout="menu"'), true);

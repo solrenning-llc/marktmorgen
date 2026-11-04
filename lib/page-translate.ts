@@ -121,31 +121,26 @@ export function withWords(page: SalesPage, words: string[]): SalesPage {
  * as the first is dropped there, as it always was, rather than coming back
  * whole in the old language beside a translated first one.
  *
- * With `to`, the language asked for (inbox C4-19 (c)): the page says it is
- * in `to`, a translated block carries no language of its own, and a block
- * put back as it was says the language it is in, its own mark or else the
- * original page's, so the page draws it with that lang (WCAG 3.1.2). When
- * neither is known, nothing is marked: a wrong language is worse than none.
+ * The languages (inbox C4-19 (c), C4-26 (2)): `to`, the one asked for, and
+ * `from`, the one the creator says the page is in now, when they say. A
+ * translated block carries no mark; a block put back as it was keeps its own
+ * mark while that still holds, or else is marked `from`, and is never marked
+ * the language asked for. When the language is not known, nothing is marked:
+ * a wrong language is worse than none.
  */
-export function keepEveryBlock(original: SalesPage, translated: SalesPage, to?: LanguageCode): { page: SalesPage; untranslated: number } {
+export function keepEveryBlock(original: SalesPage, translated: SalesPage, to?: LanguageCode, from?: LanguageCode): { page: SalesPage; untranslated: number } {
   // The blocks put back as they were, by version: counted only once the page is read, so a second version dropped
   // there for being the same as the first does not count its blocks (inbox C4-19 (a)).
   const restored = { main: new Set<string>(), variant: new Set<string>() };
   const reads = (block: PageBlock) => parsePage({ blocks: [block] }).blocks.length === 1;
-  const unmarked = (block: PageBlock): PageBlock => {
-    const { lang: _lang, ...rest } = block;
-    void _lang;
-    return rest as PageBlock;
-  };
   const marked = (before: PageBlock): PageBlock => {
-    if (!to) return before;
-    const lang = before.lang ?? original.lang;
-    return lang && lang !== to ? { ...before, lang } : unmarked(before);
+    const lang = markHolds(before) ? before.lang : from;
+    return lang && lang !== to ? markLang(before, lang) : unmarked(before);
   };
-  const fit = (from: PageBlock[], blocks: PageBlock[], kept: Set<string>): PageBlock[] =>
+  const fit = (from_: PageBlock[], blocks: PageBlock[], kept: Set<string>): PageBlock[] =>
     blocks.map((block, at) => {
-      if (reads(block)) return to ? unmarked(block) : block;
-      const before = from[at];
+      if (reads(block)) return unmarked(block);
+      const before = from_[at];
       if (before && before.id === block.id && reads(before)) {
         kept.add(before.id);
         return marked(before);
@@ -155,9 +150,42 @@ export function keepEveryBlock(original: SalesPage, translated: SalesPage, to?: 
   const variant = translated.variant
     ? { ...translated.variant, blocks: fit(original.variant?.blocks ?? [], translated.variant.blocks, restored.variant) }
     : translated.variant;
-  const page = parsePage({ ...translated, blocks: fit(original.blocks, translated.blocks, restored.main), variant, ...(to ? { lang: to } : {}) });
+  const page = parsePage({ ...translated, blocks: fit(original.blocks, translated.blocks, restored.main), variant });
   const left = (blocks: PageBlock[] | undefined, kept: Set<string>) => (blocks ?? []).filter((block) => kept.has(block.id)).length;
   return { page, untranslated: left(page.blocks, restored.main) + left(page.variant?.blocks, restored.variant) };
+}
+
+/**
+ * A print of a block's words, in the order the page reads them: eight hex
+ * characters of an FNV-1a hash, enough to tell that words changed, never a
+ * secret.
+ */
+export function wordsPrint(block: PageBlock): string {
+  const text = JSON.stringify(pageWords({ blocks: [unmarked(block)], variant: null } as unknown as SalesPage));
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/** A block marked as being in `lang`, with the print of the words it is marked for. */
+export function markLang(block: PageBlock, lang: LanguageCode): PageBlock {
+  return { ...unmarked(block), lang, langOf: wordsPrint(block) };
+}
+
+/** Whether a block's language mark still holds: its words are the ones it was marked with. */
+export function markHolds(block: PageBlock): boolean {
+  return Boolean(block.lang) && block.langOf === wordsPrint(block);
+}
+
+/** A block without a language mark. */
+function unmarked(block: PageBlock): PageBlock {
+  const { lang: _lang, langOf: _langOf, ...rest } = block;
+  void _lang;
+  void _langOf;
+  return rest as PageBlock;
 }
 
 /** The words split into parts of at most TRANSLATE_PART_CHARS characters (a longer single one is a part of its own). */
@@ -178,37 +206,3 @@ export function translateParts(words: string[]): string[][] {
   return parts;
 }
 
-/**
- * The words of each block marked with a language of its own (keepEveryBlock),
- * by version and block id, as the studio last had them: a mark holds only
- * while its block's words are those (inbox C4-19 (c)).
- */
-export type PageMarks = { a: Record<string, string>; b: Record<string, string> };
-
-/** A block's words as one key, in the order the page reads them. */
-function wordsKey(block: PageBlock): string {
-  return JSON.stringify(pageWords({ blocks: [block], variant: null } as unknown as SalesPage));
-}
-
-/** The marked blocks' words, as the studio has them now: after loading a page and after a translation. */
-export function marksOf(page: SalesPage): PageMarks {
-  const of = (blocks: PageBlock[] | undefined) => Object.fromEntries((blocks ?? []).filter((block) => block.lang).map((block) => [block.id, wordsKey(block)]));
-  return { a: of(page.blocks), b: of(page.variant?.blocks) };
-}
-
-/**
- * The page with each block's language mark kept only while its words are
- * the ones it was marked with: a block the creator has since written in
- * another way, by hand, carries no mark, since its language is no longer
- * known. Nothing else changes.
- */
-export function keptMarks(page: SalesPage, marks: PageMarks): SalesPage {
-  const keep = (blocks: PageBlock[], known: Record<string, string>): PageBlock[] =>
-    blocks.map((block) => {
-      if (!block.lang || (Object.hasOwn(known, block.id) && known[block.id] === wordsKey(block))) return block;
-      const { lang: _lang, ...rest } = block;
-      void _lang;
-      return rest as PageBlock;
-    });
-  return { ...page, blocks: keep(page.blocks, marks.a), variant: page.variant ? { ...page.variant, blocks: keep(page.variant.blocks, marks.b) } : page.variant };
-}

@@ -48,6 +48,9 @@ export function TranslatePage({
 }) {
   const { on, left: startLeft } = useContext(AiOn);
   const [to, setTo] = useState<LanguageCode>(storeLanguage);
+  // The language the page is in now, as the creator says: only then is a block a translation must leave as it was
+  // marked with its language (lib/page-translate.ts, keepEveryBlock; WCAG 3.1.2). "Not sure" marks nothing.
+  const [from, setFrom] = useState<LanguageCode | "">("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ error: boolean; text: string } | null>(null);
   const [left, setLeft] = useState(startLeft);
@@ -62,7 +65,7 @@ export function TranslatePage({
       const response = await fetch("/api/store/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "translate", product: productId, language: to, page: sent }),
+        body: JSON.stringify({ kind: "translate", product: productId, language: to, ...(from ? { from } : {}), page: sent }),
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: { page?: SalesPage; untranslated?: number }; left?: number; error?: string };
       if (data.ok && data.value?.page) {
@@ -101,6 +104,17 @@ export function TranslatePage({
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <label className="block">
+            <span className="field-label">Written now in</span>
+            <select className="field" value={from} aria-describedby={`${productId}-from-hint`} onChange={(e) => setFrom(e.target.value as LanguageCode | "")}>
+              <option value="">Not sure</option>
+              {LANGUAGE_CODES.map((code) => (
+                <option key={code} value={code}>
+                  {LANGUAGES[code].english}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
             <span className="field-label">Into</span>
             <select className="field" value={to} onChange={(e) => setTo(e.target.value as LanguageCode)}>
               {LANGUAGE_CODES.map((code) => (
@@ -114,6 +128,9 @@ export function TranslatePage({
             {busy ? "Translating…" : "Translate"}
           </button>
         </div>
+        <p id={`${productId}-from-hint`} className="text-xs text-ink-soft">
+          The language the page is written in now. If a block has to stay as it is, the page marks it with that language, so a screen reader reads it right. Not sure: nothing is marked.
+        </p>
         <p className="text-xs text-ink-soft">
           {parts === 0
             ? "Add a few blocks first."

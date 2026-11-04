@@ -406,7 +406,7 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
  */
 export async function translatePage(
   store: Store,
-  input: { page: SalesPage; language: string; to?: LanguageCode },
+  input: { page: SalesPage; language: string; to?: LanguageCode; from?: LanguageCode },
   now = Date.now(),
 ): Promise<AiResult<{ page: SalesPage; untranslated: number }> | { ok: false; reason: "long" }> {
   const words = pageWords(input.page);
@@ -438,7 +438,7 @@ export async function translatePage(
       );
       if (answers.some((a) => a === null)) return null;
       // A block kept whole that a longer translation would refuse stays as it was, counted (keepEveryBlock).
-      return keepEveryBlock(input.page, withWords(input.page, answers.flat() as string[]), input.to);
+      return keepEveryBlock(input.page, withWords(input.page, answers.flat() as string[]), input.to, input.from);
     },
     parts.length,
   );

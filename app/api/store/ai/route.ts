@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
     const product = await readListing(store, text(body.product, 40));
     if (!product) return fail("unknown", 404);
     const to = isLanguage(body.language) ? body.language : store.language;
-    return answer(translatePage(store, { page: parsePage(body.page), language: LANGUAGES[to].english, to }));
+    return answer(translatePage(store, { page: parsePage(body.page), language: LANGUAGES[to].english, to, from: isLanguage(body.from) ? body.from : undefined }));
   }
   if (body.kind === "blog") {
     // A blog post, from the creator's words and what the store sells (lib/ai.ts, writeBlogPost).

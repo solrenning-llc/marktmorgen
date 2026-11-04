@@ -9,6 +9,7 @@ import { imageUrl } from "@/lib/product-image";
 import { type Piece, aboutBlocks } from "@/lib/product-about";
 import { CELL_NO, CELL_YES, type CtaBlock, type HeroBlock, type PageBlock, type PageStyle, type RowBlock, type RowElement, bandsOf, quoteHost } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
+import { markHolds } from "@/lib/page-translate";
 import type { PageFacts } from "@/lib/page-facts";
 import { MAX_LONG_ANSWER, MAX_SHORT_ANSWER, type FormDef, type FormField, branches, formOpen, offersKeep, scheduleWhen } from "@/lib/forms";
 import { FormBranching } from "@/components/form-branching";
@@ -873,8 +874,9 @@ export function PageSections({
           block.screens ? `sp-only-${block.screens}` : "",
         ];
         return (
-          // A block left in another language than the page's says so (lib/page-translate.ts, keepEveryBlock; WCAG 3.1.2).
-          <div key={block.id} data-block={block.id} className={classes.filter(Boolean).join(" ")} lang={block.lang}>
+          // A block a translation left in another language says so while its words are still those (lib/page-translate.ts,
+          // markHolds; WCAG 3.1.2).
+          <div key={block.id} data-block={block.id} className={classes.filter(Boolean).join(" ")} lang={markHolds(block) ? block.lang : undefined}>
             {view}
           </div>
         );

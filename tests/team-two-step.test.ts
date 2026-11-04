@@ -1,9 +1,11 @@
 /**
  * 612 [WP11], unit 1: the owner may require two-step sign-in of the team
- * (lib/team.ts, lib/studio-route.ts). With it on, a member without an
- * authenticator app or a passkey opens nothing of the store; with either,
- * they do; the owner always does; a member joining or leaving never switches
- * it off; the activity log records who switched it. Synthetic records only.
+ * (lib/team.ts, lib/studio-route.ts). With it on, a member opens nothing of
+ * the store unless the session was opened with a second step: owning an
+ * authenticator app or a passkey is not enough by itself (the session side is
+ * in tests/team-two-step-session.test.ts); the owner always does; a member
+ * joining or leaving never switches it off; the activity log records who
+ * switched it. Synthetic records only.
  */
 import { createHash } from "node:crypto";
 import { putMember, readLog, readTeam, removeMember, setRequireTwoStep } from "@/lib/team";
@@ -41,12 +43,12 @@ async function main(): Promise<void> {
   const refused = refusedJson("two_step");
   is("a route answers 403 with its own error", [refused.status, ((await refused.json()) as { error: string }).error], [403, "two_step_required"]);
 
-  part("With an authenticator app or a passkey, they open it");
+  part("Owning an authenticator app or a passkey is not enough: the session must have been opened with it");
   await redis.pipeline([["SET", `nl:2fa:${sha(`nimbus-2fa:${ANA}`).slice(0, 40)}`, JSON.stringify({ s: "JBSWY3DPEHPK3PXP", since: 1, codes: [], last: -1 })]]);
-  is("an authenticator app", await open(ANA), "open");
+  is("an authenticator app, without a session opened with its code", await open(ANA), "two_step");
   is("Ben still has none", await open(BEN), "two_step");
   await redis.pipeline([["SET", `nl:pk:${sha(`nimbus-passkeys:${BEN}`).slice(0, 40)}`, JSON.stringify([{ id: "cred1", publicKey: "pk1", counter: 0, transports: [], name: "Phone", createdAt: "", lastUsedAt: "", synced: true }])]]);
-  is("a passkey", await open(BEN), "open");
+  is("a passkey, without a session opened with it", await open(BEN), "two_step");
 
   part("Team changes never switch it off");
   await putMember(store, "cara-2fa@example.com", "editor");

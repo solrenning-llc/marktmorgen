@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   const route = readFileSync("app/api/store/book/route.ts", "utf8");
   is(
     "back on the booking page after any refusal, the length chosen is still chosen: only a whole number, read against the list again",
-    [route.includes("const keptLength = /^\\d{1,4}$/.test(minutes) && Number(minutes) !== product.call.minutes ? `&length=${minutes}` : \"\";"), route.includes("${keptLength}`, \"Cache-Control\": \"no-store\""), page.includes("bookingLength(product.call, product.priceCents, asked)")],
+    [route.includes("const keptLength = /^\\d{1,4}$/.test(minutes) && Number(minutes) !== product.call.minutes ? `&length=${minutes}` : \"\";"), route.includes("${keptLength}${keptEmbed}`, \"Cache-Control\": \"no-store\""), page.includes("bookingLength(product.call, product.priceCents, asked)")],
     [true, true, true],
   );
   is("offered from the same rule the booking keeps, with the team the times were read for", page.includes("offeredLengths(product.call, product.priceCents, { pkg: Boolean(pkgToken), team: read.team })"), true);

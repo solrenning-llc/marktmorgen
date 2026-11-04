@@ -97,3 +97,22 @@ test("the original matrix and every original profile reject proxies before any p
  assert.deepEqual(contractProtocolInfrastructureCosts(Object.freeze({...input})), contractProtocolInfrastructureCosts(input));
  assert.deepEqual(contractProtocolInfrastructureCosts(Object.assign(Object.create(null), input)), contractProtocolInfrastructureCosts(input));
 });
+
+test("an inherited setter cannot discard a priced contract row", () => {
+ const input = profiles();
+ const previous = Object.getOwnPropertyDescriptor(Object.prototype, "creator_month");
+ let setters = 0;
+ try {
+  Object.defineProperty(Object.prototype, "creator_month", {
+   configurable: true, set(){ setters++; },
+  });
+  const output = contractProtocolInfrastructureCosts(input);
+  assert.ok(output);
+  assert.equal(Object.hasOwn(output, "creator_month"), true);
+  assert.equal(output.creator_month.infrastructureCents, 3);
+  assert.equal(setters, 0);
+ } finally {
+  if (previous) Object.defineProperty(Object.prototype, "creator_month", previous);
+  else delete (Object.prototype as Record<string, unknown>).creator_month;
+ }
+});

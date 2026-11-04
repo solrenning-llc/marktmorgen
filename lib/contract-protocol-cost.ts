@@ -1,4 +1,4 @@
-import {CONTRACT_KEYS,CONTRACT_FUNDING_RULES,canonicalFinancialSnapshot,type ContractKey} from "@/lib/contract-funding-rules";
+import {CONTRACT_KEYS,CONTRACT_FUNDING_RULES,type ContractKey} from "@/lib/contract-funding-rules";
 import {PUBLISHED_PLAN_PRICES} from "@/lib/plan";
 import {protocolInfrastructureMicroUsd,type ProtocolInfrastructureBounds} from "@/lib/spend-cost-table";
 
@@ -19,25 +19,30 @@ export type ContractProtocolInfrastructureCosts = Record<ContractKey,{
  * assessment, an approved retention policy or permission to operate.
  */
 export function contractProtocolInfrastructureCosts(input:unknown):ContractProtocolInfrastructureCosts|null {
- const encoded=canonicalFinancialSnapshot(input);
- if(!encoded)return null;
- const profiles=JSON.parse(encoded) as Record<string,unknown>|null;
- if(!profiles||typeof profiles!=="object"||Array.isArray(profiles)||
-    Object.keys(profiles).length!==CONTRACT_KEYS.length||
-    Object.keys(profiles).some(key=>!CONTRACT_KEYS.includes(key as ContractKey)))return null;
  const result={} as ContractProtocolInfrastructureCosts;
- for(const key of CONTRACT_KEYS){
-  if(!Object.hasOwn(profiles,key))return null;
-  const cost=protocolInfrastructureMicroUsd(profiles[key] as ProtocolInfrastructureBounds);
-  if(!cost)return null;
-  const [tier,cycle]=key.split("_") as ["creator"|"pro"|"scale","month"|"year"];
-  result[key]={
-   contractKey:key,
-   paidMonths:CONTRACT_FUNDING_RULES.paidMonths[cycle],
-   publishedPriceCents:PUBLISHED_PLAN_PRICES[tier][cycle],
-   infrastructure:cost,
-   infrastructureCents:Number((BigInt(cost.totalMicroUsd)+BigInt(9_999))/BigInt(10_000)),
-  };
- }
+ try{
+  if(!input||typeof input!=="object"||Array.isArray(input)||
+     ![Object.prototype,null].includes(Object.getPrototypeOf(input))||
+     Reflect.ownKeys(input).length!==CONTRACT_KEYS.length)return null;
+  for(const key of CONTRACT_KEYS){
+   const field=Object.getOwnPropertyDescriptor(input,key);
+   if(!field||!field.enumerable||!Object.hasOwn(field,"value"))return null;
+   // Price the original profile: a prior JSON projection could erase a
+   // category hidden by Proxy reflection before the pricing boundary sees it.
+   const cost=protocolInfrastructureMicroUsd(field.value as ProtocolInfrastructureBounds);
+   if(!cost)return null;
+   const [tier,cycle]=key.split("_") as ["creator"|"pro"|"scale","month"|"year"];
+   result[key]={
+    contractKey:key,
+    paidMonths:CONTRACT_FUNDING_RULES.paidMonths[cycle],
+    publishedPriceCents:PUBLISHED_PLAN_PRICES[tier][cycle],
+    infrastructure:cost,
+    infrastructureCents:Number((BigInt(cost.totalMicroUsd)+BigInt(9_999))/BigInt(10_000)),
+   };
+  }
+  // Every original profile is now validated plain numeric data. Reject a
+  // Proxy at the matrix root without cloning unvalidated accessor graphs.
+  structuredClone(input);
+ }catch{return null;}
  return result;
 }

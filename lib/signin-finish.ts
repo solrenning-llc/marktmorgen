@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { pendingRemoval } from "@/lib/passkeys";
-import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { DEVICE_COOKIE, SESSION_COOKIE, endSession, isMoving, noteSignIn, openSession, sessionCookie } from "@/lib/auth";
+import { repairMove } from "@/lib/move-repair";
 import { HOLD_SECONDS, TWO_STEP_COOKIE, endRecoveryAccess, holdSignIn, resetIfDue, twoStepOn } from "@/lib/two-step";
 
 /**
@@ -33,6 +34,9 @@ export async function finishProvenSignIn(
 
   let sessionId: string | null = null;
   try {
+    // An address in the middle of a move, or left by one that broke, takes no login without a second step until
+    // the move is over or repaired (lib/auth.ts isMoving, lib/move-repair.ts; review of 1daa9131e).
+    if (owner && (await isMoving(owner)) && !((await repairMove(owner)) && !(await isMoving(owner)))) return redirect("/signin?status=move-busy");
     if (owner && (await twoStepOn(owner)) && !(await resetIfDue(owner))) {
       const held = await holdSignIn(owner, false, way === "google");
       const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";

@@ -43,6 +43,7 @@
  * cannot see a flood that arrives from many machines at once.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { deleteIfHeldOnly } from "@/lib/redis-lock";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
 import { withPrefill } from "@/lib/handle-prefill";
@@ -148,27 +149,80 @@ export const MOVING_SECONDS = 5 * 60;
  * passkeys and app have left one and not yet settled, so an address that is
  * moving counts as having a second step, and nobody adds a passkey or an app
  * to it until the move is over (lib/second-step-gate.ts, security review of
- * 8b4ddf6ee). False when either is already moving.
+ * 8b4ddf6ee). Answers the move's own token, or null when either address is
+ * already moving or holds a broken move.
  */
-export async function markMoving(from: string, to: string): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
+export async function markMoving(from: string, to: string): Promise<string | null> {
+  if (!isRedisConfigured()) return null;
+  if ((await readBrokenMove(from)) || (await readBrokenMove(to))) return null;
+  const token = randomToken();
   const [a, b] = await redisPipeline([
-    ["SET", await movingKey(from), "1", "NX", "EX", MOVING_SECONDS],
-    ["SET", await movingKey(to), "1", "NX", "EX", MOVING_SECONDS],
+    ["SET", await movingKey(from), token, "NX", "EX", MOVING_SECONDS],
+    ["SET", await movingKey(to), token, "NX", "EX", MOVING_SECONDS],
   ]);
-  if (a === "OK" && b === "OK") return true;
-  await redisPipeline([...(a === "OK" ? [["DEL", await movingKey(from)]] : []), ...(b === "OK" ? [["DEL", await movingKey(to)]] : [])]);
-  return false;
+  if (a === "OK" && b === "OK") return token;
+  // Only what this call set is taken back: the other move's mark stays.
+  await endMovingOne(from, token);
+  await endMovingOne(to, token);
+  return null;
 }
 
-export async function endMoving(from: string, to: string): Promise<void> {
-  await redisPipeline([["DEL", await movingKey(from), await movingKey(to)]]);
+/** Takes an address's mark away only when it is still this move's (`token`), in one script (lib/redis-lock.ts). */
+async function endMovingOne(email: string, token: string): Promise<void> {
+  const key = await movingKey(email);
+  await deleteIfHeldOnly({ key, token, ttlSeconds: MOVING_SECONDS }, [key]);
 }
 
-export async function isMoving(email: string): Promise<boolean> {
+export async function endMoving(from: string, to: string, token: string): Promise<void> {
+  await endMovingOne(from, token);
+  await endMovingOne(to, token);
+}
+
+const brokenKey = async (email: string) =>
+  `nl:auth:move-broken:${(await sha256Hex(`nimbus-auth-move-broken:${normaliseEmail(email)}`)).slice(0, 40)}`;
+
+/**
+ * A move that could not be finished nor undone (app/api/auth/move): its two
+ * addresses, written on both with no expiry until it is repaired
+ * (lib/move-repair.ts). While it is there, both count as moving: nothing is
+ * added to them, a second move waits, and a login without a second step is
+ * refused (lib/signin-finish.ts and the recovery routes).
+ */
+export async function markBrokenMove(from: string, to: string): Promise<void> {
+  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now() });
+  await redisPipeline([
+    ["SET", await brokenKey(from), value],
+    ["SET", await brokenKey(to), value],
+  ]);
+}
+
+export async function readBrokenMove(email: string): Promise<{ from: string; to: string } | null> {
+  if (!isRedisConfigured()) return null;
+  const [raw] = await redisPipeline([["GET", await brokenKey(email)]]);
+  try {
+    const value = typeof raw === "string" ? (JSON.parse(raw) as { from?: unknown; to?: unknown }) : null;
+    return value && typeof value.from === "string" && typeof value.to === "string" ? { from: value.from, to: value.to } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearBrokenMove(from: string, to: string): Promise<void> {
+  await redisPipeline([["DEL", await brokenKey(from), await brokenKey(to)]]);
+}
+
+/** Whether a move of this address is running now (its mark), not counting a broken one. */
+export async function moveRunning(email: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const [found] = await redisPipeline([["EXISTS", await movingKey(email)]]);
   return Number(found) === 1;
+}
+
+/** Whether this address is in a move: running now, or broken and not yet repaired. */
+export async function isMoving(email: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const [running, broken] = await redisPipeline([["EXISTS", await movingKey(email)], ["EXISTS", await brokenKey(email)]]);
+  return Number(running) === 1 || Number(broken) === 1;
 }
 
 /**

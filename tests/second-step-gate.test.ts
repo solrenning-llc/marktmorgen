@@ -30,7 +30,7 @@ import { POST as addressRoute } from "@/app/api/store/address/route";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { claimHandle, storeForEmail } from "@/lib/store";
 import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
-import { endMoving, markMoving, sendMoveLink } from "@/lib/auth";
+import { endMoving, isMoving, markMoving, sendMoveLink } from "@/lib/auth";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -648,11 +648,31 @@ async function main(): Promise<void> {
   const novLink = await linkSession(NOV);
   const novOptions = await passkeys(novLink, { action: "options" }) as { ok: boolean; options?: { challenge: string } };
   is("an account with no second step gets the options", novOptions.ok, true);
-  await markMoving(NOV, "nov-elsewhere@example.com");
   const novKey = makePasskey(NOV, "cred-nov-new");
+  const novPipe = redis.pipeline.bind(redis);
+  let novRaced = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The instant the add takes the account's lock, after the route's own check passed: a passkey lands first.
+    if (!novRaced && commands.some((c) => c[0] === "SET" && c[1] === lockOf(NOV) && c.includes("NX"))) {
+      novRaced = true;
+      await makePasskey(NOV, "cred-nov-first").keep();
+    }
+    return novPipe(commands);
+  }) as typeof redis.pipeline;
   const novAdd = await passkeys(novLink, { action: "add", response: novKey.register(novOptions.options!.challenge), name: "New" });
-  await endMoving(NOV, "nov-elsewhere@example.com");
-  is("between the options and the add, the account started to move: nothing is added", [novAdd.error, (await listPasskeys(NOV)).length], ["second_step", 0]);
+  redis.pipeline = novPipe;
+  is("a passkey that landed between the route's check and the lock: the link's add is refused under the lock", [novRaced, novAdd.error, (await listPasskeys(NOV)).map((p) => p.id)], [true, "second_step", ["cred-nov-first"]]);
+  await redis.pipeline([["DEL", `nl:pk:${hex(`nimbus-passkeys:${NOV}`).slice(0, 40)}`]]);
+
+  part("Two moves of one address at once: the second is refused, and only a move's own mark is taken away");
+  const MA = "ma-one@example.com";
+  const firstMark = await markMoving(MA, "ma-two@example.com");
+  is("the first move marks both", [typeof firstMark, await isMoving(MA)], ["string", true]);
+  is("a second move of the same address is refused, and its other address is left unmarked", [await markMoving(MA, "ma-three@example.com"), await isMoving("ma-three@example.com")], [null, false]);
+  await endMoving(MA, "ma-three@example.com", "not-this-moves-token");
+  is("another move's token takes nothing away", await isMoving(MA), true);
+  await endMoving(MA, "ma-two@example.com", firstMark!);
+  is("its own token does", [await isMoving(MA), await isMoving("ma-two@example.com")], [false, false]);
   const novOptions2 = await passkeys(novLink, { action: "options" }) as { ok: boolean; options?: { challenge: string } };
   is("with nothing in the way, the same answer adds it", (await passkeys(novLink, { action: "add", response: makePasskey(NOV, "cred-nov-2").register(novOptions2.options?.challenge ?? ""), name: "New" })).ok, true);
   const SET = "set-app@example.com";
@@ -744,6 +764,90 @@ async function main(): Promise<void> {
     answers.push((r.headers.get("location") ?? "").split("address=")[1]);
   }
   is("five an hour, then limited", answers, ["sent", "sent", "sent", "sent", "sent", "limited"]);
+
+  part("A move that can be neither finished nor undone stays marked until it is repaired (review of 1daa9131e)");
+  const BRK = "brk-from@example.com";
+  const BRD = "brk-dest@example.com";
+  await claimHandle(BRK, "brk-from", "Brk", "");
+  await makePasskey(BRK, "cred-brk").keep();
+  const brkOwner = await openSession(BRK, "passkey", "cred-brk");
+  mails.length = 0;
+  await sendMoveLink(BRK, BRD, ORIGIN, brkOwner);
+  const brkToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === BRD)?.text ?? "")?.[1] ?? "";
+  const brkList = `nl:pk:${hex(`nimbus-passkeys:${BRK}`).slice(0, 40)}`;
+  const bPipe = redis.pipeline.bind(redis);
+  let bStoreFail = true;
+  let bBackFail = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const c = commands[0];
+    if (bStoreFail && c && c[0] === "SET" && c.includes("NX") && c.includes(15)) { bStoreFail = false; bBackFail = true; throw new Error("store lock busy (made up)"); }
+    // From then on, putting the passkeys back on the old address fails too.
+    if (bBackFail && commands.some((x) => x[0] === "EVAL" && x.includes(brkList))) throw new Error("down for a while");
+    return bPipe(commands);
+  }) as typeof redis.pipeline;
+  const brkAnswer = (await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: brkToken }))).headers.get("location");
+  is("the move fails, and so does putting the passkeys back", brkAnswer, `${ORIGIN}/signin?status=move-error`);
+  is("both addresses stay marked after the move returns", [await isMoving(BRK), await isMoving(BRD)], [true, true]);
+  is("so nothing is added to the old address, even with the passkey away", await mayAddSecondStep(BRK, await openSession(BRK)), false);
+  const tokenBrk = hex(String(Math.random()));
+  await bPipe([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenBrk}`).slice(0, 40)}`, BRK, "EX", 900]]);
+  is("a login with the emailed link is refused while it cannot be repaired", (await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenBrk }))).headers.get("location"), `${ORIGIN}/signin?status=move-busy`);
+  bBackFail = false;
+  redis.pipeline = bPipe;
+  const tokenBrk2 = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenBrk2}`).slice(0, 40)}`, BRK, "EX", 900]]);
+  const brkLogin = await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenBrk2 }));
+  is("the next login repairs it: the passkey is back with the store, and the login goes on", [brkLogin.headers.get("location")?.includes("/studio"), (await listPasskeys(BRK)).map((p) => p.id), (await listPasskeys(BRD)).length, await isMoving(BRK), await isMoving(BRD)], [true, ["cred-brk"], 0, false, false]);
+
+  const BOTH = "both-from@example.com";
+  const BOTHD = "both-dest@example.com";
+  await claimHandle(BOTH, "both-from", "Both", "");
+  await makePasskey(BOTH, "cred-both").keep();
+  const bothOwner = await openSession(BOTH, "passkey", "cred-both");
+  mails.length = 0;
+  await sendMoveLink(BOTH, BOTHD, ORIGIN, bothOwner);
+  const bothToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === BOTHD)?.text ?? "")?.[1] ?? "";
+  const bothOwnerKey = `nl:store:owner:${hex(`nimbus-store:${BOTH}`).slice(0, 40)}`;
+  const oPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The store is written at the new address, and taking it off the old one fails: it is on both.
+    if (commands.some((x) => x[0] === "DEL" && x.includes(bothOwnerKey))) throw new Error("down for a moment");
+    return oPipe(commands);
+  }) as typeof redis.pipeline;
+  const bothAnswer = (await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: bothToken }))).headers.get("location");
+  redis.pipeline = oPipe;
+  const bothStores = [Boolean(await storeForEmail(BOTH)), Boolean(await storeForEmail(BOTHD))];
+  is("a store left on both addresses", bothStores.every(Boolean) ? bothAnswer : "not on both", `${ORIGIN}/signin?status=move-error`);
+  const tokenBoth = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenBoth}`).slice(0, 40)}`, BOTH, "EX", 900]]);
+  is("keeps both marked: the old address takes no login by the emailed link and no new passkey", [await isMoving(BOTH), await isMoving(BOTHD), (await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenBoth }))).headers.get("location"), await mayAddSecondStep(BOTH, await openSession(BOTH))], [true, true, `${ORIGIN}/signin?status=move-busy`, false]);
+
+  part("Undoing a move forgets two-step login the old address gained midway, and gives back the owner's");
+  const APP = "app-from@example.com";
+  const APD = "app-dest@example.com";
+  await claimHandle(APP, "app-from", "App", "");
+  await makePasskey(APP, "cred-app").keep();
+  await turnOnApp(APP, "app-backup@example.org");
+  const appOwner = await openSession(APP, "app");
+  mails.length = 0;
+  await sendMoveLink(APP, APD, ORIGIN, appOwner);
+  const appToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === APD)?.text ?? "")?.[1] ?? "";
+  const appRecord = `nl:2fa:${hex(`nimbus-2fa:${APP}`).slice(0, 40)}`;
+  const aPipe = redis.pipeline.bind(redis);
+  let aFired = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const c = commands[0];
+    if (!aFired && c && c[0] === "SET" && c.includes("NX") && c.includes(15)) {
+      aFired = true;
+      // Something wrote two-step login of its own on the old address in the gap.
+      await aPipe([["SET", appRecord, JSON.stringify({ s: "x", since: 1, codes: ["planted"], last: -1, reset: 0, backup: "" })]]);
+      throw new Error("store lock busy (made up)");
+    }
+    return aPipe(commands);
+  }) as typeof redis.pipeline;
+  await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: appToken }));
+  redis.pipeline = aPipe;
+  is("the planted record is gone, the owner's ten codes are back on the old address, nothing at the new one, nothing left broken", [(await twoStepStatus(APP)).codesLeft, (await twoStepStatus(APD)).on, await isMoving(APP)], [10, false, false]);
 
   part("A passkey removed, or the app turned off, just as a login opens its session");
   const UMA = "uma-race@example.com";

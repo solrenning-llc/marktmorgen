@@ -62,6 +62,10 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "That address already has a store",
     body: "An account cannot be moved on top of another one. Nothing was changed.",
   },
+  "move-busy": {
+    title: "Your account is in the middle of a move",
+    body: "Its sign-in address is being changed, so logging in with only the emailed link waits until that is over. Try again in a few minutes, or log in with your passkey. If this keeps happening, reply to any email from us.",
+  },
   "move-has-login": {
     title: "That address has its own passkeys or two-step login",
     body: "An account cannot be moved onto an address that already has its own passkeys, authenticator app or recovery codes. Nothing was changed. Remove them from that address first, or move to another address.",

@@ -5,6 +5,7 @@ import { originFrom } from "@/lib/request-origin";
 import {
   endAllSessions,
   endMoving,
+  markBrokenMove,
   markMoving,
   moveDevices,
   openSession,
@@ -15,6 +16,7 @@ import { moveAccount, storeForEmail } from "@/lib/store";
 import { moveMemberships } from "@/lib/team";
 import { discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { holdsSecondStep } from "@/lib/second-step-gate";
+import { repairMove } from "@/lib/move-repair";
 import { movePhoneDevices } from "@/lib/phone-alerts";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
@@ -60,15 +62,36 @@ export async function POST(request: NextRequest) {
   if (await holdsSecondStep(moved.to).catch(() => true)) return away("/signin?status=move-has-login");
 
   const { from, to } = moved;
+  // A move left broken earlier is repaired first (lib/move-repair.ts); while it cannot be, nothing moves.
+  if (!(await repairMove(from)) || !(await repairMove(to))) return away("/signin?status=move-error");
   // Both addresses are marked as moving for the whole move (lib/auth.ts markMoving): the ways in leave
   // `from` before the store does, and in that gap `from` counts as having a second step, so a session opened
   // only by the emailed link adds no passkey and no app to it (lib/second-step-gate.ts; review of 8b4ddf6ee).
   // A second move of either address waits until this one is over.
-  if (!(await markMoving(from, to).catch(() => false))) return away("/signin?status=move-error");
+  const mark = await markMoving(from, to).catch(() => null);
+  if (!mark) return away("/signin?status=move-error");
+  let broken = false;
   try {
-    return await finishMove(from, to, away);
+    return await finishMove(from, to, away, () => {
+      broken = true;
+    });
   } finally {
-    await endMoving(from, to).catch((error) => console.error("unmarking a move failed", error));
+    // A move that could be neither finished nor undone keeps both addresses marked, durably, until it is
+    // repaired (lib/auth.ts markBrokenMove): never a store on one address and its ways in on the other
+    // with a login by the emailed link let in (review of 1daa9131e).
+    if (broken) await markBrokenMove(from, to).catch((error) => console.error("marking a broken move failed", error));
+    await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
+  }
+}
+
+/** Runs one step of an undo; false, logged, when it failed. */
+async function step(what: string, work: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await work();
+    return true;
+  } catch (error) {
+    console.error(`${what} failed`, error);
+    return false;
   }
 }
 
@@ -77,26 +100,34 @@ export async function POST(request: NextRequest) {
  * each refuses an address with its own (lib/passkeys.ts movePasskeys,
  * lib/two-step.ts moveTwoStep); when one refuses, or the store cannot move,
  * the account's own ways in go back, whatever `from` gained in the meantime is
- * forgotten and its sessions are logged out, and nothing else moves: a move
- * never ends split between two addresses.
+ * forgotten and its sessions are logged out, and nothing else moves. When
+ * that cannot be done, or where the store is cannot be told, `broke` is
+ * called and the move is kept marked until it is repaired.
  */
-async function finishMove(from: string, to: string, away: (path: string) => Response): Promise<Response> {
+async function finishMove(from: string, to: string, away: (path: string) => Response, broke: () => void): Promise<Response> {
   let keysMoved = false;
   let appMoved = false;
+  // A copy of two-step login that may have been left at `to` when moving it refused (lib/two-step.ts moveTwoStep).
+  let appCopy = false;
   const undo = async () => {
+    let ok = true;
     if (keysMoved) {
-      await discardPasskeys(from).catch((error) => console.error("forgetting passkeys added midway failed", error));
-      await movePasskeys(to, from).catch((error) => console.error("moving passkeys back failed", error));
+      ok = (await step("forgetting passkeys added midway", () => discardPasskeys(from))) && ok;
+      ok = (await step("moving passkeys back", () => movePasskeys(to, from))) && ok;
     }
     if (appMoved) {
-      await discardTwoStep(from).catch((error) => console.error("forgetting two-step login added midway failed", error));
-      await moveTwoStep(to, from).catch((error) => console.error("moving two-step login back failed", error));
+      ok = (await step("forgetting two-step login added midway", () => discardTwoStep(from))) && ok;
+      ok = (await step("moving two-step login back", () => moveTwoStep(to, from))) && ok;
+    } else if (appCopy) {
+      ok = (await step("forgetting a copy of two-step login", () => discardTwoStep(to))) && ok;
     }
-    await endAllSessions(from).catch((error) => console.error("logging out after an undone move failed", error));
+    ok = (await step("logging out after an undone move", () => endAllSessions(from))) && ok;
+    if (!ok) broke();
   };
   try {
     await movePasskeys(from, to);
     keysMoved = true;
+    appCopy = true;
     await moveTwoStep(from, to);
     appMoved = true;
   } catch (error) {
@@ -130,11 +161,15 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     await pendingRemoval(to).catch((error) => console.error("applying a passkey removal failed", error));
   } catch (error) {
     console.error("address move failed", error);
-    // Undone only when the store is known to be still at `from`: a passing error reading it never undoes a
-    // move whose store already landed at `to`.
+    // Undone only when the store is known to be still at `from` alone: a passing error reading it never undoes
+    // a move whose store already landed at `to`. Known at `to` alone, the move stands with its ways in. Any
+    // other state (unknown, or on both addresses) is kept marked until it is repaired.
     const [there, here] = await Promise.all([storeForEmail(to).catch(() => undefined), storeForEmail(from).catch(() => undefined)]);
     if (there === null && here) await undo();
-    else if (there === undefined || here === undefined) console.error("a failed move left in an unknown state", { from, to });
+    else if (!(there && here === null)) {
+      console.error("a failed move left in an unknown state", { from, to });
+      broke();
+    }
     return away("/signin?status=move-error");
   }
 

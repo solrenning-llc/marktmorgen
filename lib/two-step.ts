@@ -64,7 +64,7 @@
  *   nl:2fa:lockedset:<hash> the account's locked sessions, to log them out on Cancel
  */
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, dropSecondStep, endSession, normaliseEmail, openSession } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, dropSecondStep, endSession, isMoving, normaliseEmail, openSession } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
@@ -597,7 +597,8 @@ export async function spendRescue(token: string): Promise<string | null> {
   }
   if (typeof email !== "string" || !email) return null;
   const address = email;
-  const off = await withTwoStep(address, async (held) => (await twoStepOn(address)) && deleteHeld(held, [recordKey(address)]));
+  // Never for an address in a move, or left by one that broke (lib/auth.ts isMoving): its two-step login stays.
+  const off = await withTwoStep(address, async (held) => !(await isMoving(address)) && (await twoStepOn(address)) && deleteHeld(held, [recordKey(address)]));
   if (!off) return null;
   // What the app opened goes with it (lib/auth.ts dropSecondStep).
   await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");

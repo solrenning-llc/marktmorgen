@@ -291,6 +291,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:link:@lib/auth.ts": company("A sign-in link", "An account's, minutes."),
   "nl:auth:move:@lib/auth.ts": company("An address change", "An account's, a day."),
   "nl:auth:moving:@lib/auth.ts": company("An address in the middle of a move", "An account's, minutes."),
+  "nl:auth:move-broken:@lib/auth.ts": company("A move that could be neither finished nor undone", "An account's, until it is repaired at the next login or move."),
   "nl:auth:session:@lib/auth.ts": company("A session", "An account's."),
   "nl:auth:sessions:@lib/auth.ts": company("An account's sessions", "An account's."),
   "nl:rl:address:@lib/auth.ts": company("Sign-in links per address", "An account's, an hour."),

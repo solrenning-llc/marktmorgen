@@ -30,8 +30,12 @@
  * deadline. When the creator cancels, or the store cannot hold the time
  * (a refused or lost booking), the buyer chose the add-on for a call that
  * did not happen, so it is refunded with the call. Both are said before
- * paying (CALL_ADDON_KEEP_WORDS), never only after.
+ * paying (callAddOnKeepWords), from the sale's own cancellation promise
+ * (lib/call-setup.ts, readCancelPromise): a refund is promised only where
+ * the creator set a deadline and it has not passed, never on a call without
+ * one, where canceling is between the buyer and the creator.
  */
+import type { CancelPromise } from "@/lib/call-setup";
 import type { Listing } from "@/lib/store";
 import { type Bump, type BumpPause, MAX_BUMPS, bumpTargetPause } from "@/lib/product-extras";
 
@@ -143,9 +147,21 @@ export function callAddOnRefund(by: CallEndedBy): "call" | "callAndAddOns" {
   return by === "buyer" ? "call" : "callAndAddOns";
 }
 
-/** Said beside the boxes before paying, so nobody learns the cancellation rule only after it applies. */
-export const CALL_ADDON_KEEP_WORDS =
-  "An extra is yours as soon as you pay. If you cancel the call, you keep the extra and get the call refunded under the cancellation terms. If the call is canceled by the creator, you get the extra refunded too.";
+/**
+ * Said beside the boxes before paying, so nobody learns the cancellation rule
+ * only after it applies. It promises only what the sale promises: a refund of
+ * the call where the creator set a deadline (CancelPromise) and the booking is
+ * not already inside it; on a call without one, canceling is asked of the
+ * creator. The creator canceling refunds the extra in every case.
+ */
+export function callAddOnKeepWords(promise: CancelPromise | null, store: string): string {
+  const yours = "An extra is yours as soon as you pay.";
+  const theirs = `If ${store} cancels the call, you get the extra refunded too.`;
+  if (!promise) return `${yours} If you want to cancel the call, ask ${store}. You keep the extra either way. ${theirs}`;
+  const hours = promise.hours === 1 ? "1 hour" : `${promise.hours} hours`;
+  if (promise.late) return `${yours} This call starts in less than ${hours}, so canceling it now gets no refund. You keep the extra. ${theirs}`;
+  return `${yours} Cancel the call at least ${hours} before it starts to get it refunded. You keep the extra. ${theirs}`;
+}
 
 /** What the creator is told when an add-on set on a call is not offered, naming what to change. */
 export function callAddOnPauseWords(pause: CallAddOnPause, offer: string | null): string {

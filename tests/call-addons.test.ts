@@ -8,10 +8,10 @@ import { readFileSync } from "node:fs";
 import type { Listing } from "@/lib/store";
 import { MAX_BUMPS, bumpState } from "@/lib/product-extras";
 import {
-  CALL_ADDON_KEEP_WORDS,
   type CallAddOnContext,
   type CallAddOnPause,
   activeCallAddOns,
+  callAddOnKeepWords,
   callAddOnPauseWords,
   callAddOnRefund,
   callAddOnState,
@@ -99,11 +99,18 @@ is("what they add to the price", callAddOnsTotal(chosenCallAddOns(active, ["wb",
 part("When a booking with add-ons ends before it takes place");
 is("the buyer cancels: only the call is refunded; the add-on was delivered with their consent", callAddOnRefund("buyer"), "call");
 is("the creator cancels, or the store could not hold the time: the add-ons are refunded too", [callAddOnRefund("creator"), callAddOnRefund("store")], ["callAndAddOns", "callAndAddOns"]);
+const timely = callAddOnKeepWords({ hours: 24, late: false }, "Lena");
+const late = callAddOnKeepWords({ hours: 24, late: true }, "Lena");
+const none = callAddOnKeepWords(null, "Lena");
 is(
-  "said before paying, in plain words, with both cases",
-  [CALL_ADDON_KEEP_WORDS.includes("If you cancel the call, you keep the extra"), CALL_ADDON_KEEP_WORDS.includes("canceled by the creator, you get the extra refunded too"), CALL_ADDON_KEEP_WORDS.split(/[.!?]\s/).every((s) => s.split(/\s+/).length <= 20)],
-  [true, true, true],
+  "with the creator's deadline, before it: the call refunded only if canceled in time, and the extra kept",
+  [timely.includes("Cancel the call at least 24 hours before it starts to get it refunded. You keep the extra."), callAddOnKeepWords({ hours: 1, late: false }, "Lena").includes("at least 1 hour before")],
+  [true, true],
 );
+is("booked already inside the deadline: no refund is promised for canceling now", [late.includes("canceling it now gets no refund"), late.includes("to get it refunded")], [true, false]);
+is("a call without a deadline promises no refund: canceling is asked of the creator", [none.includes("ask Lena"), /to get it refunded|call refunded/.test(none)], [true, false]);
+is("in every case, the creator canceling refunds the extra too", [timely, late, none].every((w) => w.endsWith("If Lena cancels the call, you get the extra refunded too.")), true);
+is("in plain words: every sentence under twenty words", [timely, late, none].every((w) => w.split(/(?<=[.!?])\s/).every((sentence) => sentence.split(/\s+/).length <= 20)), true);
 
 part("What the creator is told");
 const pauses: CallAddOnPause[] = ["notCall", "package", "deposit", "series", "move", "gone", "itself", "targetFree", "targetRecurring", "targetCall", "targetOptions", "targetPwyw", "targetLimited", "targetEmpty", "targetPick", "dearer"];

@@ -58,13 +58,6 @@ export default async function StudioCardPage({ searchParams }: Params) {
               </Link>
             </p>
           )}
-          {card?.on ? (
-            <p className="mt-3">
-              <Link href={`/@${store.handle}/contact`} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">
-                {`Open your card at ${address}`}
-              </Link>
-            </p>
-          ) : null}
           {card ? (
             <div className="mt-8">
               <CreatorCardEditor

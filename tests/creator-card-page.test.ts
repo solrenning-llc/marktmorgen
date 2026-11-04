@@ -63,7 +63,8 @@ async function main(): Promise<void> {
   is("what they do and their line, as typed", html.includes("Course creator") && html.includes("Pottery &amp; glazes"), true);
   is("each way to reach them a link that says what it is", [html.includes("<dt"), html.includes('href="mailto:ana@example.com"'), html.includes(`href="tel:${phone}"`), html.includes('href="https://ana.example.com/"') && html.includes(">ana.example.com</a>")], [true, true, true, true]);
   is("Save contact, explained beside it", html.includes('href="/@anapottery/contact/vcard"') && html.includes('aria-describedby="card-save-hint"') && html.includes("Adds this card to the contacts on your phone or computer."), true);
-  is("every link tall enough to tap", (html.match(/min-h-11/g) ?? []).length >= 4, true);
+  is("every link tall enough to tap, the way back to the store too (2.5.5)", (html.match(/<a [^>]*>/g) ?? []).map((tag) => tag.includes("min-h-11")), [true, true, true, true, true]);
+  is("the notice's way back is tall enough to tap too", readFileSync("app/[handle]/contact/page.tsx", "utf8").includes('#contact"}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">'), true);
   is("the way back to the store", html.includes("Visit Ana&#x27;s Pottery") || html.includes("Visit Ana's Pottery"), true);
   const bare = draw({ ...card, title: "", email: "", phone: "", website: "", note: "" });
   is("only what was filled in", !bare.includes("<dl") && !bare.includes("mailto:") && bare.includes("Ana Souza</h1>"), true);

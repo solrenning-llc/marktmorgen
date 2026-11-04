@@ -245,6 +245,8 @@ export async function takeReading(pass: ReadPass, now = Date.now()): Promise<boo
   try {
     const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, keep]]);
     const n = Number(count);
+    // The first reading past the ceiling marks the window, once: the studio then says it is partial even if the plan grows later.
+    if (n === pass.cap + 1) await redisPipeline([["SET", `${key}:over`, "1", "EX", keep]]).catch(() => undefined);
     return Number.isSafeInteger(n) && n >= 1 && n <= pass.cap;
   } catch {
     return false;
@@ -259,8 +261,9 @@ export type ReadingsPartial = { counted: number; opens: number };
  * ceiling, for the studio to say that the window's time on page and reading
  * depth are partial: then only the first `counted` readings were counted.
  * One command; null when they did not, or when it cannot be told. Compared
- * with the ceiling of the store's plan now: a plan changed during the window
- * is read at its new figure.
+ * with the ceiling of the store's plan now, and with the mark the first
+ * reading past the ceiling left: a window that went past it stays partial
+ * if the plan grows later in it.
  */
 export async function readingsPartial(store: WindowFields & { tier?: Tier; statsId: string | null }, now = Date.now()): Promise<ReadingsPartial | null> {
   const statsId = store.statsId;
@@ -268,9 +271,13 @@ export async function readingsPartial(store: WindowFields & { tier?: Tier; stats
   const cap = readCeiling(store, now);
   if (!statsId || !STATS_ID.test(statsId) || !window || cap <= 0 || !isRedisConfigured()) return null;
   try {
-    const [raw] = await redisPipeline([["GET", readsKey(statsId, window.id)]]);
+    const key = readsKey(statsId, window.id);
+    const [both] = await redisPipeline([["MGET", key, `${key}:over`]]);
+    const [raw, over] = Array.isArray(both) ? both : [null, null];
     const n = Number(raw);
-    return Number.isSafeInteger(n) && n > cap ? { counted: cap, opens: window.end } : null;
+    // Past the ceiling now, or once this window (the mark stays if the plan grew since).
+    if (!Number.isSafeInteger(n) || (n <= cap && over !== "1")) return null;
+    return { counted: Math.min(n, cap), opens: window.end };
   } catch {
     return null;
   }

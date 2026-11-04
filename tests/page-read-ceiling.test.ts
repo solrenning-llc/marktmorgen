@@ -304,6 +304,10 @@ async function main(): Promise<void> {
   is("readings within the ceiling, or none: nothing said", [await readingsPartial(suspendedShop), await readingsPartial(store)], [null, null]);
   const partial = await readingsPartial(shop);
   is("past it: the window is partial, and how many were counted", partial, { counted: shopCeiling, opens: shopWindow.end });
+  is("the window is marked once it went past", redis.run(["GET", `${readsKey(shop.statsId!, shopWindow.id)}:over`]), "1");
+  // The plan grown since: its ceiling is now above what was counted, but the window still went past the old one.
+  const grown = { ...shop, tier: "scale" as const };
+  is("a plan grown later in the window still says the window is partial", readCeiling(grown) > shopCeiling && (await readingsPartial(grown)) !== null, true);
   const words = readingsPartialWords(partial!.counted, partial!.opens);
   is("said in plain words, with the real figure and the day it opens again, nothing made up", [words.includes(`up to ${shopCeiling.toLocaleString("en-US")} measured visits a month`), words.includes("Only part of this month is counted."), words.includes("(UTC)"), /\d+%|about|estimated/i.test(words)], [true, true, true, false]);
   const shown = renderToStaticMarkup(createElement(PageTime, { ranges: timeShares({ "@t2": 40 }), least: 20, partial }));

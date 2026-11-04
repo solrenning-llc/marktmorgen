@@ -91,20 +91,23 @@ export type Broadcast = {
    */
   test: SubjectTest | null;
   /**
-   * Studio requests held, when it was written down, for the one reading of
-   * the store's buyers its list needs when the scheduled job starts it (a
-   * narrowed email; lib/segments.ts, ledgerReadingUnits), not drawn yet: that
-   * reading draws from it and is never refused (C3-80 (d)). Studio requests
-   * are never given back (lib/store-allowance.ts gives back only a take it
-   * refused), so what is left after the reading, or when it is canceled, stays
-   * here as the record of it. Absent on every email made before 4 November
-   * 2026 and on one with nothing held.
+   * Studio requests held, when it was written down, for the readings of the
+   * store's buyers its list needs when the scheduled job starts it (a
+   * narrowed email: the first, and EXTRA_READS more should it wait for
+   * another reason, each at its worst, lib/segments.ts ledgerReadingUnits),
+   * not drawn yet: those readings draw from it and are never refused
+   * (C3-80 (d)). Studio requests are never given back (lib/store-allowance.ts
+   * gives back only a take it refused), so what is left after the readings,
+   * or when it is canceled, stays here as the record of it. Absent on every
+   * email made before 4 November 2026 and on one that starts in the request
+   * that wrote it down.
    */
   reserve?: number;
   /**
    * Readings of the store's buyers the scheduled job made for it, written
-   * down before each one: at most one covered by `reserve` and EXTRA_READS
-   * besides (C3-80 (d)). Absent before the first.
+   * down before each one: at most 1 + EXTRA_READS for an email that holds
+   * them (`reserve`), and EXTRA_READS for one written down before holds
+   * existed (C3-80 (d)). Absent before the first.
    */
   reads?: number;
 };
@@ -123,13 +126,19 @@ export const MAX_SCHEDULE_DAYS = 365;
 const RECORD_DAYS = 400;
 const RECIPIENT_DAYS = 60;
 /**
- * Readings of the buyers the scheduled job may make for one email beyond the
- * one its hold covers (`reserve`; every reading of an email that holds
- * nothing): a list that could not be made for another reason (the data room
- * full) is read again at most this many times, then the email stops, failed,
- * saying why (C3-80 (d); tests/plan-cost-registry.ts, scheduled-reads).
+ * Readings of the buyers the scheduled job may make for one email beyond its
+ * first (C3-80 (d)): a list that could not be made for another reason (the
+ * data room full, which is rare) is read again at most this many times, then
+ * the email stops, failed, saying why. Held with the first when the email is
+ * written down (createBroadcast, READS_HELD), so the scheduled job never
+ * reads one that is not paid for. An email written down before holds existed
+ * (only before 4 November 2026, with no sales open) is read at most
+ * EXTRA_READS times in all, each one of the scheduled readings the plan
+ * already prices (tests/plan-cost-registry.ts, scheduled-reads).
  */
-export const EXTRA_READS = 3;
+export const EXTRA_READS = 1;
+/** Readings of the buyers a narrowed email the scheduled job starts holds when it is written down: its first, and EXTRA_READS. */
+export const READS_HELD = 1 + EXTRA_READS;
 
 /** The note of an email stopped because its readings of the buyers ran out: why it waited, without "tried again". */
 export function readsSpentNote(waiting: string): string {
@@ -323,14 +332,14 @@ export async function createBroadcast(
   const test = asked === "none" ? null : asked;
   if (test && reach < MIN_TEST_REACH) return { ok: false, reason: "test_small" };
   if (test && !linksToStore(body, store)) return { ok: false, reason: "test_links" };
-  // A narrowed email the scheduled job starts reads the buyers again then: what that reading costs at the most is held
-  // now, counted before anything is written, and drawn by that reading (advanceBroadcast). One that starts in this
-  // request lists from the narrowing just read (the route's `keep`) and holds nothing. Held before the data room is
-  // taken, so a refusal takes nothing; studio requests are never given back, so a data room found full after this
-  // keeps them taken.
-  let reserve = 0;
+  // A narrowed email the scheduled job starts reads the buyers again then: READS_HELD readings at the most each costs
+  // (its first, and one more should it wait for another reason) are held now, counted before anything is written,
+  // and drawn by those readings (advanceBroadcast). One that starts in this request lists from the narrowing just
+  // read (the route's `keep`) and holds nothing. Held before the data room is taken, so a refusal takes nothing;
+  // studio requests are never given back, so a data room found full after this keeps them taken.
+  let reserve: number | undefined;
   if (narrow && count && sendAt > now + 60) {
-    reserve = await ledgerReadingUnits(store);
+    reserve = READS_HELD * (await ledgerReadingUnits(store));
     if (reserve > 0 && !(await count(reserve).catch(() => false))) throw new LedgerNotCounted();
   }
   if (sendAt <= now + 60) {
@@ -363,7 +372,7 @@ export async function createBroadcast(
     listed: false,
     tagged: true,
     test,
-    ...(reserve > 0 ? { reserve } : {}),
+    ...(reserve !== undefined ? { reserve } : {}),
   };
   // Its room in the store's data room first (DataRoomError when it does not
   // fit): its record, until it expires by itself (400 days after the last
@@ -484,8 +493,9 @@ export async function advanceBroadcast(
       // and logged, without who. Never a wait for the studio's requests (C3-80 (d)).
       let keep = given?.keep;
       if (!given && isNarrowed(b.narrow) && readsBuyers(store)) {
-        // At most one reading its hold covers and EXTRA_READS besides, each written down before it is read; past
-        // them, it stops, failed, with why it waited, never dropped without a word (C3-80 (d)).
+        // At most READS_HELD readings for an email that holds them, and EXTRA_READS for one written down before holds
+        // existed (one of the scheduled readings the plan prices), each written down before it is read; past them, it
+        // stops, failed, with why it waited, never dropped without a word (C3-80 (d)).
         const reads = b.reads ?? 0;
         if (reads - (b.reserve !== undefined ? 1 : 0) >= EXTRA_READS) {
           b = { ...b, status: "failed", note: readsSpentNote(b.note), finishedAt: now };

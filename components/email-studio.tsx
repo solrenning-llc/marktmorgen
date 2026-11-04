@@ -1269,7 +1269,7 @@ function Compose(props: {
               Eligibility is checked again when sending starts.
               {/* A narrowed email scheduled holds its later reading of the buyers now (lib/broadcasts.ts, createBroadcast; C3-80 (d)). */}
               {later && (minSpent || channel || quietDays || buyerGroup || activeDays)
-                ? " Scheduling it sets aside, now, the studio requests needed to find these buyers when it goes out. If too few are left, it is not scheduled, and you see how many it needs. Canceling does not give them back."
+                ? " Scheduling it sets aside, now, the studio requests needed to find these buyers when it goes out, and to find them once more if it has to wait. If too few are left, it is not scheduled, and you see how many it needs. Canceling does not give them back."
                 : null}
             </p>
           </div>

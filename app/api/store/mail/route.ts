@@ -241,7 +241,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "broadcast") {
       // A narrowed email reads the store's buyers again when their copy ran out: counted first, nothing written when not.
-      // One the scheduled job starts also holds, here, what its reading then costs at the most, so that job never
+      // One the scheduled job starts also holds, here, what its readings then cost at the most, so that job never
       // refuses it (C3-80 (d)): without that room it is refused now, with the same sentence, and nothing is written.
       const counting = countLedger(store);
       const created = await createBroadcast(store, {

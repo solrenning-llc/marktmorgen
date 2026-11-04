@@ -9,6 +9,7 @@
  * holds:
  *
  *   - A hero or the reviews: a page has one of each, at their own places.
+ *   - A row of columns, whose parts may be pictures (see NOT_IN_SECTIONS).
  *   - A picture. A picture belongs to the one page that shows it and is
  *     deleted with it (lib/sales-page-store.ts), so a section keeps the block
  *     and the creator adds that page's pictures to it.
@@ -34,8 +35,12 @@ export const MAX_SECTION_BLOCKS = 8;
 export const MAX_SECTION_NAME = 60;
 export const MAX_SECTION_BYTES = 40_000;
 
-/** The kinds a section never holds. */
-export const NOT_IN_SECTIONS: readonly BlockKind[] = ["hero", "reviews"];
+/**
+ * The kinds a section never holds. A row of columns (375 [TB1]) may hold
+ * pictures among its parts, which a section never keeps (sectionBlocks), so
+ * it stays on the page it was made on.
+ */
+export const NOT_IN_SECTIONS: readonly BlockKind[] = ["hero", "reviews", "row"];
 
 export type SavedSection = {
   id: string;

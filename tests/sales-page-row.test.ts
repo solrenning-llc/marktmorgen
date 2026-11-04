@@ -1,6 +1,7 @@
 /**
  * A row of one, two or three columns (lib/sales-page.ts, RowBlock; queue item
- * 375 [TB1], unit 1): kept and drawn, not offered in the studio yet.
+ * 375 [TB1], unit 1): kept and drawn. Unit 2 offers it in the studio, with
+ * its editor (tests/row-editor.test.ts).
  *
  * What is checked, against the real parser and the real drawing:
  *
@@ -16,13 +17,14 @@
  *   - on the page, the columns' elements come in reading order, headings
  *     keep the outline, a button is the page's own or a checked link, and
  *     an empty row takes no place;
- *   - "row" is not in the block gallery until its editor exists (VR).
+ *   - "row" is in the block gallery for a product's page, and only there.
  */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type BlockContext, BlockView, PageSections } from "@/components/sales-blocks";
 import { BLOCK_GROUPS } from "@/components/block-picker";
 import { KIND_ICONS } from "@/lib/sales-page-icons";
+import { SITE_KINDS } from "@/lib/site-page-rules";
 import { coachChecks } from "@/lib/page-coach";
 import {
   BLOCK_KINDS,
@@ -180,9 +182,10 @@ is("a row with nothing in it is not drawn", draw({ id: "row00009", kind: "row", 
 const sections = renderToStaticMarkup(createElement(PageSections, { blocks: [{ id: "row00009", kind: "row", columns: [[]] }, three], ctx, style: "bands", reviewsFor: () => null }));
 is("and takes no band of its own", (sections.match(/data-block=/g) ?? []).length, 1);
 
-part("Not offered until its editor exists");
-is("not in the block list", BLOCK_KINDS.some((k) => k.kind === "row"), false);
-is("not in the gallery", BLOCK_GROUPS.some((g) => g.kinds.includes("row")), false);
+part("Offered on a product's page, now that its editor exists");
+is("in the block list", BLOCK_KINDS.some((k) => k.kind === "row"), true);
+is("in the gallery, once", BLOCK_GROUPS.flatMap((g) => g.kinds).filter((k) => k === "row").length, 1);
+is("not on the store's own pages", SITE_KINDS.includes("row"), false);
 is("but it has an icon, like every kind", KIND_ICONS.row, "layout");
 is("an empty one is two empty columns", emptyBlock("row", "row00001"), { id: "row00001", kind: "row", columns: [[], []] });
 

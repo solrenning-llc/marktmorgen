@@ -121,20 +121,23 @@ export async function verifySns(m: SnsMessage, config: SesConfig, now = Date.now
 
 /** What one announcement from Amazon SES says became of an email: who bounced or complained, and the email's own tags. */
 export type SesEvent = {
-  kind: "bounced" | "complained";
+  kind: "delivered" | "delayed" | "bounced" | "complained";
   permanent: boolean;
   recipients: string[];
   tags: Record<string, string>;
+  messageId: string;
 };
 
-/** The event inside an announcement, or null when it is not a bounce or a complaint. */
+/** The delivery event inside an announcement, or null when it is not one we report. */
 export function readSesEvent(message: string): SesEvent | null {
   let v: {
     eventType?: unknown;
     notificationType?: unknown;
     bounce?: { bounceType?: unknown; bouncedRecipients?: unknown };
     complaint?: { complainedRecipients?: unknown };
-    mail?: { tags?: unknown };
+    delivery?: { recipients?: unknown };
+    deliveryDelay?: { delayedRecipients?: unknown };
+    mail?: { tags?: unknown; messageId?: unknown };
   };
   try {
     v = JSON.parse(message) as typeof v;
@@ -146,7 +149,7 @@ export function readSesEvent(message: string): SesEvent | null {
   const addresses = (list: unknown): string[] =>
     Array.isArray(list)
       ? list
-          .map((r) => (r && typeof r === "object" ? (r as { emailAddress?: unknown }).emailAddress : null))
+          .map((r) => typeof r === "string" ? r : (r && typeof r === "object" ? (r as { emailAddress?: unknown }).emailAddress : null))
           .filter((a): a is string => typeof a === "string" && a.length > 0 && a.length <= 320)
           .slice(0, 50)
       : [];
@@ -158,7 +161,10 @@ export function readSesEvent(message: string): SesEvent | null {
       if (typeof first === "string") tags[name] = first;
     }
   }
-  if (type === "Bounce") return { kind: "bounced", permanent: v.bounce?.bounceType === "Permanent", recipients: addresses(v.bounce?.bouncedRecipients), tags };
-  if (type === "Complaint") return { kind: "complained", permanent: false, recipients: addresses(v.complaint?.complainedRecipients), tags };
+  const messageId = typeof v.mail?.messageId === "string" && v.mail.messageId.length <= 200 ? v.mail.messageId : "";
+  if (type === "Bounce") return { kind: "bounced", permanent: v.bounce?.bounceType === "Permanent", recipients: addresses(v.bounce?.bouncedRecipients), tags, messageId };
+  if (type === "Complaint") return { kind: "complained", permanent: false, recipients: addresses(v.complaint?.complainedRecipients), tags, messageId };
+  if (type === "Delivery") return { kind: "delivered", permanent: false, recipients: addresses(v.delivery?.recipients), tags, messageId };
+  if (type === "DeliveryDelay") return { kind: "delayed", permanent: false, recipients: addresses(v.deliveryDelay?.delayedRecipients), tags, messageId };
   return null;
 }

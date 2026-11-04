@@ -522,7 +522,7 @@ export async function sendTo(
   // A missing checkpoint is not evidence that this list is safe to send.
   if (pause === undefined) return { done, rest: emails, stopped: "retry" };
   if (pause) return { done, rest: emails, stopped: "paused", pause };
-  const tags = healthTags(store, true);
+  const tags = healthTags(store, true, tag?.campaign);
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
     if (room <= 0) return { done, rest: emails.slice(i), stopped: "day" };

@@ -6,6 +6,7 @@
 import { createHmac } from "node:crypto";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/mail/inbound/route";
+import { recordSesEvent } from "@/app/api/mail/ses/route";
 import { healthTags } from "@/lib/mail-health";
 import { MAIL_REPORT_TAG, mailReportDay } from "@/lib/mail-report";
 import { readSesEvent } from "@/lib/sns";
@@ -58,19 +59,24 @@ async function main() {
   part("Amazon events retain their distinct meanings");
   is(
     "delivery recipients are read without being retained in the report identity",
-    readSesEvent(JSON.stringify({ eventType: "Delivery", delivery: { recipients: ["reader@example.test"] }, mail: { tags: { ...tags, other: ["x"] } } })),
-    { kind: "delivered", permanent: false, recipients: ["reader@example.test"], tags: { ...tags, other: "x" } },
+    readSesEvent(JSON.stringify({ eventType: "Delivery", delivery: { recipients: ["reader@example.test"] }, mail: { messageId: "ses_delivery_1", tags: { ...tags, other: ["x"] } } })),
+    { kind: "delivered", permanent: false, recipients: ["reader@example.test"], tags: { ...tags, other: "x" }, messageId: "ses_delivery_1" },
   );
   is(
     "a transient bounce remains temporary",
-    readSesEvent(JSON.stringify({ eventType: "Bounce", bounce: { bounceType: "Transient", bouncedRecipients: [{ emailAddress: "full@example.test" }] }, mail: { tags } })),
-    { kind: "bounced", permanent: false, recipients: ["full@example.test"], tags },
+    readSesEvent(JSON.stringify({ eventType: "Bounce", bounce: { bounceType: "Transient", bouncedRecipients: [{ emailAddress: "full@example.test" }] }, mail: { messageId: "ses_bounce_1", tags } })),
+    { kind: "bounced", permanent: false, recipients: ["full@example.test"], tags, messageId: "ses_bounce_1" },
   );
   is(
     "a delivery delay is the provider's other temporary outcome",
-    readSesEvent(JSON.stringify({ eventType: "DeliveryDelay", deliveryDelay: { delayedRecipients: [{ emailAddress: "slow@example.test" }] }, mail: { tags } })),
-    { kind: "bounced", permanent: false, recipients: ["slow@example.test"], tags },
+    readSesEvent(JSON.stringify({ eventType: "DeliveryDelay", deliveryDelay: { delayedRecipients: [{ emailAddress: "slow@example.test" }] }, mail: { messageId: "ses_delay_1", tags } })),
+    { kind: "delayed", permanent: false, recipients: ["slow@example.test"], tags, messageId: "ses_delay_1" },
   );
+  const sesCampaign = "b-abcdef0123456789abcdef01";
+  const sesTags = { nl_store: STORE, nl_list: LIST, [MAIL_REPORT_TAG]: sesCampaign };
+  is("the authenticated SES route action records delivery", await recordSesEvent({ kind: "delivered", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delivery_2" }), "delivered");
+  is("and records a temporary outcome without treating it as permanent", await recordSesEvent({ kind: "delayed", permanent: false, recipients: ["ses@example.test"], tags: sesTags, messageId: "ses_delay_2" }), "temporary");
+  is("the SES outcomes remain separate", await mailReportDay(STORE, sesCampaign), { delivered: 1, permanentBounces: 0, temporaryBounces: 1, complained: 0 });
 
   part("Signed outcomes are counted for the email, without recipient data");
   const delivered = await POST(announce("email.delivered", { email_id: "em_1", to: ["reader@example.test"], tags }));
@@ -87,8 +93,10 @@ async function main() {
   });
 
   await POST(announce("email.delivery_delayed", { email_id: "em_1", to: ["full@example.test"], tags, bounce: { type: "Transient" } }, "report_delay"));
-  is("the same signed event is not counted twice", (await mailReportDay(STORE, CAMPAIGN)).temporaryBounces, 1);
-  is("temporary delivery trouble never creates a pause or recipient mark", redis.keys().some((key) => key.startsWith(`nl:mail:paused:${STORE}`) || key.includes(":seen:")), false);
+  is("the same signed event is not counted twice", (await mailReportDay(STORE, CAMPAIGN))?.temporaryBounces, 1);
+  await POST(announce("email.delivery_delayed", { email_id: "em_1", to: ["full@example.test"], tags, bounce: { type: "Transient" } }));
+  is("a provider replay under another webhook id is still the same email outcome", (await mailReportDay(STORE, CAMPAIGN))?.temporaryBounces, 1);
+  is("temporary delivery trouble never creates a pause or recipient mark", redis.keys().some((key) => key.startsWith(`nl:mail:paused:${STORE}`) || key.startsWith(`nl:mail:health:${STORE}:seen:`)), false);
   is("no key or report field contains a recipient address", [
     redis.keys().some((key) => key.includes("reader@") || key.includes("full@")),
     String(redis.run(["HGETALL", `nl:mail:health:${STORE}:${new Date().toISOString().slice(0, 10)}`])).includes("@"),

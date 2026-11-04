@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { canHearResend, forwardInbound, inboundSigned, isInboundConfigured } from "@/lib/inbound-mail";
-import { LIST_TAG, STORE_TAG, heardFromSender } from "@/lib/mail-health";
+import { HEALTH_ID, LIST_TAG, STORE_TAG, heardFromSender, mailReportCampaign } from "@/lib/mail-health";
+import { MAIL_REPORT_TAG, type MailReportEvent, noteMailReportEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
 
@@ -63,11 +64,13 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false }, { status: 400 });
   }
   const bad = notice.type === "email.bounced" || notice.type === "email.complained";
-  if (!bad && notice.type !== "email.received") return Response.json({ ok: true });
+  const report = bad || notice.type === "email.delivered" || notice.type === "email.delivery_delayed";
+  if (!report && notice.type !== "email.received") return Response.json({ ok: true });
+  if (!bad && report && (!HEALTH_ID.test(tagOf(notice.data?.tags, STORE_TAG)) || !mailReportCampaign(tagOf(notice.data?.tags, MAIL_REPORT_TAG)))) return Response.json({ ok: true });
   // Mail to the site's own addresses needs the other two settings as well,
   // and is not found without them, as it always was: an announcement not
   // acknowledged is one Resend offers again.
-  if (!bad && !isInboundConfigured()) return new Response("Not found.", { status: 404 });
+  if (!report && !isInboundConfigured()) return new Response("Not found.", { status: 404 });
 
   const seenKey = `nl:inbound:seen:${id}`;
   try {
@@ -78,20 +81,37 @@ export async function POST(request: NextRequest) {
     // being delivered twice; carry on.
   }
 
-  if (bad) {
-    const to = Array.isArray(notice.data?.to) ? notice.data.to[0] : notice.data?.to;
+  if (report) {
+    const recipients = (Array.isArray(notice.data?.to) ? notice.data.to : [notice.data?.to])
+      .filter((to): to is string => typeof to === "string" && to.length > 0 && to.length <= 320)
+      .slice(0, 50);
+    const to = recipients[0] ?? "";
     try {
-      const result = await heardFromSender({
-        kind: notice.type === "email.complained" ? "complained" : "bounced",
-        permanent: notice.data?.bounce?.type === "Permanent",
-        to: typeof to === "string" ? to : "",
-        store: tagOf(notice.data?.tags, STORE_TAG),
-        list: tagOf(notice.data?.tags, LIST_TAG),
-      });
-      return Response.json({ ok: true, result });
+      const store = tagOf(notice.data?.tags, STORE_TAG);
+      const permanent = notice.type === "email.bounced" && notice.data?.bounce?.type === "Permanent";
+      let result: "counted" | "paused" | "ignored" = "ignored";
+      if (notice.type === "email.complained" || permanent) {
+        result = await heardFromSender({
+          kind: notice.type === "email.complained" ? "complained" : "bounced",
+          permanent,
+          to,
+          store,
+          list: tagOf(notice.data?.tags, LIST_TAG),
+        });
+      }
+      const event: MailReportEvent = notice.type === "email.delivered"
+        ? "delivered"
+        : notice.type === "email.complained"
+          ? "complained"
+          : permanent ? "permanent-bounce" : "temporary-bounce";
+      const emailId = typeof notice.data?.email_id === "string" && notice.data.email_id.length <= 200 ? notice.data.email_id : "";
+      const reported = await noteMailReportEvent(store, tagOf(notice.data?.tags, MAIL_REPORT_TAG), event, recipients.length, emailId ? `resend:${emailId}` : "");
+      if (!reported && !bad) return Response.json({ ok: true });
+      const reportResult = event === "delivered" ? "delivered" : event === "temporary-bounce" ? "temporary" : "counted";
+      return Response.json({ ok: true, result: result !== "ignored" ? result : reported ? reportResult : "ignored" });
     } catch (error) {
       // Not acted on: let go of, so the retry is heard.
-      console.error("a bounce or complaint could not be recorded", error);
+      console.error("a delivery report could not be recorded", error);
       await redisPipeline([["DEL", seenKey]]).catch(() => {});
       return Response.json({ ok: false }, { status: 500 });
     }

@@ -9,9 +9,10 @@ import { type Piece, aboutBlocks } from "@/lib/product-about";
 import { CELL_NO, CELL_YES, type CtaBlock, type HeroBlock, type PageBlock, type PageStyle, bandsOf, quoteHost } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { PageFacts } from "@/lib/page-facts";
-import { MAX_LONG_ANSWER, MAX_SHORT_ANSWER, type FormDef, type FormField, branches, formOpen, scheduleWhen } from "@/lib/forms";
+import { MAX_LONG_ANSWER, MAX_SHORT_ANSWER, type FormDef, type FormField, branches, formOpen, offersKeep, scheduleWhen } from "@/lib/forms";
 import { FormBranching } from "@/components/form-branching";
 import { formWords } from "@/lib/buyer-words/form";
+import { FormKeep } from "@/components/form-keep";
 import { NewTab } from "@/components/new-tab";
 
 /**
@@ -832,6 +833,8 @@ function FormView({ block, form, ctx }: { block: Extract<PageBlock, { kind: "for
         ))}
         {/* Only what the branching needs reaches the browser: a scored quiz's points and ranges stay on the server. */}
         {branches(form) && !ctx.preview ? <FormBranching form={{ id: form.id, fields: form.fields.map((f) => ({ ...f, options: f.options.map(({ id, label, outcome, next }) => ({ id, label, outcome, ...(next ? { next } : {}) })) })), outcomes: form.outcomes.map(({ id, title, body, product }) => ({ id, title, body, product })) }} /> : null}
+        {/* A long form can be finished later: its answers kept in the visitor's own browser, only if they ask (639 [GL7](26)). */}
+        {offersKeep(form) && !ctx.preview && target ? <FormKeep handle={target.handle} form={form.id} words={w} /> : null}
         {form.offerList && target?.listOpen ? (
           <label className="sp-form-option">
             <input type="checkbox" name="consent" value="yes" disabled={ctx.preview} />

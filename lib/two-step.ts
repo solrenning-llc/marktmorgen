@@ -187,6 +187,12 @@ async function backupOf(email: string, record: TwoStep): Promise<string> {
   return (await recoveryAddress(email)) || record.backup;
 }
 
+/** The same for an address, read whether or not two-step login is on: what lib/passkeys.ts tells as well. */
+export async function recoveryAddressOf(email: string): Promise<string> {
+  const record = await read(email);
+  return record ? backupOf(email, record) : recoveryAddress(email);
+}
+
 export async function twoStepStatus(email: string): Promise<TwoStepStatus> {
   // A request whose days are over turns it off here too, so the studio never shows it as pending.
   await resetIfDue(email);
@@ -205,7 +211,12 @@ const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { weekday: 
  * that moves money or data out, changes who can get in, or cannot be undone.
  * Every permission of lib/team-roles.ts has to be named here (the type says
  * so, and tests/locked-session.test.ts checks it), so a new one is never open
- * to a locked session by being forgotten; anything not named is refused.
+ * to a locked session by being forgotten. lib/studio-route.ts refuses what
+ * LOCKED_NEEDS holds (the ones said false); "member", which is only being on
+ * the team and not a permission, is not refused. A permission keeps a route
+ * open, not every action in it: a route whose action destroys what its
+ * permission otherwise only edits refuses that action itself while the
+ * session is locked (app/api/store/product/route.ts, "remove" and "link").
  */
 export const LOCKED_ALLOWS: Readonly<Record<Permission, boolean>> = {
   billing: false,
@@ -229,12 +240,6 @@ export const LOCKED_ALLOWS: Readonly<Record<Permission, boolean>> = {
 
 /** The permissions a locked session waits for: the ones LOCKED_ALLOWS says false to. */
 export const LOCKED_NEEDS: readonly string[] = (Object.keys(LOCKED_ALLOWS) as Permission[]).filter((p) => !LOCKED_ALLOWS[p]);
-
-/** Whether a locked session is refused `need`: every permission LOCKED_ALLOWS does not allow by name ("member" is only being on the team). */
-export function lockedRefuses(need: string): boolean {
-  if (need === "member") return false;
-  return !Object.prototype.hasOwnProperty.call(LOCKED_ALLOWS, need) || LOCKED_ALLOWS[need as Permission] !== true;
-}
 
 /** Until when a session is locked, in ms, or 0 for a session that is not. */
 export async function lockedUntil(session: string | undefined, now = Date.now()): Promise<number> {

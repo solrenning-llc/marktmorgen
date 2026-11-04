@@ -12,6 +12,7 @@ import {
   editProduct,
   filesOnProduct,
   moveProduct,
+  productFile,
   removeProduct,
   setProductAbout,
   setProductHidden,
@@ -27,7 +28,9 @@ import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { lockedUntil } from "@/lib/two-step";
 import { dropPage } from "@/lib/sales-page-store";
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
@@ -167,6 +170,16 @@ export async function POST(request: NextRequest) {
 
   if (action !== "add" && !id) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+  }
+
+  // A session let in without its second step (lib/two-step.ts) keeps "products"
+  // to edit, hide and reorder them, but destroys nothing while it is locked:
+  // removing a product deletes its files, course lessons, the work its students
+  // handed in, its reviews and its page for good, and a link put where a file
+  // was deletes that file. Refused with the studio's own "locked" answer; the
+  // roles that may do either are unchanged.
+  if ((action === "remove" || action === "link") && (await lockedUntil(request.cookies.get(SESSION_COOKIE)?.value)) > 0) {
+    if (action === "remove" || (await productFile(guarded.ref, id))) return refusedJson("locked");
   }
 
   // What the Terms forbid ("anything that promises fast or easy money, or income

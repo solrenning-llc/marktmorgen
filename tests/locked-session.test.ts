@@ -145,6 +145,22 @@ async function main(): Promise<void> {
   is("a full session may remove it", gone.status, 200);
   is("both addresses are told", mails.slice(beforeRemove).filter((m) => m.subject.includes("passkey was removed")).map((m) => m.to).sort(), [BACKUP, OWNER].sort());
 
+  part("An account from before keeps its recovery address on its two-step record, and is told there too");
+  const OLD = "old@locked.example";
+  const OLD_BACKUP = "old.backup@locked.example";
+  await turnOn(OLD, OLD_BACKUP, "d".repeat(64));
+  // As an account set up before the address had a key of its own: only the record's `backup` holds it.
+  const recordKey = `nl:2fa:${sha(`nimbus-2fa:${OLD}`).slice(0, 40)}`;
+  const [rawRecord] = await redis.pipeline([["GET", recordKey]]);
+  await redis.pipeline([["SET", recordKey, JSON.stringify({ ...(JSON.parse(String(rawRecord)) as object), backup: OLD_BACKUP })], ["DEL", `nl:auth:rec:${sha(`nimbus-rec:${OLD}`).slice(0, 40)}`]]);
+  is("two-step login still reads that address (lib/two-step.ts)", (await twoStep.twoStepStatus(OLD)).backup !== "", true);
+  const oldList = `nl:pk:${sha(`nimbus-passkeys:${OLD}`).slice(0, 40)}`;
+  await redis.pipeline([["SET", oldList, JSON.stringify([{ id: "PKOLD", publicKey: "AA", counter: 0, transports: [], name: "Old laptop", createdAt: "", lastUsedAt: "", synced: true }])], ["SET", `nl:pk:cred:${sha("nimbus-passkey-id:PKOLD").slice(0, 40)}`, OLD]]);
+  const beforeOld = mails.length;
+  const oldGone = await passkeyRoute(new NextRequest("https://marktmorgen.com/api/auth/passkey", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${await openSession(OLD)}` }, body: JSON.stringify({ action: "remove", id: "PKOLD" }) }));
+  is("removed by a full session", oldGone.status, 200);
+  is("and told to the record's recovery address as well", mails.slice(beforeOld).filter((m) => m.subject.includes("passkey was removed")).map((m) => m.to).sort(), [OLD_BACKUP, OLD].sort());
+
   done();
 }
 

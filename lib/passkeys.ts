@@ -38,7 +38,7 @@ import {
 import { normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { recoveryAddress } from "@/lib/recovery-address";
+import { recoveryAddressOf } from "@/lib/two-step";
 import { SITE_URL } from "@/lib/site-url";
 
 /** Passkeys one account may hold. */
@@ -239,7 +239,8 @@ export async function removePasskey(email: string, id: string): Promise<boolean>
   await tell(address, "A passkey was removed from your Marktmorgen account", line);
   // A passkey is one of the ways the owner calls off a login without two-step login (lib/two-step.ts),
   // so its removal is told to the recovery address too, which whoever holds the sign-in inbox cannot read.
-  const backup = await recoveryAddress(address).catch(() => "");
+  // Read as two-step login reads it, so an account from before, whose record kept the address, is told too.
+  const backup = await recoveryAddressOf(address).catch(() => "");
   if (backup && normaliseEmail(backup) !== address) {
     await tell(address, "A passkey was removed from your Marktmorgen account", `This is the recovery address for the Marktmorgen account ${address}, so you get this notice too.\n\n${line}`, backup);
   }

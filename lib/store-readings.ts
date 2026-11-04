@@ -49,6 +49,8 @@ export const READING_KINDS: readonly ReadingKind[] = ["stats", "sales", "members
 
 const copyKey = (kind: ReadingKind, statsId: string) => `nl:reading:${kind}:${statsId}`;
 const dayKey = (statsId: string, day: string) => `nl:reading:day:${statsId}:${day}`;
+/** A store with no list: its one try of the UTC day to be given one (listForNaming), kept two days. */
+const listTryKey = (statsId: string, day: string) => `nl:list:try:${statsId}:${day}`;
 const utcDay = (now: number) => new Date(now).toISOString().slice(0, 10);
 
 /** When the day's readings come back: the next 00:00 UTC, in milliseconds. */
@@ -242,12 +244,18 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   const text = JSON.stringify({ at: now, value });
   if (value === null || value === undefined || Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) return { value, at: now, stale: false };
   const names = guard ? [...new Set(guard.names(value))] : [];
-  if (!names.length) {
+  if (!guard || !names.length) {
     await redisPipeline([["SET", key, text, "EX", READING_KEEP_SECONDS]]).catch(() => {});
     return { value, at: now, stale: false };
   }
-  // Someone named and no list to look them up in: shown, never kept (its check cannot be made).
-  if (!guard?.listId) return { value, at: now, stale: false };
+  // No list to look them up in: kept and shown naming nobody (review of 2c1af02e0). Safe: an erasure always gives
+  // the store a list first (lib/suppression.ts), so with none nobody can have been deleted, and a copy naming nobody
+  // is never one an erasure has to undo.
+  if (!guard.listId) {
+    const unnamed = guard.without(value, new Set(names));
+    await redisPipeline([["SET", key, JSON.stringify({ at: now, value: unnamed }), "EX", READING_KEEP_SECONDS]]).catch(() => {});
+    return { value: unnamed, at: now, stale: false };
+  }
   // Kept only when nobody it names was deleted meanwhile, checked where it is written (READING_COPY). Someone was:
   // shown without them and not kept; the next reading is made again without them. The step could not be run:
   // nothing kept, since its check could not be made, and shown as read (its read left the deleted out already).
@@ -284,14 +292,32 @@ export async function keptSales(store: Store, now = Date.now(), fresh = false): 
     // Selling not configured on our side: nothing is called, so the reading's unit is given back (inbox C4-53).
     if (store.stripeAccountId && !keyFor(store.stripeAccountId)) throw new NotRead("selling is not configured");
     const sales = await readSales(store, now);
-    // A store from before lists has none to keep deleted people's prints in: made now, once, before anyone is
-    // named (lib/read-ceilings.ts, LIST_MADE_SHAPE), only for a store already moved to product records (moving one
-    // is a write of its own, not priced here); when it is not made, the reading is shown and not kept.
-    if (!guard.listId && store.catalog.id && sales?.buyers?.top.length) guard.listId = (await ensureListId(storeRef(store)).catch(() => null))?.listId ?? null;
+    // A store from before lists has none to keep deleted people's prints in: tried once a day (listForNaming);
+    // with none, the reading is kept and shown naming nobody (keptReading).
+    if (!guard.listId && sales?.buyers?.top.length) guard.listId = await listForNaming(store, now);
     return withoutErasedBuyers({ listId: guard.listId ?? null }, sales);
   }, now, fresh, guard);
   if (!kept) throw new ReadingsUsed();
   return kept;
+}
+
+/**
+ * The list of a store that would name someone and has none (a store from
+ * before lists; every store made since #1680 has one), so a deleted person's
+ * print can be looked up where a reading or a calendar file is kept (review of
+ * fe4cb5e56): lib/store.ts, ensureListId, tried at most once a UTC day a store
+ * (a mark taken before, SET NX: review of 2c1af02e0), whatever reads first, a
+ * sales reading or the calendar feed's making; and only for a store already
+ * moved to product records (moving one is a write of its own, not priced
+ * here). Priced once a day in the store-readings line (lib/read-ceilings.ts,
+ * LIST_MADE_SHAPE). null when there is none: the caller names nobody.
+ */
+export async function listForNaming(store: Store, now = Date.now()): Promise<string | null> {
+  if (store.listId) return store.listId;
+  if (!store.statsId || !store.catalog.id || !isRedisConfigured()) return null;
+  const [took] = await redisPipeline([["SET", listTryKey(store.statsId, utcDay(now)), "1", "NX", "EX", 2 * 86_400]]).catch(() => [null]);
+  if (took !== "OK") return null;
+  return (await ensureListId(storeRef(store)).catch(() => null))?.listId ?? null;
 }
 
 /**

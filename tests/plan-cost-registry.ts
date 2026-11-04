@@ -1024,10 +1024,15 @@ export const COST_LINES: CostLine[] = [
       DAY_WINDOWS * (HEAVY_READINGS_PER_DAY * readShapeCost(SALES_READ_SHAPE)
         + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * Math.max(readShapeCost(STATS_READ_SHAPE), readShapeCost(MEMBERS_READ_SHAPE)))
       + (STORE_ALLOWANCES[tier].studio / STUDIO_PAGE_UNITS) * readShapeCost(KEPT_READINGS_SHAPE)
-      + READING_KINDS.length * READING_COPY_MAX_BYTES * DB_BYTE_MONTH * (READING_KEEP_SECONDS / (30 * 86_400)),
+      + READING_KINDS.length * READING_COPY_MAX_BYTES * DB_BYTE_MONTH * (READING_KEEP_SECONDS / (30 * 86_400))
+      // A store from before lists: its one try a UTC day to be given one (lib/store-readings.ts, listForNaming), shared
+      // by its sales readings and its calendar feed (one mark), at its worst every day (review of 2c1af02e0).
+      + DAY_WINDOWS * readShapeCost(LIST_MADE_SHAPE),
     sources: [
       { file: "lib/store-reading-rules.ts", names: ["STORE_READINGS_PER_DAY", "HEAVY_READINGS_PER_DAY", "READING_FRESH_SECONDS"] },
-      { file: "lib/store-readings.ts", names: ["READING_KEEP_SECONDS", "READING_COPY_MAX_BYTES", "takeStoreReading", "readingsLeft", "keptReading", "READING_KINDS"] },
+      { file: "lib/store-readings.ts", names: ["READING_KEEP_SECONDS", "READING_COPY_MAX_BYTES", "takeStoreReading", "readingsLeft", "keptReading", "READING_KINDS", "listForNaming", "listTryKey"] },
+      { file: "app/api/store/calendar/[token]/route.ts", names: ["listForNaming(store)"] },
+      { file: "lib/read-ceilings.ts", names: ["LIST_MADE_SHAPE", "STORE_LOCK_TRIES"] },
       { file: "app/studio/page.tsx", names: ["keptStats(current, undefined, freshNumbers)", "keptSales(current, undefined, freshNumbers)", "readingsLeft(current)"] },
       { file: "app/studio/totals/page.tsx", names: ["keptNumbers(store)", "keptMembers(store)"] },
       { file: "lib/read-ceilings.ts", names: ["STATS_READ_SHAPE", "SALES_READ_SHAPE", "MEMBERS_READ_SHAPE", "STORE_READING_SHAPES", "KEPT_READINGS_SHAPE"] },
@@ -1193,17 +1198,6 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "lib/read-ceilings.ts", names: ["LIFE_FILL_SHAPE"] },
     ],
     basis: "Once for each store, under a lock and marked filled so it never happens twice: two reads of each of KEPT_DAYS days, an HINCRBY for every field found (DAY_FIELDS_MAX a day at the most), its marks and the record read again (LIFE_FILL_SHAPE). Whichever reader comes first pays it (the studio's home page, the totals, the API, the weekly email), so it is priced here, once, in the first payment's worst case, like the closing.",
-  },
-  {
-    id: "reading-list-made",
-    feature: "A store from before lists given one the first time a sales reading or its calendar file would name someone, so a deleted person is looked up where the copy is kept (review of fe4cb5e56)",
-    monthlyUsd: () => readShapeCost(LIST_MADE_SHAPE),
-    sources: [
-      { file: "lib/store-readings.ts", names: ["ensureListId(storeRef(store))", "store.catalog.id"] },
-      { file: "app/api/store/calendar/[token]/route.ts", names: ["ensureListId(storeRef(store))", "store.catalog.id"] },
-      { file: "lib/read-ceilings.ts", names: ["LIST_MADE_SHAPE", "STORE_LOCK_TRIES"] },
-    ],
-    basis: "Once for each store kept from before lists (every store made since #1680 has one): the list is written into its record (lib/store.ts, ensureListId, which writes nothing once there is one), so whichever reading comes first pays it, once, priced here in the first payment's worst case like the all-time filling (LIST_MADE_SHAPE: the record read twice and written once at its largest, its lock tried for its whole wait, its head's product records read). Only for a store already moved to product records; one not moved yet is shown its reading without keeping it until the daily job moves it.",
   },
   {
     id: "retained-files",

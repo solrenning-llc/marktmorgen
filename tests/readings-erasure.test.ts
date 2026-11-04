@@ -139,7 +139,7 @@ async function main(): Promise<void> {
   const unnamed = await withoutErasedBookers(store, calls);
   const ics = bookedCalendar(store, unnamed, Date.now(), []);
   is("the calendar file made again keeps the booked time but does not name them", [ics.includes(person), ics.includes("Rhea"), ics.includes("A buyer whose details were deleted"), ics.includes(other)], [false, false, true, true]);
-  is("the feed's route goes through it", readFileSync("app/api/store/calendar/[token]/route.ts", "utf8").includes("const calls = await withoutErasedBookers(store, paid);"), true);
+  is("the feed's route goes through it", readFileSync("app/api/store/calendar/[token]/route.ts", "utf8").includes("const calls = store.listId ? await withoutErasedBookers(store, paid)"), true);
 
   part("A sales reading begun before a buyer's erasure keeps nothing naming them (the race, review of #2111)");
   const day = new Date().toISOString().slice(0, 10);
@@ -286,9 +286,76 @@ async function main(): Promise<void> {
   is("a sales reading of a store with no list: neither shown nor kept naming them", [JSON.stringify(listlessSales.value).includes(saleSayer), String(redis.run(["GET", key]) ?? "").includes(saleSayer)], [false, false]);
   unlisted();
   freshDay();
-  redis.run(["DEL", key]);
+  redis.run(["DEL", key, `nl:list:try:${store.statsId}:${day}`]);
   const quietSales = await keptSales({ ...unlistedStore }, Date.now(), true);
   is("with nobody deleted, its list is made and the reading kept as before", [String(redis.run(["GET", key]) ?? "").includes(stayer), typeof (await storeForEmail(OWNER))?.listId, quietSales.stale], [true, "string", false]);
+
+  part("A store from before lists whose list cannot be made (its record's lock stays busy): tried once a day, and a copy that names nobody is kept (review of 2c1af02e0)");
+  unlisted();
+  const lockKey = ownerKey.replace("nl:store:owner:", "nl:store:lock:");
+  redis.run(["SET", lockKey, "held-by-another-write", "EX", 3_600]);
+  const listTry = `nl:list:try:${store.statsId}:${day}`;
+  // The parts above may have taken today's try; this store is read here as on a new day.
+  redis.run(["DEL", listTry]);
+  /** How many of `work`'s commands tried the store's lock. */
+  const lockTries = async <T>(work: () => Promise<T>): Promise<{ value: T | Error; tries: number }> => {
+    const real = redis.pipeline;
+    let tries = 0;
+    redis.pipeline = async (batch) => {
+      tries += batch.filter((c) => c[0] === "SET" && c[1] === lockKey).length;
+      return real(batch);
+    };
+    try {
+      return { value: await work(), tries };
+    } catch (error) {
+      return { value: error as Error, tries };
+    } finally {
+      redis.pipeline = real;
+    }
+  };
+  const busyStore = { ...(await storeForEmail(OWNER))!, stripeAccountId: "acct_test_readings_race" } as Store;
+  is("the store has no list and its record is moved to product records", [busyStore.listId, Boolean(busyStore.catalog.id)], [null, true]);
+  const shy = normaliseEmail("shy.buyer@example.com");
+  const bold = normaliseEmail("bold.buyer@example.com");
+  checkouts = [checkout(shy, 9_900, 7), checkout(bold, 1_900, 8)];
+  freshDay();
+  redis.run(["DEL", key]);
+  const salesTries: number[] = [];
+  const salesStates: string[] = [];
+  let salesShown = "";
+  for (let i = 0; i < 4; i += 1) {
+    const one = await lockTries(() => keptSales(busyStore, Date.now() + i, true));
+    salesTries.push(one.tries);
+    salesStates.push(one.value instanceof Error ? one.value.constructor.name : one.value.stale ? "kept" : "read");
+    if (!(one.value instanceof Error)) salesShown += JSON.stringify(one.value.value);
+  }
+  const salesKept = String(redis.run(["GET", key]) ?? "");
+  is(`its list tried in one reading of the day, not in each (${JSON.stringify(salesTries)})`, salesTries.filter((n) => n > 0).length, 1);
+  is(`the numbers still shown on every call, from the copy kept once the day's readings are used (${JSON.stringify(salesStates)})`, salesStates.includes("ReadingsUsed"), false);
+  is("a copy is kept, with its totals, naming nobody", [salesKept !== "", /"cents":\d/.test(salesKept), salesKept.includes(shy), salesKept.includes(bold)], [true, true, false, false]);
+  is("and nothing shown names them either", [salesShown.includes(shy), salesShown.includes(bold)], [false, false]);
+
+  redis.run(["DEL", listTry]);
+  const shyCaller = normaliseEmail("shy.caller@example.com");
+  checkouts = [callSession(shyCaller, 5), callSession(bold, 6)];
+  freshFeed();
+  const feedTries: number[] = [];
+  const feedAnswers: number[] = [];
+  let feedShown = "";
+  for (let i = 0; i < 4; i += 1) {
+    redis.run(["DEL", `nl:cal:pace:${store.statsId}`]);
+    const one = await lockTries(ask);
+    feedTries.push(one.tries);
+    const response = one.value as Response;
+    feedAnswers.push(response.status);
+    feedShown += await response.text();
+  }
+  const feedKept = String(redis.run(["GET", feedKey]) ?? "");
+  is(`the feed tries its list in one making of the day, not in each (${JSON.stringify(feedTries)})`, feedTries.filter((n) => n > 0).length, 1);
+  is(`every check answered with a file, none asked to come back (${JSON.stringify(feedAnswers)})`, feedAnswers, [200, 200, 200, 200]);
+  is("the file answered and kept keeps the times and names nobody", [feedShown.includes("BEGIN:VEVENT"), feedShown.includes(shyCaller), feedShown.includes(bold), feedKept.includes(shyCaller), feedKept.includes(bold), feedKept.includes("BEGIN:VEVENT")], [true, false, false, false, false, true]);
+  is("each booker is shown as a buyer, never as one whose details were deleted", [feedShown.includes("A buyer"), feedShown.includes("whose details were deleted")], [true, false]);
+  redis.run(["DEL", lockKey]);
   done();
 }
 

@@ -463,6 +463,8 @@ export type BookedCall = {
   moves: number;
   /** The buyer deleted their details from the store (lib/suppression.ts): the time stays, the person is not named. */
   erased?: boolean;
+  /** Not named, the store having no list to look a deleted person up in (app/api/store/calendar/[token]): "A buyer". */
+  unnamed?: boolean;
 };
 
 /**
@@ -512,7 +514,7 @@ export function bookedCalendar(
     }
   }
   const who = (c: BookedCall) =>
-    c.erased ? "A buyer whose details were deleted" : c.name && c.email ? `${c.name} <${c.email}>` : c.name ?? c.email ?? "A buyer who gave no address";
+    c.erased ? "A buyer whose details were deleted" : c.unnamed ? "A buyer" : c.name && c.email ? `${c.name} <${c.email}>` : c.name ?? c.email ?? "A buyer who gave no address";
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",

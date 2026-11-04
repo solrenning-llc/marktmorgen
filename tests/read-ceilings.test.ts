@@ -49,7 +49,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { takeAllowance } from "@/lib/store-allowance";
-import { COST_LINES, PER_PAYMENT_LINES, nonPayingWorst, readShapeCost } from "./plan-cost-registry";
+import { COST_LINES, DAY_WINDOWS, PER_PAYMENT_LINES, nonPayingWorst, readShapeCost } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -294,7 +294,7 @@ async function main(): Promise<void> {
     is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + MAX_PRODUCTS + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
   }
 
-  part("A store from before lists gets one once, the first time a reading would name someone: measured, within its shape, priced once (review of fe4cb5e56)");
+  part("A store from before lists gets one the first time a reading would name someone, tried once a day: measured, within its shape, priced every day (reviews of fe4cb5e56 and 2c1af02e0)");
   {
     const ownerKey = `nl:store:owner:${createHash("sha256").update(`nimbus-store:${OWNER.toLowerCase()}`).digest("hex").slice(0, 40)}`;
     const record = JSON.parse(String(redis.run(["GET", ownerKey])));
@@ -306,9 +306,10 @@ async function main(): Promise<void> {
     is(`made, measured (${made.commands}), within LIST_MADE_SHAPE less the lock's other tries and the head's reads (${room})`, [typeof made.value?.listId, made.commands <= room], ["string", true]);
     is("once there is one, nothing is written: one read", again.commands, 1);
     is("the figures the shape is built from are the code's own", [read("lib/store.ts").includes("const LOCK_WAIT_MS = 8_000;"), read("lib/redis-lock.ts").includes("for (let wait = 20; ; wait = Math.min(wait * 2, 250))"), LIST_MADE_HEAD_READS === STORE_PAGE_SIZE * (1 + MAX_BUMPS)], [true, true, true]);
-    const listLine = PER_PAYMENT_LINES.find((l) => l.id === "reading-list-made");
-    is("priced once, in the first payment's worst case", (listLine?.monthlyUsd("creator") ?? 0) >= readShapeCost(LIST_MADE_SHAPE), true);
-    console.log(`  its own once-a-store line (reading-list-made): $${readShapeCost(LIST_MADE_SHAPE).toFixed(4)} once (${LIST_MADE_SHAPE.commands} commands)`);
+    const readingsLine = COST_LINES.find((l) => l.id === "store-readings");
+    is("priced every day of the month, once a day a store, in the store-readings line", (readingsLine?.monthlyUsd("creator") ?? 0) >= DAY_WINDOWS * readShapeCost(LIST_MADE_SHAPE), true);
+    is("and no longer as a one-time line beside it", PER_PAYMENT_LINES.some((l) => l.id === "reading-list-made"), false);
+    console.log(`  a day's try at a list (store-readings line): $${readShapeCost(LIST_MADE_SHAPE).toFixed(4)} a day at most (${LIST_MADE_SHAPE.commands} commands)`);
   }
 
   part("Every figure costs at least the worst it stands for");

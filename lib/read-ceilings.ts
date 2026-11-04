@@ -105,13 +105,16 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  * and the store kept in the list whose refunds are read (ZSCORE and ZADD: 2,
  * inbox C4-33).
  */
+/** A store with no list, before anyone is named: the day's try mark (SET NX), whether or not the try is its own (listForNaming). */
+export const LIST_TRY_COMMANDS = 1;
 /** Commands one booking adds to a making: its moves (GET), its room's four reads and its room's making (SET NX and GET). */
 export const CALENDAR_BUILD_PER_BOOKING = 1 + 4 + 2;
 /** Commands of a making for a store of `listings` call listings and `calls` bookings (tests/read-ceilings.test.ts measures it). */
 export function calendarBuildCommands(listings: number, calls: number): number {
   // + 1: the bookers looked up among the store's deleted people (withoutErasedBookers, one HMGET); the copy kept, 4:
-  // KEEP_COPY looks them up again where it writes (review of #2111).
-  return 4 + 8 + 4 + 3 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 4 + 2 + 1;
+  // KEEP_COPY looks them up again where it writes (review of #2111). + LIST_TRY_COMMANDS: a store with no list, the
+  // day's try mark (lib/store-readings.ts, listForNaming; the try itself is priced once a day in store-readings).
+  return 4 + 8 + 4 + 3 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 4 + 2 + 1 + LIST_TRY_COMMANDS;
 }
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,
@@ -213,7 +216,7 @@ export const ERASED_LOOKUP_BYTES = 10 * (64 + 64);
  */
 export const READING_COPY_EXTRA_COMMANDS = 2;
 export const SALES_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy + 1 + READING_COPY_EXTRA_COMMANDS, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
+  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy + 1 + READING_COPY_EXTRA_COMMANDS + LIST_TRY_COMMANDS, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
   dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES + 2 * ERASED_LOOKUP_BYTES,
 };
 export const MEMBERS_READ_SHAPE: ReadShape = {
@@ -236,8 +239,11 @@ export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands:
  * #1680, 2 November 2026) gets one the first time a sales reading or its
  * calendar file would name someone (lib/store-readings.ts, keptSales;
  * app/api/store/calendar/[token]/route.ts), so a deleted person's print can be
- * looked up where the copy is kept (review of fe4cb5e56). Once ever for each
- * store, and only for one already moved to product records:
+ * looked up where the copy is kept (review of fe4cb5e56). At most once a UTC
+ * day for each store, whichever reads first (lib/store-readings.ts,
+ * listForNaming: a mark taken before the try, so a try that keeps failing, a
+ * record at its ceiling or a lock held elsewhere, is not made again that day;
+ * review of 2c1af02e0), and only for one already moved to product records:
  * lib/store.ts, ensureListId: the record read (GET), its lock (SET NX, tried
  * again every 20 to 250 ms for LOCK_WAIT_MS, 8 seconds: at most
  * STORE_LOCK_TRIES), the record read again (GET), its first page's product
@@ -246,8 +252,9 @@ export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands:
  * EXPIRE), the record written while held (EVAL, GET, EXISTS, SET) and the lock
  * let go (EVAL, GET, DEL); the record at its largest read twice and written
  * once. tests/read-ceilings.test.ts measures it and fails when one of the
- * figures it is built from moves. Priced once, in the first payment's worst
- * case (tests/plan-cost-registry.ts, reading-list-made).
+ * figures it is built from moves. Priced every day of the month in the
+ * store-readings line (tests/plan-cost-registry.ts), the feed's making
+ * sharing the same mark.
  */
 export const STORE_LOCK_TRIES = 4 + Math.ceil((8_000 - (20 + 40 + 80 + 160)) / 250) + 1;
 /** The head's reads: STORE_PAGE_SIZE (24, lib/catalog.ts) products and MAX_BUMPS (3, lib/product-extras.ts) bumps each. */

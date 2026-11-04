@@ -1,4 +1,5 @@
-import { ensureListId, storeForHandle, storeRef } from "@/lib/store";
+import { storeForHandle } from "@/lib/store";
+import { listForNaming } from "@/lib/store-readings";
 import { paidCalls } from "@/lib/calls";
 import { FeedGone, bookedCalendar, bookedCalendarFeed, ensureFeedToken, slotRooms, storeIdForToken, withoutErasedBookers } from "@/lib/calendar-sync";
 import { readKind } from "@/lib/catalog";
@@ -39,11 +40,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
       await ensureFeedToken(store).catch(() => {});
       // Who deleted their details from the store is not named, though Stripe keeps the booking (review of #2111).
       const paid = store.stripeAccountId ? await paidCalls(store) : [];
-      // A store from before lists has none to keep deleted people's prints in: made now, once, before anyone is
-      // named, so they can be looked up here and where the copy is kept (review of fe4cb5e56; lib/read-ceilings.ts,
-      // LIST_MADE_SHAPE). Only for a store already moved to product records: moving one is a write of its own.
-      if (!store.listId && store.catalog.id && paid.some((c) => c.email)) store = (await ensureListId(storeRef(store)).catch(() => null)) ?? store;
-      const calls = await withoutErasedBookers(store, paid);
+      // A store from before lists has none to keep deleted people's prints in: tried once a day before anyone is
+      // named (lib/store-readings.ts, listForNaming; review of fe4cb5e56). With none, nobody is named: the times stay,
+      // each booker "A buyer" (review of 2c1af02e0). Safe: an erasure always gives the store a list first.
+      if (!store.listId && paid.some((c) => c.email || c.name)) {
+        const listId = await listForNaming(store);
+        if (listId) store = { ...store, listId };
+      }
+      const calls = store.listId ? await withoutErasedBookers(store, paid) : paid.map((c) => (c.email || c.name ? { ...c, email: null, name: null, unnamed: true } : c));
       const listings = await readKind(store, "call");
       const ics = bookedCalendar(store, calls, Date.now(), listings, await slotRooms(store, calls, listings));
       // Who the file may name, checked again where its copy is kept: a deletion meanwhile is not undone by it.

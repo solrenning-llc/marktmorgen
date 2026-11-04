@@ -46,6 +46,19 @@ async function main(): Promise<void> {
   is("a second deletion deletes nothing", await forgetCrmPerson(STATS, ANA, "ana@example.com", ROOM), 0);
   is("and gives nothing more back", await used(), after);
 
+  part("A deal edited while its person is deleted is not written back");
+  const kept = deal("dealdddddd", "ana@example.com");
+  await writeDeal(STATS, kept, ROOM);
+  const beforeEdit = await used();
+  // The edit read the deal, then the deletion ran, then the edit saves.
+  await forgetCrmPerson(STATS, ANA, "ana@example.com", ROOM);
+  const afterDeletion = await used();
+  is("the deletion gave its room back", beforeEdit > afterDeletion, true);
+  is("the edit answers that the deal is gone", await writeDeal(STATS, { ...kept, title: "Edited" }, ROOM, "edit"), "gone");
+  is("and the deal is not there again", (await redis.pipeline([["HEXISTS", `nl:crm:deals:${STATS}`, kept.id]]))[0], 0);
+  is("nor its room taken", await used(), afterDeletion);
+  is("an edit of a deal still there is written", [await writeDeal(STATS, deal("dealcccccc", "ben@example.com"), ROOM, "edit")], [true]);
+
   part("Without a room nothing is counted, and nothing breaks");
   is("Ben deleted", await forgetCrmPerson(STATS, BEN, "ben@example.com"), 2);
   done();

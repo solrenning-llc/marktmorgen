@@ -44,6 +44,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -256,22 +257,20 @@ export async function readReview(statsId: string, productId: string, id: string)
  * the numbers from two different moments. "busy" when it could not be had.
  */
 async function locked<T>(statsId: string, productId: string, work: () => Promise<T>): Promise<T | "busy"> {
-  const key = lockKey(statsId, productId);
-  // A value of this call's own: a lock that ran out and was taken by another call is never let go of by this one.
-  const mine = randomBytes(12).toString("hex");
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const [got] = await redisPipeline([["SET", key, mine, "NX", "EX", 10]]);
-    if (got !== null) {
-      try {
-        return await work();
-      } finally {
-        const [held] = await redisPipeline([["GET", key]]).catch(() => [null]);
-        if (held === mine) await redisPipeline([["DEL", key]]).catch(() => {});
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 60 + attempt * 40));
+  // Under a token of this call's own, let go of in one step (lib/redis-lock.ts): a lock that ran out and was taken
+  // by another call is never let go of by this one.
+  let held;
+  try {
+    held = await takeLock(lockKey(statsId, productId), 10, 1_600);
+  } catch (error) {
+    if (error instanceof LockBusyError) return "busy";
+    throw error;
   }
-  return "busy";
+  try {
+    return await work();
+  } finally {
+    await releaseLock(held);
+  }
 }
 
 /** Counts a product's numbers again from its reviews, and keeps them. */
@@ -404,8 +403,9 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       // The AI summary that counted it goes in the same request: when it cannot, the deletion fails with it.
       ...summaryGone(statsId, productId),
     ]);
-    // Its room given back only once it is gone, and only by the deletion that removed it: a deletion that failed
-    // keeps the review and its room, and a second one racing it gives nothing back twice.
+    // Its room given back only once its own HDEL answered that it removed the review: never twice for two
+    // deletions racing. A request that failed may still have run the HDEL (an error on another command); the room
+    // then stays counted, more than is used, never less.
     if (Number(removed) === 1) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
     await recount(statsId, productId);
     return "deleted" as const;
@@ -635,12 +635,27 @@ export async function reviewsSince(statsId: string | null, since: number): Promi
 }
 
 /** Forgets every review of a product that is gone. Returns their photos' paths, for the caller to delete. */
-export async function dropReviews(statsId: string | null, productId: string): Promise<string[]> {
+export async function dropReviews(statsId: string | null, productId: string, tries = 1): Promise<string[]> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return [];
+  // Read once: a deletion that ran but did not answer in time leaves nothing to read again, and its photos would be lost.
   const [raw, all] = await redisPipeline([["HKEYS", productKey(statsId, productId)], ["HVALS", productKey(statsId, productId)]]);
   const ids = Array.isArray(raw) ? (raw as string[]) : [];
   const photos = (Array.isArray(all) ? (all as unknown[]) : []).map((one) => parseReview(one)?.photo?.path).filter((path): path is string => Boolean(path));
   const members = ids.map((id) => `${productId}|${id}`);
+  // Only the deletion is tried again (it can run twice: every command in it is the same the second time).
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await dropReviewRecords(statsId, productId, members);
+      return photos;
+    } catch (error) {
+      if (attempt >= tries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+  }
+}
+
+/** A product's reviews, their index entries and their AI summary, deleted in one request. */
+async function dropReviewRecords(statsId: string, productId: string, members: string[]): Promise<void> {
   await redisPipeline([
     ["DEL", productKey(statsId, productId)],
     ["DEL", visibleKey(statsId, productId)],
@@ -648,7 +663,6 @@ export async function dropReviews(statsId: string | null, productId: string): Pr
     ...summaryGone(statsId, productId),
     ...(members.length ? [["ZREM", allKey(statsId), ...members], ["ZREM", newKey(statsId), ...members]] : []),
   ]);
-  return photos;
 }
 
 /**

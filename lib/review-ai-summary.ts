@@ -20,9 +20,9 @@
  *                                       while it is the mark read before checking
  *   nl:rsum:lock:<statsId>              one at a time, two minutes
  */
-import { randomBytes } from "node:crypto";
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { MAX_SUMMARY_REVIEWS, MAX_SUMMARY_THEMES, MIN_SUMMARY_REVIEWS, MAX_THEME_TITLE, SUMMARY_REFRESH_SECONDS, type SummaryInput, type SummaryTheme, inputsStillShown, maySummarise, readThemes, summaryInputs } from "@/lib/review-ai-summary-rules";
 import { visibleReviews } from "@/lib/reviews";
 import type { Store } from "@/lib/store";
@@ -118,10 +118,15 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
   const notNow = (summary: ReviewSummary | null, at: number): ReviewSummaryResult =>
     summary ? { ok: true, summary, fresh: false, left: null } : inputs.length < MIN_SUMMARY_REVIEWS ? { ok: false, reason: "few", reviews: inputs.length } : { ok: false, reason: "week", next: at + SUMMARY_REFRESH_SECONDS };
   if (!maySummarise(inputs, lastAt, nowSeconds)) return notNow(kept, lastAt);
-  // The store's lock, under a value of this call's own, so only this call lets go of it.
-  const mine = randomBytes(12).toString("hex");
-  const [claimed] = await redisPipeline([["SET", lockKey(statsId), mine, "NX", "EX", LOCK_SECONDS]]);
-  if (claimed === null) return { ok: false, reason: "busy" };
+  // The store's lock, under a token of this call's own (lib/redis-lock.ts), let go of in one step only by this call.
+  let held;
+  try {
+    held = await takeLock(lockKey(statsId), LOCK_SECONDS, 0);
+  } catch (error) {
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
+    throw error;
+  }
+  const mine = held.token;
   try {
     // Read again under the lock: a summary made by a call that held it just before is this one's answer, not a second AI job.
     const now2 = await week(statsId, productId);
@@ -155,8 +160,7 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
     if (Number(keptNow) !== 1) return { ok: false, reason: "failed" };
     return { ok: true, summary: done.value, fresh: true, left: done.left };
   } finally {
-    // Let go only of this call's own lock: one that ran out and was taken by another call is left to it.
-    const [held] = await redisPipeline([["GET", lockKey(statsId)]]).catch(() => [null]);
-    if (held === mine) await redisPipeline([["DEL", lockKey(statsId)]]).catch(() => {});
+    // Let go only of this call's own lock, in one step: one that ran out and was taken by another call is left to it.
+    await releaseLock(held);
   }
 }

@@ -10,10 +10,11 @@ import { POST } from "@/app/api/store/review-summary/route";
 import { aiMonthKey } from "@/lib/ai";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { SUMMARY_REFRESH_SECONDS, summaryInputs } from "@/lib/review-ai-summary-rules";
+import { markRefundedReviews } from "@/lib/review-proof";
 import { KEEP_REVIEW_SUMMARY, makeReviewSummary, readReviewSummary, summaryPrompt } from "@/lib/review-ai-summary";
-import { deleteReview, forgetReviewsPerson, markOneRefunded, markRefunded, readReview, saveReview, setHidden, setReply, visibleReviews } from "@/lib/reviews";
+import { deleteReview, dropReviews, forgetReviewsPerson, markOneRefunded, markRefunded, readReview, saveReview, setHidden, setReply, setReviewPhoto, visibleReviews } from "@/lib/reviews";
 import { dataUsed } from "@/lib/store-data";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, imageFolder, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { readFileSync } from "node:fs";
@@ -112,7 +113,7 @@ async function main(): Promise<void> {
   reply = JSON.stringify({ themes: [{ title: "Clear steps", reviews: [5, 6] }, { title: "Nice photos", reviews: [1, 4] }] });
   const next = await makeReviewSummary(store, glaze, day + 60_000);
   is("the next try the same day may be made", next.ok && next.fresh, true);
-  is("the lock is let go only by the call that took it", readFileSync("lib/review-ai-summary.ts", "utf8").includes("if (held === mine)"), true);
+  is("the lock is let go only by the call that took it", readFileSync("lib/review-ai-summary.ts", "utf8").includes("await releaseLock(held);"), true);
   is("and a summary found under the lock is the answer, not a second AI job", readFileSync("lib/review-ai-summary.ts", "utf8").includes("const now2 = await week(statsId, productId);"), true);
   const one = (await visibleReviews(statsId, glaze, 0, 10))[0];
   await deleteReview(statsId, glaze, one.id, ROOM);
@@ -284,7 +285,7 @@ async function main(): Promise<void> {
   redis.pipeline = realPipe;
   is("and leaves the lock another call took to it", (await redis.pipeline([["GET", lockOf]]))[0], "another-call");
   await redis.pipeline([["DEL", lockOf]]);
-  is("the reviews' lock is held under a value of its own, not a shared one", readFileSync("lib/reviews.ts", "utf8").includes('["SET", key, mine, "NX", "EX", 10]'), true);
+  is("the reviews' lock is lib/redis-lock.ts's, let go of in one step", [readFileSync("lib/reviews.ts", "utf8").includes("held = await takeLock(lockKey(statsId, productId), 10, 1_600);"), readFileSync("lib/reviews.ts", "utf8").includes("await releaseLock(held);")], [true, true]);
 
   // A refund that finds its review busy is not taken as seen: thrown, so the sweep tries it again.
   await redis.pipeline([["SET", lockOf, "held-by-a-test", "EX", 10]]);
@@ -293,8 +294,62 @@ async function main(): Promise<void> {
   await redis.pipeline([["DEL", lockOf]]);
   is("a refund of a busy review throws, one or by payment", [busyOne, busyAll, (await readReview(statsId, slipId, slipA.id))?.refunded], ["thrown", "thrown", false]);
   is("once free, it is marked", [await markRefunded(statsId, "pi_slp0"), (await readReview(statsId, slipId, slipA.id))?.refunded], [1, true]);
+  // A removed product's reviews: read once, the deletion tried again. The first deletion runs but does not answer.
+  const photoPath = `images/${await imageFolder(OWNER)}/${"cd".repeat(16)}.webp`;
+  await setReviewPhoto(statsId, slipId, slipA.id, { path: photoPath, width: 800, height: 800 });
+  await redis.pipeline([["SET", `nl:rsum:${statsId}:${slipId}`, keptRaw, "EX", 8 * 86_400]]);
+  let timedOut = 0;
+  const realDrop = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (timedOut === 0 && commands.some((c) => c[0] === "DEL" && c[1] === `nl:rev:${statsId}:${slipId}`)) {
+      timedOut += 1;
+      await realDrop(commands);
+      throw new Error("Redis did not answer in time");
+    }
+    return realDrop(commands);
+  }) as typeof redis.pipeline;
+  const dropped = await dropReviews(statsId, slipId, 3);
+  redis.pipeline = realDrop;
+  is("a deletion that ran but timed out is tried again, and the photos read before it are still given back", [timedOut, dropped, await readReview(statsId, slipId, slipA.id), await readReviewSummary(statsId, slipId)], [1, [photoPath], null, null]);
+  redis.pipeline = (async () => { throw new Error("redis down for this test"); }) as typeof redis.pipeline;
+  const once = await dropReviews(statsId, slipId, 1).then(() => "dropped", () => "thrown");
+  redis.pipeline = realDrop;
+  is("one that cannot be deleted says so, never dropped silently", once, "thrown");
   const productRoute = readFileSync("app/api/store/product/route.ts", "utf8");
-  is("a removed product's reviews are tried again, never dropped silently", [productRoute.includes("dropReviews(removed.store.statsId, id).catch("), productRoute.includes("await dropReviewsAgain(removed.store.statsId, id)")], [false, true]);
+  is("the product route tries it three times and logs a failure", [productRoute.includes("dropReviews(removed.store.statsId, id).catch(() => [] as string[])"), productRoute.includes("await dropReviews(removed.store.statsId, id, 3).catch((error: unknown) => {")], [false, true]);
+
+  // The refund pass: a busy review stops it, and the reviews it already marked still leave the store's quotes.
+  // Two products, so only the second one's lock (a product's) is held.
+  const mixIds: string[] = [];
+  for (const [i, text] of ["Lovely glaze mixes, clear steps", "Great colours and clear notes"].entries()) {
+    const made = await addProduct(OWNER, `Glaze Mixes ${i}`, "", "25");
+    if (!made.ok) throw new Error("no product");
+    mixIds.push(made.product.id);
+    await saveReview(statsId, { productId: made.product.id, email: `mix${i}@example.com`, reference: `cs_test_mix${i}0000000000`, pi: `pi_mixrefund${i}0000`, rating: 5, text, name: `Mix ${i}` }, ROOM);
+  }
+  const freeOne = (await visibleReviews(statsId, mixIds[0], 0, 10))[0];
+  const busyOneReview = (await visibleReviews(statsId, mixIds[1], 0, 10))[0];
+  const mixId = mixIds[1];
+  process.env.STRIPE_SECRET_KEY = "sk_test_only_a_stand_in_0123456789";
+  const paid = { ...(await storeForEmail(OWNER))!, stripeAccountId: "acct_RefundPass0001" };
+  const quotesBefore = JSON.stringify((await storeForEmail(OWNER))!.quotes ?? null);
+  const refundsFetch = keep;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.hostname === "api.stripe.com" && url.pathname === "/v1/refunds") {
+      const row = (n: number) => ({ id: `re_mix${n}`, created: Math.floor(Date.now() / 1000), status: "succeeded", payment_intent: `pi_mixrefund${n}0000`, charge: { object: "charge", refunded: true, amount: 2500, amount_refunded: 2500 } });
+      return new Response(JSON.stringify({ object: "list", data: [row(0), row(1)], has_more: false }));
+    }
+    return refundsFetch(input, init);
+  }) as typeof fetch;
+  // The second review is busy: its lock held by another request.
+  await redis.pipeline([["SET", `nl:rev:lock:${statsId}:${mixId}`, "held-by-a-test", "EX", 10]]);
+  const pass = await markRefundedReviews(paid, Date.now() + 30_000).then(() => "done", () => "thrown");
+  await redis.pipeline([["DEL", `nl:rev:lock:${statsId}:${mixId}`]]);
+  globalThis.fetch = keep;
+  const quotesAfter = (await storeForEmail(OWNER))!.quotes ?? [];
+  is("the pass stops at the busy review, the first marked", [pass, (await readReview(statsId, mixIds[0], freeOne.id))?.refunded, (await readReview(statsId, mixId, busyOneReview.id))?.refunded], ["thrown", true, false]);
+  is("and the store's quotes are refreshed for what it marked, the refunded review left out", [JSON.stringify(quotesAfter) !== quotesBefore, quotesAfter.some((q) => q.t.includes("Lovely glaze mixes"))], [true, false]);
 
   const fifth = await addProduct(OWNER, "Wheel Basics", "", "45");
   if (!fifth.ok) throw new Error("no product");

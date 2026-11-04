@@ -18,10 +18,12 @@
  * cap as it streams.
  *
  * Retention (inbox C4-49): the daily run lists its own objects under backups/
- * (ListObjectsV2, a Class A operation each page) and deletes, one by one with
+ * (ListObjectsV2, a Class A operation each page, with each object's time and
+ * size) and deletes, one by one with
  * DeleteObject (free on R2, https://developers.cloudflare.com/r2/pricing/, read
- * 4 November 2026 by Claude 1, inbox C4-38), those older than the review's
- * retention (lib/backup-run.ts). The listing offers only names this store
+ * 4 November 2026 by Claude 1, inbox C4-38), the oldest when a set would not
+ * fit under the review's ceiling and, after a write, those older than the
+ * review's retention (lib/backup-run.ts). The listing offers only names this store
  * writes (backups/<uuid>.mmbk), so nothing else in the bucket is ever deleted;
  * a listing it cannot read whole throws, never reads as an empty bucket. The
  * bucket's lifecycle rule stays as a safety net.
@@ -106,7 +108,7 @@ function single(xml: string, name: string): string | null {
  * One listing page read whole, or a throw: the backup's own objects with their write times, and the token to go on.
  * A field missing, repeated or out of shape, a count that does not match, or a truncated page with no token throws.
  */
-export function readListing(xml: string): { objects: { id: string; writtenAt: number }[]; next: string | null } {
+export function readListing(xml: string): { objects: { id: string; writtenAt: number; bytes: number }[]; next: string | null } {
   if (!xml.includes("<ListBucketResult") || !xml.includes("</ListBucketResult>")) throw new Error("Invalid backup listing");
   const truncated = single(xml, "IsTruncated");
   if (truncated !== "true" && truncated !== "false") throw new Error("Invalid backup listing");
@@ -114,15 +116,17 @@ export function readListing(xml: string): { objects: { id: string; writtenAt: nu
   const opened = (xml.match(/<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?Contents[^A-Za-z0-9_.:-]/g) ?? []).length;
   if (entries.length > BACKUP_LIST_PAGE_KEYS || opened !== entries.length) throw new Error("Invalid backup listing");
   if (/<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?KeyCount[^A-Za-z0-9_.:-]/.test(xml) && single(xml, "KeyCount") !== String(entries.length)) throw new Error("Invalid backup listing");
-  const objects: { id: string; writtenAt: number }[] = [];
+  const objects: { id: string; writtenAt: number; bytes: number }[] = [];
   for (const entry of entries) {
     const name = single(entry, "Key");
     const when = single(entry, "LastModified");
     const writtenAt = when !== null && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(when) ? Date.parse(when) : NaN;
-    if (name === null || !name.startsWith(PREFIX) || !Number.isSafeInteger(writtenAt)) throw new Error("Invalid backup listing entry");
+    const size = single(entry, "Size");
+    const bytes = size !== null && /^\d{1,15}$/.test(size) ? Number(size) : NaN;
+    if (name === null || !name.startsWith(PREFIX) || !Number.isSafeInteger(writtenAt) || !Number.isSafeInteger(bytes)) throw new Error("Invalid backup listing entry");
     // Only what this store writes is offered; any other name under the prefix is left alone.
     const id = OBJECT_NAME.exec(name)?.[1];
-    if (id) objects.push({ id, writtenAt });
+    if (id) objects.push({ id, writtenAt, bytes });
   }
   const token = truncated === "true" ? single(xml, "NextContinuationToken") : null;
   const next = token === null ? null : token.replace(/&(amp|lt|gt|quot|apos);/g, (_, e: string) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" })[e] as string);

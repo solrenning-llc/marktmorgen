@@ -143,7 +143,7 @@ async function main(): Promise<void> {
   const ask = calls[calls.length - 1];
   const query = new URL(ask.url).searchParams;
   is("one page under backups/, signed, at most 1,000 names", [ask.method, query.get("list-type"), query.get("prefix"), query.get("max-keys"), ask.headers.authorization?.startsWith("AWS4-HMAC-SHA256 ")], ["GET", "2", "backups/", "1000", true]);
-  is("only its own objects, each with the time the bucket wrote it; another name is never offered for deletion", listed, { objects: [{ id: proof.id, writtenAt: Date.parse("2026-10-01T10:00:00.000Z") }], next: null });
+  is("only its own objects, each with the time the bucket wrote it and its size; another name is never offered for deletion", listed, { objects: [{ id: proof.id, writtenAt: Date.parse("2026-10-01T10:00:00.000Z"), bytes: objects.get(mine)!.byteLength }], next: null });
   for (const n of ["44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555"]) objects.set(`/marktmorgen-backups/backups/${n}.mmbk`, new Uint8Array([2]));
   listPage = 2;
   const first = await store.list(null);
@@ -153,7 +153,8 @@ async function main(): Promise<void> {
   for (const [name, body] of [
     ["not a listing", "<html>busy</html>"],
     ["a truncated listing with nowhere to go on", '<ListBucketResult><IsTruncated>true</IsTruncated><Contents><Key>backups/44444444-4444-4444-8444-444444444444.mmbk</Key><LastModified>2026-10-01T10:00:00.000Z</LastModified></Contents></ListBucketResult>'],
-    ["a time that is not one", '<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>backups/44444444-4444-4444-8444-444444444444.mmbk</Key><LastModified>soon</LastModified></Contents></ListBucketResult>'],
+    ["a time that is not one", '<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>backups/44444444-4444-4444-8444-444444444444.mmbk</Key><LastModified>soon</LastModified><Size>1</Size></Contents></ListBucketResult>'],
+    ["no size", '<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>backups/44444444-4444-4444-8444-444444444444.mmbk</Key><LastModified>2026-10-01T10:00:00.000Z</LastModified></Contents></ListBucketResult>'],
     ["a count that does not match", '<ListBucketResult><IsTruncated>false</IsTruncated><KeyCount>2</KeyCount><Contents><Key>backups/44444444-4444-4444-8444-444444444444.mmbk</Key><LastModified>2026-10-01T10:00:00.000Z</LastModified></Contents></ListBucketResult>'],
   ] as const) {
     listing = body;

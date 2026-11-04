@@ -3,7 +3,8 @@
  * a reviewed cost ceiling as a set of sealed parts and a sealed manifest
  * (lib/backup-parts.ts, inbox C4-30), each written once to the backup's own
  * bucket and read back the same (lib/backup-store.ts), then keep the time of
- * the last good copy and the last failure's reason for the report.
+ * the last good copy (and its manifest) and the last failure's reason for the
+ * report.
  *
  * Off three ways, each checked before a single command is sent:
  *   - no reviewed cost ceiling: BACKUP_COST_REVIEW is null until the owner's
@@ -15,34 +16,45 @@
  *   - no backup bucket settings (backupStoreConfig()).
  *   - no 32-byte BACKUP_ENCRYPTION_KEY.
  *
- * At most BACKUP_RUNS_PER_DAY runs a UTC day (inbox C4-49): the day's count is
- * taken before anything costly, and a run that ends well raises it past the
- * limit, so a second run that day is a new try after a failure (or a call that
- * came while the first was running); every call after them is refused at the
- * count, two commands and nothing else.
+ * One run at a time: a lock (SET NX PX) taken before anything else, held
+ * longer than a run can write (BACKUP_LOCK_MS > the admission's own requests
+ * + BACKUP_RUN_CUTOFF_MS); a call that finds it is refused as "busy" at one
+ * command, without touching the day's count. At most BACKUP_RUNS_PER_DAY runs
+ * a UTC day (inbox C4-49): the day's count is taken next, and a run that ends
+ * well raises it past the limit, so a second run that day is a new try after
+ * a failure; a call past them is refused at four commands (the lock, the
+ * count, the lock let go).
  *
- * Retention by the run itself (inbox C4-49): R2's lifecycle rule removes what
- * expired "typically" within a day, not within a bound, and bills it until it
- * goes, so the run deletes, before it writes anything, every object of the
- * backup the bucket says was written more than retentionDays days before the
- * run started; a run whose deletion does not complete (an error, or a listing
- * longer than its pages, or its cutoff) writes nothing and says so
- * ("prune_error", "prune_pages", "prune_cutoff"), and the owner's report
- * shows it. The deletion and the copy run under BACKUP_RUN_CUTOFF_MS. Deleting first is what
- * makes the ceiling a proof: every object alive at any moment was written by
- * a run that started no earlier than retentionDays days and one run's length
- * before the start of the latest run whose deletion completed, so its runs
- * fall within retentionDays + 2 UTC days, at most BACKUP_RUNS_PER_DAY sets
- * each (backupPeakSets). The deletion removes only copies past the retention,
- * which the lifecycle rule would remove anyway, so no copy inside it is lost
- * by going first. Without a run, nothing new is written and the lifecycle
- * rule, kept as a safety net, removes the rest. Nothing schedules it:
- * vercel.json is untouched (owner prerequisite 6 of docs/backup.md), and no
- * route calls it.
+ * Retention by the run itself (inbox C4-49, C4-53): write first, delete after.
+ *   1. Before it writes, the run lists every object of its own (complete, or
+ *      it writes nothing: "room_pages"). If they and one more set at its bound
+ *      would pass the review's maxStoredBytes, or backupKeptObjects objects, it
+ *      deletes the oldest first, never the last verified copy (the manifest
+ *      kept with the last good copy's time, and the parts it names), until
+ *      the set fits; if that deletion fails, it writes nothing ("room_error",
+ *      "room_cutoff"; the day's new try may try again).
+ *   2. Then it writes the set, and after it deletes every copy of its own the
+ *      bucket says was written more than retentionDays days before the run
+ *      started, as best it can: a failure ("prune_error", "prune_pages",
+ *      "prune_cutoff") is in the owner's report and never costs the day's copy;
+ *      the next run's step 1 holds the ceiling meanwhile.
+ * The ceiling is a proof: no other run writes while one holds the lock (its
+ * writes end by its cutoff, before the lock expires, and R2 lists what was
+ * written), and a run writes only after its own complete listing showed room
+ * for its whole set, so the bucket never holds more than maxStoredBytes nor
+ * more than backupKeptObjects objects. validReview asks maxStoredBytes for
+ * retention + 2 sets (backupPeakSets): with one good run a day, the copies of
+ * the last retentionDays days and the one that is about to age out are there
+ * before the day's write, so step 1 deletes nothing inside the retention; it
+ * acts only after failed runs or failed deletions. Names under backups/ this
+ * code does not write are never listed as its own nor deleted; the bucket's
+ * lifecycle rule, kept as a safety net, removes them and anything left while
+ * no run happens. Nothing schedules it: vercel.json is untouched (owner
+ * prerequisite 6 of docs/backup.md), and no route calls it.
  */
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
-import type { BackupBucket, BackupListPage, BackupObjectStore } from "@/lib/backup-roundtrip";
-import { MAX_PARTS, copyInParts, runStoredBound } from "@/lib/backup-parts";
+import type { BackupBucket, BackupListedObject, BackupObjectStore } from "@/lib/backup-roundtrip";
+import { MAX_PARTS, copyInParts, manifestBound, openManifest, runStoredBound } from "@/lib/backup-parts";
 import { BACKUP_LIST_PAGE_KEYS, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
 import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { redisPipeline } from "@/lib/redis";
@@ -53,9 +65,9 @@ export type BackupCostReview = {
   /** Every database command one run may send, its own marks included. */
   maxCommands: number;
   maxBytes: number;
-  /** Days a copy is kept: the run deletes every copy older than this before it writes. */
+  /** Days a copy is kept: after it writes, the run deletes every copy older than this. */
   retentionDays: number;
-  /** The most the kept copies may weigh in all. */
+  /** The most the kept copies may weigh in all: the run writes only when its whole set fits under it. */
   maxStoredBytes: number;
   /**
    * The most parts one run writes (lib/backup-parts.ts), and the most it copies
@@ -75,30 +87,33 @@ export const BACKUP_COST_REVIEW: BackupCostReview | null = null;
 /** Runs a UTC day at the most: one, and one new try after a failure (inbox C4-49). */
 export const BACKUP_RUNS_PER_DAY = 2;
 /**
- * Commands a run sends besides the walk and the copy: the day's count (SET NX with its expiry, INCRBY) and one
- * outcome (the last good copy and the count raised past the day's limit, or the failure).
+ * Commands a run sends besides the walk and the copy: the lock (SET NX PX), the day's count (SET NX with its expiry,
+ * INCRBY), the last good copy read when room must be made (GET), and one outcome (the last good copy, the count raised
+ * past the day's limit, a failed deletion's note, the lock let go; or the failure and the lock let go).
  */
-export const BACKUP_RUN_COMMANDS = 4;
+export const BACKUP_RUN_COMMANDS = 8;
 /**
- * The most a run's deletion and copy may last, in ms (independent review of #2175): every request inside is given up
- * by then and none is sent after it (lib/fetch-timeout.ts, withCutoff), and the walk, each part and the manifest are
- * refused once it has passed. Its writes therefore land within 800 s of its start, under a day, which the retention's
- * proof needs (backupPeakSets) whatever route or machine runs it. The outcome is written after it, outside it.
+ * The most a run's listing, deletions and copy may last, in ms (independent review of #2175): every request inside is
+ * given up by then and none is sent after it (lib/fetch-timeout.ts, withCutoff), and the walk, each part and the
+ * manifest are refused once it has passed. The outcome is written after it, outside it.
  */
 export const BACKUP_RUN_CUTOFF_MS = 800_000;
+/** The lock's life, in ms: past the admission's two requests (5 s each at most) and the cutoff, with room to spare. */
+export const BACKUP_LOCK_MS = 900_000;
 /**
- * The shortest retention a review may set. The run deletes before it writes, so a retention of a day or two could
- * delete the last good copy after one or two failed days; at 3 days, the report says no good copy has been verified
- * for 48 hours (backupStale) before the last one can be deleted.
+ * The shortest retention a review may set: at 3 days, the report says no good copy has been verified for 48 hours
+ * (backupStale) before the last one ages out of the retention.
  */
 export const BACKUP_MIN_RETENTION_DAYS = 3;
 /** Keys copied per request. */
 const BATCH = 100;
 const DAY_MS = 86_400_000;
-const OUTCOME_SECONDS = 8 * 86_400;
 const STALE_MS = 48 * 3_600_000;
 const LAST_OK = "nl:backup:last-ok";
 const LAST_FAIL = "nl:backup:last-fail";
+const LOCK = "nl:backup:lock";
+/** The outcome's life: 8 days, and for the last good copy never less than its retention and two days (it names the copy to keep). */
+const outcomeSeconds = (review: BackupCostReview) => Math.max(8, review.retentionDays + 2) * 86_400;
 
 /** The UTC day of a moment. */
 const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -111,17 +126,12 @@ const runLimits = (review: BackupCostReview) => ({
 /** What one run's stored objects weigh at the most: every part sealed, and its manifest. */
 const objectBound = (review: BackupCostReview) => runStoredBound(runLimits(review));
 
-/**
- * The most sets the bucket holds at once under a retention (inbox C4-49), proved by the run's order: every object
- * alive was written by a run started within retentionDays days and one run's length (at most Vercel's longest function, 800 s, under a day) before the
- * start of the latest run whose deletion completed, a span that touches at most retentionDays + 2 UTC days, each with
- * at most BACKUP_RUNS_PER_DAY runs, each writing at most one set (a failed run's parts weigh no more than a set).
- * A run marked before a midnight that writes after it is counted on the day it was marked, so it is inside the span.
- */
-export const backupPeakSets = (retentionDays: number) => BACKUP_RUNS_PER_DAY * (retentionDays + 2);
-/** Listing pages one deletion may read: every object the bucket can hold at once, 1,000 a page (S3's limit). */
-export const backupListPages = (review: BackupCostReview) =>
-  Math.max(1, Math.ceil((backupPeakSets(review.retentionDays) * (runLimits(review).maxParts + 1)) / BACKUP_LIST_PAGE_KEYS));
+/** Sets of a run's stored bound the review's ceiling must hold (inbox C4-53): the retention and two more. */
+export const backupPeakSets = (retentionDays: number) => retentionDays + 2;
+/** The most objects the bucket holds: retention + 2 sets of a run's objects (its parts and its manifest). */
+export const backupKeptObjects = (review: BackupCostReview) => backupPeakSets(review.retentionDays) * (runLimits(review).maxParts + 1);
+/** Listing pages one listing may read: every object the bucket can hold, 1,000 a page (S3's limit). */
+export const backupListPages = (review: BackupCostReview) => Math.max(1, Math.ceil(backupKeptObjects(review) / BACKUP_LIST_PAGE_KEYS));
 
 const REVIEW_FIELDS = ["maxRows", "maxCommands", "maxBytes", "retentionDays", "maxStoredBytes", "maxParts", "maxRunBytes", "reviewedAt", "source"] as const;
 const OPTIONAL_FIELDS = new Set<string>(["maxParts", "maxRunBytes"]);
@@ -171,7 +181,7 @@ export function admitReview(raw: unknown): BackupCostReview | null {
   const day = typeof reviewedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(reviewedAt) ? Date.parse(`${reviewedAt}T00:00:00Z`) : NaN;
   if (!Number.isFinite(day) || dayOf(day) !== reviewedAt) return null;
   if (typeof source !== "string" || source.trim().length < 10) return null;
-  // Every set the code lets the bucket hold at once (backupPeakSets), each at its stored bound.
+  // Room for retention + 2 sets at their stored bound (backupPeakSets): the run writes only below the ceiling.
   const kept = backupPeakSets(retentionDays) * objectBound(review);
   return Number.isSafeInteger(kept) && kept <= maxStoredBytes ? review : null;
 }
@@ -182,17 +192,16 @@ export function validReview(review: unknown): review is BackupCostReview {
 }
 
 export type BackupRunResult =
-  | { ok: true; id: string; keys: number; bytes: number; parts: number; pruned: number }
+  | { ok: true; id: string; keys: number; bytes: number; parts: number; pruned: number; prune: "done" | "prune_error" | "prune_pages" | "prune_cutoff" }
   | {
       ok: false;
       reason:
-        | "off_review" | "off_store" | "off_key" | "already_ran" | "mark_error"
-        | "prune_error" | "prune_pages" | "prune_cutoff"
+        | "off_review" | "off_store" | "off_key" | "busy" | "already_ran" | "mark_error"
+        | "room_error" | "room_pages" | "room_cutoff"
         | "export_limits" | "export_budget" | "export_cutoff" | "export_scan_pages" | "export_too_many" | "export_too_big" | "export_too_many_parts" | "export_unreadable" | "export_error"
         | "verify";
     };
 
-/** The encryption key from BACKUP_ENCRYPTION_KEY (base64 of exactly 32 bytes), or none. */
 export function backupKey(): Uint8Array | null {
   const raw = process.env.BACKUP_ENCRYPTION_KEY?.trim();
   if (!raw || !/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) return null;
@@ -201,18 +210,33 @@ export function backupKey(): Uint8Array | null {
 }
 
 
+
 export type BackupRunOptions = {
   now?: number;
   review?: BackupCostReview | null;
   store?: BackupBucket | null;
   key?: Uint8Array | null;
-  /** The run's cutoff, in ms from when it starts deleting; BACKUP_RUN_CUTOFF_MS unless a test shortens it. */
+  /** The run's cutoff, in ms from when it starts listing; BACKUP_RUN_CUTOFF_MS unless a test shortens it. */
   cutoffMs?: number;
 };
 
 function defaultStore(): BackupBucket | null {
   const config = backupStoreConfig();
   return config ? r2BackupStore(config) : null;
+}
+
+/** The last good copy as kept: its time and its manifest's id; a bare time (older format) names no manifest. */
+function readLastOk(raw: unknown): { at: number; set: string | null } | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed === "number") return Number.isFinite(parsed) ? { at: parsed, set: null } : null;
+    if (!parsed || typeof parsed !== "object") return null;
+    const { at, set } = parsed as { at?: unknown; set?: unknown };
+    return typeof at === "number" && Number.isFinite(at) ? { at, set: typeof set === "string" ? set : null } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** One run: off unless all three are there; otherwise a verified copy, or a failure that says which step. Never throws. */
@@ -225,74 +249,142 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   const key = "key" in options ? options.key : backupKey();
   if (!key || key.length !== 32) return { ok: false, reason: "off_key" };
 
-  // The day's count, before anything costly: kept two days, so the count of a run marked before a midnight that
-  // writes after it is still there for the day after.
+  // One run at a time, before anything else (inbox C4-53): a call that finds a run going is refused at one command.
+  try {
+    const [held] = await redisPipeline([["SET", LOCK, String(now), "NX", "PX", BACKUP_LOCK_MS]]);
+    if (held !== "OK") return { ok: false, reason: "busy" };
+  } catch {
+    return { ok: false, reason: "mark_error" };
+  }
+  const letGo = () => redisPipeline([["DEL", LOCK]]).then(() => undefined, () => undefined);
+
+  // The day's count: kept two days, so the count of a run marked before a midnight that writes after it is still
+  // there for the day after.
   const day = `nl:backup:ran:${dayOf(now)}`;
   try {
     const [, count] = await redisPipeline([["SET", day, "0", "NX", "EX", 2 * 86_400], ["INCRBY", day, 1]]);
     const runs = Number(count);
-    if (!Number.isSafeInteger(runs) || runs < 1) return { ok: false, reason: "mark_error" };
-    if (runs > BACKUP_RUNS_PER_DAY) return { ok: false, reason: "already_ran" };
+    if (!Number.isSafeInteger(runs) || runs < 1) return (await letGo(), { ok: false, reason: "mark_error" });
+    if (runs > BACKUP_RUNS_PER_DAY) return (await letGo(), { ok: false, reason: "already_ran" });
   } catch {
+    await letGo();
     return { ok: false, reason: "mark_error" };
   }
 
   const cutoff = Date.now() + Math.min(options.cutoffMs ?? BACKUP_RUN_CUTOFF_MS, BACKUP_RUN_CUTOFF_MS);
   const result: BackupRunResult = await withCutoff(cutoff, async () => {
+    const room = await makeRoom(review, store, key);
+    if (!room.ok) return { ok: false, reason: room.reason };
+    const copied = await copy(review, store, key, now);
+    // After the write, as best it can: a failure is reported and never costs the copy just made.
     const pruned = await prune(review, store, now);
-    return pruned.ok ? copy(review, store, key, now, pruned.deleted) : { ok: false, reason: pruned.reason };
+    return copied.ok ? { ...copied, pruned: room.deleted + pruned.deleted, prune: pruned.state } : copied;
   });
+  const keep = outcomeSeconds(review);
   try {
     await redisPipeline(
       result.ok
-        // Done: no new try today; the count goes past the day's limit.
-        ? [["SET", LAST_OK, String(now), "EX", OUTCOME_SECONDS], ["INCRBY", day, BACKUP_RUNS_PER_DAY]]
-        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason }), "EX", OUTCOME_SECONDS]],
+        ? [
+            ["SET", LAST_OK, JSON.stringify({ at: now, set: result.id }), "EX", keep],
+            // Done: no new try today; the count goes past the day's limit.
+            ["INCRBY", day, BACKUP_RUNS_PER_DAY],
+            ...(result.prune === "done" ? [] : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.prune }), "EX", keep]]),
+            ["DEL", LOCK],
+          ]
+        : [["SET", LAST_FAIL, JSON.stringify({ at: now, reason: result.reason }), "EX", keep], ["DEL", LOCK]],
     );
   } catch {
-    // The copy stands as it is; a lost note only makes the report look older (and may let one new try run today).
+    // The copy stands as it is; a lost note only makes the report look older (the lock goes by itself).
   }
   return result;
 }
 
+/** Every object of the backup's own, read whole within backupListPages pages; null when the listing is longer. */
+async function listAll(review: BackupCostReview, store: BackupBucket): Promise<BackupListedObject[] | null> {
+  const all: BackupListedObject[] = [];
+  let next: string | null = null;
+  for (let page = 0; page < backupListPages(review); page += 1) {
+    if (timeLeft() <= 0) throw new RangeError("cutoff");
+    const answer = await store.list(next);
+    if (!answer || !Array.isArray(answer.objects) || (answer.next !== null && typeof answer.next !== "string")) throw new Error("Invalid listing");
+    for (const object of answer.objects) {
+      if (!object || typeof object.id !== "string" || !Number.isSafeInteger(object.writtenAt) || !Number.isSafeInteger(object.bytes) || object.bytes < 0) throw new Error("Invalid listing");
+      all.push(object);
+    }
+    if (answer.next === null) return all;
+    next = answer.next;
+  }
+  return null;
+}
+
+/** The ids of the last verified copy that are still in the bucket: its manifest and every part it names. */
+async function lastVerified(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[]): Promise<Set<string>> {
+  const [raw] = await redisPipeline([["GET", LAST_OK]]);
+  const set = readLastOk(raw)?.set;
+  if (!set || !listed.some((o) => o.id === set)) return new Set();
+  // Listed but unreadable: thrown, so nothing is deleted on doubt.
+  const manifest = openManifest(await store.read(set, manifestBound(MAX_PARTS)), key);
+  return new Set([set, ...manifest.parts.map((part) => part.id)]);
+}
+
 /**
- * Deletes every object of the backup written more than retentionDays days before `now`, reading at most
- * backupListPages pages; complete, or a reason. Deletes are one by one (DeleteObject, free on R2); deleting while the
- * listing goes on is safe because a page goes on from the last name read, and a deleted name is behind it.
+ * Before the write (step 1): room for one more set at its bound under the review's ceiling, in bytes and in objects,
+ * made by deleting the oldest copies first and never the last verified one; or a reason, and nothing written.
  */
-async function prune(
+async function makeRoom(
   review: BackupCostReview,
   store: BackupBucket,
-  now: number,
-): Promise<{ ok: true; deleted: number } | { ok: false; reason: "prune_error" | "prune_pages" | "prune_cutoff" }> {
-  const line = now - review.retentionDays * DAY_MS;
-  const pages = backupListPages(review);
-  let next: string | null = null;
-  let deleted = 0;
+  key: Uint8Array,
+): Promise<{ ok: true; deleted: number } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" }> {
+  const need = objectBound(review);
+  const objects = runLimits(review).maxParts + 1;
+  const most = backupKeptObjects(review);
   try {
-    for (let page = 0; page < pages; page += 1) {
-      if (timeLeft() <= 0) return { ok: false, reason: "prune_cutoff" };
-      const answer: BackupListPage = await store.list(next);
-      if (!answer || !Array.isArray(answer.objects) || (answer.next !== null && typeof answer.next !== "string")) return { ok: false, reason: "prune_error" };
-      for (const object of answer.objects) {
-        if (!object || typeof object.id !== "string" || !Number.isSafeInteger(object.writtenAt)) return { ok: false, reason: "prune_error" };
-        // Older than the retention: written before the line (a run's late writes land at most 800 s after its start).
-        if (object.writtenAt < line) {
-          if (timeLeft() <= 0) return { ok: false, reason: "prune_cutoff" };
-          await store.delete(object.id);
-          deleted += 1;
-        }
-      }
-      if (answer.next === null) return { ok: true, deleted };
-      next = answer.next;
+    const listed = await listAll(review, store);
+    if (!listed) return { ok: false, reason: "room_pages" };
+    let bytes = listed.reduce((n, o) => n + o.bytes, 0);
+    let count = listed.length;
+    const fits = () => bytes + need <= review.maxStoredBytes && count + objects <= most;
+    if (fits()) return { ok: true, deleted: 0 };
+    const keep = await lastVerified(store, key, listed);
+    const oldest = listed.filter((o) => !keep.has(o.id)).sort((a, b) => a.writtenAt - b.writtenAt || (a.id < b.id ? -1 : 1));
+    let deleted = 0;
+    for (const object of oldest) {
+      if (fits()) break;
+      if (timeLeft() <= 0) return { ok: false, reason: "room_cutoff" };
+      await store.delete(object.id);
+      bytes -= object.bytes;
+      count -= 1;
+      deleted += 1;
     }
-    return { ok: false, reason: "prune_pages" };
+    return fits() ? { ok: true, deleted } : { ok: false, reason: "room_error" };
   } catch {
-    return { ok: false, reason: timeLeft() <= 0 ? "prune_cutoff" : "prune_error" };
+    return { ok: false, reason: timeLeft() <= 0 ? "room_cutoff" : "room_error" };
   }
 }
 
-async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uint8Array, now: number, pruned: number): Promise<BackupRunResult> {
+/**
+ * After the write (step 2), as best it can: deletes every object of the backup's own written more than retentionDays
+ * days before `now`. Deletes are one by one (DeleteObject, free on R2).
+ */
+async function prune(review: BackupCostReview, store: BackupBucket, now: number): Promise<{ deleted: number; state: "done" | "prune_error" | "prune_pages" | "prune_cutoff" }> {
+  const line = now - review.retentionDays * DAY_MS;
+  let deleted = 0;
+  try {
+    const listed = await listAll(review, store);
+    for (const object of listed ?? []) {
+      if (object.writtenAt >= line) continue;
+      if (timeLeft() <= 0) return { deleted, state: "prune_cutoff" };
+      await store.delete(object.id);
+      deleted += 1;
+    }
+    return { deleted, state: listed ? "done" : "prune_pages" };
+  } catch {
+    return { deleted, state: timeLeft() <= 0 ? "prune_cutoff" : "prune_error" };
+  }
+}
+
+async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uint8Array, now: number): Promise<Exclude<BackupRunResult, { ok: true }> | { ok: true; id: string; keys: number; bytes: number; parts: number }> {
   // The copy in parts (lib/backup-parts.ts): every part verified as written, the set verified by its manifest last.
   let done: Awaited<ReturnType<typeof copyInParts>>;
   try {
@@ -300,7 +392,7 @@ async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uin
   } catch {
     return { ok: false, reason: "export_error" };
   }
-  if (done.ok) return { ok: true, id: done.id, keys: done.keys, bytes: done.bytes, parts: done.parts, pruned };
+  if (done.ok) return { ok: true, id: done.id, keys: done.keys, bytes: done.bytes, parts: done.parts };
   // Sealing, a write or a read-back failed: every earlier set is left as it was.
   if (done.reason === "verify") return { ok: false, reason: "verify" };
   return { ok: false, reason: `export_${done.reason}` };
@@ -309,8 +401,8 @@ async function copy(review: BackupCostReview, store: BackupObjectStore, key: Uin
 /** True when no copy has been verified in the last 48 hours (none kept counts as none). */
 export async function backupStale(now: number = Date.now()): Promise<boolean> {
   const [last] = await redisPipeline([["GET", LAST_OK]]);
-  const at = Number(last);
-  return !(last && Number.isFinite(at) && now - at <= STALE_MS);
+  const kept = readLastOk(last);
+  return !(kept && now - kept.at <= STALE_MS);
 }
 
 /** The latest failure kept, if any. */

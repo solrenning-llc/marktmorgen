@@ -199,6 +199,8 @@ Still open, so the line is not reviewed (`BACKUP_COST_UNKNOWNS`): the route and 
 
 ## 5d. The run deletes its own copies, a run and one new try a day, 200 SCAN pages (inbox C4-46 and C4-49, 4 November 2026)
 
+*The order and the ceiling below (delete first, 2 × (retention + 2) sets) are superseded by section 5e (inbox C4-53); the snapshot, the 200 pages and the day's count stand.*
+
 What changed in the code, each with a test that failed before it (`tests/backup-run.test.ts`, `tests/backup-parts.test.ts`, `tests/backup-store.test.ts`, `tests/backup-cost.test.ts`):
 
 - **The review is read once, as data** (`admitReview`, `lib/backup-run.ts`; Codex G on #2175): each field from the object's own data property, never through a getter, never inherited; an object that throws when read (a revoked Proxy) gives null. The run and `backupWorstMonth` use only that copy, so a review cannot pass with one figure and be priced or used with another.
@@ -225,4 +227,34 @@ Worst month of the design as built (one part of 4 MiB, 10,000 keys, 20,204 comma
 A year: 12 × $9.3593 = **$112.31**. Against section 5c ($18.17), the 200-page cap takes the Upstash bytes from $9.95 to $0.25; counting a new try on every day doubles the runs (32 → 64), and so the commands and the Vercel line, which is why the month is $9.36 and not about $7.30. The $4.50 of Class A is almost all the million of rounding.
 
 Still open (`BACKUP_COST_UNKNOWNS`), none closed today: this session cannot reach developers.cloudflare.com, vercel.com or upstash.com, so no rate or date was reread. The route and its maximum duration (300 s assumed for the price; the retention proof no longer depends on it, since the run's cutoff is 800 s); the Vercel rates of 7 October 2026; whether Vercel bills the bytes sent to R2 and Upstash; the last batch of `DUMP`s read before the byte cap refuses it; the `SCAN` names of other products and names escaped in JSON (pages are now capped, their size is not); calls refused at the day's count (two commands and one Vercel call each, no cap); the report's two reads a day; whether Upstash and Vercel round up to a block; reading a set back to restore. `BACKUP_COST_REVIEW` stays `null`.
+
+## 5e. Write first, delete after, one run at a time (inbox C4-53, 4 November 2026)
+
+Claude 1's decision replaces "always delete first" (section 5d), so a passing failure to delete never costs the day's copy, with the ceiling still proved. What the code does now (`lib/backup-run.ts`), each with a test that failed before it (`tests/backup-run.test.ts`):
+
+- **One run at a time:** a lock (`nl:backup:lock`, `SET … NX PX`, 15 minutes, let go when the run ends) is taken before anything else; a call that finds it is refused as `busy` at one command, without touching the day's count. Two runs at once (counts 1 and 2), a run that crosses midnight and the day's new try therefore never write side by side. The lock outlives everything a run can write: its listing, deletions and copy are under an 800 s cutoff (`BACKUP_RUN_CUTOFF_MS`), after the admission's two requests of at most 5 s each.
+- **Step 1, before the write:** the run lists every object of its own (complete within `backupListPages` pages, or it writes nothing: `room_pages`). When they and one more set at its stored bound would pass the review's `maxStoredBytes`, or `backupKeptObjects` objects ((retention + 2) × (parts + 1)), it deletes the oldest first, never the last verified copy (the manifest whose id is kept with the last good copy's time, read back to find its parts), and if that deletion fails it writes nothing (`room_error`, `room_cutoff`); the day's new try may try again.
+- **Step 2, after the write:** it deletes every copy of its own older than `retentionDays` days, as best it can; a failure (`prune_error`, `prune_pages`, `prune_cutoff`) goes into the owner's report and the run is still done.
+
+**The ceiling, proved:** no other run writes while one holds the lock, R2 lists what was written, and a run writes only after its own complete listing showed room for its whole set; deletions only lower it. So the bucket never holds more than `maxStoredBytes` nor more than `backupKeptObjects` objects. `validReview` asks `maxStoredBytes` ≥ (retention + 2) sets at their bound (`backupPeakSets` = retention + 2 = **32 sets** for 30 days): with one good run a day, the copies of the last 30 days and the one about to age out are there before the day's write, so step 1 deletes nothing inside the retention; it acts only after failed runs or failed deletions. **`maxStoredBytes` for the design as built: 32 × 4,325,536 = 138,417,152 bytes** (the 132,055,040 approved on 4 November was 31 sets of the old 4,259,840 bound; it no longer passes).
+
+**The last verified copy** is never deleted to make room (Reviewer 1's note), held by a test at the ceiling and by the 90-day simulation (runs before midnight, failures, new tries, failed deletes: never past the ceiling, the last verified copy always there). Step 2 may still delete it once it is older than the retention, as the lifecycle rule would; the 3-day minimum retention means the report has said "no good copy for 48 hours" before that.
+
+**Retention and privacy:** after each run whose deletion finished, none of the backup's own copies is older than 30 days. A run whose deletion did not finish leaves older ones for the next run or the lifecycle rule. Other names under `backups/` are never deleted by the run. The sentence proposed in section 5d for the privacy text stands.
+
+Worst month of the design as built (one part of 4 MiB, 10,000 keys, 20,208 commands: 20,000 for the copy, 200 `SCAN` pages and the run's eight (the lock, the day's count, the last good copy's read, the outcome); 30 days, `maxStoredBytes` 138,417,152, a 300 s route), `tests/backup-cost.test.ts`:
+
+| Line | Per month |
+| --- | ---: |
+| R2 storage (the review's ceiling, 32 sets, + 1 GB-month of rounding) | $0.0171 |
+| R2 Class A (64 runs × (2 objects × 2 + 2 listings) = 384, + 64 objects alive at the month's start = 448, + 1 million of rounding) | $4.5020 |
+| R2 Class B (64 runs × (2 read-backs + 1 manifest read) = 192, + 1 million of rounding) | $0.3601 |
+| Upstash commands (64 × 20,208 + 32 × 2 report reads) | $2.5868 |
+| Upstash bytes (64 runs × 127.7 MB) | $0.2452 |
+| Upstash storage (6 marks) | $0.0000 |
+| Vercel (64 calls of 300 s at 2 GB) | $0.7958 |
+| Provider allowance, 10% | $0.8507 |
+| **Total** | **$9.3576** |
+
+A year: 12 × $9.3576 = **$112.29**. Calls refused at the lock cost one command, at the day's count four, each one Vercel call, with no cap on how many arrive: still open (`refused-calls`), with the other items of section 5d. `BACKUP_COST_REVIEW` stays `null`.
 

@@ -7,8 +7,8 @@ export type BackupObjectStore = {
  putNew: (id:string, bytes:Uint8Array)=>Promise<void>;
  read: (id:string, maxBytes:number)=>Promise<Uint8Array>;
 };
-/** One object the backup wrote, as the bucket lists it: its id and when the bucket says it was written, in ms. */
-export type BackupListedObject = { id:string; writtenAt:number };
+/** One object the backup wrote, as the bucket lists it: its id, when the bucket says it was written (ms) and its size in bytes. */
+export type BackupListedObject = { id:string; writtenAt:number; bytes:number };
 /** One page of the backup's own objects; `next` goes on from it, null on the last page. */
 export type BackupListPage = { objects:BackupListedObject[]; next:string|null };
 /**

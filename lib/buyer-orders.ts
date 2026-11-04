@@ -837,6 +837,9 @@ export async function ordersGrant(store: Store, token: string): Promise<string |
   }
 }
 
+/** What a download asks for besides its purchase: a product of a bundle by its id (`pid`), and a product ticked at checkout by its key (`item`). */
+export type DownloadWant = { pid?: string; item?: string };
+
 /**
  * The one purchase a download asks for, with the link's address, when that
  * address paid for it. Read again from Stripe, so a refund made a minute ago
@@ -844,24 +847,33 @@ export async function ordersGrant(store: Store, token: string): Promise<string |
  *
  * Only that purchase is read, by its own reference, never the whole list:
  * DOWNLOAD_LOOKUP_UNITS of the store's buyer requests are taken before the
- * link's grant is read, and the listings it names through the meter handed
- * back (for what the download reads after), all waited on DOWNLOAD_LOOKUP_MS
- * at the most. A checkout is read alone and must have been paid with the
- * link's address; a payment taken in one click after one, with the checkout
- * it followed, which must; one brought over, its one entry. Throws OrdersBusy
- * when the store has no room (before Stripe is asked anything, or anything
- * more), and OrdersLate past that time.
+ * link's grant is read, and the listings it reads through the meter, all
+ * waited on DOWNLOAD_LOOKUP_MS at the most. A checkout is read alone and must
+ * have been paid with the link's address; a payment taken in one click after
+ * one, with the checkout it followed, which must, and which the list would
+ * hand over; one brought over, its one entry. Of its listings only what the
+ * download asks for is read: the product bought, the one ticked (`item`) and
+ * the one of a bundle (`pid`), which must be on the order's own list; the
+ * other products of a bundle are never read. `listing` hands back what was
+ * read, so the route reads nothing again. Throws OrdersBusy when the store
+ * has no room (before Stripe is asked anything, or anything more), and
+ * OrdersLate past that time.
  */
-export async function findPurchase(store: Store, token: string, reference: string): Promise<{ purchase: Purchase; email: string; meter: OrdersMeter } | null> {
+export async function findPurchase(
+  store: Store,
+  token: string,
+  reference: string,
+  want: DownloadWant = {},
+): Promise<{ purchase: Purchase; email: string; listing: (id: string) => Promise<Listing | null> } | null> {
   const kind = SESSION_ID_PATTERN.test(reference) ? "session" : INTENT_ID_PATTERN.test(reference) ? "intent" : IMPORTED_REFERENCE.test(reference) ? "imported" : null;
   if (!kind || !ORDERS_TOKEN_PATTERN.test(token)) return null;
   if (!(await takePublicRequest(store, "buyer", Date.now(), DOWNLOAD_LOOKUP_UNITS))) throw new OrdersBusy();
   const email = await ordersGrant(store, token);
   if (!email) return null;
   const meter = new OrdersMeter(store);
-  const found = await withinOpening(lookUp(store, email, kind, reference, meter), meter, DOWNLOAD_LOOKUP_MS);
+  const found = await withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS);
   if (found === "late") throw new OrdersLate();
-  return found ? { purchase: found, email, meter } : null;
+  return found;
 }
 
 /** One checkout or payment on the creator's account, null when Stripe has none by that id. */
@@ -887,8 +899,53 @@ async function sessionOf(store: Store, email: string, id: string, meter: OrdersM
   return paidWith && normaliseEmail(paidWith) === normaliseEmail(email) ? session : null;
 }
 
-async function lookUp(store: Store, email: string, kind: "session" | "intent" | "imported", reference: string, meter: OrdersMeter): Promise<Purchase | null> {
-  const find = finderFor(store, meter);
+/**
+ * A finder that reads only the products a download asks for, each once and
+ * taken from the meter first, and answers null for every other without
+ * reading it.
+ */
+function onlyFinder(store: Store, meter: OrdersMeter): { find: Finder; allow: (...ids: (string | undefined)[]) => void } {
+  const base = finderFor(store, meter);
+  const allowed = new Set<string>();
+  return {
+    find: (id) => (id && allowed.has(id) ? base(id) : Promise.resolve(null)),
+    allow: (...ids) => ids.forEach((id) => id && allowed.add(id)),
+  };
+}
+
+/** A product of a bundle asked for: only one on the order's own list (its metadata), read with nothing else of it. */
+const inList = (ids: string[], pid: string | undefined) => !pid || ids.includes(pid);
+
+/**
+ * Whether the checkout a payment in one click followed is one the list would
+ * hand over and so read that payment under: paid, this store's, not a gift,
+ * a place, a call, a package of calls or a pre-order, its product there and
+ * not a call, a membership still paid for, and not given back.
+ */
+async function handsOverAfter(store: Store, session: Row, find: Finder, meter: OrdersMeter): Promise<boolean> {
+  const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
+  if (!saleHandles(store).has(meta.store ?? "") || !isSettled(session)) return false;
+  if (meta.kind === "call" || meta.kind === "package" || meta.gift || meta.group || meta.preorder) return false;
+  const product = await find(meta.product);
+  if (!product || product.call) return false;
+  if (soldAMembership(product, { mode: session.mode, metadata: meta })) {
+    const sub = session.subscription as { status?: unknown } | null;
+    if (!sub || typeof sub !== "object" || !isLiveSub(sub)) return false;
+  }
+  meter.alive();
+  return !(await purchaseRefunded(store.stripeAccountId, session));
+}
+
+async function lookUp(
+  store: Store,
+  email: string,
+  kind: "session" | "intent" | "imported",
+  reference: string,
+  meter: OrdersMeter,
+  want: DownloadWant,
+): Promise<{ purchase: Purchase; email: string; listing: (id: string) => Promise<Listing | null> } | null> {
+  const { find, allow } = onlyFinder(store, meter);
+  const done = (purchase: Purchase | null) => (purchase ? { purchase, email, listing: (id: string) => find(id) } : null);
   if (kind === "imported") {
     if (!store.pastBuyers || !store.statsId) return null;
     const key = importedKey(store.statsId, email);
@@ -901,22 +958,35 @@ async function lookUp(store: Store, email: string, kind: "session" | "intent" | 
     if (!productId) return null;
     const [raw] = await redisPipeline([["HGET", key, productId]]);
     const [given] = importedFrom([productId, raw]);
-    return given ? purchaseFromImported(store, statsId, email, given, find, meter) : null;
+    if (!given || !inList(given.items ?? [], want.pid)) return null;
+    allow(given.productId, want.pid);
+    return done(await purchaseFromImported(store, statsId, email, given, find, meter));
   }
   if (!store.stripeAccountId) return null;
   if (kind === "session") {
     const session = await sessionOf(store, email, reference, meter);
-    return session ? ((await purchaseFromSession(store, session, find, meter))?.purchase ?? null) : null;
+    if (!session) return null;
+    const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
+    const bump = want.item ? bumpsFromMeta(meta).find((b) => b.key === want.item) : undefined;
+    if (want.item && !bump) return null;
+    if (!inList(bundleFromMeta(meta, bump ? `${bump.key}_bundle` : "bundle"), want.pid)) return null;
+    allow(meta.product, bump?.id, want.pid);
+    return done((await purchaseFromSession(store, session, find, meter))?.purchase ?? null);
   }
   // A payment taken in one click: its own, made for the customer of the checkout it followed (lib/upsell.ts, metadata[parent]),
-  // which must have been paid with this address.
+  // which must have been paid with this address and be one the list reads such payments under.
   const intent = await readOne(store, `/payment_intents/${encodeURIComponent(reference)}?expand[]=latest_charge`, meter);
-  const parent = ((intent?.metadata ?? {}) as Record<string, string>).parent ?? "";
-  if (!intent || !SESSION_ID_PATTERN.test(parent)) return null;
+  const intentMeta = (intent?.metadata ?? {}) as Record<string, string>;
+  const parent = intentMeta.parent ?? "";
+  if (!intent || !SESSION_ID_PATTERN.test(parent) || want.item) return null;
+  if (!inList(bundleFromMeta(intentMeta, "bundle"), want.pid)) return null;
   const session = await sessionOf(store, email, parent, meter);
   if (!session) return null;
   const customer = (value: unknown) => (typeof value === "string" ? value : value && typeof value === "object" ? (value as { id?: unknown }).id : null);
   const owner = customer(session.customer);
-  if (!owner || owner !== customer(intent.customer)) return null;
-  return purchaseFromIntent(store, intent, find);
+  if (!owner || !CUSTOMER_PATTERN.test(String(owner)) || owner !== customer(intent.customer)) return null;
+  allow(currentMeta((session.metadata ?? {}) as Record<string, string>, session).product);
+  if (!(await handsOverAfter(store, session, find, meter))) return null;
+  allow(intentMeta.product, want.pid);
+  return done(await purchaseFromIntent(store, intent, find));
 }

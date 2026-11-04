@@ -1,12 +1,11 @@
 import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { preorderWords } from "@/lib/buyer-words/preorder";
-import { readListing } from "@/lib/catalog";
 import { type Listing, type Store, normaliseHandle, storeForHandle } from "@/lib/store";
 import { readOrder } from "@/lib/store-checkout";
 import { plain, serveFile } from "@/lib/serve-file";
 import { offerRefunded, upsellDelivery } from "@/lib/upsell";
-import { ORDERS_LISTING_COMMANDS, OrdersBusy, findPurchase } from "@/lib/buyer-orders";
+import { OrdersBusy, findPurchase } from "@/lib/buyer-orders";
 import { stampedCopy, wantsStamp } from "@/lib/pdf-stamp";
 import { renewPath } from "@/lib/membership-access";
 import { originFrom } from "@/lib/request-origin";
@@ -111,7 +110,11 @@ export async function GET(request: NextRequest) {
     // a store with no room left for it is answered as too often, and nothing more is asked of Stripe.
     let found;
     try {
-      found = await findPurchase(store, token, request.nextUrl.searchParams.get("ref") ?? "");
+      found = await findPurchase(store, token, request.nextUrl.searchParams.get("ref") ?? "", {
+        pid: request.nextUrl.searchParams.get("pid") ?? "",
+        // Only a key a product ticked at checkout goes under (lib/bundle-rules.ts, BUMP_KEYS); any other is not one.
+        item: (BUMP_KEYS as readonly string[]).includes(request.nextUrl.searchParams.get("item") ?? "") ? request.nextUrl.searchParams.get("item") ?? "" : "",
+      });
     } catch (error) {
       if (error instanceof OrdersBusy) return tooOften();
       console.error("looking up a purchase failed", error);
@@ -120,13 +123,8 @@ export async function GET(request: NextRequest) {
     if (!found) {
       return plain(410, say.linkExpired);
     }
-    const { purchase, email, meter } = found;
-    // The listing read again below for how its file is handed over (stamped or not) is taken through the lookup's meter
-    // first: false when the store has no room left for it.
-    const listingRead = () => meter.take(ORDERS_LISTING_COMMANDS).then(() => true, (error) => {
-      if (error instanceof OrdersBusy) return false;
-      throw error;
-    });
+    // The listing of what is handed over (stamped or not) is the one the lookup already read: nothing is read again.
+    const { purchase, email, listing } = found;
     if (purchase.ended) return toRenew(request, store, { id: purchase.productId });
     // A product ticked at checkout is asked for by the key its order names it under.
     const asked = request.nextUrl.searchParams.get("item") ?? "";
@@ -138,8 +136,7 @@ export async function GET(request: NextRequest) {
       const line = (bumped ? bumped.items : purchase.items)?.lines.find((l) => l.productId === pid) ?? null;
       if (!line || !line.delivery) return plain(404, say.nothingToDownload);
       if (!line.delivery.file) return plain(409, say.notADownloadPurchases);
-      if (!(await listingRead())) return tooOften();
-      const item = await readListing(store, line.productId);
+      const item = await listing(line.productId);
       if (!item) return plain(404, say.nothingToDownload);
       return deliver(store, item, line.delivery.file, { reference: purchase.reference, email, paidAt: purchase.paidAt });
     }
@@ -148,8 +145,7 @@ export async function GET(request: NextRequest) {
     if (!delivery.file) {
       return plain(409, say.notADownloadPurchases);
     }
-    if (!(await listingRead())) return tooOften();
-    const owner = await readListing(store, bumped ? bumped.id : purchase.productId);
+    const owner = await listing(bumped ? bumped.id : purchase.productId);
     if (!owner) return serveFile(delivery.file);
     return deliver(store, owner, delivery.file, { reference: purchase.reference, email, paidAt: purchase.paidAt });
   }

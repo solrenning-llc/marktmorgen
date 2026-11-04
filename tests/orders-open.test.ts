@@ -394,6 +394,66 @@ test("a download of what was taken in one click reads that payment and the check
   assert.equal(await findPurchase(store, token, "pi_testupsell000001"), null);
 });
 
+test("a download in one click is refused where the list would not read it: the checkout it followed refunded, a gift, a place, a call, a package, a pre-order, another store's, unpaid, or its product gone", async () => {
+  const { store, ids, refs, token } = await linkStore();
+  intents = [{
+    id: "pi_testupsell000001",
+    object: "payment_intent",
+    status: "succeeded",
+    created: Math.floor(Date.now() / 1000),
+    customer: "cus_buyer00001",
+    metadata: { kind: "upsell", store: "moss", product: ids[0], parent: refs[0] },
+    latest_charge: { refunded: false, amount_refunded: 0 },
+  }];
+  const parent = sessions[0] as Record<string, unknown> & { metadata: Record<string, string> };
+  assert.equal((await findPurchase(store, token, "pi_testupsell000001"))?.purchase.kind, "upsell");
+  const variants: [string, Record<string, unknown>][] = [
+    ["refunded", { payment_intent: { id: "pi_testmoss000000", status: "succeeded", latest_charge: { refunded: true, amount_refunded: 1900 } } }],
+    ["a gift", { metadata: { ...parent.metadata, gift: "1" } }],
+    ["a place", { metadata: { ...parent.metadata, group: "1" } }],
+    ["a call", { metadata: { ...parent.metadata, kind: "call" } }],
+    ["a package", { metadata: { ...parent.metadata, kind: "package" } }],
+    ["a pre-order", { metadata: { ...parent.metadata, preorder: "1" } }],
+    ["another store's", { metadata: { ...parent.metadata, store: "elsewhere" } }],
+    ["unpaid", { payment_status: "unpaid" }],
+    ["its product gone", { metadata: { ...parent.metadata, product: "gone000001" } }],
+  ];
+  for (const [what, change] of variants) {
+    sessions[0] = { ...parent, ...change };
+    assert.equal(await findPurchase(store, token, "pi_testupsell000001"), null, what);
+  }
+});
+
+test("a product of a bundle costs its lookup and two listings, whatever the bundle holds, and is read once", async () => {
+  const { store, ids, refs, token, folder, window } = await linkStore(Array.from({ length: 21 }, (_, i) => (i === 0 ? "Kit" : `Part ${i}`)));
+  sessions[0] = { ...sessions[0], metadata: { store: "moss", product: ids[0], bundle: ids.slice(1).join(",") } };
+  const before = await requestsIn(folder, window);
+  const found = await findPurchase(store, token, refs[0], { pid: ids[5] });
+  assert.deepEqual(found?.purchase.items?.lines.map((line) => line.productId), [ids[5]]);
+  assert.equal((await requestsIn(folder, window)) - before, DOWNLOAD_LOOKUP_UNITS + Math.ceil((2 * ORDERS_LISTING_COMMANDS) / ORDERS_UNIT_COMMANDS));
+  // The route hands it over from what was read: nothing more is taken or read for it, and nothing else is read at all.
+  const at = await requestsIn(folder, window);
+  assert.equal((await found!.listing(ids[5]))?.id, ids[5]);
+  assert.equal((await found!.listing(ids[0]))?.id, ids[0]);
+  assert.equal(await found!.listing(ids[6]), null);
+  assert.equal((await requestsIn(folder, window)) - at, 0);
+  // One not on the order's own list is refused before any listing is read.
+  sent.length = 0;
+  assert.equal(await findPurchase(store, token, refs[0], { pid: ids[0] }), null);
+  assert.equal(await findPurchase(store, token, refs[0], { pid: "elsewhere1" }), null);
+  assert.deepEqual(sent.filter((command) => command.includes(":l:")), []);
+});
+
+test("a product ticked at checkout is read with the one bought and no other; a key the order does not hold is refused", async () => {
+  const { store, ids, refs, token, folder, window } = await linkStore(["Course", "Workbook", "Extra"]);
+  sessions[0] = { ...sessions[0], metadata: { store: "moss", product: ids[0], bump: ids[1], bump2: ids[2] } };
+  const before = await requestsIn(folder, window);
+  const found = await findPurchase(store, token, refs[0], { item: "bump" });
+  assert.deepEqual(found?.purchase.added.map((added) => added.id), [ids[1]]);
+  assert.equal((await requestsIn(folder, window)) - before, DOWNLOAD_LOOKUP_UNITS + 1);
+  assert.equal(await findPurchase(store, token, refs[0], { item: "bump3" }), null);
+});
+
 test("a download of what was brought over reads its ids and that one entry, each id taken first", async () => {
   const { store, ids, token, folder, window } = await linkStore(["Guide", "Archive", "Planner"]);
   const shop = { ...store, pastBuyers: true };

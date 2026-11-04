@@ -38,10 +38,10 @@ import { aiAvailableFor } from "@/lib/ai";
 import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { type LeadStatus, maskEmail } from "@/lib/affiliate-lead-rules";
 
-// The one load that works the program's book out for everybody reads up to 23 pages of Stripe
-// (lib/affiliate-book-snapshot.ts): it may take this long, never longer than the refresh's lock
-// (BOOK_LOCK_SECONDS), so a stopped load's lock is still held when it stops. Equal to
-// AFFILIATE_PAGE_MAX_SECONDS; a literal, as the build reads it.
+// The one load that works the program's book out for everybody stops asking Stripe after
+// BOOK_READ_SECONDS and writes what it read (lib/affiliate-book-snapshot.ts), inside this limit;
+// the refresh's lock (BOOK_LOCK_SECONDS) outlasts it, so a stopped load's lock is still held when
+// it stops. Equal to AFFILIATE_PAGE_MAX_SECONDS; a literal, as the build reads it.
 export const maxDuration = 300;
 
 type Params = {

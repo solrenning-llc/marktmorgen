@@ -26,7 +26,7 @@
  *     sitemapUnits before reading a listing or a post; refused, it reads
  *     nothing and tells the crawler to come back.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { answering } from "./security/next-headers";
@@ -35,8 +35,9 @@ import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { type Affiliate, bookSize, readBook } from "@/lib/affiliates";
 import { admitAffiliatePage, affiliatePageCost } from "@/lib/affiliate-page-admission";
 import {
-  AFFILIATE_PAGE_MAX_SECONDS, BOOK_FRESH_SECONDS, BOOK_KEEP_SECONDS, BOOK_LOCK_SECONDS, BOOK_SHORT_SECONDS, BOOK_SHORT_TRIES, BOOK_SNAPSHOT_MAX_BYTES, BOOK_STRIPE_WORST_SECONDS,
-  bookSlice, claimRefresh, keptSlice, readBookVersion, releaseRefresh, snapshotState, writeSnapshot,
+  AFFILIATE_PAGE_MAX_SECONDS, BOOK_FRESH_SECONDS, BOOK_KEEP_SECONDS, BOOK_LOCK_SECONDS, BOOK_READ_SECONDS, BOOK_SHORT_SECONDS, BOOK_SHORT_TRIES, BOOK_SNAPSHOT_MAX_BYTES,
+  BOOK_ATTEMPT, BOOK_BEGIN, BOOK_COMMIT, BOOK_FORGET, BOOK_MARK, BOOK_ROUND, BOOK_UNDO,
+  beginAttempt, bookSlice, claimRefresh, forgetBookSnapshot, keptSlice, readBookVersion, releaseRefresh, snapshotState, undoAttempt, writeSnapshot,
 } from "@/lib/affiliate-book-snapshot";
 import { PERSON_DATA } from "@/lib/person-data";
 import { forgetLeadPerson, leadId } from "@/lib/affiliate-leads";
@@ -55,8 +56,17 @@ process.env.STRIPE_SECRET_KEY = "sk_test_public_reads_only";
 const NOW = Math.floor(Date.now() / 1000);
 let stripeCalls = 0;
 let refundsDown = false;
+// A slow Stripe: every call takes its whole 20 seconds, on a clock the check moves, and there is always another page.
+let slowStripe = false;
+const realNow = Date.now.bind(Date);
+let skew = 0;
+Date.now = () => realNow() + skew;
 globalThis.fetch = (async (input: string | URL | Request) => {
   stripeCalls += 1;
+  if (slowStripe) {
+    skew += 20_000;
+    return new Response(JSON.stringify({ object: "list", data: [{ id: `obj_${stripeCalls}` }], has_more: true }), { status: 200 });
+  }
   if (refundsDown && new URL(String(input instanceof Request ? input.url : input)).pathname === "/v1/refunds") return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
 }) as typeof fetch;
@@ -129,7 +139,9 @@ async function writeHeld(shop: Parameters<typeof writeSnapshot>[0], book: Parame
   const held = await claimRefresh(shop);
   if (!held) throw new Error("the refresh lock is taken");
   try {
-    return await writeSnapshot(shop, book, at, held, await readBookVersion(shop));
+    const tries = await beginAttempt(shop, held, at);
+    if (tries === null) throw new Error("the refresh could not be counted");
+    return await writeSnapshot(shop, book, at, held, await readBookVersion(shop), tries);
   } finally {
     await releaseRefresh(held);
   }
@@ -173,37 +185,100 @@ function sharedCallers(sources: { file: string; text: string }[]): string[] {
   return [...found].sort();
 }
 
+/** Every TypeScript file under the folders, read as it is listed: no check first, so nothing can change between a check and the read. */
 function sourcesUnder(...dirs: string[]): { file: string; text: string }[] {
   const out: { file: string; text: string }[] = [];
-  const walk = (dir: string) => {
-    for (const name of readdirSync(dir)) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else if (/\.tsx?$/.test(name)) out.push({ file: path, text: readFileSync(path, "utf8") });
+  for (const dir of dirs) {
+    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+      if (!entry.isFile() || !/\.tsx?$/.test(entry.name)) continue;
+      const file = join(entry.parentPath, entry.name);
+      try {
+        out.push({ file, text: readFileSync(file, "utf8") });
+      } catch {
+        // Gone since it was listed: nothing of it to read.
+      }
     }
-  };
-  for (const dir of dirs) walk(dir);
+  }
   return out;
 }
 
 /**
- * HSTRLEN and RENAME, which the kept book uses and the in-memory Redis
+ * HSTRLEN and the kept book's scripts, which the in-memory Redis
  * (lib/redis-memory.ts, reserved elsewhere today) does not answer: done here
- * with the commands it does, for hashes, as Redis does them.
+ * with the commands it does, step for step as each script's Lua reads, one
+ * script at a time. The Lua itself runs on a real Redis in
+ * tests/security/affiliate-book.redis-run.ts.
  */
 const memory = redis.pipeline.bind(redis);
+const one = async (command: (string | number)[]) => (await memory([command]))[0];
+const text = (value: unknown) => (value === null || value === undefined ? "" : String(value));
+async function rename(from: string, to: string): Promise<void> {
+  const [fields, ttl] = await memory([["HGETALL", from], ["PTTL", from]]);
+  const flat = Array.isArray(fields) ? (fields as string[]) : [];
+  if (!flat.length) throw new Error("ERR no such key");
+  await memory([["DEL", to], ["HSET", to, ...flat], ...(Number(ttl) > 0 ? [["PEXPIRE", to, Number(ttl)]] : []), ["DEL", from]]);
+}
+const holds = async (k: string[], a: string[]) => text(await one(["GET", k[0]])) === a[0] && text(await one(["GET", k[1]])) === a[1];
+const written = async (k: string[], a: string[]) => {
+  if (a[3] === "1") await one(["DEL", k[5]]);
+  await one(["DEL", k[6]]);
+};
+const SCRIPTS = new Map<string, (k: string[], a: string[]) => Promise<number>>([
+  [BOOK_ATTEMPT, async (k, a) => {
+    if (text(await one(["GET", k[0]])) !== a[0]) return 0;
+    const tries = Number(await one(["INCR", k[1]]));
+    await memory([["EXPIRE", k[1], a[2]], ["SET", k[2], a[1], "EX", a[3]]]);
+    return tries;
+  }],
+  [BOOK_UNDO, async (k, a) => {
+    if (text(await one(["GET", k[0]])) !== a[0] || text(await one(["GET", k[2]])) !== a[1]) return 0;
+    if (Number(await one(["DECR", k[1]])) <= 0) await one(["DEL", k[1]]);
+    await one(["DEL", k[2]]);
+    return 1;
+  }],
+  [BOOK_BEGIN, async (k, a) => {
+    if (!(await holds(k, a))) return 0;
+    await memory([["DEL", k[3], k[4]], ["SET", k[2], a[0], "EX", a[2]]]);
+    return 1;
+  }],
+  [BOOK_ROUND, async (k, a) => {
+    if (!(await holds(k, a))) return 0;
+    await memory([["HSET", k[2], ...a.slice(3)], ["EXPIRE", k[2], a[2]]]);
+    return 1;
+  }],
+  [BOOK_COMMIT, async (k, a) => {
+    if (!(await holds(k, a))) return (await one(["DEL", k[2]])), 0;
+    if (text(await one(["HGET", k[3], "_by"])) === a[0]) return 1;
+    await memory([["HSET", k[2], ...a.slice(4)], ["EXPIRE", k[2], a[2]]]);
+    await rename(k[2], k[3]);
+    await one(["DEL", k[4]]);
+    await written(k, a);
+    return 1;
+  }],
+  [BOOK_MARK, async (k, a) => {
+    if (!(await holds(k, a))) return (await one(["DEL", k[2]])), 0;
+    if (text(await one(["HGET", k[3], "_by"])) === a[0]) return (await one(["DEL", k[2]])), 2;
+    await memory([["DEL", k[2], k[3], k[4]], ["HSET", k[3], ...a.slice(4)], ["EXPIRE", k[3], a[2]]]);
+    await written(k, a);
+    return 1;
+  }],
+  [BOOK_FORGET, async (k, a) => {
+    if (text(await one(["GET", k[3]])) !== a[0]) return 2;
+    await memory([["DEL", k[0], k[1]], ["INCR", k[2]], ["EXPIRE", k[2], a[1]]]);
+    return 1;
+  }],
+]);
 redis.pipeline = async (commands) => {
   const out: unknown[] = [];
   for (const c of commands) {
-    if (c[0] === "HSTRLEN") {
+    const run = c[0] === "EVAL" ? SCRIPTS.get(String(c[1])) : undefined;
+    if (run) {
+      const n = Number(c[2]);
+      const args = c.slice(3).map(String);
+      out.push(await run(args.slice(0, n), args.slice(n)));
+    } else if (c[0] === "HSTRLEN") {
       const [value] = await memory([["HGET", c[1], c[2]]]);
       out.push(typeof value === "string" ? Buffer.byteLength(value, "utf8") : 0);
-    } else if (c[0] === "RENAME") {
-      const [fields, ttl] = await memory([["HGETALL", c[1]], ["PTTL", c[1]]]);
-      const flat = Array.isArray(fields) ? (fields as string[]) : [];
-      if (!flat.length) throw new Error("ERR no such key");
-      await memory([["DEL", c[2]], ["HSET", c[2], ...flat], ...(Number(ttl) > 0 ? [["PEXPIRE", c[2], Number(ttl)]] : []), ["DEL", c[1]]]);
-      out.push("OK");
     } else {
       out.push(...(await memory([c])));
     }
@@ -301,7 +376,7 @@ async function main(): Promise<void> {
   is("a newer book replaces the older whole: no part of the old one stays behind", (await snapshotState(shop, idOf(9)))?.sliceBytes, 0);
   const original = redis.pipeline;
   redis.pipeline = async (commands) => {
-    if (commands.some((c) => c[0] === "RENAME")) throw new Error("synthetic write failure");
+    if (commands.some((c) => c[0] === "EVAL" && c[1] === BOOK_COMMIT)) throw new Error("synthetic write failure");
     return original.call(redis, commands);
   };
   const markOnly = await writeHeld(shop, whole2, Math.floor(stale / 1000));
@@ -388,14 +463,14 @@ async function main(): Promise<void> {
   const plain = redis.pipeline;
   redis.pipeline = async (commands) => {
     const reply = await plain.call(redis, commands);
-    if (!heldB && commands.some((c) => c[0] === "HSET" && String(c[1]) === `${statsKey}:new:${heldA.token}`)) {
+    if (!heldB && commands.some((c) => c[0] === "EVAL" && c[1] === BOOK_ROUND && String(c[5]) === `${statsKey}:new:${heldA.token}`)) {
       await plain.call(redis, [["DEL", lockOf]]);
       heldB = await claimRefresh(shop);
-      wroteB = await writeSnapshot(shop, base, Math.floor(stale / 1000) + 1, heldB!, await readBookVersion(shop));
+      wroteB = await writeSnapshot(shop, base, Math.floor(stale / 1000) + 1, heldB!, await readBookVersion(shop), 1);
     }
     return reply;
   };
-  const wroteA = await writeSnapshot(shop, partial, Math.floor(stale / 1000) + 2, heldA, versionA);
+  const wroteA = await writeSnapshot(shop, partial, Math.floor(stale / 1000) + 2, heldA, versionA, 1);
   redis.pipeline = plain;
   is("B, holding the lock, keeps its whole book", [heldB !== null, wroteB], [true, { kept: true, short: false }]);
   is("A, whose lock ran out midway, keeps nothing", wroteA, null);
@@ -410,15 +485,15 @@ async function main(): Promise<void> {
   const versionC = await readBookVersion(shop);
   let heldD: Awaited<ReturnType<typeof claimRefresh>> = null;
   redis.pipeline = async (commands) => {
-    if (commands.some((c) => c[0] === "RENAME" && String(c[1]) === `${statsKey}:new:${heldC.token}`)) {
+    if (commands.some((c) => c[0] === "EVAL" && c[1] === BOOK_COMMIT && String(c[5]) === `${statsKey}:new:${heldC.token}`)) {
       await plain.call(redis, [["DEL", lockOf]]);
       heldD = await claimRefresh(shop);
-      await writeSnapshot(shop, base, Math.floor(stale / 1000) + 3, heldD!, await readBookVersion(shop));
+      await writeSnapshot(shop, base, Math.floor(stale / 1000) + 3, heldD!, await readBookVersion(shop), 1);
       throw new Error("synthetic rename failure");
     }
     return plain.call(redis, commands);
   };
-  const wroteC = await writeSnapshot(shop, partial, Math.floor(stale / 1000) + 4, heldC, versionC);
+  const wroteC = await writeSnapshot(shop, partial, Math.floor(stale / 1000) + 4, heldC, versionC, 1);
   redis.pipeline = plain;
   is("a refresh whose rename failed after its lock ran out marks nothing", wroteC, null);
   is("the newer refresh's whole book stays, kept", [(await redis.pipeline([["HGET", statsKey, "_by"]]))[0], (await snapshotState(shop, idOf(2)))?.kept, (await snapshotState(shop, idOf(2)))?.at], [heldD!.token, true, Math.floor(stale / 1000) + 3]);
@@ -431,7 +506,7 @@ async function main(): Promise<void> {
   await redis.pipeline([["DEL", lockOf]]);
   await writeHeld(shop, base, Math.floor(stale / 1000) + 5);
   is("a draft a stopped refresh left is deleted by the next", (await bookKeys(statsId)).filter((k) => k.includes(":book:new")), []);
-  is("the lock lasts past the worst Stripe read with room, and past the page's maxDuration, which the page declares", [BOOK_STRIPE_WORST_SECONDS, BOOK_LOCK_SECONDS >= BOOK_STRIPE_WORST_SECONDS + 60, BOOK_LOCK_SECONDS > AFFILIATE_PAGE_MAX_SECONDS, readFileSync("app/[handle]/affiliates/page.tsx", "utf8").includes(`export const maxDuration = ${AFFILIATE_PAGE_MAX_SECONDS};`)], [23 * 20, true, true, true]);
+  is("the read stops well inside the page's maxDuration, which the page declares, and the lock outlasts both", [BOOK_READ_SECONDS + 60 <= AFFILIATE_PAGE_MAX_SECONDS, BOOK_LOCK_SECONDS >= AFFILIATE_PAGE_MAX_SECONDS + 60, readFileSync("app/[handle]/affiliates/page.tsx", "utf8").includes(`export const maxDuration = ${AFFILIATE_PAGE_MAX_SECONDS};`)], [true, true, true]);
 
   part("A person deleted while the book is worked out is never kept in it");
   const SECOND = "mara.buyer@example.com";
@@ -442,7 +517,7 @@ async function main(): Promise<void> {
   const readF = await readBook(shop);
   is("the refresh read the address (masked in what it would keep)", JSON.stringify(keptSlice(bookSlice(readF, idOf(0)))).includes("m•••@example.com"), true);
   is("the person is deleted meanwhile", await forgetLeadPerson(shop, SECOND), 1);
-  is("so what it read is thrown away: nothing kept, no draft", [await writeSnapshot(shop, readF, Math.floor(stale / 1000) + 6, heldF, versionF), (await bookKeys(statsId)).filter((k) => k === statsKey || k.includes(":book:new"))], [null, []]);
+  is("so what it read is thrown away: nothing kept, no draft", [await writeSnapshot(shop, readF, Math.floor(stale / 1000) + 6, heldF, versionF, 1), (await bookKeys(statsId)).filter((k) => k === statsKey || k.includes(":book:new"))], [null, []]);
   await releaseRefresh(heldF);
   // The same, through a page load: the deletion lands while its refresh reads the program's records.
   const THIRD = "nora.buyer@example.com";
@@ -465,6 +540,29 @@ async function main(): Promise<void> {
   is("a book is kept", (await redis.pipeline([["EXISTS", statsKey]]))[0], 1);
   is("the address is already off the lead: nothing more to take off it", await forgetLeadPerson(shop, THIRD), 0);
   is("but the kept book is deleted all the same", (await redis.pipeline([["EXISTS", statsKey]]))[0], 0);
+
+  part("A Redis that cannot run the scripts writes nothing");
+  await writeHeld(shop, await readBook(shop), Math.floor(stale / 1000) + 8);
+  const kept8 = JSON.stringify(await redis.pipeline([["HGETALL", statsKey]]));
+  const versionBefore = await readBookVersion(shop);
+  const emulated = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => c[0] === "EVAL")) throw new Error("ERR unknown command 'EVAL'");
+    return emulated.call(redis, commands);
+  };
+  const heldG = await claimRefresh(shop);
+  const triedG = heldG ? await beginAttempt(shop, heldG, Math.floor(stale / 1000) + 9) : "no lock";
+  const wroteG = heldG ? await writeSnapshot(shop, await readBook(shop), Math.floor(stale / 1000) + 9, heldG, versionBefore, 1) : "no lock";
+  redis.pipeline = emulated;
+  is("no refresh is counted and nothing is written: the book stays as it was, no draft", [triedG, wroteG, JSON.stringify(await redis.pipeline([["HGETALL", statsKey]])) === kept8, (await bookKeys(statsId)).filter((k) => k.includes(":book:new"))], [null, null, true, []]);
+  if (heldG) await releaseRefresh(heldG);
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => c[0] === "EVAL")) throw new Error("ERR unknown command 'EVAL'");
+    return emulated.call(redis, commands);
+  };
+  const forgot = await forgetBookSnapshot(statsId).then(() => "done", () => "threw");
+  redis.pipeline = emulated;
+  is("a deletion without them still raises the version and deletes the book, and fails so it is tried again", [forgot, (await readBookVersion(shop)) !== versionBefore, (await redis.pipeline([["EXISTS", statsKey]]))[0]], ["threw", true, 0]);
   const line = PERSON_DATA.find((d) => d.file === "lib/affiliate-book-snapshot.ts");
   is("the privacy line says how long it is really kept", [BOOK_KEEP_SECONDS, line?.what.includes("kept for up to eight days")], [8 * 86_400, true]);
 
@@ -505,6 +603,49 @@ async function main(): Promise<void> {
   } finally {
     answering(null);
   }
+
+  part("A slow Stripe: the refresh stops in time, keeps a short book, and is paid once");
+  let slow = await paidStore("slow-owner@example.com", "slowshop", "acct_1TestSlowshop1");
+  await program(slow.statsId!, 3, 12);
+  slow = (await storeForEmail("slow-owner@example.com"))!;
+  const slowFull = (await affiliatePageCost(slow))!;
+  const T0 = Date.now();
+  const skewBefore = skew;
+  stripeCalls = 0;
+  slowStripe = true;
+  const slowFirst = await watched(() => admitAffiliatePage(slow, as(idOf(0)), T0));
+  slowStripe = false;
+  // The time Stripe's calls took on the check's clock.
+  const spent = skew - skewBefore;
+  is(`Stripe asked no longer than BOOK_READ_SECONDS (${stripeCalls} calls of 20 s, ${spent / 1000} s), where it would have taken 23 calls`, [spent <= BOOK_READ_SECONDS * 1000, stripeCalls < 23], [true, true]);
+  is("what it read is kept as an incomplete book, worked out again soon, and the page says so", [(await snapshotState(slow, idOf(0)))?.freshFor, (await snapshotState(slow, idOf(0)))?.kept, shownOf(slowFirst.value)?.refresh], [BOOK_SHORT_SECONDS, true, "short"]);
+  is("one charge: this load and the book", slowFirst.taken, load + slowFull);
+  const slowAgain = await watched(() => admitAffiliatePage(slow, as(idOf(1)), T0 + 60_000));
+  is("a minute later: no second charge for the book, only the load's own part", [slowAgain.taken, count(slowAgain.names, "HGETALL")], [load, 0]);
+  const slowLater = await watched(() => admitAffiliatePage(slow, as(idOf(1)), T0 + (BOOK_SHORT_SECONDS + 60) * 1000));
+  is("after the short wait, Stripe answering again: worked out once more, complete", [slowLater.taken, count(slowLater.names, "HGETALL"), (await snapshotState(slow, idOf(1)))?.freshFor], [load + slowFull, 7, BOOK_FRESH_SECONDS]);
+
+  part("A refresh stopped before it writes still counts");
+  const T1 = T0 + (BOOK_SHORT_SECONDS + 60 + BOOK_FRESH_SECONDS + 60) * 1000;
+  const unstopped = redis.pipeline;
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => c[0] === "HGETALL" && String(c[1]) === `nl:aff:${slow.statsId}:people`)) throw new Error("the function was stopped");
+    return unstopped.call(redis, commands);
+  };
+  const stopped = await watched(() => admitAffiliatePage(slow, as(idOf(0)), T1).catch(() => "stopped" as const));
+  redis.pipeline = unstopped;
+  is("the refresh was paid for and stopped with nothing written", [stopped.value, stopped.taken, (await snapshotState(slow, idOf(0)))?.at], ["stopped", load + slowFull, Math.floor((T0 + (BOOK_SHORT_SECONDS + 60) * 1000) / 1000)]);
+  const stoppedState = await snapshotState(slow, idOf(0));
+  is("counted before it read: one refresh without a complete book, begun then", [stoppedState?.tries, stoppedState?.triedAt], [1, Math.floor(T1 / 1000)]);
+  const afterStop = await watched(() => admitAffiliatePage(slow, as(idOf(0)), T1 + 60_000));
+  is("so the next load does not pay for it again before the short wait: the last book kept, its own part paid", [afterStop.taken, count(afterStop.names, "HGETALL"), shownOf(afterStop.value) !== null], [load, 0, true]);
+  const afterWait = await watched(() => admitAffiliatePage(slow, as(idOf(0)), T1 + (BOOK_SHORT_SECONDS + 60) * 1000));
+  is("after it, once more, and a complete book sets the count back", [afterWait.taken, (await snapshotState(slow, idOf(0)))?.tries, (await snapshotState(slow, idOf(0)))?.triedAt], [load + slowFull, 0, 0]);
+  const refusedSlow = await claimRefresh(slow);
+  is("a refresh counted before its charge", await beginAttempt(slow, refusedSlow!, 1), 1);
+  await undoAttempt(slow, refusedSlow!, 1);
+  is("whose charge is refused takes its count back: nothing left of it", [(await snapshotState(slow, idOf(0)))?.tries, (await snapshotState(slow, idOf(0)))?.triedAt], [0, 0]);
+  await releaseRefresh(refusedSlow!);
 
   part("The store's map");
   const MAP = "map-owner@example.com";

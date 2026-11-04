@@ -24,11 +24,25 @@
  *   nl:aff:<statsId>:book:lock   a random token: one refresh at a time
  *   nl:aff:<statsId>:book:ver    raised each time a person is deleted; a
  *                                refresh that read before it keeps nothing
- *   nl:aff:<statsId>:book:tries  incomplete books worked out in a row
+ *   nl:aff:<statsId>:book:tries  paid refreshes in a row that kept no complete
+ *                                book: raised before each one reads, set back
+ *                                by a complete one
+ *   nl:aff:<statsId>:book:tried  when the last paid refresh began, until it
+ *                                writes: one that stopped before writing
+ *                                (its function ended) counts as an incomplete
+ *                                book, so the next waits as after one
  *
  * Every write of a refresh lands only while its lock is still its own and no
  * person was deleted since it began (one script each, checked and written in
  * one step); one that lost its lock or saw a deletion throws its draft away.
+ * A Redis that cannot run the scripts writes nothing: the refresh keeps
+ * nothing, and a deletion fails to be tried again.
+ *
+ * A refresh stops reading Stripe BOOK_READ_SECONDS after it began and keeps
+ * what it read as an incomplete book, worked out again sooner, so it always
+ * ends inside the page's maxDuration; and it is counted before it reads, so
+ * paid refreshes are never more than once a day and BOOK_SHORT_TRIES more
+ * (and one for an affiliate approved since), whatever stops them.
  *
  * Only what the page shows is kept: a lead's address masked as the page
  * masks it (first letter and domain), and none of the affiliate's own
@@ -41,9 +55,8 @@
  * so the refresh paid outside a connection's share stays once a day; until
  * then each load works out its own, paid from its own connection's share.
  */
-import { type Book, DISPUTE_PAGES, INVOICE_PAGES, REFUND_PAGES, readBook } from "@/lib/affiliates";
+import { type Book, readBook } from "@/lib/affiliates";
 import { maskEmail } from "@/lib/affiliate-lead-rules";
-import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import type { Store } from "@/lib/store";
@@ -52,9 +65,9 @@ import type { Store } from "@/lib/store";
 export const BOOK_FRESH_SECONDS = 24 * 60 * 60;
 /** How soon one that was incomplete (Stripe not all read: refundsChecked or invoicesChecked false) is worked out again. */
 export const BOOK_SHORT_SECONDS = 15 * 60;
-/** How many incomplete books in a row are worked out again that soon; past them, once a day like any other, until a complete one is written. */
+/** How many paid refreshes in a row without a complete book are worked out again that soon; past them, once a day like any other, until a complete one is written. */
 export const BOOK_SHORT_TRIES = 3;
-/** How long the count of incomplete books in a row is kept: well past a day, so it is not forgotten between daily refreshes. */
+/** How long the count of paid refreshes without a complete book is kept: well past a day, so it is not forgotten between daily refreshes. */
 export const BOOK_TRIES_KEEP_SECONDS = 30 * 24 * 60 * 60;
 /**
  * How long it is kept: a week past being out of date, so a load that waits
@@ -64,16 +77,22 @@ export const BOOK_TRIES_KEEP_SECONDS = 30 * 24 * 60 * 60;
 export const BOOK_KEEP_SECONDS = BOOK_FRESH_SECONDS + 7 * 24 * 60 * 60;
 /** An approved affiliate missing from a fresh book (approved since) waits at least this long after it was worked out. */
 export const BOOK_NEW_AFFILIATE_SECONDS = 15 * 60;
-/** The longest a refresh reads Stripe: every page of invoices, refunds and disputes, each at its full timeout (no retries). */
-export const BOOK_STRIPE_WORST_SECONDS = (INVOICE_PAGES + REFUND_PAGES + DISPUTE_PAGES) * (STRIPE_TIMEOUT_MS / 1000);
-/** The affiliate page's maxDuration (app/[handle]/affiliates/page.tsx; a test holds the two equal): no refresh outlives it. */
+/** The affiliate page's maxDuration (app/[handle]/affiliates/page.tsx; a test holds the two equal). */
 export const AFFILIATE_PAGE_MAX_SECONDS = 300;
 /**
- * How long one refresh holds the others off: past its worst Stripe read, with
- * two minutes for Redis, and past the page's maxDuration, so the function is
- * stopped before its lock can run out. Its writes are fenced by the lock anyway.
+ * How long after it began a refresh stops asking Stripe (each call given at
+ * most what is left): what it read is kept as an incomplete book, so the
+ * refresh writes well inside the page's maxDuration rather than being
+ * stopped with nothing written. Its worst read had been 23 pages at 20 s.
  */
-export const BOOK_LOCK_SECONDS = BOOK_STRIPE_WORST_SECONDS + 120;
+export const BOOK_READ_SECONDS = 240;
+/**
+ * How long one refresh holds the others off: past the page's maxDuration,
+ * with two minutes more, so a function stopped at its limit has surely
+ * stopped before another refresh may start. Its writes are fenced by the
+ * lock anyway.
+ */
+export const BOOK_LOCK_SECONDS = AFFILIATE_PAGE_MAX_SECONDS + 120;
 /** The most a kept book may take, all its parts together, in bytes as Redis counts them (UTF-8). */
 export const BOOK_SNAPSHOT_MAX_BYTES = 8_000_000;
 /** Bytes and fields written per round, so no one request is large. */
@@ -90,6 +109,7 @@ const pointerKey = (statsId: string) => `nl:aff:${statsId}:book:draft`;
 const lockKey = (statsId: string) => `nl:aff:${statsId}:book:lock`;
 const versionKey = (statsId: string) => `nl:aff:${statsId}:book:ver`;
 const triesKey = (statsId: string) => `nl:aff:${statsId}:book:tries`;
+const triedKey = (statsId: string) => `nl:aff:${statsId}:book:tried`;
 
 /** Bytes as Redis counts them: a masked "•" or a title in another script is more than one. */
 const utf8 = (text: string) => Buffer.byteLength(text, "utf8");
@@ -131,28 +151,43 @@ export type SnapshotState = {
   freshFor: number;
   /** The length of this affiliate's part of it; 0 when it holds none. */
   sliceBytes: number;
+  /** When a paid refresh began that has written nothing yet (it is running, or it stopped), in seconds; 0 when none. */
+  triedAt: number;
+  /** Paid refreshes in a row that kept no complete book. */
+  tries: number;
 };
 
-/** When the kept book is from, whether its parts are kept, and how long this affiliate's part is: two commands. Null when they cannot be read. */
+/** When the kept book is from, whether its parts are kept, how long this affiliate's part is, and any paid refresh that wrote nothing: four commands. Null when they cannot be read. */
 export async function snapshotState(store: Store, id: string): Promise<SnapshotState | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   try {
-    const [meta, length] = await redisPipeline([
+    const [meta, length, tried, tries] = await redisPipeline([
       ["HMGET", snapshotKey(store.statsId), AT, KEPT, SHORT],
       ["HSTRLEN", snapshotKey(store.statsId), id],
+      ["GET", triedKey(store.statsId)],
+      ["GET", triesKey(store.statsId)],
     ]);
     const [at, kept, short] = Array.isArray(meta) ? meta : [];
-    const when = Number(at ?? 0);
-    const bytes = Number(length ?? 0);
-    if (!Number.isSafeInteger(when) || when < 0 || !Number.isSafeInteger(bytes) || bytes < 0) return null;
-    return { at: when, kept: kept === "1", freshFor: short === "1" ? BOOK_SHORT_SECONDS : BOOK_FRESH_SECONDS, sliceBytes: bytes };
+    const counts = [Number(at ?? 0), Number(length ?? 0), Number(tried ?? 0), Number(tries ?? 0)];
+    if (!counts.every((n) => Number.isSafeInteger(n) && n >= 0)) return null;
+    const [when, bytes, triedAt, count] = counts;
+    return { at: when, kept: kept === "1", freshFor: short === "1" ? BOOK_SHORT_SECONDS : BOOK_FRESH_SECONDS, sliceBytes: bytes, triedAt, tries: count };
   } catch {
     return null;
   }
 }
 
-/** Whether a load should work the book out again: it is out of date, or this affiliate is not in it and it is not brand new. */
+/**
+ * Whether a load should work the book out again: it is out of date, or this
+ * affiliate is not in it and it is not brand new. Never while a paid refresh
+ * that wrote nothing is recent: it counts as an incomplete book, waited on
+ * BOOK_SHORT_SECONDS while the tries allow, a day past them.
+ */
 export function needsRefresh(state: SnapshotState, nowSeconds: number): boolean {
+  if (state.triedAt) {
+    const since = nowSeconds - state.triedAt;
+    if (since >= 0 && since < (state.tries <= BOOK_SHORT_TRIES ? BOOK_SHORT_SECONDS : BOOK_FRESH_SECONDS)) return false;
+  }
   const age = nowSeconds - state.at;
   if (!state.at || age >= state.freshFor || age < 0) return true;
   return state.kept && state.sliceBytes === 0 && age >= BOOK_NEW_AFFILIATE_SECONDS;
@@ -191,12 +226,23 @@ export async function readSlice(store: Store, id: string): Promise<{ book: Book;
 /**
  * The scripts a refresh writes with, each checked and written in one step on
  * the Redis side: they land only while the refresh's lock still holds its
- * token (KEYS[1], ARGV[1]) and no person was deleted since it began
- * (KEYS[2] still ARGV[2]). Where a Redis cannot run them (the local
- * stand-in), the same checks are made as separate commands, as
- * lib/redis-lock.ts does.
+ * token (KEYS[1], ARGV[1]) and, past the first, no person was deleted since
+ * it began (KEYS[2] still ARGV[2]). There is no other way to write: a Redis
+ * that cannot run them writes nothing (tests/security/affiliate-book.redis-run.ts
+ * runs them on a real Redis).
  */
 const HELD = 'if redis.call("GET", KEYS[1]) ~= ARGV[1] or (redis.call("GET", KEYS[2]) or "") ~= ARGV[2] then';
+/** Counts a paid refresh before it reads: raises the tries (KEYS[2]) and marks when it began (KEYS[3]); the tries so far, or 0 when the lock is not its own. */
+export const BOOK_ATTEMPT = `if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+local tries = redis.call("INCR", KEYS[2])
+redis.call("EXPIRE", KEYS[2], ARGV[3])
+redis.call("SET", KEYS[3], ARGV[2], "EX", ARGV[4])
+return tries`;
+/** Takes back the count of a refresh whose charge was refused, if it is still its own (KEYS[3] still ARGV[2]). */
+export const BOOK_UNDO = `if redis.call("GET", KEYS[1]) ~= ARGV[1] or redis.call("GET", KEYS[3]) ~= ARGV[2] then return 0 end
+if redis.call("DECR", KEYS[2]) <= 0 then redis.call("DEL", KEYS[2]) end
+redis.call("DEL", KEYS[3])
+return 1`;
 /** Starts a draft: deletes one a stopped refresh left (KEYS[4]) and this one's (KEYS[5]), and names this one's (KEYS[3]). */
 export const BOOK_BEGIN = `${HELD} return 0 end
 redis.call("DEL", KEYS[4], KEYS[5])
@@ -207,23 +253,24 @@ export const BOOK_ROUND = `${HELD} return 0 end
 redis.call("HSET", KEYS[3], unpack(ARGV, 4))
 redis.call("EXPIRE", KEYS[3], ARGV[3])
 return 1`;
-const TRIES_WRITE = 'if ARGV[4] == "0" then redis.call("DEL", KEYS[6]) else redis.call("SET", KEYS[6], ARGV[4], "EX", ARGV[5]) end';
+/** A book written: the refresh is no longer pending (KEYS[7]), and a complete one (ARGV[4] "1") sets the tries (KEYS[6]) back. */
+const WRITTEN = 'if ARGV[4] == "1" then redis.call("DEL", KEYS[6]) end\nredis.call("DEL", KEYS[7])';
 /** Puts the draft (KEYS[3]) in the book's place (KEYS[4]); 1 too when this refresh's book is already there. */
 export const BOOK_COMMIT = `${HELD} redis.call("DEL", KEYS[3]) return 0 end
 if redis.call("HGET", KEYS[4], "${BY}") == ARGV[1] then return 1 end
-redis.call("HSET", KEYS[3], unpack(ARGV, 6))
+redis.call("HSET", KEYS[3], unpack(ARGV, 5))
 redis.call("EXPIRE", KEYS[3], ARGV[3])
 redis.call("RENAME", KEYS[3], KEYS[4])
 redis.call("DEL", KEYS[5])
-${TRIES_WRITE}
+${WRITTEN}
 return 1`;
 /** Keeps only when the book was worked out (KEYS[4]); 2, and nothing changed, when this refresh's whole book is already there. */
 export const BOOK_MARK = `${HELD} redis.call("DEL", KEYS[3]) return 0 end
 if redis.call("HGET", KEYS[4], "${BY}") == ARGV[1] then redis.call("DEL", KEYS[3]) return 2 end
 redis.call("DEL", KEYS[3], KEYS[4], KEYS[5])
-redis.call("HSET", KEYS[4], unpack(ARGV, 6))
+redis.call("HSET", KEYS[4], unpack(ARGV, 5))
 redis.call("EXPIRE", KEYS[4], ARGV[3])
-${TRIES_WRITE}
+${WRITTEN}
 return 1`;
 /** Deletes the book (KEYS[1]) and the draft named (KEYS[2]) and raises the version (KEYS[3]); 2 when the draft named changed meanwhile (KEYS[4] no longer ARGV[1]). */
 export const BOOK_FORGET = `if (redis.call("GET", KEYS[4]) or "") ~= ARGV[1] then return 2 end
@@ -232,14 +279,12 @@ redis.call("INCR", KEYS[3])
 redis.call("EXPIRE", KEYS[3], ARGV[2])
 return 1`;
 
-async function script(source: string, keys: string[], args: (string | number)[], fallback: () => Promise<number>): Promise<number> {
-  let reply: unknown;
-  try {
-    [reply] = await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]);
-  } catch {
-    return fallback();
-  }
-  return Number(reply);
+/** Runs one of the scripts; throws, with nothing written, when the Redis cannot run it or gives no number. */
+async function script(source: string, keys: string[], args: (string | number)[]): Promise<number> {
+  const reply = await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]);
+  const value = Array.isArray(reply) && reply.length === 1 ? Number(reply[0]) : Number.NaN;
+  if (!Number.isSafeInteger(value)) throw new Error("an affiliate book script gave no answer");
+  return value;
 }
 
 /** The version a refresh starts from: raised each time a person is deleted (forgetBookSnapshot). */
@@ -248,32 +293,57 @@ async function bookVersion(statsId: string): Promise<string> {
   return version === null || version === undefined ? "" : String(version);
 }
 
-/** The separate-commands form of HELD. */
-async function stillHeld(statsId: string, held: Held, version: string): Promise<boolean> {
-  const [token, now] = await redisPipeline([["GET", held.key], ["GET", versionKey(statsId)]]);
-  return token === held.token && (now === null || now === undefined ? "" : String(now)) === version;
-}
-
 /**
  * Deletes the whole kept book and any draft being written, so the next load
- * works it out again, and raises the version, so a refresh that began before
- * keeps nothing it read: when a person is deleted (lib/affiliate-leads.ts,
- * forgetLeadPerson, after their address came off the lead). Throws when it
- * could not, so the deletion is tried again.
+ * works it out again, and raises the version first, so a refresh that began
+ * before keeps nothing it read: when a person is deleted
+ * (lib/affiliate-leads.ts, forgetLeadPerson, after their address came off
+ * the lead). With no book and no draft there is nothing more to do: a
+ * refresh writing later read the lead after the address came off, or is
+ * thrown away by the version. Throws when it could not delete in one step,
+ * so the deletion is tried again; the version is raised and what it can
+ * deleted even then.
  */
 export async function forgetBookSnapshot(statsId: string): Promise<void> {
   const book = snapshotKey(statsId);
+  const version = versionKey(statsId);
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const [seen] = await redisPipeline([["GET", pointerKey(statsId)]]);
+    const [, , seen, exists] = await redisPipeline([["INCR", version], ["EXPIRE", version, BOOK_KEEP_SECONDS], ["GET", pointerKey(statsId)], ["EXISTS", book]]);
     const token = typeof seen === "string" ? seen : "";
+    if (!token && Number(exists) === 0) return;
     const draft = token ? draftKey(statsId, token) : book;
-    const done = await script(BOOK_FORGET, [book, draft, versionKey(statsId), pointerKey(statsId)], [token, BOOK_KEEP_SECONDS], async () => {
-      await redisPipeline([["DEL", book, draft], ["INCR", versionKey(statsId)], ["EXPIRE", versionKey(statsId), BOOK_KEEP_SECONDS]]);
-      return 1;
-    });
+    let done: number;
+    try {
+      done = await script(BOOK_FORGET, [book, draft, version, pointerKey(statsId)], [token, BOOK_KEEP_SECONDS]);
+    } catch (error) {
+      await redisPipeline([["DEL", book, draft]]).catch(() => undefined);
+      throw error;
+    }
     if (done === 1) return;
   }
   throw new Error("an affiliate book's draft kept changing while it was deleted");
+}
+
+/**
+ * Counts a paid refresh before it reads (BOOK_ATTEMPT), under its lock: how
+ * many in a row now kept no complete book, this one included, or null when
+ * it could not be counted (then it must not be paid for or read).
+ */
+export async function beginAttempt(store: Store, held: Held, at: number): Promise<number | null> {
+  if (!store.statsId) return null;
+  try {
+    const tries = await script(BOOK_ATTEMPT, [held.key, triesKey(store.statsId), triedKey(store.statsId)], [held.token, String(at), BOOK_TRIES_KEEP_SECONDS, BOOK_FRESH_SECONDS]);
+    return tries > 0 ? tries : null;
+  } catch (error) {
+    console.error("counting an affiliate book's refresh failed", error);
+    return null;
+  }
+}
+
+/** Takes the count back when the charge for it was refused; left as it is (one refresh more waited on) when it cannot. */
+export async function undoAttempt(store: Store, held: Held, at: number): Promise<void> {
+  if (!store.statsId) return;
+  await script(BOOK_UNDO, [held.key, triesKey(store.statsId), triedKey(store.statsId)], [held.token, String(at)]).catch(() => 0);
 }
 
 /**
@@ -282,28 +352,35 @@ export async function forgetBookSnapshot(statsId: string): Promise<void> {
  * something in it, hasSomething), only what the page shows of it
  * (keptSlice), written to this refresh's own draft that then takes the old
  * book's place, so no part of an older book stays behind. When it was worked
- * out is written in every case. `kept` false when the parts are not kept
- * (past BOOK_SNAPSHOT_MAX_BYTES, or the write failed); `short` when it is
- * worked out again after BOOK_SHORT_SECONDS rather than a day. Null, and
- * nothing kept, when the lock is no longer this refresh's or a person was
- * deleted since `version` was read: what it read is thrown away.
+ * out is written in every case. `tries` is what beginAttempt counted. `kept`
+ * false when the parts are not kept (past BOOK_SNAPSHOT_MAX_BYTES, or the
+ * write failed); `short` when it is worked out again after
+ * BOOK_SHORT_SECONDS rather than a day. Null, and nothing more kept, when
+ * the lock is no longer this refresh's, a person was deleted since
+ * `version` was read, or Redis could not run the scripts: what it read is
+ * thrown away.
  */
-export async function writeSnapshot(store: Store, book: Book, at: number, held: Held, version: string): Promise<{ kept: boolean; short: boolean } | null> {
+export async function writeSnapshot(store: Store, book: Book, at: number, held: Held, version: string, tries: number): Promise<{ kept: boolean; short: boolean } | null> {
   if (!store.statsId) return null;
-  const statsId = store.statsId;
+  try {
+    return await write(store.statsId, book, at, held, version, tries);
+  } catch (error) {
+    console.error("keeping an affiliate book failed", error);
+    return null;
+  }
+}
+
+async function write(statsId: string, book: Book, at: number, held: Held, version: string, tries: number): Promise<{ kept: boolean; short: boolean } | null> {
   const key = snapshotKey(statsId);
   const draft = draftKey(statsId, held.token);
   const pointer = pointerKey(statsId);
-  const [previous, seen] = await redisPipeline([["GET", triesKey(statsId)], ["GET", pointer]]).catch(() => [null, null]);
-  const tries = Math.max(0, Number(previous) || 0);
+  // The draft a stopped refresh may have left; not read, nothing is written.
+  const [seen] = await redisPipeline([["GET", pointer]]);
   const complete = book.refundsChecked && book.invoicesChecked;
-  const short = !complete && tries < BOOK_SHORT_TRIES;
-  // Counted while the books stay incomplete, past a day; set back only by a complete one.
-  const nextTries = complete ? 0 : Math.min(tries + 1, BOOK_SHORT_TRIES);
-  const triesWrite = nextTries === 0 ? ["DEL", triesKey(statsId)] : ["SET", triesKey(statsId), String(nextTries), "EX", BOOK_TRIES_KEEP_SECONDS];
+  const short = !complete && tries <= BOOK_SHORT_TRIES;
   const meta = [AT, String(at), SHORT, short ? "1" : "0", BY, held.token];
-  const tail = [String(nextTries), BOOK_TRIES_KEEP_SECONDS];
-  const keys = [held.key, versionKey(statsId), draft, key, pointer, triesKey(statsId)];
+  const keys = [held.key, versionKey(statsId), draft, key, pointer, triesKey(statsId), triedKey(statsId)];
+  const head = [held.token, version, BOOK_KEEP_SECONDS, complete ? "1" : "0"];
   const parts = book.rows
     .map((row) => ({ row, slice: bookSlice(book, row.affiliate.id) }))
     .filter(({ row, slice }) => row.affiliate.status === "approved" || hasSomething(slice))
@@ -314,13 +391,7 @@ export async function writeSnapshot(store: Store, book: Book, at: number, held: 
     return null;
   };
   const markOnly = async () => {
-    const marked = await script(BOOK_MARK, keys, [held.token, version, BOOK_KEEP_SECONDS, ...tail, ...meta, KEPT, "0"], async () => {
-      if (!(await stillHeld(statsId, held, version))) return 0;
-      const [by] = await redisPipeline([["HGET", key, BY]]);
-      if (by === held.token) return 2;
-      await redisPipeline([["DEL", draft, key, pointer], ["HSET", key, ...meta, KEPT, "0"], ["EXPIRE", key, BOOK_KEEP_SECONDS], triesWrite]);
-      return 1;
-    }).catch(() => -1);
+    const marked = await script(BOOK_MARK, keys, [...head, ...meta, KEPT, "0"]);
     if (marked === 0) return thrownAway();
     return { kept: marked === 2, short };
   };
@@ -328,12 +399,7 @@ export async function writeSnapshot(store: Store, book: Book, at: number, held: 
   try {
     // A draft a stopped refresh left is deleted as this one begins, so there is never more than one.
     const left = typeof seen === "string" && seen ? draftKey(statsId, seen) : draft;
-    const begun = await script(BOOK_BEGIN, [held.key, versionKey(statsId), pointer, left, draft], [held.token, version, BOOK_LOCK_SECONDS * 2], async () => {
-      if (!(await stillHeld(statsId, held, version))) return 0;
-      await redisPipeline([["DEL", left, draft], ["SET", pointer, held.token, "EX", BOOK_LOCK_SECONDS * 2]]);
-      return 1;
-    });
-    if (begun !== 1) return null;
+    if ((await script(BOOK_BEGIN, [held.key, versionKey(statsId), pointer, left, draft], [held.token, version, BOOK_LOCK_SECONDS * 2])) !== 1) return null;
     let round: string[] = [];
     let size = 0;
     const flush = async (): Promise<boolean> => {
@@ -341,12 +407,7 @@ export async function writeSnapshot(store: Store, book: Book, at: number, held: 
       const pairs = round;
       round = [];
       size = 0;
-      const wrote = await script(BOOK_ROUND, [held.key, versionKey(statsId), draft], [held.token, version, BOOK_LOCK_SECONDS * 2, ...pairs], async () => {
-        if (!(await stillHeld(statsId, held, version))) return 0;
-        await redisPipeline([["HSET", draft, ...pairs], ["EXPIRE", draft, BOOK_LOCK_SECONDS * 2]]);
-        return 1;
-      });
-      return wrote === 1;
+      return (await script(BOOK_ROUND, [held.key, versionKey(statsId), draft], [held.token, version, BOOK_LOCK_SECONDS * 2, ...pairs])) === 1;
     };
     for (const [id, value] of parts) {
       const length = utf8(id) + utf8(value);
@@ -355,14 +416,7 @@ export async function writeSnapshot(store: Store, book: Book, at: number, held: 
       size += length;
     }
     if (!(await flush())) return thrownAway();
-    const committed = await script(BOOK_COMMIT, keys, [held.token, version, BOOK_KEEP_SECONDS, ...tail, ...meta, KEPT, "1"], async () => {
-      if (!(await stillHeld(statsId, held, version))) return 0;
-      const [by] = await redisPipeline([["HGET", key, BY]]);
-      if (by === held.token) return 1;
-      await redisPipeline([["HSET", draft, ...meta, KEPT, "1"], ["EXPIRE", draft, BOOK_KEEP_SECONDS], ["RENAME", draft, key], ["DEL", pointer], triesWrite]);
-      return 1;
-    });
-    if (committed !== 1) return thrownAway();
+    if ((await script(BOOK_COMMIT, keys, [...head, ...meta, KEPT, "1"])) !== 1) return thrownAway();
     return { kept: true, short };
   } catch {
     return markOnly();
@@ -370,19 +424,22 @@ export async function writeSnapshot(store: Store, book: Book, at: number, held: 
 }
 
 /**
- * Works the whole program's book out and keeps it, under `held` (claimRefresh):
- * the book itself whether or not it could be kept, whether it was, and
- * whether it is worked out again soon. Null when what it read was thrown
- * away (the lock ran out, or a person was deleted while it read).
+ * Works the whole program's book out and keeps it, under `held`
+ * (claimRefresh), counted by beginAttempt (`tries`): Stripe is asked for no
+ * longer than BOOK_READ_SECONDS, past which the book is incomplete. The book
+ * itself whether or not it could be kept, whether it was, and whether it is
+ * worked out again soon. Null when what it read was thrown away (the lock
+ * ran out, a person was deleted while it read, or Redis could not write).
  */
-export async function refreshBook(store: Store, at: number, held: Held): Promise<{ book: Book; kept: boolean; short: boolean } | null> {
+export async function refreshBook(store: Store, at: number, held: Held, tries: number): Promise<{ book: Book; kept: boolean; short: boolean } | null> {
   if (!store.statsId) return null;
+  const deadline = Date.now() + BOOK_READ_SECONDS * 1000;
   // Read before the book, so a deletion while it reads is seen when it writes.
   const version = await bookVersion(store.statsId);
   // readBook reads at most 200 open bookings across the whole program (lib/affiliates.ts, openBookings):
   // worked out for everybody at once, a program past that may read fewer of one affiliate's than their own book did.
-  const book = await readBook(store);
-  const written = await writeSnapshot(store, book, at, held, version);
+  const book = await readBook(store, undefined, { deadline });
+  const written = await writeSnapshot(store, book, at, held, version, tries);
   return written && { book, ...written };
 }
 

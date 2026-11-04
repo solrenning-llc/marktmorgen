@@ -37,7 +37,9 @@
  */
 import type { Affiliate, Book } from "@/lib/affiliates";
 import { DISPUTE_PAGES, INVOICE_PAGES, REFUND_PAGES, affiliatesOn, bookSize, readBook } from "@/lib/affiliates";
-import { type SnapshotState, BOOK_SHORT_SECONDS, bookSlice, claimRefresh, hasSomething, needsRefresh, readSlice, refreshBook, releaseRefresh, snapshotState } from "@/lib/affiliate-book-snapshot";
+import {
+  type SnapshotState, BOOK_READ_SECONDS, BOOK_SHORT_SECONDS, beginAttempt, bookSlice, claimRefresh, hasSomething, needsRefresh, readSlice, refreshBook, releaseRefresh, snapshotState, undoAttempt,
+} from "@/lib/affiliate-book-snapshot";
 import { codeOwnerCount } from "@/lib/affiliate-codes";
 import { affiliateLoadUnits, affiliatePageUnits, listingUnits } from "@/lib/public-read-rules";
 import type { Store } from "@/lib/store";
@@ -99,8 +101,15 @@ async function refreshFor(store: Store, id: string, now: number): Promise<KeptBo
     const again = await snapshotState(store, id);
     if (!again || !needsRefresh(again, seconds)) return null;
     const units = await affiliatePageCost(store);
-    if (units === null || !(await takePublicRequest(store, "buyer", now, units, { shared: true }))) return null;
-    const done = await refreshBook(store, seconds, held);
+    if (units === null) return null;
+    // Counted before it is paid for and read, so one stopped before it writes still counts as a refresh (beginAttempt).
+    const tries = await beginAttempt(store, held, seconds);
+    if (tries === null) return null;
+    if (!(await takePublicRequest(store, "buyer", now, units, { shared: true }))) {
+      await undoAttempt(store, held, seconds);
+      return null;
+    }
+    const done = await refreshBook(store, seconds, held, tries);
     // Thrown away (its lock ran out, or a person was deleted while it read): nothing of it is shown.
     if (!done) return null;
     return { book: bookSlice(done.book, id), at: seconds, refresh: !done.kept ? null : done.short ? "short" : "daily" };
@@ -117,7 +126,8 @@ async function refreshFor(store: Store, id: string, now: number): Promise<KeptBo
 async function ownBook(store: Store, id: string, now: number): Promise<KeptBook | null> {
   const units = await affiliatePageCost(store);
   if (units === null || !(await takePublicRequest(store, "buyer", now, units))) return null;
-  return { book: await readBook(store, id), at: Math.floor(now / 1000), refresh: null };
+  // Stripe asked no longer than a refresh is, so the page answers inside its maxDuration.
+  return { book: await readBook(store, id, { deadline: Date.now() + BOOK_READ_SECONDS * 1000 }), at: Math.floor(now / 1000), refresh: null };
 }
 
 /** What a load that has paid its own part reads: the refresh when it is due, the kept part, or its own book when none could be kept. */

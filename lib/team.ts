@@ -31,7 +31,7 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
-import { forgetPipelineAccess } from "@/lib/pipeline-access";
+import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
@@ -515,18 +515,32 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
   const after = normaliseEmail(to);
   const [ids] = await redisPipeline([["SMEMBERS", indexKey(before)]]);
   const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id)) : [];
+  // Stores whose membership stayed on the old address: their index entry is kept.
+  const stayed: string[] = [];
   for (const sid of list) {
     const store = await storeForId(sid);
     if (!store || normaliseEmail(store.email) === after) continue;
     const role = await withTeam(sid, async () => {
       const team = await readTeam(sid);
       if (!team.members.some((m) => m.email === before) || team.members.some((m) => m.email === after)) return null;
+      // What they may do with each pipeline (639 [GL7](7)) is copied to the new address first. If that cannot
+      // be confirmed, this store's membership stays on the old address: the new one never has the store without
+      // its restrictions.
+      try {
+        await copyPipelineAccess(store.statsId, before, after);
+      } catch (error) {
+        console.error("copying pipeline access failed; the membership stays on the old address", error);
+        stayed.push(sid);
+        return null;
+      }
       await saveTeam(sid, { members: team.members.map((m) => (m.email === before ? { ...m, email: after } : m)), invites: team.invites });
       return team.members.find((m) => m.email === before)?.role ?? "support";
     });
     if (!role) continue;
+    // The old address's restrictions go only once the team names the new one.
+    await forgetPipelineAccess(store.statsId, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
     await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
   }
-  await redisPipeline([["DEL", indexKey(before)]]);
+  await redisPipeline([stayed.length ? ["SREM", indexKey(before), ...list.filter((sid) => !stayed.includes(sid))] : ["DEL", indexKey(before)]]);
 }

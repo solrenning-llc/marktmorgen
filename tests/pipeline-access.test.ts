@@ -15,7 +15,7 @@ import { PIPELINE_ACCESS_REFUSAL, accessOf, parseAccessMap, pipelineOfStage, vis
 import { readPipelineAccess, writePipelineAccess } from "@/lib/pipeline-access";
 import { redisPipeline } from "@/lib/redis";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { putMember, removeMember } from "@/lib/team";
+import { moveMemberships, putMember, removeMember } from "@/lib/team";
 import { readFileSync } from "node:fs";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -80,6 +80,36 @@ async function main(): Promise<void> {
   const [key] = (await redis.keys()).filter((k: string) => k.startsWith("nl:crm:pacc:"));
   await redisPipeline([["HSET", key, "sam@example.com", "{not json"]]);
   is("a record that cannot be read refuses every change", [await readPipelineAccess(statsId, "sam@example.com"), (await deal("sam", "lead00")).status], [null, 403]);
+
+  part("Found in review: every other way in");
+  await writePipelineAccess(statsId, "sam@example.com", { sales0: "none" }, store);
+  const ownerDeal = (await deal("owner", "wnew01")).body.deal!.id;
+  const stringMoves = await post("sam", { action: "pipeline", pipeline: { ...workshops, stages: workshops.stages.filter((st) => st.id !== "wnew01") }, moves: "lead00" });
+  is("a removed stage's deals sent by one stage for all (a string) into a pipeline they cannot change: refused", stringMoves.status, 403);
+  is("and the deal did not move", (await post("owner", { action: "deal", deal: { id: ownerDeal, title: "Ten seats", email: "", cents: 50_000, stage: "wnew01", note: "" } })).status, 200);
+  is("a deal that is not there, or cannot be read, is never removed by someone limited", (await post("sam", { action: "undeal", id: "zzzzzzzzzz" })).status, 403);
+  await moveMemberships("sam@example.com", "sam2@example.com");
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam2@example.com")}`;
+  is("moving their sign-in to another address keeps exactly their restrictions", [await readPipelineAccess(statsId, "sam@example.com"), await readPipelineAccess(statsId, "sam2@example.com")], [{}, { sales0: "none" }]);
+  is("and the new address is refused where the old one was", (await deal("sam", "lead00")).status, 403);
+  await moveMemberships("sam2@example.com", "sam@example.com");
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam@example.com")}`;
+
+  part("Moving one's sign-in when the database fails");
+  await writePipelineAccess(statsId, "sam@example.com", { sales0: "none" }, store);
+  const realPipeline = redis.pipeline.bind(redis);
+  // Both the read of the restrictions and any write of them fail while the sign-in moves.
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => (c[0] === "HGET" || c[0] === "HSET") && String(c[1]).startsWith("nl:crm:pacc:"))) throw new Error("stand-in failure");
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  await moveMemberships("sam@example.com", "sam3@example.com");
+  redis.pipeline = realPipeline;
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam3@example.com")}`;
+  is("the new address never gets the store without its restrictions: it is not on the team at all", (await deal("sam", "wnew01")).status >= 400, true);
+  is("and the old address keeps its membership and its restrictions", [await readPipelineAccess(statsId, "sam@example.com"), (await readPipelineAccess(statsId, "sam3@example.com"))], [{ sales0: "none" }, {}]);
+  cookies.sam = `${SESSION_COOKIE}=${await openSession("sam@example.com")}`;
+  is("the old address still works, still restricted", [(await deal("sam", "wnew01")).status, (await deal("sam", "lead00")).status], [200, 403]);
 
   part("Leaving the team");
   await writePipelineAccess(statsId, "sam@example.com", { wkshp1: "view" }, store);

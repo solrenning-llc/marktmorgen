@@ -74,7 +74,9 @@ export async function POST(request: NextRequest) {
         if (changing !== null && !mayEdit(changing)) return noAccess();
         if (removing && !mayEdit(pipelineOfStage(pipelines, moveTo))) return noAccess();
         // Deals of a removed stage may be sent to another pipeline's stage: that one must be theirs to change too.
-        const targets = !removing && body.moves && typeof body.moves === "object" ? Object.values(body.moves as Record<string, unknown>).filter((v): v is string => typeof v === "string") : [];
+        // Moves may be one stage for every removed stage (a string) or one per stage (an object): every target is checked.
+        const sentMoves = body.moves;
+        const targets = removing ? [] : typeof sentMoves === "string" ? [sentMoves] : sentMoves && typeof sentMoves === "object" ? Object.values(sentMoves as Record<string, unknown>).filter((v): v is string => typeof v === "string") : [];
         const sentStages = body.pipeline && typeof body.pipeline === "object" && Array.isArray((body.pipeline as { stages?: unknown }).stages) ? ((body.pipeline as { stages: { id?: unknown }[] }).stages.map((st) => st?.id).filter((v): v is string => typeof v === "string")) : [];
         if (targets.some((stage) => !sentStages.includes(stage) && !mayEdit(pipelineOfStage(pipelines, stage)))) return noAccess();
       }
@@ -112,7 +114,8 @@ export async function POST(request: NextRequest) {
       const id = typeof body.id === "string" ? body.id : "";
       if (restricted) {
         const existing = DEAL_ID.test(id) ? await readDeal(statsId, id, stages) : null;
-        if (existing && !mayEdit(pipelineOfStage(await readPipelines(statsId), existing.stage))) return noAccess();
+        // A deal that cannot be read (or is not there) is never removed by someone whose access is limited.
+        if (!existing || !mayEdit(pipelineOfStage(await readPipelines(statsId), existing.stage))) return noAccess();
       }
       return (await dropDeal(statsId, id, store)) ? Response.json({ ok: true }) : refuse("unknown", 404);
     }

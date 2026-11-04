@@ -19,6 +19,16 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
  * file left behind costs storage, a picture deleted from under a product
  * costs the creator's page.
  *
+ * The same note is what lets a new name onto a record at all (4 November
+ * 2026, after a review proved that a picture put on a second record was
+ * deleted with it): a product's or a link's picture, and a page's new one,
+ * must be taken from this list by the request that puts it on, or be that
+ * record's own already. A name another record shows, a buyer's review photo
+ * or an email's picture was never noted (or was taken when it was put on),
+ * so it is refused there, and taking it off the second record later can
+ * never delete it. A picture put on before this rule stays where it is shown
+ * and can still be kept or replaced there.
+ *
  * One list per store's picture folder, so one store's doors never push out
  * another's. Notes older than PICTURE_DOOR_SECONDS, and past the newest
  * PICTURE_DOOR_MAX of the store, are dropped as new ones come in, and the list
@@ -36,16 +46,20 @@ function doorsKey(path: string): string | null {
   return parts.length === 3 && parts[0] === "images" && /^[0-9a-f]{24}$/.test(parts[1]) ? `nl:pictures:doors:${parts[1]}` : null;
 }
 
-/** Writes down a picture the door just signed for, in milliseconds; old notes are dropped with it. */
-export async function notePictureDoor(path: string, now = Date.now()): Promise<void> {
+/**
+ * Writes down a picture the door just signed for, in milliseconds; old notes are dropped with it. False when it
+ * could not be written: such an upload could never be put on anything, so the door is not opened for it.
+ */
+export async function notePictureDoor(path: string, now = Date.now()): Promise<boolean> {
   const key = doorsKey(path);
-  if (!key || !isRedisConfigured()) return;
+  if (!key || !isRedisConfigured()) return false;
   await redisPipeline([
     ["ZREMRANGEBYSCORE", key, 0, now - PICTURE_DOOR_SECONDS * 1000],
     ["ZADD", key, now, path],
     ["ZREMRANGEBYRANK", key, 0, -(PICTURE_DOOR_MAX + 1)],
     ["EXPIRE", key, PICTURE_DOOR_SECONDS],
   ]);
+  return true;
 }
 
 /**

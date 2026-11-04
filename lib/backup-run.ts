@@ -80,8 +80,9 @@ export function validReview(review: BackupCostReview | null | undefined): review
   const day = typeof reviewedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(reviewedAt) ? Date.parse(`${reviewedAt}T00:00:00Z`) : NaN;
   if (!Number.isFinite(day) || dayOf(day) !== reviewedAt) return false;
   if (typeof source !== "string" || source.trim().length < 10) return false;
-  // One set a day (its parts and manifest), kept retentionDays, plus the day being written.
-  return (retentionDays + 1) * objectBound(review) <= maxStoredBytes;
+  // One set a day (its parts and manifest), kept retentionDays, plus up to a day the bucket's lifecycle rule takes to
+  // remove what expired ("within 24 hours", read 4 November 2026, inbox C4-38), plus the day being written.
+  return (retentionDays + 2) * objectBound(review) <= maxStoredBytes;
 }
 
 export type BackupRunResult =

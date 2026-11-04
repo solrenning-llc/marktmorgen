@@ -81,6 +81,8 @@ async function main(): Promise<void> {
     ["no source", { ...review, source: " " }],
     ["no retention", { ...review, retentionDays: 0 }],
     ["a storage ceiling the kept copies could pass", { ...review, maxStoredBytes: 30 * 1_000_000 }],
+    // Room for the retention and the day being written, but not the day the lifecycle rule may take (inbox C4-38).
+    ["a storage ceiling without the lifecycle rule's day of delay", { ...review, maxStoredBytes: 36_000_000 }],
     ["no room for the run's own commands", { ...review, maxCommands: 3 }],
     ["a cap that is not a count", { ...review, maxRows: 1.5 }],
     ["more parts than a set may have", { ...review, maxParts: 10_001 }],

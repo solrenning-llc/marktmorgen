@@ -228,13 +228,13 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok((ORDERS_OPEN_UNITS - 1) * laterPageCost() < ORDERS_SPARE * ORDERS_OPEN_READ, `${ORDERS_OPEN_UNITS} units, one more than needed`);
   assert.ok(laterPageCost() >= ORDERS_UNIT_COMMANDS * ORDERS_METERED_COMMAND, `${laterPageCost()} < ${ORDERS_UNIT_COMMANDS} x ${ORDERS_METERED_COMMAND}`);
   assert.ok(ORDERS_LISTING_COMMANDS * ORDERS_METERED_COMMAND >= ORDERS_METERED_LISTING, `${ORDERS_LISTING_COMMANDS} x ${ORDERS_METERED_COMMAND} < ${ORDERS_METERED_LISTING}`);
-  // A download's lookup of its one purchase is DOWNLOAD_LOOKUP_UNITS public requests before its grant: more than its wait and fixed reads cost.
+  // A download's lookup of its one purchase is DOWNLOAD_LOOKUP_UNITS public requests, after its grant and before anything else: more than its wait and fixed reads cost.
   assert.ok(DOWNLOAD_LOOKUP_UNITS * laterPageCost() >= DOWNLOAD_LOOKUP_READ, `${DOWNLOAD_LOOKUP_UNITS} x ${laterPageCost()} < ${DOWNLOAD_LOOKUP_READ}`);
-  // Showing a bundle's products on that list is ORDERS_BUNDLE_UNITS public requests before its grant: a download's lookup and its answer
+  // Showing a bundle's products on that list is ORDERS_BUNDLE_UNITS public requests, after its grant and before anything else: a download's lookup and its answer
   // (the button's, or the page drawn without JavaScript), with the same tenth to spare and no more.
   assert.ok(ORDERS_BUNDLE_UNITS * laterPageCost() >= ORDERS_SPARE * ORDERS_BUNDLE_READ, `${ORDERS_BUNDLE_UNITS} x ${laterPageCost()} < ${ORDERS_SPARE} x ${ORDERS_BUNDLE_READ}`);
   assert.ok((ORDERS_BUNDLE_UNITS - 1) * laterPageCost() < ORDERS_SPARE * ORDERS_BUNDLE_READ, `${ORDERS_BUNDLE_UNITS} units, one more than needed`);
-  // Checking a batch of older purchases is ORDERS_OLDER_UNITS public requests before its grant: an opening's time and its answer, the same way.
+  // Checking a batch of older purchases is ORDERS_OLDER_UNITS public requests, after its grant and before anything else: an opening's time and its answer, the same way.
   assert.ok(ORDERS_OLDER_UNITS * laterPageCost() >= ORDERS_SPARE * ORDERS_OLDER_READ, `${ORDERS_OLDER_UNITS} x ${laterPageCost()} < ${ORDERS_SPARE} x ${ORDERS_OLDER_READ}`);
   assert.ok((ORDERS_OLDER_UNITS - 1) * laterPageCost() < ORDERS_SPARE * ORDERS_OLDER_READ, `${ORDERS_OLDER_UNITS} units, one more than needed`);
   console.log(`a bundle's products: $${ORDERS_BUNDLE_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_BUNDLE_UNITS} requests`);

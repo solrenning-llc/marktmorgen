@@ -23,11 +23,13 @@
  *     own rows of the payload and each client component's chunk list. It is
  *     SHELL_BYTES, measured on 4 November 2026 on a local production build
  *     (next build --webpack, next start) of this branch: the orders page of a
- *     synthetic store with its chat on, opened with a link that lists nothing,
- *     answered 403,137 bytes, of which the page's own HTML was 1,636 and its
- *     payload rows 2,737 (unescaped, the least they add): 398,764 bytes of
- *     shell, 178,341 of them the inlined stylesheet. Taken as 400,000, above
- *     the 160,000 allowed before it was measured.
+ *     synthetic store with its chat on and the longest name (60 characters of
+ *     &), opened with a link that lists nothing, in each of the 7 languages.
+ *     The most was 401,498 bytes of shell (Italian; the answer, 406,977, less
+ *     the page's own HTML, 2,556, and its payload rows, 2,923, unescaped, the
+ *     least they add), 178,341 of them the inlined stylesheet; with a short
+ *     name it was 398,764. Taken as 410,000, above every measure and the
+ *     160,000 allowed before it was measured.
  *
  * Only the measuring is here; what a page may send is held by its own test.
  */
@@ -38,7 +40,7 @@ import type { ReactElement } from "react";
 import { renderToString } from "react-dom/server";
 
 /** The shell besides the page's own tree: layouts, head with the inlined stylesheet, scripts, the router's rows (measured; see above). */
-export const SHELL_BYTES = 400_000;
+export const SHELL_BYTES = 410_000;
 /** The most bytes a script's nonce attribute takes (nonce="…", a base64 nonce of at most 64 characters). */
 const NONCE = 64;
 /** What one embedded chunk adds around its data: <script nonce="…">self.__next_f.push( and )</script>. */

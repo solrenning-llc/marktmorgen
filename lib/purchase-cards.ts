@@ -11,6 +11,7 @@
  * (components/purchase-card.tsx), so a card drawn in the browser says exactly
  * what the page says.
  */
+import { domainToUnicode } from "node:url";
 import { feedToken } from "@/lib/podcast-access";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 import { readListings } from "@/lib/catalog";
@@ -29,6 +30,7 @@ import {
   type Delivery,
   type OrdersMeter,
   type Purchase,
+  HOST_SHOWN,
   LINK_SHOWN,
   ORDERS_BUNDLE_PER_HOUR,
   ORDERS_OLDER_PER_HOUR,
@@ -111,6 +113,31 @@ export async function extrasFor(store: Store, email: string, listed: Purchase[],
   return { feeds, keys, reviewing };
 }
 
+/**
+ * The host a link is named by, as a person reads it: in its own script when
+ * it is written in one (xn--…) and that fits, else as it is; null when it is
+ * longer than HOST_SHOWN, so it is never said.
+ */
+function shownHost(link: string): string | null {
+  const host = linkHost(link);
+  const read = host.includes("xn--") ? domainToUnicode(host) : "";
+  if (read && read.length <= HOST_SHOWN) return read;
+  return host && host.length <= HOST_SHOWN ? host : null;
+}
+
+/**
+ * The line under a link on the list of purchases saying where it is kept
+ * (C3-90): its whole address when that is at most LINK_SHOWN characters,
+ * else its host alone when that is at most HOST_SHOWN, else nothing. The
+ * whole address is always its button's own, sent once.
+ */
+export function keptLine(language: unknown, link: string): string | null {
+  const words = ordersWords(language);
+  const host = shownHost(link);
+  if (link.length <= LINK_SHOWN) return words.keptOn(host ?? linkHost(link), link);
+  return host ? words.keptAt(host) : null;
+}
+
 /** One purchase as its card says it, in the store's language, with the link's token in its addresses. */
 export function cardOf(store: Store, purchase: Purchase, token: string, extras: Extras): PurchaseCardModel {
   const words = ordersWords(store.language);
@@ -119,20 +146,18 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
   const on = (seconds: number) => said.date(seconds * 1000);
   const handle = store.handle;
 
+  // What a delivery's button names (WCAG 2.4.9): the product, or, for a course or podcast bought at one of several prices, the
+  // price's own name, since the course's own button already carries the product's.
+  const named = (given: Delivery, item: "main" | BumpKey) =>
+    item === "main" && purchase.option && (purchase.courseProduct || purchase.podcastProduct) ? purchase.option : given.title;
   const delivery = (given: Delivery, item: "main" | BumpKey): CardDelivery => {
     if (given.link) {
-      const host = linkHost(given.link);
-      // The button says what it opens by name (WCAG 2.4.9); the address is the button's own, shown as text only when short.
-      return {
-        href: given.link,
-        external: true,
-        label: words.openTitle(given.title),
-        keptOn: given.link.length > LINK_SHOWN ? words.keptAt(host) : words.keptOn(host, given.link),
-      };
+      // The button says what it opens by name; the address is the button's own, shown as text only when short.
+      return { href: given.link, external: true, label: words.openTitle(named(given, item)), keptOn: keptLine(store.language, given.link) };
     }
     const query = new URLSearchParams({ handle, ref: purchase.reference, token });
     if (item !== "main") query.set("item", item);
-    return { href: `/api/store/download?${query}`, external: false, label: item !== "main" ? words.downloadTitle(given.title) : words.downloadIt, keptOn: null };
+    return { href: `/api/store/download?${query}`, external: false, label: words.downloadTitle(named(given, item)), keptOn: null };
   };
 
   const keyOf = (slot: string, title?: string): CardKey[] => {
@@ -183,7 +208,7 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
           : pre.receiptLater
         : null,
     ended: purchase.ended ? { note: words.endedNote, renew: { href: renewPath(store, { id: purchase.productId }), label: words.renew } } : null,
-    course: purchase.courseProduct ? { href: `/@${handle}/course/${purchase.courseProduct}`, label: words.openCourse } : null,
+    course: purchase.courseProduct ? { href: `/@${handle}/course/${purchase.courseProduct}`, label: words.openTitle(purchase.title) } : null,
     package:
       typeof purchase.packageLeft === "number"
         ? purchase.packageBook
@@ -243,8 +268,8 @@ export function ordersShared(store: Store, token: string): OrdersShared {
         openIt: words.openIt,
         openTitle: words.openTitle("{title}"),
         keptOn: words.keptOn("{host}", "{link}"),
-        keptAt: words.keptAt("{host}"),
         downloadIt: words.downloadIt,
+        downloadTitle: words.downloadTitle("{title}"),
         nothingAttached: words.nothingAttached(store.name),
       },
       key: {
@@ -282,6 +307,7 @@ export function bundleLinesOf(store: Store, token: string, which: "main" | BumpK
         ? `/api/store/download?${new URLSearchParams({ handle: store.handle, ref: purchase.reference, token, pid: line.productId, ...(which !== "main" ? { item: which } : {}) })}`
         : null,
       course: line.courseProduct ? `/@${store.handle}/course/${line.courseProduct}` : null,
+      kept: line.delivery?.link ? keptLine(store.language, line.delivery.link) : null,
       key: key
         ? { label: words.yourKeyFor(line.title), value: issued ? issued.key : null, revoked: Boolean(issued?.revoked), waiting: key !== "error" && key.state === "waiting" }
         : null,

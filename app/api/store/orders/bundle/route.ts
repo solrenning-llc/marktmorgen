@@ -17,8 +17,9 @@ function answer(status: number, body: OrdersBundleAnswer): Response {
  *
  * Read as a download is (lib/purchase-cards.ts, askBundle): the link's own
  * limit and the request's call first, then lib/buyer-orders.ts (bundleFor)
- * takes ORDERS_BUNDLE_UNITS of the store's buyer requests before the grant is
- * read and every listing and key through its meter before it is read, and
+ * takes ORDERS_BUNDLE_UNITS of the store's buyer requests once the grant is
+ * read (one read, paid by the request's call) and before anything else is,
+ * and every listing and key through its meter before it is read, and
  * reads only that purchase, from the creator's own Stripe account, so a refund
  * made a minute ago is honored. A store with no room answers "too often" and
  * reads nothing. The page draws the same products without JavaScript

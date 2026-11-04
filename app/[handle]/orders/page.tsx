@@ -20,7 +20,6 @@ import { PurchaseCard } from "@/components/purchase-card";
 import { OlderPurchases } from "@/components/older-purchases";
 import { OrdersKey, OrdersSharedProvider } from "@/components/orders-shared";
 import { BundleDelivery } from "@/components/bundle-delivery";
-import { LINK_SHOWN } from "@/lib/buyer-orders-rules";
 import { speech, speechFor } from "@/lib/buyer-words";
 import { type OrdersWords, ordersWords } from "@/lib/buyer-words/orders";
 import { NewTab } from "@/components/new-tab";
@@ -441,13 +440,13 @@ async function BundleView({ store, token, asked }: { store: Store; token: string
             storeName={store.name}
             heading={words.insideTitle(answer.value.title)}
             showHeading={false}
-            shownLink={LINK_SHOWN}
             missing={answer.value.missing ? 1 : 0}
             words={{ ...shared.words.bundle, missing: answer.value.missing }}
             lines={answer.value.lines.map((line) => ({
               product: { id: line.id, title: line.title, link: line.link },
               download: line.download,
               course: line.course ? { href: line.course } : null,
+              kept: line.kept,
               keyBox: line.key ? <OrdersKey title={line.title} label={line.key.label} value={line.key.value} revoked={line.key.revoked} waiting={line.key.waiting} /> : null,
             }))}
           />

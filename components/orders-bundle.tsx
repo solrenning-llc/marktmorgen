@@ -4,7 +4,6 @@ import { type FormEvent, useId, useState, useSyncExternalStore } from "react";
 import { BundleDelivery } from "@/components/bundle-delivery";
 import { LicenceKeyBox } from "@/components/licence-key-box";
 import { useOrdersShared } from "@/components/orders-shared";
-import { LINK_SHOWN } from "@/lib/buyer-orders-rules";
 
 /** Whether the page runs its script never changes once read. */
 const noChange = () => () => {};
@@ -17,6 +16,8 @@ export type OrdersBundleLine = {
   download: string | null;
   course: string | null;
   key: { label: string; value: string | null; revoked: boolean; waiting: boolean } | null;
+  /** Where its link is kept, as the list says it (lib/purchase-cards.ts, keptLine); null for none. */
+  kept: string | null;
 };
 
 /** What the route answers: the products, and what is said about the ones the store no longer has; or why not. */
@@ -111,13 +112,13 @@ export function OrdersBundle({ reference, item, label, heading }: { reference: s
             storeName={shared.storeName}
             heading={heading}
             showHeading={false}
-            shownLink={LINK_SHOWN}
             missing={shown.missing ? 1 : 0}
             words={{ ...words.bundle, missing: shown.missing }}
             lines={shown.lines.map((line) => ({
               product: { id: line.id, title: line.title, link: line.link },
               download: line.download,
               course: line.course ? { href: line.course } : null,
+              kept: line.kept,
               keyBox: line.key ? (
                 <LicenceKeyBox
                   title={line.title}

@@ -16,8 +16,9 @@ function answer(status: number, body: OlderAnswer): Response {
  * the list (components/older-purchases.tsx). One way with the page's own
  * batch without JavaScript (lib/purchase-cards.ts, askOlder): the link's own
  * limit and the request's call first; then lib/buyer-orders.ts (olderFor)
- * takes ORDERS_OLDER_UNITS of the store's buyer requests before the grant is
- * read, and every read past them through its meter, with the same ceiling of
+ * takes ORDERS_OLDER_UNITS of the store's buyer requests once the grant is
+ * read (one read, paid by the request's call) and before anything else is,
+ * and every read past them through its meter, with the same ceiling of
  * calls to Stripe as an opening, ORDERS_OLDER_MOST purchases at the most.
  * `older` is where the batch starts (lib/buyer-orders.ts, olderCursor). A
  * store with no room answers "too often" and reads nothing. Each purchase is

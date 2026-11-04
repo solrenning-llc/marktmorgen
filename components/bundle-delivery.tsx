@@ -12,6 +12,13 @@ export type BundleLine = {
   course: { action: string; fields: Record<string, string> } | { href: string } | null;
   /** Its licence key, drawn by the page, when it hands one out. */
   keyBox?: ReactNode;
+  /**
+   * The line under a link saying where it is kept, already said by the server
+   * (lib/purchase-cards.ts, keptLine: the address only when short, else the
+   * host only when short; null for none), as on the list of purchases. When
+   * left out, the whole address is said, as on the thanks page.
+   */
+  kept?: string | null;
 };
 
 /**
@@ -22,13 +29,13 @@ export type BundleWords = {
   openCourse: string;
   startCourse: string;
   openIt: string;
-  /** "Open {title}": the link's button named by what it opens, where given (WCAG 2.4.9); "openIt" where not. */
+  /** "Open {title}": a link's or a course's button named by what it opens, where given (WCAG 2.4.9); openIt and openCourse where not. */
   openTitle?: string;
   /** "Kept on {host}: {link}". */
   keptOn: string;
-  /** "Kept on {host}", for an address longer than shownLink, where given. */
-  keptAt?: string;
   downloadIt: string;
+  /** "Download {title}": a file's button named by what it downloads, where given (WCAG 2.4.9); downloadIt where not. */
+  downloadTitle?: string;
   nothingAttached: string;
   /** Said when products are missing, already with how many; null when none are. */
   missing: string | null;
@@ -60,7 +67,6 @@ export function BundleDelivery({
   storeName,
   heading = "What is inside",
   showHeading = true,
-  shownLink,
   words: given,
 }: {
   lines: BundleLine[];
@@ -70,13 +76,6 @@ export function BundleDelivery({
   heading?: string;
   /** False when the heading is already drawn above, as on the list of purchases (components/orders-bundle.tsx): it stays the list's name. */
   showHeading?: boolean;
-  /**
-   * The longest address said as text, as on the list of purchases
-   * (lib/buyer-orders-rules.ts, LINK_SHOWN): a longer one is named by its host
-   * alone (words.keptAt), its whole address the button's own, one click away.
-   * Every address said whole when not given, as on the thanks page.
-   */
-  shownLink?: number;
   /** Said in the store's language; English when not given. */
   words?: BundleWords;
 }) {
@@ -87,13 +86,21 @@ export function BundleDelivery({
       <ul className="mt-3 space-y-3">
         {lines.map((line) => {
           const { product } = line;
+          // A function, so a "$" in a title or an address is never read as a replacement pattern.
+          const named = (template: string | undefined, fallback: string) => (template ? template.replace("{title}", () => product.title) : fallback);
+          const kept =
+            line.kept !== undefined
+              ? line.kept
+              : product.link
+                ? words.keptOn.replace("{host}", () => linkHost(product.link as string)).replace("{link}", () => product.link as string)
+                : null;
           return (
             <li key={product.id} className="rounded-2xl px-5 py-4" style={{ border: "1px solid var(--st-line)" }}>
               <p className="font-semibold">{product.title}</p>
               {line.course ? (
                 "href" in line.course ? (
                   <a href={line.course.href} className="btn st-btn mt-3">
-                    {words.openCourse}
+                    {named(words.openTitle, words.openCourse)}
                   </a>
                 ) : (
                   <form action={line.course.action} method="post" className="mt-3">
@@ -108,17 +115,13 @@ export function BundleDelivery({
               ) : product.link ? (
                 <>
                   <a href={product.link} rel="noopener noreferrer nofollow" target="_blank" className="btn st-btn mt-3">
-                    {words.openTitle ? words.openTitle.replace("{title}", () => product.title) : words.openIt}
+                    {named(words.openTitle, words.openIt)}
                   <NewTab /></a>
-                  <p className="st-muted mt-2 break-all text-xs">
-                    {shownLink !== undefined && product.link.length > shownLink && words.keptAt
-                      ? words.keptAt.replace("{host}", () => linkHost(product.link as string))
-                      : words.keptOn.replace("{host}", linkHost(product.link)).replace("{link}", product.link)}
-                  </p>
+                  {kept ? <p className="st-muted mt-2 break-all text-xs">{kept}</p> : null}
                 </>
               ) : line.download ? (
                 <a href={line.download} className="btn st-btn mt-3">
-                  {words.downloadIt}
+                  {named(words.downloadTitle, words.downloadIt)}
                 </a>
               ) : (
                 <p className="st-muted mt-2 text-sm">{words.nothingAttached}</p>

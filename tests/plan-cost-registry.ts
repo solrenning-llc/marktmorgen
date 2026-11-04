@@ -293,7 +293,7 @@ export const ORDERS_OPEN_READ =
  * it waits on (a checkout, or a payment taken in one click and its checkout),
  * with the wait shape's share of CPU (SHAPES); its DOWNLOAD_LOOKUP_COMMANDS;
  * and the one entry brought over, under 2 KB. Counted as
- * DOWNLOAD_LOOKUP_UNITS public requests taken before the grant is read
+ * DOWNLOAD_LOOKUP_UNITS public requests taken after the grant (one read, paid by the request's own call) and before anything else is read
  * (tests/plan-cost-registry.test.ts holds them above it).
  */
 export const DOWNLOAD_LOOKUP_READ =
@@ -307,8 +307,8 @@ export const DOWNLOAD_LOOKUP_READ =
  * app/api/store/orders/bundle/route.ts; C3-80), at the most: a download's
  * lookup of one purchase, and its answer sent on, ORDERS_BUNDLE_BYTES (the
  * page drawn without JavaScript, the larger of the two).
- * Counted as ORDERS_BUNDLE_UNITS public requests taken before the grant is
- * read (tests/plan-cost-registry.test.ts holds them above it).
+ * Counted as ORDERS_BUNDLE_UNITS public requests taken after the grant (one read, paid by the request's own call) and before anything else is read
+ * (tests/plan-cost-registry.test.ts holds them above it).
  */
 export const ORDERS_BUNDLE_READ = DOWNLOAD_LOOKUP_READ + ORDERS_BUNDLE_BYTES * ORIGIN_PER_BYTE;
 /**
@@ -319,7 +319,7 @@ export const ORDERS_BUNDLE_READ = DOWNLOAD_LOOKUP_READ + ORDERS_BUNDLE_BYTES * O
  * to the creator's Stripe account it waits on, inside ORDERS_STRIPE_CALLS),
  * a quarter of it in CPU, its ORDERS_OLDER_COMMANDS and its answer sent on,
  * ORDERS_OLDER_BYTES. Counted as ORDERS_OLDER_UNITS public requests taken
- * before the grant is read (tests/plan-cost-registry.test.ts holds them above it).
+ * after the grant (one read, paid by the request's own call) and before anything else is read (tests/plan-cost-registry.test.ts holds them above it).
  */
 export const ORDERS_OLDER_READ =
   ORDERS_OPEN_SECONDS * MEMORY_SECOND + (ORDERS_OPEN_SECONDS / 4) * CPU_SECOND + ORDERS_OLDER_COMMANDS * COMMAND + ORDERS_OLDER_BYTES * ORIGIN_PER_BYTE;
@@ -679,7 +679,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/buyer-orders-rules.ts", names: ["ORDERS_OPEN_UNITS", "ORDERS_OPEN_SECONDS", "ORDERS_OPEN_COMMANDS", "ORDERS_UNIT_COMMANDS", "ORDERS_READ_MS", "ORDERS_IMPORTED_ENTRY_COMMANDS", "ORDERS_CALL_MOVES", "ORDERS_LISTING_COMMANDS", "ORDERS_KEY_COMMANDS", "ORDERS_FEED_COMMANDS", "ORDERS_ROOM_COMMANDS"] },
       // A request for the link to that list, and a download from it, read the same purchases the same way: each takes ORDERS_OPEN_UNITS
       // before it reads, its meter the rest before each read, and the store's "too many" answer without room (C3-78, MR, 4 November 2026).
-      // A download from it reads only the purchase asked for, by its reference: DOWNLOAD_LOOKUP_UNITS before the grant, and only the
+      // A download from it reads only the purchase asked for, by its reference: DOWNLOAD_LOOKUP_UNITS after the grant (one read) and before the rest, and only the
       // listings it hands over through the meter, never read again (DOWNLOAD_LOOKUP_READ in tests/plan-cost-registry.test.ts).
       { file: "lib/buyer-orders.ts", names: ["export async function requestOrdersLink", "withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS)", "afterAnswer(() => sendLink(store, raw, email, origin))", "export async function findPurchase", "takePublicRequest(store, \"buyer\", Date.now(), DOWNLOAD_LOOKUP_UNITS)", "withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS)", "DOWNLOAD_LOOKUP_MS)) as Row", "await meter.take(Number(count) || 0)", "const find = finderFor(store, meter)", "function onlyFinder(store: Store, meter: OrdersMeter)"] },
       { file: "lib/buyer-orders-rules.ts", names: ["DOWNLOAD_LOOKUP_UNITS", "DOWNLOAD_LOOKUP_MS", "DOWNLOAD_LOOKUP_COMMANDS", "ORDERS_LINK_READ_MS"] },
@@ -690,7 +690,7 @@ export const COST_LINES: CostLine[] = [
       { file: "components/purchase-card.tsx", names: ["<OrdersBundle"] },
       // An opening asks the creator's Stripe account ORDERS_STRIPE_CALLS times at the most, a payment plan's refund check taken
       // before it is made; a bundle's products are read only when the buyer asks, by their own request: ORDERS_BUNDLE_UNITS
-      // before the grant, the listings and keys through the meter (C3-80, 4 November 2026; ORDERS_BUNDLE_READ in
+      // after the grant (one read) and before the rest, the listings and keys through the meter (C3-80, 4 November 2026; ORDERS_BUNDLE_READ in
       // tests/plan-cost-registry.test.ts, the page's bytes and the calls in tests/orders-page-bounds.test.ts).
       { file: "lib/buyer-orders.ts", names: ["if (meter && calls > 0 && !meter.stripe(calls))", "if (shown >= MAX_LISTED) {", "if (meter?.older.length && refundCalls(session) > 0) {", "if (purchases.length >= ORDERS_OLDER_MOST) {", "if (meter && !checked && !meter.stripe(1)) return null;", "if (!meter.stripe(taken.filter(disputed).length)) return wait;", "return this.stripe(1);", "export async function bundleFor", "takePublicRequest(store, \"buyer\", Date.now(), ORDERS_BUNDLE_UNITS)", "export async function olderFor", "takePublicRequest(store, \"buyer\", Date.now(), ORDERS_OLDER_UNITS)", "if (purchases.length === 0 && calls.length === 0 && unchecked === 0) return;", "await meter.take(keyed.length * ORDERS_KEY_COMMANDS)", "await linesOf(find, bundleFromMeta(meta, \"bundle\"), lines)"] },
       { file: "lib/buyer-orders-rules.ts", names: ["ORDERS_STRIPE_CALLS", "ORDERS_STRIPE_LISTS", "PLAN_REFUND_CALLS", "ORDERS_PAGE_BYTES", "LINK_SHOWN", "ORDERS_BUNDLE_UNITS", "ORDERS_BUNDLE_BYTES", "ORDERS_BUNDLE_PER_HOUR", "ORDERS_OLDER_UNITS", "ORDERS_OLDER_COMMANDS", "ORDERS_OLDER_BYTES", "ORDERS_OLDER_PER_HOUR", "ORDERS_OLDER_MOST", "ORDERS_ONE_CLICK_LISTS"] },

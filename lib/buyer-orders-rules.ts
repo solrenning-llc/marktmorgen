@@ -17,13 +17,14 @@
  * public-requests) and tests/plan-cost-registry.test.ts holds the units
  * above what they stand for, with a tenth to spare and no more.
  *
- * Measured on 4 November 2026 (C3-83, C3-90, C3-93): the page at every limit
- * as it is sent is 5,722,881 bytes (HTML 2,318,806, RSC payload 2,812,075,
- * keys from a creator's list 192,000, and the shell measured on a local
- * production build, 398,764, taken as 400,000), held under ORDERS_PAGE_BYTES
- * (5,750,000). An opening then costs $0.000943 at most before its metered
- * reads; 17 units at $0.0000633 are $0.001076, 14.1% to spare (16 would be
- * 7.4%). 12 until the page was measured as it is sent: #2060 measured its
+ * Measured on 4 November 2026 (C3-83, C3-90, C3-93, C3-97), in each of the 7
+ * languages with every field at its longest of the costliest character: the
+ * most, in French, is 5,831,910 bytes as sent (HTML 2,358,336, RSC payload
+ * 2,871,574, keys from a creator's list 192,000, and the shell measured on a
+ * local production build, at most 401,498, taken as 410,000), held under
+ * ORDERS_PAGE_BYTES (5,850,000). An opening then costs $0.000949 at most
+ * before its metered reads; 17 units at $0.0000633 are $0.001076, 13.4% to
+ * spare (16 would be 6.7%). 12 until the page was measured as it is sent: #2060 measured its
  * HTML alone, 2.5 MB, and so did not cover the payload or the shell.
  *
  * Taken from the public requests, never from the buyers' actions figure
@@ -75,7 +76,9 @@ export const ORDERS_LINK_READ_MS = 12_000;
  * What one download from the list of purchases takes to find its purchase
  * (lib/buyer-orders.ts, findPurchase; C3-78, MR, 4 November 2026), besides the
  * download's own request: DOWNLOAD_LOOKUP_UNITS of the store's buyer requests,
- * taken before the link's grant is read. They pay for the grant, the purchase
+ * taken after the link's grant is read and before anything else is: the grant is
+ * one read, paid by the request's own call (its per-link limit takes a
+ * public request first), so a link that opens nothing takes nothing more. They pay for the purchase
  * read by its own reference (one checkout, or a payment taken in one click
  * with the checkout it followed, from the creator's Stripe account; or the
  * one entry brought over), waited on DOWNLOAD_LOOKUP_MS at the most, and its
@@ -151,7 +154,7 @@ export const PLAN_REFUND_CALLS = 1 + 1 + 10 + 10;
  * holds a page drawn at those limits under it, and tests/plan-cost-registry.ts
  * prices it in ORDERS_OPEN_READ.
  */
-export const ORDERS_PAGE_BYTES = 5_750_000;
+export const ORDERS_PAGE_BYTES = 5_850_000;
 /**
  * The longest address of a delivery the list of purchases shows as text. A
  * longer one is named by its host alone ("Kept on example.com"): its whole
@@ -161,11 +164,22 @@ export const ORDERS_PAGE_BYTES = 5_750_000;
  * 2026; before, cut to 60 characters and then given whole to screen readers).
  */
 export const LINK_SHOWN = 80;
+/**
+ * The longest host the list names a longer address by, a DNS label's own
+ * limit (lib/purchase-cards.ts, keptLine): an address may carry a host of
+ * almost 2,000 characters (lib/product-link.ts, readLink), and one longer than
+ * this is not said at all, only kept in its button's address (review of
+ * claude3/orders-page-bounds, 4 November 2026). A host written in another
+ * script is said in it (domainToUnicode) when it fits.
+ */
+export const HOST_SHOWN = 63;
 
 /**
  * What showing a bundle's products takes (app/api/store/orders/bundle/route.ts;
  * C3-80, 4 November 2026), besides the request's own call: ORDERS_BUNDLE_UNITS
- * of the store's buyer requests, taken before the link's grant is read, in
+ * of the store's buyer requests, taken after the link's grant is read and before anything else is: the grant is
+ * one read, paid by the request's own call (its per-link limit takes a
+ * public request first), so a link that opens nothing takes nothing more, in
  * place of a download's DOWNLOAD_LOOKUP_UNITS. They pay for the same lookup of
  * one purchase by its reference, and for the answer sent back, every product
  * of the bundle with its address and its key, ORDERS_BUNDLE_BYTES at the most.
@@ -173,7 +187,8 @@ export const LINK_SHOWN = 80;
  * read. tests/plan-cost-registry.ts prices it (ORDERS_BUNDLE_READ) and
  * tests/plan-cost-registry.test.ts holds the units above it, with a tenth to
  * spare (2 until C3-83, when the page without JavaScript had to fit too):
- * $0.000134 at most, 3 units $0.000190, 41.6% to spare (measured 4 November 2026).
+ * $0.000135 at most, 3 units $0.000190, 40.4% to spare (measured 4 November
+ * 2026; the page without JavaScript at most 1,014,516 bytes, in French).
  */
 export const ORDERS_BUNDLE_UNITS = 3;
 /**
@@ -184,7 +199,7 @@ export const ORDERS_BUNDLE_UNITS = 3;
  * the larger, measured as it is sent (tests/page-response.ts), and is what
  * this holds (tests/orders-page-bounds.test.ts holds both under it).
  */
-export const ORDERS_BUNDLE_BYTES = 1_000_000;
+export const ORDERS_BUNDLE_BYTES = 1_020_000;
 /** How often one link may show a bundle's products in an hour, as a download's link is limited. */
 export const ORDERS_BUNDLE_PER_HOUR = 240;
 
@@ -193,15 +208,18 @@ export const ORDERS_BUNDLE_PER_HOUR = 240;
  * C3-80, 4 November 2026): an opening's purchases whose refund did not fit in
  * its ORDERS_STRIPE_CALLS wait under the list, said as not checked yet, and
  * the buyer checks them a batch at a time. ORDERS_OLDER_UNITS of the store's
- * buyer requests are taken before the link's grant is read; they pay for the
+ * buyer requests are taken after the link's grant is read and before anything else is: the grant is
+ * one read, paid by the request's own call (its per-link limit takes a
+ * public request first), so a link that opens nothing takes nothing more; they pay for the
  * request held at 2 GB as long as an opening (ORDERS_OPEN_SECONDS, which
  * bounds every call to Stripe it waits on), its ORDERS_OLDER_COMMANDS, and
  * its answer, ORDERS_OLDER_BYTES at the most. Every listing, key and feed it
  * reads past them goes through its meter. tests/plan-cost-registry.ts prices
  * it (ORDERS_OLDER_READ) and tests/plan-cost-registry.test.ts holds the units
  * above it, with a tenth to spare (8 until C3-83, when the page without
- * JavaScript had to fit too): $0.000529 at most, 10 units $0.000633, 19.6% to
- * spare, 9 only 7.6% (measured 4 November 2026).
+ * JavaScript had to fit too): $0.000531 at most, 10 units $0.000633, 19.2% to
+ * spare, 9 only 7.2% (measured 4 November 2026; the page without JavaScript
+ * at most 1,426,236 bytes, in French).
  */
 export const ORDERS_OLDER_UNITS = 10;
 /** Commands a batch makes besides its metered reads: the link's grant. */
@@ -214,7 +232,7 @@ export const ORDERS_OLDER_COMMANDS = 1;
  * as it is sent (tests/page-response.ts), is the larger and is what this
  * holds (tests/orders-page-bounds.test.ts holds both under it).
  */
-export const ORDERS_OLDER_BYTES = 1_400_000;
+export const ORDERS_OLDER_BYTES = 1_430_000;
 /** How often one link may check a batch of older purchases in an hour. */
 export const ORDERS_OLDER_PER_HOUR = 60;
 /**

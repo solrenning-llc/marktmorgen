@@ -31,6 +31,7 @@ import { saleHandles, type Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { sourceOf } from "@/lib/webhooks";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
+import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
 
 /** Checkouts asked of Stripe per call: its own most. */
 export const SALES_PAGE = 100;
@@ -41,14 +42,44 @@ export const SALES_PAGE = 100;
  */
 export const SALES_TITLE_IDS = 200;
 const CURSOR = /^cs_[A-Za-z0-9_]{1,250}$/;
+/** The longest checkout id, the cursor included: "cs_" and 250 more. */
+export const SALES_ID_LENGTH = 253;
+/** A product's or an option's id, as the catalog writes them. */
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+export const SALES_SAFE_ID_LENGTH = 64;
+
+/**
+ * The most characters (UTF-16 units) of each text a sale echoes, cut on the
+ * server so a page's answer stays bounded whatever the creator's Stripe
+ * account holds: a title as the checkout writes it (480), the utm tags and
+ * the site as the checkout writes them (40 and 300), the buyer's name, and
+ * an address no longer than an address can be (longer is null, never cut).
+ */
+export const SALE_TEXT_LIMITS = { title: 480, utm: 40, site: 300, name: 150, email: 254 } as const;
+
+/** Every field of a sale, in the order the answer writes them: what ?fields= may choose. */
+export const SALE_FIELDS = [
+  "checkout_session", "kind", "product", "option", "bundle_items", "order_bump", "order_bumps", "amount_cents", "discount_cents",
+  "currency", "buyer", "paid_at", "refunded_cents", "disputed", "trial", "source",
+] as const;
 
 export type SalesPage = { data: Record<string, unknown>[]; next: string | null };
 
 type Row = { id?: unknown; status?: unknown; payment_status?: unknown; mode?: unknown; created?: unknown; payment_intent?: unknown; invoice?: unknown; amount_total?: unknown; currency?: unknown; customer_email?: unknown; customer_details?: unknown; total_details?: unknown; metadata?: Record<string, string> | null };
 
-const str = (value: unknown) => (typeof value === "string" && value ? value : null);
 const cents = (value: unknown) => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null);
 const iso = (seconds: unknown) => (typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toISOString() : null);
+/**
+ * A text cut to `max`: control characters dropped first, a surrogate left
+ * alone by the cut (or by the account) dropped after, so every unit left is
+ * at most three bytes of the JSON answer. Empty is null.
+ */
+export function cutText(value: unknown, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const cut = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, max).replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "");
+  return cut || null;
+}
+const safeId = (value: unknown) => (typeof value === "string" && SAFE_ID.test(value) ? value : null);
 const obj = (value: unknown) => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
 
 /** The cursor a request sent: none, one of Stripe's checkout ids, or not one (malformed, empty or sent twice). */
@@ -118,6 +149,24 @@ function readSale(row: Row): Read | null {
   return discount === null ? null : { row, paid, amount, discount };
 }
 
+/**
+ * The products whose titles a page reads, at most SALES_TITLE_IDS: the
+ * products sold first, then those checked at checkout, then a bundle's.
+ */
+export function titleIds(metas: Record<string, string>[]): string[] {
+  const wanted: string[] = [];
+  const want = (id: string | null) => {
+    if (id && wanted.length < SALES_TITLE_IDS && !wanted.includes(id)) wanted.push(id);
+  };
+  for (const m of metas) want(safeId(m.product));
+  for (const m of metas) for (const bump of bumpsFromMeta(m)) want(bump.id);
+  for (const m of metas) {
+    for (const id of bundleFromMeta(m, "bundle")) want(id);
+    for (const bump of bumpsFromMeta(m)) for (const id of bundleFromMeta(m, `${bump.key}_bundle`)) want(id);
+  }
+  return wanted;
+}
+
 /** One page of the store's sales, or null when Stripe's answer could not be read whole. */
 export async function sales(store: Store, cursor: string | null): Promise<SalesPage | null> {
   if (cursor !== null && !CURSOR.test(cursor)) throw new Error("A sales cursor is checked (cursorOf) before it is sent to Stripe");
@@ -126,61 +175,65 @@ export async function sales(store: Store, cursor: string | null): Promise<SalesP
   if (typeof page !== "object" || page === null || Array.isArray(page) || !Array.isArray(page.data) || typeof page.has_more !== "boolean" ||
       page.data.some((row: unknown) => typeof row !== "object" || row === null || Array.isArray(row))) return null;
   const rows = page.data as Row[];
+  // More to come without a cursor to go on from would look like the end: unknown instead.
+  const lastId = rows.length ? rows[rows.length - 1].id : null;
+  const last = typeof lastId === "string" && CURSOR.test(lastId) ? lastId : null;
+  if (page.has_more === true && !last) return null;
   const handles = saleHandles(store);
   const mine = rows.filter((row) => typeof row.id === "string" && isSale(row) && handles.has(row.metadata?.store ?? ""));
   // One sale that cannot be read makes the page unknown: never a guessed zero, a negative amount or "nothing charged".
   const read: Read[] = [];
   for (const row of mine) {
-    const sale = readSale(row);
+    const sale = CURSOR.test(row.id as string) ? readSale(row) : null;
     if (!sale) return null;
     read.push(sale);
   }
 
   const meta = (row: Row): Record<string, string> => row.metadata ?? {};
-  const wanted: string[] = [];
-  const want = (id: string | null) => {
-    if (id && wanted.length < SALES_TITLE_IDS && !wanted.includes(id)) wanted.push(id);
-  };
-  for (const row of mine) want(str(meta(row).product));
-  for (const row of mine) for (const bump of bumpsFromMeta(meta(row))) want(bump.id);
-  for (const row of mine) {
-    for (const id of bundleFromMeta(meta(row), "bundle")) want(id);
-    for (const bump of bumpsFromMeta(meta(row))) for (const id of bundleFromMeta(meta(row), `${bump.key}_bundle`)) want(id);
-  }
-  const titles = new Map((wanted.length ? await readListings(store, wanted) : []).map((p) => [p.id, p.title]));
+  const wanted = titleIds(mine.map(meta));
+  const titles = new Map((wanted.length ? await readListings(store, wanted) : []).map((p) => [p.id, cutText(p.title, MAX_TITLE_LENGTH)]));
   const product = (id: string) => ({ id, title: titles.get(id) ?? null });
   const inside = (m: Record<string, string>, slot: BundleSlot) => {
     const ids = bundleFromMeta(m, slot);
     return ids.length ? ids.map(product) : null;
   };
-  const last = rows.length ? str(rows[rows.length - 1].id) : null;
+  const { title: TITLE, utm: UTM, site: SITE, name: NAME, email: EMAIL } = SALE_TEXT_LIMITS;
   return {
     data: read.map(({ row, paid, amount, discount }) => {
       const m = meta(row);
       const details = (obj(row.customer_details) ?? {}) as { email?: unknown; name?: unknown };
-      const productId = str(m.product);
+      const email = cutText(details.email, EMAIL + 1) ?? cutText(row.customer_email, EMAIL + 1);
+      const productId = safeId(m.product);
+      const source = sourceOf(m);
       // Every product checked at checkout, in the order of its boxes; the first also under its old name, as sale.completed sends them.
       const checked = bumpsFromMeta(m).map(({ key, id }) => ({ ...product(id), bundle_items: inside(m, `${key}_bundle`) }));
       return {
         checkout_session: row.id,
         kind: saleKind(row),
-        product: { id: productId, title: str(m.title) ?? (productId ? titles.get(productId) ?? null : null) },
-        option: str(m.option),
+        product: { id: productId, title: cutText(m.title, TITLE) ?? (productId ? titles.get(productId) ?? null : null) },
+        option: safeId(m.option),
         bundle_items: inside(m, "bundle"),
         order_bump: checked[0] ?? null,
         order_bumps: checked,
         amount_cents: amount,
         discount_cents: discount,
         // Unknown is null, never a guessed currency.
-        currency: str(row.currency),
-        buyer: { email: str(details.email) ?? str(row.customer_email), name: str(details.name) },
+        currency: typeof row.currency === "string" && /^[a-z]{3}$/.test(row.currency) ? row.currency : null,
+        // An address longer than an address can be is not one: null, never cut.
+        buyer: { email: email && email.length <= EMAIL ? email : null, name: cutText(details.name, NAME) },
         paid_at: paid.paidAt,
         refunded_cents: paid.refundedCents,
         disputed: paid.disputed,
         trial: Number(m.trial_days) > 0,
-        source: sourceOf(m),
+        source: {
+          utm_source: cutText(source.utm_source, UTM),
+          utm_medium: cutText(source.utm_medium, UTM),
+          utm_campaign: cutText(source.utm_campaign, UTM),
+          utm_content: cutText(source.utm_content, UTM),
+          site: cutText(source.site, SITE),
+        },
       };
     }),
-    next: page.has_more === true && last ? last : null,
+    next: page.has_more === true ? last : null,
   };
 }

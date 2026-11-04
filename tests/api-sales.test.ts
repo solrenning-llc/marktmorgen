@@ -12,10 +12,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GET } from "@/app/api/v1/sales/route";
 import { makeKey } from "@/lib/api-keys";
-import { SALES_PAGE, saleKind } from "@/lib/api-sales";
-import { allowanceUsed } from "@/lib/store-allowance";
-import { API_SALES_UNITS } from "@/lib/store-allowance-rules";
-import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { SALE_TEXT_LIMITS, SALES_PAGE, SALES_TITLE_IDS, cutText, saleKind, titleIds } from "@/lib/api-sales";
+import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
+import { API_SALES_UNITS, allowanceFor } from "@/lib/store-allowance-rules";
+import { BUMP_KEYS, MAX_BUNDLE_ITEMS, bundleMeta } from "@/lib/bundle-rules";
+import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
+import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { API_SALE_BYTES, API_SALES_ANSWER_BYTES } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -137,7 +140,13 @@ async function main(): Promise<void> {
   is("Stripe not asked, and only the request itself taken from the month", [asked.length - before, (await allowanceUsed(store, "api")) - usedBefore], [0, 4]);
   pages = [{ refused: 404, body: { error: { code: "resource_missing", type: "invalid_request_error", message: "No such checkout.session: 'cs_test_elsewhere'" } } }];
   const foreign = await call("?cursor=cs_test_elsewhere");
-  is("a checkout id Stripe does not have on this account: 400 invalid_cursor, not a 502 to retry forever", [foreign.status, (foreign.body as { error?: string }).error], [400, "invalid_cursor"]);
+  is("a checkout id Stripe does not have on this account (404): 400 invalid_cursor, not a 502 to retry forever", [foreign.status, (foreign.body as { error?: string }).error], [400, "invalid_cursor"]);
+  pages = [{ refused: 400, body: { error: { code: "resource_missing", param: "starting_after", type: "invalid_request_error", message: "No such checkout session: 'cs_test_elsewhere2'" } } }];
+  const foreign400 = await call("?cursor=cs_test_elsewhere2");
+  is("the same said as a 400 on starting_after: 400 invalid_cursor too", [foreign400.status, (foreign400.body as { error?: string }).error], [400, "invalid_cursor"]);
+  pages = [{ refused: 400, body: { error: { code: "parameter_invalid_integer", type: "invalid_request_error", message: "Invalid integer" } } }];
+  const otherBad = await call("?cursor=cs_test_elsewhere3");
+  is("another 400 from Stripe is not the cursor's fault: 502", otherBad.status, 502);
 
   part("Stripe busy with the creator's account: said with when to try again");
   pages = [{ refused: 429, body: { error: { type: "invalid_request_error", message: "Too many requests" } } }];
@@ -171,6 +180,11 @@ async function main(): Promise<void> {
   is("no discount details at all: the discount is null, never a guessed 0", ((await call()).body as { data: Record<string, unknown>[] }).data[0].discount_cents, null);
   pages = [{ object: "list", has_more: false, data: [session("cs_test_odd_other", { amount_total: -1 }, { store: "someone-else" })] }];
   is("another store's odd checkout does not stop this store's page", (await call()).status, 200);
+  for (const lastId of [null, "not-a-checkout"]) {
+    pages = [{ object: "list", has_more: true, data: [session("cs_test_before"), { ...session("cs_test_x", {}, { store: "someone-else" }), id: lastId }] }];
+    const r = await call();
+    is(`more to come but the last id is ${JSON.stringify(lastId)}: 502, never a next of null that looks like the end`, r.status, 502);
+  }
 
   part("When the buyer paid, not when the checkout page opened");
   const opened = Date.UTC(2026, 11, 31, 23, 50) / 1000;
@@ -237,9 +251,9 @@ async function main(): Promise<void> {
   pages = [{ object: "list", has_more: true, data: [session("cs_test_f")] }];
   const chosen = await call("?fields=checkout_session,amount_cents");
   is("only the fields asked, the cursor kept", chosen.body, { data: [{ checkout_session: "cs_test_f", amount_cents: 4900 }], next: "cs_test_f" });
-  pages = [{ object: "list", has_more: false, data: [session("cs_test_f2")] }];
+  const asOfTypo = [asked.length, await allowanceUsed(store, "api")];
   const typo = await call("?fields=amount");
-  is("a field no sale has: 400 unknown_field", [typo.status, (typo.body as { error?: string }).error], [400, "unknown_field"]);
+  is("a field no sale has: 400 unknown_field, before Stripe is asked or the rest of the call taken", [typo.status, (typo.body as { error?: string }).error, asked.length - asOfTypo[0], (await allowanceUsed(store, "api")) - asOfTypo[1]], [400, "unknown_field", 0, 1]);
   const asOfFields = asked.length;
   const badName = await call("?fields=Amount!");
   is("a name that cannot be a field: 400 before Stripe is asked", [badName.status, (badName.body as { error?: string }).error, asked.length - asOfFields], [400, "fields", 0]);
@@ -253,12 +267,71 @@ async function main(): Promise<void> {
   const real = (await call()).body;
   is("the same fields, in the same order, all the way down", shape(example), shape(real));
 
+  part("Texts cut on the server");
+  is("control characters dropped, then cut, then a surrogate the cut left alone dropped", [cutText("a\u0000b\u001fc", 10), cutText("ab\ud83d\ude00", 3), cutText("\udc00x", 5), cutText("\u0007", 5), cutText(4, 5)], ["abc", "ab", "x", null, null]);
+  const long = "漢".repeat(600);
+  pages = [{
+    object: "list",
+    has_more: false,
+    data: [session("cs_test_long", { customer_details: { email: `${"a".repeat(250)}@x.co`, name: long } }, { title: long, utm_source: long, option: "not an id!", product: "bad id!" })],
+  }];
+  const cut = ((await call()).body as { data: Record<string, Record<string, unknown>>[] }).data[0];
+  is("the title, the name and a utm tag cut to their limits; an address longer than one can be is null, never cut; ids that cannot be ids are null",
+    [(cut.product.title as string).length, (cut.buyer.name as string).length, (cut.source.utm_source as string).length, cut.buyer.email, cut.option, cut.product.id],
+    [SALE_TEXT_LIMITS.title, SALE_TEXT_LIMITS.name, SALE_TEXT_LIMITS.utm, null, null, null]);
+
+  part("At most SALES_TITLE_IDS titles read a page: products sold first, then those checked, then bundles'");
+  const id = (n: number) => `p_${String(n).padStart(4, "0")}`;
+  let n = 0;
+  const metas = Array.from({ length: 10 }, () => {
+    const m: Record<string, string> = { product: id(n++) };
+    for (const key of BUMP_KEYS) Object.assign(m, { [key]: id(n++) }, bundleMeta(`${key}_bundle`, Array.from({ length: MAX_BUNDLE_ITEMS }, () => id(n++))));
+    return { ...m, ...bundleMeta("bundle", Array.from({ length: MAX_BUNDLE_ITEMS }, () => id(n++))) };
+  });
+  const ids = titleIds(metas);
+  is("cut at the most, products sold first, then the checked boxes", [ids.length, ids.slice(0, 10), ids.slice(10, 13)], [SALES_TITLE_IDS, metas.map((m) => m.product), [metas[0].bump, metas[0].bump2, metas[0].bump3]]);
+
+  part("A page at every limit weighs no more than the cost registry's figure");
+  const products: string[] = [];
+  for (let i = 0; i < 1 + MAX_BUNDLE_ITEMS + BUMP_KEYS.length * (1 + MAX_BUNDLE_ITEMS); i += 1) {
+    const made = await addProduct(OWNER, `${"漢".repeat(MAX_TITLE_LENGTH - 4)}${String(i).padStart(4, "0")}`, "", "10", null);
+    if (!made.ok) throw new Error(`no product ${i}: ${JSON.stringify(made)}`);
+    products.push(made.product.id);
+  }
+  let k = 1;
+  const full: Record<string, string> = { product: products[0], option: "o".repeat(64), title: "\\".repeat(SALE_TEXT_LIMITS.title), ...bundleMeta("bundle", products.slice(k, (k += MAX_BUNDLE_ITEMS))) };
+  for (const key of BUMP_KEYS) Object.assign(full, { [key]: products[k++] }, bundleMeta(`${key}_bundle`, products.slice(k, (k += MAX_BUNDLE_ITEMS))));
+  for (const utm of ["utm_source", "utm_medium", "utm_campaign", "utm_content"]) full[utm] = "漢".repeat(SALE_TEXT_LIMITS.utm);
+  full.embed_site = `https://${"a".repeat(60)}.${"b".repeat(60)}.${"c".repeat(60)}.${"d".repeat(60)}.example`;
+  const worst = (i: number) => session(`cs_${"W".repeat(246)}${String(i).padStart(4, "0")}`, {
+    kind: "payment_plan", amount_total: Number.MAX_SAFE_INTEGER, total_details: { amount_discount: Number.MAX_SAFE_INTEGER },
+    payment_intent: { id: "pi_w", latest_charge: charge("ch_w", 1_790_000_060, { amount_refunded: Number.MAX_SAFE_INTEGER }) },
+    customer_details: { email: "漢".repeat(SALE_TEXT_LIMITS.email), name: "漢".repeat(SALE_TEXT_LIMITS.name) },
+  }, { ...full, trial_days: "7" });
+  pages = [{ object: "list", has_more: true, data: Array.from({ length: SALES_PAGE }, (_, i) => worst(i)) }];
+  const heavy = await GET(new Request("https://marktmorgen.com/api/v1/sales", { headers: { Authorization: `Bearer ${key.key}` } }));
+  const bytes = Buffer.byteLength(await heavy.text());
+  const one = JSON.parse(JSON.stringify(((await (async () => { pages = [{ object: "list", has_more: false, data: [worst(0)] }]; return (await call()).body; })()) as { data: unknown[] }).data[0]));
+  is("every product of the sale is listed, with its catalog title", [(one as { order_bumps: unknown[] }).order_bumps.length, ((one as { bundle_items: { title: string | null }[] }).bundle_items ?? []).every((p) => p.title?.startsWith("漢"))], [BUMP_KEYS.length, true]);
+  is(`a full page: ${bytes} bytes, within API_SALES_ANSWER_BYTES (${API_SALES_ANSWER_BYTES})`, [heavy.status, bytes <= API_SALES_ANSWER_BYTES], [200, true]);
+  is(`one sale: ${Buffer.byteLength(JSON.stringify(one))} bytes, within API_SALE_BYTES (${API_SALE_BYTES})`, Buffer.byteLength(JSON.stringify(one)) <= API_SALE_BYTES, true);
+
   part("The privacy policy says a key reads buyers' addresses and names here");
   const privacy = readFileSync(join(process.cwd(), "app/privacy/page.tsx"), "utf8").replace(/\s+/g, " ").replace(/&apos;/g, "'");
   is("one sentence, under the API's own heading", privacy.includes("Any key of a store, one that only reads included, can also list the store's sales with each buyer's email address and name, read from the creator's own Stripe account when the tool asks; we do not keep that list."), true);
 
   part("Kinds");
   is("as sale.completed names them", [saleKind({ metadata: { kind: "call" } }), saleKind({ metadata: { kind: "plan" }, mode: "subscription" }), saleKind({ mode: "subscription" }), saleKind({ mode: "payment" })], ["call", "payment_plan", "membership", "one_time"]);
+
+  part("Fewer than the call's units left: refused, and only the request itself taken");
+  const limit = allowanceFor(store, "api");
+  const used = await allowanceUsed(store, "api");
+  const fill = await takeAllowance(store, "api", limit - used - (API_SALES_UNITS - 2));
+  if (!fill.ok) throw new Error("could not fill the synthetic month");
+  const asOfLast = asked.length;
+  const tight = await call();
+  is(`${API_SALES_UNITS - 2} left: 429 monthly_limit, Stripe not asked`, [tight.status, (tight.body as { error?: string }).error, asked.length - asOfLast], [429, "monthly_limit", 0]);
+  is(`the ${API_SALES_UNITS - 1} refused are not taken: only the request's own one`, await allowanceUsed(store, "api"), limit - (API_SALES_UNITS - 2) + 1);
 
   done();
 }

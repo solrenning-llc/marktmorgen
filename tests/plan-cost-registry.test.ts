@@ -193,7 +193,8 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // A contact added or a product given is API_WRITE_UNITS requests: more than a write of sixty commands.
   assert.ok(API_WRITE_UNITS * UNIT_COST.api >= request("write", 60, 20_000));
   // A page of sales read through the API is API_SALES_UNITS requests: more than its wait on Stripe, its reads and its answer cost (lib/api-sales.ts).
-  assert.ok(API_SALES_UNITS * UNIT_COST.api >= API_SALES_READ, `${API_SALES_UNITS} x ${UNIT_COST.api} < ${API_SALES_READ}`);
+  // With room: at least 5% more than that worst page.
+  assert.ok(API_SALES_UNITS * UNIT_COST.api >= 1.05 * API_SALES_READ, `${API_SALES_UNITS} x ${UNIT_COST.api} < 1.05 x ${API_SALES_READ}`);
   // A booked call is CALL_ORDER_UNITS orders: its confirmation to buyer and host and its two reminders are four emails.
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.

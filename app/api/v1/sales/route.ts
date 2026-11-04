@@ -1,6 +1,6 @@
 import { apiError, apiStore } from "@/lib/api-guard";
 import { apiOkFields, fieldsAsked } from "@/lib/api-fields";
-import { cursorOf, sales } from "@/lib/api-sales";
+import { SALE_FIELDS, cursorOf, sales } from "@/lib/api-sales";
 import { canSell } from "@/lib/store-checkout";
 import { takeAllowance } from "@/lib/store-allowance";
 import { API_SALES_UNITS } from "@/lib/store-allowance-rules";
@@ -18,8 +18,12 @@ export async function GET(request: Request) {
   // What the request asks is checked before Stripe is read or more of the month is taken.
   const cursor = cursorOf(request.url);
   if (!cursor.ok) return badCursor();
-  // A field name that cannot be one is refused with apiOkFields's own 400, before the answer is read.
-  if (!fieldsAsked(request.url).ok) return apiOkFields(request, null);
+  // A field name that cannot be one is refused with apiOkFields's own 400, and one no sale has with its
+  // unknown_field, before the answer is read or the rest of the call is taken from the month.
+  const fields = fieldsAsked(request.url);
+  if (!fields.ok) return apiOkFields(request, null);
+  const unknown = fields.fields?.find((f) => !(SALE_FIELDS as readonly string[]).includes(f));
+  if (unknown) return apiError(400, "unknown_field", `No item in this answer has a field named “${unknown}”.`);
   // A page of sales is API_SALES_UNITS of the month's API requests, the request itself one of them.
   const taken = await takeAllowance(store, "api", API_SALES_UNITS - 1);
   if (!taken.ok) return apiError(429, taken.reason === "used" ? "monthly_limit" : taken.reason === "pool" ? "no_place" : "unavailable", taken.message);
@@ -28,8 +32,9 @@ export async function GET(request: Request) {
     if (!page) return unavailable();
     return apiOkFields(request, page);
   } catch (error) {
-    // A cursor of another account, or of a checkout Stripe no longer has: the request's own, so trying again never helps.
-    if (cursor.cursor && error instanceof StripeError && error.status === 404) return badCursor();
+    // A cursor of another account, or of a checkout Stripe no longer has (Stripe says resource_missing, as a 400
+    // on starting_after or a 404): the request's own, so trying again never helps.
+    if (cursor.cursor && error instanceof StripeError && error.code === "resource_missing" && (error.status === 400 || error.status === 404)) return badCursor();
     // Stripe's limit on the creator's account: said with when to try again.
     if (error instanceof StripeError && error.status === 429) {
       return apiError(503, "unavailable", "Stripe is busy with your account just now. Try again in a few seconds.", { "Retry-After": "10" });

@@ -6,7 +6,7 @@ import { API_RATE } from "@/lib/api-guard";
 import { MAX_KEYS } from "@/lib/api-key-rules";
 import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
 import { API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
-import { SALES_PAGE, SALES_TITLE_IDS } from "@/lib/api-sales";
+import { SALE_TEXT_LIMITS, SALES_PAGE, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { PLAN_TITLES } from "@/lib/plan";
 
 export const metadata: Metadata = {
@@ -588,6 +588,17 @@ export default function DevelopersPage() {
           <code className="font-mono">null</code>: not read here, which is not the same as none. Add the{" "}
           <code className="font-mono">refund.issued</code> and <code className="font-mono">dispute.opened</code> webhooks in
           your studio to be told of each one, or read them in Stripe&apos;s own API with your own Stripe key.
+        </p>
+        <p>
+          The list is in the order Stripe keeps checkouts: newest first by when the checkout page was opened, not by{" "}
+          <code className="font-mono">paid_at</code>. A buyer can open a checkout and pay later, and some payment methods,
+          such as bank debits, settle days after that, so a sale can appear below sales you already read. To keep a copy
+          in step, read again from the top each time and go on until you reach checkouts opened before the last read,
+          less a margin: at least the last 24 hours, and a week or more if your store takes payment methods that settle
+          later. Use <code className="font-mono">checkout_session</code> to skip a sale you already have.
+        </p>
+        <p>
+          {`Texts are cut to a fixed length, so a page stays small: a product's title from the checkout to ${SALE_TEXT_LIMITS.title} characters, the buyer's name to ${SALE_TEXT_LIMITS.name}, each utm tag to ${SALE_TEXT_LIMITS.utm} and the site to ${SALE_TEXT_LIMITS.site}, with control characters left out. An email address longer than ${SALE_TEXT_LIMITS.email} characters is not a real one, so it is null rather than cut.`}
         </p>
         <p>
           A <code className="font-mono">cursor</code> this list did not give, or sent twice, is answered 400{" "}

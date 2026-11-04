@@ -82,7 +82,9 @@ import { ORDER_KEY_BYTES } from "@/lib/order-data";
 import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
-import { SALES_TITLE_IDS } from "@/lib/api-sales";
+import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
+import { BUMP_KEYS, MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
+import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS } from "@/lib/store-blog";
@@ -605,7 +607,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/api-write.ts", names: ["ADDS_PER_DAY", "GIVES_PER_DAY", "monthly_limit"] },
       { file: "app/api/v1/sales/route.ts", names: ["takeAllowance(store, \"api\", API_SALES_UNITS - 1)"] },
       { file: "lib/store-allowance-rules.ts", names: ["API_SALES_UNITS"] },
-      { file: "lib/api-sales.ts", names: ["SALES_PAGE", "SALES_TITLE_IDS"] },
+      { file: "lib/api-sales.ts", names: ["SALES_PAGE", "SALES_TITLE_IDS", "SALE_TEXT_LIMITS", "cutText"] },
     ],
     basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs, and a page of sales API_SALES_UNITS, more than API_SALES_READ (held below). The per-minute and daily limits only spread them.",
   },
@@ -1042,15 +1044,32 @@ export const EMAIL_SITES: Record<string, string[]> = {
 };
 
 /**
+ * The most one page of sales weighs as JSON (lib/api-sales.ts), derived from the cuts the code makes: every text
+ * is cut to its limit with control characters and lone surrogates dropped, so each unit left is at most
+ * SALES_TEXT_BYTES bytes (a CJK character is three; a quote or a backslash, escaped, two). A sale holds its
+ * checkout id, its product (an id and a title as the checkout writes it), its option, a bundle of
+ * MAX_BUNDLE_ITEMS products, BUMP_KEYS.length checked boxes each with a bundle of its own, the first of them twice
+ * (order_bump and order_bumps), the buyer's address and name, four utm tags and a site; every listed product has
+ * a catalog title (MAX_TITLE_LENGTH). SALES_KEY_BYTES is each object's keys and punctuation, with the kind, the
+ * numbers, the time and the flags: tests/api-sales.test.ts holds a page built at these limits under the figure.
+ */
+const SALES_TEXT_BYTES = 3;
+const SALES_KEY_BYTES = { sale: 600, entry: 32, bump: 50, page: 300 };
+const SALES_ENTRY_BYTES = SALES_KEY_BYTES.entry + SALES_SAFE_ID_LENGTH + SALES_LISTING_TITLE * SALES_TEXT_BYTES;
+const SALES_BUMP_BYTES = SALES_KEY_BYTES.bump + SALES_ENTRY_BYTES + MAX_BUNDLE_ITEMS * SALES_ENTRY_BYTES;
+export const API_SALE_BYTES = SALES_KEY_BYTES.sale + SALES_ID_LENGTH
+  + SALES_SAFE_ID_LENGTH + SALE_TEXT_LIMITS.title * SALES_TEXT_BYTES + SALES_SAFE_ID_LENGTH
+  + MAX_BUNDLE_ITEMS * SALES_ENTRY_BYTES + (BUMP_KEYS.length + 1) * SALES_BUMP_BYTES
+  + (SALE_TEXT_LIMITS.email + SALE_TEXT_LIMITS.name + 4 * SALE_TEXT_LIMITS.utm + SALE_TEXT_LIMITS.site) * SALES_TEXT_BYTES;
+export const API_SALES_ANSWER_BYTES = SALES_KEY_BYTES.page + SALES_ID_LENGTH + SALES_PAGE * (API_SALE_BYTES + 1);
+/**
  * One page of sales read through the API (GET /api/v1/sales, lib/api-sales.ts), at the most: Stripe waited on for
  * its whole ceiling (STRIPE_TIMEOUT_MS) on top of the request's own light seconds, at 2 GB; a CPU second through up
- * to SALES_PAGE expanded checkouts; the key, the store and the figure taken twice, and one read of up to
- * SALES_TITLE_IDS listings at 16 KB each; and an answer of up to API_SALES_ANSWER_BYTES on to the browser (a
- * hundred sales, each with its bundle and three checked boxes of twenty products, at Stripe's longest strings). It
- * is taken as API_SALES_UNITS API requests, which cost at least this (tests/plan-cost-registry.test.ts), so it stays
- * inside the plan's rest-api figure.
+ * to SALES_PAGE expanded checkouts and the answer; the key, the store and the figure taken twice, and one read of up
+ * to SALES_TITLE_IDS listings at 16 KB each; and an answer of up to API_SALES_ANSWER_BYTES on to the browser. It is
+ * taken as API_SALES_UNITS API requests, which cost at least this with room (tests/plan-cost-registry.test.ts), so
+ * it stays inside the plan's rest-api figure.
  */
-export const API_SALES_ANSWER_BYTES = 2_000_000;
 export const API_SALES_READ = CALL + 1 * CPU_SECOND + (STRIPE_TIMEOUT_MS / 1000 + SHAPES.light.seconds) * MEMORY_SECOND
   + (20 + 2 * TAKE_COMMANDS + 1) * COMMAND + (20_000 + SALES_TITLE_IDS * 16_384) * DB_BYTE + API_SALES_ANSWER_BYTES * ORIGIN_PER_BYTE;
 

@@ -552,10 +552,15 @@ def main():
         assert call(acc, "new-no-proof", **next_period) == ["denied", "unreviewed_reset"]
         assert int(client.command("HGET", keys(acc, "new-no-proof")[0], "spent")) == 2
         assert call(acc, "new-with-proof", prior=[old_start, old_reset, 5, old_reset], **next_period)[0] == "reserved"
-        assert [int(x) for x in client.command("HMGET", keys(acc, "new-with-proof")[0], "seenUsed", "spent", "held")] == [4, 0, 4]
-        assert claim_call(acc, "pending-reset", pending, "settle", "accepted") == ["settled", "accepted"]
-        assert [int(x) for x in client.command("HMGET", keys(acc, "new-with-proof")[0], "spent", "held")] == [3, 1]
-        print("PASS: only a reviewed consecutive provider period resets settled spend; unresolved holds carry over")
+        assert [int(x) for x in client.command("HMGET", keys(acc, "new-with-proof")[0], "seenUsed", "spent", "held")] == [4, 0, 1]
+        # Closure accounts for every prior attempt. A late old claim must
+        # never consume or release a new period's reservation.
+        assert claim_call(acc, "pending-reset", pending, "settle", "accepted") == ["denied", "closed_period"]
+        assert claim_call(acc, "pending-reset", pending, "settle", "confirmed_not_accepted") == ["settled", "confirmed_not_accepted"]
+        assert [int(x) for x in client.command("HMGET", keys(acc, "new-with-proof")[0], "spent", "held")] == [0, 1]
+        assert claim_call(acc, "pending-reset", pending, "settle", "confirmed_not_accepted") == ["already_settled", "confirmed_not_accepted"]
+        assert int(client.command("HGET", keys(acc, "new-with-proof")[0], "held")) == 1
+        print("PASS: reviewed closure releases old holds; late old settlements cannot alter the new period")
 
         acc = account()
         assert call(acc, "bootstrap", "initialize", cap=50_001) == ["denied", "arguments"]

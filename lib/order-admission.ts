@@ -40,7 +40,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { paidOrdersLimitFor } from "@/lib/order-rules";
 import { dataKey } from "@/lib/store-data";
-import { dataRoomFor, orderDataBytes } from "@/lib/store-data-rules";
+import { dataRoomFor, orderDataBytes, MAX_ORDER_ITEMS } from "@/lib/store-data-rules";
+import { shareBps } from "@/lib/platform-share";
 
 /** Hours a checkout is held for: Stripe keeps a checkout open for a day at most, and one more for the hour it was opened in. */
 export const OPEN_HOURS = 25;
@@ -129,6 +130,49 @@ export const ADMITTED_FIELD = "mm_admit";
 
 export type Admission = { ok: true; hour: number | null } | { ok: false; reason: "paused" | "unavailable" };
 
+type ConfirmationAdmission = { hour: number | null; bytes: number; window: string; windowEnd: number; captured: number; share: number; owner: string; folder: string | null; accountId: string | null; reference?: string };
+const confirmationAdmissions = new WeakMap<object, ConfirmationAdmission>();
+
+function confirmationEvidence(store: Store, window: { id: string; start: number; end: number } | null, hour: number | null, folder: string | null, n: number, items: number, now: number): ConfirmationAdmission | null {
+  try {
+    if (n !== 1 || !window || !Number.isSafeInteger(now) || now<=0 || now<window.start || now>=window.end || !Number.isSafeInteger(items) || items<1 || items>MAX_ORDER_ITEMS) return null;
+    const source: Record<string,unknown> = Object.create(null);
+    for (const key of ["shared","subscriptionActive","trialEnds","tier"]) {
+      const d=Object.getOwnPropertyDescriptor(store,key);
+      if (!d || !("value" in d)) return null;
+      source[key]=d.value;
+    }
+    if (typeof source.shared!=="boolean" || typeof source.subscriptionActive!=="boolean" || !Number.isSafeInteger(source.trialEnds) ||
+        Number(source.trialEnds)<0 || typeof source.tier!=="string" || !["creator","pro","scale"].includes(source.tier)) return null;
+    const share=shareBps(source as unknown as Store,now/1000),owner=storeRef(store).toLowerCase();
+    if (!owner || owner.length>320 || !Number.isSafeInteger(share) || share<0 || share>10_000) return null;
+    const account=Object.getOwnPropertyDescriptor(store,"stripeAccountId");
+    if(account && (!("value" in account) || (account.value!==null && (typeof account.value!=="string" || !/^acct_[A-Za-z0-9]{6,128}$/.test(account.value))))) return null;
+    return {hour,bytes:orderDataBytes(items),window:window.id,windowEnd:window.end,captured:now,share,owner,folder,accountId:account?.value??null};
+  } catch { return null; }
+}
+
+/** Capture only from this checkout's acknowledged admission, before exposing
+ * its payment page. This must be the actual returned object in this process:
+ * an old metadata hour or reconstructed success cannot establish evidence.
+ * One admission can bind only one checkout. Group-place admissions need their
+ * own per-place protocol and are intentionally not admitted by this hook.
+ */
+export function orderConfirmationAdmission(store: Store, admission: Admission, reference: string, accountId?: string): ConfirmationAdmission | null {
+  try {
+    const evidence=confirmationAdmissions.get(admission);
+    if (!evidence || evidence.owner!==storeRef(store).toLowerCase() || (accountId!==undefined && evidence.accountId!==accountId) ||
+      (evidence.reference!==undefined && evidence.reference!==reference)) return null;
+    evidence.reference=reference;
+    return {...evidence};
+  } catch { return null; }
+}
+
+/** The original aggregate hour is never replaced with the worker's hour. */
+export function orderConfirmationHoldKeys(folder: string): [string, string] {
+  return [openKey(folder), heldKey(folder)];
+}
+
 /**
  * Admits `n` orders for a store before a checkout opens (one for a checkout,
  * one plus its places for a purchase made for several people), each handing
@@ -139,7 +183,14 @@ export type Admission = { ok: true; hour: number | null } | { ok: false; reason:
  */
 export async function admitOrders(store: Store, n = 1, now = Date.now(), items = 1): Promise<Admission> {
   const limit = paidOrdersLimitFor(store, now / 1000);
-  if (limit === null) return { ok: true, hour: null };
+  if (limit === null) {
+    const result: Admission={ok:true,hour:null};
+    try {
+      const evidence=confirmationEvidence(store,allowanceWindow(store,now),null,null,n,items,now);
+      if(evidence) confirmationAdmissions.set(result,evidence);
+    } catch { /* Capturing evidence must not change this legacy admission. */ }
+    return result;
+  }
   // A store in its free trial holds one of the month's places for stores that pay nothing (lib/free-pool-rules.ts).
   if (!(await admitNonPaying(store, now))) return { ok: false, reason: "paused" };
   if (!Number.isSafeInteger(n) || n < 1) return { ok: false, reason: "unavailable" };
@@ -155,6 +206,7 @@ export async function admitOrders(store: Store, n = 1, now = Date.now(), items =
     const room = dataKey(store);
     if (!room) return { ok: false, reason: "unavailable" };
     const hour = hourOf(now);
+    const evidence=confirmationEvidence(store,window,hour,folder,n,items,now);
     const reply: unknown = await redisPipeline([
       ["EVAL", ADMIT_ORDERS, 4, countKey(folder, window.id), openKey(folder), room, heldKey(folder), limit, n, hour, hour - (OPEN_HOURS - 1), (OPEN_HOURS + 1) * 3_600, dataRoomFor(store, now / 1000), n * orderDataBytes(items)],
     ]);
@@ -165,7 +217,11 @@ export async function admitOrders(store: Store, n = 1, now = Date.now(), items =
     if (!length || !Object.hasOwn(length, "value") || length.value !== 1) return { ok: false, reason: "unavailable" };
     const answer = Object.getOwnPropertyDescriptor(reply, "0");
     if (!answer || !Object.hasOwn(answer, "value")) return { ok: false, reason: "unavailable" };
-    if (answer.value === 1) return { ok: true, hour };
+    if (answer.value === 1) {
+      const result: Admission={ok:true,hour};
+      if(evidence) confirmationAdmissions.set(result,evidence);
+      return result;
+    }
     // The figure is reached, or the data room has no space for this order's records: either way the store rests.
     if (answer.value === 0 || answer.value === 2) return { ok: false, reason: "paused" };
     return { ok: false, reason: "unavailable" };

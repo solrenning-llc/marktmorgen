@@ -221,6 +221,8 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { PasskeyManager } from "@/components/passkey-manager";
 import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
+import { AppCodeInvite } from "@/components/app-code-invite";
+import { showAppCodeInvite } from "@/lib/app-code-invite-words";
 import { lockedUntil, twoStepStatus } from "@/lib/two-step";
 import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager } from "@/components/recovery-address-manager";
@@ -1249,6 +1251,9 @@ export default async function StudioPage({
             </a>
           </div>
         ) : null}
+
+        {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
+        {store && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}

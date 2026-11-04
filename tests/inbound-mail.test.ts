@@ -43,6 +43,8 @@ type Sent = { from: string; to: string[]; subject: string; text: string; html?: 
 const sent: { body: Sent; key: string | null; auth: string | null }[] = [];
 const reads: string[] = [];
 let failSending = false;
+let failureStatus = 429;
+let outboundPosts = 0;
 let refuseCreators = false;
 
 const MAILS: Record<string, unknown> = {
@@ -114,12 +116,21 @@ const MAILS: Record<string, unknown> = {
     headers: {},
   },
 };
+let mailSerial = 0;
+const originalOf = new Map<string, string>();
+function newMailLike(original: string): string {
+  const id = `bef9a417-02e9-4d39-ad75-${(++mailSerial).toString(16).padStart(12, "0")}`;
+  MAILS[id] = { ...MAILS[original] as Record<string, unknown>, id };
+  originalOf.set(id, original);
+  return id;
+}
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const headers = new Headers(init?.headers);
   if (url.hostname === "api.resend.com" && (init?.method ?? "GET") === "POST" && url.pathname === "/emails") {
-    if (failSending) return new Response("{}", { status: 500 });
+    outboundPosts++;
+    if (failSending) return new Response("{}", { status: failureStatus });
     // A key that may not send from the creators' domain.
     if (refuseCreators && /@mail\.marktmorgen\.com/.test(String((JSON.parse(String(init?.body)) as Sent).from))) return new Response("{}", { status: 403 });
     sent.push({ body: JSON.parse(String(init?.body)) as Sent, key: headers.get("Idempotency-Key"), auth: headers.get("Authorization") });
@@ -130,7 +141,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const files = url.pathname.match(/^\/emails\/receiving\/([^/]+)\/attachments$/);
     if (files) {
       const data =
-        files[1] === A
+        (originalOf.get(files[1]) ?? files[1]) === A
           ? [
               { id: "f1", filename: "receipt.pdf", size: 5, content_type: "application/pdf", download_url: "https://inbound-cdn.resend.com/a/receipt.pdf?signature=s" },
               { id: "f2", filename: "elsewhere.png", size: 5, content_type: "image/png", download_url: "https://example.com/elsewhere.png" },
@@ -221,12 +232,13 @@ async function main(): Promise<void> {
   is("from this site's own address, naming the domain it was written to", theirs?.from, '"Ana via hazelsong.com" <support@marktmorgen.com>');
   is("and the text says which address", theirs?.text, "From: Ana <ana@example.org>\nTo: support@hazelsong.com\n\nWhere do I paste the code?");
 
-  part("When sending fails");
+  part("When the provider confirms rate-limit non-acceptance");
+  const retryId = newMailLike(A);
   failSending = true;
-  const failed = await POST(announce(A, { id: "msg_retry" }));
+  const failed = await POST(announce(retryId, { id: "msg_retry" }));
   is("answered with a failure", failed.status, 500);
   failSending = false;
-  const retried = await POST(announce(A, { id: "msg_retry" }));
+  const retried = await POST(announce(retryId, { id: "msg_retry" }));
   is("and the retry is heard", [retried.status, (await retried.json()).result, sent.length], [200, "sent", 4]);
 
   part("An answer written to a store's own address");
@@ -236,9 +248,9 @@ async function main(): Promise<void> {
   const before = await POST(announce(E, { id: "msg_before" }));
   is("with no domain set apart for creators, it is mail like any other", [(await before.json()).result, sent[4]?.body.to], ["sent", ["inbox@example.net"]]);
   process.env.MARKETING_FROM_DOMAIN = "mail.marktmorgen.com";
-  const answer = await POST(announce(E, { id: "msg_creator" }));
-  // The same message has been sent on once already under its own key; this
-  // stand-in for Resend does not hold keys, so the second send is seen here.
+  const answer = await POST(announce(newMailLike(E), { id: "msg_creator" }));
+  // Distinct incoming emails are distinct intentions. Replaying the first
+  // email ID must not fabricate a second successful provider delivery.
   const theirsNow = sent[5]?.body;
   is("it goes to the creator, and to nobody else", [(await answer.json()).result, theirsNow?.to], ["sent", ["ana@example.org"]]);
   is("from the store's own address, in the writer's name", theirsNow?.from, '"Lee via Harbor Kitchen" <harborkitchen@mail.marktmorgen.com>');
@@ -246,18 +258,27 @@ async function main(): Promise<void> {
   is("and the text says who wrote, and to which address", theirsNow?.text, "From: Lee <lee@example.org>\nTo: harborkitchen@mail.marktmorgen.com\n\nIs the pie still on?");
   is("sent with the site's key, which may send from every domain of the account", sent[5]?.auth, "Bearer re_test_sending_only");
   process.env.RESEND_CREATORS_API_KEY = "re_test_creators_domain_only";
-  await POST(announce(E, { id: "msg_own_key" }));
+  await POST(announce(newMailLike(E), { id: "msg_own_key" }));
   is("or with a key held to that domain alone, when one is given", [sent[6]?.auth, sent[6]?.body.from], ["Bearer re_test_creators_domain_only", '"Lee via Harbor Kitchen" <harborkitchen@mail.marktmorgen.com>']);
   delete process.env.RESEND_CREATORS_API_KEY;
   refuseCreators = true;
-  const narrowed = await POST(announce(E, { id: "msg_narrowed" }));
+  const narrowedId = newMailLike(E);
+  const narrowed = await POST(announce(narrowedId, { id: "msg_narrowed" }));
   refuseCreators = false;
-  is("if Resend refuses the creators' domain, the same email goes from the site's own address at once", [(await narrowed.json()).result, sent[7]?.body.from, sent[7]?.body.to, sent[7]?.key], ["sent", '"Lee via Harbor Kitchen" <onboarding@resend.dev>', ["ana@example.org"], `inbound-${E}:site`]);
+  is("if Resend refuses the creators' domain, the same email goes from the site's own address at once", [(await narrowed.json()).result, sent[7]?.body.from, sent[7]?.body.to, sent[7]?.key], ["sent", '"Lee via Harbor Kitchen" <onboarding@resend.dev>', ["ana@example.org"], `inbound-${narrowedId}:site`]);
   const nobody = await POST(announce(F));
   is("mail to a name that is no store's is dropped", [(await nobody.json()).result, sent.length], ["skipped", 8]);
-  for (let i = 0; i < CREATOR_HOURLY; i += 1) await POST(announce(E, { id: `msg_flood_${i}` }));
+  for (let i = 0; i < CREATOR_HOURLY; i += 1) await POST(announce(newMailLike(E), { id: `msg_flood_${i}` }));
   is("and one store is sent on only so many an hour", sent.length, 8 + CREATOR_HOURLY - 3);
   delete process.env.MARKETING_FROM_DOMAIN;
+  part("Unknown HTTP acceptance never becomes a known rejection");
+  const uncertainId = newMailLike(A), postsBefore = outboundPosts, sentBefore = sent.length;
+  failureStatus = 500; failSending = true;
+  const unknown = await POST(announce(uncertainId, { id: "msg_unknown" }));
+  failSending = false;
+  const unknownAgain = await POST(announce(uncertainId, { id: "msg_unknown" }));
+  is("a possibly accepted message remains an explicit failure without another POST", [unknown.status, unknownAgain.status, outboundPosts - postsBefore, sent.length - sentBefore], [500, 500, 1, 0]);
+  is("the original provider source remains available for reconciliation", (MAILS[uncertainId] as Record<string, unknown>).text, (MAILS[A] as Record<string, unknown>).text);
 
   part("Names and addresses");
   is("a name and an address", parseSender('"Doe, Jane" <jane@example.com>'), { name: "Doe, Jane", address: "jane@example.com" });

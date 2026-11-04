@@ -24,13 +24,34 @@ import { check, finish } from "./check";
 
 const slow = { mail: 0 };
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+let enteredSlowMail: (() => void) | null = null;
+let slowMailEntries = 0;
+/** Observe the real mocked provider entry; a refused send cannot stand in for
+ * a race with an in-flight email. No mutation starts before this ACK. */
+function expectSlowMail(): Promise<void> {
+  const expected = slowMailEntries + 1;
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => { enteredSlowMail = null; reject(new Error("The slow synthetic mail provider was never reached")); }, 5_000);
+    enteredSlowMail = () => {
+      enteredSlowMail = null;
+      clearTimeout(timer);
+      check("the exact next slow synthetic provider POST began before the concurrent write", ++slowMailEntries, expected);
+      resolve();
+    };
+  });
+}
+
 const real = globalThis.fetch;
 let mails = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   if (String(url).startsWith(String(process.env.UPSTASH_REDIS_REST_URL))) return real(input as string, init);
   if (url.hostname === "api.resend.com") {
-    if (slow.mail) await wait(slow.mail);
+    if (slow.mail) {
+      const delay = slow.mail;
+      enteredSlowMail?.();
+      await wait(delay);
+    }
     mails += 1;
     return new Response(JSON.stringify({ id: `email_${mails}` }), { status: 200 });
   }
@@ -67,8 +88,9 @@ async function main(): Promise<void> {
   const one = await createAgreement(store, draftOf("signer@example.com"));
   if (!one.ok) throw new Error(one.message);
   slow.mail = 600;
+  const resendingEntered = expectSlowMail();
   const resending = sendAgain(store, one.agreement.id);
-  await wait(150);
+  await resendingEntered;
   const signed = await signLatest(store, one.agreement.id, "signer@example.com");
   slow.mail = 0;
   await resending;
@@ -81,8 +103,9 @@ async function main(): Promise<void> {
   const revised = await reviseAgreement(store, two.agreement.id, { ...draftOf("second@example.com"), body: `${BODY}\n\nFour months, not three.` });
   if (!revised.ok) throw new Error(revised.message);
   slow.mail = 600;
+  const emailingEntered = expectSlowMail();
   const emailing = sendAgreementEmail(store, revised.agreement, revised.version);
-  await wait(150);
+  await emailingEntered;
   const signedTwo = await signLatest(store, two.agreement.id, "second@example.com");
   slow.mail = 0;
   await emailing;
@@ -94,8 +117,9 @@ async function main(): Promise<void> {
   if (!three.ok) throw new Error(three.message);
   await signLatest(store, three.agreement.id, "third@example.com");
   slow.mail = 600;
+  const copyingEntered = expectSlowMail();
   const copying = resendSignedCopy(store, three.agreement.id);
-  await wait(150);
+  await copyingEntered;
   const v2 = await reviseAgreement(store, three.agreement.id, { ...draftOf("third@example.com"), body: `${BODY}\n\nWith a workbook.` });
   slow.mail = 0;
   await copying;

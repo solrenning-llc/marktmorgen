@@ -50,6 +50,9 @@ export const TASK_REFUSALS: Readonly<Record<TaskRefusal, string>> = {
   unknown: "That task is not there anymore.",
 };
 
+/** What a change refused while another one is being saved says (lib/crm.ts, changePersonTasks; answered 409 "busy"). */
+export const TASKS_BUSY = "Someone else is changing tasks in this store right now. Try again in a moment.";
+
 const line = (raw: unknown) => (typeof raw === "string" ? raw.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim() : "");
 
 export type TaskInput = { text: string; due: string; assignee: string };

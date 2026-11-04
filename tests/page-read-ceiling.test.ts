@@ -311,7 +311,7 @@ async function main(): Promise<void> {
   const grownPartial = await readingsPartial(grown);
   is("and that counting went on after the change, so the figure is the ceiling reached, not every visit counted", grownPartial?.resumed, true);
   const grownWords = readingsPartialWords(grownPartial!.counted, grownPartial!.opens, grownPartial!.resumed === true);
-  is("said so: the visits left out are the ones before the change", [grownWords.includes(`counted up to ${shopCeiling.toLocaleString("en-US")} measured visits`), grownWords.includes("before your plan changed are not counted"), grownWords.includes("Visits since the change are counted."), grownWords.includes("until")], [true, true, true, false]);
+  is("said so: the visits left out are the ones before the change", [grownWords.includes(`Your earlier plan counted up to ${shopCeiling.toLocaleString("en-US")} measured visits`), grownWords.includes("before your plan changed are not counted"), grownWords.includes("Counting went on after the change."), grownWords.includes("until")], [true, true, true, false]);
   is("a plan not grown says nothing of a change", partial?.resumed, undefined);
   const words = readingsPartialWords(partial!.counted, partial!.opens);
   is("said in plain words, with the real figure and the day it opens again, nothing made up", [words.includes(`up to ${shopCeiling.toLocaleString("en-US")} measured visits a month`), words.includes("Only part of this month is counted."), words.includes("(UTC)"), /\d+%|about|estimated/i.test(words)], [true, true, true, false]);

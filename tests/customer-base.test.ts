@@ -27,3 +27,79 @@ test('commercial company base includes the entire funded exposure without a tax 
 test('a missing separately funded exposure review keeps paid plans closed',()=>{assert.equal(commercialMarginReady({...review(),fundedExposure:null}),false);});
 
 test('funding acquisition never repairs a paying customer with zero net profit',()=>{const r=review();r.companyBase=fixed(0,10000);r.scenarios.creator_month_full=fundedCustomerWithAi(2200,0);assert.equal(commercialMarginReady(r),false);});
+
+test('minimum-base fixed evidence must be own data and never execute accessors',()=>{
+ const inherited=Object.create(fixed());
+ assert.equal(assessMinimumCustomerBase([unit()],inherited).status,'unknown');
+ for(const key of Object.keys(fixed()) as (keyof CustomerBaseReview)[]){
+  let reads=0;
+  const supplied=fixed();
+  Object.defineProperty(supplied,key,{enumerable:true,get(){reads++;return fixed()[key];}});
+  const result=assessMinimumCustomerBase([unit()],supplied);
+  assert.equal(result.reviewedBaseSufficient,false,key);
+  assert.equal(result.minimumCustomers,null,key);
+  assert.equal(reads,0,key);
+ }
+ assert.deepEqual(assessMinimumCustomerBase([unit()],Object.assign(Object.create(null),fixed(10000,2))),
+  {status:'calculated',minimumCustomers:2,reviewedBaseSufficient:true});
+});
+test('minimum-base unit fields and array slots never execute supplied code',()=>{
+ for(const key of ['months','scenario'] as const){
+  let reads=0;const supplied=unit();
+  Object.defineProperty(supplied,key,{enumerable:true,get(){reads++;return unit()[key];}});
+  assert.equal(assessMinimumCustomerBase([supplied],fixed()).reviewedBaseSufficient,false);
+  assert.equal(reads,0,key);
+ }
+ assert.equal(assessMinimumCustomerBase([Object.create(unit())],fixed()).minimumCustomers,null);
+ let reads=0;const indexed=[unit()];
+ Object.defineProperty(indexed,'0',{enumerable:true,get(){reads++;return unit();}});
+ assert.equal(assessMinimumCustomerBase(indexed,fixed()).minimumCustomers,null);
+ assert.equal(reads,0);
+ const sparse=[unit(),unit()];Reflect.deleteProperty(sparse,'0');
+ assert.equal(assessMinimumCustomerBase(sparse,fixed()).minimumCustomers,null);
+ const nullData=Object.assign(Object.create(null),unit());
+ assert.equal(assessMinimumCustomerBase([nullData],fixed()).minimumCustomers,2);
+});
+test('a supplied iterator cannot hide the weakest unit or a losing annual contract',()=>{
+ let reads=0;const supplied=[unit(),unit(10000,0,12)];
+ Object.defineProperty(supplied,Symbol.iterator,{value:function*(){reads++;yield supplied[0];}});
+ assert.equal(assessMinimumCustomerBase(supplied,fixed()).minimumCustomers,null);
+ assert.equal(reads,0);
+ assert.equal(assessMinimumCustomerBase([unit(),unit(10000,0,12)],fixed()).status,'below_unit_floor');
+ class UnreviewedUnits extends Array<CustomerBaseUnit>{}
+ assert.equal(assessMinimumCustomerBase(new UnreviewedUnits(unit()),fixed()).minimumCustomers,null);
+});
+test('minimum-base arithmetic never re-reads an assessed scenario through a get trap',()=>{
+ let reads=0;const reviewed=scenario();
+ const supplied=new Proxy(reviewed,{get(){reads++;throw new Error('unreviewed read');}});
+ assert.deepEqual(assessMinimumCustomerBase([{months:1,scenario:supplied}],fixed(10000,2)),
+  {status:'calculated',minimumCustomers:2,reviewedBaseSufficient:true});
+ assert.equal(reads,0);
+ const revoked=Proxy.revocable([unit()],{});revoked.revoke();
+ assert.equal(assessMinimumCustomerBase(revoked.proxy,fixed()).minimumCustomers,null);
+ const trapped=new Proxy(fixed(),{getOwnPropertyDescriptor(){throw new Error('missing evidence');}});
+ assert.equal(assessMinimumCustomerBase([unit()],trapped).minimumCustomers,null);
+ for(const bad of [null,{},'units']){
+  assert.equal(assessMinimumCustomerBase(bad as unknown as CustomerBaseUnit[],fixed()).minimumCustomers,null);
+ }
+});
+
+test('minimum-base tax period uses the captured own months without a second supplied read',()=>{
+ let monthDescriptors=0,getReads=0;
+ const supplied=new Proxy(unit(),{
+  get(){getReads++;throw new Error('unreviewed read');},
+  getOwnPropertyDescriptor(target,key){
+   if(key==='months'){
+    monthDescriptors++;
+    return {value:monthDescriptors===1?1:12,enumerable:true,configurable:true,writable:true};
+   }
+   return Reflect.getOwnPropertyDescriptor(target,key);
+  },
+ });
+ assert.deepEqual(assessMinimumCustomerBase([supplied],fixed(10000,2)),
+  {status:'calculated',minimumCustomers:2,reviewedBaseSufficient:true});
+ assert.equal(monthDescriptors,1);
+ assert.equal(getReads,0);
+ const mismatch={months:12 as const,scenario:scenario(10000,7000,1)};
+ assert.equal(assessMinimumCustomerBase([mismatch],fixed()).minimumCustomers,null);
+});

@@ -1,7 +1,9 @@
 import { PAGE_TEST_WORDS } from "@/lib/headline-test-words";
+import { LOCKED_LIST } from "@/lib/locked-words";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { SHARED_QUESTIONS, helpAnswer } from "@/lib/help-content";
 import { funnelBeginnerQuestions } from "@/lib/funnel-faq";
+import { nicheCampaignFeature, startersFeature } from "@/lib/funnel-niche-feature";
 import { courseBeginnerQuestions } from "@/lib/course-faq";
 import { membershipBeginnerQuestions } from "@/lib/membership-faq";
 import { callBeginnerQuestions } from "@/lib/call-faq";
@@ -1258,7 +1260,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "layout", title: "Pages in order", body: "Your own pages and your products' pages, up to 20 in a row, from one address: marktmorgen.com/@you/go/launch, or yourdomain.com/go/launch.", href: "/platform/sales-pages" },
           { icon: "list", title: "Eight kinds to start from", body: "Lead magnet, video training, challenge, product launch, book, small first purchase, application and quiz: pick one, choose your products for its steps, and the funnel is made with the pages it needs, empty and hidden until you write them, and the form it asks." },
           { icon: "copy", title: "Copy and share a funnel", body: `Make a copy inside your store or in another of your own stores, or share a funnel with another Marktmorgen creator by a link or a file. They preview it, choose their own products for its steps and get it as a draft, with a list of what to fill in. Only the words and the shape go: never your pictures, files, buyers, contacts, form answers, reviews, prices or numbers, and not your about text, guarantee, videos or deadlines. A link can be revoked at any time and works for 7, 30 or 90 days or a year. Share links at once: ${SHARE_LIMITS.creator.shares} on Store, ${SHARE_LIMITS.pro.shares} on Studio, ${SHARE_LIMITS.scale.shares} on Scale.` },
-          { icon: "list", title: "Starters with first words", body: "Six funnels with their first words written: a free guide then your first offer, a recorded workshop, a coaching application with its form, a membership with the page that sells it, a free lesson then the full course, and a paid call. Every sentence is one you can say as it stands, or a part in [brackets] for you to fill in; none states a result, a number or a deadline." },
+          // 242 [CF5], unit 2: every campaign, counted and named from the campaigns themselves.
+          startersFeature(),
           { icon: "sparkle", title: "A first draft of the whole funnel, with AI", body: "On " + AI_PLANS_WORDS + ", the funnel's review step can draft every new page's words, the form's questions, offers from your own products and three follow-up emails, from the products you chose and what you type: who it is for, what they get and the proof you actually have. Before it runs it says how many of your monthly AI uses it takes: 2, or 3 with the emails, from the same monthly AI budget as every draft. It fills the setup's fields for you to change, invents no testimonial, result, number or deadline, removes any sentence with a number your products and words do not carry, and marks what only you know ⟦like this⟧. A page holding one stays hidden until you replace it, and the emails are saved only if you check the box, as a sequence that is switched off.", href: "/platform/ai-writing" },
           { icon: "type", title: "Forms, surveys and quizzes", body: "Up to 12 questions on one of your own pages: short and long answers, an email, one or several choices, a scale of 1 to 10. A quiz shows each person the result their answers point at, or, scored, the result whose range holds their total of points, with their score and a product of yours for it; the studio checks every total has exactly one result before it saves. Every answer is kept for you, as a file too, and on a step of a funnel sending it leads on to the next." },
           { icon: "chart", title: "Counted step by step", body: "How many people opened each step, and how many signed up or paid there, each person once a step, never you or your team." },
@@ -1513,7 +1516,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "Tell your other tools",
     highlight: "what just happened",
     intro:
-      "Up to five addresses of your own, such as a Zapier Catch Hook, a Make scenario or your own server, told about sales, members, leads, bookings and refunds as they happen, in signed JSON.",
+      "Up to five addresses of your own, such as a Zapier Catch Hook, a Make scenario or your own server, told about sales, members, leads, bookings, refunds and disputes as they happen, in signed JSON.",
     visual: "webhooks",
     badge: WORKING,
     accent: "from-violet-brand to-sky-brand",
@@ -1533,10 +1536,12 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "features",
-        title: "Nine events, and how they arrive",
+        title: "Eleven events, and how they arrive",
         items: [
           { icon: "receipt", title: "sale.completed and refund.issued", body: "A paid checkout of any product, each one-click offer taken after it, and a refund, even one made in your Stripe dashboard." },
           { icon: "repeat", title: "membership.started and membership.canceled", body: "A membership bought, and a membership set to end or ended." },
+          { icon: "refresh", title: "membership.changed", body: "A membership moved to another price or quantity on your Stripe account, such as an upgrade or a switch to yearly: what it was and what it is now." },
+          { icon: "alert", title: "dispute.opened", body: "A buyer disputed a payment made at your checkout: the amount, the reason Stripe reports and, when Stripe gives one, the date your answer is due." },
           { icon: "gift", title: "lead.captured", body: "Someone confirmed their address for a free product." },
           { icon: "mail", title: "list.joined", body: "Someone confirmed their address to join your email list, from your store page, a form or the checkout script on your own site." },
           { icon: "calendar", title: "call.booked and call.moved", body: "A call or a seat in a session booked and paid, and a booking the buyer moved." },
@@ -1776,8 +1781,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "how",
         title: "How it works",
         items: [
-          { title: "Switch it on per product", body: "One box on the product, for the PDF it delivers." },
-          { title: "The buyer downloads", body: "One quiet line along the bottom of every page: “Sold to maya@example.com on Sep 26, 2026 · order …E54F2A · for personal use.”" },
+          { title: "Switch it on per product", body: "One box on the product, for the PDF or EPUB it delivers." },
+          { title: "The buyer downloads", body: "One quiet line along the bottom of every page: “Sold to maya@example.com on Sep 26, 2026 · order …E54F2A · for personal use.” In an EPUB, the same line is hidden inside the book’s files, where reading apps do not show it." },
           { title: "Made once per sale", body: "The stamped copy is kept beside your original, so downloading again gives the buyer the same file." },
         ],
       },
@@ -1790,8 +1795,9 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "limits",
         title: "What it does not do",
         items: [
-          "PDFs up to 50 MB. A bigger one, or one locked with a password or damaged, is handed over as you uploaded it, and your studio tells you.",
-          "PDFs only. Images, ZIP files and everything else are handed over as uploaded.",
+          "PDFs and EPUBs up to 50 MB. A bigger one, or one locked with a password or damaged, is handed over as you uploaded it, and your studio tells you.",
+          "An EPUB with a digital signature or encryption (DRM) is handed over as you uploaded it, since the line would break it. Your studio tells you.",
+          "PDFs and EPUBs only. Images, ZIP files and everything else are handed over as uploaded.",
           "A product sold as a link is not stamped: the file is wherever you keep it.",
           "A free download is handed over as you uploaded it: only a paid one is stamped.",
         ],
@@ -1804,7 +1810,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           ...stampBeginnerQuestions(),
           { q: "Does it change my original file?", a: "No. Your upload stays as it is. Each buyer's copy is made from it, kept beside it, and deleted with it." },
           { q: "Is the file sent to another company to be stamped?", a: "No. It is stamped by our own code on the servers that run Marktmorgen, and not sent anywhere else." },
-          { q: "Should I tell buyers?", a: "Yes. Their email is printed on the file they receive, so say so on the product." },
+          { q: "Should I tell buyers?", a: "Yes. Their email is in the file they receive, so say so on the product." },
         ],
       },
     ],
@@ -2594,7 +2600,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         intro: "Said here so nobody relies on it for more than it does.",
         items: [
           "Two-step login is off until you turn it on. Without it, your account is as safe as your email inbox: protect that one.",
-          "Lose your phone, your recovery codes and every passkey, and a link to your recovery address gets you straight back in. Lose that inbox too, and you still get in at once, with the emailed link alone: you can sell, edit your products and pages and answer buyers, while payments, your plan, your team, exports, settings, sending to your list and your sign-in address stay locked for 7 days, until two-step login turns off. That lock is what stops somebody who only has your sign-in inbox, and a login with a code or a passkey, or Cancel in your studio, logs them out.",
+          `Lose your phone, your recovery codes and every passkey, and a link to your recovery address gets you straight back in. Lose that inbox too, and you still get in at once, with the emailed link alone: you can sell, edit your products and pages and answer buyers, while ${LOCKED_LIST} stay locked for 7 days, until two-step login turns off. That lock is what stops somebody who only has your sign-in inbox, and a login with a code or a passkey, or Cancel in your studio, logs them out.`,
           "On a payment plan, a refund in full of the first payment closes access like any refund in full; a refund of a later payment is not detected, so take the buyer off the course, or remove their access, yourself. A refunded membership closes when its subscription is canceled in Stripe.",
           "A refund cannot take back a file already saved, or a product delivered as a link to somewhere else.",
           "The limits on checkouts, bookings and forms are counted in our database. If it cannot be reached, they let requests through rather than stop a buyer from paying.",
@@ -2666,6 +2672,7 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
           { icon: "calendar", title: "Programs in installments", body: "Two to twelve payments: the program opens after the first, and the plan ends by itself after the last.", href: "/platform/checkout" },
           { icon: "refresh", title: "A sequence after each sale", body: "On Studio, a few emails in the days after someone buys — what to do first, and when to book the call.", href: "/platform/email" },
           { icon: "users", title: "A monthly group", body: "A membership that hands over the meeting link, which members cancel themselves.", href: "/platform/memberships" },
+          nicheCampaignFeature("coaches"),
         ],
       },
       {
@@ -2734,6 +2741,7 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
           { icon: "book", title: "A cooking course", body: "Batch cooking on video, a free first lesson on your store, a module that opens each week.", href: "/platform/courses" },
           { icon: "download", title: "Lost the plan? Back by email", body: "A buyer who changes phones gets everything they bought again, with the address they paid with.", href: "/platform/instant-delivery" },
           { icon: "chart", title: "Which post sold the plan", body: "Visits from Instagram, TikTok and Pinterest counted separately, next to the sales from your Stripe.", href: "/platform/insights" },
+          nicheCampaignFeature("cooks"),
         ],
       },
       {
@@ -2803,6 +2811,7 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
           { icon: "calendar", title: "Weekly unlocks", body: "A module opens a set number of days after each person joins, so nobody skips to week twelve.", href: "/platform/courses" },
           { icon: "calendar", title: "Programs in installments", body: "Three monthly payments for a twelve-week program, ending by itself.", href: "/platform/checkout" },
           { icon: "list", title: "Challenges with a real limit", body: "A cap such as fifty places, counted from real payments, with no invented countdown.", href: "/platform/checkout" },
+          nicheCampaignFeature("fitness"),
         ],
       },
       {
@@ -2873,6 +2882,7 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
           { icon: "key", title: "License keys", body: "A unique key with each sale, for plugins and apps, checked by your software through a public address.", href: "/platform/license-keys" },
           { icon: "file", title: "Stamped PDFs", body: "The buyer's email on every page of a guide or a color book, so anyone thinking of sharing it thinks twice.", href: "/platform/pdf-stamping" },
           { icon: "star", title: "Reviews from real buyers", body: "Stars and words only people who paid can leave, on the product's card and its page.", href: "/platform/reviews" },
+          nicheCampaignFeature("designers"),
         ],
       },
       {

@@ -19,6 +19,8 @@
  * registry lists it as open (lib/person-data.ts), and the confirmation says
  * so before anyone deletes.
  */
+import { redisPipeline } from "@/lib/redis";
+import { traceKey } from "@/lib/community-trace";
 import { forgetMemberRecord, readConfig } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
 import { forgetCommunityUnsub } from "@/lib/community-mail";
@@ -40,6 +42,9 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   if (member?.h) records += await forgetHandle(id, member.h, who);
   if (member?.t) records += await forgetCommunityUnsub(member.t);
   await unindexMember(id, who);
+  // Their trace (lib/community-trace.ts): what they wrote and did, by reference.
+  const [traced] = await redisPipeline([["DEL", traceKey(id, who)]]);
+  records += Number(traced) || 0;
   records += await forgetPointsPerson(id, who);
   records += await forgetNoticesPerson(id, who);
   records += await forgetPushPerson(id, who);

@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
 import { QuizEditor } from "@/components/quiz-editor";
+import { CourseDayPreview } from "@/components/course-day-preview";
 import { TaskEditor } from "@/components/task-editor";
 import {
   type Course,
@@ -355,6 +356,9 @@ export function CourseEditor({
         />
       ))}
       </AiOn>
+
+      {/* 399 [SL3], unit 3: the schedule as a student sees it on a day the creator picks, from the modules as held here and the start date as the server last drew it (set further down, it changes only that). */}
+      <CourseDayPreview course={{ ...course, startsAt: initial.startsAt }} />
 
       <AiOn value={ai}>
         <AiAssist<Outline>
@@ -1042,7 +1046,7 @@ function LessonEditor({
                   onChange={(e) => setText(e.target.value)}
                 />
                 <p className="mt-1 text-sm text-ink-mute">
-                  {`Blank lines make paragraphs, lines starting with "- " make a list, and web addresses become links. ${MAX_BODY_LENGTH - text.length} characters left.`}
+                  {`Blank lines make paragraphs, lines starting with "- " make a list, and web addresses become links. Put code between two lines of three backticks (\`\`\`) to show it as typed. ${MAX_BODY_LENGTH - text.length} characters left.`}
                 </p>
               </div>
               {look ? (

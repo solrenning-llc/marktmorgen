@@ -78,7 +78,8 @@ const DECLINED = new Set(["INSTRUMENT_DECLINED", "PAYER_ACTION_REQUIRED", "ORDER
 const ownKey = (statsId: string, email: string, productId: string) => `nl:ppsell:own:${statsId}:${addressHash(email)}:${productId}`;
 /** Every paid order, scored by when it was paid, and those refunded in full: what the store's numbers read. */
 const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
-const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
+/** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */
+export const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
 const SALES_KEPT_SECONDS = 400 * 86_400;
 
 type Partner = { client: string; secret: string; merchant: string; bn: string };
@@ -423,6 +424,23 @@ export async function readPaid(order: string): Promise<Paid | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * A person's paid PayPal orders for these products, for the copy of their
+ * data (619 [SZ3], lib/person-copy.ts): kept on purpose as the order's
+ * record (lib/person-data.ts). Only reads.
+ */
+export async function paypalOrdersOf(statsId: string | null, productIds: string[], email: string): Promise<Paid[]> {
+  if (!statsId || !productIds.length || !isRedisConfigured()) return [];
+  const sets = await redisPipeline(productIds.map((p) => ["SMEMBERS", ownKey(statsId, email, p)]));
+  const orders = [...new Set(sets.flatMap((set) => (Array.isArray(set) ? set.map(String) : [])))].filter((o) => ORDER_ID.test(o));
+  const out: Paid[] = [];
+  for (const order of orders) {
+    const paid = await readPaid(order);
+    if (paid) out.push(paid);
+  }
+  return out;
 }
 
 async function readOpened(order: string): Promise<Opened | null> {

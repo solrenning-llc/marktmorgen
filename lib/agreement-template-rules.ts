@@ -1,7 +1,8 @@
 /**
  * Saved agreement templates (634 [GL2], unit 1; added 2 November 2026): the
  * rules, browser-safe. Keeping them in the store and choosing one in the
- * studio are the next units.
+ * studio are the next units; unit 2a (below) adds how long one is kept and
+ * what it may take of the store's data room.
  *
  * A template is what a creator would otherwise type again for each client:
  * a kind, a title, the text and the lines. It is checked by readDraft
@@ -23,8 +24,19 @@
  *     goes through readDraft with the email address and the consent box like
  *     any other. A template never sends, signs or charges anything, and
  *     editing one changes no agreement already made from it.
+ *   - Kept in the store's data room, like the agreements (the owner's
+ *     decision of 2 November 2026, 23h36): at most MAX_TEMPLATES, each kept
+ *     in its plain form (keptTemplate: its words as an agreement reads them,
+ *     with nothing invisible left), counted at its exact size before it is
+ *     written and refused above MAX_TEMPLATE_BYTES, which that form can never
+ *     pass, so the plan's own room pays for it and it is never a cost without
+ *     a limit. Each is kept TEMPLATE_KEEP_DAYS from the last
+ *     time it was saved or used to make an agreement, so one used often and
+ *     seldom edited never goes; the studio says on the template until when
+ *     it is kept if it is not used (keptUntilWords), and the store's export
+ *     carries it (templateExport).
  */
-import { type AgreementKind, type DraftProblem, DRAFT_PROBLEMS, MAX_NAME, clean, plainText, readDraft } from "@/lib/agreement-rules";
+import { type AgreementKind, type DraftProblem, DRAFT_PROBLEMS, KEEP_DAYS, MAX_BODY, MAX_LINE_TEXT, MAX_LINES, MAX_NAME, MAX_TITLE, clean, plainText, readDraft } from "@/lib/agreement-rules";
 import type { Currency } from "@/lib/money";
 
 /** The placeholders a template may hold. */
@@ -48,13 +60,107 @@ export type AgreementTemplate = {
   /** Amounts as typed ("120.50"), read by readDraft each time. */
   lines: TemplateLine[];
   updatedAt: number;
+  /** The last time an agreement was made from it; absent until then. */
+  usedAt?: number;
 };
+
+/** How long a template is kept from the last time it was saved or used. The same as an agreement's record (lib/agreement-rules.ts, KEEP_DAYS). */
+export const TEMPLATE_KEEP_DAYS = KEEP_DAYS;
+const DAY = 86_400_000;
+
+/** When a template goes by itself if it is neither saved nor used again: TEMPLATE_KEEP_DAYS after the later of the two. */
+export function templateKeptUntil(t: Pick<AgreementTemplate, "updatedAt" | "usedAt">): number {
+  return Math.max(t.updatedAt, t.usedAt ?? 0) + TEMPLATE_KEEP_DAYS * DAY;
+}
+
+/** What the studio says on a template about how long it is kept, in the creator's time zone (UTC when that is not one). */
+export function keptUntilWords(t: Pick<AgreementTemplate, "updatedAt" | "usedAt">, timeZone: string): string {
+  const day = (zone: string) => new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: zone }).format(templateKeptUntil(t));
+  let until: string;
+  try {
+    until = day(timeZone);
+  } catch {
+    until = `${day("UTC")} (UTC)`;
+  }
+  return `Kept until ${until}, unless you use it or save it. Each time you do, it's kept for ${TEMPLATE_KEEP_DAYS} days from then.`;
+}
+
+/**
+ * The most one template may take of the store's data room, in bytes, as it
+ * is written in its plain form (keptTemplate): every field at its longest,
+ * each UTF-16 unit at three bytes (the most UTF-8 gives one, and in that form
+ * the only characters JSON escapes are quotes, backslashes, tabs and line
+ * breaks, at two), with room for the keys, quantities, amounts, id and
+ * times. A template over it is refused, never cut.
+ */
+export const MAX_TEMPLATE_BYTES = 3 * (MAX_TEMPLATE_NAME + MAX_TITLE + MAX_BODY + MAX_LINES * (MAX_LINE_TEXT + 40)) + 1_024;
+
+/** A template's exact size as it is written: its JSON, in UTF-8 bytes. */
+export function templateBytes(t: AgreementTemplate): number {
+  return new TextEncoder().encode(JSON.stringify(t)).length;
+}
+
+/** Refused above MAX_TEMPLATE_BYTES as it would be written, before anything is counted or kept. */
+export function templateSizeProblem(t: AgreementTemplate): TemplateProblem | null {
+  return templateBytes(t) > MAX_TEMPLATE_BYTES ? { why: "too_big" } : null;
+}
+
+// Lone surrogate halves made the replacement character (one unit, three bytes, as JSON writes it), controls made spaces.
+const wellFormed = (text: string) => text.replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "\ufffd");
+const oneLineKept = (raw: unknown, max: number) => clean(typeof raw === "string" ? wellFormed(raw).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ") : "", max + 1);
+
+/**
+ * The template as it is kept, once the rules take it, or why not: the name,
+ * title and lines' words as an agreement reads them (spaces made one,
+ * controls taken out), the text as an agreement keeps it, each quantity a
+ * number and each amount as read, nothing a reader cannot see (half of a
+ * character is made the replacement character), so what is written is what
+ * the creator wrote, and never more than MAX_TEMPLATE_BYTES. Checked again
+ * in that form, so a template is never kept in a form the rules refuse.
+ */
+export function keptTemplate(
+  t: Pick<AgreementTemplate, "name" | "kind" | "title" | "body" | "lines">,
+  keep: { id: string; kept: number; currency: Currency; now: number; usedAt?: number },
+): { ok: true; template: AgreementTemplate } | { ok: false; problem: TemplateProblem } {
+  const first = templateProblem(t, keep.kept, keep.currency);
+  if (first) return { ok: false, problem: first };
+  const template: AgreementTemplate = {
+    id: keep.id,
+    name: oneLineKept(t.name, MAX_TEMPLATE_NAME),
+    kind: t.kind,
+    title: oneLineKept(t.title, MAX_TITLE),
+    body: plainText(wellFormed(t.body), MAX_BODY),
+    lines: t.lines.map((l) => ({
+      text: oneLineKept(l.text, MAX_LINE_TEXT),
+      quantity: typeof l.quantity === "number" ? l.quantity : Number(String(l.quantity).trim()),
+      amount: String(l.amount).trim().replace(/^(\d+),(\d{1,2})$/, "$1.$2"),
+    })),
+    updatedAt: keep.now,
+    ...(keep.usedAt ? { usedAt: keep.usedAt } : {}),
+  };
+  const again = templateProblem(template, keep.kept, keep.currency) ?? templateSizeProblem(template);
+  return again ? { ok: false, problem: again } : { ok: true, template };
+}
+
+/** A template as the store's export carries it: what the creator wrote, and until when it is kept. */
+export function templateExport(t: AgreementTemplate): { name: string; kind: AgreementKind; title: string; text: string; lines: TemplateLine[]; savedAt: string; lastUsedAt: string | null; keptUntil: string } {
+  return {
+    name: t.name,
+    kind: t.kind,
+    title: t.title,
+    text: t.body,
+    lines: t.lines.map((l) => ({ text: l.text, quantity: l.quantity, amount: l.amount })),
+    savedAt: new Date(t.updatedAt).toISOString(),
+    lastUsedAt: t.usedAt ? new Date(t.usedAt).toISOString() : null,
+    keptUntil: new Date(templateKeptUntil(t)).toISOString(),
+  };
+}
 
 /** Where a placeholder problem is: the title, the text, or a line (from 1). */
 export type Where = { part: "title" | "text" } | { part: "line"; line: number };
 
 export type TemplateProblem =
-  | { why: "name" | "too_many" | "client_name" | "store_name" | "client_name_long" }
+  | { why: "name" | "too_many" | "too_big" | "client_name" | "store_name" | "client_name_long" }
   | { why: "unknown_field"; found: string; where: Where }
   | { why: "draft"; problem: DraftProblem; line?: number };
 
@@ -67,6 +173,8 @@ export function templateProblemWords(p: TemplateProblem): string {
       return `Give the template a name of up to ${MAX_TEMPLATE_NAME} characters, so you can find it later.`;
     case "too_many":
       return `Your store can keep up to ${MAX_TEMPLATES} templates. Delete one you no longer use to save this one.`;
+    case "too_big":
+      return "This template is too long to keep. Make its text shorter, then save it again.";
     case "client_name":
       return "This template puts the client's name in. Type the client's name first.";
     case "store_name":
@@ -80,8 +188,10 @@ export function templateProblemWords(p: TemplateProblem): string {
   }
 }
 
-// Words as the template keeps them before any check: full-width braces and spaces made plain, then as an agreement keeps them.
-const plainBraces = (text: string) => text.normalize("NFKC");
+// Words as the template keeps them before any check: only what sits in braces (full-width or small ones too) is made plain (NFKC), so a
+// full-width "｛ｃｌｉｅｎｔ＿ｎａｍｅ｝" is read as the placeholder while the creator's own words ("40 m²", "x²", "½") stay exactly as typed.
+const BRACED = /[{\uFF5B\uFE5B][^{}\uFF5B\uFF5D\uFE5B\uFE5C\n]{0,80}[}\uFF5D\uFE5C]/gu;
+const plainBraces = (text: string) => text.replace(BRACED, (part) => part.normalize("NFKC"));
 const oneLine = (text: string, max: number) => clean(plainBraces(text), max + 1);
 const block = (text: string, max: number) => plainText(plainBraces(text), max + 1);
 
@@ -113,7 +223,7 @@ const asDraftBody = (t: { kind: AgreementKind; title: string; body: string; line
  * agreement in the store's currency would refuse.
  */
 export function templateProblem(t: Pick<AgreementTemplate, "name" | "kind" | "title" | "body" | "lines">, kept: number, currency: Currency): TemplateProblem | null {
-  const name = t.name.replace(/\s+/g, " ").trim();
+  const name = oneLineKept(t.name, MAX_TEMPLATE_NAME);
   if (!name || name.length > MAX_TEMPLATE_NAME) return { why: "name" };
   if (kept >= MAX_TEMPLATES) return { why: "too_many" };
   const unknown = firstUnknown(t);

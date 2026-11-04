@@ -23,7 +23,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { sendEmail } from "@/lib/email";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
-import { refundedInFull } from "@/lib/refunds";
+import { givenBack } from "@/lib/refunds";
 import { canSell } from "@/lib/store-checkout";
 import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -145,6 +145,22 @@ export async function readPreorder(store: Store, productId: string, sessionId: s
   if (!store.statsId || !isRedisConfigured() || !SESSION_ID.test(sessionId)) return null;
   const [raw] = await redisPipeline([["HGET", entriesKey(store.statsId, productId), sessionId]]);
   return parsePreorder(raw);
+}
+
+/** A person's pre-orders of these products and what became of them, for the copy of their data (619 [SZ3]). Only reads. */
+export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
+  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
+  const address = email.trim().toLowerCase();
+  const replies = await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)]));
+  return productIds.flatMap((product, i) => {
+    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const out: (Preorder & { product: string; checkout: string })[] = [];
+    for (let k = 0; k + 1 < flat.length; k += 2) {
+      const entry = parsePreorder(flat[k + 1]);
+      if (entry && entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: String(flat[k]) });
+    }
+    return out;
+  });
 }
 
 type Session = {
@@ -363,7 +379,8 @@ export async function runPreorderReleases(
       try {
         if (entry.pi) {
           const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(entry.pi)}?expand[]=latest_charge`);
-          if (refundedInFull(payment)) {
+          // Refunded in full or lost to a dispute (lib/refunds.ts): never handed over.
+          if (await givenBack(store.stripeAccountId, payment)) {
             await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, pid)]);
             continue;
           }

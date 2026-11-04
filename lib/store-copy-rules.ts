@@ -230,6 +230,14 @@ export function copiedBlocks(blocks: readonly PageBlock[], products: IdMap, form
       left.pictures += 1;
       block.picture = null;
     }
+    // A row's pictures are the first store's too (375 [TB1]): each one left out and counted, the other parts kept in order.
+    if (block.kind === "row") {
+      const pictures = block.columns.reduce((n, column) => n + column.filter((element) => element.kind === "image").length, 0);
+      if (pictures) {
+        left.pictures += pictures;
+        block.columns = block.columns.map((column) => column.filter((element) => element.kind !== "image"));
+      }
+    }
     if (block.kind === "reviews" && block.first.length) {
       left.reviewPicks += block.first.length;
       block.first = [];

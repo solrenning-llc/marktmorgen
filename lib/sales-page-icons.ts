@@ -29,4 +29,6 @@ export const KIND_ICONS: Record<BlockKind, IconName> = {
   product: "basket",
   quotes: "quote",
   form: "list",
+  // Not in the block gallery yet (lib/sales-page.ts, BLOCK_KINDS); here because every kind has one.
+  row: "layout",
 };

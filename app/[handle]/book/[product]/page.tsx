@@ -197,7 +197,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                           <a
                             href={lengthHref(l.minutes)}
                             aria-current={l.minutes === chosen.minutes ? "true" : undefined}
-                            className={`btn ${l.minutes === chosen.minutes ? "btn-primary" : "btn-secondary"} w-full justify-start`}
+                            className={`btn ${l.minutes === chosen.minutes ? "st-btn" : "st-btn-ghost"} w-full justify-start`}
                           >
                             {b.lengthOption(l.minutes, money(l.cents))}
                           </a>
@@ -219,7 +219,7 @@ export default async function BookPage({ params, searchParams }: Params) {
                           <option key={h.key} value={h.key}>{h.label}</option>
                         ))}
                       </select>
-                      <button type="submit" className="btn btn-secondary">{b.hostShow}</button>
+                      <button type="submit" className="btn st-btn-ghost">{b.hostShow}</button>
                     </div>
                     {pickedHost ? <p className="mt-2 text-sm" role="status">{b.withHost(pickedHost.label)}</p> : null}
                   </form>

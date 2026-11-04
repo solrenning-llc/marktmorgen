@@ -35,6 +35,7 @@ const en = {
     "pkg-gone": { title: "That package link does not work", body: "Use the link in your package's email. Nothing was charged." },
     "pkg-error": { title: "We could not book from your package just now", body: "Nothing was charged. Try again in a moment." },
     "price-changed": { title: "This length's price just changed", body: "The creator changed it while you were choosing. The price below is the new one; pick your time again. Nothing was charged." },
+    "length-gone": { title: "This length is no longer offered", body: "The creator changed the lengths while you were choosing. Pick a length and a time again below. Nothing was charged." },
     taken: {
       title: "That time was just taken",
       body: "Somebody booked it a moment before you, or it is being paid for right now. Pick another; nothing was charged.",
@@ -296,6 +297,7 @@ const es: BookingWords = {
     "pkg-gone": { title: "Ese enlace del paquete no funciona", body: "Usa el enlace del email de tu paquete. No se ha cobrado nada." },
     "pkg-error": { title: "No pudimos reservar con tu paquete en este momento", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },
     "price-changed": { title: "El precio acaba de cambiar", body: "El creador lo cambió mientras elegías. El precio de abajo es el nuevo; vuelve a elegir tu horario. No se ha cobrado nada." },
+    "length-gone": { title: "Esta duración ya no se ofrece", body: "El creador cambió las duraciones mientras elegías. Vuelve a elegir una duración y un horario abajo. No se ha cobrado nada." },
     taken: {
       title: "Ese horario acaba de ocuparse",
       body: "Alguien lo reservó justo antes que tú, o se está pagando ahora mismo. Elige otro; no se ha cobrado nada.",
@@ -499,7 +501,8 @@ const fr: BookingWords = {
     "pkg-refunded": { title: "Ce forfait a été remboursé", body: "Il ne permet plus aucune réservation. Rien n'a été débité." },
     "pkg-gone": { title: "Ce lien de forfait ne fonctionne pas", body: "Utilisez le lien de l'e-mail de votre forfait. Rien n'a été débité." },
     "pkg-error": { title: "Nous n'avons pas pu réserver avec votre forfait pour l'instant", body: "Rien n'a été débité. Réessayez dans un instant." },
-    "price-changed": { title: "Le prix vient de changer", body: "Le créateur l'a modifié pendant que vous choisissiez. Le prix ci-dessous est le nouveau ; choisissez à nouveau votre horaire. Rien n'a été débité." },
+    "price-changed": { title: "Le prix vient de changer", body: `Le créateur l'a modifié pendant que vous choisissiez. Le prix ci-dessous est le nouveau${S}; choisissez à nouveau votre horaire. Rien n'a été débité.` },
+    "length-gone": { title: "Cette durée n'est plus proposée", body: "Le créateur a modifié les durées pendant que vous choisissiez. Choisissez à nouveau une durée et un horaire ci-dessous. Rien n'a été débité." },
     taken: {
       title: "Ce créneau vient d'être pris",
       body: `Quelqu'un l'a réservé juste avant vous, ou il est en train d'être payé. Choisissez-en un autre${S}; rien n'a été débité.`,
@@ -657,7 +660,7 @@ const fr: BookingWords = {
   lengthPick: `Quelle durée souhaitez-vous${S}?`,
   lengthChosen: (what: string) => `Horaires pour ${what}.`,
   backToCard: (title: string) => `Retour à ${title}`,
-  lengthOption: (minutes: number, price: string) => `${minutes} minutes pour ${price}`,
+  lengthOption: (minutes: number, price: string) => `${minutes} minutes à ${price}`,
   withHost: (name) => `Avec ${name}`,
   cancelPolicy: (hours, store) =>
     `Annulez au moins ${hours} heures avant le début, en répondant à votre e-mail de confirmation, et ${store} rembourse ce que vous avez payé en ligne. Si vous annulez plus tard ou ne venez pas, ${store} n'est pas tenu de le rembourser. Si ${store} annule, tout vous est remboursé. Cela ne change rien à vos droits prévus par la loi.`,
@@ -704,6 +707,7 @@ const de: BookingWords = {
     "pkg-gone": { title: "Dieser Paket-Link funktioniert nicht", body: "Verwenden Sie den Link aus der E-Mail zu Ihrem Paket. Es wurde nichts berechnet." },
     "pkg-error": { title: "Die Buchung aus Ihrem Paket hat gerade nicht geklappt", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
     "price-changed": { title: "Der Preis hat sich gerade geändert", body: "Der Anbieter hat ihn geändert, während Sie gewählt haben. Der Preis unten ist der neue; wählen Sie Ihren Termin noch einmal. Es wurde nichts abgebucht." },
+    "length-gone": { title: "Diese Länge wird nicht mehr angeboten", body: "Der Anbieter hat die Längen geändert, während Sie gewählt haben. Wählen Sie unten noch einmal eine Länge und einen Termin. Es wurde nichts abgebucht." },
     taken: {
       title: "Dieser Termin wurde gerade vergeben",
       body: "Jemand hat ihn kurz vor Ihnen gebucht, oder er wird gerade bezahlt. Wählen Sie einen anderen; es wurde nichts berechnet.",
@@ -908,6 +912,7 @@ const it: BookingWords = {
     "pkg-gone": { title: "Quel link del pacchetto non funziona", body: "Usa il link nell'email del tuo pacchetto. Non è stato addebitato nulla." },
     "pkg-error": { title: "Non siamo riusciti a prenotare con il tuo pacchetto in questo momento", body: "Non è stato addebitato nulla. Riprova tra un momento." },
     "price-changed": { title: "Il prezzo è appena cambiato", body: "Il creatore l'ha modificato mentre sceglievi. Il prezzo qui sotto è quello nuovo; scegli di nuovo il tuo orario. Non è stato addebitato nulla." },
+    "length-gone": { title: "Questa durata non è più disponibile", body: "Il creatore ha cambiato le durate mentre sceglievi. Scegli di nuovo una durata e un orario qui sotto. Non è stato addebitato nulla." },
     taken: {
       title: "Quell'orario è appena stato preso",
       body: "Qualcuno l'ha prenotato un attimo prima di te, oppure lo sta pagando proprio ora. Scegline un altro; non è stato addebitato nulla.",
@@ -1112,6 +1117,7 @@ const nl: BookingWords = {
     "pkg-gone": { title: "Die pakketlink werkt niet", body: "Gebruik de link in de e-mail van je pakket. Er is niets afgeschreven." },
     "pkg-error": { title: "We konden nu niet boeken met je pakket", body: "Er is niets afgeschreven. Probeer het zo meteen opnieuw." },
     "price-changed": { title: "De prijs is net veranderd", body: "De maker heeft hem gewijzigd terwijl je koos. De prijs hieronder is de nieuwe; kies je tijd opnieuw. Er is niets afgeschreven." },
+    "length-gone": { title: "Deze lengte wordt niet meer aangeboden", body: "De maker heeft de lengtes gewijzigd terwijl je koos. Kies hieronder opnieuw een lengte en een tijd. Er is niets afgeschreven." },
     taken: {
       title: "Die tijd is net bezet",
       body: "Iemand heeft hem vlak voor jou geboekt, of er wordt op dit moment voor betaald. Kies een andere; er is niets afgeschreven.",
@@ -1315,6 +1321,7 @@ const pt: BookingWords = {
     "pkg-gone": { title: "Essa ligação do pacote não funciona", body: "Utilize a ligação do email do seu pacote. Nada foi cobrado." },
     "pkg-error": { title: "Não foi possível marcar com o seu pacote neste momento", body: "Nada foi cobrado. Tente novamente daqui a pouco." },
     "price-changed": { title: "O preço acabou de mudar", body: "O criador alterou-o enquanto escolhia. O preço abaixo é o novo; escolha de novo o seu horário. Nada foi cobrado." },
+    "length-gone": { title: "Esta duração já não está disponível", body: "O criador alterou as durações enquanto escolhia. Escolha de novo uma duração e um horário abaixo. Nada foi cobrado." },
     taken: {
       title: "Esse horário acabou de ser ocupado",
       body: "Alguém o marcou momentos antes de si, ou está a ser pago neste momento. Escolha outro; nada foi cobrado.",

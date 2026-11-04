@@ -191,7 +191,52 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
   return buyerNoticeCap(tier, paid) * CLOSING_BUYER_COST;
 }
 
-/** What one order costs at the most: its confirmation, the email that says it shipped, its compute, and what it leaves for its store's closing. */
+/** The existing two-email order envelope: confirmation, shipment email,
+ * compute and its share of closure. It does NOT price the new durable
+ * shipment outbox's indefinite pending/source/fence storage, copies,
+ * reservation pools, provider retries or repeated reconciliation. Those
+ * remain unpriced, not zero: CURRENT_SHIPMENT_MAIL_POLICY is null. The
+ * CURRENT_SHIPMENT_MAIL_LIFECYCLE is never_activated: status returns
+ * not_recorded and cleanup returns0 without Redis, and the UI does no GET.
+ * New storage/dispatch require active AND a valid independent policy. A finite
+ * active-month/closing-days room is not funding for an unknown pending tail.
+ * In active/retired, status and erasure remain available even with policy
+ * null; retirement permits no new enqueue or dispatch. Cleanup may write
+ * fences for an empty index, with an indefinite failure tail. Funding for
+ * cleanup/failures/retention must precede first activation; lifecycle is not
+ * financial evidence. Never restore never_activated after any use while
+ * payloads or uncertain reserves remain. Future tails are unknown/rejected.
+ * The new account-wide Resend budget is also NOT funded by this order
+ * coefficient or by a paid provider quota alone. Its permanent schema1
+ * ledger, schema2 claims, pending/unknown holds without TTL, exact35-day
+ * terminal receipts and partial-error reconciliation need their full own
+ * retention/copies/command/cleanup envelope. Measured EVAL+internal paths:
+ * 4 initialize,11 reserve,11 dispatch,14 accepted,10 receipt read,13 cancel.
+ * These are command observations, not an invoice or financial approval;
+ * CURRENT_RESEND_FALLBACK_REVIEW remains null, never an automatic bootstrap.
+ * The restricted physical-item createCheckout caller now reserves a complete
+ * confirmation origin BEFORE its payment POST/URL, but remains never_activated
+ * with policy null. This is a constructed pre-URL slice, not completed durable
+ * confirmation: no payment/accounting/email worker or origin erasure exists.
+ * Its five own families and five shared pool/index/fence references are in
+ * store-data-registry, not a second allocation of the shipment pool. A full
+ * future row reservation is not evidence of lifetime storage/copy/cleanup
+ * funding. No TTL bounds pending/unknown origins;23h limits creation replay
+ * only. Original-account read-only recovery persists its pagination cursor.
+ * Observed EVAL+internal commands:27 shared enqueue,17 create,18 bind,
+ * 15 already-bound replay,17 cursor; TS read adds3 and reserve adds1 TIME.
+ * Open/recovery repeats Redis/provider reads, so these are NOT a full call or
+ * lifetime envelope. Activation remains blocked on missing lifecycle work
+ * and unknown/rejected full retention/failure/cleanup costs.
+ * Its accounting hooks remain unconnected to a payment worker. Their68-byte
+ * OCI/OC1 receipt horizon is ORIGINAL window end+400
+ * days (at most767 from capture), first apply23 commands; the200-byte MEMORY
+ * fixture is not universal storage coverage. The legacy45-day '1' marker's
+ * priced part excludes this new path. Other effects can lose TTL after a
+ * partial Lua failure; the whole tail is unknown, not bounded by the receipt.
+ * No PER_EMAIL/ORDER_COST coefficient, real review, quota protection, paid
+ * financial envelope or retention approval is changed/certified here.
+ */
 export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
@@ -1315,6 +1360,8 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "lib/imports.ts": MONTHLY, "lib/product-updates.ts": MONTHLY, "lib/review-requests.ts": MONTHLY,
   "lib/mail.ts": ["monthly", "company"],
   "lib/call-packages.ts": ORDER, "lib/call-reminders.ts": ORDER, "lib/free.ts": ORDER, "lib/gifts.ts": ORDER, "lib/group-buy.ts": ["order", "store"],
+  // Active shipment delivery uses sendQueuedShipmentMail in lib/email.ts.
+  // The never-activated deployment retains its original one-shot ORDER sender.
   "lib/paypal-sales.ts": ORDER, "lib/preorders.ts": ORDER, "lib/shipments.ts": ORDER,
   "lib/purchase-email.ts": ["order", "store"], "lib/calls.ts": ["order", "store"], "lib/licence-keys.ts": ["order", "store"],
   "lib/affiliate-hub.ts": STORE, "lib/affiliate-payday.ts": STORE, "lib/affiliates.ts": STORE, "lib/assignment-notify.ts": STORE,

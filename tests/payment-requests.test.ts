@@ -52,12 +52,15 @@ const checkoutHeaders: Headers[] = [];
 const sessions = new Map<string, Record<string, unknown>>();
 let refunds: Record<string, unknown>[] = [];
 let mailDown = false;
+let mailFailureStatus = 429;
+let mailPosts = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
-    if (mailDown) return answer({ message: "down" }, 500);
+    mailPosts++;
+    if (mailDown) return answer({ message: "known rate-limit refusal" }, mailFailureStatus);
     const body = JSON.parse(String(init?.body)) as { to: string[]; subject: string; text: string };
     mails.push({ to: body.to[0], subject: body.subject, text: body.text });
     return answer({ id: `email_${mails.length}` });
@@ -248,6 +251,18 @@ async function main(): Promise<void> {
   is("no more than the two asked for", count(), 3);
   is(`and at most ${MAX_SENDS} emails in all, by hand too`, [(await remindNow(big, rid, now + 40 * 86_400_000)).ok, (await remindNow(big, rid, now + 41 * 86_400_000)).ok], [true, false]);
   is("an expired request takes no payment and no reminder", [statusOf((await readRequest(rid))!, now + (OPEN_DAYS + 1) * 86_400_000), (await remindNow(big, rid, now + (OPEN_DAYS + 1) * 86_400_000)).ok], ["expired", false]);
+  part("An uncertain provider response keeps its source without another send");
+  const unknownDraft = readDraft(draftBody({ email: "uncertain@example.com" }), "usd", now);
+  if (!unknownDraft.ok) throw Error("Synthetic uncertainty draft was refused");
+  const unknownRequest = await createRequest(big, unknownDraft.draft, now);
+  if (!unknownRequest.ok) throw Error("Synthetic uncertainty source was refused");
+  const beforeUnknown = mailPosts;
+  mailFailureStatus = 500; mailDown = true;
+  const unknown = await sendRequestEmail(big, unknownRequest.request, now);
+  mailDown = false;
+  const unknownAgain = await sendRequestEmail(big, (await readRequest(unknownRequest.request.id))!, now);
+  is("HTTP500 is not confirmed non-acceptance or permission to repeat", [unknown.sent, unknownAgain.sent, mailPosts - beforeUnknown], [false, false, 1]);
+  is("the payment request source is retained for reconciliation", (await readRequest(unknownRequest.request.id))?.email, "uncertain@example.com");
 
   part("Cancel, delete, and deleting the person");
   is("an open request cannot be deleted before it is canceled", await deleteRequest(store, otherId, now), "open");

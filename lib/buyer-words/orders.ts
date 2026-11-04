@@ -149,10 +149,10 @@ const en = {
   loadingInside: "Getting the products…",
   insideFailed: "These products could not be shown just now. Try again in a moment.",
   /** Purchases whose refund did not fit in the opening's calls to Stripe (lib/buyer-orders.ts, ORDERS_STRIPE_CALLS), and the button that checks the next batch (components/older-purchases.tsx). */
-  olderNotChecked: (count: number, more = false) =>
+  olderNotChecked: (count: number, withAdded = false) =>
     count === 0
       ? "Anything added to an order after paying is not checked yet."
-      : more
+      : withAdded
         ? `${count === 1 ? "1 older purchase" : `${count} older purchases`} and anything added to an order after paying are not checked yet.`
         : count === 1
           ? "1 older purchase is not checked yet."
@@ -182,8 +182,8 @@ const en = {
   /** The name the email comes from. */
   ordersFrom: (store: string) => `${store} via Marktmorgen`,
   ordersSubject: (store: string) => `What you bought from ${store}`,
-  ordersIntro: (store: string, count: number, more = false) =>
-    more
+  ordersIntro: (store: string, count: number, withAdded = false) =>
+    withAdded
       ? count === 0
         ? `You asked for what you bought from ${store}. Your purchases are not checked yet; the page checks them when you ask:`
         : `You asked for what you bought from ${store}. ${count === 1 ? "Here is 1" : `Here are ${count}`}, ready to open again, and older purchases the page checks when you ask:`
@@ -406,10 +406,10 @@ const es: OrdersWords = {
   showInside: (title) => `Mostrar los productos de ${title}`,
   loadingInside: "Cargando los productos…",
   insideFailed: "No se han podido mostrar estos productos ahora. Inténtalo de nuevo en un momento.",
-  olderNotChecked: (count, more = false) =>
+  olderNotChecked: (count, withAdded = false) =>
     count === 0
       ? "Aún falta comprobar lo que se añadió a un pedido después de pagar."
-      : more
+      : withAdded
         ? `Aún falta comprobar ${count === 1 ? "1 compra anterior" : `${count} compras anteriores`} y lo que se añadió a un pedido después de pagar.`
         : count === 1
           ? "1 compra anterior aún no está comprobada."
@@ -435,8 +435,8 @@ const es: OrdersWords = {
 
   ordersFrom: (store) => `${store} vía Marktmorgen`,
   ordersSubject: (store) => `Lo que le compraste a ${store}`,
-  ordersIntro: (store, count, more = false) =>
-    more
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
       ? count === 0
         ? `Pediste lo que le compraste a ${store}. Tus compras aún no están comprobadas; la página las comprueba cuando lo pidas:`
         : `Pediste lo que le compraste a ${store}. ${count === 1 ? "Aquí tienes 1 compra lista para abrirla de nuevo" : `Aquí tienes ${count} compras listas para abrirlas de nuevo`}, y compras anteriores que la página comprueba cuando lo pidas:`
@@ -647,10 +647,10 @@ const fr: OrdersWords = {
   showInside: (title) => `Afficher les produits de ${title}`,
   loadingInside: "Chargement des produits…",
   insideFailed: "Ces produits ne peuvent pas être affichés pour le moment. Réessayez dans un instant.",
-  olderNotChecked: (count, more = false) =>
+  olderNotChecked: (count, withAdded = false) =>
     count === 0
       ? "Ce qui a été ajouté à une commande après le paiement n'est pas encore vérifié."
-      : more
+      : withAdded
         ? `${count < 2 ? "1 achat plus ancien" : `${count}${S}achats plus anciens`} et ce qui a été ajouté à une commande après le paiement ne sont pas encore vérifiés.`
         : count < 2
           ? "1 achat plus ancien n'est pas encore vérifié."
@@ -676,8 +676,8 @@ const fr: OrdersWords = {
 
   ordersFrom: (store) => `${store} via Marktmorgen`,
   ordersSubject: (store) => `Ce que vous avez acheté chez ${store}`,
-  ordersIntro: (store, count, more = false) =>
-    more
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
       ? count === 0
         ? `Vous avez demandé ce que vous avez acheté chez ${store}. Vos achats ne sont pas encore vérifiés${S}; la page les vérifie quand vous le demandez${S}:`
         : `Vous avez demandé ce que vous avez acheté chez ${store}. ${count < 2 ? "En voici 1, prêt à être rouvert" : `En voici ${count}, prêts à être rouverts`}, et des achats plus anciens que la page vérifie quand vous le demandez${S}:`
@@ -888,10 +888,10 @@ const de: OrdersWords = {
   showInside: (title) => `Die Produkte in ${title} anzeigen`,
   loadingInside: "Die Produkte werden geladen…",
   insideFailed: "Diese Produkte können gerade nicht angezeigt werden. Versuchen Sie es gleich noch einmal.",
-  olderNotChecked: (count, more = false) =>
+  olderNotChecked: (count, withAdded = false) =>
     count === 0
       ? "Was nach dem Bezahlen zu einer Bestellung hinzugefügt wurde, ist noch nicht geprüft."
-      : more
+      : withAdded
         ? `${count === 1 ? "1 älterer Kauf" : `${count} ältere Käufe`} und was nach dem Bezahlen zu einer Bestellung hinzugefügt wurde, sind noch nicht geprüft.`
         : count === 1
           ? "1 älterer Kauf ist noch nicht geprüft."
@@ -917,8 +917,8 @@ const de: OrdersWords = {
 
   ordersFrom: (store) => `${store} über Marktmorgen`,
   ordersSubject: (store) => `Ihre Käufe bei ${store}`,
-  ordersIntro: (store, count, more = false) =>
-    more
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
       ? count === 0
         ? `Sie haben angefordert, was Sie bei ${store} gekauft haben. Ihre Käufe sind noch nicht geprüft; die Seite prüft sie, wenn Sie es möchten:`
         : `Sie haben angefordert, was Sie bei ${store} gekauft haben. ${count === 1 ? "Hier ist 1" : `Hier sind ${count}`}, bereit zum erneuten Öffnen, und ältere Käufe, die die Seite prüft, wenn Sie es möchten:`
@@ -1133,10 +1133,10 @@ const it: OrdersWords = {
   showInside: (title) => `Mostra i prodotti in ${title}`,
   loadingInside: "Caricamento dei prodotti…",
   insideFailed: "Non è stato possibile mostrare questi prodotti ora. Riprova tra un momento.",
-  olderNotChecked: (count, more = false) =>
+  olderNotChecked: (count, withAdded = false) =>
     count === 0
       ? "Ciò che è stato aggiunto a un ordine dopo il pagamento non è ancora verificato."
-      : more
+      : withAdded
         ? `${count === 1 ? "1 acquisto precedente" : `${count} acquisti precedenti`} e ciò che è stato aggiunto a un ordine dopo il pagamento non sono ancora verificati.`
         : count === 1
           ? "1 acquisto precedente non è ancora verificato."
@@ -1162,8 +1162,8 @@ const it: OrdersWords = {
 
   ordersFrom: (store) => `${store} tramite Marktmorgen`,
   ordersSubject: (store) => `Ciò che hai acquistato da ${store}`,
-  ordersIntro: (store, count, more = false) =>
-    more
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
       ? count === 0
         ? `Hai chiesto ciò che hai acquistato da ${store}. I tuoi acquisti non sono ancora verificati; la pagina li verifica quando lo chiedi:`
         : `Hai chiesto ciò che hai acquistato da ${store}. ${count === 1 ? "Eccone 1, pronto per essere riaperto" : `Eccone ${count}, pronti per essere riaperti`}, e acquisti precedenti che la pagina verifica quando lo chiedi:`
@@ -1373,10 +1373,10 @@ const nl: OrdersWords = {
   showInside: (title) => `Toon de producten in ${title}`,
   loadingInside: "De producten worden geladen…",
   insideFailed: "Deze producten kunnen nu niet worden getoond. Probeer het zo opnieuw.",
-  olderNotChecked: (count, more = false) =>
+  olderNotChecked: (count, withAdded = false) =>
     count === 0
       ? "Wat na het betalen aan een bestelling is toegevoegd, is nog niet gecontroleerd."
-      : more
+      : withAdded
         ? `${count === 1 ? "1 oudere aankoop" : `${count} oudere aankopen`} en wat na het betalen aan een bestelling is toegevoegd, zijn nog niet gecontroleerd.`
         : count === 1
           ? "1 oudere aankoop is nog niet gecontroleerd."
@@ -1402,8 +1402,8 @@ const nl: OrdersWords = {
 
   ordersFrom: (store) => `${store} via Marktmorgen`,
   ordersSubject: (store) => `Wat je bij ${store} hebt gekocht`,
-  ordersIntro: (store, count, more = false) =>
-    more
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
       ? count === 0
         ? `Je vroeg om wat je bij ${store} hebt gekocht. Je aankopen zijn nog niet gecontroleerd; de pagina controleert ze wanneer je dat vraagt:`
         : `Je vroeg om wat je bij ${store} hebt gekocht. ${count === 1 ? "Hier is er 1" : `Hier zijn er ${count}`}, klaar om opnieuw te openen, en oudere aankopen die de pagina controleert wanneer je dat vraagt:`
@@ -1614,10 +1614,10 @@ const pt: OrdersWords = {
   showInside: (title) => `Mostrar os produtos de ${title}`,
   loadingInside: "A carregar os produtos…",
   insideFailed: "Não foi possível mostrar estes produtos agora. Tente novamente daqui a pouco.",
-  olderNotChecked: (count, more = false) =>
+  olderNotChecked: (count, withAdded = false) =>
     count === 0
       ? "O que foi acrescentado a uma encomenda depois de pagar ainda não foi verificado."
-      : more
+      : withAdded
         ? `${count === 1 ? "1 compra anterior" : `${count} compras anteriores`} e o que foi acrescentado a uma encomenda depois de pagar ainda não foram verificados.`
         : count === 1
           ? "1 compra anterior ainda não foi verificada."
@@ -1643,8 +1643,8 @@ const pt: OrdersWords = {
 
   ordersFrom: (store) => `${store} via Marktmorgen`,
   ordersSubject: (store) => `O que comprou a ${store}`,
-  ordersIntro: (store, count, more = false) =>
-    more
+  ordersIntro: (store, count, withAdded = false) =>
+    withAdded
       ? count === 0
         ? `Pediu o que comprou a ${store}. As suas compras ainda não foram verificadas; a página verifica-as quando pedir:`
         : `Pediu o que comprou a ${store}. ${count === 1 ? "Aqui está 1 compra, pronta a abrir de novo" : `Aqui estão ${count} compras, prontas a abrir de novo`}, e compras anteriores que a página verifica quando pedir:`

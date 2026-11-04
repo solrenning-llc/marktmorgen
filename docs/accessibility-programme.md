@@ -141,3 +141,14 @@ Muted words on store pages (dates, notes, hints, "Unsaved" and similar) are smal
   - Links on a band stay at 4.5:1. Asking 7:1 there has no solution for some accents the creator may pick, so it stays a recorded gap and needs a design choice.
   - Large text and non-text contrast were not changed.
   - Some backgrounds are barely set apart from the card. The soft accent on "night" moved from 1.60:1 to 1.30:1 against the card. Bands were already as close as 1.06:1 for some accents, before and after this change. Text stays readable on them, which is what 1.4.6 asks. A background difference is never the only sign that something is chosen (1.4.1), so a minimum band-to-card difference is a design choice left open.
+
+## A video in a window: Escape inside the player (4 November 2026)
+
+375 [TB1] unit 5 puts a creator's YouTube, Vimeo or Loom video in a modal `<dialog>` (`components/video-window.tsx`).
+
+- **What works:** Escape closes the window when focus is on its Close button or on the frame element itself. Close and a click on the backdrop also close it. Each of these removes the player and returns focus to the button that opened it.
+- **The case:** once the buyer clicks inside the player, or tabs into its own controls, keystrokes go to the player's document. That document is on the provider's origin, not ours. The browser does not pass Escape to our page, so the window stays open.
+- **Demonstrated** by the independent review of #2135 in Chromium with a stand-in player that has its own buttons: Escape pressed inside it left the dialog open.
+- **Why it cannot be fixed on our side:** a page cannot listen to keys inside a frame of another origin. Running our script in the frame is not possible either, because it is the provider's page.
+- **The equivalent we offer:** this is not a keyboard trap (2.1.2). One Shift+Tab from the player's first control reaches Close, which is labeled "Close", is at least 44 × 44 px and is always visible at the top of the window. Close is also the first thing focused when the window opens.
+- **Not checked:** a real screen reader with each provider's real player.

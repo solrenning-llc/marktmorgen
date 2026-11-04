@@ -119,18 +119,10 @@ export type OrderRoom = { readonly [ORDER_ROOM]: true; readonly order: DataOwner
 export function orderRoom(owner: DataOwner): OrderRoom {
   return { [ORDER_ROOM]: true, order: owner };
 }
-/**
- * The older way to say an order's: an object holding `order` and nothing
- * else. Still read, exactly (a store record has many fields, never only
- * that one), until its last caller (app/[handle]/thanks/page.tsx, reserved
- * by another lane) moves to orderRoom.
- */
-type LegacyOrderRoom = { order: DataOwner };
-const isOrderRoom = (room: ContactRoom): room is OrderRoom | LegacyOrderRoom =>
-  room !== null && ((room as Partial<OrderRoom>)[ORDER_ROOM] === true || (Object.keys(room).length === 1 && Object.getOwnPropertySymbols(room).length === 0 && "order" in room));
+const isOrderRoom = (room: ContactRoom): room is OrderRoom => room !== null && (room as Partial<OrderRoom>)[ORDER_ROOM] === true;
 
 /** Who a contact's write is counted for: the store's room, an order of the store's (orderRoom), or nobody (the company's own lists). */
-export type ContactRoom = DataStore | OrderRoom | LegacyOrderRoom | null;
+export type ContactRoom = DataStore | OrderRoom | null;
 
 /** Takes what writing these contacts over what they were grows the list by; nothing when the writes are an order's. */
 async function needContacts(room: ContactRoom, pairs: { before: Contact | null; next: Contact }[]): Promise<void> {

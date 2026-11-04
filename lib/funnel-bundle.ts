@@ -219,6 +219,9 @@ export function buildBundle(source: BundleSource, mode: "share" | "own"): { bund
           left.videos += 1;
           block.video = null;
           if (block.kind === "hero" && block.media === "video") block.media = "none";
+          // The video's words and its captions go with it: they were the sender's video's, not the next one's.
+          delete block.transcript;
+          delete block.captioned;
         }
         if (block.kind === "bio" && block.body) {
           left.bios += 1;

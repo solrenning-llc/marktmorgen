@@ -158,7 +158,7 @@ export type HeroBlock = {
   layout?: HeroLayout;
   /** A button under the words, leading where every button on the page leads. */
   button?: boolean;
-};
+} & VideoWords;
 export type HeroLayout = "split" | "centered" | "cover";
 export const HERO_LAYOUTS: { value: HeroLayout; label: string }[] = [
   { value: "split", label: "Side by side" },
@@ -988,10 +988,11 @@ function rowElementWhole(raw: unknown, kept: RowElement): boolean {
       // A picture marked as decoration has its description taken out on purpose.
       return whole(picture.caption) === kept.picture.caption && (kept.decorative || whole(picture.alt) === kept.picture.alt);
     }
+    // A transcript too long is refused with the row, never cut (review of the video-words unit).
     case "video":
-      return whole(value.title) === kept.title;
+      return whole(value.title) === kept.title && lines(value.transcript, Number.MAX_SAFE_INTEGER) === (kept.transcript ?? "");
     case "video-window":
-      return whole(value.title) === kept.title && whole(value.label) === kept.label;
+      return whole(value.title) === kept.title && whole(value.label) === kept.label && lines(value.transcript, Number.MAX_SAFE_INTEGER) === (kept.transcript ?? "");
   }
 }
 
@@ -1040,7 +1041,8 @@ function parseBlock(raw: unknown): PageBlock | null {
     case "hero": {
       const video = parseVideo(value.video);
       const media = value.media === "video" && video ? "video" : value.media === "none" ? "none" : "picture";
-      const hero: HeroBlock = { id, kind: "hero", headline: line(value.headline, MAX_HEADLINE), sub: lines(value.sub, MAX_SUBHEADLINE), media, video };
+      // Its video's words come with the video only (VideoWords).
+      const hero: HeroBlock = { id, kind: "hero", headline: line(value.headline, MAX_HEADLINE), sub: lines(value.sub, MAX_SUBHEADLINE), media, video, ...(media === "video" ? videoWords(value) : {}) };
       if (value.layout === "centered" || value.layout === "cover") hero.layout = value.layout;
       if (value.button === true) hero.button = true;
       return hero;
@@ -1307,6 +1309,7 @@ export type PageProblem =
   | "same_version"
   | "row"
   | "booking"
+  | "transcript"
   | null;
 
 /** The rules of one version's blocks, told back; `kept` is that version as parsed. */
@@ -1321,6 +1324,8 @@ function blocksProblem(sent: unknown[], kept: PageBlock[]): PageProblem {
     const value = block && typeof block === "object" ? (block as Record<string, unknown>) : {};
     if (value.kind === "hero" && value.media === "video" && !parseVideo(value.video)) return "video";
     if (value.kind === "video" && !parseVideo(value.video)) return "video";
+    // A video's transcript longer than it may be is told back, never cut (VideoWords).
+    if ((value.kind === "video" || value.kind === "hero") && lines(value.transcript, Number.MAX_SAFE_INTEGER).length > MAX_TRANSCRIPT) return "transcript";
     // A countdown with no moment, or one too far away to be a deadline.
     if (value.kind === "countdown") {
       const until = parseUntil(value.until);

@@ -25,15 +25,17 @@ export function VideoWordsFields({ id, value, onChange }: { id: string; value: V
           checked={value.captioned === true}
           onChange={(e) => onChange({ ...value, captioned: e.target.checked })}
         />
-        The video has captions of its own (subtitles you turned on where it is hosted)
+        The video has captions of its own (subtitles you turned on where it is hosted). Changing the video address clears this, so you check the new one.
       </label>
       <div>
-        <label htmlFor={`${id}-tr`} className="flex items-baseline justify-between gap-3 text-sm font-medium text-ink">
-          <span>Transcript (optional)</span>
-          <span className="text-xs font-normal text-ink-soft">
+        <div className="flex items-baseline justify-between gap-3">
+          <label htmlFor={`${id}-tr`} className="text-sm font-medium text-ink">
+            Transcript (optional)
+          </label>
+          <span className="text-xs text-ink-soft">
             {transcript.length.toLocaleString("en-US")} of {MAX_TRANSCRIPT.toLocaleString("en-US")} characters
           </span>
-        </label>
+        </div>
         <textarea
           id={`${id}-tr`}
           className="field mt-1"
@@ -47,7 +49,7 @@ export function VideoWordsFields({ id, value, onChange }: { id: string; value: V
           Shown under the video, closed until a visitor opens it. Up to about five minutes of speech; for a longer video, tick captions instead.
         </p>
       </div>
-      <p id={`${id}-state`} className={`text-xs ${said ? "text-ink-soft" : "font-semibold text-ink"}`}>
+      <p id={`${id}-state`} role="status" className={`text-xs ${said ? "text-ink-soft" : "font-semibold text-ink"}`}>
         {said ? "Done: people who cannot hear or see the video can still follow it." : "Not yet: some visitors cannot hear or see a video. Tick captions or write what it says."}
       </p>
     </fieldset>

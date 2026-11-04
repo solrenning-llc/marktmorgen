@@ -15,7 +15,8 @@ export function VideoTranscript({ text, lang }: { text?: string; lang: string })
   if (paragraphs.length === 0) return null;
   return (
     <details className="sp-transcript mt-3">
-      <summary className="inline-flex min-h-11 cursor-pointer items-center font-semibold underline underline-offset-4">{blockWords(lang).videoTranscript}</summary>
+      {/* A list item, as a summary is by default: its own triangle says whether it is open or closed. */}
+      <summary className="min-h-11 cursor-pointer py-2.5 font-semibold underline underline-offset-4">{blockWords(lang).videoTranscript}</summary>
       <div className="mt-2 space-y-3 leading-relaxed">
         {paragraphs.map((paragraph, i) => (
           <p key={i} className="whitespace-pre-line">

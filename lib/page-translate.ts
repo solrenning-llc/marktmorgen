@@ -16,7 +16,7 @@
  * a layout, or a comparison's tick or cross.
  * Browser-safe.
  */
-import { CELL_NO, CELL_YES, type PageBlock, type RowElement, type SalesPage, parsePage } from "@/lib/sales-page";
+import { CELL_NO, CELL_YES, MAX_TRANSCRIPT, type PageBlock, type RowElement, type SalesPage, parsePage } from "@/lib/sales-page";
 
 /** A block's own words. */
 const TEXT = ["headline", "sub", "heading", "body", "label", "note", "caption", "transcript", "yesLabel", "noLabel", "columnA", "columnB"] as const;
@@ -124,7 +124,11 @@ export function keepEveryBlock(original: SalesPage, translated: SalesPage): { pa
   // The blocks put back as they were, by version: counted only once the page is read, so a second version dropped
   // there for being the same as the first does not count its blocks (inbox C4-19 (a)).
   const restored = { main: new Set<PageBlock>(), variant: new Set<PageBlock>() };
-  const reads = (block: PageBlock) => parsePage({ blocks: [block] }).blocks.length === 1;
+  // A block reads when it is kept alone, and none of its videos' transcripts would be cut (MAX_TRANSCRIPT): a
+  // translation that makes one longer leaves the block as it was, counted, rather than cut short unsaid.
+  const transcripts = (block: PageBlock): string[] =>
+    block.kind === "row" ? block.columns.flat().flatMap((part) => ("transcript" in part && typeof part.transcript === "string" ? [part.transcript] : [])) : "transcript" in block && typeof block.transcript === "string" ? [block.transcript] : [];
+  const reads = (block: PageBlock) => parsePage({ blocks: [block] }).blocks.length === 1 && transcripts(block).every((words) => words.length <= MAX_TRANSCRIPT);
   const fit = (from: PageBlock[], to: PageBlock[], kept: Set<PageBlock>): PageBlock[] =>
     to.map((block, at) => {
       if (reads(block)) return block;

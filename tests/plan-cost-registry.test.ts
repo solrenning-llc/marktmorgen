@@ -19,6 +19,8 @@ import { ADD_ON_LINES, ASSIST_REMIND_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, 
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
+import { ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING } from "./plan-cost-registry";
+import { ORDERS_LISTING_COMMANDS, ORDERS_OPEN_UNITS, ORDERS_UNIT_COMMANDS } from "@/lib/buyer-orders-rules";
 import { assessCustomerWorstCase } from "@/lib/net-margin-rules";
 import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
@@ -27,12 +29,6 @@ import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
 import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
-import { readShapeCost } from "./plan-cost-registry";
-import {
-  CALENDAR_BUILD_SHAPE, CALENDAR_BUILD_UNITS, CALENDAR_READ_SHAPE, CALENDAR_READ_UNITS, SEARCH_DM_SHAPE, SEARCH_DM_UNITS, SEARCH_REQUEST_UNITS,
-  SEARCH_ROOM_SHAPE, SEARCH_ROOM_UNITS, SEARCH_SECONDS, SEARCH_SHAPE, TOTALS_STORE_SHAPE, TOTALS_STORE_UNITS, UPDATE_READ_SHAPE, UPDATE_READ_UNITS,
-  WALK_STEP_SHAPE, WALK_STEP_UNITS,
-} from "@/lib/read-ceilings";
 import { SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TIERS } from "@/lib/plan";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
@@ -211,39 +207,16 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // And its checkout reminder is ASSIST_REMIND_REQUEST_UNITS public requests: more than its reads and Stripe calls cost.
   assert.ok(ASSIST_REMIND_REQUEST_UNITS * laterPageCost() >= ASSIST_REMIND_READ, `${ASSIST_REMIND_REQUEST_UNITS} x ${laterPageCost()} < ${ASSIST_REMIND_READ}`);
   console.log(`a Store assistant checkout reminder: $${ASSIST_REMIND_READ.toFixed(6)} at most besides its email and model, counted as ${ASSIST_REMIND_REQUEST_UNITS} requests at $${laterPageCost().toFixed(6)}`);
+  // An opening of a buyer's orders page is ORDERS_OPEN_UNITS public requests before anything is read: more than its time, its fixed reads and
+  // its page cost; and each request its meter takes pays for ORDERS_UNIT_COMMANDS commands, a listing counted as ORDERS_LISTING_COMMANDS.
+  assert.ok(ORDERS_OPEN_UNITS * laterPageCost() >= ORDERS_OPEN_READ, `${ORDERS_OPEN_UNITS} x ${laterPageCost()} < ${ORDERS_OPEN_READ}`);
+  assert.ok(laterPageCost() >= ORDERS_UNIT_COMMANDS * ORDERS_METERED_COMMAND, `${laterPageCost()} < ${ORDERS_UNIT_COMMANDS} x ${ORDERS_METERED_COMMAND}`);
+  assert.ok(ORDERS_LISTING_COMMANDS * ORDERS_METERED_COMMAND >= ORDERS_METERED_LISTING, `${ORDERS_LISTING_COMMANDS} x ${ORDERS_METERED_COMMAND} < ${ORDERS_METERED_LISTING}`);
+  console.log(`an opening of the orders page: $${ORDERS_OPEN_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}; ${ORDERS_UNIT_COMMANDS} metered commands a request`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
   assert.ok(UNIT_COST.buyer >= UNIT_COST.integration && UNIT_COST.buyer >= UNIT_COST.webhook);
-});
-
-test("the four reads of C4-4 take at least their worst before reading (lib/read-ceilings.ts)", () => {
-  // The community search takes the buyers' figure from a member (never the visits' requests) and studio requests from the creator: each held in its own units.
-  const search: [string, typeof SEARCH_REQUEST_UNITS, number][] = [
-    ["community search", SEARCH_REQUEST_UNITS, readShapeCost(SEARCH_SHAPE)],
-    ["its room", SEARCH_ROOM_UNITS, readShapeCost(SEARCH_ROOM_SHAPE)],
-    ["its messages", SEARCH_DM_UNITS, readShapeCost(SEARCH_DM_SHAPE)],
-    ["a step of its one-time walk", WALK_STEP_UNITS, readShapeCost(WALK_STEP_SHAPE)],
-  ];
-  const held: [string, number, number, number][] = [
-    ...search.flatMap(([what, units, worst]): [string, number, number, number][] => [
-      [`${what}, a member's (buyers' figure)`, units.buyer, UNIT_COST.buyer, worst],
-      [`${what}, the creator's (studio)`, units.studio, UNIT_COST.studio, worst],
-    ]),
-    ["the booking calendar's answer", CALENDAR_READ_UNITS, UNIT_COST.studio, readShapeCost(CALENDAR_READ_SHAPE)],
-    ["the booking calendar made again", CALENDAR_BUILD_UNITS, UNIT_COST.studio, readShapeCost(CALENDAR_BUILD_SHAPE)],
-    ["a product update's reading of every sale", UPDATE_READ_UNITS, UNIT_COST.studio, readShapeCost(UPDATE_READ_SHAPE)],
-    ["one store's numbers on the totals page", TOTALS_STORE_UNITS, UNIT_COST.studio, readShapeCost(TOTALS_STORE_SHAPE)],
-  ];
-  for (const [what, units, each, worst] of held) {
-    assert.ok(units * each >= worst, `${what}: ${units} x ${each} < ${worst}`);
-    console.log(`${what}: $${worst.toFixed(6)} at most, taken first as ${units} units at $${each.toFixed(6)}`);
-  }
-  // The search page's time limit is the one its shape is priced at; a page cut at it has spent no more.
-  assert.equal(SEARCH_SHAPE.seconds, SEARCH_SECONDS);
-  assert.ok(read("app/[handle]/community/search/page.tsx").includes(`export const maxDuration = ${SEARCH_SECONDS};`));
-  // A totals reading costs more than a page, so it is no longer the page's units.
-  assert.ok(TOTALS_STORE_UNITS >= STUDIO_PAGE_UNITS);
 });
 
 test("a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced", () => {

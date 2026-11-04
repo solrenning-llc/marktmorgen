@@ -44,7 +44,7 @@ export type AdContext = {
   verifiedReviews: readonly string[];
 };
 
-export type AdRule = TermsWarningKind | "testimonial_unverified" | "empty" | "too_long";
+export type AdRule = TermsWarningKind | "testimonial_unverified" | "empty" | "too_long" | "disguised";
 export type AdFinding = { field: keyof AdText; rule: AdRule; excerpt: string; why: string; fix: string };
 export type AdCheck = { sendable: boolean; refusals: AdFinding[]; warnings: AdFinding[]; notChecked: readonly string[] };
 
@@ -56,12 +56,30 @@ export const AD_NOT_CHECKED: readonly string[] = [
   "Each platform's length limits for headlines and text",
   "Pictures and videos: only the words are read here",
   "A price in a currency other than US dollars: an amount is compared with the product's price only when the store sells in US dollars and the amount is written with $",
+  "Words in a language other than English: the honesty rules here read English words only",
 ];
 
 const REFUSED: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "earnings_claim", "false_urgency", "price_mismatch"]);
 
 // Quoted words followed by who said them ("…" — Ana; "…", said Ben): bounded, with no nested repetition.
 const QUOTE = /["“]([^"”]{8,400})["”],? ?(?:[-–—] ?|said |says )[A-Z]/gu;
+/**
+ * An ad's line as a reader sees it: compatibility forms folded (fullwidth
+ * "＄５９" is "$59"), hidden format characters removed, every run of spaces
+ * one space, so nothing can hide a price, a promise or urgency from the rules.
+ */
+export function adPlain(text: string): string {
+  return text.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/\s+/gu, " ").trim();
+}
+
+/** A word that mixes Latin letters with Cyrillic or Greek ones ("Lаst" with a Cyrillic "а"): a disguise, never a real word. */
+function mixedScriptWord(text: string): string | null {
+  for (const [word] of text.normalize("NFKC").matchAll(/\p{L}+/gu)) {
+    if (/\p{Script=Latin}/u.test(word) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(word)) return word;
+  }
+  return null;
+}
+
 const normal = (words: string) => words.toLowerCase().replace(/[\s ]+/g, " ").replace(/[.!?,;:]+$/, "").trim();
 
 /** Checks an ad's words; `sendable` only when nothing is refused. */
@@ -74,13 +92,25 @@ export function checkAdText(ad: AdText, context: AdContext): AdCheck {
     refusals.push({ field: "text", rule: "too_long", excerpt: "", why: `An ad's words are kept under ${AD_TEXT_MAX} characters.`, fix: "Shorten it." });
     return { sendable: false, refusals, warnings, notChecked: AD_NOT_CHECKED };
   }
-  if (!(ad.headline ?? "").trim() && !(ad.text ?? "").trim()) {
+  if (!adPlain(ad.headline ?? "") && !adPlain(ad.text ?? "")) {
     refusals.push({ field: "headline", rule: "empty", excerpt: "", why: "An ad needs a headline or a main text.", fix: "Write what the product is and who it is for." });
   }
   const reviews = new Set(context.verifiedReviews.map(normal));
   for (const field of fields) {
-    const text = ad[field] ?? "";
-    if (!text.trim()) continue;
+    const raw = ad[field] ?? "";
+    const text = adPlain(raw);
+    if (!text) continue;
+    // Hidden characters or letters of another alphabet inside a word: refused, whatever the words say.
+    const mixed = mixedScriptWord(raw);
+    if (/\p{Cf}/u.test(raw) || mixed) {
+      refusals.push({
+        field,
+        rule: "disguised",
+        excerpt: mixed ?? "",
+        why: mixed ? `"${mixed}" mixes letters of two alphabets, which looks the same as another word but is not.` : "This line has hidden characters in it.",
+        fix: "Type the line again with ordinary letters and spaces.",
+      });
+    }
     const found = checkCreatorTerms({
       text,
       ownHosts: context.ownHosts,

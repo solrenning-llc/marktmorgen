@@ -52,4 +52,17 @@ is("no headline and no text", rules({ headline: " ", text: "" }), ["empty"]);
 is("past the size", rules({ text: "x".repeat(AD_TEXT_MAX + 1) }), ["too_long"]);
 is("a long run of quotes is read fast", (() => { const t = Date.now(); checkAdText(ad({ text: "“".repeat(4000) }), context); return Date.now() - t < 1000; })(), true);
 
+part("Edge tests of 4 November 2026: what hid a price or urgency, and ordinary words that were refused");
+const refusedFor = (rule: string, lines: string[]) => lines.filter((text) => !rules({ headline: "Bread at home", text }).includes(rule as never));
+is("a price behind fullwidth digits or a hidden character is still the price", refusedFor("price_mismatch", ["Only ＄59", "Only $５９", "Only $\u200b59"]), []);
+is("an earlier price written 'Reg.' with no sale", refusedFor("price_mismatch", ["Reg. $59 now $49"]), []);
+is("a price from, or starting at, that is not the price", refusedFor("price_mismatch", ["Courses from $59", "Starting at $59"]), []);
+is("urgency hidden by spacing, a hyphen or fullwidth letters", refusedFor("false_urgency", ["last  chance", "last\nchance", "last-chance", "Limited-time", "Ｌａｓｔ ｃｈａｎｃｅ"]), []);
+is("urgency in more plain English", refusedFor("false_urgency", ["Only three left", "Only 3 remaining", "Just 3 left", "3 spots left", "Only a few left", "Last few spots", "Ends midnight", "Ends in 2 hours", "Ends Nov 5", "Ends 11/5", "Offer ends on Friday", "Expires tonight", "Expires soon", "Final hours", "Last day", "Act fast", "Act today", "Don't miss out", "Selling out fast", "Sells fast", "Almost gone", "Nearly sold out", "While supplies last", "Price will rise", "Price is going up", "Prices increase soon"]), []);
+is("ordinary words are not urgency", ["Selling fast food? Learn the menu", "Only 3 left-handed techniques", "Chapter 3: only 3 left turns", "This course ends today's lesson plan", "Learn to hurry less", "Hurry-up-and-wait tactics explained", "Last chapter", "3 lessons left in the course", "Ends with a Q&A", "The price goes down for students? No, it stays."].filter((text) => rules({ headline: "Bread at home", text }).includes("false_urgency")), []);
+is("a word mixing two alphabets, or a hidden character, is refused as a disguise", [rules({ headline: "L\u0430st chance" }).includes("disguised"), rules({ headline: "Bread\u200b at home" }).includes("disguised"), rules({ headline: "Last\u202e chance" }).includes("disguised")], [true, true, true]);
+is("and a line of hidden characters only is no headline", rules({ headline: "\u200b", text: "" }).includes("empty"), true);
+is("ordinary words in other alphabets are not a disguise", [rules({ headline: "Хлеб дома" }).includes("disguised"), rules({ headline: "Ψωμί at home" }).includes("disguised")], [false, false]);
+is("the check says it reads English words only", AD_NOT_CHECKED.some((line) => line.includes("English words only")), true);
+
 done();

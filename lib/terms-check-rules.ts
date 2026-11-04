@@ -150,16 +150,26 @@ function fastMoneyExcused(text: string, index: number, length: number): boolean 
 }
 
 
-const URGENCY_TIME = /\b(limited time|ends (?:today|tonight|soon|at midnight|(?:this )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))|today only|only today|last chance|price (?:goes|will go) up|before the timer (?:runs out|ends)|act now|hurry)\b/gi;
-const URGENCY_STOCK = /\b(only \d+ (?:left|spots?|seats?|copies|places)|limited (?:spots|seats|copies|places)|selling fast|almost sold out)\b/gi;
+/** Between the words of a phrase: spaces or a hyphen ("last-chance", "limited  time"). */
+const W = String.raw`[\s-]+`;
+const MONTH = String.raw`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?`;
+const URGENCY_TIME = new RegExp(
+  String.raw`\b(limited${W}time|ends${W}(?:on${W})?(?:today(?!['’])|tonight|soon|at${W}midnight|midnight|in${W}\d+${W}(?:hours?|days?|minutes?)|(?:this${W})?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|${MONTH}${W}\d{1,2}|\d{1,2}/\d{1,2})|expires${W}(?:today|tonight|soon)|final${W}hours|last${W}day|today${W}only|only${W}today|last${W}chance|price${W}(?:goes|will${W}go|is${W}going)${W}up|price${W}will${W}rise|prices?${W}(?:will${W})?(?:increase|rise|go${W}up)(?:${W}soon)?|before${W}the${W}timer${W}(?:runs${W}out|ends)|act${W}(?:now|fast|today)|hurry(?![\s-]*(?:less|up[\s-]+and))|don['’]?t${W}miss${W}out)\b`,
+  "gi",
+);
+const HOW_MANY = String.raw`(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|a${W}few)`;
+const URGENCY_STOCK = new RegExp(
+  String.raw`\b((?:only|just)${W}${HOW_MANY}${W}(?:left(?![\s-]*(?:handed|turns?|side|over))|remaining)|${HOW_MANY}${W}(?:spots?|seats?|places|copies)${W}(?:left|remaining)|only${W}${HOW_MANY}${W}(?:spots?|seats?|copies|places)|limited${W}(?:spots|seats|copies|places)|last${W}few${W}(?:spots|seats|copies|places)|selling${W}(?:out${W})?fast(?![\s-]*food)|sells${W}fast|almost${W}(?:sold${W}out|gone)|nearly${W}sold${W}out|while${W}supplies${W}last)\b`,
+  "gi",
+);
 
 const RESALE = /\b(resell(?:ing)? rights?|resale rights?|master resell(?:ing)? rights?|PLR|private label rights?|white[- ]label rights?)\b/gi;
 
 const MONEY = /\$\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))?(?!\d)/g;
 /** A word saying what follows is the price, just before the amount. */
-const PRICE_WORD = /\b(price|priced|costs?|pay|paying|only|just|for|now|today|sale)\b[^.!?;\n$]{0,12}$/i;
+const PRICE_WORD = /\b(price|priced|costs?|pay|paying|only|just|for|now|today|sale|from|starting at|starts at)\b[^.!?;\n$]{0,12}$/i;
 /** A word saying what follows is an earlier price ("was $49", "instead of $49"): only true while a sale is running. */
-const WAS_PRICE_WORD = /\b(was|were|instead of|regularly|originally|normally|usually|reg\.?)\b[^.!?;\n$]{0,8}$/i;
+const WAS_PRICE_WORD = /\b(was|were|instead of|regularly|originally|normally|usually|reg)\b\.?[^.!?;\n$]{0,8}$/i;
 /** An amount that is not the product's price: shipping, tax, a fee, a stated value, a saving. */
 const NOT_PRICE_BEFORE = /\b(shipping|delivery|postage|tax|taxes|fees?|save|saving|savings|worth|valued at|refunds?|deposit|tip|bonus)\b[^.!?;\n$]{0,16}$/i;
 const NOT_PRICE_AFTER = /^\S*\s*(?:\)|,)?\s*(value|worth|off|discount|shipping|tax|fee|deposit|bonus)\b/i;

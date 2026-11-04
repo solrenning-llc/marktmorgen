@@ -796,7 +796,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "Can I put the buyer's email on a PDF?",
         a: [
-          "Yes. Switch on stamping for a product, and every page of the PDF a buyer downloads carries one line along the bottom with their email, the date and their order. It discourages sharing; it does not stop it, and it is not copy protection. PDFs up to 50 MB are stamped; a bigger one, or one locked with a password, is handed over as uploaded and your studio tells you. Say on the product that the buyer's email is printed on it.",
+          "Yes. Switch on stamping for a product, and every page of the PDF a buyer downloads carries one line along the bottom with their email, the date and their order. It discourages sharing; it does not stop it, and it is not copy protection. PDFs up to 50 MB are stamped; a bigger one, or one locked with a password, is handed over as uploaded and your studio tells you. An EPUB gets the same line hidden inside the book's files, where reading apps do not show it; one with a digital signature or encryption (DRM) is handed over as uploaded. Say on the product that the buyer's email is in the file.",
         ],
       },
       {

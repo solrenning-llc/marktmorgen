@@ -42,6 +42,7 @@
  * keep at one time, for the closing days after a plan ends
  * (PER_PAYMENT_LINES).
  */
+import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import type { Tier } from "@/lib/plan";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
@@ -244,6 +245,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stats:@lib/api-numbers.ts": { what: "The numbers as the API and the MCP tools read them, kept an hour", parts: [capped(2 * (NUMBERS_KEPT_BYTES + KB), "Two copies, without and with the products' listings, each at most NUMBERS_KEPT_BYTES and its first line.", src("lib/api-read-rules.ts", "NUMBERS_KEPT_BYTES"))] },
   "nl:aff:@lib/affiliate-bond.ts": { what: "Which affiliate a buyer belongs to", parts: [kept(MARK, "A field per buyer, written with a sale, kept for good.")] },
   "nl:aff:@lib/affiliate-codes.ts": { what: "Discount codes given to affiliates", room: ["lib/affiliate-codes.ts"] },
+  // An affiliate program's book worked out for all its affiliates and kept a day (4 November 2026), past its cap not kept at all.
+  "nl:aff:@lib/affiliate-book-snapshot.ts": { what: "An affiliate program's book, shown a day and kept a week more for its affiliates' own pages, the draft of its refresh and that draft's name, the lock of its refresh, its version, its count of refreshes without a complete book and when the last began", parts: [capped(2 * BOOK_SNAPSHOT_MAX_BYTES + 6 * KEY, "One book a store, BOOK_SNAPSHOT_MAX_BYTES at the most (UTF-8 bytes, as Redis counts them), BOOK_KEEP_SECONDS, and one draft while it is written, renamed into its place (the next refresh deletes one a stopped refresh left, so never two); the draft's name, its lock BOOK_LOCK_SECONDS, the version raised by a person's deletion (BOOK_KEEP_SECONDS), the count of paid refreshes in a row without a complete book (BOOK_TRIES_KEEP_SECONDS) and when the last one began until it writes (BOOK_FRESH_SECONDS), a key each.", src("lib/affiliate-book-snapshot.ts", "BOOK_SNAPSHOT_MAX_BYTES", "BOOK_KEEP_SECONDS", "BOOK_LOCK_SECONDS", "BOOK_TRIES_KEEP_SECONDS", "BOOK_FRESH_SECONDS"))] },
   "nl:affhub:@lib/affiliate-hub.ts": company("The stores an address is an affiliate of", "Per affiliate across stores, in the set of the quarter it was noted in, kept QUARTERS_KEPT quarters at the most: written with an affiliate record (capped by MAX_AFFILIATES per store, below); what a closed store leaves in it is the company's as the hub is, and runs out with its quarter."),
   "nl:affhub:link:@lib/affiliate-hub.ts": company("An emailed link to an affiliate's page, a day", "Per affiliate across stores, behind a per-address limit."),
   "nl:sdemo:@lib/studio-demo-rules.ts": company("The studio demo's day: its counts and caps (nl:sdemo:day:<day>), and the day's sessions and refusals by a keyed fingerprint of each address or network, with the day's count of refusals (nl:sdemo:addr:<day>)", "The company's, no store's (256 [KJ1], off): the day's hash holds only the fields of DEMO_COUNTS and the caps' counters, kept 400 days; the addresses' hash holds at most DEMO_SESSIONS_PER_DAY fields of sessions, DEMO_REFUSALS_PER_DAY fields of an address's refusals and the day's count of refusals, and ends with the day (EXPIREAT)."),

@@ -3228,6 +3228,41 @@ a.sp-product:focus-visible {
 .sp-row-icon {
   display: inline-flex;
 }
+/* A video in a window (components/video-window.tsx): the picture viewer's
+   dialog, with the player as wide as the screen allows at 16:9 and a Close
+   button that says its name. */
+.sp-video-window-mark {
+  font-weight: 500;
+}
+.vw-dialog {
+  width: min(100vw, 64rem);
+}
+.vw-title {
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.pv-button.vw-close {
+  display: inline-flex;
+  gap: 0.375rem;
+  width: auto;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding-inline: 0.875rem 1rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.vw-video {
+  width: min(100%, calc((100dvh - 6rem) * 16 / 9));
+  margin-inline: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vw-dialog .pv-button {
+    transition: none;
+  }
+}
 @container (min-width: 560px) {
   .sp-row-2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));

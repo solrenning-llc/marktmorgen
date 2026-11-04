@@ -57,7 +57,19 @@ is("webhooks signed with HMAC-SHA256", [says("signed with HMAC-SHA256"), /create
 is("paid work reserved against store and site ceilings before it starts", [says("counted against a monthly ceiling for your store, and one for the whole site, before it starts"), /export async function reserveAiSpend/.test(read("lib/ai-spend.ts")), /reserveAiSpend\(/.test(read("lib/ai.ts")), /export async function reserveStoreUpload/.test(read("lib/upload-budget.ts")), /reserveStoreUpload\(store, MAX_FILE_BYTES/.test(read("app/api/store/file/route.ts"))], [true, true, true, true, true]);
 
 part("Data export and deletion");
-is("the whole store as one file", [says("can download everything your store keeps as one file"), /what === "store"/.test(read("app/api/store/export/route.ts")), /export function storeExport/.test(read("lib/store-export.ts"))], [true, true, true]);
+// The export promise may name only what storeExport writes, and must name what it leaves out (review of #2114, C4-45).
+const exporter = read("lib/store-export.ts");
+const exportKeys = [...new Set([...exporter.matchAll(/[,{]\\?"(\w+)\\?":/g)].map((m) => m[1]))].filter((key) => !["exportedAt", "store", "unreadPart", "ordersNote", "notIncluded"].includes(key));
+const exportAt = words.indexOf('"title":"A copy of your store');
+const exportCopy = exportAt < 0 ? "" : words.slice(exportAt, words.indexOf("}", exportAt));
+const copyText = exportCopy.toLowerCase();
+const excluded = (/"notIncluded":"([^"]*)"/.exec(exporter)?.[1] ?? "").split(":")[0].toLowerCase();
+const promised = (/ (?:download )?a copy of (.*?) as one file/.exec(copyText)?.[1] ?? "");
+is("the export keys are products, courses, posts, forms, contactsCsv, ordersCsv", exportKeys.sort(), ["contactsCsv", "courses", "forms", "ordersCsv", "posts", "products"]);
+is("the copy names each exported part", ["products", "courses", "posts", "forms", "contacts", "orders"].map((word) => promised.includes(word)), [true, true, true, true, true, true]);
+is("the copy lists each exclusion of notIncluded and the CRM tasks (not in storeExport)", [["files", "videos", "community posts"].map((word) => excluded.includes(word) && /not in it/.test(copyText) && copyText.includes(word)), !/readPersonTasks|crm/.test(exporter) && copyText.includes("crm tasks")], [[true, true, true], true]);
+is("the copy does not promise everything or the whole store", [/everything|whole store|entire store/.test(copyText), says("can download everything your store keeps")], [false, false]);
+is("the export is offered from the studio", [/what === "store"/.test(read("app/api/store/export/route.ts")), /export function storeExport/.test(exporter)], [true, true]);
 is("a buyer deletes their own data by an emailed link", [says("Buyers can delete their own data"), words.includes('"href":"/privacy/delete"'), existsSync("app/privacy/delete/page.tsx"), existsSync("app/api/privacy/erase/route.ts")], [true, true, true, true]);
 is("a creator deletes one person", [says("can delete one person from your store"), /erasePerson\(/.test(read("app/api/store/person/route.ts"))], [true, true]);
 

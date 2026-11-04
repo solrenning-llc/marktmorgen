@@ -253,7 +253,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
                 New pipeline
               </button>
             ) : null}
-            {pipelines.length < pipelineMax ? (
+            {pipelines.length < pipelineMax && canChange ? (
               /* 639 [GL7](8): the same stages under a new name, none of its deals; opened to read and save, nothing saved yet. */
               <button type="button" className="btn btn-ghost btn-sm" disabled={locked || editing || writeUnconfirmed} onClick={() => { setError(null); const copy = copyPipeline(pipeline, pipelines); setPipelineDraft({ ...copy, isNew: true, moves: {}, removeTo: "" }); }}>
                 <Icon name="plus" size={16} />
@@ -369,7 +369,7 @@ export function DealsBoard({ deals, stages: everyStage, pipelines: savedPipeline
             No deals yet. When someone asks about something you sell outside a checkout, press &ldquo;New deal&rdquo; and move it across the stages as the talk goes on.
           </p>
         ) : null}
-        {view === "agenda" ? <DealAgenda deals={visibleDeals} stages={stages} currency={currency} today={today} disabled={locked || editing || writeUnconfirmed} onEdit={deal => { setError(null); setDraft(draftFromDeal(deal, currency)); }} /> : (
+        {view === "agenda" ? <DealAgenda deals={visibleDeals} stages={stages} currency={currency} today={today} disabled={locked || editing || writeUnconfirmed} onEdit={canChange ? deal => { setError(null); setDraft(draftFromDeal(deal, currency)); } : undefined} /> : (
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {columns.map(({ stage, count, cents }) => (
             <section key={stage.id} aria-label={stage.name} className="min-w-0 rounded-2xl bg-paper p-4 ring-1 ring-line">

@@ -55,22 +55,32 @@ export const DEMO_COMMANDS_PER_ACTION = 12;
  */
 export const DEMO_START_COMMANDS = 19;
 /**
- * Refused demo requests the whole site counts in a day (UTC). Every request
- * that reaches Redis reads this count first, with its address's own; past it,
- * the demo answers "closed" for the rest of the day after that one command,
- * and writes nothing. A refusal reaches it only through its address's
- * DEMO_REFUSALS_PER_ADDRESS_PER_DAY, so one address alone can never fill it.
+ * Refused demo requests with no live session behind them (a door, a cookie
+ * that names no live session) the whole site counts in a day (UTC). Such a
+ * request reads this count first, with its address's own; past it, the door
+ * answers "closed" and the cookie reads nothing for the rest of the day,
+ * after that first read, and nothing is written. A refusal reaches it only
+ * through its address's DEMO_REFUSALS_PER_ADDRESS_PER_DAY, so one address
+ * alone can never fill it. A live session is never answered by it: what a
+ * session refuses is counted in its own record (DEMO_REFUSALS_PER_SESSION).
  */
 export const DEMO_REFUSALS_PER_DAY = 5_000;
 /**
- * Refused demo requests one address (a new-kind one by its network, as
- * DEMO_SESSIONS_PER_ADDRESS_PER_DAY) counts in a day (UTC), each counted for
- * the whole site too. Past it, that address alone is answered after the first
- * read for the rest of the day, and nothing is written.
+ * Refused demo requests with no live session behind them one address (a
+ * new-kind one by its network, as DEMO_SESSIONS_PER_ADDRESS_PER_DAY) counts in
+ * a day (UTC), each counted for the whole site too. Past it, that address can
+ * open no session and read no made-up cookie for the rest of the day, after
+ * the first read and writing nothing; a session already open behind it goes on.
  */
 export const DEMO_REFUSALS_PER_ADDRESS_PER_DAY = 10;
+/**
+ * Refused actions one live session counts in its own record, whoever else
+ * shares its address. Past it, that session's next actions are answered after
+ * reading its record, and nothing is written. Priced with each day's openings.
+ */
+export const DEMO_REFUSALS_PER_SESSION = 10;
 /** Database commands a refused request sends at the most, its own counting included (held in tests/studio-demo.test.ts). */
-export const DEMO_REFUSAL_WORST_COMMANDS = 10;
+export const DEMO_REFUSAL_WORST_COMMANDS = 7;
 /** Bytes opening a session moves through the database at the most, both ways (held in tests/studio-demo.test.ts). */
 export const DEMO_START_DB_BYTES = 4_096;
 /** Bytes an action's own check and count, or a refused request with its counting, move through the database at the most, both ways (held in tests/studio-demo.test.ts). */
@@ -306,10 +316,16 @@ export function demoDayWorstActions(): number {
   return demoDayReachableSessions() * DEMO_ACTIONS_PER_SESSION;
 }
 
-/** One day's openings at their worst, with all their actions (some may run the next day), in micro-USD; the CDN's part is added by the test. */
+/** The most refusals one day's openings can count in their own records: every reachable session at its DEMO_REFUSALS_PER_SESSION. */
+export function demoDaySessionRefusals(): number {
+  return demoDayReachableSessions() * DEMO_REFUSALS_PER_SESSION;
+}
+
+/** One day's openings at their worst, with all their actions and their own refusals (some may run the next day), in micro-USD; the CDN's part is added by the test. */
 export function demoCohortFunctionWorstMicroUsd(): number {
   return demoDayReachableSessions() * (DEMO_START_FUNCTION_MICRO_USD + DEMO_SESSION_KEPT_MICRO_USD)
-    + demoDayWorstActions() * DEMO_ACTION_FUNCTION_MICRO_USD;
+    + demoDayWorstActions() * DEMO_ACTION_FUNCTION_MICRO_USD
+    + demoDaySessionRefusals() * DEMO_REFUSAL_FUNCTION_MICRO_USD;
 }
 
 /** A day's counted refusals at their worst, in micro-USD; the CDN's part is added by the test. */
@@ -329,5 +345,5 @@ export function demoDayFunctionWorstMicroUsd(): number {
 export const DEMO_UNKNOWN_COSTS: readonly string[] = [
   "The script and style files a demo studio page loads from the CDN: not measured for the studio (tests/traffic-cost.ts measured 13 on a store's page).",
   "The bot check at its basic level: lib/bot-check.ts records no charge per check, without a dated official source in the repository.",
-  "Requests refused without being counted: a program the bot check refuses, and every request past the day's DEMO_REFUSALS_PER_DAY or past its own address's DEMO_REFUSALS_PER_ADDRESS_PER_DAY, each one database command at the most and nothing written; and requests that passed that first read together while one place was left and found it taken when counting, each up to DEMO_REFUSAL_WORST_COMMANDS and nothing written. Each is still a function call, and nothing bounds how many arrive across addresses; the bot check is the brake for the door, and reads and actions have none yet.",
+  "Requests refused without being counted: a program the bot check refuses; every door past the day's DEMO_REFUSALS_PER_DAY or past its own address's DEMO_REFUSALS_PER_ADDRESS_PER_DAY (one database command), every made-up cookie past them (two) and every action of a session past its DEMO_REFUSALS_PER_SESSION (one), each with nothing written; and requests that passed their first read together while one place was left and found it taken when counting, each up to DEMO_REFUSAL_WORST_COMMANDS and nothing written. Each is still a function call, and nothing bounds how many arrive across addresses; the bot check is the brake for the door, and reads and actions have none yet.",
 ];

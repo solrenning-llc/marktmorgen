@@ -24,6 +24,7 @@ import {
   DEMO_SESSION_WORST_COMMANDS, DEMO_START_COMMANDS, DEMO_START_DB_BYTES, DEMO_TAKE_DB_BYTES, STUDIO_DEMO_ON, sandboxKey,
 } from "@/lib/studio-demo-rules";
 import * as rulesNs from "@/lib/studio-demo-rules";
+import { ELSEWHERE_FAMILIES } from "@/lib/data-families";
 import { store } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -217,7 +218,7 @@ async function run(): Promise<void> {
   is("its check and count bill DEMO_TAKE_COMMANDS", first.commands, DEMO_TAKE_COMMANDS);
   is("under an action's commands", DEMO_TAKE_COMMANDS < DEMO_COMMANDS_PER_ACTION, true);
   is(`and move no more than DEMO_TAKE_DB_BYTES (${first.bytes})`, first.bytes <= DEMO_TAKE_DB_BYTES, true);
-  is("and touch only the day's addresses (the refusals read first), the session record and the day", [...new Set(first.keys)], [addrKey, record, dayKey]);
+  is("and touch only the session record (its own refusals read with it) and the day, never the addresses' refusals", [...new Set(first.keys)], [record, dayKey]);
   is("the day counts the commands sent", store.run(["HGET", dayKey, "sent"]), String(DEMO_START_COMMANDS + DEMO_COMMANDS_PER_ACTION));
   store.run(["HSET", record, "actions", String(DEMO_ACTIONS_PER_SESSION - 1)]);
   is("the last action runs", (await takeDemoAction(asker(), s, cost, at(clock))).ok, true);
@@ -266,19 +267,22 @@ async function run(): Promise<void> {
   const RN = rulesNs as unknown as Record<string, unknown>;
   const REFUSALS = Number(RN.DEMO_REFUSALS_PER_DAY), REFUSAL_WORST = Number(RN.DEMO_REFUSAL_WORST_COMMANDS);
   const REFUSALS_ADDRESS = Number(RN.DEMO_REFUSALS_PER_ADDRESS_PER_DAY), REFUSAL_BYTES = DEMO_TAKE_DB_BYTES;
+  const REFUSALS_SESSION = Number(RN.DEMO_REFUSALS_PER_SESSION);
   is("the day's refusals and a refusal's commands are capped", [Number.isSafeInteger(REFUSALS) && REFUSALS > 0, Number.isSafeInteger(REFUSAL_WORST) && REFUSAL_WORST > 0], [true, true]);
   const live = await openStudioDemo(door("192.0.2.50"), at(clock));
   if (!live.ok) throw new Error("no session");
   const liveRecord = sandboxKey(live.session.id, "session")!;
   for (let i = 0; i < DEMO_SESSIONS_PER_ADDRESS_PER_DAY; i += 1) await openStudioDemo(door("192.0.2.60"), at(clock));
   const refusedNow = () => Number(store.run(["HGET", addrKey, "refused"]) ?? 0);
+  const sessionRefused = () => Number(store.run(["HGET", liveRecord, "refused"]) ?? 0);
   const ghost: StudioDemoSession = { ...live.session, id: "sd" + "e".repeat(32) };
-  const paths: [string, () => Promise<unknown>, () => void][] = [
-    ["an address past its sessions", () => openStudioDemo(door("192.0.2.60"), at(clock)), () => {}],
-    ["a day with no session left", () => openStudioDemo(door("192.0.2.61"), at(clock)), () => store.run(["HSET", dayKey, "sessions", String(DEMO_SESSIONS_PER_DAY)])],
-    ["a session whose record is gone", () => takeDemoAction(door(), ghost, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => {}],
-    ["an action past the day's commands", () => takeDemoAction(door(), live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => store.run(["HSET", dayKey, "sent", String(DEMO_COMMANDS_PER_DAY)])],
-    ["an action past the session's, refused by its script", () => takeDemoAction(door(), live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => {
+  // Each path, and where its refusal is counted: the site's (through its address) or the live session's own record.
+  const paths: [string, () => Promise<unknown>, () => void, () => number][] = [
+    ["an address past its sessions", () => openStudioDemo(door("192.0.2.60"), at(clock)), () => {}, refusedNow],
+    ["a day with no session left", () => openStudioDemo(door("192.0.2.61"), at(clock)), () => store.run(["HSET", dayKey, "sessions", String(DEMO_SESSIONS_PER_DAY)]), refusedNow],
+    ["a session whose record is gone", () => takeDemoAction(door(), ghost, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => {}, refusedNow],
+    ["an action past the day's commands, in the session's own record", () => takeDemoAction(door(), live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => store.run(["HSET", dayKey, "sent", String(DEMO_COMMANDS_PER_DAY)]), sessionRefused],
+    ["an action past the session's, refused by its script, in the session's own record", () => takeDemoAction(door(), live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)), () => {
       store.run(["HSET", dayKey, "sent", "0"]);
       // As if another request took the last place between this one's read and its count.
       const run = store.run.bind(store);
@@ -289,15 +293,15 @@ async function run(): Promise<void> {
         }
         return run(command);
       };
-    }],
-    ["a cookie naming no session", () => readStudioDemo(withCookie(`${DEMO_COOKIE}=${ghost.id}`), at(clock)), () => {}],
+    }, sessionRefused],
+    ["a cookie naming no session", () => readStudioDemo(withCookie(`${DEMO_COOKIE}=${ghost.id}`), at(clock)), () => {}, refusedNow],
   ];
-  for (const [name, work, setUp] of paths) {
+  for (const [name, work, setUp, counted] of paths) {
     setUp();
-    const was = refusedNow();
+    const was = counted();
     const step = await billed(work);
     const result = step.result as { ok?: boolean } | null;
-    is(`${name}: refused, counted once, in ${step.commands} commands at most DEMO_REFUSAL_WORST_COMMANDS`, [result === null || result.ok === false, refusedNow() - was, step.commands <= REFUSAL_WORST], [true, 1, true]);
+    is(`${name}: refused, counted once, in ${step.commands} commands at most DEMO_REFUSAL_WORST_COMMANDS`, [result === null || result.ok === false, counted() - was, step.commands <= REFUSAL_WORST], [true, 1, true]);
     is(`${name}: and moves no more than the bytes a refusal is priced with (${step.bytes})`, step.bytes <= REFUSAL_BYTES, true);
   }
   store.run(["HSET", dayKey, "sessions", "0"]);
@@ -305,10 +309,11 @@ async function run(): Promise<void> {
   const shut = () => store.keys().map((k) => [k, store.run(["TYPE", k]) === "hash" ? store.run(["HGETALL", k]) : store.run(["GET", k])]);
   const beforeShut = shut();
   const closedOpen = await billed(() => openStudioDemo(door("192.0.2.70"), at(clock)));
-  const closedTake = await billed(() => takeDemoAction(door(), live.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)));
-  const closedRead = await billed(() => readStudioDemo(withCookie(`${DEMO_COOKIE}=${live.session.id}`), at(clock)));
-  is("past the day's refusals, a door, an action and a read are each answered after one command", [closedOpen.result, closedTake.result, closedRead.result, closedOpen.commands, closedTake.commands, closedRead.commands], [{ ok: false, reason: "closed" }, { ok: false, reason: "closed" }, null, 1, 1, 1]);
+  const closedRead = await billed(() => readStudioDemo(withCookie(`${DEMO_COOKIE}=${ghost.id}`), at(clock)));
+  is("past the day's refusals, a door is answered after one command and a made-up cookie after two", [closedOpen.result, closedRead.result, closedOpen.commands, closedRead.commands], [{ ok: false, reason: "closed" }, null, 1, 2]);
   is("and nothing is written", shut(), beforeShut);
+  const ownRead = await billed(() => readStudioDemo(withCookie(`${DEMO_COOKIE}=${live.session.id}`), at(clock)));
+  is("while a live session still reads, in two commands", [ownRead.result?.id, ownRead.commands], [live.session.id, 2]);
 
   part("One address, or made-up cookies, never close the demo for everyone");
   const refusedToday = () => Number(store.run(["HGET", addrKey, "refused"]) ?? 0);
@@ -335,7 +340,9 @@ async function run(): Promise<void> {
     const k = r.ok ? "ok" : r.reason;
     spent[k] = (spent[k] ?? 0) + 1;
   }
-  is(`one address sending ${REFUSALS + 4} actions past its session's is refused, its share counted`, [spent, refusedToday()], [{ actions: REFUSALS_ADDRESS, address: REFUSALS + 4 - REFUSALS_ADDRESS }, REFUSALS_ADDRESS]);
+  is(`a session sending ${REFUSALS + 4} actions past its own is refused, its own refusals counted in its record and none for the site`, [spent, store.run(["HGET", sandboxKey(busy.session.id, "session")!, "refused"]), refusedToday()], [{ actions: REFUSALS_SESSION, refusals: REFUSALS + 4 - REFUSALS_SESSION }, String(REFUSALS_SESSION), 0]);
+  const pastOwn = await billed(() => takeDemoAction(door("198.51.100.205"), busy.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock)));
+  is("past its own refusals, an action is answered after one command, nothing written", [pastOwn.result, pastOwn.commands], [{ ok: false, reason: "refusals" }, 1]);
   const other = await openStudioDemo(door("198.51.100.206"), at(clock));
   is("so another address still opens and acts", [other.ok, other.ok && (await takeDemoAction(door("198.51.100.206"), other.session, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock))).ok], [true, true]);
   fresh();
@@ -359,6 +366,24 @@ async function run(): Promise<void> {
   await Promise.all(Array.from({ length: 4 * REFUSALS_ADDRESS }, () => readStudioDemo(sameAddress, at(clock))));
   is(`${4 * REFUSALS_ADDRESS} refusals at once from one address count exactly its share`, refusedToday(), REFUSALS_ADDRESS);
 
+  part("A live session is never barred by other people's refusals");
+  fresh();
+  const office = "198.51.100.230";
+  const atOffice = await openStudioDemo(door(office), at(clock));
+  if (!atOffice.ok) throw new Error("no session");
+  const officeSession = atOffice.session;
+  const asked = (cookie: string, address: string) => new Request("https://marktmorgen.com/api/studio-demo", { headers: { cookie: `${DEMO_COOKIE}=${cookie}`, "x-forwarded-for": address } });
+  const officeAct = () => takeDemoAction(door(office), officeSession, { commands: DEMO_COMMANDS_PER_ACTION, bytes: 1 }, at(clock));
+  for (let i = 0; i < REFUSALS_ADDRESS + 5; i += 1) await readStudioDemo(asked(`sd${"0".repeat(32)}`, office), at(clock));
+  is("behind one address (an office, a carrier's NAT), a stranger's made-up cookies spend the address's share: no new session opens there", await openStudioDemo(door(office), at(clock)), { ok: false, reason: "address" });
+  is("but the session already open behind it still reads", (await readStudioDemo(asked(officeSession.id, office), at(clock)))?.id, officeSession.id);
+  is("and still acts", (await officeAct()).ok, true);
+  store.run(["HSET", addrKey, "refused", String(REFUSALS)]);
+  const pastDay = await billed(() => readStudioDemo(asked(`sd${"1".repeat(32)}`, "198.51.100.232"), at(clock)));
+  is("past the site's refusals, a new door is closed and a made-up cookie reads nothing, counting nothing", [await openStudioDemo(door("198.51.100.231"), at(clock)), pastDay.result, refusedToday()], [{ ok: false, reason: "closed" }, null, REFUSALS]);
+  is("but a live session still reads", (await readStudioDemo(asked(officeSession.id, office), at(clock)))?.id, officeSession.id);
+  is("and still acts", (await officeAct()).ok, true);
+
   part("Its first drafts, and what the module may reach");
   const seedFile = readFileSync("lib/demo-seed.ts", "utf8");
   is("the product, the page and the offer are the demo store's own words", [
@@ -371,6 +396,8 @@ async function run(): Promise<void> {
   is("it imports only the bot check, Redis, the request guard, its rules, the address rule and the key its fingerprints are made with", imports, ["@/lib/bot-check", "@/lib/redis", "@/lib/request-guard", "@/lib/secret-box", "@/lib/studio-demo-rules", "@/lib/traffic-rules", "node:crypto"]);
   is("the route imports only the module", [...readFileSync("app/api/studio-demo/route.ts", "utf8").matchAll(/from "([^"]+)"/g)].map((m) => m[1]), ["@/lib/studio-demo"]);
   is("no switch is read from the environment", /process\.env/.test(source), false);
+  const demoFamilies = ELSEWHERE_FAMILIES.flatMap((name, i) => (name.startsWith(DEMO_NAMESPACE) ? [[ELSEWHERE_FAMILIES[i - 1], name, ELSEWHERE_FAMILIES[i + 1]]] : []));
+  is("the demo's families sit in their place in ELSEWHERE_FAMILIES, in order", [demoFamilies.length, demoFamilies.every(([before, name, after]) => before < name && name < after)], [2, true]);
 }
 
 run().then(done, (error) => {

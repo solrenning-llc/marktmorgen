@@ -102,16 +102,18 @@ const refusals = num("DEMO_REFUSALS_PER_DAY");
 const perOpening = num("DEMO_START_FUNCTION_MICRO_USD") + num("DEMO_SESSION_KEPT_MICRO_USD") + cdnPerAnswer;
 const perAction = DEMO_ACTION_FUNCTION_MICRO_USD + cdnPerAnswer;
 const perRefusal = num("DEMO_REFUSAL_FUNCTION_MICRO_USD") + cdnPerAnswer;
-const cohortMicroUsd = call("demoCohortFunctionWorstMicroUsd") + (reachable + actions) * cdnPerAnswer;
+const sessionRefusals = call("demoDaySessionRefusals");
+is("each reachable session counts its own refusals, at most", sessionRefusals, reachable * num("DEMO_REFUSALS_PER_SESSION"));
+const cohortMicroUsd = call("demoCohortFunctionWorstMicroUsd") + (reachable + actions + sessionRefusals) * cdnPerAnswer;
 const refusalsMicroUsd = call("demoRefusalsFunctionWorstMicroUsd") + refusals * cdnPerAnswer;
 const dayMicroUsd = cohortMicroUsd + refusalsMicroUsd;
 is("the day's function worst is one day's openings and its refusals", demoDayFunctionWorstMicroUsd(), call("demoCohortFunctionWorstMicroUsd") + call("demoRefusalsFunctionWorstMicroUsd"));
-// Every pair a day can hold, by brute force: s sessions open only while s whole worsts fit, each takes up to its actions.
+// Every pair a day can hold, by brute force: s sessions open only while s whole worsts fit, each takes up to its actions and counts up to its own refusals.
 let best = 0;
 for (let s = 0; s <= DEMO_SESSIONS_PER_DAY; s += 1) {
   if (s * DEMO_SESSION_WORST_COMMANDS > DEMO_COMMANDS_PER_DAY) break;
   for (let a = 0; a <= s * DEMO_ACTIONS_PER_SESSION; a += 1) {
-    for (const r of [0, refusals]) best = Math.max(best, s * perOpening + a * perAction + r * perRefusal);
+    for (const r of [0, refusals]) best = Math.max(best, s * (perOpening + num("DEMO_REFUSALS_PER_SESSION") * perRefusal) + a * perAction + r * perRefusal);
   }
 }
 is("the day's ceiling is the most of every pair the caps allow", Math.abs(dayMicroUsd - best) < 1e-6, true);
@@ -122,6 +124,7 @@ const doc = readFileSync("docs/studio-demo.md", "utf8");
 is("an action at its worst, in micro-USD", Math.round(perAction * 100) / 100, 51.77);
 is(`the doc states the day's known worst (${dollars(dayMicroUsd)})`, doc.includes(`${dollars(dayMicroUsd)} a day`), true);
 is(`the doc states thirty days (${dollars(thirtyMicroUsd)})`, doc.includes(`${dollars(thirtyMicroUsd)} in thirty days`), true);
+is(`the doc states the sessions' own refused actions (${sessionRefusals})`, doc.includes(`sessions' own ${sessionRefusals.toLocaleString("en-US")} refused actions`), true);
 is(`the doc states the reachable sessions and actions (${reachable}, ${actions})`, doc.includes(`${reachable} openings and ${actions.toLocaleString("en-US")} actions`), true);
 is("the doc says the demo stays off while a cost is unknown", /unknown/i.test(doc) && /STUDIO_DEMO_ON/.test(doc), true);
 

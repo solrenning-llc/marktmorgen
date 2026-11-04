@@ -8,12 +8,14 @@
  * record and first drafts are written with one absolute end, in the demo's
  * namespace only; a session reads back; an action is counted at its caps'
  * exact edges and two actions at the last place pass one; refusals at the
- * same moment count no more than an address's share, nor past the day's cap.
+ * same moment count no more than an address's share, nor past the day's cap,
+ * nor past a session's own; and a live session goes on whatever other
+ * people's refusals are, behind its address or on the whole site.
  */
 import { STUDIO_DEMO_SEED_VALUES, openStudioDemo, readStudioDemo, takeDemoAction } from "@/lib/studio-demo";
 import {
   DEMO_ACTIONS_PER_SESSION, DEMO_BYTES_PER_SESSION, DEMO_COOKIE, DEMO_NAMESPACE, DEMO_REFUSALS_PER_ADDRESS_PER_DAY, DEMO_REFUSALS_PER_DAY, DEMO_SESSIONS_PER_ADDRESS_PER_DAY,
-  DEMO_SESSIONS_PER_DAY,
+  DEMO_REFUSALS_PER_SESSION, DEMO_SESSIONS_PER_DAY,
   DEMO_SESSION_SECONDS, sandboxKey,
 } from "@/lib/studio-demo-rules";
 import { redisPipeline } from "@/lib/redis";
@@ -58,7 +60,13 @@ async function main(): Promise<void> {
   await Promise.all(Array.from({ length: 20 }, (_, i) => readStudioDemo(ghost(i), ON)));
   check("twenty made-up cookies at once, one place left: the day's refusals stop at their cap", await one(["HGET", addrKey, "refused"]), String(DEMO_REFUSALS_PER_DAY));
   check("past the day's refusals the door is closed and counts nothing more", [await openStudioDemo(door("192.0.2.9"), ON), await one(["HGET", addrKey, "refused"])], [{ ok: false, reason: "closed" }, String(DEMO_REFUSALS_PER_DAY)]);
+  const asked = (cookie: string) => new Request("https://marktmorgen.com/", { headers: { cookie: `${DEMO_COOKIE}=${cookie}`, "x-forwarded-for": "192.0.2.3" } });
+  check("past the day's refusals a live session still reads and acts", [(await readStudioDemo(asked(s.id), ON))?.id, (await takeDemoAction(door("192.0.2.3"), s, { commands: 12, bytes: 1 }, ON)).ok], [s.id, true]);
   await one(["HSET", addrKey, "refused", "0"]);
+  await Promise.all(Array.from({ length: 2 * DEMO_REFUSALS_PER_ADDRESS_PER_DAY }, () => readStudioDemo(asked(`sd${"1".repeat(32)}`), ON)));
+  check("behind its address, others' made-up cookies stop new sessions there", await openStudioDemo(door("192.0.2.3"), ON), { ok: false, reason: "address" });
+  check("but the live session behind it still reads and acts", [(await readStudioDemo(asked(s.id), ON))?.id, (await takeDemoAction(door("192.0.2.3"), s, { commands: 12, bytes: 1 }, ON)).ok], [s.id, true]);
+  await one(["HSET", keys[0], "actions", "0", "bytes", String(s.bytes)]);
   check("the house key is untouched", await one(["GET", "nl:store:0123456789abcdef0123456789abcdef"]), "house");
   check("the session reads back", await readStudioDemo(new Request("https://marktmorgen.com/", { headers: { cookie: `${DEMO_COOKIE}=${s.id}`, "x-forwarded-for": "192.0.2.3" } }), ON), s);
   check("its life is its DEMO_SESSION_SECONDS", s.expiresAt - s.startedAt, DEMO_SESSION_SECONDS * 1000);
@@ -72,6 +80,10 @@ async function main(): Promise<void> {
   check("filling the bytes exactly runs", (await takeDemoAction(door("192.0.2.3"), s, cost, ON)).ok, true);
   check("one byte past them is refused", await takeDemoAction(door("192.0.2.3"), s, { commands: 12, bytes: 1 }, ON), { ok: false, reason: "bytes" });
   check("at its end it is over", await takeDemoAction(door("192.0.2.3"), s, cost, { ...ON, now: () => s.expiresAt }), { ok: false, reason: "expired" });
+  await one(["HSET", keys[0], "actions", String(DEMO_ACTIONS_PER_SESSION), "bytes", "0", "refused", "0"]);
+  const over = await Promise.all(Array.from({ length: 4 * DEMO_REFUSALS_PER_SESSION }, () => takeDemoAction(door("192.0.2.3"), s, cost, ON)));
+  check("actions at once past the session's own: all refused, its record counts exactly its own refusals", [over.every((r) => !r.ok), await one(["HGET", keys[0], "refused"])], [true, String(DEMO_REFUSALS_PER_SESSION)]);
+  check("past them it is answered without counting, and its record still ends with the session", [await takeDemoAction(door("192.0.2.3"), s, cost, ON), await one(["HGET", keys[0], "refused"]), await one(["PEXPIRETIME", keys[0]])], [{ ok: false, reason: "refusals" }, String(DEMO_REFUSALS_PER_SESSION), s.expiresAt]);
   finish();
 }
 

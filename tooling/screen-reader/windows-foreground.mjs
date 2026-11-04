@@ -1,3 +1,4 @@
+import {ownedRepositoryEnv} from "./owned-repository.mjs";
 import {spawn} from "node:child_process";
 
 // One hidden process is prepared BEFORE Chromium. Queries read Win32 state;
@@ -31,7 +32,7 @@ export async function startWindowsForegroundProbe(options={}){
  const {env=process.env,platform=process.platform,launch=spawn,timeoutMs=3000,
   startupTimeoutMs=options.timeoutMs===undefined?10000:timeoutMs,
   onDiagnostic=event=>console.error("AX2_NVDA_NATIVE_DIAGNOSTIC:"+JSON.stringify(event))}=options;
- if(platform!=="win32"||env.GITHUB_ACTIONS!=="true"||env.GITHUB_REPOSITORY!=="viniciussucupira/marktmorgen"||env.AX2_PUBLIC_DISPOSABLE_RUNNER!=="true")
+ if(platform!=="win32"||env.GITHUB_ACTIONS!=="true"||!ownedRepositoryEnv(env)||env.AX2_PUBLIC_DISPOSABLE_RUNNER!=="true")
   throw Error("Native foreground diagnostics require the owned disposable Windows runner");
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>3000||
     !Number.isSafeInteger(startupTimeoutMs)||startupTimeoutMs<1||startupTimeoutMs>10000)

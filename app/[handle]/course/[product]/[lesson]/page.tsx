@@ -11,7 +11,7 @@ import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, lessonVideo } from "@/lib/learn";
-import { type Attempt, attemptOf, heldBack, passedQuizzes, readQuizFor } from "@/lib/quiz";
+import { type Attempt, attemptOf, heldBack, passedQuizzes, readQuizFor, studentQuiz } from "@/lib/quiz";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -119,6 +119,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
     lesson.task && student ? submissionOf(course.id, lesson.id, who) : Promise.resolve<Submission | null>(null),
   ]);
   const quizMode = access.state === "open" && access.learner.owner ? "owner" : student && open ? "student" : "visitor";
+  // A student sees only the questions their try draws from a bank (lib/quiz.ts).
+  const asked = quiz && attempt && quizMode === "student" ? studentQuiz(quiz, course.id, lesson.id, who, attempt) : null;
   // Comments are for the course's students and its creator; a visitor on a
   // free preview sees none of them.
   const reader = access.state === "open" && open ? (access.learner.owner ? CREATOR_AUTHOR : who) : null;
@@ -260,8 +262,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {quiz ? (
               <LessonQuiz
-                quiz={quiz}
+                quiz={asked?.quiz ?? quiz}
                 attempt={attempt}
+                waitSeconds={asked?.wait ?? 0}
+                stale={query.quiz === "stale"}
                 mode={quizMode}
                 action="/api/store/course/quiz"
                 hidden={{ handle: store.handle, product: product.id, lesson: lesson.id }}

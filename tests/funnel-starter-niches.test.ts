@@ -37,5 +37,6 @@ const cooks = renderToStaticMarkup(createElement(FunnelStarterGallery, { starter
 is("with one chosen, each card says how it fits, and only its campaigns are shown", [Object.values(NICHE_FIT.cooks).every((l) => cooks.includes(l)), cooks.includes(`${Object.keys(NICHE_FIT.cooks).length} of ${cards.length} campaigns shown`)], [true, true]);
 is("the line chosen is searched too", matchingStarters(cards, "all", "recipe pack", "cooks").map((c) => c.id), ["digital-product"]);
 is("the button's name holds its visible words", html.includes('aria-label="Set up this campaign: '), true);
+is("every set-up button's name starts with its visible words and names its campaign (2.5.3), as the browser checks find it", cards.every((c) => html.includes(`aria-label="Set up this campaign: ${c.label}">Set up this campaign</button>`)), true);
 
 done();

@@ -6,3 +6,4 @@ Only Claude 4 edits this file (owner decision 04/11/2026, inbox C4-1). Add a row
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 4 | 388 [TB14] F38 (MM-SA-18): a lost dispute closes what a full refund closes | claude4/tb14-lost-dispute | `lib/refunds.ts`, `lib/community-access.ts`, `lib/buyer-orders.ts`, `lib/upsell.ts`, `lib/preorders.ts`, `lib/licence-keys.ts`, `tests/lost-dispute-access.test.ts` | 04/11/2026 |

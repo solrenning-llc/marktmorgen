@@ -18,7 +18,14 @@
  *     hears "revoked" from the public check.
  *
  * The rule is the same for all of them: the payment was refunded in full,
- * as Stripe says on the charge. A partial refund keeps access, because the
+ * as Stripe says on the charge, or the bank took it back for good, a dispute
+ * Stripe closed as lost (queue 388 [TB14], F38; audit MM-SA-18). A buyer who
+ * won a chargeback has their money back exactly as a refunded one has, so
+ * the same doors close, after the same delays as above (the job that revokes
+ * keys reads the disputes closed since its last run, as it reads refunds).
+ * A dispute still open (needs_response, under_review, the warning_ stages)
+ * or won by the creator closes nothing: only the final "lost" does. A
+ * partial refund keeps access, because the
  * creator chose to keep part of the price, and the buyer keeps what it paid
  * for. A payment added in one click after checkout is its own payment and
  * is judged on its own; a product ticked at checkout is part of the
@@ -30,29 +37,144 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 
-type ChargeLike = { refunded?: unknown; amount?: unknown; amount_refunded?: unknown };
+type ChargeLike = {
+  id?: unknown;
+  refunded?: unknown;
+  amount?: unknown;
+  amount_refunded?: unknown;
+  disputed?: unknown;
+  /**
+   * The charge's dispute, when it came with the charge: older API versions
+   * could expand it there; the current one cannot, so disputeLost() asks
+   * Stripe for it, and lostDisputesSince() writes it here from the dispute.
+   */
+  dispute?: unknown;
+};
+
+/** A dispute Stripe closed against the creator, as written on the charge. */
+function lostOnCharge(charge: ChargeLike): boolean {
+  const dispute = charge.dispute;
+  return (
+    charge.disputed === true &&
+    dispute !== null &&
+    typeof dispute === "object" &&
+    (dispute as { status?: unknown }).status === "lost"
+  );
+}
 
 function chargeRefunded(charge: ChargeLike): boolean {
   if (charge.refunded === true) return true;
+  if (lostOnCharge(charge)) return true;
   const amount = typeof charge.amount === "number" ? charge.amount : 0;
   const back = typeof charge.amount_refunded === "number" ? charge.amount_refunded : 0;
   return amount > 0 && back >= amount;
 }
 
+/** The charge of a PaymentIntent read with its latest charge expanded, or a Charge itself. */
+function chargeOf(payment: unknown): ChargeLike | null {
+  if (!payment || typeof payment !== "object") return null;
+  const value = payment as { object?: unknown; latest_charge?: unknown } & ChargeLike;
+  if (value.object === "charge") return value;
+  const charge = value.latest_charge;
+  return charge && typeof charge === "object" ? (charge as ChargeLike) : null;
+}
+
 /**
- * Whether Stripe says this payment was given back in full.
+ * Whether Stripe says this payment was given back in full: refunded, or a
+ * dispute written on the charge as lost (see disputeLost() for the current
+ * API, which no longer sends the dispute with the charge).
  *
  * Takes a PaymentIntent read with its latest charge expanded, or a Charge
  * itself. Anything Stripe did not expand, or did not send, counts as not
  * refunded: only Stripe saying so closes a door.
  */
 export function refundedInFull(payment: unknown): boolean {
-  if (!payment || typeof payment !== "object") return false;
-  const value = payment as { object?: unknown; latest_charge?: unknown } & ChargeLike;
-  if (value.object === "charge") return chargeRefunded(value);
-  const charge = value.latest_charge;
-  if (charge && typeof charge === "object") return chargeRefunded(charge as ChargeLike);
-  return false;
+  const charge = chargeOf(payment);
+  return charge ? chargeRefunded(charge) : false;
+}
+
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+
+/**
+ * Whether the bank took this payment back from the creator for good: a
+ * dispute on its charge that Stripe has closed as lost. Takes what
+ * refundedInFull() takes. Stripe marks a disputed charge with `disputed` but
+ * no longer sends the dispute with it, and nothing can expand it, so only
+ * for a charge marked disputed (rare) is Stripe asked for that charge's
+ * disputes: a door reading an undisputed payment makes no extra request.
+ * A charge not expanded, or not marked, counts as not lost, as with refunds.
+ * Throws when Stripe cannot be asked.
+ */
+export async function disputeLost(account: string, payment: unknown): Promise<boolean> {
+  const charge = chargeOf(payment);
+  if (!charge || charge.disputed !== true) return false;
+  if (lostOnCharge(charge)) return true;
+  const id = typeof charge.id === "string" ? charge.id : "";
+  if (!CHARGE_ID.test(id)) return false;
+  const listed = await onAccount("GET", account, `/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`);
+  const rows = Array.isArray(listed.data) ? (listed.data as { status?: unknown }[]) : [];
+  return rows.some((row) => row && row.status === "lost");
+}
+
+/** Refunded in full, or lost to a dispute: given back either way. Throws when Stripe cannot be asked. */
+export async function givenBack(account: string | null | undefined, payment: unknown): Promise<boolean> {
+  if (refundedInFull(payment)) return true;
+  return account ? disputeLost(account, payment) : false;
+}
+
+/**
+ * A payment given back, as the jobs that take things back read them: a
+ * refund from /refunds (its charge expanded), or a dispute closed as lost,
+ * read by lostDisputesSince() in the same shape. `id` is what the job keeps
+ * as read (re_… or the evt_… of the closing).
+ */
+export type GivenBackRow = Record<string, unknown>;
+
+/** Whether one row of a job's reading takes its sale back: a full refund going through, or a lost dispute. */
+export function rowGivesBack(row: GivenBackRow): boolean {
+  if (row.object === "dispute") return row.status === "lost";
+  if (row.status !== "succeeded" && row.status !== "pending") return false;
+  return refundedInFull(row.charge);
+}
+
+/**
+ * The disputes on the creator's account that Stripe closed as lost since
+ * `since` (seconds), read from the closing events, which Stripe keeps thirty
+ * days: each as a row rowGivesBack() takes, `id` the event's, `created` the
+ * time it closed, `payment_intent` the payment it took back. `complete` is
+ * false when there were more than the pages read, so the caller keeps its
+ * place and reads them again next time.
+ */
+export async function lostDisputesSince(
+  account: string,
+  since: number,
+  pages = 3,
+): Promise<{ rows: GivenBackRow[]; complete: boolean }> {
+  const found: GivenBackRow[] = [];
+  let after = "";
+  for (let page = 0; page < pages; page += 1) {
+    const query = new URLSearchParams({ type: "charge.dispute.closed", limit: "100", "created[gte]": String(Math.max(0, Math.floor(since))) });
+    if (after) query.set("starting_after", after);
+    const listed = await onAccount("GET", account, `/events?${query}`);
+    const events = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    for (const event of events) {
+      const dispute = ((event.data as { object?: unknown } | null)?.object ?? null) as Record<string, unknown> | null;
+      if (typeof event.id !== "string" || !dispute || dispute.status !== "lost") continue;
+      const charge = idOf(dispute.charge);
+      found.push({
+        object: "dispute",
+        id: event.id,
+        status: "lost",
+        created: typeof event.created === "number" ? event.created : 0,
+        payment_intent: idOf(dispute.payment_intent) || null,
+        charge: { object: "charge", id: charge, disputed: true, dispute: { status: "lost" } },
+      });
+    }
+    const last = events[events.length - 1];
+    if (listed.has_more !== true || !last || typeof last.id !== "string") return { rows: found, complete: true };
+    after = last.id;
+  }
+  return { rows: found, complete: false };
 }
 
 type SessionLike = {
@@ -103,7 +225,7 @@ async function planRefundedInFull(account: string, session: SessionLike): Promis
     if (!intents.length) return false;
     const checked = await Promise.all(
       intents.map(async (intent) =>
-        refundedInFull(await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`)),
+        givenBack(account, await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`)),
       ),
     );
     return checked.every(Boolean);
@@ -115,9 +237,18 @@ async function planRefundedInFull(account: string, session: SessionLike): Promis
 
 /**
  * Whether a checkout's purchase was given back in full: its payment, or for a
- * payment plan its first invoice's. The one rule for every door.
+ * payment plan its first invoice's, refunded in full or lost to a dispute.
+ * The one rule for every door. A plan's later instalments, refunded or lost,
+ * close nothing here, as before.
  */
 export async function purchaseRefunded(account: string | null | undefined, session: SessionLike): Promise<boolean> {
   if (refundedInFull(session.payment_intent)) return true;
-  return account ? planRefundedInFull(account, session) : false;
+  if (!account) return false;
+  try {
+    if (await disputeLost(account, session.payment_intent)) return true;
+  } catch (error) {
+    // As for a plan's first payment below: what Stripe did not answer closes nothing.
+    console.error("reading a payment's dispute failed", error);
+  }
+  return planRefundedInFull(account, session);
 }

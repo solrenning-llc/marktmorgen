@@ -62,7 +62,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { refundedInFull } from "@/lib/refunds";
+import { lostDisputesSince, rowGivesBack } from "@/lib/refunds";
 import { readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -474,7 +474,11 @@ export function storeHasKeys(store: Store): boolean {
  * made that payment (a cs_… reference), or the payment itself for an offer
  * taken in one click (a pi_… reference). Both the product bought and the one
  * ticked at checkout lose their keys, since both were paid by that payment.
- * A partial refund changes nothing. Returns how many keys it revoked.
+ * A partial refund changes nothing. A dispute Stripe closed as lost takes
+ * the key back as a full refund does (queue 388 [TB14]): the disputes closed
+ * since the last run are read with the first page of refunds, from Stripe's
+ * closing events, so a lost dispute revokes within the same five minutes;
+ * one still open, or won, changes nothing. Returns how many keys it revoked.
  */
 const idOf = (value: unknown): string =>
   typeof value === "string"
@@ -535,14 +539,17 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // Lost disputes, read once with the first page; more than it reads keeps the anchor.
+    const lost = page === 0 ? await lostDisputesSince(account, since) : { rows: [], complete: true };
+    if (!lost.complete) unsure = true;
+    const rows = [...lost.rows, ...refunds];
     for (const refund of rows) {
       if (Date.now() >= deadline) break;
       const id = typeof refund.id === "string" ? refund.id : "";
       const created = typeof refund.created === "number" ? refund.created : 0;
       if (!id) continue;
-      if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-      if (!refundedInFull(refund.charge)) continue;
+      if (!rowGivesBack(refund)) continue;
       const [seen] = await redisPipeline([["SISMEMBER", refundSeenKey(store), id]]);
       if (Number(seen) === 1) {
         newest = Math.max(newest, created);
@@ -605,7 +612,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
       ]);
       newest = Math.max(newest, created);
     }
-    const last = rows[rows.length - 1];
+    const last = refunds[refunds.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") {
       complete = true;
       break;

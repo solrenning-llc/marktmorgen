@@ -15,6 +15,7 @@
  *   - the preview writes nothing.
  */
 import {
+  ACTION_COMMANDS_PER_STEP,
   HISTORY_COMMANDS_PER_STEP,
   MAX_RETRIES_BY_YOU,
   MAX_STEPS,
@@ -115,7 +116,7 @@ async function main(): Promise<void> {
   is(
     "start, every step and each retry of the creator's, and every wait",
     WORST_COMMANDS_PER_RUN,
-    RUN_START_COMMANDS + (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) + MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY,
+    RUN_START_COMMANDS + (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP + ACTION_COMMANDS_PER_STEP) + MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY,
   );
   is("and the commercial review captures the bounds", [WORKFLOW_LIMITS.maxWaitsPerRun, WORKFLOW_LIMITS.maxWaitDaysPerStep, WORKFLOW_LIMITS.maxRetriesByYou, WORKFLOW_LIMITS.worstCommandsPerRun], [MAX_WAITS_PER_RUN, MAX_WAIT_DAYS_PER_STEP, MAX_RETRIES_BY_YOU, WORST_COMMANDS_PER_RUN]);
 

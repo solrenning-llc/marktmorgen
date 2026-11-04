@@ -18,10 +18,11 @@
  * cost and the webhooks a step queues (lib/webhooks.ts keeps its own retry
  * ceiling).
  *
- * Worst case per run, for the margin review: MAX_STEPS steps, each at most
- * HISTORY_COMMANDS_PER_STEP history commands and QUEUE_COMMANDS_PER_STEP queue
- * and contact commands, plus RUN_START_COMMANDS once. These are ceilings for
- * the review's arithmetic, not measured averages.
+ * Worst case per run, for the margin review: MAX_STEPS steps (and the
+ * creator's retries), each at most STEP_COMMANDS commands and STEP_BYTES
+ * bytes, every wait at WAIT_COMMANDS_PER_TRY and WAIT_BYTES, plus the start
+ * once. These are ceilings measured on the real path at its worst
+ * (tests/flow-step-cost.test.ts), not averages.
  */
 import type { Tier } from "@/lib/plan";
 
@@ -91,32 +92,130 @@ export const MAX_WAITS_PER_RUN = 3;
 export const MAX_WAIT_DAYS_PER_STEP = 35;
 export const MAX_RETRIES_BY_YOU = 1;
 
-/** Ceilings for the margin review's per-run arithmetic. */
-export const RUN_START_COMMANDS = 8;
+/**
+ * Ceilings for the margin review's per-run arithmetic, measured on the real
+ * path (tests/flow-step-cost.test.ts, 4 November 2026) as Upstash bills them:
+ * every command of every pipeline, and for a script (EVAL) one command more
+ * for every redis.call it runs (https://upstash.com/docs/redis/overall/billing,
+ * read 31 October 2026). Each step is measured for a batch of one person (a
+ * batch shares its reads, so one is the dearest), in a job run that serves
+ * nothing else, its empty scans included, with the dearest condition on it (a
+ * course's progress: three reads), which holds, so its action runs too.
+ *
+ * RUN_START_COMMANDS: a run's start, from the trigger (enroll): the store's
+ * workflows read, whether the person may be written to, the start claimed,
+ * the day's runs counted, the run's room taken in the data room (one script,
+ * its own month slot's later removal charged here), the run's record and
+ * history opened and its first step queued. Measured at 24; 8 until this date,
+ * which counted neither the script's inner commands nor the record's.
+ */
+export const RUN_START_COMMANDS = 26;
+/** A step's history: the attempt claimed and written, then settled (cleared, written, the run's record and index, and its expiry when it ends). Measured at 8. */
 export const HISTORY_COMMANDS_PER_STEP = 9;
-// The queue's own commands for one person's step: the scan, the take from the queue, the lease, the person's row, the lease entry read with
-// it (since 4 November 2026: a stop step of another workflow may have removed it), the next step queued while leased, and the lease let go: 7.
-// The actions' own commands (a deal read and moved, a rotate's lock, a stop's removal) are not in it yet: measured and added in the follow-up on workflow step costs.
-export const QUEUE_COMMANDS_PER_STEP = 7;
+/**
+ * The queue's and the job's own commands for one person's step: the leases
+ * scanned, the queue scanned twice (the step, then nothing more), the take
+ * from the queue, the lease, the store and its workflows read (3), the
+ * person's row with their lease entry (2: a stop step of another workflow may
+ * have removed it), the next step queued while still leased (one script and
+ * its two inner commands: QUEUE_IF_LEASED in lib/flows.ts), the step's tally
+ * and the lease let go. Measured at 14 on a step that waits and 15 with its
+ * tally; 7 until 4 November 2026, which left out the scans, the store, the
+ * workflows, the tally and the script's inner commands.
+ */
+export const QUEUE_COMMANDS_PER_STEP = 15;
+/**
+ * The condition's reads (a course's progress, the dearest: 3) and the action's
+ * or the email's own commands, at the dearest action: a label that starts
+ * every other workflow of the store with it (19 on Scale, whose 20 may be
+ * switched on), each start refused because the run has no room in the data
+ * room (the start claimed, the day's runs counted, the room script and its
+ * inner commands, the start and the day given back: 15 each). That step was
+ * measured at 313 commands in all; this, with HISTORY_COMMANDS_PER_STEP and
+ * QUEUE_COMMANDS_PER_STEP, holds 320, rounded up to the next ten, which also
+ * leaves room for three month slots gone by that a room script in the step may
+ * clear on its way (two commands each, lib/store-data.ts). The other actions
+ * measured lower: rotate 46, webhook to five endpoints 42, a note on a page
+ * already full 44, an email 40, a deal made 40, assign 39, a deal moved 38, a
+ * stop that ends a held run 37, a start refused for room 38, a field 34, a
+ * label refused for the day for 19 workflows 142. A start a step makes that is
+ * admitted is a run of its own, counted in the day's runs and priced with its
+ * own RUN_START_COMMANDS. None of this was counted until 4 November 2026.
+ */
+export const ACTION_COMMANDS_PER_STEP = 296;
+/** Every command one step of a run may cost, at the most. */
+export const STEP_COMMANDS = HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP + ACTION_COMMANDS_PER_STEP;
 /**
  * One wait, at the most, for a batch of one person (the dearest case; a
  * batch shares its reads): the job's queue scans, take and lease (6), the
  * store and its workflows (3), the person's row and their lease entry, read
  * together (2: a stop step of another workflow removes that entry), the
- * attempt claimed and written (2), what the send read before stopping (up to 9 when the
- * month's emails ran out: the pause, the day, the sender, the month's count
- * taken and given back), the wait counted (3), the attempt cleared and taken
- * back out of the history (4), the step put back in the queue only while
- * the lease entry is still there (1, one script: QUEUE_IF_LEASED in
- * lib/flows.ts), and the lease let go (1). Measured at 22 for a wait on the
- * day's room and 31 for the month's emails (tests/workflow-retries.test.ts,
- * 4 November 2026, with the lease read); 32 with room to spare.
+ * course condition's reads (3), the attempt claimed and written (2), what the
+ * send read before stopping (up to 9 when the month's emails ran out: the
+ * pause, the day, the sender, the month's count taken and given back), the
+ * wait counted (3), the attempt cleared and taken back out of the history
+ * (4), the step put back in the queue only while the lease entry is still
+ * there (one script and its two inner commands: QUEUE_IF_LEASED in
+ * lib/flows.ts), and the lease let go (1). Measured on 4 November 2026
+ * (tests/flow-step-cost.test.ts) at 36 for the month's emails, 35 for a
+ * rotate whose deal could not be read just before it was written, 30 for an
+ * assign whose team could not be read, 28 for a stop not confirmed and 27 for
+ * a rotate whose lock was taken; 38 holds them with two to spare. It was 32
+ * until that day, measured without the condition's reads or the script's inner
+ * commands (tests/workflow-retries.test.ts measures a wait on the day's room
+ * and the month's emails too).
  */
-export const WAIT_COMMANDS_PER_TRY = 32;
+export const WAIT_COMMANDS_PER_TRY = 38;
 export const WORST_COMMANDS_PER_RUN =
   RUN_START_COMMANDS +
-  (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) +
+  (MAX_STEPS + MAX_RETRIES_BY_YOU) * STEP_COMMANDS +
   MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY;
+
+/**
+ * Bytes, sent and answered, which Upstash bills past the free quota (no free
+ * quota counted: lib/spend-cost-table.ts, UPSTASH_MICRO_USD_PER_GB_TRANSFER).
+ * Measured with the commands (tests/flow-step-cost.test.ts) as what the REST
+ * API carries: each command's arguments, a script's source included, and each
+ * answer as JSON. The few records a step reads whose size grows with what the
+ * creator keeps are priced at their most, apart from the measured rest:
+ *
+ *   - the store's workflows, read once by every step, wait and start: up to
+ *     MAX_FLOWS workflows of MAX_STEPS steps, each with a subject of 150 and a
+ *     body of 20,000 characters (lib/mail.ts, MAX_SUBJECT, MAX_MAIL_BODY),
+ *     each character at most 6 bytes in the stored JSON (a control character,
+ *     "\u0001") and 7 in the answer, which escapes the backslash once more;
+ *     2,000 bytes a step for its id, wait, condition, routes and action, and
+ *     80 characters and 4,000 bytes a workflow for its name and the rest:
+ *     20 x (20 x (7 x 20,150 + 2,000) + 7 x 80 + 4,000) = 57,311,200 bytes;
+ *   - the deals board, read whole by a deal step: up to MAX_DEALS deals
+ *     (lib/crm-rules.ts, 1,000) of at most 7,500 bytes each as answered (a
+ *     title of 90, a note of 500 and a next action of 200 characters at 7
+ *     bytes, two addresses and the rest at twice what they keep): 7,500,000;
+ *   - the store's record, read when the job loads the store: up to
+ *     MAX_STORE_BYTES (lib/store.ts, 1,000,000) kept, at most twice that
+ *     answered (every quote and backslash escaped): 2,000,000.
+ *
+ * What is not priced here beyond the measurement: the course outline a
+ * condition on a course reads, the person's contact row and their notes,
+ * which no code bounds other than the store's data room; with workflows and
+ * deals at their most they are small beside these.
+ */
+export const WORKFLOWS_READ_BYTES = 57_311_200;
+export const DEALS_READ_BYTES = 7_500_000;
+export const STORE_READ_BYTES = 2_000_000;
+/** The rest of a run's start, measured at 4,278 bytes (the room script's source is most of it). */
+export const RUN_START_FIXED_BYTES = 5_000;
+/** The rest of a step, measured at most 65,420 bytes: the label refused for room for 19 workflows, the room script sent each time. */
+export const STEP_FIXED_BYTES = 70_000;
+/** The rest of a wait's try, measured at most 6,387 bytes (a stop not confirmed). */
+export const WAIT_FIXED_BYTES = 7_000;
+export const RUN_START_BYTES = RUN_START_FIXED_BYTES + WORKFLOWS_READ_BYTES;
+export const STEP_BYTES = STEP_FIXED_BYTES + WORKFLOWS_READ_BYTES + DEALS_READ_BYTES + STORE_READ_BYTES;
+export const WAIT_BYTES = WAIT_FIXED_BYTES + WORKFLOWS_READ_BYTES + DEALS_READ_BYTES + STORE_READ_BYTES;
+export const WORST_BYTES_PER_RUN =
+  RUN_START_BYTES +
+  (MAX_STEPS + MAX_RETRIES_BY_YOU) * STEP_BYTES +
+  MAX_WAITS_PER_RUN * WAIT_BYTES;
 
 type PlanView = { tier: Tier; subscriptionActive: boolean; trialEnds: number };
 const inTrial = (store: PlanView, nowSeconds: number) => store.trialEnds > nowSeconds;
@@ -156,6 +255,7 @@ export const WORKFLOW_LIMITS = {
   maxRunEvents: MAX_RUN_EVENTS,
   runKeepSeconds: RUN_KEEP_SECONDS,
   worstCommandsPerRun: WORST_COMMANDS_PER_RUN,
+  worstBytesPerRun: WORST_BYTES_PER_RUN,
   maxWaitsPerRun: MAX_WAITS_PER_RUN,
   maxWaitDaysPerStep: MAX_WAIT_DAYS_PER_STEP,
   maxRetriesByYou: MAX_RETRIES_BY_YOU,

@@ -14,7 +14,7 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 
 | Line | Store monthly ($69) | Store yearly ($690) | Studio monthly ($449) | Studio yearly ($4490) | Scale monthly ($999) | Scale yearly ($9990) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Net today | 60.31% | 60.58% | 60.38% | 60.06% | 60.46% | 60.07% |
+| Net today | 60.13% | 60.37% | 54.52% | 53.03% | 56.22% | 54.99% |
 | AI drafts / answers a month | none today | none today | 40 / 250 | 40 / 250 | 80 / 400 | 80 / 400 |
 | Video hours watched a month | 4 | 4 | 32 | 32 | 64 | 64 |
 | Storage | 5 GiB | 5 GiB | 40 GiB | 40 GiB | 80 GiB | 80 GiB |
@@ -23,9 +23,11 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 | Access emails a month | 150 | 150 | 400 | 400 | 1,000 | 1,000 |
 | List emails a month | none today | none today | 7,000 | 7,000 | 10,000 | 10,000 |
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
-| Net with the cuts | **60.31%** | **60.58%** | **60.38%** | **60.06%** | **60.46%** | **60.07%** |
-| Every printed line at 10% / at zero | 62.04% / 62.23% | 62.52% / 62.74% | 62.76% / 63.02% | 62.74% / 63.03% | 62.79% / 63.05% | 62.71% / 63.00% |
-| Or every printed line cut alike to | 100.00% of today | 100.00% of today | 100.00% of today | 100.00% of today | 100.00% of today | 100.00% of today |
+| Net with the cuts | **60.13%** | **60.37%** | not reachable | not reachable | not reachable | not reachable |
+| Every printed line at 10% / at zero | 61.88% / 62.07% | 62.31% / 62.53% | 56.90% / 57.17% | 55.70% / 56.00% | 58.56% / 58.82% | 57.63% / 57.92% |
+| Or every printed line cut alike to | 100.00% of today | 100.00% of today | none reaches 60% | none reaches 60% | none reaches 60% | none reaches 60% |
+
+Not reachable by printed cuts within the 10% floor: Studio monthly (even with every printed line at zero it keeps 57.17%: its hidden lines and receiving alone take more than the floor leaves); Studio yearly (even with every printed line at zero it keeps 56.00%: its hidden lines and receiving alone take more than the floor leaves); Scale monthly (even with every printed line at zero it keeps 58.82%: its hidden lines and receiving alone take more than the floor leaves); Scale yearly (even with every printed line at zero it keeps 57.92%: its hidden lines and receiving alone take more than the floor leaves).
 
 ## How each line compares
 

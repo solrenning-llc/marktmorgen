@@ -59,7 +59,7 @@ import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
-import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
+import { DAILY_RUNS_BY_TIER, WORST_BYTES_PER_RUN, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, MAX_REPORT_ROWS } from "@/lib/imports";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
@@ -267,6 +267,11 @@ export function figureCost(allowances: Record<AllowanceKind, number>, kind: Allo
  */
 export const REQUEST_COMMANDS = 1 + SHARE_COMMANDS_PER_REQUEST;
 
+/** What one workflow run can cost the database at the most: its commands and the bytes it moves (lib/flow-limits.ts). */
+export function runCost(): number {
+  return WORST_COMMANDS_PER_RUN * COMMAND + WORST_BYTES_PER_RUN * DB_BYTE;
+}
+
 /** What one request costs: its call, CPU, memory, database commands and the bytes it moves through the database. */
 export function request(shape: keyof typeof SHAPES, commands: number, bytes = 0): number {
   const { seconds, cpu } = SHAPES[shape];
@@ -438,9 +443,9 @@ export const COST_LINES: CostLine[] = [
   {
     id: "workflows",
     feature: "Workflow runs (#507)",
-    monthlyUsd: (tier) => DAILY_RUNS_BY_TIER[tier] * DAY_WINDOWS * WORST_COMMANDS_PER_RUN * COMMAND,
-    sources: [{ file: "lib/flow-limits.ts", names: ["DAILY_RUNS_BY_TIER", "WORST_COMMANDS_PER_RUN", "TRIAL_DAILY_RUNS", "ACTIVE_FLOWS_BY_TIER", "WORKFLOW_LIMITS"] }],
-    basis: "Every new run of every UTC day a billing month touches (32) at the run ceiling of commands. Steps run in the five-minute job, whose time the schedule bounds (a company fixed cost); emails and the owner's notices come out of the monthly emails.",
+    monthlyUsd: (tier) => DAILY_RUNS_BY_TIER[tier] * DAY_WINDOWS * runCost(),
+    sources: [{ file: "lib/flow-limits.ts", names: ["DAILY_RUNS_BY_TIER", "WORST_COMMANDS_PER_RUN", "WORST_BYTES_PER_RUN", "TRIAL_DAILY_RUNS", "ACTIVE_FLOWS_BY_TIER", "WORKFLOW_LIMITS"] }],
+    basis: "Every new run of every UTC day a billing month touches (32) at the run ceiling of commands and of bytes through the database, both measured on the real path at its worst (tests/flow-step-cost.test.ts, 4 November 2026). Steps run in the five-minute job, whose time the schedule bounds (a company fixed cost); emails and the owner's notices come out of the monthly emails.",
   },
   {
     id: "imports",
@@ -831,7 +836,7 @@ export function nonPayingWorst(): number {
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
     + TRIAL_VIDEO_HOURS * hourCost()
-    + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
+    + TRIAL_DAILY_RUNS * 15 * runCost()
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // Its students' work and its community's pictures, kept for the trial and then to its closing day (lib/plan-closing.ts).

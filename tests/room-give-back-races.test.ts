@@ -21,6 +21,7 @@ import { dataKey, dataUsed, monthOf, noteData, type DataStore } from "@/lib/stor
 import { waitlistTokenKey } from "@/lib/waitlist-tokens";
 import { WAIT_SECONDS } from "@/lib/waitlist-rules";
 import { forgetNoted } from "@/lib/erasure-index";
+import { suppressCommand } from "@/lib/suppression";
 import { dataBytes } from "@/lib/store-data-rules";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
@@ -218,6 +219,49 @@ async function waitlists(): Promise<void> {
   is("the place is readable again", typeof JSON.parse(String(lia)).t, "string");
   await forgetWaitlistPerson(store.statsId, [rye.id], "lia@example.com", store);
   is("and its room comes back whole", await used(store), beforeLia);
+
+  part("A deletion that takes the places before this sign-up writes one, and the links after, leaves nothing");
+  const beforeMo = await used(store);
+  const sentBefore = mailed.length;
+  const listId = store.listId!;
+  // The deletion's first steps run once the sign-up wrote its links: the fingerprint, then the places (none yet).
+  after(
+    (commands) => commands.some((c) => c[0] === "SET" && String(c[2]).includes('"k":"confirm"') && String(c[2]).includes("mo@example.com")),
+    async () => {
+      await redis.pipeline([suppressCommand(listId, "mo@example.com")]);
+      await forgetWaitlistPerson(store.statsId, [rye.id], "mo@example.com", store);
+      // Its last step, the links it noted, once the place is written.
+      after(reads("HSETNX", ryeKey), () => forgetNoted(store.statsId, "mo@example.com"));
+    },
+  );
+  is("the sign-up is refused", await enter("mo@example.com"), "error");
+  is("no place with the address is left", (await redis.pipeline([["HEXISTS", ryeKey, "mo@example.com"]]))[0], 0);
+  is("nothing was emailed", mailed.length, sentBefore);
+  is("nor any room kept", await used(store), beforeMo);
+
+  part("A sign-up changed under it three times drops its link to confirm");
+  is("Ned joins", await enter("ned@example.com"), "sent");
+  const confirms: string[] = [];
+  let rounds = 0;
+  const meddle = () =>
+    after(reads("HGET", ryeKey), async () => {
+      // Another request rewrites the place each time this one reads it.
+      const [raw] = await redis.pipeline([["HGET", ryeKey, "ned@example.com"]]);
+      await redis.pipeline([["HSET", ryeKey, "ned@example.com", JSON.stringify({ ...JSON.parse(String(raw)), at: 1_700_000_000 + rounds })]]);
+      rounds += 1;
+      if (rounds < 3) meddle();
+    });
+  const spy = redis.pipeline;
+  redis.pipeline = (async (commands: Commands) => {
+    for (const c of commands) if (c[0] === "SET" && String(c[2]).includes('"k":"confirm"') && String(c[2]).includes("ned@example.com")) confirms.push(String(c[1]));
+    return spy(commands);
+  }) as typeof redis.pipeline;
+  meddle();
+  is("asking again gives up", await enter("ned@example.com"), "error");
+  redis.pipeline = spy;
+  const last = confirms.at(-1) ?? "";
+  is("its link to confirm was written", last.startsWith("nl:wl:t:"), true);
+  is("and is gone", (await redis.pipeline([["EXISTS", last]]))[0], 0);
 
   part("A store renamed afterwards gets back exactly what a place took");
   is("the longest handle is the pattern's", [HANDLE_PATTERN.test("a".repeat(LONGEST_HANDLE)), HANDLE_PATTERN.test("a".repeat(LONGEST_HANDLE + 1))], [true, false]);

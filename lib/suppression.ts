@@ -39,6 +39,11 @@ export function suppressCommand(listId: string, email: string, nowSeconds = Math
   return ["HSET", suppressedKey(listId), suppressionPrint(listId, email), nowSeconds];
 }
 
+/** A command that answers when this address was deleted from this store (seconds), or nil. */
+export function suppressedAtCommand(listId: string, email: string): Command {
+  return ["HGET", suppressedKey(listId), suppressionPrint(listId, email)];
+}
+
 /** Lifts it: the person's own yes, given again. */
 export function liftCommand(listId: string, email: string): Command {
   return ["HDEL", suppressedKey(listId), suppressionPrint(listId, email)];

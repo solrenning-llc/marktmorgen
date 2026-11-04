@@ -43,6 +43,7 @@ import { cleanText, cleanLine } from "@/lib/community-text";
 import { productSegment } from "@/lib/product-slug";
 import { noteForErasure } from "@/lib/erasure-index";
 import { blankInLists } from "@/lib/erasure-lists";
+import { suppressedAtCommand } from "@/lib/suppression";
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const listKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}`;
@@ -109,6 +110,7 @@ export async function joinWaitlist(input: {
   if (!(await withinStore("waitlist-ip", `${sid}:${ip}`, 10, 3_600, store))) return "limited";
   if (!(await withinLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
 
+  const startedAt = Math.floor(Date.now() / 1000);
   const confirm = newToken();
   const grant = (k: TokenGrant["k"], t: string): (string | number)[] => ["SET", tokenKey(t), JSON.stringify({ s: sid, h: store.handle, p: product.id, e: email, k } satisfies TokenGrant), "EX", k === "confirm" ? CONFIRM_SECONDS : WAIT_SECONDS];
   // The links go before the place, noted for a deletion of the person: one
@@ -170,7 +172,28 @@ export async function joinWaitlist(input: {
     if (!before) await redisPipeline([["DEL", tokenKey(t)]]);
     mustExist = true;
   }
-  if (!leave) return "error";
+  if (!leave) {
+    // Changed under it every time: its link to confirm leads nowhere and goes.
+    await redisPipeline([["DEL", tokenKey(confirm)]]);
+    return "error";
+  }
+
+  // A deletion of the person that began while this request ran takes its
+  // places before the links it noted: a place written between the two would
+  // be left with the address on it. The deletion's first step is the
+  // address's fingerprint, with its time (lib/suppression.ts), so a place
+  // written now, under a fingerprint that recent, is taken back with its
+  // links and room, and nothing is sent. ERASURE_SECONDS is how long a
+  // deletion may still be running; an address deleted that recently is
+  // asked to try again later.
+  if (store.listId) {
+    const [erasedAt] = await redisPipeline([suppressedAtCommand(store.listId, email)]);
+    if (erasedAt !== null && erasedAt !== undefined && Number(erasedAt) >= startedAt - ERASURE_SECONDS) {
+      const [taken] = await redisPipeline([["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, product.id), email], ["DEL", tokenKey(confirm), tokenKey(leave)]]);
+      if (typeof taken === "string") await giveData(store, [{ slot: waitSlot(product.id), bytes: placeBytes(sid, product.id, email, taken) }]);
+      return "error";
+    }
+  }
 
   const link = `${origin}/@${store.handle}/waitlist?token=${confirm}`;
   const g = givingWords(store.language);
@@ -232,6 +255,9 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
   }
   return { ok: true, productId: grant.p };
 }
+
+/** How long a deletion of a person may still be running after its first step: a sign-up that close to one is taken back (joinWaitlist). */
+export const ERASURE_SECONDS = 15 * 60;
 
 /** Where one product's waitlist is counted in the store's data room (lib/store-data.ts). */
 const waitSlot = (productId: string) => `wl:${productId}`;

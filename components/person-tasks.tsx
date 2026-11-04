@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/components/toast";
 import { MAX_PERSON_TASKS, MAX_TASK_TEXT, type PersonTask, dayIn } from "@/lib/person-tasks";
 
@@ -75,6 +75,12 @@ export function watchDay(onChange: () => void, clock: DayClock = browserClock())
 
 const watchBrowserDay = (onChange: () => void) => watchDay(onChange);
 
+type Field = "text" | "due" | "assignee";
+/** Where the focus goes once the screen has drawn a change, so it is never left on a button that went away (AAA audit C1). */
+type FocusTo = { to: Field | "undo" | "full" | "count" } | { to: "task"; id: string };
+/** The field of the add form each refusal is about (lib/person-tasks.ts), so the message is told beside it (AAA audit C2). */
+const FIELD_OF: Partial<Record<string, Field>> = { text: "text", long: "text", date: "due", assignee: "assignee" };
+
 /**
  * The creator's own day for comparing tasks' dates. The server's page is
  * drawn with `serverDay` (the server cannot know the creator's time zone);
@@ -116,11 +122,13 @@ export function addedTask(before: readonly PersonTask[], after: readonly PersonT
  * What an undo says once it is done, in one message: put back, with nobody
  * named when its teammate may no longer be responsible, and done again when
  * it was done; or, when the task put back could not be told apart from one
- * added elsewhere at the same moment, that it is open and can be marked done.
+ * added elsewhere at the same moment, or done again did not save ("failed"),
+ * that it is open and can be marked done.
  */
-export function undoWords(task: PersonTask, unassigned: boolean, doneAgain: boolean | null): string {
+export function undoWords(task: PersonTask, unassigned: boolean, doneAgain: boolean | null | "failed"): string {
   const back = unassigned ? `Task put back with nobody named, since ${task.assignee} can no longer be responsible for tasks.` : "Task put back.";
   if (!task.done) return back;
+  if (doneAgain === "failed") return `${back} It is open again: marking it done did not save. Mark it done if it still is.`;
   return doneAgain ? `${back} Marked done again.` : `${back} It is open: mark it done if it still is.`;
 }
 
@@ -148,7 +156,24 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
   const [assignee, setAssignee] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [errorField, setErrorField] = useState<Field | null>(null);
   const [removed, setRemoved] = useState<PersonTask | null>(null);
+  // Whether the alert says the error too: when the focus is already in the field at fault, moving it there says nothing.
+  const [spoken, setSpoken] = useState(true);
+  const [errorAsk, setErrorAsk] = useState(0);
+  const [focusAsk, setFocusAsk] = useState(0);
+  const working = useRef(false);
+  // The code of the last refusal, so an undo refused for its teammate can be put back with nobody (round 3, M3).
+  const lastRefusal = useRef("");
+  const focusNext = useRef<FocusTo | null>(null);
+  const textField = useRef<HTMLInputElement>(null);
+  const dueField = useRef<HTMLInputElement>(null);
+  const assigneeField = useRef<HTMLSelectElement>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  const fullLine = useRef<HTMLParagraphElement>(null);
+  const countLine = useRef<HTMLParagraphElement>(null);
+  const boxes = useRef(new Map<string, HTMLInputElement>());
+  const full = tasks.length >= MAX_PERSON_TASKS;
 
   /** The person's tasks read again, after a refusal that says this screen is out of date; true when they were. */
   async function reread(): Promise<boolean> {
@@ -165,9 +190,47 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
     return false;
   }
 
-  async function send(body: Record<string, unknown>, done: string | null): Promise<PersonTask[] | null> {
-    setBusy(true);
+  function focusAfterDrawing(next: FocusTo) {
+    focusNext.current = next;
+    setFocusAsk((n) => n + 1);
+  }
+
+  // Once the change asked for is drawn: the field, box or button named, or the count of tasks when it is gone.
+  useEffect(() => {
+    const next = focusNext.current;
+    focusNext.current = null;
+    if (!next) return;
+    const named = { text: textField, due: dueField, assignee: assigneeField, undo: undoButton, full: fullLine, count: countLine };
+    const target = next.to === "task" ? boxes.current.get(next.id) : named[next.to].current;
+    (target ?? countLine.current)?.focus();
+  }, [focusAsk]);
+
+  function refuse(message: string, field: Field | null) {
+    const fields = { text: textField, due: dueField, assignee: assigneeField };
+    setError(message);
+    setErrorField(field);
+    setSpoken(!field || fields[field].current === document.activeElement);
+    // A new node each time, so the same refusal twice is said twice.
+    setErrorAsk((n) => n + 1);
+    if (field) focusAfterDrawing({ to: field });
+  }
+
+  function clearError() {
     setError("");
+    setErrorField(null);
+  }
+
+  /** The refusal of a field gone once the person corrects it. */
+  function corrected(field: Field) {
+    if (errorField === field) clearError();
+  }
+
+  /** `form` when the change is the add form's own, so a refusal is told beside the field at fault. */
+  async function send(body: Record<string, unknown>, done: string | null, form = false): Promise<PersonTask[] | null> {
+    if (working.current) return null;
+    working.current = true;
+    setBusy(true);
+    clearError();
     try {
       const response = await fetch("/api/store/person-tasks", {
         method: "POST",
@@ -177,42 +240,86 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; tasks?: PersonTask[]; message?: string; error?: string };
       if (answer.ok && answer.tasks) {
         setTasks(answer.tasks);
+        // Said once: a change also told in the status line beside it is not said again in a toast (AAA audit C6).
         if (done) toast(done);
         return answer.tasks;
       }
-      const said = answer.message ?? (answer.error === "data_full" ? "Your store's data room is full. Delete something you no longer need first." : "That did not save. Try again in a moment.");
+      lastRefusal.current = answer.error ?? "";
+      const said = answer.message ?? (answer.error === "data_full" ? "Your store has no room left for more records. Delete some you no longer need first." : "That did not save. Try again in a moment.");
       // Changed elsewhere since this page was drawn: what is kept now is shown, and the refusal says why.
-      setError(staleRefusal(answer.error) && (await reread()) ? `${said} The list now shows the tasks as they are.` : said);
+      refuse(staleRefusal(answer.error) && (await reread()) ? `${said} The list now shows the tasks as they are.` : said, form ? (FIELD_OF[answer.error ?? ""] ?? null) : null);
     } catch {
-      setError("That did not save. Check your connection and try again.");
+      refuse("That did not save. Check your connection and try again.", null);
     } finally {
+      working.current = false;
       setBusy(false);
     }
     return null;
   }
 
+  async function remove(task: PersonTask) {
+    if (busy) return;
+    if (await send({ action: "remove", id: task.id }, null)) {
+      setRemoved(task);
+      focusAfterDrawing({ to: "undo" });
+    }
+  }
+
   /**
    * The removed task put back with its words, date and teammate, done again
    * if it was; with nobody named when that teammate may no longer be
-   * responsible, and said so.
+   * responsible, and said so; all of it said once.
    */
   async function undoRemove(task: PersonTask) {
-    const { body, unassigned } = undoBody(task, assignees);
+    if (busy || full) return;
+    let { body, unassigned } = undoBody(task, assignees);
     const before = tasks;
     // Said once, when all of it is done (round 2, A-L): never a message for the add and another for done again.
-    const back = await send(body, task.done ? null : undoWords(task, unassigned, null));
+    let back = await send(body, task.done ? null : undoWords(task, unassigned, null));
+    // The teammate left after this page was drawn (round 3, M3): put back once more with nobody responsible, and said so.
+    if (!back && lastRefusal.current === "assignee" && body.assignee) {
+      unassigned = true;
+      body = { ...body, assignee: "" };
+      back = await send(body, task.done ? null : undoWords(task, unassigned, null));
+    }
     if (!back) return;
     setRemoved(null);
-    if (!task.done) return;
     const added = addedTask(before, back, { text: String(body.text), due: String(body.due), assignee: String(body.assignee) });
-    if (!added) return toast(undoWords(task, unassigned, false));
-    await send({ action: "done", id: added.id, done: true }, undoWords(task, unassigned, true));
+    if (task.done) {
+      if (!added) toast(undoWords(task, unassigned, false));
+      // Put back, but done again did not save (round 3, L5): it is said to be open.
+      else if (!(await send({ action: "done", id: added.id, done: true }, undoWords(task, unassigned, true)))) refuse(undoWords(task, unassigned, "failed"), null);
+    }
+    focusAfterDrawing(added ? { to: "task", id: added.id } : { to: "count" });
   }
+
+  async function add(event: React.FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    if (!text.trim()) return refuse("Write what needs doing.", "text");
+    const after = await send({ action: "add", text, due, assignee }, "Task added.", true);
+    if (after) {
+      setText("");
+      setDue("");
+      // Ready for the next one; at the most a person can have, the line that says so takes the focus.
+      focusAfterDrawing({ to: after.length >= MAX_PERSON_TASKS ? "full" : "text" });
+    }
+  }
+
+  const described = (field: Field, hint?: string) => [hint, errorField === field ? `task-${field}-error` : ""].filter(Boolean).join(" ") || undefined;
+  const fieldError = (field: Field) =>
+    errorField === field ? (
+      <span id={`task-${field}-error`} className="field-error mt-1 block [overflow-wrap:anywhere]">
+        {error}
+      </span>
+    ) : null;
 
   const open = tasks.filter((task) => !task.done).length;
   return (
     <div>
-      <p className="mt-1 text-sm text-ink-soft">{tasks.length ? `${open} open, ${tasks.length - open} done.` : "No tasks yet."}</p>
+      <p ref={countLine} tabIndex={-1} className="mt-1 text-sm text-ink-soft">
+        {tasks.length ? `${open} open, ${tasks.length - open} done.` : "No tasks yet."}
+      </p>
       {tasks.length ? (
         <ul className="mt-4 space-y-3">
           {tasks.map((task) => {
@@ -221,11 +328,19 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
               <li key={task.id} className="rounded-xl bg-paper p-4 text-sm ring-1 ring-line">
                 <label className="flex min-h-11 items-start gap-3">
                   <input
+                    ref={(element) => {
+                      if (element) boxes.current.set(task.id, element);
+                      else boxes.current.delete(task.id);
+                    }}
                     type="checkbox"
                     className="mt-1 h-5 w-5 shrink-0"
                     checked={task.done}
-                    disabled={busy}
-                    onChange={(event) => void send({ action: "done", id: task.id, done: event.target.checked }, event.target.checked ? "Marked done." : "Open again.")}
+                    aria-disabled={busy || undefined}
+                    onChange={(event) => {
+                      // Kept enabled while a change is saved, so the focus stays on it; a click then is ignored (AAA audit C1).
+                      if (busy) return;
+                      void send({ action: "done", id: task.id, done: event.target.checked }, event.target.checked ? "Marked done." : "Marked as not done.");
+                    }}
                   />
                   <span className={`[overflow-wrap:anywhere] ${task.done ? "text-ink-soft line-through" : "text-ink"}`}>
                     {task.text}
@@ -237,9 +352,7 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
                     {task.due ? (late ? `Was due ${dayWords(task.due)}` : `Due ${dayWords(task.due)}`) : "No date"}
                     {task.assignee ? ` · ${task.assignee}` : " · Nobody named"}
                   </p>
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={async () => {
-                      if (await send({ action: "remove", id: task.id }, "Task removed.")) setRemoved(task);
-                    }} aria-label={`Remove the task: ${task.text}`}>
+                  <button type="button" className="btn btn-ghost btn-sm" aria-disabled={busy || undefined} onClick={() => void remove(task)} aria-label={`Remove the task: ${task.text}`}>
                     Remove
                   </button>
                 </div>
@@ -250,45 +363,70 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
       ) : null}
       <div role="status" className="mt-3">
         {removed ? (
-          <p className="flex flex-wrap items-center gap-3 text-sm text-ink">
-            <span className="[overflow-wrap:anywhere]">{`Removed: ${removed.text}`}</span>
-            <button type="button" className="btn btn-secondary btn-sm" disabled={busy || tasks.length >= MAX_PERSON_TASKS} onClick={() => void undoRemove(removed)}>
-              Undo
-            </button>
-          </p>
+          <>
+            <p className="flex flex-wrap items-center gap-3 text-sm text-ink">
+              <span className="[overflow-wrap:anywhere]">{`Removed: ${removed.text}`}</span>
+              <button
+                ref={undoButton}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                aria-disabled={busy || full || undefined}
+                aria-describedby={full ? "task-undo-full" : undefined}
+                onClick={() => void undoRemove(removed)}
+              >
+                Undo
+              </button>
+            </p>
+            {full ? (
+              <p id="task-undo-full" className="mt-1 text-sm text-ink">{`It cannot be put back now: this person has ${MAX_PERSON_TASKS} tasks, the most one person can have. Remove a done one first.`}</p>
+            ) : null}
+          </>
         ) : null}
       </div>
-      {tasks.length < MAX_PERSON_TASKS ? (
-        <form
-          className="mt-4 grid gap-3 sm:grid-cols-2"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            if (await send({ action: "add", text, due, assignee }, "Task added.")) {
-              setText("");
-              setDue("");
-            }
-          }}
-        >
-          <label className="block text-sm sm:col-span-2">
-            <span className="field-label">New task</span>
+      {!full ? (
+        <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={add} noValidate>
+          <div className="block text-sm sm:col-span-2">
+            <label htmlFor="task-text" className="field-label">
+              New task
+            </label>
             <input
+              id="task-text"
+              ref={textField}
               required
               maxLength={MAX_TASK_TEXT}
               className="field mt-1"
-              placeholder="Send the workbook"
               value={text}
-              onChange={(event) => setText(event.target.value)}
-              aria-describedby="task-length"
+              onChange={(event) => {
+                setText(event.target.value);
+                corrected("text");
+              }}
+              aria-invalid={errorField === "text" || undefined}
+              aria-describedby={described("text", "task-hint task-length")}
             />
-            <span id="task-length" className="mt-1 block text-xs text-ink-soft">{`${text.length}/${MAX_TASK_TEXT}`}</span>
-          </label>
-          <label className="block text-sm">
-            <span className="field-label">Due (optional)</span>
-            <input type="date" className="field mt-1" value={due} onChange={(event) => setDue(event.target.value)} />
-          </label>
-          <label className="block text-sm">
-            <span className="field-label">Responsible (optional)</span>
-            <select className="field mt-1" value={assignee} onChange={(event) => setAssignee(event.target.value)}>
+            <span id="task-hint" className="mt-1 block text-xs text-ink-soft">
+              Example: Send the workbook.
+            </span>
+            <span id="task-length" className="mt-1 block text-xs text-ink-soft">{`${text.length} of ${MAX_TASK_TEXT} characters`}</span>
+            {fieldError("text")}
+          </div>
+          <div className="block text-sm">
+            <label htmlFor="task-due" className="field-label">
+              Due (optional)
+            </label>
+            <input id="task-due" ref={dueField} type="date" className="field mt-1" value={due} onChange={(event) => {
+                setDue(event.target.value);
+                corrected("due");
+              }} aria-invalid={errorField === "due" || undefined} aria-describedby={described("due")} />
+            {fieldError("due")}
+          </div>
+          <div className="block text-sm">
+            <label htmlFor="task-assignee" className="field-label">
+              Responsible (optional)
+            </label>
+            <select id="task-assignee" ref={assigneeField} className="field mt-1" value={assignee} onChange={(event) => {
+                setAssignee(event.target.value);
+                corrected("assignee");
+              }} aria-invalid={errorField === "assignee" || undefined} aria-describedby={described("assignee")}>
               <option value="">Nobody</option>
               {assignees.map((email) => (
                 <option key={email} value={email}>
@@ -296,18 +434,22 @@ export function PersonTasks({ person, initial, assignees, today: serverDay }: { 
                 </option>
               ))}
             </select>
-          </label>
+            {fieldError("assignee")}
+          </div>
           <div className="sm:col-span-2">
-            <button type="submit" className="btn btn-secondary btn-sm" disabled={busy || !text.trim()}>
+            <button type="submit" className="btn btn-secondary btn-sm" aria-disabled={busy || undefined}>
               Add task
             </button>
           </div>
         </form>
       ) : (
-        <p className="mt-4 text-sm text-ink-soft">{`This person has ${MAX_PERSON_TASKS} tasks, the most one person can have. Remove a done one to add another.`}</p>
+        <p ref={fullLine} tabIndex={-1} className="mt-4 text-sm text-ink-soft">{`This person has ${MAX_PERSON_TASKS} tasks, the most one person can have. Remove a done one to add another.`}</p>
       )}
       <p className="mt-2 text-sm text-danger-text" role="alert">
-        {error}
+        {/* Shown beside its field: here only said, once. */}
+        <span key={errorAsk} className={errorField ? "sr-only" : undefined}>
+          {errorField && !spoken ? "" : error}
+        </span>
       </p>
     </div>
   );

@@ -28,9 +28,11 @@ is("each remove button says which task", html.includes('aria-label="Remove the t
 is("rows tall enough to tap", html.includes("min-h-11"), true);
 
 part("Adding one");
-is("every field labeled, the date and teammate optional", ["New task", "Due (optional)", "Responsible (optional)"].every((label) => html.includes(label)), true);
+is("every field labeled, the date and teammate optional", [["text", "New task"], ["due", "Due (optional)"], ["assignee", "Responsible (optional)"]].every(([id, label]) => html.includes(`<label for="task-${id}" class="field-label">${label}</label>`) && html.includes(`id="task-${id}"`)), true);
+is("the example stays while typing, never a placeholder (3.3.2)", html.includes("Example: Send the workbook.") && !html.includes("placeholder="), true);
 is("the teammates who can see deals, or nobody", /<option value=""[^>]*>Nobody<\/option>/.test(html) && /<option value="sam@example.com"[^>]*>sam@example.com<\/option>/.test(html), true);
-is("the length counted beside the field", html.includes('aria-describedby="task-length"') && html.includes("0/200"), true);
+is("the length counted beside the field, in words", html.includes('aria-describedby="task-hint task-length"') && html.includes("0 of 200 characters") && !html.includes("0/200"), true);
+is("no box or button switched off, so the focus never falls off one (C1, C3)", [html.includes("disabled="), html.includes("aria-disabled")], [false, false]);
 is("refusals are said in an alert region", html.includes('role="alert"'), true);
 const full = draw(Array.from({ length: MAX_PERSON_TASKS }, (_, i) => task(i + 1)));
 is("at the most a person can have, the form says so instead", [full.includes("New task"), full.includes(`This person has ${MAX_PERSON_TASKS} tasks`)], [false, true]);
@@ -41,17 +43,35 @@ const source = readFileSync("components/person-tasks.tsx", "utf8");
 is("a status region, there before anything is removed, says what was removed", html.includes('<div role="status"') && source.includes("`Removed: ${removed.text}`"), true);
 const gone = task(7, { text: "Send the slides", due: "2026-11-05", assignee: "sam@example.com", done: true });
 is("undo puts back the words, the date and the teammate", undoBody(gone, ["owner@example.com", "sam@example.com"]), { body: { action: "add", text: "Send the slides", due: "2026-11-05", assignee: "sam@example.com" }, unassigned: false });
-is("a teammate who left since: the task comes back with nobody named, and it is said, instead of not coming back", [undoBody(gone, ["owner@example.com"]), source.includes("const { body, unassigned } = undoBody(task, assignees);") && source.includes("can no longer be responsible for tasks")], [{ body: { action: "add", text: "Send the slides", due: "2026-11-05", assignee: "" }, unassigned: true }, true]);
+is("a teammate who left since: the task comes back with nobody named, and it is said, instead of not coming back", [undoBody(gone, ["owner@example.com"]), source.includes("let { body, unassigned } = undoBody(task, assignees);") && source.includes("can no longer be responsible for tasks")], [{ body: { action: "add", text: "Send the slides", due: "2026-11-05", assignee: "" }, unassigned: true }, true]);
 is("the task put back is the one this add made, never one another tab added at the same moment", [addedTask([task(1)], [task(1), task(9)])?.id, source.includes("const added = addedTask(before, back, { text: String(body.text), due: String(body.due), assignee: String(body.assignee) });")], ["task000009", true]);
 const sent = { text: "Send the slides", due: "2026-11-05", assignee: "" };
 const theirs = task(8, { text: "Call Ana" });
 const ours = task(9, { text: "Send the slides", due: "2026-11-05" });
 is("two new at once (round 2, A-M): the one with the words, date and teammate sent, wherever it is", [addedTask([task(1)], [task(1), ours, theirs], sent)?.id, addedTask([task(1)], [task(1), theirs, ours], sent)?.id], ["task000009", "task000009"]);
 is("and none only when no new one has them", [addedTask([task(1)], [task(1), theirs, task(7, { text: "Other" })], sent), addedTask([task(1)], [task(1), theirs, ours])], [null, null]);
-is("and marks it done again if it was", source.includes('await send({ action: "done", id: added.id, done: true }, undoWords(task, unassigned, true));'), true);
-is("said once, all of it in one message (round 2, A-L)", [undoWords(gone, true, true), undoWords({ ...gone, done: false }, false, null), source.includes("const back = await send(body, task.done ? null : undoWords(task, unassigned, null));")], ["Task put back with nobody named, since sam@example.com can no longer be responsible for tasks. Marked done again.", "Task put back.", true]);
-is("and when the task put back cannot be told apart, it says it is open, briefly", [undoWords(gone, false, false), source.includes("if (!added) return toast(undoWords(task, unassigned, false));")], ["Task put back. It is open: mark it done if it still is.", true]);
-is("offered only after the removal was saved", source.includes('if (await send({ action: "remove", id: task.id }, "Task removed.")) setRemoved(task);'), true);
+is("and marks it done again if it was", source.includes('else if (!(await send({ action: "done", id: added.id, done: true }, undoWords(task, unassigned, true)))) refuse(undoWords(task, unassigned, "failed"), null);'), true);
+is("said once, all of it in one message (round 2, A-L)", [undoWords(gone, true, true), undoWords({ ...gone, done: false }, false, null), source.includes("let back = await send(body, task.done ? null : undoWords(task, unassigned, null));")], ["Task put back with nobody named, since sam@example.com can no longer be responsible for tasks. Marked done again.", "Task put back.", true]);
+is("and when the task put back cannot be told apart, it says it is open, briefly", [undoWords(gone, false, false), source.includes("if (!added) toast(undoWords(task, unassigned, false));")], ["Task put back. It is open: mark it done if it still is.", true]);
+is("offered only after the removal was saved", source.includes('if (await send({ action: "remove", id: task.id }, null)) {\n      setRemoved(task);'), true);
+is("a teammate who left after the page was drawn (round 3, M3): put back once more with nobody responsible, and said so", source.includes('if (!back && lastRefusal.current === "assignee" && body.assignee) {') && source.includes('body = { ...body, assignee: "" };') && source.includes("unassigned = true;") && source.includes('lastRefusal.current = answer.error ?? "";'), true);
+is("put back, but done again did not save (round 3, L5): it is said to be open again", undoWords(gone, false, "failed"), "Task put back. It is open again: marking it done did not save. Mark it done if it still is.");
+
+part("The AAA audit of 4 November 2026");
+is("C1: busy boxes and buttons are said to be, never switched off, and ignore a press then", !/(?<![-\w])disabled=\{/.test(source) && (source.match(/aria-disabled=\{busy \|\| undefined\}/g) ?? []).length === 3 && source.includes("aria-disabled={busy || full || undefined}") && (source.match(/if \(busy\) return;/g) ?? []).length === 3 && source.includes("if (busy || full) return;"), true);
+is("C1: the focus is moved by refs once the change is drawn, never by a timer (the only timer waits for midnight, watchDay)", source.includes("}, [focusAsk]);") && !/requestAnimationFrame/.test(source) && (source.match(/setTimeout\(/g) ?? []).length === 1 && source.includes("setTimer: (run, ms) => setTimeout(run, ms)"), true);
+is("C1: a removal takes the focus to Undo; the undo to the task put back; an add to the field, or to the line saying the list is full", source.includes('focusAfterDrawing({ to: "undo" })') && source.includes('focusAfterDrawing(added ? { to: "task", id: added.id } : { to: "count" })') && source.includes('focusAfterDrawing({ to: after.length >= MAX_PERSON_TASKS ? "full" : "text" })') && source.includes("<p ref={fullLine} tabIndex={-1}"), true);
+is("C2: a refusal of the add form names its field, marked invalid and described by the message beside it", source.includes('const FIELD_OF: Partial<Record<string, Field>> = { text: "text", long: "text", date: "due", assignee: "assignee" };') && ["text", "due", "assignee"].every((field) => source.includes(`aria-invalid={errorField === "${field}" || undefined}`)) && source.includes("`task-${field}-error`") && source.includes('send({ action: "add", text, due, assignee }, "Task added.", true)'), true);
+is("C3: Add with nothing typed says what to do; Undo at the most a person can have says why", source.includes('if (!text.trim()) return refuse("Write what needs doing.", "text");') && source.includes('aria-describedby={full ? "task-undo-full" : undefined}') && source.includes("It cannot be put back now: this person has"), true);
+is("C6: a removal and its undo are said once each", !source.includes('"Task removed."') && source.includes("task.done ? null : undoWords(task, unassigned, null)"), true);
+is("a box checked off again is said in plain words", source.includes('"Marked as not done."') && !source.includes('"Open again."'), true);
+
+part("The independent review of the audit fixes");
+is("HIGH 1: a refusal tied to a field is also said in the alert when the focus is already in that field, hidden there as it shows beside the field", source.includes("=== document.activeElement);") && source.includes('<span key={errorAsk} className={errorField') && source.includes('"sr-only" : undefined}>') && source.includes('{errorField && !spoken ? "" : error}') && source.includes("setErrorAsk((n) => n + 1);"), true);
+is("MEDIUM 3: correcting the field at fault takes its refusal away", ["text", "due", "assignee"].every((field) => source.includes(`corrected("${field}");`)) && source.includes("if (errorField === field) clearError();"), true);
+is("the alert region is there before any refusal, its message drawn as a new node each time", html.includes('role="alert"><span></span></p>'), true);
+
+is("C7: a full store said in plain words", source.includes("Your store has no room left for more records. Delete some you no longer need first.") && !source.includes("data room"), true);
 
 part("On the person's page");
 const page = readFileSync("app/studio/people/page.tsx", "utf8");
@@ -114,7 +134,9 @@ is("a soft hyphen, a zero-width space and the direction marks go", typed("Ca\u00
 is("the joiners stay on purpose (Persian, the Indic scripts, emoji)", [typed("\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645"), typed("a\u200db")], ["\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", "a\u200db"]);
 is("tag characters, which can carry words no one sees, go", [typed("Call Ana\u{E0068}\u{E0069}\u{E0064}"), typed("Only\u{E007F}")], ["Call Ana", "Only"]);
 const scotland = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
-is("except inside a flag of a region, kept whole", typed(`Visit ${scotland}`), `Visit ${scotland}`);
+is("except in the flags of England, Scotland and Wales, kept whole", typed(`Visit ${scotland}`), `Visit ${scotland}`);
+const madeUp = "\u{1F3F4}\u{E0068}\u{E0069}\u{E0064}\u{E0065}\u{E007F}";
+is("any other run of tags after a black flag goes (round 3, L1): only the flag is left", [typed(`Flag ${madeUp}`), typed(`${scotland}\u{E0068}x`)], ["Flag \u{1F3F4}", `${scotland}x`]);
 is("words of tag characters only are no task", typed("\u{E0068}\u{E0069}"), "text");
 
 done();

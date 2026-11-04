@@ -64,10 +64,13 @@ export const TASKS_BUSY = "Someone else is changing tasks in this store right no
 const UNSEEN = /[\u00ad\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 /**
  * Tag characters (U+E0000 to U+E007F), which are never drawn and can carry
- * words no one sees, except inside a flag of a region (the black flag, its
- * tag letters and the cancel tag, as the flag of Scotland is written).
+ * words no one sees, except in the three flags written with them (England,
+ * Scotland and Wales: the black flag, "gbeng", "gbsct" or "gbwls" in tag
+ * letters, and the cancel tag), as lib/ad-creative-check.ts keeps them.
  */
-const TAGS = /(?<!\u{1F3F4}[\u{E0020}-\u{E007E}]*)[\u{E0000}-\u{E007F}]|\u{1F3F4}(?![\u{E0020}-\u{E007E}]+\u{E007F})[\u{E0000}-\u{E007F}]+/gu;
+const TAG_FLAG = /(\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F})/u;
+const TAG = /[\u{E0000}-\u{E007F}]/gu;
+const withoutTags = (text: string) => text.split(TAG_FLAG).map((part, i) => (i % 2 ? part : part.replace(TAG, ""))).join("");
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
 /**
@@ -76,7 +79,7 @@ const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[
  * surrogate, never typed) shown as U+FFFD, in the composed form (NFC); trimmed.
  */
 const line = (raw: unknown) =>
-  typeof raw === "string" ? raw.replace(LONE_SURROGATE, "\ufffd").normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(UNSEEN, "").replace(TAGS, (found) => (found.startsWith("\u{1F3F4}") ? "\u{1F3F4}" : "")).replace(/\s+/g, " ").trim() : "";
+  typeof raw === "string" ? withoutTags(raw).replace(LONE_SURROGATE, "\ufffd").normalize("NFC").replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(UNSEEN, "").replace(/\s+/g, " ").trim() : "";
 
 /** True when the words have a character that is drawn: not only spaces, joiners, marks or fillers. */
 const seen = (value: string) => /[^\s\p{C}\p{M}\u115f\u1160\u3164\uffa0\u2800]/u.test(value);

@@ -467,7 +467,9 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
   const held = paidYearHeld(raw as Parameters<typeof paidYearHeld>[0]);
   // That trial is the year paid, also once it is over (the membership active again, monthly): its time is never
   // counted as a free trial in the store's revenue month by month (lib/mrr-movements.ts).
-  const paidTrial = held || (/^\d{9,11}$/.test(meta.yearly_paid_until ?? "") && String(num(raw.trial_end)) === meta.yearly_paid_until);
+  const paidTrial =
+    held ||
+    [meta.yearly_paid_until, meta.paid_trial_until].some((until) => /^\d{9,11}$/.test(until ?? "") && String(num(raw.trial_end)) === until);
   return {
     id: typeof raw.id === "string" ? raw.id : "",
     status: held ? "active" : typeof raw.status === "string" ? raw.status : "",

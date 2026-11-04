@@ -25,6 +25,7 @@ import { FALLBACK_BOTH_KEY, FALLBACK_CHECK_KEY, FALLBACK_STORES_KEY, FALLBACK_ST
 import {
   FALLBACK_CALL_MS,
   FALLBACK_CHECK_DAYS,
+  FALLBACK_DISPUTE_DAYS,
   FALLBACK_MAX_DAYS,
   FALLBACK_PER_SET,
   FALLBACK_SHARE_MS,
@@ -144,6 +145,7 @@ const yearInvoice = (status: string): Obj => ({
 });
 const monthLine = (start: number) => ({
   id: "il_Month0001",
+  amount: 2000,
   parent: { type: "subscription_item_details", subscription_item_details: { proration: false } },
   pricing: { price_details: { price: "price_Month00001" } },
   period: { start, end: start + 30 * 86_400 },
@@ -202,6 +204,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const latest = url.searchParams.getAll("expand[]").includes("latest_invoice") ? state.invoices.get(String(found.latest_invoice)) ?? found.latest_invoice : found.latest_invoice;
     return json({ ...found, latest_invoice: latest });
   }
+  if (sub && method === "DELETE") {
+    const found = state.subs.get(sub[1]);
+    if (!found) return missing();
+    const next = { ...found, status: "canceled", ended_at: nowSeconds() };
+    state.subs.set(sub[1], next);
+    return json(next);
+  }
   if (sub && method === "POST") {
     const found = state.subs.get(sub[1]);
     if (!found) return missing();
@@ -221,6 +230,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const next = { ...found, metadata, items, ...trial, ...(cancelAt ? { cancel_at: Number(cancelAt) } : {}) };
     state.subs.set(sub[1], next);
     return json(next);
+  }
+  const finalizing = path.match(/^\/invoices\/(in_\w+)\/finalize$/);
+  if (finalizing && method === "POST") {
+    const found = state.invoices.get(finalizing[1]);
+    if (!found) return missing();
+    if (found.status !== "draft") return json({ error: { type: "invalid_request_error", message: "This invoice is already finalized." } }, 400);
+    found.status = "open";
+    found.auto_advance = body.get("auto_advance") === "true";
+    return json(found);
   }
   const voiding = path.match(/^\/invoices\/(in_\w+)\/void$/);
   if (voiding && method === "POST") {
@@ -277,6 +295,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (deleting && method === "DELETE") {
     const found = state.invoices.get(deleting[1]);
     if (!found || found.status !== "draft") return json({ error: { type: "invalid_request_error", message: "You can only delete draft invoices." } }, 400);
+    // As Stripe answers it: a subscription's draft is never deleted.
+    if (found.parent) return json({ error: { type: "invalid_request_error", message: "You can't delete invoices created by subscriptions." } }, 400);
     state.invoices.delete(deleting[1]);
     return json({ id: deleting[1], object: "invoice", deleted: true });
   }
@@ -297,6 +317,12 @@ const interval = () => ((state.subs.get(SUB)?.items as { data: { price: { recurr
 const posts = () => calls.filter((c) => c.method === "POST").map((c) => c.path);
 const members = async (key: string) => (((await redisPipeline([["SMEMBERS", key]]))[0] as string[]) ?? []).sort();
 const sweep = () => settleFallbacks(Date.now() + 20_000);
+/** Only the held memberships: the three lists empty, so the whole run is theirs. */
+const checkHeldOnly = async () => {
+  const saved = await redisPipeline([["SMEMBERS", FALLBACK_BOTH_KEY]]);
+  void saved;
+  return settleFallbacks(Date.now() + 20_000);
+};
 async function reset(sub: Obj | null, invoices: Obj[], charge?: Obj): Promise<void> {
   calls.length = 0;
   mails.length = 0;
@@ -851,19 +877,19 @@ async function main(): Promise<void> {
   await sweep();
   const unhold = calls.find((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}`);
   is(
-    "the year refunded since: the hold ends now (the month charged from today), its marks taken off, the creator told, the month's refund standing",
+    "the year refunded since: the notice kept goes as it was (rev69), and the held membership read the same run ends its hold now (the month charged from today), its marks taken off, the creator told",
     [
       unhold?.body.get("trial_end"),
       unhold?.key,
       state.subs.get(SUB)?.status,
       (state.subs.get(SUB)?.metadata as Record<string, string>).yearly_paid ?? null,
       paidYearHeld(state.subs.get(SUB)),
-      mails[0]?.text.includes("its next monthly payment is taken now"),
-      mails[0]?.text.includes("We had refunded the month, $20,"),
+      mails[0]?.subject,
+      mails[1]?.text.includes("its next monthly payment is taken now"),
       state.refunds.length,
       await members(FALLBACK_BOTH_KEY),
     ],
-    ["now", `fallback-unhold:${YEAR}`, "active", null, false, true, true, 1, []],
+    ["now", `fallback-unhold:${YEAR}`, "active", null, false, "A member's extra month was refunded for Supper Club", true, 1, []],
   );
 
   // LOW 6: the year's dispute still open, the month still owed: not collected meanwhile, collected again if the year is lost.
@@ -911,7 +937,7 @@ async function main(): Promise<void> {
   for (const id of stuck) {
     state.fail.add(`GET /invoices/${id}`);
     await put(FALLBACK_VOID_KEY, `${ACCOUNT}|${id}|${MONTH}`);
-    await redisPipeline([["HSET", FALLBACK_SINCE_KEY, `${ACCOUNT}|${id}|${MONTH}`, String(Date.now() - DAY)]]);
+    await redisPipeline([["HSET", FALLBACK_SINCE_KEY, `${ACCOUNT}|${id}|${MONTH}`, String(Date.now() - DAY), `t:${ACCOUNT}|${id}|${MONTH}`, String(Date.now() - DAY)]]);
   }
   await put(FALLBACK_VOID_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
   await sweep();
@@ -1187,9 +1213,21 @@ async function main(): Promise<void> {
   await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
   await sweep();
   is(
-    "a renewal still owed: voided; one still a draft: deleted; both said",
-    [state.invoices.get("in_Open00000001")?.status, state.invoices.has("in_Draft0000001"), mails[0]?.text.includes("(in_Open00000001) was voided"), mails[0]?.text.includes("(in_Draft0000001) was deleted")],
-    ["void", false, true, true],
+    "a renewal still owed: voided; one still a draft (Stripe never deletes a subscription's): stopped, finalized without a charge and voided; both said",
+    [
+      state.invoices.get("in_Open00000001")?.status,
+      state.invoices.get("in_Draft0000001")?.status,
+      calls.filter((c) => c.path.startsWith("/invoices/in_Draft0000001")).map((c) => `${c.method} ${c.path} ${c.body}`),
+      mails[0]?.text.includes("(in_Open00000001) was voided"),
+      mails[0]?.text.includes("(in_Draft0000001) was voided before it could be charged"),
+    ],
+    [
+      "void",
+      "void",
+      ["POST /invoices/in_Draft0000001 auto_advance=false", "POST /invoices/in_Draft0000001/finalize auto_advance=false", "POST /invoices/in_Draft0000001/void "],
+      true,
+      true,
+    ],
   );
 
   // M2: a year refunded after its entry was settled ends the hold on a later day.
@@ -1298,6 +1336,221 @@ async function main(): Promise<void> {
 
   // L8: German.
   is("German says the day the way German does", MEMBERSHIP_WORDS.de.paidUntil("4. November 2026"), "Bezahlt bis zum 4. November 2026");
+
+  part("Found by the review of 4 November 2026 (rev69): each failed before its fix");
+  const yearRefunded = () => state.charges.set(YPI, { id: "ch_Year000000001", amount: 20000, amount_refunded: 20000, refunded: true, disputed: false });
+  const subPosts = () => calls.filter((c) => c.path === `/subscriptions/${SUB}` && c.method !== "GET");
+
+  // H1: a cancellation asked before the hold is put back when the hold ends early.
+  {
+    const asked = nowSeconds() + 20 * 86_400;
+    await reset(subscription(true, { cancel_at: asked }), [paidYear(), monthInvoice("paid")], paidCharge());
+    await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+    await sweep();
+    is("held: the date asked is kept beside the hold", (state.subs.get(SUB)?.metadata as Record<string, string>).cancel_before_hold, String(asked));
+    yearRefunded();
+    mails.length = 0;
+    calls.length = 0;
+    shift = DAY + 60_000;
+    await sweep();
+    shift = 0;
+    const ended = subPosts()[0];
+    is(
+      "a date asked: the year refunded, the hold ends now and the membership still ends on the date asked, said",
+      [ended?.body.get("trial_end"), ended?.body.get("cancel_at"), ended?.body.get("metadata[cancel_before_hold]"), mails[0]?.text.includes(`It ends on ${new Date(asked * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}, as the member had asked.`)],
+      ["now", String(asked), "", true],
+    );
+  }
+  await reset(subscription(true, { cancel_at_period_end: true }), [paidYear(), monthInvoice("paid")], paidCharge());
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  yearRefunded();
+  mails.length = 0;
+  calls.length = 0;
+  shift = DAY + 60_000;
+  await sweep();
+  shift = 0;
+  is(
+    "the period's end asked, the month refunded: the membership ends now, nothing charged, said",
+    [subPosts().map((c) => c.method), state.subs.get(SUB)?.status, mails[0]?.text.includes("the membership has ended now, as the member had asked before")],
+    [["DELETE"], "canceled", true],
+  );
+  await reset(subscription(true, { cancel_at_period_end: true }), [paidYear(), monthInvoice("paid")], paidCharge());
+  state.fail.add("POST /refunds");
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  state.fail.clear();
+  yearRefunded();
+  calls.length = 0;
+  await sweep();
+  is(
+    "the period's end asked, the month kept: it ends when that month ends, never charged again",
+    [subPosts()[0]?.body.get("trial_end"), subPosts()[0]?.body.get("cancel_at")],
+    [String(monthEnd()), String(monthEnd())],
+  );
+
+  // M1: a subscription's draft refused on its way: kept for the next run, never said done.
+  await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+  state.invoices.set("in_Draft0000001", { ...monthInvoice("draft"), id: "in_Draft0000001", billing_reason: "subscription_cycle", created: nowSeconds() - 300, payments: { data: [] } });
+  state.refuse.add("POST /invoices/in_Draft0000001/finalize");
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("the draft's finalizing refused (a 400): the entry waits, nothing told yet", [await members(FALLBACK_BOTH_KEY), mails.length], [[`${ACCOUNT}|${YEAR}|${MONTH}`], 0]);
+
+  // M2: the held: the longest waiting first, those on BOTH left out before the cut, a part of their own.
+  {
+    await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+    const end = nowSeconds() + 300 * 86_400;
+    for (let i = 0; i < 300; i += 1) {
+      const other = `in_Busy${String(i).padStart(7, "0")}`;
+      await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${other}|${MONTH}`);
+      await redisPipeline([["ZADD", FALLBACK_HELD_KEY, Date.now() - 3_600_000, `${ACCOUNT}|sub_Busy${String(i).padStart(6, "0")}|${other}|${MONTH}|${end}`]]);
+    }
+    await redisPipeline([["DEL", FALLBACK_BOTH_KEY]]);
+    for (let i = 0; i < 300; i += 1) await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|in_Busy${String(i).padStart(7, "0")}|${MONTH}`);
+    // And 300 more due, not on BOTH, less overdue (unreadable: each taken off without a call).
+    for (let i = 0; i < 300; i += 1) await redisPipeline([["ZADD", FALLBACK_HELD_KEY, Date.now() - 3_600_000, `${ACCOUNT}|sub_Late${String(i).padStart(6, "0")}|in_Late${String(i).padStart(7, "0")}|${MONTH}|soon`]]);
+    // The real one: held, its year refunded; due the longest.
+    state.subs.set(SUB, { ...subscription(true), status: "trialing", trial_end: yearEnd(), metadata: { store: "harbor", product, yearly_paid: YEAR, yearly_paid_until: String(yearEnd()) } });
+    yearRefunded();
+    await redisPipeline([["ZADD", FALLBACK_HELD_KEY, Date.now() - 2 * DAY, `${ACCOUNT}|${SUB}|${YEAR}|${MONTH}|${end}`]]);
+    await checkHeldOnly();
+    is(`the longest waiting read first, ahead of ${300} still on BOTH and ${300} due later: its hold ended`, (state.subs.get(SUB)?.metadata as Record<string, string>).yearly_paid ?? null, null);
+  }
+  {
+    await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+    state.subs.set(SUB, { ...subscription(true), status: "trialing", trial_end: yearEnd(), metadata: { store: "harbor", product, yearly_paid: YEAR, yearly_paid_until: String(yearEnd()) } });
+    yearRefunded();
+    await redisPipeline([["ZADD", FALLBACK_HELD_KEY, Date.now() - DAY, `${ACCOUNT}|${SUB}|${YEAR}|${MONTH}|${yearEnd()}`]]);
+    state.slow.set("GET /subscriptions/sub_Slow0000001", 30_000);
+    state.slow.set("GET /invoices/in_Slow00000002", 30_000);
+    await put(FALLBACK_CHECK_KEY, `${ACCOUNT}|sub_Slow0000001|${YEAR}`);
+    await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|in_Other0000009|in_Slow00000002`);
+    await settleFallbacks(Date.now() + 3_000);
+    is("lists whose calls hang: the held still get their own part of a short run", (state.subs.get(SUB)?.metadata as Record<string, string>).yearly_paid ?? null, null);
+  }
+  {
+    await reset(subscription(true), [yearInvoice("open"), monthInvoice("paid")]);
+    const old = Array.from({ length: 300 }, (_, i) => `in_Recent${String(i).padStart(5, "0")}`);
+    for (const id of old) {
+      state.fail.add(`GET /invoices/${id}`);
+      await put(FALLBACK_VOID_KEY, `${ACCOUNT}|${id}|${MONTH}`);
+      await redisPipeline([["HSET", FALLBACK_SINCE_KEY, `${ACCOUNT}|${id}|${MONTH}`, String(Date.now() - 3 * DAY), `t:${ACCOUNT}|${id}|${MONTH}`, String(Date.now() - 3_600_000)]]);
+    }
+    await put(FALLBACK_VOID_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+    await redisPipeline([["HSET", FALLBACK_SINCE_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`, String(Date.now() - 3 * DAY), `t:${ACCOUNT}|${YEAR}|${MONTH}`, String(Date.now() - 2 * DAY)]]);
+    await sweep();
+    is("the lists too: the one tried longest ago goes first", state.invoices.get(YEAR)?.status, "void");
+  }
+
+  // M3: a dispute of the year open past its own limit is told and taken off; one Stripe lists none of is uncertain.
+  await reset(subscription(true), [], paidCharge());
+  state.invoices.set(YEAR, paidYear({ id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: true }));
+  state.invoices.set(MONTH, monthInvoice("paid"));
+  state.disputes.set("ch_Year000000001", [{ id: "dp_1", status: "needs_response" }]);
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  for (const day of [30, 60, 90, FALLBACK_DISPUTE_DAYS + 1]) {
+    shift = day * DAY;
+    await sweep();
+  }
+  is(
+    `a dispute of the year open past ${FALLBACK_DISPUTE_DAYS} days: the creator told what to look at, taken off`,
+    [mails[0]?.text.includes(`open for more than ${FALLBACK_DISPUTE_DAYS} days`), await members(FALLBACK_BOTH_KEY)],
+    [true, []],
+  );
+  shift = 0;
+  await reset(subscription(true), [], paidCharge());
+  state.invoices.set(YEAR, paidYear({ id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: true }));
+  state.invoices.set(MONTH, monthInvoice("paid"));
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  await sweep();
+  is(
+    "marked disputed, no dispute listed: uncertain, held and waited on, nothing refunded, the creator told once",
+    [state.subs.get(SUB)?.status, state.refunds.length, mails.map((m) => m.subject), await members(FALLBACK_BOTH_KEY)],
+    ["trialing", 0, ["A member's yearly payment shows a dispute we cannot read for Supper Club"], [`${ACCOUNT}|${YEAR}|${MONTH}`]],
+  );
+
+  // L1: a month refunded in full by the creator is not kept: the hold ends now.
+  await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+  state.fail.add("POST /refunds");
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  state.fail.clear();
+  state.charges.set(PI, { ...paidCharge(2000), refunded: true });
+  yearRefunded();
+  calls.length = 0;
+  await sweep();
+  is("the month refunded by the creator, the year refunded: the hold ends now, not at that month's end", subPosts()[0]?.body.get("trial_end"), "now");
+
+  // L2/L4: the words of a notice that did not go are sent again unchanged; the month collected again is said as such.
+  await reset(subscription(true), [], paidCharge());
+  state.invoices.set(YEAR, paidYear({ id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: true }));
+  state.invoices.set(MONTH, monthInvoice("open"));
+  state.disputes.set("ch_Year000000001", [{ id: "dp_1", status: "needs_response" }]);
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  state.disputes.set("ch_Year000000001", [{ id: "dp_1", status: "lost" }]);
+  state.mailDown = true;
+  await sweep();
+  state.mailDown = false;
+  calls.length = 0;
+  await sweep();
+  is(
+    "the dispute lost, its notice sent the next day: the same words (the month collected again, its next payment said), nothing done twice",
+    [mails.length, mails[0]?.text.includes("the monthly payment they still owed is collected again, and the next one is taken on"), calls.filter((c) => c.method !== "GET").length, await members(FALLBACK_BOTH_KEY)],
+    [1, true, 0, []],
+  );
+
+  // L3: a held membership's notice that did not go: told again the next day, the hold never ended twice.
+  await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+  state.subs.set(SUB, { ...subscription(true), status: "trialing", trial_end: yearEnd(), metadata: { store: "harbor", product, yearly_paid: YEAR, yearly_paid_until: String(yearEnd()) } });
+  yearRefunded();
+  await redisPipeline([["ZADD", FALLBACK_HELD_KEY, Date.now() - DAY, `${ACCOUNT}|${SUB}|${YEAR}|${MONTH}|${yearEnd()}`]]);
+  state.mailDown = true;
+  await sweep();
+  state.mailDown = false;
+  shift = DAY + 60_000;
+  await sweep();
+  is("the notice went the next day, the hold ended once", [mails.length, subPosts().length, (await redisPipeline([["ZCARD", FALLBACK_HELD_KEY]]))[0]], [1, 1, 0]);
+  shift = 0;
+
+  // L5: never more than the month's own line (with its tax) is refunded.
+  await reset(subscription(true), [paidYear()], { id: "ch_Month00000001", amount: 2500, amount_refunded: 0, disputed: false });
+  state.invoices.set(MONTH, {
+    ...monthInvoice("paid"),
+    amount_paid: 2500,
+    total: 2500,
+    lines: { data: [monthLine(nowSeconds() - 86_400), { id: "il_Item0001", parent: { type: "invoice_item_details" }, amount: 500, pricing: { price_details: { price: "price_Item000001" } }, period: { start: nowSeconds(), end: nowSeconds() } }] },
+    payments: { data: [{ id: "inpay_1", status: "paid", amount_paid: 2500, payment: { type: "payment_intent", payment_intent: PI } }] },
+  });
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("an item beside the month on its invoice: only the month refunded", state.refunds.map((r) => r.amount), [2000]);
+
+  // L6: the trial running on to a paid month's end is read as paid.
+  await reset(subscription(true), [paidYear(), monthInvoice("paid")], paidCharge());
+  state.fail.add("POST /refunds");
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  state.fail.clear();
+  yearRefunded();
+  await sweep();
+  is(
+    "the hold ended at the end of a paid month: read as paid until then",
+    [(state.subs.get(SUB)?.metadata as Record<string, string>).paid_trial_until, paidYearHeld(state.subs.get(SUB))],
+    [String(monthEnd()), true],
+  );
+
+  // L7: remembered while its entry waits on a dispute of the year.
+  await reset(subscription(true), [], paidCharge());
+  state.invoices.set(YEAR, paidYear({ id: "ch_Year000000001", amount: 20000, amount_refunded: 0, disputed: true }));
+  state.invoices.set(MONTH, monthInvoice("paid"));
+  state.disputes.set("ch_Year000000001", [{ id: "dp_1", status: "needs_response" }]);
+  await put(FALLBACK_BOTH_KEY, `${ACCOUNT}|${YEAR}|${MONTH}`);
+  await sweep();
+  is("held during the dispute: remembered already", (await redisPipeline([["ZCARD", FALLBACK_HELD_KEY]]))[0], 1);
 
   part("Its own share of the daily job's time");
   const at = 1_000_000;

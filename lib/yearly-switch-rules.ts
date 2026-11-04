@@ -37,9 +37,11 @@ import { type YearlyCandidate, type Yearly, activeYearly } from "@/lib/yearly-pr
 export function paidYearHeld(sub: { status?: unknown; trial_end?: unknown; metadata?: Record<string, string> | null } | null | undefined): boolean {
   if (!sub || sub.status !== "trialing") return false;
   const meta = sub.metadata ?? {};
-  if (!/^in_[A-Za-z0-9]{6,64}$/.test(meta.yearly_paid ?? "")) return false;
-  const until = /^\d{9,11}$/.test(meta.yearly_paid_until ?? "") ? Number(meta.yearly_paid_until) : 0;
-  return until > 0 && sub.trial_end === until;
+  // Or what is left of it once the year was refunded or lost: the trial runs on to the end of a month the member paid
+  // (lib/yearly-fallback-sweep.ts, endHold, metadata[paid_trial_until]), paid too.
+  const until = /^in_[A-Za-z0-9]{6,64}$/.test(meta.yearly_paid ?? "") ? meta.yearly_paid_until : meta.paid_trial_until;
+  const end = /^\d{9,11}$/.test(until ?? "") ? Number(until) : 0;
+  return end > 0 && sub.trial_end === end;
 }
 
 /** The parts of a Stripe subscription these rules read. */

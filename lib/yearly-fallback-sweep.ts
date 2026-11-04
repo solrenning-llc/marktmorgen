@@ -82,7 +82,13 @@
  *     or collected again), else at once. A held membership is remembered
  *     (FALLBACK_HELD_KEY) and its year read again each day until it ends, so a
  *     year refunded or lost after its entry was settled ends its hold the
- *     same way. No switch of tier or to the yearly price is made while an
+ *     same way (the longest due first, a part of each run of their own). A
+ *     cancellation asked before the hold (metadata[cancel_before_hold]) is put
+ *     back when a hold ends early; a trial left running to a paid month's end
+ *     is marked paid (metadata[paid_trial_until]). A dispute of the year is
+ *     waited on FALLBACK_DISPUTE_DAYS at most; one Stripe marks with no
+ *     dispute listed is uncertain, and its creator told. A notice whose facts
+ *     were acted on is kept word for word until it goes (tellKept). No switch of tier or to the yearly price is made while an
  *     entry of the membership waits (lib/yearly-fallback.ts,
  *     fallbackPendingFor). A courtesy refund of part of it, or a dispute the
  *     creator won, leaves a paid year; a dispute still open waits for its
@@ -152,6 +158,13 @@ export const FALLBACK_CHECK_DAYS = 21;
 export const FALLBACK_MAX_DAYS = 45;
 /** Past FALLBACK_MAX_DAYS, how long its notice to the creator is tried each day before the entry is dropped with a log line. */
 export const FALLBACK_TELL_DAYS = 14;
+/**
+ * The longest a dispute of the year is waited on, from the first day it was read open (kept apart, `d:` in
+ * FALLBACK_SINCE_KEY): then the creator is told what is left to look at, as for an entry past FALLBACK_MAX_DAYS.
+ */
+export const FALLBACK_DISPUTE_DAYS = 120;
+/** The least time the held memberships get of each run, whatever the lists before them took. */
+export const FALLBACK_HELD_MIN_MS = 2_000;
 /** The most of the daily job's time this takes, and never more than a third of what is left. */
 export const FALLBACK_SHARE_MS = 12_000;
 /** Below this much time left, no new Stripe call is started: the entry waits for the next day. */
@@ -254,29 +267,27 @@ function shuffled<T>(list: T[]): T[] {
 }
 
 /**
- * The order a list is taken in: entries never seen first, then those still within FALLBACK_MAX_DAYS, then those past
- * it (whose notice has not gone yet), each group in a random order; so an entry that can never be settled never
- * keeps a new one out of FALLBACK_PER_SET. A list whose times cannot be read is only shuffled.
+ * The order a list is taken in: the longest waiting first. Entries never tried come first, then by when each was last
+ * tried (`t:` in FALLBACK_SINCE_KEY), the oldest first, ties in a random order; so with FALLBACK_PER_SET a run and a
+ * few seconds each, every entry is reached in turn and none (a new one, or one that keeps failing) is ever left
+ * behind for good. A list whose times cannot be read is only shuffled.
  */
 async function inTurn(entries: string[]): Promise<string[]> {
-  if (entries.length <= FALLBACK_PER_SET) return shuffled(entries);
-  let seen: unknown[] = [];
+  if (entries.length <= 1) return entries;
+  let tried: unknown[] = [];
   try {
-    const [raw] = await redisPipeline([["HMGET", FALLBACK_SINCE_KEY, ...entries]]);
-    seen = Array.isArray(raw) ? raw : [];
+    const [raw] = await redisPipeline([["HMGET", FALLBACK_SINCE_KEY, ...entries.map((entry) => `t:${entry}`)]]);
+    tried = Array.isArray(raw) ? raw : [];
   } catch (error) {
-    console.error("reading when the moves to monthly were first seen failed; taken in a random order", error);
+    console.error("reading when the moves to monthly were last tried failed; taken in a random order", error);
     return shuffled(entries);
   }
-  const now = Date.now();
-  const groups: string[][] = [[], [], []];
-  entries.forEach((entry, i) => {
-    const since = Number(seen[i]);
-    const group = seen[i] === null || seen[i] === undefined || !Number.isFinite(since) ? 0 : now - since <= FALLBACK_MAX_DAYS * 86_400_000 ? 1 : 2;
-    groups[group].push(entry);
-  });
-  return groups.flatMap(shuffled);
+  const at = new Map(entries.map((entry, i) => [entry, Number.isFinite(Number(tried[i])) && tried[i] !== null ? Number(tried[i]) : -1]));
+  return shuffled(entries).sort((a, b) => (at.get(a) ?? -1) - (at.get(b) ?? -1));
 }
+
+/** The fields kept beside an entry in FALLBACK_SINCE_KEY, all taken out with it. */
+const entryFields = (entry: string) => [entry, `t:${entry}`, `d:${entry}`, `u:${entry}`, `n:${entry}`];
 
 /**
  * Settles what moves to the monthly price left behind, until `until` (the daily job passes its own share,
@@ -294,10 +305,13 @@ export async function settleFallbacks(until: number): Promise<FallbackSweep> {
   ];
   /** The accounts an entry was taken off for this run: their store is forgotten once none is left (below). */
   const touched = new Set<string>();
+  // The held memberships keep a part of their own, whatever the lists take (review rev69): a quarter of the run, and
+  // never less than FALLBACK_HELD_MIN_MS (half a short run), so one call of theirs can always start.
+  const runLeft = Math.max(0, until - Date.now());
+  const listsUntil = until - Math.max(Math.floor(runLeft / 4), Math.min(FALLBACK_HELD_MIN_MS, Math.floor(runLeft / 2)));
   for (const [index, [key, settle]] of lists.entries()) {
-    // Each list its own part of what is left (the held years after them one more), so one list whose calls hang never
-    // keeps the others from running.
-    const slice = Date.now() + Math.floor((until - Date.now()) / (lists.length + 1 - index));
+    // Each list its own part of what is left, so one list whose calls hang never keeps the others from running.
+    const slice = Date.now() + Math.floor((listsUntil - Date.now()) / (lists.length - index));
     run.slice = slice;
     let entries: string[] = [];
     try {
@@ -319,6 +333,7 @@ export async function settleFallbacks(until: number): Promise<FallbackSweep> {
       }
       let step: Step = "wait";
       try {
+        await redisPipeline([["HSET", FALLBACK_SINCE_KEY, `t:${entry}`, String(Date.now())]]);
         step = (await expired(run, key, entry)) ?? (await settle(run, entry));
       } catch (error) {
         if (deniedBy(error)) {
@@ -334,7 +349,7 @@ export async function settleFallbacks(until: number): Promise<FallbackSweep> {
       }
       if (step === "done") {
         try {
-          await redisPipeline([["SREM", key, entry], ["HDEL", FALLBACK_SINCE_KEY, entry]]);
+          await redisPipeline([["SREM", key, entry], ["HDEL", FALLBACK_SINCE_KEY, ...entryFields(entry)]]);
           out.settled += 1;
           touched.add(account);
         } catch (error) {
@@ -378,11 +393,16 @@ async function forgetStores(accounts: Set<string>): Promise<void> {
  * Past FALLBACK_MAX_DAYS since the job first saw it: the creator is told what is left to look at, and only once the
  * notice is accepted does it leave (never dropped unseen); null while it is not that old.
  */
-async function expired(run: Run, key: string, entry: string): Promise<Step | null> {
+async function expired(run: Run, key: string, entry: string, disputeSince = 0): Promise<Step | null> {
   const now = Date.now();
-  const [, first] = await redisPipeline([["HSETNX", FALLBACK_SINCE_KEY, entry, String(now)], ["HGET", FALLBACK_SINCE_KEY, entry]]);
-  const since = Number(first);
-  if (!Number.isFinite(since) || now - since <= FALLBACK_MAX_DAYS * 86_400_000) return null;
+  // A dispute of the year open past FALLBACK_DISPUTE_DAYS: told from the day it was first read open.
+  const limit = disputeSince ? FALLBACK_DISPUTE_DAYS : FALLBACK_MAX_DAYS;
+  let since = disputeSince;
+  if (!since) {
+    const [, first] = await redisPipeline([["HSETNX", FALLBACK_SINCE_KEY, entry, String(now)], ["HGET", FALLBACK_SINCE_KEY, entry]]);
+    since = Number(first);
+  }
+  if (!Number.isFinite(since) || now - since <= limit * 86_400_000) return null;
   const [account = "", a = "", b = ""] = entry.split("|");
   const invoices = (key === FALLBACK_CHECK_KEY ? [b] : [a, b]).filter((id) => INVOICE_PATTERN.test(id));
   // Whether we stopped collecting the month while we waited (BOTH, a dispute of the year open): read, never assumed.
@@ -400,7 +420,9 @@ async function expired(run: Run, key: string, entry: string): Promise<Step | nul
     key: `fallback-expired:${entry}`,
     subject: "A member's move to a monthly price needs a look",
     lines: [
-      `A member asked to move from a yearly price to a monthly one, and after ${FALLBACK_MAX_DAYS} days we still could not finish settling it on your Stripe account.`,
+      disputeSince
+        ? `A member paid their yearly renewal while moving to a monthly price, and a dispute of that yearly payment has been open for more than ${FALLBACK_DISPUTE_DAYS} days, so we could not finish settling it.`
+        : `A member asked to move from a yearly price to a monthly one, and after ${FALLBACK_MAX_DAYS} days we still could not finish settling it on your Stripe account.`,
       "Nothing more will be done about it automatically. Please look at that customer on your Stripe account, so they are never charged for both the year and a month.",
       ...(paused === true
         ? ["We stopped collecting the month's invoice while we waited, and it is still open: please void it if the year is paid, or collect it if not."]
@@ -411,7 +433,7 @@ async function expired(run: Run, key: string, entry: string): Promise<Step | nul
     ],
   });
   if (told === "unsent") {
-    if (now - since <= (FALLBACK_MAX_DAYS + FALLBACK_TELL_DAYS) * 86_400_000) {
+    if (now - since <= (limit + FALLBACK_TELL_DAYS) * 86_400_000) {
       console.error("a move to monthly could not be settled in time, and its notice did not go; kept until it does", entry.slice(0, 200));
       return "wait";
     }
@@ -508,7 +530,7 @@ async function settleCheck(run: Run, entry: string): Promise<Step> {
         return (await voidIdle(run, account, await readInvoice(run, account, latestId))) ? "done" : "wait";
       }
       // Paid on a membership that has ended (Stripe cancels it after its failed payments): never kept in silence.
-      if (ended(sub)) return sentStep(await tellEndedYear(account, sub, year, yearly, ""), account, yearly);
+      if (ended(sub)) return sentStep(await tellEndedYear(account, sub, year, yearly, "", 0, false, entry), account, yearly);
       return "done";
     }
     if (year.status === "void") return "done";
@@ -547,6 +569,10 @@ async function settleCheck(run: Run, entry: string): Promise<Step> {
 async function settleBoth(run: Run, entry: string): Promise<Step> {
   const [account = "", yearly = "", monthly = "", ...rest] = entry.split("|");
   if (rest.length || !ACCOUNT_PATTERN.test(account) || !INVOICE_PATTERN.test(yearly) || !INVOICE_PATTERN.test(monthly) || yearly === monthly) return malformed(entry);
+  // Everything was done and only its notice did not go: the very same words again, never worked out anew from what
+  // has changed since (review rev69).
+  const kept = await keptNote(entry);
+  if (kept) return sentStep(await tellCreator(account, null, kept), account, monthly);
   let first: Raw;
   try {
     first = await get(run, account, `/invoices/${encodeURIComponent(monthly)}`);
@@ -579,7 +605,7 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
     if (!sub || ended(sub)) {
       if ((month.status === "open" || month.status === "uncollectible") && !(await voidIdle(run, account, month))) return "wait";
       const refunded = month.status === "paid" && (await refundedByUs(run, account, monthly, month));
-      return sent(await tellEndedYear(account, sub, year, yearly, monthly, month.status === "paid" ? num(month.amount_paid) : 0, refunded));
+      return sent(await tellEndedYear(account, sub, year, yearly, monthly, month.status === "paid" ? num(month.amount_paid) : 0, refunded, entry));
     }
     const path = sub ? `/subscriptions/${encodeURIComponent(idOf(sub.id))}` : "";
     /** Our hold, set by an earlier run on this year: still a trial ending when the year paid ends. */
@@ -590,37 +616,58 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
     // 0. A year refunded in full (on its charge or by credit notes) or lost in a dispute since is not a paid year:
     //    nothing is undone, and a hold set for it ends. A dispute still open waits for its outcome (its time stopped),
     //    a month still owed not collected meanwhile, so it is not tried on the member's card again and again.
-    const kept = await yearKept(run, account, year);
-    if (kept === "open-dispute") {
+    const yearState = await yearKept(run, account, year);
+    if (yearState === "open-dispute" || yearState === "unknown-dispute") {
+      // Waited on for FALLBACK_DISPUTE_DAYS at most, from the first day it was read open; then the creator is told.
+      const [, opened] = await redisPipeline([["HSETNX", FALLBACK_SINCE_KEY, `d:${entry}`, String(Date.now())], ["HGET", FALLBACK_SINCE_KEY, `d:${entry}`]]);
+      const openSince = Number(opened);
+      if (Number.isFinite(openSince) && Date.now() - openSince > FALLBACK_DISPUTE_DAYS * 86_400_000) return (await expired(run, FALLBACK_BOTH_KEY, entry, openSince)) ?? "wait";
       if ((month.status === "open" || month.status === "uncollectible") && month.auto_advance !== false && !processing(month)) {
         await post(run, account, `/invoices/${encodeURIComponent(monthly)}`, new URLSearchParams({ auto_advance: "false", "metadata[fallback_paused]": yearly }), `fallback-pause:${monthly}`);
       }
       // Held meanwhile, so no next month is charged on top of a year that may well be kept; a dispute lost ends the
-      // hold at once (below). The entry's time does not run while the dispute is open: it can take months.
-      await hold(run, account, sub, year, yearly);
+      // hold at once (below). The entry's own time does not run while the dispute is open: it can take months.
+      if ((await hold(run, account, sub, year, yearly)) === "held") await remember(account, idOf(sub.id), yearly, monthly, yearEnd(year)?.end ?? 0);
       await redisPipeline([["HSET", FALLBACK_SINCE_KEY, entry, String(Date.now())]]);
+      // Marked disputed with no dispute listed: uncertain, waited on all the same, and the creator told once.
+      if (yearState === "unknown-dispute") {
+        const [fresh] = await redisPipeline([["HSETNX", FALLBACK_SINCE_KEY, `u:${entry}`, "1"]]);
+        if (Number(fresh) === 1) {
+          const told = await tellCreator(account, sub, {
+            key: `fallback-unknown-dispute:${account}:${yearly}`,
+            subject: "A member's yearly payment shows a dispute we cannot read",
+            lines: [
+              "A member paid their yearly renewal while their move to the monthly price was being made.",
+              "Stripe marks that yearly payment as disputed, but lists no dispute for it, so we cannot tell how it ends. We hold the membership with nothing to pay meanwhile and wait. Please look at that payment on your Stripe account.",
+              "",
+              invoices,
+            ],
+          });
+          if (told === "unsent") await redisPipeline([["HDEL", FALLBACK_SINCE_KEY, `u:${entry}`]]);
+        }
+      }
       return "wait";
     }
-    if (kept !== "kept") {
+    if (yearState !== "kept") {
       // The month stopped by us is collected again: the year it stood beside is not paid any more.
       if (pausedHere) {
         await post(run, account, `/invoices/${encodeURIComponent(monthly)}`, new URLSearchParams({ auto_advance: "true", "metadata[fallback_paused]": "" }), `fallback-resume:${monthly}`);
       }
       // A hold set for that year ends, so it is never a free year: from the end of the month the member keeps (paid and
       // not refunded by us, or collected again), else from today.
-      const unhold = heldHere ? await endHold(run, account, sub, yearly, monthly, month, pausedHere) : { kind: "none" as const, from: 0 };
+      const unhold: Unhold = heldHere ? await endHold(run, account, sub, subscription, yearly, monthly, month, year, pausedHere) : { kind: "none", from: 0, resumed: false, cancelAt: 0, canceledNow: false };
       const unheld = unhold.kind;
       const [mark] = await redisPipeline([["GET", fallbackRefundedKey(monthly)]]);
       const refundedBefore = typeof mark === "string" ? /^refunded:(\d+)/.exec(mark) : null;
-      const what = kept === "refunded" ? "refunded" : "lost in a dispute";
+      const what = yearState === "refunded" ? "refunded" : "lost in a dispute";
       return sent(
-        await tellCreator(account, sub, {
+        await tellKept(entry, account, sub, {
           key: `fallback-year-undone:${account}:${monthly}`,
           subject: "A member's yearly payment was refunded or disputed",
           lines: [
             `A member paid their yearly renewal while their move to the monthly price was being made, and that yearly payment was ${what} afterwards.`,
             unheld === "ended"
-              ? unholdWords(unhold.from)
+              ? unholdWords(unhold)
               : unheld === "refused"
                 ? "We held the membership with nothing to pay until the end of that year, and could not end that hold by itself. Please end its trial on your Stripe account, so the year is not given for free."
                 : `So the membership stays on the monthly price${pausedHere ? ", and its monthly payment is collected again" : ""}.`,
@@ -660,7 +707,7 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
       if ((settledBack || back === "ended") && !later.lines.length) return "done";
       if (settledBack || back === "ended") {
         return sent(
-          await tellCreator(account, sub, {
+          await tellKept(entry, account, sub, {
             key: `fallback-later:${account}:${monthly}`,
             subject: "A member's extra months were refunded",
             lines: ["A member paid their yearly renewal while their move to the monthly price was being made. The monthly payment they still owed was not taken.", ...later.lines, where, "", invoices],
@@ -669,7 +716,7 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
       }
       // The month was voided, but the membership could not be held by itself: the creator is told.
       return sent(
-        await tellCreator(account, sub, {
+        await tellKept(entry, account, sub, {
           key: `fallback-back:${account}:${monthly}`,
           subject: "A member's yearly payment needs a look",
           lines: ["A member paid their yearly renewal while their move to the monthly price was being made. The monthly payment was not taken.", ...later.lines, where, "", invoices],
@@ -684,7 +731,7 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
     const creditLine = credit > 0 && outcome.kind !== "no-payment" ? [`Part of the month, ${money(credit)}, was paid from the member's credit balance on your Stripe account; it was not given back by itself. If they are owed it, please credit it back.`] : [];
     if (outcome.kind === "refunded") {
       const paidMonth = num(month.amount_paid);
-      const told = await tellCreator(account, sub, {
+      const told = await tellKept(entry, account, sub, {
         key: `fallback-both:${account}:${monthly}`,
         subject: "A member's extra month was refunded",
         lines: [
@@ -704,7 +751,7 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
     }
     if (outcome.kind === "disputed") {
       return sent(
-        await tellCreator(account, sub, {
+        await tellKept(entry, account, sub, {
           key: `fallback-disputed:${account}:${monthly}`,
           subject: "A member disputed an extra month they paid",
           lines: [
@@ -722,7 +769,7 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
     }
     if (outcome.kind === "no-payment") {
       return sent(
-        await tellCreator(account, sub, {
+        await tellKept(entry, account, sub, {
           key: `fallback-nopay:${account}:${monthly}`,
           subject: "A member paid an extra month that needs a look",
           lines: [
@@ -739,7 +786,7 @@ async function settleBoth(run: Run, entry: string): Promise<Step> {
     // "none": the payment was refunded in full before, by someone else; only what could not go back is said.
     if (creditLine.length || later.lines.length || !settledBack) {
       return sent(
-        await tellCreator(account, sub, {
+        await tellKept(entry, account, sub, {
           key: `fallback-back:${account}:${monthly}`,
           subject: "A member's yearly payment needs a look",
           lines: ["A member paid their yearly renewal while their move to the monthly price was being made.", ...creditLine, ...later.lines, where, "", invoices],
@@ -778,9 +825,9 @@ function yearEnd(year: Raw): { price: string; end: number } | null {
  * (Invoice Line Item, `parent.type` "subscription_item_details", or `type` "subscription" in older versions), never a
  * proration nor an item added to the invoice.
  */
-function subLine(invoice: Raw): { price: string; start: number; end: number } | null {
+function subLine(invoice: Raw): { price: string; start: number; end: number; amount: number | null } | null {
   const lines = (invoice.lines as { data?: unknown } | null)?.data;
-  let found: { price: string; start: number; end: number } | null = null;
+  let found: { price: string; start: number; end: number; amount: number | null } | null = null;
   for (const line of Array.isArray(lines) ? (lines as Raw[]) : []) {
     // The subscription's own line (Invoice Line Item, `parent.type` "subscription_item_details", or `type`
     // "subscription" in older versions), never a proration nor an item added to the invoice (a one-time add-on).
@@ -790,7 +837,10 @@ function subLine(invoice: Raw): { price: string; start: number; end: number } | 
     const price = idOf((line.pricing as { price_details?: { price?: unknown } | null } | null)?.price_details?.price);
     const end = (line.period as { end?: unknown } | null)?.end;
     const start = num((line.period as { start?: unknown } | null)?.start);
-    if (PRICE_PATTERN.test(price) && typeof end === "number" && end > (found?.end ?? 0)) found = { price, start, end };
+    // What the line charged with its own tax (Invoice Line Item, `amount`, and `taxes` or, before, `tax_amounts`).
+    const taxes = [...(Array.isArray(line.taxes) ? (line.taxes as Raw[]) : []), ...(Array.isArray(line.tax_amounts) ? (line.tax_amounts as Raw[]) : [])];
+    const amount = typeof line.amount === "number" ? line.amount + taxes.reduce((sum, t) => sum + num(t.amount), 0) : null;
+    if (PRICE_PATTERN.test(price) && typeof end === "number" && end > (found?.end ?? 0)) found = { price, start, end, amount };
   }
   return found;
 }
@@ -828,10 +878,11 @@ async function paidPayments(run: Run, account: string, invoice: Raw): Promise<Pa
  * docs.stripe.com/api/disputes/object): won (or closed with no chargeback) keeps the money with the creator; lost
  * gives it back; anything else is still open.
  */
-async function disputeOf(run: Run, account: string, chargeId: string): Promise<"won" | "lost" | "open" | "inquiry"> {
+async function disputeOf(run: Run, account: string, chargeId: string): Promise<"won" | "lost" | "open" | "inquiry" | "unknown"> {
   const read = await get(run, account, `/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`);
   const rows = Array.isArray(read.data) ? (read.data as Raw[]) : [];
-  if (!rows.length) return "open";
+  // Marked disputed with no dispute listed: uncertain, never read as won or as nothing (the creator is told).
+  if (!rows.length) return "unknown";
   if (rows.some((d) => d.status === "lost")) return "lost";
   // An inquiry (a `warning_*` status: the bank asks, no money is taken back) is not a chargeback: the money is still
   // the creator's, and a refund is what answers it.
@@ -846,7 +897,7 @@ async function disputeOf(run: Run, account: string, chargeId: string): Promise<"
  * amount, or credit notes for all of what was paid): a small courtesy refund leaves a paid year. Disputed only when
  * the dispute was lost: one the creator won leaves a paid year, one still open waits.
  */
-async function yearKept(run: Run, account: string, year: Raw): Promise<"kept" | "refunded" | "disputed" | "open-dispute"> {
+async function yearKept(run: Run, account: string, year: Raw): Promise<"kept" | "refunded" | "disputed" | "open-dispute" | "unknown-dispute"> {
   const paid = num(year.amount_paid);
   const notes = num(year.post_payment_credit_notes_amount);
   if (paid > 0 && notes >= paid) return "refunded";
@@ -854,6 +905,7 @@ async function yearKept(run: Run, account: string, year: Raw): Promise<"kept" | 
   // note that refunds also shows on its charge, so the two are never added together: the larger is what went back.
   let back = 0;
   let open = false;
+  let unknown = false;
   for (const row of await paidPayments(run, account, year)) {
     const found = await chargeOf(run, account, row);
     if (!found) continue;
@@ -863,10 +915,11 @@ async function yearKept(run: Run, account: string, year: Raw): Promise<"kept" | 
       const outcome = await disputeOf(run, account, idOf(charge.id));
       if (outcome === "lost") return "disputed";
       if (outcome === "open") open = true;
+      if (outcome === "unknown") unknown = true;
     }
   }
   if (paid > 0 && Math.max(back, notes) >= paid) return "refunded";
-  return open ? "open-dispute" : "kept";
+  return open ? "open-dispute" : unknown ? "unknown-dispute" : "kept";
 }
 
 /**
@@ -891,8 +944,10 @@ async function hold(run: Run, account: string, sub: SubRead, year: Raw, yearly: 
   // `cancel_at`) is kept, moved to the end of the year paid: never before it, never dropped.
   // A later date the member or the creator set is kept as it is (review rev30).
   const cancelAt = num(sub.cancel_at) > 0 || sub.cancel_at_period_end === true ? Math.max(num(sub.cancel_at), paid.end) : 0;
+  // What was asked before the hold, so it is put back when the hold ends early (endHold): the period's end, or a date.
+  const before = sub.cancel_at_period_end === true ? "period_end" : num(sub.cancel_at) > 0 ? String(num(sub.cancel_at)) : "";
   try {
-    await post(run, account, `/subscriptions/${encodeURIComponent(idOf(sub.id))}`, holdBody(paid.end, yearly, cancelAt), `fallback-hold:${yearly}`);
+    await post(run, account, `/subscriptions/${encodeURIComponent(idOf(sub.id))}`, holdBody(paid.end, yearly, cancelAt, before), `fallback-hold:${yearly}`);
     return "held";
   } catch (error) {
     if (!refusedBy(error)) throw error;
@@ -906,12 +961,13 @@ async function hold(run: Run, account: string, sub: SubRead, year: Raw, yearly: 
  * no new billing period begins), the paid year named and the day it ends, so every reader knows this trial is paid
  * while it lasts (lib/yearly-switch-rules.ts, paidYearHeld).
  */
-export function holdBody(end: number, yearly: string, cancelAt = 0): URLSearchParams {
+export function holdBody(end: number, yearly: string, cancelAt = 0, cancelBefore = ""): URLSearchParams {
   const body = new URLSearchParams({ trial_end: String(end), proration_behavior: "none", "metadata[yearly_paid]": yearly, "metadata[yearly_paid_until]": String(end) });
   // The member had set it to end: it still ends, on the last day of the year they paid (Update a subscription,
   // `cancel_at`, a timestamp, docs.stripe.com/api/subscriptions/update, read 4 November 2026). How Stripe orders a
   // cancel_at with a trial ending the same second is on the test clock list (item 630 line 14).
   if (cancelAt > 0) body.set("cancel_at", String(Math.max(cancelAt, end)));
+  if (cancelBefore) body.set("metadata[cancel_before_hold]", cancelBefore);
   return body;
 }
 
@@ -928,13 +984,13 @@ const dayWords = (at: number) => new Date(at * 1000).toLocaleDateString("en-US",
  * member has nothing to use it for, so the creator is always told to refund it or to start the membership again.
  * Never refunded by itself here (the owner's decision is pending, item 630 line 14).
  */
-async function tellEndedYear(account: string, sub: SubRead | null, year: Raw, yearly: string, monthly: string, monthPaid = 0, monthRefunded = false): Promise<Told> {
+async function tellEndedYear(account: string, sub: SubRead | null, year: Raw, yearly: string, monthly: string, monthPaid = 0, monthRefunded = false, entry = ""): Promise<Told> {
   const money = (cents: number) => formatMoney(cents, str(year.currency) || "usd");
   const endedAt = num(sub?.ended_at) || num(sub?.canceled_at);
   // Paid before it ended (by hand, on its page, while it was still running): it has ended since, not before.
   const paidAt = num((year.status_transitions as { paid_at?: unknown } | null)?.paid_at);
   const since = paidAt > 0 && endedAt > 0 && paidAt < endedAt;
-  return tellCreator(account, sub, {
+  return tellKept(entry, account, sub, {
     key: `fallback-ended:${account}:${yearly}`,
     subject: "A member paid a year on a membership that had ended",
     lines: [
@@ -1028,8 +1084,19 @@ async function strayMonths(run: Run, account: string, subscription: string, year
       if (!renewalOf(invoice, month)) continue;
       const id = idOf(invoice.id);
       if (status === "draft") {
-        await onAccount("DELETE", account, `/invoices/${encodeURIComponent(id)}`, undefined, v, undefined, ceiling(run));
-        out.lines.push(`A later monthly invoice not sent yet (${id}) was deleted.`);
+        // A subscription's draft cannot be deleted (Stripe refuses it): kept from charging (auto_advance=false),
+        // finalized without a charge, then voided. Any of it refused waits for the next run.
+        const at = `/invoices/${encodeURIComponent(id)}`;
+        try {
+          await post(run, account, at, new URLSearchParams({ auto_advance: "false" }), `fallback-stray-stop:${id}`);
+          await post(run, account, `${at}/finalize`, new URLSearchParams({ auto_advance: "false" }), `fallback-stray-final:${id}`);
+          await post(run, account, `${at}/void`, new URLSearchParams(), `fallback-stray-void:${id}`);
+          out.lines.push(`A later monthly invoice not sent yet (${id}) was voided before it could be charged.`);
+        } catch (error) {
+          if (!refusedBy(error)) throw error;
+          console.error("a later monthly draft could not be voided; kept for the next run", account, id, error);
+          out.pending = true;
+        }
       } else if (await voidIdle(run, account, await readInvoice(run, account, id))) {
         out.lines.push(`A later monthly invoice still owed (${id}) was voided.`);
       } else out.pending = true;
@@ -1039,14 +1106,32 @@ async function strayMonths(run: Run, account: string, subscription: string, year
 }
 
 /**
- * The end of the month the member keeps beside a year no longer paid: the month's own line period, when it was paid
- * and not refunded by us, or when it is collected again; 0 when we refunded or voided it.
+ * The end of the latest month the member keeps beside a year no longer paid: the entry's month or a renewal since,
+ * whose money stayed with the creator (not refunded in full by anyone, not lost in a dispute), or the entry's month
+ * collected again; 0 when none is kept.
  */
-async function monthKeptUntil(run: Run, account: string, monthly: string, month: Raw, resumed: boolean): Promise<number> {
-  const end = subLine(month)?.end ?? 0;
-  if (resumed) return end;
-  if (month.status !== "paid") return 0;
-  return (await refundedByUs(run, account, monthly, month)) ? 0 : end;
+async function monthKeptUntil(run: Run, account: string, subscription: string, yearly: string, monthly: string, month: Raw, year: Raw, resumed: boolean): Promise<number> {
+  let end = resumed ? (subLine(month)?.end ?? 0) : 0;
+  if (month.status === "paid" && (await moneyStayed(run, account, month))) end = Math.max(end, subLine(month)?.end ?? 0);
+  for (const invoice of await sinceMove(run, account, subscription, yearly, monthly, month, year, "paid")) {
+    if (!renewalOf(invoice, month) || num(invoice.amount_paid) <= 0) continue;
+    if (await moneyStayed(run, account, await readInvoice(run, account, idOf(invoice.id)))) end = Math.max(end, subLine(invoice)?.end ?? 0);
+  }
+  return end;
+}
+
+/** Whether what was paid on an invoice stayed with the creator: not refunded in full by anyone, not lost in a dispute. */
+async function moneyStayed(run: Run, account: string, invoice: Raw): Promise<boolean> {
+  const paid = num(invoice.amount_paid) - num(invoice.post_payment_credit_notes_amount);
+  if (paid <= 0) return false;
+  let back = 0;
+  for (const row of await paidPayments(run, account, invoice)) {
+    const found = await chargeOf(run, account, row);
+    if (!found) continue;
+    back += found.charge.refunded === true ? num(found.charge.amount) : Math.min(num(found.charge.amount_refunded), num(found.charge.amount));
+    if (found.charge.disputed === true && (await disputeOf(run, account, idOf(found.charge.id))) === "lost") return false;
+  }
+  return back < paid;
 }
 
 /** Whether we refunded this month: the mark, else Stripe's own refunds of its payments read for one of ours. */
@@ -1060,66 +1145,94 @@ async function refundedByUs(run: Run, account: string, monthly: string, month: R
   return false;
 }
 
+/** How a hold of a year no longer paid ended. */
+type Unhold = { kind: "ended" | "refused" | "none"; from: number; resumed: boolean; cancelAt: number; canceledNow: boolean };
+
 /**
  * Ends our hold of a year no longer paid: never a free year, never the month the member keeps charged twice. The trial
- * ends at the end of that month (paid and not refunded by us, or collected again), else now; the marks go.
+ * ends at the end of the latest month the member keeps (monthKeptUntil), else now; the marks go. A cancellation the
+ * member had asked before the hold (metadata[cancel_before_hold], moved by the hold to the year's end) is put back:
+ * a date, never before the trial ends; the period's end, as the end of the month kept. One that is already due ends
+ * the membership now, with nothing charged (Cancel a subscription, docs.stripe.com/api/subscriptions/cancel). Where
+ * the trial goes on to a paid month's end, metadata[paid_trial_until] says so (paidYearHeld reads it as paid).
  */
 async function endHold(
   run: Run,
   account: string,
   sub: SubRead,
+  subscription: string,
   yearly: string,
   monthly: string,
   month: Raw,
+  year: Raw,
   resumed: boolean,
-): Promise<{ kind: "ended" | "refused"; from: number }> {
-  const kept = await monthKeptUntil(run, account, monthly, month, resumed);
+): Promise<Unhold> {
+  const kept = await monthKeptUntil(run, account, subscription, yearly, monthly, month, year, resumed);
   const now = Math.floor(Date.now() / 1000);
   const from = kept > now + 60 ? kept : 0;
+  const before = sub.metadata?.cancel_before_hold ?? "";
+  const asked = before === "period_end" ? from : /^\d{9,11}$/.test(before) ? Math.max(Number(before), from || now) : 0;
+  const path = `/subscriptions/${encodeURIComponent(idOf(sub.id))}`;
   try {
-    await post(
-      run,
-      account,
-      `/subscriptions/${encodeURIComponent(idOf(sub.id))}`,
-      new URLSearchParams({ trial_end: from ? String(from) : "now", proration_behavior: "none", "metadata[yearly_paid]": "", "metadata[yearly_paid_until]": "" }),
-      `fallback-unhold:${yearly}`,
-    );
-    return { kind: "ended", from };
+    if (before && asked <= now + 60) {
+      // The member asked it to end by now: it ends now, nothing charged.
+      await onAccount("DELETE", account, path, undefined, v, `fallback-unhold-end:${yearly}`, ceiling(run));
+      return { kind: "ended", from: 0, resumed, cancelAt: now, canceledNow: true };
+    }
+    const body = new URLSearchParams({
+      trial_end: from ? String(from) : "now",
+      proration_behavior: "none",
+      "metadata[yearly_paid]": "",
+      "metadata[yearly_paid_until]": "",
+      "metadata[cancel_before_hold]": "",
+      "metadata[paid_trial_until]": from ? String(from) : "",
+    });
+    if (before) body.set("cancel_at", String(asked));
+    await post(run, account, path, body, `fallback-unhold:${yearly}`);
+    return { kind: "ended", from, resumed, cancelAt: before ? asked : 0, canceledNow: false };
   } catch (error) {
     if (!refusedBy(error)) throw error;
     console.error("ending the hold of a year no longer paid was refused; its creator is told", account, idOf(sub.id), error);
-    return { kind: "refused", from };
+    return { kind: "refused", from, resumed, cancelAt: 0, canceledNow: false };
   }
 }
 
-/** What the creator is told once our hold ended: from the end of the month the member keeps, or from today. */
-function unholdWords(from: number): string {
-  return from
-    ? `So the time we held for that year has ended: the membership goes on at the monthly price, its next payment taken on ${dayWords(from)}, when the month they paid ends.`
+/** What the creator is told once our hold ended: when the next payment is taken, and when it ends if it was asked to. */
+function unholdWords(u: Unhold): string {
+  if (u.canceledNow) return "So the time we held for that year has ended, and the membership has ended now, as the member had asked before; nothing more was charged.";
+  const next = u.from
+    ? u.resumed
+      ? `So the time we held for that year has ended: the monthly payment they still owed is collected again, and the next one is taken on ${dayWords(u.from)}, when that month ends.`
+      : `So the time we held for that year has ended: the membership goes on at the monthly price, its next payment taken on ${dayWords(u.from)}, when the month they paid ends.`
     : "So the time we held for that year has ended: the membership goes on at the monthly price, and its next monthly payment is taken now.";
+  return u.cancelAt ? `${next} It ends on ${dayWords(u.cancelAt)}, as the member had asked.` : next;
 }
 
-/** A membership held until `until`, read again each day until then (checkHeld). Never throws. */
+/**
+ * A membership held until `until`, read again each day until then (checkHeld): "account|subscription|yearly|monthly|until"
+ * scored by when it is next read, so the longest waiting are read first. Never moved later by being remembered again.
+ * Never throws.
+ */
 async function remember(account: string, subscription: string, yearly: string, monthly: string, until: number): Promise<void> {
   if (!SUB_PATTERN.test(subscription) || !(until > 0)) return;
-  await redisPipeline([["ZADD", FALLBACK_HELD_KEY, until, `${account}|${subscription}|${yearly}|${monthly}`]]).catch((error) => {
+  await redisPipeline([["ZADD", FALLBACK_HELD_KEY, "NX", Date.now(), `${account}|${subscription}|${yearly}|${monthly}|${until}`]]).catch((error) => {
     console.error("remembering a held membership failed; its year is not read again after today", error);
   });
 }
 
 /**
- * The memberships held for a year paid, read again each day until the year ends (FALLBACK_PER_SET a run): a year
- * refunded in full or lost in a dispute since ends the hold (endHold) and the creator is told. One still being settled
- * on BOTH is left to it. Never throws.
+ * The memberships held for a year paid, read again each day until the year ends: those due longest first, those still
+ * being settled on BOTH left out before the cut (BOTH reads them), FALLBACK_PER_SET a run in what is left of it (at
+ * least FALLBACK_HELD_MIN_MS). A year refunded in full or lost in a dispute since ends the hold (endHold) and the
+ * creator is told; one read and still paid is read again the next day. Never throws.
  */
 async function checkHeld(run: Run): Promise<void> {
   let members: string[] = [];
   let both: string[] = [];
-  const now = Math.floor(Date.now() / 1000);
+  const now = Date.now();
   try {
-    const [, raw, list] = await redisPipeline([
-      ["ZREMRANGEBYSCORE", FALLBACK_HELD_KEY, "-inf", now],
-      ["ZRANGEBYSCORE", FALLBACK_HELD_KEY, now + 1, "+inf", "LIMIT", 0, 500],
+    const [raw, list] = await redisPipeline([
+      ["ZRANGEBYSCORE", FALLBACK_HELD_KEY, "-inf", now, "LIMIT", 0, 500],
       ["SMEMBERS", FALLBACK_BOTH_KEY],
     ]);
     members = Array.isArray(raw) ? raw.map(String) : [];
@@ -1128,25 +1241,43 @@ async function checkHeld(run: Run): Promise<void> {
     console.error("reading the held memberships failed", error);
     return;
   }
-  for (const member of shuffled(members).slice(0, FALLBACK_PER_SET)) {
+  const due = members.filter((member) => {
+    const [account = "", , yearly = ""] = member.split("|");
+    return !both.some((entry) => entry.startsWith(`${account}|${yearly}|`));
+  });
+  for (const member of due.slice(0, FALLBACK_PER_SET)) {
     if (Date.now() + LEAST_CALL_MS > run.until) return;
-    const [account = "", subscription = "", yearly = "", monthly = "", ...rest] = member.split("|");
+    const [account = "", subscription = "", yearly = "", monthly = "", until = "", ...rest] = member.split("|");
     if (run.denied.has(account)) continue;
     let done = false;
+    let tried = false;
     try {
-      if (rest.length || !ACCOUNT_PATTERN.test(account) || !SUB_PATTERN.test(subscription) || !INVOICE_PATTERN.test(yearly) || !INVOICE_PATTERN.test(monthly)) done = true;
-      else if (both.some((entry) => entry.startsWith(`${account}|${yearly}|`))) continue;
-      else done = await settleHeld(run, account, subscription, yearly, monthly);
+      if (rest.length || !ACCOUNT_PATTERN.test(account) || !SUB_PATTERN.test(subscription) || !INVOICE_PATTERN.test(yearly) || !INVOICE_PATTERN.test(monthly) || !/^\d{9,11}$/.test(until)) done = true;
+      else if (Number(until) <= Math.floor(Date.now() / 1000)) done = true;
+      else {
+        done = await settleHeld(run, member, account, subscription, yearly, monthly);
+        tried = true;
+      }
     } catch (error) {
       if (deniedBy(error)) run.denied.add(account);
       else if (!(error instanceof Error && (error.name === "LockBusyError" || error.name === "OutOfTime"))) console.error("reading a held membership again failed; kept for tomorrow", error);
     }
-    if (done) await redisPipeline([["ZREM", FALLBACK_HELD_KEY, member]]).catch(() => {});
+    await redisPipeline(
+      done
+        ? [["ZREM", FALLBACK_HELD_KEY, member], ["HDEL", FALLBACK_SINCE_KEY, `n:${member}`]]
+        : [["ZADD", FALLBACK_HELD_KEY, Date.now() + (tried ? 86_400_000 : 0), member]],
+    ).catch(() => {});
   }
 }
 
-/** One held membership read again: true once there is nothing more to read (the hold ended, by us or otherwise). */
-async function settleHeld(run: Run, account: string, subscription: string, yearly: string, monthly: string): Promise<boolean> {
+/**
+ * One held membership read again: true once there is nothing more to read (the hold ended, by us or otherwise, and
+ * its notice went). A hold we ended whose notice did not go keeps its words (keptNote) and is only told again the
+ * next day, never ended twice (review rev69).
+ */
+async function settleHeld(run: Run, member: string, account: string, subscription: string, yearly: string, monthly: string): Promise<boolean> {
+  const pending = await keptNote(member);
+  if (pending) return (await tellCreator(account, null, pending)) !== "unsent";
   return withLock(fallbackLockKey(subscription), FALLBACK_LOCK_SECONDS, 2_000, async (): Promise<boolean> => {
     let sub: SubRead;
     try {
@@ -1158,25 +1289,23 @@ async function settleHeld(run: Run, account: string, subscription: string, yearl
     if (ended(sub) || sub.status !== "trialing" || sub.metadata?.yearly_paid !== yearly) return true;
     const year = await readInvoice(run, account, yearly);
     const kept = await yearKept(run, account, year);
-    if (kept === "kept" || kept === "open-dispute") return false;
+    if (kept === "kept" || kept === "open-dispute" || kept === "unknown-dispute") return false;
     const month = await readInvoice(run, account, monthly);
-    const unhold = await endHold(run, account, sub, yearly, monthly, month, false);
+    const unhold = await endHold(run, account, sub, subscription, yearly, monthly, month, year, false);
     const what = kept === "refunded" ? "refunded" : "lost in a dispute";
-    const told = await tellCreator(account, sub, {
+    const told = await tellKept(member, account, sub, {
       key: `fallback-held-undone:${account}:${yearly}`,
       subject: "A member's yearly payment was refunded or disputed",
       lines: [
         `A member's yearly payment, made while they moved to the monthly price, was ${what} after we held their membership for that year.`,
         unhold.kind === "ended"
-          ? unholdWords(unhold.from)
+          ? unholdWords(unhold)
           : "We could not end that hold by itself. Please end its trial on your Stripe account, so the year is not given for free.",
         "",
         `Invoices: ${yearly} (the year) and ${monthly} (the month).`,
       ],
     });
-    // The hold ended: its notice goes once (its key), and the member is not read again whether it went or not.
-    if (told === "unsent") console.error("a held year no longer paid was ended, and its notice did not go", account, subscription);
-    return true;
+    return told !== "unsent";
   });
 }
 
@@ -1209,6 +1338,9 @@ async function refundMonth(run: Run, account: string, yearly: string, monthly: s
   let pending = false;
   // What credit notes gave back of it already is never given again (Invoice, `post_payment_credit_notes_amount`).
   let paidOnInvoice = Math.max(0, num(month.amount_paid) - num(month.post_payment_credit_notes_amount));
+  // Never more than the month itself, its line with its tax: an item added to the same invoice is not the month.
+  const line = subLine(month)?.amount;
+  if (typeof line === "number") paidOnInvoice = Math.min(paidOnInvoice, Math.max(0, line));
   for (const row of rows) {
     const paid = await chargeOf(run, account, row);
     if (!paid) continue;
@@ -1306,9 +1438,40 @@ async function tellDenied(account: string): Promise<void> {
   if (told === "unsent") await redisPipeline([["DEL", deniedKey(account)]]).catch(() => {});
 }
 
-type Note = { key: string; subject: string; lines: string[] };
+type Note = { key: string; subject: string; lines: string[]; titled?: boolean };
 /** Whether a notice went: accepted by the sender, no store to tell (nothing more can be done), or not sent. */
 type Told = "told" | "nostore" | "unsent";
+
+/**
+ * A notice whose words are kept (`n:` in FALLBACK_SINCE_KEY) before it is sent, so a later run that finds it there
+ * sends the very same words (keptNote), never works the facts out again once what it says was done.
+ */
+async function tellKept(field: string, account: string, sub: SubRead | null, note: Note): Promise<Told> {
+  if (!field) return tellCreator(account, sub, note);
+  let titled: Note = note;
+  try {
+    const store = await storeOf(account, sub);
+    const productId = sub && store ? productOfSub(sub as Parameters<typeof productOfSub>[0]) : "";
+    const [product] = productId && store ? await readListings(store, [productId]).catch(() => [] as Listing[]) : [];
+    titled = { ...note, subject: product?.title ? `${note.subject} for ${product.title}` : note.subject, titled: true };
+  } catch (error) {
+    console.error("naming the product of a notice failed; its subject says no name", error);
+  }
+  await redisPipeline([["HSET", FALLBACK_SINCE_KEY, `n:${field}`, JSON.stringify(titled)]]);
+  return tellCreator(account, sub, titled);
+}
+
+/** The words of a notice kept by tellKept and not sent yet; null when there is none. */
+async function keptNote(field: string): Promise<Note | null> {
+  const [raw] = await redisPipeline([["HGET", FALLBACK_SINCE_KEY, `n:${field}`]]);
+  if (typeof raw !== "string") return null;
+  try {
+    const note = JSON.parse(raw) as Note;
+    return typeof note.key === "string" && typeof note.subject === "string" && Array.isArray(note.lines) ? { ...note, titled: true } : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * A short note to the creator, in English, about their own account and their money: counted as the company's
@@ -1320,7 +1483,7 @@ async function tellCreator(account: string, sub: SubRead | null, note: Note): Pr
     const store = await storeOf(account, sub);
     // No store, or no address an email can ever go to: nothing more can be done by email (said in the log by the caller).
     if (!store || !oneAddress(store.email)) return "nostore";
-    const productId = sub ? productOfSub(sub as Parameters<typeof productOfSub>[0]) : "";
+    const productId = sub && !note.titled ? productOfSub(sub as Parameters<typeof productOfSub>[0]) : "";
     const [product] = productId ? await readListings(store, [productId]).catch(() => [] as Listing[]) : [];
     const subject = product?.title ? `${note.subject} for ${product.title}` : note.subject;
     const ok = await sendEmail({

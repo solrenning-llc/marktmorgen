@@ -294,6 +294,9 @@ LEVES: (a) :324 "keep being charged … until they or you cancel" é falso com "
 ### C2-87 — 04/11/2026 09h30 — Tire as suas linhas de reserva vencidas (PR só de documento, junto com a C2-84)
 O Claude 4 (09h14) está preso por linhas suas que já não têm trabalho aberto: (a) a da C2-76 (claude2/locked-erase), que reserva lib/two-step.ts, embora o #2078 já esteja no main: a correção da C2-86 é um PR novo e pode reservar só os arquivos dele; (b) a do GL5 2c (claude2/gl5-say-lengths, sem PR aberto), que reserva lib/answers.ts: tire-a, ou abra o PR agora. Faça isso no mesmo PR só de documento da C2-84. Os repasses (b), (d) e (e) da C2-80 esperam o #1892, o #1730 e o #1732 entrarem: diga no canal quando cada um estiver verde e revisado.
 
+### C2-88 — 04/11/2026 09h45 — Decisão sobre o pricing-optimization nº 3 (08h28 e 09h17): sem tolerância; o cálculo exato decide
+Decisão (pelo dono, MR): **não se cria tolerância** na linearização nem no teste. A conta exata do repositório (keeps) é a autoridade, e a restrição linear do solucionador é só uma aproximação conservadora. O certo é o solucionador confirmar a resposta pela conta exata: depois de resolver, conferir com keeps os preços candidatos abaixo do escolhido, na mesma grade da busca exaustiva, e ficar com o menor que keeps aprova; assim o solucionador e a busca dão o mesmo preço (US$ 119 no cenário -1,5 e -2 da alternativa C) sem afrouxar nada. Isso entra no #1496, que já reescreve essa análise pela MR, com um teste que falha antes (o próprio nº 3 com os custos do PF1). O PF1 entra depois do #1496; até lá, siga a ordem da C2-86. Nenhum preço muda por isso: a análise é proposta, não lista de preços.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens

@@ -12,6 +12,7 @@ import { addProduct, claimHandle, ensureStatsId, storeForEmail, updateDetails, t
 import { KIND } from "@/lib/catalog";
 import { AGENTS_GET, SEARCH_DONE_FOR_YOU, searchCheck } from "@/lib/store-search-check";
 import { readFileSync } from "node:fs";
+import { MCP_TOOLS } from "@/lib/mcp-catalog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -73,6 +74,11 @@ async function main(): Promise<void> {
     ['"@type": "Product"', "aggregateRating", "image:"].every((w) => productPage.includes(w)),
     readFileSync("app/api/mcp/route.ts", "utf8").includes("apiStore(request)"),
   ], [true, true, true, true]);
+  part("The line about the creator's own AI assistant names only what its key can read (Reviewer 3, 4 November 2026)");
+  const assistantLine = AGENTS_GET[2];
+  const toolNames = MCP_TOOLS.map((tool) => tool.name).join(" ");
+  is("it does not say pages, which no tool reads", /\bpages\b/.test(assistantLine), false);
+  is("each thing it names is read by a tool", ["numbers", "products", "memberships", "emails", "affiliates"].every((word) => assistantLine.includes(word) && toolNames.includes(word === "products" ? "list_products" : `get_${word}`)), true);
   done();
 }
 

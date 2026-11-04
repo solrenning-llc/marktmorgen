@@ -84,7 +84,7 @@ export default function DevelopersPage() {
         <p>
           To get only some fields of each row, add <code className="font-mono">?fields=</code> with their names,
           separated by commas, for example <code className="font-mono">/api/v1/leads?fields=email,agreed</code>. The paging
-          fields beside <code className="font-mono">data</code> always stay. A field no row has is answered 400{" "}
+          fields beside <code className="font-mono">data</code> always stay. A list of fields that cannot be read (an empty list, a name with other characters than letters, digits and underscores, or too many names) is answered 400 <code className="font-mono">fields</code>, and a field no row has is answered 400{" "}
           <code className="font-mono">unknown_field</code>, with its name. This works on every list above, on
           Store, on Bookings and on Discount codes.
         </p>

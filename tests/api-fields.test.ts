@@ -54,6 +54,9 @@ async function main(): Promise<void> {
   is("every list, Store and Bookings choose fields", routes.every((r) => readFileSync(`app/api/v1/${r}/route.ts`, "utf8").includes("apiOkFields(request,")), true);
   is("documented for developers", readFileSync("app/developers/page.tsx", "utf8").includes("/api/v1/leads?fields=email,agreed"), true);
 
+  part("Both refusals are documented (Reviewer 3, 4 November 2026)");
+  const developers = readFileSync("app/developers/page.tsx", "utf8");
+  is("the 400 fields for a list that cannot be read, and the 400 unknown_field", [developers.includes('answered 400 <code className="font-mono">fields</code>'), developers.includes("unknown_field")], [true, true]);
   done();
 }
 

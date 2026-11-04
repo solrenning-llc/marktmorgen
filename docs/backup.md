@@ -12,6 +12,9 @@ Status: incomplete, production disabled. This is an offline codec and synthetic 
 | Code | viniciussucupira/marktmorgen, viniciussucupira/hazelsong (formerly kudobox, repository1367384911), viniciussucupira/solrenning; all main | GitHub is source, not independent account-loss backup. No git bundle created or tested. Metadata size is not a funded maximum. |
 
 ## Cost admission
+
+The worst-case cost of the current design and of a backup covering 100% of each plan, with sources, dates and what is still unknown: [docs/backup-cost-2026-11-04.md](backup-cost-2026-11-04.md) (4 November 2026). It does not pass yet: open items fail it, and today one store at full use already passes the 4 MiB the run may copy, so the run would refuse and keep no backup.
+
 Reuse lib/receiving-costs.ts and docs/tax-uncertainty.md. MOST_TAX_READING currently imposes78.18% profit tax plus5% revenue tax and inside VAT. Even before receiving/operation costs, the60% net floor cannot pass. Credentials alone must never enable this job. No price, visible limit or tax assumption changed.
 
 Official prices checked22October2026: [R2](https://developers.cloudflare.com/r2/pricing/): Standard$0.015/decimalGB-month, ClassA$4.50/million, ClassB$0.36/million, rounded up to billing units; no free-tier credit. [Redis](https://upstash.com/pricing/redis): public PAYG$0.20/100k commands; actual contract and all operation/bandwidth accounting unverified.

@@ -28,6 +28,7 @@
  *
  *   nl:erase:link:<hash of a token>  { e: address, s: [store ids still to do] }, an hour
  */
+import { after } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -124,29 +125,52 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   const email = normaliseEmail(raw);
   if (!(await withinLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "limited" };
   if (!(await withinLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "limited" };
-  const known = new Set(await storesKnownFor(email));
-  const stores: Store[] = [];
   if (input.handle) {
     const store = await storeForHandle(input.handle).catch(() => null);
     if (store?.sid) {
+      // The store's room is read before anything about the address: "full" comes to every address alike.
       const room = await askedRoom(store);
       if (room.state === "full") return { status: "full", ...(room.opens ? { opens: room.opens } : {}) };
-      if (await knows(store, email, known)) stores.push(store);
+      // Whether the store knows the address, and the email, only after the answer (review of #2101, inbox
+      // C4-15 (3)(a)): their time, and a send that fails or finds the room just taken, would only ever come to
+      // an address the store knows. They go to the server's log; the page always gives the privacy contact.
+      afterAnswer(async () => {
+        const known = new Set(await storesKnownFor(email));
+        if (!(await knows(store, email, known))) return;
+        const answer = await emailLink([store], email, input.origin);
+        if (answer.status !== "sent") console.warn(`a deletion link asked from one store was not emailed: ${answer.status}`);
+      });
     }
-    return stores.length ? emailLink(stores, email, input.origin) : { status: "sent" };
+    return { status: "sent" };
   }
-  for (const sid of [...known].slice(0, MAX_ERASE_STORES)) {
-    const store = await storeForId(sid).catch(() => null);
-    if (store?.sid) stores.push(store);
-  }
-  if (stores.length) {
-    const answer = await emailLink(stores, email, input.origin).catch((error: unknown) => {
-      console.error("emailing a deletion link failed", error);
-      return { status: "error" } as EraseAnswer;
-    });
+  // Every store: which stores know the address, and the email, only after the answer, for the same reason.
+  afterAnswer(async () => {
+    const stores: Store[] = [];
+    for (const sid of (await storesKnownFor(email)).slice(0, MAX_ERASE_STORES)) {
+      const store = await storeForId(sid).catch(() => null);
+      if (store?.sid) stores.push(store);
+    }
+    if (!stores.length) return;
+    const answer = await emailLink(stores, email, input.origin);
     if (answer.status !== "sent") console.warn(`a deletion link asked for every store was not emailed: ${answer.status}`);
-  }
+  });
   return { status: "sent" };
+}
+
+/**
+ * Runs what depends on the address after the answer is sent (as lib/buyer-orders.ts does): inside the
+ * route's time, or at once and unwaited when there is no request to wait for. What fails goes to the log.
+ */
+function afterAnswer(task: () => Promise<void>): void {
+  const run = () =>
+    task().catch((error: unknown) => {
+      console.error("emailing a deletion link failed", error);
+    });
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 /**

@@ -30,9 +30,13 @@ import { readListing, readListings } from "@/lib/catalog";
 import type { ProductFile } from "@/lib/product-file";
 import {
   type ProductOption,
+  handsOver,
   lowestPriceCents,
-  optionDelivers,
+  sellableOptions,
 } from "@/lib/product-option";
+
+// Read here for years; it now lives beside the option rules, so the studio can read it too.
+export { sellableOptions };
 import { isPaidUp } from "@/lib/billing";
 import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { StripeError, checkoutClosesAt, onAccount, platformKey } from "@/lib/stripe-account";
@@ -98,20 +102,6 @@ export function canSell(store: Store): boolean {
 }
 
 /**
- * The options a buyer may actually be offered.
- *
- * An option with nothing behind it is left off the page rather than sold and
- * apologised for afterward. The creator is told about it in the studio, which
- * is where it can be fixed; the buyer never meets it.
- */
-export function sellableOptions(product: Listing): ProductOption[] {
-  // A course or a private podcast is its own delivery: every option opens it,
-  // and a file or link on one is something extra that option includes.
-  const opens = Boolean(product.course || product.podcast || product.shipping);
-  return product.options.filter((option) => optionDelivers(option, opens));
-}
-
-/**
  * A product can only be sold once there is something to hand over.
  *
  * Either kind counts: a file we host, or a link to wherever the creator keeps
@@ -128,20 +118,9 @@ export function canSellProduct(store: Store, product: Listing): boolean {
   // A draft is not on sale until the creator publishes it.
   if (product.hidden) return false;
   if (!canSell(store)) return false;
-  // A bundle hands over its products: it is ready once it holds two. Whether
-  // each can still be handed over is read when the checkout opens.
-  if (product.bundle) return product.options.length === 0 && product.recurring === null && product.bundle.length >= MIN_BUNDLE_ITEMS;
-  // A call delivers a time, not a file: it is ready once it has hours set.
-  if (product.call) return product.options.length === 0 && product.recurring === null;
-  // A course delivers its lessons: it is ready once it has one, at one price
-  // or at several (each option opens the same course).
-  if (product.course) return product.course.lessons > 0;
-  // A private podcast delivers its episodes: it is ready once it has one.
-  if (product.podcast) return product.podcast.episodes > 0;
-  // A physical product delivers what the creator ships (lib/shipping.ts).
-  if (activeShipping(product)) return true;
-  if (product.options.length > 0) return sellableOptions(product).length > 0;
-  return product.file !== null || product.link !== null;
+  // What it hands over is read from the product alone (lib/product-option.ts,
+  // handsOver), which the studio also reads to say what removing a price does.
+  return handsOver(product);
 }
 
 /** The figure a product card leads with: the cheapest way in. */

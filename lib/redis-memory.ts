@@ -348,18 +348,6 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[4]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:crm-deal-drop:v1\n") && args[0] === "1" && args.length === 4) {
-          const target = args[1];
-          this.live(target);
-          const held = this.data.get(target);
-          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
-          const current = held instanceof Map ? held.get(args[2]) : undefined;
-          if (current === undefined) return 0;
-          if (current !== args[3]) return -1;
-          // As HDEL does here.
-          this.hash(target).delete(args[2]);
-          return 1;
-        }
         if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lease, queue, member, score, next] = args;
           if (this.run(["ZSCORE", lease, member]) === null) return 0;

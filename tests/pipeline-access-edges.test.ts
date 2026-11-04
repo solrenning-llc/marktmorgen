@@ -11,7 +11,7 @@ import { NextRequest } from "next/server";
 import { POST as CRM } from "@/app/api/store/crm/route";
 import { POST as PACC } from "@/app/api/store/pipeline-access/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { dealVersion, readPipelines } from "@/lib/crm";
+import { DROP_CRM_DEAL, dealVersion, readPipelines } from "@/lib/crm";
 import { copyPipelineAccess, readAllPipelineAccess, readPipelineAccess, writePipelineAccess } from "@/lib/pipeline-access";
 import { redisPipeline } from "@/lib/redis";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -26,8 +26,31 @@ import { done, is, part } from "./check";
 
 type Reply = { ok?: boolean; error?: string; message?: string; access?: Record<string, string>; deal?: { id: string }; pipelines?: { id: string }[] };
 
+/**
+ * The Lua that removes a deal only while it is the record read (DROP_CRM_DEAL in lib/crm.ts), as Redis runs it,
+ * for the in-memory store this test uses: its own shim, so lib/redis-memory.ts stays as it is on main.
+ */
+function runDealDropLikeRedis(): void {
+  const plain = redis.pipeline.bind(redis);
+  const isDrop = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]) === DROP_CRM_DEAL && c[2] === 1 && c.length === 6;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!commands.some(isDrop)) return plain(commands);
+    const out: unknown[] = [];
+    for (const c of commands) {
+      if (!isDrop(c)) { out.push(...(await plain([c]))); continue; }
+      const [, , , key, field, expected] = c;
+      const [current] = await plain([["HGET", key, field]]);
+      if (current === null || current === undefined) out.push(0);
+      else if (current !== expected) out.push(-1);
+      else { await plain([["HDEL", key, field]]); out.push(1); }
+    }
+    return out;
+  }) as typeof redis.pipeline;
+}
+
 async function main(): Promise<void> {
   redis.clear();
+  runDealDropLikeRedis();
   const owner = "pedges@example.com";
   await claimHandle(owner, "pedges", "Pipe Edges", "");
   await ensureStatsId(owner);

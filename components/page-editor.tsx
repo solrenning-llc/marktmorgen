@@ -117,6 +117,8 @@ import type { PageFacts } from "@/lib/page-facts";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
+import { PreviewFrame, ScreenSwitch, usePreviewScreen } from "@/components/preview-frame";
+import { COMPUTER_BODY_MAX, type PreviewScreen } from "@/lib/preview-screen";
 import {
   ROW_EDIT_WHY,
   ROW_ELEMENT_NAMES,
@@ -471,7 +473,8 @@ export function PageEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const [wide, setWide] = useState(false);
+  // The preview as on a computer or as on a phone, one press apart; remembered in this browser only.
+  const [screen, setScreen] = usePreviewScreen();
   // Where the block picker is open: the place a new block would take, or null when closed.
   const [picking, setPicking] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -942,14 +945,14 @@ export function PageEditor({
     </section>
   );
 
-  /** The page as visitors will see it, in the store's look: at phone width, or wide. */
-  const pagePreview = (wideView: boolean) => (
-          <div className="overflow-hidden rounded-2xl ring-1 ring-line">
-            <div
-              className={`st-page st-theme-${look.theme} mx-auto overflow-hidden`}
-              style={{ ...(lookStyle(look) as React.CSSProperties), maxWidth: wideView ? "100%" : 390 }}
-            >
-              <div className={`sp-body sp-style-${style} mx-auto ${wideView ? "max-w-3xl" : ""} px-4 pb-12 pt-8`}>
+  /**
+   * The page as visitors will see it, in the store's look, laid out at a
+   * computer's or a phone's real width (lib/preview-screen.ts) and shrunk to fit.
+   */
+  const pagePreview = (on: PreviewScreen) => (
+          <PreviewFrame screen={on}>
+            <div className={`st-page st-theme-${look.theme} overflow-hidden`} style={lookStyle(look) as React.CSSProperties}>
+              <div className={`sp-body sp-style-${style} mx-auto px-4 pb-12 pt-8`} style={on === "computer" ? { maxWidth: COMPUTER_BODY_MAX } : undefined}>
                 {drafts.length === 0 ? (
                   <p className="st-note text-sm">Add a block and it appears here, in your store&apos;s look.</p>
                 ) : (
@@ -980,7 +983,7 @@ export function PageEditor({
                 )}
               </div>
             </div>
-          </div>
+          </PreviewFrame>
   );
 
   const field = (id: string, label: string, input: React.ReactNode, extra?: React.ReactNode) => (
@@ -1800,25 +1803,14 @@ export function PageEditor({
       {view === "preview" ? (
         <div className="mt-5">
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-ink-soft">Width:</span>
-            {[false, true].map((w) => (
-              <button
-                key={String(w)}
-                type="button"
-                aria-pressed={wide === w}
-                onClick={() => setWide(w)}
-                className={`inline-flex min-h-11 items-center rounded-full px-3 font-semibold ring-1 ${wide === w ? "bg-lilac text-violet-ink ring-violet-brand/40" : "text-ink-soft ring-line"}`}
-              >
-                {w ? "Wide" : "Phone"}
-              </button>
-            ))}
+            <ScreenSwitch value={screen} onChange={setScreen} />
             {dirty ? <span className="ml-auto text-xs font-semibold text-ink-soft">Showing unsaved changes</span> : null}
           </div>
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
             <span className="text-ink-soft">Style:</span>
             <PageStylePicker value={style} onChange={setStyle} compact />
           </div>
-          {pagePreview(wide)}
+          {pagePreview(screen)}
         </div>
       ) : (
         // On a wide screen the page is drawn beside the blocks as they are edited.
@@ -2188,7 +2180,7 @@ export function PageEditor({
                             })}
                           </div>
                           <p className="mt-1 text-xs text-ink-soft">
-                            A shorter list for phones, a wide table only where it fits. Preview at Phone or Wide width to see each.
+                            A shorter list for phones, a wide table only where it fits. Preview it on Computer and on Phone to see each.
                           </p>
                         </div>
                       ) : null}
@@ -2361,11 +2353,14 @@ export function PageEditor({
             document.getElementById(`row-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
           }}
         >
+          <div className="mb-2">
+            <ScreenSwitch value={screen} onChange={setScreen} />
+          </div>
           <p className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-ink-soft">
-            <span>{`As visitors see it${other ? (onB ? ", version B" : ", version A") : ""}, on a phone · press a part to edit it`}</span>
+            <span>{`As visitors see it${other ? (onB ? ", version B" : ", version A") : ""}, on a ${screen} · press a part to edit it`}</span>
             {dirty ? <span>Unsaved</span> : null}
           </p>
-          {pagePreview(false)}
+          {pagePreview(screen)}
         </aside>
         ) : null}
         </div>

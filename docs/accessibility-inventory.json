@@ -1424,6 +1424,7 @@
     "components/podcast-editor.tsx",
     "components/podcast-toggle.tsx",
     "components/post-cover.tsx",
+    "components/preview-frame.tsx",
     "components/pricing-cycle-controls.tsx",
     "components/pricing-cycle.tsx",
     "components/pricing-value.tsx",

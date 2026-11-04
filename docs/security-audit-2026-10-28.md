@@ -27,13 +27,13 @@ It does not say that Marktmorgen is secure.
 | Id | Severity | Finding | State |
 | --- | --- | --- | --- |
 | MM-SA-13 | Medium | Removing a numbers link deleted the public index of any id sent: any account with settings on any store could end another store's `/numbers/<id>` | Fixed in this PR (reproduced; test fails before) |
-| MM-SA-14 | Medium | A locked session (two-step reset, or the recovery address) could erase buyers for good and remove the owner's passkeys | In progress: `claude4/sg1-locked-session` (reproduced) |
+| MM-SA-14 | Medium | A locked session (two-step reset, or the recovery address) could erase buyers for good and remove the owner's passkeys | With Claude 2's #2078 (inbox C2-76), which locks every irreversible action for a locked session; Claude 4's overlapping branch is not opened (reproduced) |
 | MM-SA-15 | Medium | "Require two-step for the team" checks that a member has a second factor, not that this session used it: a member with only a passkey signs in by the email link alone | With Claude 3, 612 [WP11] owns `lib/team.ts` (reproduced) |
-| MM-SA-16 | Medium | The public erasure-request form sends access emails without the MM-SA-05 ceiling: strangers can spend the month's access emails and buyers get no link | In progress: `claude4/sg1-locked-session` (reproduced) |
+| MM-SA-16 | Medium | The public erasure-request form sends access emails without the MM-SA-05 ceiling: strangers can spend the month's access emails and buyers get no link | In progress: `claude4/sg1-erasure-invite` (reproduced) |
 | MM-SA-17 | Medium | The certificate PDF is built on every GET with no public-request window, no pacing and no shared cache (about 81 ms of CPU and 107 KB each) | With Claude 3, who holds the route (measured) |
 | MM-SA-18 | Medium | A lost chargeback does not close the buyer's access: courses, community, downloads, private feeds and license keys stay open | Decision with Claude 1 (refunds); proposed: close on `dispute.status = lost` (reproduced) |
-| MM-SA-19 | Low | The reset path's notices go only to the sign-in inbox the path assumes someone else holds; the confirmed recovery address hears nothing | In progress: `claude4/sg1-locked-session` (reproduced) |
-| MM-SA-20 | Low | Accepting a team invite opens a full fresh session without the code for an account with an authenticator and no store or team | In progress: `claude4/sg1-locked-session` (read) |
+| MM-SA-19 | Low | The reset path's notices go only to the sign-in inbox the path assumes someone else holds; the confirmed recovery address hears nothing | Waits for #2078 (same file, `lib/two-step.ts`), then Claude 4 (reproduced) |
+| MM-SA-20 | Low | Accepting a team invite opens a full fresh session without the code for an account with an authenticator and no store or team | In progress: `claude4/sg1-erasure-invite` (read) |
 | MM-SA-21 | Low | `/signin/lost` answers later when the address has a recovery address: the timing tells which addresses have accounts | With Codex, who holds the route (read) |
 | MM-SA-22 | Low | API keys, webhook endpoints and calendar feeds an Admin created survive the Admin's removal from the team | With Claude 3 (`lib/team.ts`) (read) |
 | MM-SA-23 | Low | The stock lock (15 s) is shorter than the Stripe calls it guards and is released without checking its owner: two buyers can get a checkout for the last unit | With Claude 2, 513 [PF1] (reproduced) |

@@ -113,15 +113,45 @@ export async function extrasFor(store: Store, email: string, listed: Purchase[],
   return { feeds, keys, reviewing };
 }
 
+/** Scripts a host may be read in; Han, Hiragana and Katakana count as one (Japanese is written in all three). */
+const HOST_SCRIPTS: [string, RegExp][] = [
+  ["Latin", /\p{Script=Latin}/u], ["Cyrillic", /\p{Script=Cyrillic}/u], ["Greek", /\p{Script=Greek}/u],
+  ["Han", /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u], ["Hangul", /\p{Script=Hangul}/u],
+  ["Arabic", /\p{Script=Arabic}/u], ["Hebrew", /\p{Script=Hebrew}/u], ["Thai", /\p{Script=Thai}/u],
+  ["Devanagari", /\p{Script=Devanagari}/u], ["Armenian", /\p{Script=Armenian}/u], ["Georgian", /\p{Script=Georgian}/u],
+];
+
+/**
+ * Whether every letter of each part of a host (between the dots) is in one
+ * script, so it can be shown as a person reads it ("日本のサイト.jp" or
+ * "пример.рф"). A part mixing alphabets ("pаypal.com" with a Cyrillic а) is
+ * shown in its xn-- form instead, so a look-alike never passes for the real
+ * name; a letter of a script not listed counts as mixed.
+ */
+export function oneScript(host: string): boolean {
+  return host.split(".").every((part) => {
+    const seen = new Set<string>();
+    for (const char of part) {
+      if (!/\p{L}/u.test(char)) continue;
+      const script = HOST_SCRIPTS.find(([, test]) => test.test(char))?.[0];
+      if (!script) return false;
+      seen.add(script);
+      if (seen.size > 1) return false;
+    }
+    return true;
+  });
+}
+
 /**
  * The host a link is named by, as a person reads it: in its own script when
- * it is written in one (xn--…) and that fits, else as it is; null when it is
- * longer than HOST_SHOWN, so it is never said.
+ * it is written in one (xn--…), all its letters in a single script, and that
+ * fits; else as it is (xn-- for a mixed one); null when it is longer than
+ * HOST_SHOWN, so it is never said.
  */
 function shownHost(link: string): string | null {
   const host = linkHost(link);
   const read = host.includes("xn--") ? domainToUnicode(host) : "";
-  if (read && read.length <= HOST_SHOWN) return read;
+  if (read && oneScript(read) && read.length <= HOST_SHOWN) return read;
   return host && host.length <= HOST_SHOWN ? host : null;
 }
 

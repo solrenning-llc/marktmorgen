@@ -1028,5 +1028,14 @@ test("the line under a link: the whole address when short, else its host when sh
   assert.equal(keptLine("en", huge.ok ? `${huge.url}${"a".repeat(80)}` : ""), null);
   // A host written in another script is said in it.
   assert.equal(keptLine("en", long("xn--bcher-kva.example")), words.keptAt("bücher.example"));
+  // A host mixing alphabets (a Cyrillic "а" in "pаypal") is said in its xn-- form, so a look-alike never passes for the real name.
+  const mixed = new URL("https://p\u0430ypal.com/").hostname;
+  assert.ok(mixed.startsWith("xn--"), mixed);
+  assert.equal(keptLine("en", long(mixed)), words.keptAt(mixed), "a mixed host is said as xn--");
+  // One script other than Latin is said in it: Cyrillic, and Japanese across Han, Hiragana and Katakana.
+  const russian = new URL("https://\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444/").hostname;
+  assert.equal(keptLine("en", long(russian)), words.keptAt("\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444"));
+  const japanese = new URL("https://\u65e5\u672c\u306e\u30b5\u30a4\u30c8.jp/").hostname;
+  assert.equal(keptLine("en", long(japanese)), words.keptAt("\u65e5\u672c\u306e\u30b5\u30a4\u30c8.jp"), "each part in one script: said as read");
   assert.equal(keptLine("fr", long("example.com")), ordersWords("fr").keptAt("example.com"));
 });

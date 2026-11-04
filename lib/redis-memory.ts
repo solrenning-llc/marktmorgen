@@ -768,6 +768,8 @@ export class MemoryRedis {
         return [...this.hash(key).values()];
       case "HLEN":
         return this.hash(key).size;
+      case "HSTRLEN":
+        return Buffer.byteLength(this.hash(key).get(args[0]) ?? "", "utf8");
       case "SCAN": {
         // SCAN cursor [MATCH pattern] [COUNT n]: here the "key" is the cursor.
         // Every match at once, with the cursor back at "0", as HSCAN does.

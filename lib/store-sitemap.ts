@@ -44,15 +44,18 @@ function visibleIds(store: Store): string[] {
 
 /**
  * What drawing the map reads, counted before it is read (4 November 2026,
- * lib/public-read-rules.ts): the visible products, from the record itself
- * (each is a line of the answer, and those the record does not carry are
- * read), and the pages of published posts, from one count. Null when the
- * posts cannot be counted.
+ * lib/public-read-rules.ts): the visible products, from the record itself,
+ * those whose listing it does not carry (read) apart from those it does (a
+ * line of the answer each, nothing read), and the pages of published posts,
+ * from one count. Null when the posts cannot be counted.
  */
 export async function sitemapSize(store: Store): Promise<SitemapSize | null> {
   const total = await publishedTotal(store.statsId);
   if (total === null) return null;
-  return { listings: visibleIds(store).length, postPages: Math.min(MAX_POST_PAGES, Math.ceil(total / POSTS_PER_PAGE)) };
+  const visible = visibleIds(store);
+  const carried = new Set(store.catalog.inline ? visible : store.catalog.head.map((listing) => listing.id));
+  const listings = visible.filter((id) => !carried.has(id)).length;
+  return { listings, carried: visible.length - listings, postPages: Math.min(MAX_POST_PAGES, Math.ceil(total / POSTS_PER_PAGE)) };
 }
 
 /**

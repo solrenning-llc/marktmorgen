@@ -42,6 +42,7 @@
  * keep at one time, for the closing days after a plan ends
  * (PER_PAYMENT_LINES).
  */
+import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import type { Tier } from "@/lib/plan";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
@@ -239,6 +240,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stats:@lib/ad-spend.ts": { what: "What the creator spent on ads", parts: [capped(MAX_SPEND_ENTRIES * 512, "MAX_SPEND_ENTRIES entries, the oldest let go.", src("lib/ad-spend-rules.ts", "MAX_SPEND_ENTRIES"))] },
   "nl:aff:@lib/affiliate-bond.ts": { what: "Which affiliate a buyer belongs to", parts: [kept(MARK, "A field per buyer, written with a sale, kept for good.")] },
   "nl:aff:@lib/affiliate-codes.ts": { what: "Discount codes given to affiliates", room: ["lib/affiliate-codes.ts"] },
+  // An affiliate program's book worked out for all its affiliates and kept a few hours (4 November 2026), past its cap not kept at all.
+  "nl:aff:@lib/affiliate-book-snapshot.ts": { what: "An affiliate program's book, kept a few hours for its affiliates' own pages, and the lock of its refresh", parts: [capped(BOOK_SNAPSHOT_MAX_BYTES + KEY, "One book a store, BOOK_SNAPSHOT_MAX_BYTES at the most, BOOK_KEEP_SECONDS; its lock BOOK_LOCK_SECONDS.", src("lib/affiliate-book-snapshot.ts", "BOOK_SNAPSHOT_MAX_BYTES", "BOOK_KEEP_SECONDS", "BOOK_LOCK_SECONDS"))] },
   "nl:affhub:@lib/affiliate-hub.ts": company("The stores an address is an affiliate of", "Per affiliate across stores, in the set of the quarter it was noted in, kept QUARTERS_KEPT quarters at the most: written with an affiliate record (capped by MAX_AFFILIATES per store, below); what a closed store leaves in it is the company's as the hub is, and runs out with its quarter."),
   "nl:affhub:link:@lib/affiliate-hub.ts": company("An emailed link to an affiliate's page, a day", "Per affiliate across stores, behind a per-address limit."),
   "nl:affkit:@lib/affiliate-kit.ts": short("An affiliate kit's counts, by the day and the window", "ai", 40),

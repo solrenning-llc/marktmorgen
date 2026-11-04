@@ -26,7 +26,6 @@ import {
   buyersJoin,
   canApply,
   linkEmail,
-  readBook,
   recruitLink,
 } from "@/lib/affiliates";
 import { AFFILIATE_CODE_PATTERN } from "@/lib/affiliate-setting";
@@ -99,11 +98,18 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   const affiliate = await affiliateForSession(store, (await cookies()).get(affiliateCookieName(store.handle))?.value);
   // Paid for before anything that grows with the store is read (lib/affiliate-page-admission.ts):
   // past the window, the resting page, and nothing more is read.
-  if (!(await admitAffiliatePage(store, affiliate))) return <StoreResting store={store} buyer={affiliate !== null} />;
+  // An approved affiliate's figures come from the program's book, worked out for all its affiliates
+  // at most every few hours (lib/affiliate-book-snapshot.ts); the page says when they are from.
+  const admission = await admitAffiliatePage(store, affiliate);
+  if (!admission.admitted) return <StoreResting store={store} buyer={affiliate !== null} />;
+  const kept = admission.book;
   const on = affiliatesOn(store);
   const open = canApply(store);
   const terms = store.affiliates;
-  const book = affiliate ? await readBook(store, affiliate.id) : null;
+  const book = kept && kept !== "soon" ? kept.book : null;
+  const asOf = kept && kept !== "soon"
+    ? new Date(kept.at * 1000).toLocaleString(lang.locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" })
+    : "";
   const row = book?.rows[0] ?? null;
   // The products a partner shares in, by name, so their own page can say what
   // they hold rather than leaving them to trust the email they accepted.
@@ -347,6 +353,9 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                       </div>
                     ))}
                   </dl>
+                  <p className="st-muted mt-3 text-sm" data-figures-as-of="">
+                    {a.figuresAsOf(asOf)}
+                  </p>
                   <p className="st-muted mt-3 text-sm">
                     {a.paidSoFar(money(row.paid, book.currency), store.name)}
                   </p>
@@ -437,6 +446,10 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     </>
                   ) : null}
                 </>
+              ) : kept === "soon" ? (
+                <p className="st-note mt-7 text-sm" role="status" data-figures-soon="">
+                  {a.figuresSoon}
+                </p>
               ) : null}
 
               {affiliate.status === "approved" ? (

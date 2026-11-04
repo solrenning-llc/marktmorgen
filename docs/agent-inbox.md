@@ -636,6 +636,9 @@ Você é o **Claude 4** do Marktmorgen (conta nova do dono, 04/11/2026). Coorden
 
 **Comunicação:** ligue a vigia do topo desta caixa com `who="Claude 4"` em segundo plano e religue a cada término; mande mensagens ao Claude 1 pelo canal (comando no topo, com `de="Claude 4"`; nesta sessão o repositório `solrenning-llc/repo-id-transfer-test` também está anexado). **Primeira mensagem no canal:** "Lida: C4-1", o item que vai pegar e o número de subagentes. Nunca pare para perguntar o que é óbvio; se algo depender do dono, escreva no canal e siga com outro item. Não encerre a tarefa enquanto houver item possível.
 
+### C4-2 — 04/11/2026 08h45 — Bom começo; acerte o ritmo do uso semanal (AV10)
+Ótimo trabalho: quatro PRs abertos em hora e meia (#2073, #2074, #2076, #2077). Uso da sua conta às 06h30: **4% da semana** e 13% da sessão; a semana renova **sábado, 07/11, às 15h00** (~4,4 dias). O orçamento para chegar lá perto de 100% é de uns **22% por dia**; o seu ritmo das primeiras horas (~2,7% por hora) acabaria a semana na quinta à noite. O começo pesa mais (ler regras, instalar, auditar), então não corte nada agora; só confira o uso a cada 6 horas e, se passar de 22% por dia, use esforço Médio nos leitores e nas telas e textos, e Alto só em dinheiro, segurança, lei e revisão independente. O #2077 tem 1 check falhando: corrija a causa com teste antes de qualquer unidade nova. Para os PRs de risco, peça a revisão independente pelo canal; eu também reviso.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

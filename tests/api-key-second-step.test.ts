@@ -104,6 +104,9 @@ const HAL = "hal-admin@example.com";
 const FIN2 = "fin-moved@example.com";
 const FIN3 = "fin-again@example.com";
 const IVY = "ivy-admin@example.com";
+const OWNER5 = "owner-five@example.com";
+const JO = "jo-admin@example.com"; // an Admin with no second step
+const LEO = "leo-admin@example.com"; // an Admin with a passkey
 
 async function newStore(owner: string, handle: string): Promise<Store> {
   await claimHandle(owner, handle, handle, "");
@@ -122,6 +125,7 @@ async function main(): Promise<void> {
   const other = await newStore(OWNER2, "keys-former");
   const third = await newStore(OWNER3, "keys-races");
   const fourth = await newStore(OWNER4, "keys-third-round");
+  const fifth = await newStore(OWNER5, "keys-codex-g");
   for (const email of [PIA, NED, LOU]) await putMember(store, email, "admin");
   for (const email of [FAY, GUS, MO]) await putMember(other, email, "admin");
 
@@ -160,7 +164,7 @@ async function main(): Promise<void> {
   // Keys are handed out under "export", which has a small daily figure of its own (lib/studio-route.ts countStudio):
   // this test makes more than a day's worth, so each part starts a new day.
   const newDay = () =>
-    redis.pipeline([store, other, third, fourth].map((s) => ["DEL", `nl:rl:studio-essential:${createHash("sha256").update(`nimbus-studio-essential:${s.sid}`).digest("hex").slice(0, 32)}`]));
+    redis.pipeline([store, other, third, fourth, fifth].map((s) => ["DEL", `nl:rl:studio-essential:${createHash("sha256").update(`nimbus-studio-essential:${s.sid}`).digest("hex").slice(0, 32)}`]));
   const teamRaw = async () => String((await realPipeline([["GET", `nl:team:${store.sid}`]]))[0]);
   const nobody = new Map<string, string>();
 
@@ -866,6 +870,70 @@ async function main(): Promise<void> {
   is("refused, and Gia stays on the team", [failedRemoval, (await readTeam(fourth.sid)).members.some((m) => m.email === GIA)], ["refused", true]);
   is("her key's hold and maker are back, and it works", [giaRecord.hold, giaRecord.maker?.left, giaRecord.maker?.by === makerPrint(fourth.sid, GIA), (await asApi(giaStay.body.key ?? "")).status], [null, undefined, true, 200]);
   await revokeKey(fourth.sid, giaStay.body.made?.id ?? "");
+
+
+  // ------------------------------------------------------------------ owner order C3-121 (Codex G)
+  for (const email of [JO, LEO]) await putMember(fifth, email, "admin");
+  await makePasskey(OWNER5, "pk-owner5").keep();
+  const owner5Passkey = await openSession(OWNER5, "passkey", "pk-owner5");
+  await makePasskey(LEO, "pk-leo").keep();
+  const leoPasskey = await openSession(LEO, "passkey", "pk-leo");
+  const hold5 = async (id: string) => (await realPipeline([["HGET", `nl:api:hold:${fifth.sid}`, id]]))[0];
+
+  await newDay();
+  part("C3-121 GRAVE: with the rule on, a key without a second step is refused at the door even when no sweep held it");
+  let ruleSaved = false;
+  let joLate: Awaited<ReturnType<typeof makeKey>> | null = null;
+  hook = async (commands) => {
+    if (writes(commands, "SET", `nl:team:${fifth.sid}`) && !ruleSaved) {
+      ruleSaved = true;
+      // An Admin with no second step makes a key right before the rule is written.
+      joLate = await makeKey(fifth.sid, "Jo's late writer", Date.now(), true, "none", makerFor(fifth.sid, "admin", JO, false));
+      return;
+    }
+    if (ruleSaved && commands.some((c) => c[0] === "HGETALL" && c[1] === `nl:api:keys:${fifth.sid}`)) {
+      hook = null;
+      throw new Error("a stand-in for the second sweep failing");
+    }
+  };
+  const ruleOn = await team(owner5Passkey, { action: "two-step", on: true, expect: (await pausePreview(fifth)).stamp }, fifth);
+  hook = null;
+  const joMade = joLate as Awaited<ReturnType<typeof makeKey>> | null;
+  if (!joMade?.ok) throw new Error("Jo's key not made");
+  is("the switch answers that it did not finish, the rule on", [ruleOn.status, ruleOn.body.error, ruleOn.body.on, (await readTeam(fifth.sid)).requireTwoStep], [502, "incomplete", true, true]);
+  is("no sweep held Jo's key", await hold5(joMade.made.id), null);
+  is("but the door refuses it, as the rule asks", [(await asApi(joMade.key)).error, lastMessage], ["key_paused", KEY_PAUSED_WORDS.rule]);
+  const joEndpoint = await addEndpoint(fifth, "https://hooks.zapier.com/hooks/catch/9/jo", ["sale.completed"], Date.now(), joMade.made.id);
+  is("and an endpoint it added hears nothing", [joEndpoint.ok, await sale(fifth)], [true, 0]);
+  const leoKey = await make(leoPasskey, "Leo's sheet", fifth);
+  is("a key made with a second step still works under the rule", (await asApi(leoKey.body.key ?? "")).status, 200);
+  await revokeKey(fifth.sid, joMade.made.id);
+
+  await newDay();
+  part("C3-121 MÉDIO (a): a removal whose team cannot be written undoes its first sweep");
+  hook = async (commands) => {
+    if (!writes(commands, "SET", `nl:team:${fifth.sid}`)) return;
+    hook = null;
+    throw new Error("a stand-in for the team not being written");
+  };
+  const notRemoved = await removeMember(fifth, LEO).then(() => "removed", () => "refused");
+  hook = null;
+  const leoRecord = (await keyRecords(fifth.sid)).find((k) => k.id === leoKey.body.made?.id)!;
+  is("refused, and Leo is still on the team", [notRemoved, (await readTeam(fifth.sid)).members.some((m) => m.email === LEO)], ["refused", true]);
+  is("his key is not held for good, keeps its maker, and works", [leoRecord.hold, leoRecord.maker?.left, leoRecord.maker?.by === makerPrint(fifth.sid, LEO), (await asApi(leoKey.body.key ?? "")).status], [null, undefined, true, 200]);
+
+  part("C3-121 MÉDIO (b): a hold written whose answer is lost is undone all the same");
+  afterHook = async (commands) => {
+    if (!commands.some((c) => c[0] === "EVAL" && c[1] === HOLD_SWAP && c[5] === "left")) return;
+    afterHook = null;
+    throw new Error("a stand-in for the answer lost on the way back");
+  };
+  const lost = await removeMember(fifth, LEO).then(() => "removed", () => "refused");
+  afterHook = null;
+  is("refused, and Leo is still on the team", [lost, (await readTeam(fifth.sid)).members.some((m) => m.email === LEO)], ["refused", true]);
+  is("the hold that was written goes back, and the key works", [await hold5(leoKey.body.made?.id ?? ""), (await asApi(leoKey.body.key ?? "")).status], [null, 200]);
+  await removeMember(fifth, LEO);
+  is("a removal that goes through still holds it for good", [await hold5(leoKey.body.made?.id ?? ""), (await asApi(leoKey.body.key ?? "")).error], ["left", "key_paused"]);
 
   part("The developers page names the answer");
   const docs = readFileSync("app/developers/page.tsx", "utf8");

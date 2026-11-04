@@ -218,7 +218,15 @@ export async function afterMake(store: Store, id: string, maker: KeyMaker, email
 }
 
 /** What one sweep of a teammate leaving paused: theirs, for good; others' whose maker matches nobody on the team; and keys nobody is recorded as having made. */
-export type Exit = { left: string[]; unmatched: string[]; unrecorded: string[] };
+export type Exit = { left: string[]; unmatched: string[]; unrecorded: string[]; attempt?: ExitAttempt };
+
+/**
+ * What a sweep tried to write (owner C3-121), confirmed or not: an answer
+ * lost on the way back does not prove nothing was written. Kept so the sweep
+ * can be undone exactly, from the very values it would have written, if the
+ * removal it belongs to did not happen.
+ */
+export type ExitAttempt = { theirs: string[]; holds: { id: string; to: Hold; before: Hold | null }[] };
 
 /**
  * A teammate left the team or was taken off it (lib/team.ts removeMember,
@@ -244,33 +252,64 @@ export async function leftTeam(store: Store, email: string): Promise<Exit> {
     const unmatched = unmatchedOf(keys, members, prints);
     const unrecorded = keys.filter((k) => !k.maker && k.hold === null);
     const stillOn = [...members.values()].includes(normalised(email));
-    const theirIds = new Set(theirs.map((k) => k.id));
+    // Every write this pass tries, recorded before it is sent (attempted); what came back confirmed, after.
+    const attempt: ExitAttempt = {
+      theirs: theirs.map((k) => k.id),
+      holds: [
+        ...theirs.map((k) => ({ id: k.id, to: "left" as Hold, before: k.hold })),
+        ...unmatched.map((k) => ({ id: k.id, to: "unmatched" as Hold, before: k.hold })),
+        ...unrecorded.map((k) => ({ id: k.id, to: "told" as Hold, before: k.hold })),
+      ],
+    };
     const held = new Set<string>();
     const odd = new Set<string>();
     const paused = new Set<string>();
     try {
       // Held first, so the key opens nothing from this moment, whatever happens to the rest.
-      for (const id of await swapHolds(store.sid, [...theirIds], "left", NOT_LEFT)) held.add(id);
+      for (const id of await swapHolds(store.sid, attempt.theirs, "left", NOT_LEFT)) held.add(id);
       for (const id of await swapHolds(store.sid, unmatched.map((k) => k.id), "unmatched", NOT_UNMATCHED)) odd.add(id);
       for (const id of await swapHolds(store.sid, unrecorded.map((k) => k.id), "told", [null])) paused.add(id);
       if (theirs.length) await rewriteMakers(store.sid, (maker) => (!maker.owner && !maker.left && prints.includes(maker.by) ? { owner: false, by: "", step: maker.step, left: true } : null));
     } catch (error) {
-      if (stillOn) {
-        // Still on the team: what this pass wrote goes back, the makers first, then each hold only from what it wrote.
-        const print = makerPrint(store.sid, email);
-        await rewriteMakers(store.sid, (maker, id) => (maker.left && theirIds.has(id) && print ? { owner: false, by: print, step: maker.step } : null)).catch((back: unknown) =>
-          console.error("putting back the maker of a teammate's API keys failed; those keys stay refused until the owner looks", back),
-        );
-        const back = (ids: Set<string>, to: Hold) => groupsOf(keys.filter((k) => ids.has(k.id)), to);
-        for (const g of [...back(held, "left"), ...back(odd, "unmatched"), ...back(paused, "told")]) await swapHolds(store.sid, g.ids, g.before, [g.to]).catch(() => []);
-      }
+      // Still on the team: everything this pass tried goes back, confirmed or not.
+      if (stillOn) await putBack(store, email, attempt);
       throw error;
     }
     return {
       left: theirs.filter((k) => held.has(k.id)).map((k) => k.name),
       unmatched: unmatched.filter((k) => odd.has(k.id)).map((k) => k.name),
       unrecorded: unrecorded.filter((k) => paused.has(k.id)).map((k) => k.name),
+      attempt,
     };
+  });
+}
+
+/**
+ * Puts back what a sweep tried (ExitAttempt): the makers first, then each
+ * hold, only from the value the sweep would have written, so a hold written
+ * since by anything else stays. Best effort, said in the log when it fails.
+ */
+async function putBack(store: Store, email: string, attempt: ExitAttempt): Promise<void> {
+  const print = makerPrint(store.sid, email);
+  const theirs = new Set(attempt.theirs);
+  await rewriteMakers(store.sid, (maker, id) => (maker.left && theirs.has(id) && print ? { owner: false, by: print, step: maker.step } : null)).catch((back: unknown) =>
+    console.error("putting back the maker of a teammate's API keys failed; those keys stay refused until the owner looks", back),
+  );
+  await undoPause(store, attempt.holds).catch((back: unknown) => console.error("putting back the holds of a sweep failed; those keys stay paused until the owner looks", back));
+}
+
+/**
+ * Undoes a sweep whose removal did not happen (lib/team.ts removeMember, when
+ * writing the team failed): only if the person is, read again under the
+ * team's lock, still on the team, so an exit that did happen meanwhile is
+ * never undone. Throws when the team cannot be read: nothing is assumed.
+ */
+export async function undoExit(store: Store, email: string, attempt: ExitAttempt | undefined): Promise<boolean> {
+  if (!store.sid || !attempt || (!attempt.theirs.length && !attempt.holds.length)) return false;
+  return withTeamLock(store.sid, async () => {
+    if (!(await readTeam(store.sid)).members.some((m) => m.email === normalised(email))) return false;
+    await putBack(store, email, attempt);
+    return true;
   });
 }
 
@@ -284,16 +323,6 @@ function unmatchedOf(keys: KeyRecord[], members: Map<string, string>, leaving: s
   return keys.filter((k) => !madeBy(k, leaving) && whoseOf(k.maker, members).kind === "unmatched" && k.hold !== "unmatched" && k.hold !== "left");
 }
 
-/** Keys grouped by the hold they had, to put back from `to`. */
-function groupsOf(keys: KeyRecord[], to: Hold): { ids: string[]; before: Hold | null; to: Hold }[] {
-  const out = new Map<string, { ids: string[]; before: Hold | null; to: Hold }>();
-  for (const k of keys) {
-    const group = out.get(k.hold ?? "") ?? { ids: [], before: k.hold, to };
-    group.ids.push(k.id);
-    out.set(k.hold ?? "", group);
-  }
-  return [...out.values()];
-}
 
 const turnOnHow = (store: Store, origin: string) =>
   `To turn one back on, log in with your passkey or your authenticator app's code, open API keys in the studio (${origin}/studio?store=${store.sid}#api) and press "Turn back on" beside it.`;
@@ -393,7 +422,7 @@ async function teamNow(store: Store) {
   const team = await readTeam(store.sid);
   const byPrint = new Map<string, string>();
   for (const m of team.members) for (const print of makerPrints(store.sid, m.email)) byPrint.set(print, m.email);
-  return { members: team.members, byPrint };
+  return { members: team.members, byPrint, rule: team.requireTwoStep === true };
 }
 
 /**
@@ -418,11 +447,11 @@ export async function shownKeys(store: Store, email: string, role: Role): Promis
   return keys
     .map((k): ShownKey => {
       const whose = whoseOf(k.maker, team.byPrint);
-      const why = pauseWhy(store.sid, k.maker, k.hold, team.members, k.write);
+      const why = pauseWhy(store.sid, k.maker, k.hold, team.members, k.write, team.rule);
       const byMe = role === "owner" ? whose.kind === "owner" : whose.kind === "member" && madeBy(k, mine);
       const maker = byMe ? "you" : whose.kind === "owner" ? "the owner" : whoWords(whose);
       // One its maker's role still does not allow is not offered: turning it on would change nothing.
-      const mayTurnOn = mayTurnOnAs(why, k, whose, mine, role) && (why === "unmatched" || !pauseWhy(store.sid, k.maker, "vouched", team.members, k.write));
+      const mayTurnOn = mayTurnOnAs(why, k, whose, mine, role) && (why === "unmatched" || !pauseWhy(store.sid, k.maker, "vouched", team.members, k.write, team.rule));
       const mayRevoke = why !== "left" || role === "owner";
       // For an unmatched key the owner says whose it is: themself, or a teammate whose role allows it.
       const whoseChoices = why === "unmatched" && mayTurnOn ? team.members.filter((m) => can(m.role, "export") && (!k.write || can(m.role, "import"))).map((m) => m.email) : [];
@@ -450,7 +479,7 @@ export async function turnKeyOn(store: Store, email: string, role: Role, id: str
   const [keys, team] = await Promise.all([keyRecords(store.sid), teamNow(store)]);
   const key = keys.find((k) => k.id === id);
   if (!key) return "unknown";
-  const why = pauseWhy(store.sid, key.maker, key.hold, team.members, key.write);
+  const why = pauseWhy(store.sid, key.maker, key.hold, team.members, key.write, team.rule);
   if (!why) return "not_paused";
   if (!mayTurnOnAs(why, key, whoseOf(key.maker, team.byPrint), makerPrints(store.sid, email), role)) return "not_yours";
   if (why === "unmatched") {
@@ -463,7 +492,7 @@ export async function turnKeyOn(store: Store, email: string, role: Role, id: str
     const before = key.maker;
     const written = await rewriteMakers(store.sid, (m, at) => (at === id && before && !m.owner && !m.left && m.by === before.by ? maker : null));
     if (!written.includes(id)) return "not_paused";
-  } else if (pauseWhy(store.sid, key.maker, "vouched", team.members, key.write)) {
+  } else if (pauseWhy(store.sid, key.maker, "vouched", team.members, key.write, team.rule)) {
     // Its maker's role (or match) still does not allow it: turning it on would change nothing.
     return "role_disallows";
   }
@@ -478,7 +507,7 @@ export async function revokeChecked(store: Store, role: Role, id: string): Promi
   const [keys, team] = await Promise.all([keyRecords(store.sid), teamNow(store)]);
   const key = keys.find((k) => k.id === id);
   if (!key) return "unknown";
-  if (pauseWhy(store.sid, key.maker, key.hold, team.members, key.write) === "left" && role !== "owner") return "owner_only";
+  if (pauseWhy(store.sid, key.maker, key.hold, team.members, key.write, team.rule) === "left" && role !== "owner") return "owner_only";
   return (await revokeKey(store.sid, id)) ? "ok" : "unknown";
 }
 

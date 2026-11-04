@@ -503,14 +503,22 @@ export async function removeMember(store: Store, email: string, options: { repea
   // a mistyped address pauses nothing and emails nobody.
   if (!options.repeat && !(await readTeam(store.sid)).members.some((m) => m.email === address)) return false;
   // Loaded here, as lib/api-key-pause.ts reads the team through this file.
-  const { leftTeam, tellOwnerOfExit } = await import("@/lib/api-key-pause");
+  const { leftTeam, tellOwnerOfExit, undoExit } = await import("@/lib/api-key-pause");
   const first = await leftTeam(store, address);
-  const removed = await withTeam(store.sid, async () => {
-    const team = await readTeam(store.sid);
-    if (!team.members.some((m) => m.email === address)) return false;
-    await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
-    return true;
-  });
+  let removed: boolean;
+  try {
+    removed = await withTeam(store.sid, async () => {
+      const team = await readTeam(store.sid);
+      if (!team.members.some((m) => m.email === address)) return false;
+      await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
+      return true;
+    });
+  } catch (error) {
+    // The team was not written: if they are still on it (read again, under the lock), the first sweep is undone,
+    // so nobody stays on the team with keys held for good (owner C3-121). Unreadable, nothing is assumed.
+    await undoExit(store, address, first.attempt).catch((undo: unknown) => console.error("undoing the sweep of a removal that did not happen failed", undo));
+    throw error;
+  }
   let second: Awaited<ReturnType<typeof leftTeam>>;
   try {
     second = await leftTeam(store, address);

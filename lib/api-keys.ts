@@ -283,12 +283,12 @@ export async function keyStates(sid: string, ids: string[]): Promise<Map<string,
     return out;
   }
   const [records, holds, team] = await redisPipeline([["HMGET", listKey(sid), ...wanted], ["HMGET", holdKey(sid), ...wanted], ["GET", teamRecordKey(sid)]]);
-  const members = parseTeam(team).members;
+  const { members, requireTwoStep } = parseTeam(team);
   wanted.forEach((id, at) => {
     const stored = parseStored(Array.isArray(records) ? records[at] : null);
     const hold = Array.isArray(holds) ? String(holds[at] ?? "") : "";
     // The same reading as a request with the key (pauseWhy): its hold, or a maker no longer on the team.
-    out.set(id, !stored ? "gone" : pauseWhy(sid, stored.maker ?? null, HOLDS.includes(hold) ? (hold as Hold) : null, members, stored.write) ? "paused" : "live");
+    out.set(id, !stored ? "gone" : pauseWhy(sid, stored.maker ?? null, HOLDS.includes(hold) ? (hold as Hold) : null, members, stored.write, requireTwoStep === true) ? "paused" : "live");
   });
   return out;
 }
@@ -355,9 +355,12 @@ export type PauseWhy = "rule" | "left" | "unmatched" | "role" | "unrecorded";
  * the team is refused as unmatched, and one whose maker's role does not allow
  * it (any key without "export", one that writes without "import") as role,
  * whatever wrote, or failed to write, its hold, and whether or not it was
- * turned back on before.
+ * turned back on before. While the team's two-step rule is on (`rule`, read
+ * from the same record), a key that is not the owner's, was not made with a
+ * second step and was not turned back on is refused too, with no hold
+ * needed: the switch's pauses and emails only record and tell (owner C3-121).
  */
-export function pauseWhy(sid: string, maker: KeyMaker | null, hold: Hold | null, members: Pick<Member, "email" | "role">[], write: boolean): PauseWhy | null {
+export function pauseWhy(sid: string, maker: KeyMaker | null, hold: Hold | null, members: Pick<Member, "email" | "role">[], write: boolean, rule = false): PauseWhy | null {
   if (hold === "left" || maker?.left) return "left";
   if (maker && !maker.owner) {
     const member = members.find((m) => makerPrints(sid, m.email).includes(maker.by));
@@ -366,8 +369,9 @@ export function pauseWhy(sid: string, maker: KeyMaker | null, hold: Hold | null,
   }
   if (hold === "unmatched") return "unmatched";
   if (hold === "role") return maker ? "role" : "unrecorded";
-  if (!isPaused(hold)) return null;
-  return maker ? "rule" : "unrecorded";
+  if (isPaused(hold)) return maker ? "rule" : "unrecorded";
+  if (rule && hold !== "vouched" && !maker?.owner && !maker?.step) return maker ? "rule" : "unrecorded";
+  return null;
 }
 
 function mapOf(raw: unknown): Map<string, string> {
@@ -429,7 +433,8 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   // Paused by the team's two-step rule, its maker's role, or its maker leaving (lib/api-key-pause.ts):
   // known, refused, and not counted as used. A maker who left refuses it even with no hold written.
   const holdNow = typeof hold === "string" && HOLDS.includes(hold) ? (hold as Hold) : null;
-  const why = pauseWhy(sid, stored.maker ?? null, holdNow, parseTeam(team).members, stored.write);
+  const read = parseTeam(team);
+  const why = pauseWhy(sid, stored.maker ?? null, holdNow, read.members, stored.write, read.requireTwoStep === true);
   if (why) return { sid, id, write: stored.write, agent: stored.agent, paused: true, why };
 
   const seconds = Math.floor(now / 1000);

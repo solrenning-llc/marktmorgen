@@ -107,6 +107,6 @@ export function pausedWords(key: Pick<ShownKey, "why" | "mayTurnOn">): string {
   if (key.why === "left") return `Whoever made it is no longer on the team. ${stopped}. It can only be revoked, by the store's owner.`;
   if (key.why === "role") return `The role of whoever made it no longer allows such a key. ${stopped}, ${until}.`;
   if (key.why === "unmatched") return `It could not be linked to anyone on the team, most likely because the server's secret changed. ${stopped}, ${until}. Before turning it on, check whose it is: its name and when it was last used help.`;
-  if (key.why === "unrecorded") return `Someone on the team left or lost access to keys, and nobody is recorded as this key's maker, so it may have been theirs. ${stopped}, ${until}.`;
+  if (key.why === "unrecorded") return `Nobody is recorded as this key's maker (keys made before November 4, 2026), and after a change on the team it waits for the owner. ${stopped}, ${until}.`;
   return `The team now logs in with a second step, and this key was made without one. ${stopped}, ${key.mayTurnOn ? "until you turn it back on" : "until whoever made it turns it back on"}.`;
 }

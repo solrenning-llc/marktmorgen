@@ -34,6 +34,7 @@ import { markRefundedReviews, provePurchase } from "@/lib/review-proof";
 import { readReview, saveReview, visibleReviews } from "@/lib/reviews";
 import { readListing } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
+import { NOT_A_COST } from "./plan-cost-registry";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -58,6 +59,9 @@ let disputesDown = false;
 let disputeReads = 0;
 let chargeReads = 0;
 let eventReads = 0;
+/** When set, the clock jumps past every job's deadline as soon as /refunds has answered, before /events is asked. */
+let lateAfterRefunds = false;
+const realNow = Date.now;
 const lookedUp: string[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -91,7 +95,10 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const read = /^\/charges\/(ch_[A-Za-z0-9]+)$/.exec(path);
   if (read) chargeReads += 1;
   if (read) return answer(charges[read[1]] ?? { object: "charge", id: read[1], amount: 4900, amount_refunded: 0, disputed: true });
-  if (path === "/refunds") return list(refunds);
+  if (path === "/refunds") {
+    if (lateAfterRefunds) Date.now = () => realNow() + 3_600_000;
+    return list(refunds);
+  }
   return list([]);
 }) as typeof fetch;
 
@@ -172,7 +179,30 @@ async function main(): Promise<void> {
   const late = await lostDisputesSince(ACCOUNT, NOW - 3600, Date.now() - 1);
   is("past the job's deadline: nothing is read, and the read is not complete, so the job keeps its place", [eventReads, late.rows.length, late.complete], [0, 0, false]);
   const read = await lostDisputesSince(ACCOUNT, NOW - 3600, Date.now() + 10_000);
+  is("the pages read are in the cost registry, by name", typeof NOT_A_COST.LOST_DISPUTE_PAGES, "string");
   is("in time: one page read, each lost dispute a row marked lost on its charge", [eventReads, read.complete, read.rows.map((r) => (r.charge as { dispute?: { status?: string } }).dispute?.status)], [1, true, ["lost", "lost"]]);
+  // Through each job: the time runs out between /refunds and /events.
+  const lateKey = await keyForSale(store, app, "cs_test_keylate00001", "buyer@example.com");
+  if (lateKey?.state !== "issued") throw new Error("no key");
+  sessionsByPayment.pi_TestKeyLate01 = [{ id: "cs_test_keylate00001", metadata: { store: "kilnworks", product: tool.product.id } }];
+  closings = [closing("evt_TestKeyLate01", "pi_TestKeyLate01", "lost")];
+  await redis.pipeline([["DEL", `nl:keys:${store.statsId}:refunds:since`, `nl:rev:refunds:since:${store.statsId}`]]);
+  eventReads = 0;
+  lateAfterRefunds = true;
+  try {
+    await revokeRefunded(store, realNow() + 10_000);
+    await markRefundedReviews(store, realNow() + 10_000);
+    await syncMeetings(async (handle) => (handle === "kilnworks" ? { ...store, callsId: "d".repeat(16) } : null), realNow() + 10_000, "https://marktmorgen.com");
+  } finally {
+    Date.now = realNow;
+    lateAfterRefunds = false;
+  }
+  const [keysAnchor, reviewsAnchor] = await redis.pipeline([["GET", `nl:keys:${store.statsId}:refunds:since`], ["GET", `nl:rev:refunds:since:${store.statsId}`]]);
+  is("past the deadline after /refunds, no job reads the closing events", eventReads, 0);
+  is("and neither the key job nor the review job moves its place", [keysAnchor, reviewsAnchor], [null, null]);
+  is("the key stays until a run in time reads its dispute", await checkKey(store, app, lateKey.key), "valid");
+  await revokeRefunded(store, Date.now() + 10_000);
+  is("the next run in time revokes it", await checkKey(store, app, lateKey.key), "revoked");
   closings = [];
 
   part("A dispute that cannot be read keeps the door open, as a refund read does");

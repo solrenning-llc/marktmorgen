@@ -87,5 +87,5 @@ export const SEARCH_DONE_FOR_YOU: readonly string[] = [
 export const AGENTS_GET: readonly string[] = [
   "Your store's public pages are open to AI shopping agents and AI search, the same as to search engines. Buyers' own pages, courses and your community are not.",
   "Each product page tells them its name, its price while it can be bought, its picture when it has one, and its rating when it has enough reviews to show one.",
-  "Your own AI assistant, such as Claude or ChatGPT, can read your store's numbers, products, memberships, emails and affiliates with an API key you make in your studio.",
+  "Your own AI assistant, such as Claude or ChatGPT, can read your store's numbers, products, memberships, email results and affiliates with an API key you make in your studio.",
 ];

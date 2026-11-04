@@ -1,7 +1,8 @@
-import { apiStore, takeMoreApi } from "@/lib/api-guard";
+import { apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
-import { readNumbers, summaryOf } from "@/lib/stats-report";
+import { apiNumbers } from "@/lib/api-numbers";
+import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
 import {
   affiliatesTool,
@@ -12,7 +13,6 @@ import {
   insightsTool,
   membershipsTool,
   productsTool,
-  readFullNumbers,
   windowOf,
 } from "@/lib/mcp-tools";
 
@@ -92,35 +92,46 @@ export async function POST(request: Request) {
   const params = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
   try {
     if (params.name === "get_store") return result(id, said(storeInfo(store)));
-    if (params.name === "get_numbers") {
-      const data = await readNumbers(store);
-      return result(id, data ? said(summaryOf(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
-    }
+    // Every other tool takes what it reads past the door before reading it (lib/api-read-rules.ts);
+    // refused, the refusal's own sentence, as the door's.
+    const charge = (more: number, taken?: number) => takeMoreApi(store, more, taken);
+    const hold = (most: number) => holdMoreApi(store, most);
+    const refusedWith = async (refusal: Response) => {
+      const words = (await refusal.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be read just now. Try again in a moment.");
+    };
+    const answer = async (read: unknown) => (read instanceof Response ? refusedWith(read) : result(id, said(read)));
     const days = windowOf(params.arguments?.days);
     const windowed: Record<string, (data: StatsData) => unknown | Promise<unknown>> = {
+      get_numbers: (data) => summaryOf(data),
       get_revenue_by_channel: (data) => channelsTool(data, days),
       get_funnel: (data) => funnelTool(data, days),
-      get_product_numbers: (data) => productsTool(store, data, days),
+      get_product_numbers: (data) => productsTool(store, data, days, { hold, charge }),
       get_buyers: (data) => buyersTool(data, days),
       get_worth_knowing: (data) => insightsTool(data, days),
     };
     const tool = typeof params.name === "string" && Object.hasOwn(windowed, params.name) ? windowed[params.name] : undefined;
     if (typeof tool === "function") {
-      const data = await readFullNumbers(store);
-      return result(id, data ? said(await tool(data)) : said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+      // The numbers, from the copy kept an hour or read anew, paid for first (lib/api-numbers.ts); get_numbers without the products' listings, as /api/v1/stats.
+      const read = await apiNumbers(store, params.name === "get_numbers" ? "plain" : "full", charge, hold);
+      if (read instanceof Response) return refusedWith(read);
+      if (!read) return result(id, said({ error: "Your numbers could not be read just now. Try again in a moment." }, true));
+      const value = {
+        ...((await tool(read.data)) as Record<string, unknown>),
+        asOf: read.asOf,
+        ...(read.listed ? {} : { products_note: "The products' names were not read: your store's API requests left did not cover them." }),
+      };
+      const answer = said(value);
+      // What the answer sends is settled before it is sent.
+      const refused = await read.settle(Buffer.byteLength(answer.content[0].text));
+      return refused ? refusedWith(refused) : result(id, answer);
     }
-    if (params.name === "get_memberships") return result(id, said(await membershipsTool(store)));
-    if (params.name === "get_emails") return result(id, said(await emailsTool(store)));
-    if (params.name === "get_affiliates") {
-      // Its further API requests are taken before the program is read; refused, its own sentence.
-      const read = await affiliatesTool(store, (more) => takeMoreApi(store, more));
-      if (!(read instanceof Response)) return result(id, said(read));
-      const refusal = (await read.json().catch(() => null)) as { message?: unknown } | null;
-      return failure(id, -32001, typeof refusal?.message === "string" ? refusal.message : "That could not be read just now. Try again in a moment.");
-    }
+    if (params.name === "get_memberships") return answer(await membershipsTool(store, charge));
+    if (params.name === "get_emails") return answer(await emailsTool(store, charge));
+    if (params.name === "get_affiliates") return answer(await affiliatesTool(store, charge));
     if (params.name === "list_products") {
       const cursor = typeof params.arguments?.cursor === "string" ? params.arguments.cursor.slice(0, 200) : null;
-      return result(id, said(await products(store, cursor)));
+      return answer(await products(store, cursor, charge));
     }
     return result(id, said({ error: `There is no tool called ${String(params.name).slice(0, 40)}.` }, true));
   } catch (error) {

@@ -384,7 +384,7 @@ async function main(): Promise<void> {
   const ordersPage = read("app/[handle]/orders/page.tsx");
   is("orders: an opening takes ORDERS_OPEN_UNITS buyer requests before its grant is read, and its meter takes more as buyer requests", [
     /takePublicRequest\(store, "buyer", Date\.now\(\), ORDERS_OPEN_UNITS\)\)\) return \{ admitted: false, email: null, meter \};\n\s*return \{ admitted: true, email: await ordersGrant\(store, token\), meter \};/.test(ordersLib),
-    /takePublicRequest\(this\.store, "buyer", Date\.now\(\), units\)\)\) throw new OrdersBusy\(\)/.test(ordersLib),
+    /takePublicRequest\(this\.store, "buyer", Date\.now\(\), units\)\)\) \{\n\s*this\.ended \?\?= "busy";\n\s*throw new OrdersBusy\(\)/.test(ordersLib),
     ordersPage.includes("await openOrders(store, token)") && ordersPage.indexOf("await openOrders(store, token)") < ordersPage.indexOf("purchasesFor(store, email, meter)"),
   ], [true, true, true]);
   is("courses, the community and podcasts rest only at the whole figure", [/isResting\(store, undefined, "buyer"\)/.test(readDir("app/[handle]/course")), /isResting\(store, Date\.now\(\), "buyer"\)/.test(read("lib/community-page.ts")), /isResting\(store, Date\.now\(\), "buyer", \{ shared: true \}\)/.test(read("app/api/store/podcast/feed/[token]/route.ts"))], [true, true, true]);

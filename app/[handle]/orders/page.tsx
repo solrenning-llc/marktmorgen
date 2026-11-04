@@ -16,7 +16,7 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { linkHost } from "@/lib/product-link";
-import { type AddedPurchase, type BookedCall, type Delivery, type Purchase, ORDERS_FEED_COMMANDS, ORDERS_KEY_COMMANDS, ORDERS_LISTING_COMMANDS, OrdersBusy, callsFor, canRecover, openOrders, purchasesFor } from "@/lib/buyer-orders";
+import { type AddedPurchase, type BookedCall, type Delivery, type Purchase, ORDERS_FEED_COMMANDS, ORDERS_KEY_COMMANDS, ORDERS_LISTING_COMMANDS, OrdersBusy, callsFor, canRecover, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
 import type { BumpKey } from "@/lib/bundle-rules";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
@@ -208,54 +208,67 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   let canReview = new Set<string>();
   if (email && meter) {
     try {
-      // A request is read and shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen);
-      // a failure nobody expected is said as "could not be read", never as nothing waiting.
-      [purchases, calls, waiting] = await Promise.all([purchasesFor(store, email, meter), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
-      const listed = purchases;
+      // Waited on ORDERS_READ_MS at the most (lib/buyer-orders.ts, withinOpening): past it nothing more is read and the
+      // page says the purchases could not be read, before the platform would cut it off.
+      const reading = (async () => {
+        const feedsRead = new Map<string, string>();
+        const keysRead = new Map<string, SaleKey | "error">();
+        // A request is read and shown only where its own page takes payment (lib/payment-requests.ts, requestsOpen);
+        // a failure nobody expected is said as "could not be read", never as nothing waiting.
+        const [listed, booked, waits] = await Promise.all([purchasesFor(store, email, meter), callsFor(store, email, meter), waitingFor(store, email, undefined, requestsOpen(store)).catch(() => ({ ...waiting, unread: true }))]);
 
-      // A purchase that gives roles in the creator's Discord server: one way in for all of them (lib/discord-rules.ts).
-      discordProducts = isDiscordConfigured() ? await discordFor(store).catch(() => null) : null;
+        // A purchase that gives roles in the creator's Discord server: one way in for all of them (lib/discord-rules.ts).
+        const discord = isDiscordConfigured() ? await discordFor(store).catch(() => null) : null;
 
-      const podcasts = [...new Set(listed.filter((p) => p.podcastProduct && !p.ended).map((p) => p.podcastProduct as string))];
-      await meter.take(podcasts.length * ORDERS_FEED_COMMANDS);
-      for (const pid of podcasts) {
-        const feed = await feedToken(store, pid, email).catch(() => null);
-        if (feed) feeds.set(pid, feed);
-      }
-
-      const wanted: { slot: string; productId: string; reference: string }[] = [];
-      for (const purchase of listed) {
-        // Nothing brought over from another platform was sold here, so no key is given for it.
-        if (purchase.ended || purchase.kind === "imported") continue;
-        wanted.push({ slot: `${purchase.reference}|main`, productId: purchase.productId, reference: purchase.reference });
-        for (const added of purchase.added) wanted.push({ slot: `${purchase.reference}|${added.key}`, productId: added.id, reference: purchase.reference });
-        // Each product of a bundle has its own key, under the same order.
-        for (const line of [...(purchase.items?.lines ?? []), ...purchase.added.flatMap((added) => added.items?.lines ?? [])]) {
-          wanted.push({ slot: `${purchase.reference}|item|${line.productId}`, productId: line.productId, reference: purchase.reference });
+        const podcasts = [...new Set(listed.filter((p) => p.podcastProduct && !p.ended).map((p) => p.podcastProduct as string))];
+        await meter.take(podcasts.length * ORDERS_FEED_COMMANDS);
+        for (const pid of podcasts) {
+          const feed = await feedToken(store, pid, email).catch(() => null);
+          if (feed) feedsRead.set(pid, feed);
         }
-      }
-      // Every product these name, read once for the keys and the reviews together (lib/catalog.ts).
-      const reviewed = takesReviews(store) ? listed.filter((p) => p.kind !== "imported").flatMap(inOrder) : [];
-      const ids = [...new Set([...wanted.map((w) => w.productId), ...reviewed])];
-      await meter.take(ids.length * ORDERS_LISTING_COMMANDS);
-      const products = new Map((ids.length ? await readListings(store, ids) : []).map((product) => [product.id, product]));
-      const keyed = wanted.filter((w) => {
-        const product = products.get(w.productId);
-        return Boolean(product && activeKeys(product));
-      });
-      await meter.take(keyed.length * ORDERS_KEY_COMMANDS);
-      await Promise.all(
-        keyed.map(async ({ slot, productId, reference }) => {
-          try {
-            const key = await keyForSale(store, products.get(productId)!, reference, email);
-            if (key) keys.set(slot, key);
-          } catch (error) {
-            console.error("reading a license key failed", error);
-            keys.set(slot, "error");
+
+        const wanted: { slot: string; productId: string; reference: string }[] = [];
+        for (const purchase of listed) {
+          // Nothing brought over from another platform was sold here, so no key is given for it.
+          if (purchase.ended || purchase.kind === "imported") continue;
+          wanted.push({ slot: `${purchase.reference}|main`, productId: purchase.productId, reference: purchase.reference });
+          for (const added of purchase.added) wanted.push({ slot: `${purchase.reference}|${added.key}`, productId: added.id, reference: purchase.reference });
+          // Each product of a bundle has its own key, under the same order.
+          for (const line of [...(purchase.items?.lines ?? []), ...purchase.added.flatMap((added) => added.items?.lines ?? [])]) {
+            wanted.push({ slot: `${purchase.reference}|item|${line.productId}`, productId: line.productId, reference: purchase.reference });
           }
-        }),
-      );
-      canReview = new Set(reviewed.flatMap((id) => (products.has(id) && reviewable(products.get(id)!) ? [id] : [])));
+        }
+        // Every product these name, read once for the keys and the reviews together (lib/catalog.ts).
+        const reviewed = takesReviews(store) ? listed.filter((p) => p.kind !== "imported").flatMap(inOrder) : [];
+        const ids = [...new Set([...wanted.map((w) => w.productId), ...reviewed])];
+        await meter.take(ids.length * ORDERS_LISTING_COMMANDS);
+        const products = new Map((ids.length ? await readListings(store, ids) : []).map((product) => [product.id, product]));
+        const keyed = wanted.filter((w) => {
+          const product = products.get(w.productId);
+          return Boolean(product && activeKeys(product));
+        });
+        await meter.take(keyed.length * ORDERS_KEY_COMMANDS);
+        await Promise.all(
+          keyed.map(async ({ slot, productId, reference }) => {
+            try {
+              const key = await keyForSale(store, products.get(productId)!, reference, email);
+              if (key) keysRead.set(slot, key);
+            } catch (error) {
+              console.error("reading a license key failed", error);
+              keysRead.set(slot, "error");
+            }
+          }),
+        );
+        const reviewing = new Set(reviewed.flatMap((id) => (products.has(id) && reviewable(products.get(id)!) ? [id] : [])));
+        return { listed, booked, waits, discord, feedsRead, keysRead, reviewing };
+      })();
+      const outcome = await withinOpening(reading, meter);
+      if (outcome === "late") failed = true;
+      else {
+        ({ listed: purchases, booked: calls, waits: waiting, discord: discordProducts, reviewing: canReview } = outcome);
+        outcome.feedsRead.forEach((feed, pid) => feeds.set(pid, feed));
+        outcome.keysRead.forEach((key, slot) => keys.set(slot, key));
+      }
     } catch (error) {
       purchases = null;
       calls = [];

@@ -28,18 +28,23 @@ export const ORDERS_UNIT_COMMANDS = 25;
 export const ORDERS_LISTING_COMMANDS = 5;
 /** Commands a pre-order's reading makes: its entry, and whether and when it ships. */
 export const ORDERS_PREORDER_COMMANDS = 3;
-/** Commands the purchases brought over or given make: the address's record, and its first reading noted. */
-export const ORDERS_IMPORTED_COMMANDS = 2;
-/** Commands one call's room makes (lib/call-rooms.ts, roomsFor): four reads. */
-export const ORDERS_ROOM_COMMANDS = 4;
+/** Commands the purchases brought over or given make besides their entries: how many there are, the record read, and its first reading noted (a script and its count). */
+export const ORDERS_IMPORTED_COMMANDS = 4;
+/**
+ * One entry of what was brought over or given, read with the address's whole
+ * record, counted in commands: a product id and its { at, job, items, option },
+ * items twenty ids at the most (lib/imported-purchases.ts, parse), under 2 KB,
+ * as two commands of a kilobyte.
+ */
+export const ORDERS_IMPORTED_ENTRY_COMMANDS = 2;
+/** Commands one call's room makes at the most (lib/call-rooms.ts, roomsFor): four reads, and a video room not made yet made and read back. */
+export const ORDERS_ROOM_COMMANDS = 6;
 /** Commands one private podcast feed makes at the most (lib/podcast-access.ts, feedToken), with the room its write is counted in. */
 export const ORDERS_FEED_COMMANDS = 8;
 /** Commands one license key makes at the most (lib/licence-keys.ts, keyForSale): read, or given with five tries at a unique one, with its writes. */
 export const ORDERS_KEY_COMMANDS = 24;
 /**
- * Reads of the moves an opening of a store that sells calls makes before its
- * buyer's bookings are known: lib/calls.ts (paidCalls) reads the move of every
- * booking on its pages, at most five pages of a hundred checkouts
- * (tests/orders-open.test.ts holds it to that file).
+ * How long an opening waits on what it reads before it says the purchases could
+ * not be read, inside ORDERS_OPEN_SECONDS so the page answers before it is cut.
  */
-export const ORDERS_CALL_MOVES = 5 * 100;
+export const ORDERS_READ_MS = 25_000;

@@ -43,15 +43,16 @@ import { paidCalls } from "@/lib/calls";
 import { roomsFor } from "@/lib/call-rooms";
 import type { CallSetup } from "@/lib/call-setup";
 import { type BumpKey, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
-import { IMPORTED_REFERENCE, importedFor, importedReference } from "@/lib/imported-purchases";
+import { IMPORTED_REFERENCE, importedFor, importedKey, importedReference } from "@/lib/imported-purchases";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { takePublicRequest } from "@/lib/traffic";
 import {
-  ORDERS_CALL_MOVES,
   ORDERS_IMPORTED_COMMANDS,
+  ORDERS_IMPORTED_ENTRY_COMMANDS,
   ORDERS_LISTING_COMMANDS,
   ORDERS_OPEN_UNITS,
   ORDERS_PREORDER_COMMANDS,
+  ORDERS_READ_MS,
   ORDERS_ROOM_COMMANDS,
   ORDERS_UNIT_COMMANDS,
 } from "@/lib/buyer-orders-rules";
@@ -64,14 +65,15 @@ export const MAX_LISTED = 40;
 
 export {
   ORDERS_FEED_COMMANDS,
-  ORDERS_CALL_MOVES,
   ORDERS_IMPORTED_COMMANDS,
+  ORDERS_IMPORTED_ENTRY_COMMANDS,
   ORDERS_KEY_COMMANDS,
   ORDERS_LISTING_COMMANDS,
   ORDERS_OPEN_COMMANDS,
   ORDERS_OPEN_SECONDS,
   ORDERS_OPEN_UNITS,
   ORDERS_PREORDER_COMMANDS,
+  ORDERS_READ_MS,
   ORDERS_ROOM_COMMANDS,
   ORDERS_UNIT_COMMANDS,
 } from "@/lib/buyer-orders-rules";
@@ -83,26 +85,78 @@ export class OrdersBusy extends Error {
   }
 }
 
+/** The opening ran past ORDERS_READ_MS: nothing more is read, and the page says the purchases could not be read. */
+export class OrdersLate extends Error {
+  constructor() {
+    super("reading this buyer's purchases took too long");
+  }
+}
+
 /**
  * What an opening reads past its first units, taken from the store's public
  * requests before it is read: as many requests as the commands asked for need,
  * ORDERS_UNIT_COMMANDS each, the rest of the last one kept for the next read.
+ * Takes run one after another, so what is left is never counted twice. Once
+ * the store has refused one, or the opening has run out of time (stop), every
+ * later take and every check before a call to Stripe (alive) throws at once.
  */
 export class OrdersMeter {
   private left = 0;
+  private ended: "busy" | "late" | null = null;
+  private queue: Promise<void> = Promise.resolve();
   /** Requests taken through this meter, for the tests. */
   taken = 0;
   constructor(private readonly store: Store) {}
-  async take(commands: number): Promise<void> {
+  take(commands: number): Promise<void> {
+    const next = this.queue.then(() => this.takeNow(commands));
+    this.queue = next.catch(() => {});
+    return next;
+  }
+  /** Throws when nothing more may be read: before a call to Stripe, which costs the opening's time rather than its commands. */
+  alive(): void {
+    if (this.ended === "busy") throw new OrdersBusy();
+    if (this.ended === "late") throw new OrdersLate();
+  }
+  /** The opening is out of time: nothing more is read through this meter. */
+  stop(): void {
+    this.ended ??= "late";
+  }
+  private async takeNow(commands: number): Promise<void> {
+    this.alive();
     if (!(commands > 0)) return;
     if (commands <= this.left) {
       this.left -= commands;
       return;
     }
     const units = Math.ceil((commands - this.left) / ORDERS_UNIT_COMMANDS);
-    if (!(await takePublicRequest(this.store, "buyer", Date.now(), units))) throw new OrdersBusy();
+    if (!(await takePublicRequest(this.store, "buyer", Date.now(), units))) {
+      this.ended ??= "busy";
+      throw new OrdersBusy();
+    }
+    this.alive();
     this.taken += units;
     this.left += units * ORDERS_UNIT_COMMANDS - commands;
+  }
+}
+
+/**
+ * An opening's reading, waited on ORDERS_READ_MS at the most (inside the page's
+ * maxDuration, so the buyer is told rather than cut off). Past it the meter is
+ * stopped, so nothing more is read or asked of Stripe, and "late" is answered.
+ */
+export async function withinOpening<T>(work: Promise<T>, meter: OrdersMeter, ms = ORDERS_READ_MS): Promise<T | "late"> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<"late">((resolve) => {
+    timer = setTimeout(() => resolve("late"), ms);
+  });
+  // What is still running when time is up ends on its own, its failure seen by nobody.
+  work.catch(() => {});
+  try {
+    const outcome = await Promise.race([work, late]);
+    if (outcome === "late") meter.stop();
+    return outcome;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -273,10 +327,14 @@ export async function callsFor(store: Store, email: string, meter?: OrdersMeter)
   if (!store.stripeAccountId || !sellsAny(store, "call")) return [];
   const who = normaliseEmail(email);
   const now = Date.now();
-  // With a meter (the orders page), each read below is taken before it is made: the moves of every booking the store's
-  // pages hold (read for all of them, at most ORDERS_CALL_MOVES), then this buyer's listings and rooms.
-  await meter?.take(ORDERS_CALL_MOVES);
-  const mine = (await paidCalls(store))
+  // With a meter (the orders page), each read is taken: this buyer's listings and rooms before they are read. The move of
+  // every booking the store's pages hold is read inside lib/calls.ts with the pages, before their number can be known
+  // here, so it is taken as soon as it is (one command each, at most five pages of a hundred): an opening the store has
+  // no more room for then reads nothing more.
+  meter?.alive();
+  const paid = await paidCalls(store);
+  await meter?.take(paid.length);
+  const mine = paid
     .filter((call) => call.email !== null && normaliseEmail(call.email) === who && call.end > now)
     .sort((a, b) => a.start - b.start)
     .slice(0, MAX_LISTED);
@@ -363,6 +421,7 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
     query.append("expand[]", "data.payment_intent.latest_charge");
+    meter?.alive();
     const listed = (await onAccount("GET", account as string, `/checkout/sessions?${query}`)) as Listed;
     for (const session of rows(listed)) {
       const id = typeof session.id === "string" ? session.id : "";
@@ -381,6 +440,7 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
       if (meta.preorder) {
         const product = await find(meta.product);
         if (!product) continue;
+        meter?.alive();
         if (await purchaseRefunded(account, session)) continue;
         await meter?.take(ORDERS_PREORDER_COMMANDS);
         const entry = await readPreorder(store, product.id, id);
@@ -409,6 +469,7 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
         const bought = await readBought(id);
         const product = bought ? await find(meta.product) : null;
         if (!bought || !product) continue;
+        meter?.alive();
         if (await purchaseRefunded(account, session)) continue;
         await meter?.take(bought.holds.length);
         const state = await packageState(bought);
@@ -433,6 +494,7 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
       }
       const product = await find(meta.product);
       if (!product || product.call) continue;
+      meter?.alive();
       if (await purchaseRefunded(account, session)) continue;
 
       // A membership hands its thing over while it is being paid for.
@@ -502,6 +564,7 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   for (const customer of account ? [...customers].slice(0, 10) : []) {
     const query = new URLSearchParams({ customer, limit: "50" });
     query.append("expand[]", "data.latest_charge");
+    meter?.alive();
     const listed = (await onAccount("GET", account as string, `/payment_intents?${query}`)) as Listed;
     for (const intent of rows(listed)) {
       const id = typeof intent.id === "string" ? intent.id : "";
@@ -533,7 +596,12 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   // no payment by this address, so nothing on Stripe to read under it, and
   // shown as exactly that.
   if (store.pastBuyers && store.statsId) {
-    await meter?.take(ORDERS_IMPORTED_COMMANDS);
+    if (meter) {
+      // The whole record of the address is read at once: its entries are counted first, and paid for before it is read.
+      await meter.take(ORDERS_IMPORTED_COMMANDS);
+      const [entries] = await redisPipeline([["HLEN", importedKey(store.statsId, email)]]);
+      await meter.take((Number(entries) || 0) * ORDERS_IMPORTED_ENTRY_COMMANDS);
+    }
     for (const given of await importedFor(store, email)) {
       const product = await find(given.productId);
       if (!product) continue;

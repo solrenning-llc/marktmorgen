@@ -7,6 +7,7 @@ import {
   endMoving,
   clearBrokenMove,
   markBrokenMove,
+  noteMoveCopy,
   markMoving,
   moveDevices,
   openSession,
@@ -143,7 +144,7 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
 
   let sessionId: string;
   try {
-    const result = await moveAccount(from, to);
+    const result = await moveAccount(from, to, (copy) => noteMoveCopy(from, to, copy));
     if (!result.ok) {
       await undo();
       return away(`/signin?status=move-${result.reason}`);

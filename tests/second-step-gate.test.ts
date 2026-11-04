@@ -1010,6 +1010,32 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenEdf}`).slice(0, 40)}`, EDF, "EX", 900]]);
   is("an edited copy is never deleted: the login waits, and the record stays for a person", [(await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenEdf }))).headers.get("location"), (await storeForEmail(EDT))?.name, await isMoving(EDF)], [`${ORIGIN}/signin?status=move-busy`, "Edited On The Copy", true]);
 
+  // The store itself changed since (its daily jobs and Stripe's answers write to it by its id), the copy did not:
+  // the copy goes, the store stays as it is now (review of #2140, task 47).
+  const TRF = "trf-from@example.com";
+  const TRT = "trf-dest@example.com";
+  await claimHandle(TRF, "trf-from", "Trf", "");
+  await makePasskey(TRF, "cred-trf").keep();
+  const trfOwner = await openSession(TRF, "passkey", "cred-trf");
+  mails.length = 0;
+  await sendMoveLink(TRF, TRT, ORIGIN, trfOwner);
+  const trfToken = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === TRT)?.text ?? "")?.[1] ?? "";
+  const trfOwnerKey = `nl:store:owner:${hex(`nimbus-store:${TRF}`).slice(0, 40)}`;
+  const trfPipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((x) => x[0] === "DEL" && x.includes(trfOwnerKey))) throw new Error("down for a moment");
+    return trfPipe(commands);
+  }) as typeof redis.pipeline;
+  await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: trfToken }));
+  redis.pipeline = trfPipe;
+  is("the move's record notes what was written at the new address", /^[0-9a-f]{64}$/.test((await readBrokenMove(TRF))?.copy ?? ""), true);
+  const [trueRaw] = await redis.pipeline([["GET", trfOwnerKey]]);
+  await redis.pipeline([["SET", trfOwnerKey, JSON.stringify({ ...JSON.parse(String(trueRaw)), name: "Changed By A Daily Job" })]]);
+  const tokenTrf = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenTrf}`).slice(0, 40)}`, TRF, "EX", 900]]);
+  const trfLogin = (await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenTrf }))).headers.get("location") ?? "";
+  is("the store changed since, the copy did not: the copy goes, the store keeps its change, and the record is cleared", [trfLogin.includes("move-busy"), Boolean(await storeForEmail(TRT)), (await storeForEmail(TRF))?.name, await readBrokenMove(TRF)], [false, false, "Changed By A Daily Job", null]);
+
   part("A request to turn the app off never ends during a move");
   const RSF = "rsf-owner@example.com";
   await turnOnApp(RSF, "rsf-backup@example.org");

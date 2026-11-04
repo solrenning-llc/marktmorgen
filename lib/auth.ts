@@ -196,15 +196,31 @@ export async function markBrokenMove(from: string, to: string): Promise<void> {
   ]);
 }
 
-export async function readBrokenMove(email: string): Promise<{ from: string; to: string } | null> {
+export async function readBrokenMove(email: string): Promise<{ from: string; to: string; copy?: string } | null> {
   if (!isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", await brokenKey(email)]]);
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as { from?: unknown; to?: unknown }) : null;
-    return value && typeof value.from === "string" && typeof value.to === "string" ? { from: value.from, to: value.to } : null;
+    const value = typeof raw === "string" ? (JSON.parse(raw) as { from?: unknown; to?: unknown; copy?: unknown }) : null;
+    if (!value || typeof value.from !== "string" || typeof value.to !== "string") return null;
+    return typeof value.copy === "string" && /^[0-9a-f]{64}$/.test(value.copy) ? { from: value.from, to: value.to, copy: value.copy } : { from: value.from, to: value.to };
   } catch {
     return null;
   }
+}
+
+/**
+ * Notes, with a running move's record, the fingerprint of the store record it
+ * wrote at the new address (lib/store.ts copyPrint), just before the old one is
+ * taken away: a repair then deletes a copy left behind while it is still that,
+ * however the store changed since (review of #2140). Written only over the
+ * record that is there (XX): a move already cleared is never marked again.
+ */
+export async function noteMoveCopy(from: string, to: string, copy: string): Promise<void> {
+  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now(), copy });
+  await redisPipeline([
+    ["SET", await brokenKey(from), value, "XX"],
+    ["SET", await brokenKey(to), value, "XX"],
+  ]);
 }
 
 export async function clearBrokenMove(from: string, to: string): Promise<void> {

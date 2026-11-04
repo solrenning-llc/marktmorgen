@@ -1455,6 +1455,15 @@ function recordJson(store: Store): string {
   return JSON.stringify({ ...store, catalog: catalogRecord(store.catalog) });
 }
 
+/**
+ * A store record's fingerprint without its address: what a move writes at its
+ * new address, so that a copy left behind by a broken move can be known for
+ * one nobody edited since (settleDoubledStore).
+ */
+export async function copyPrint(store: Store): Promise<string> {
+  return sha256Hex(`nimbus-move-copy:${recordJson({ ...store, email: "" })}`);
+}
+
 function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
@@ -2127,22 +2136,29 @@ export type MoveResult =
  * held: the address the store's handle points to (written in the same step
  * that takes the old record away) is the store; the copy on the other is
  * deleted (fenced), and the account's other stores, rewritten for the new
- * address before that step, are written back to it or listed under it. When
- * the two records differ in anything but the address (somebody edited one of
- * them since), nothing is deleted and null is answered: the record stays for
- * a person (scripts/move-repair.mjs). Answers the address that keeps it, or
- * null when that cannot be told.
+ * address before that step, are written back to it or listed under it. The
+ * copy is deleted when it is still what the move wrote (`copy`, its
+ * copyPrint noted with the move's record), however the store itself changed
+ * since (its daily jobs and Stripe's answers write to it by its id); without
+ * that print, only when the two records are the same but for the address.
+ * A copy somebody edited is never deleted: null is answered and the record
+ * stays for a person (scripts/move-repair.mjs). Answers the address that
+ * keeps it, or null when that cannot be told.
  */
-export async function settleDoubledStore(fromEmail: string, toEmail: string): Promise<string | null> {
+export async function settleDoubledStore(fromEmail: string, toEmail: string, copy?: string): Promise<string | null> {
   const from = fromEmail.toLowerCase();
   const to = toEmail.toLowerCase();
   const settled = await withStore(from, (a, _saveA, heldA) =>
     withStore(to, async (b, _saveB, heldB): Promise<string | null> => {
       if (!a.handle || a.handle !== b.handle) return null;
-      if (recordJson({ ...a, email: "" }) !== recordJson({ ...b, email: "" })) return null;
       const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
       const home = typeof points === "string" ? points.toLowerCase() : "";
       if (home !== from && home !== to) return null;
+      // The copy left behind: deleted only while it is still what the move wrote (review of #2140), or, with no
+      // print noted, while both records are the same but for the address.
+      const left = home === from ? b : a;
+      const untouched = copy ? (await copyPrint(left)) === copy : recordJson({ ...a, email: "" }) === recordJson({ ...b, email: "" });
+      if (!untouched) return null;
       const [members] = await redisPipeline([["SMEMBERS", await accountKey(from)]]);
       const extras = (Array.isArray(members) ? members : []).filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id));
       for (const sid of extras) {
@@ -2163,6 +2179,8 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string): Pr
 export async function moveAccount(
   fromEmail: string,
   toEmail: string,
+  /** Told, before the old record is taken away, the fingerprint of what was written at the new address (copyPrint). */
+  onCopy?: (print: string) => Promise<void>,
 ): Promise<MoveResult> {
   const from = fromEmail.toLowerCase();
   const to = toEmail.toLowerCase();
@@ -2215,6 +2233,10 @@ export async function moveAccount(
         }
         written.push(one);
       }
+      // The record is now on both addresses until the next step: what was written is noted with the move's record
+      // (lib/auth.ts noteMoveCopy), so a repair can tell the copy left behind from the store edited since. Best
+      // effort: without it the repair compares the two records whole.
+      if (onCopy) await onCopy(await copyPrint(next)).catch((error) => console.error("noting a move's copy failed", error));
       const handles = [store.handle, ...store.previousHandles];
       await redisPipeline([
         ...handles.map((handle) => ["SET", handleKey(handle), to]),

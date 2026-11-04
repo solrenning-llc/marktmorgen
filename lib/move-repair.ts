@@ -23,12 +23,12 @@ import { settleDoubledStore, storeForEmail } from "@/lib/store";
 export async function repairMove(email: string): Promise<boolean> {
   const broken = await readBrokenMove(email);
   if (!broken) return true;
-  const { from, to } = broken;
+  const { from, to, copy } = broken;
   try {
     if ((await moveRunning(from)) || (await moveRunning(to))) return false;
     const [atFrom, atTo] = await Promise.all([storeForEmail(from), storeForEmail(to)]);
     if (!atFrom && !atTo) return false;
-    const home = atFrom && atTo ? await settleDoubledStore(from, to) : atFrom ? from : to;
+    const home = atFrom && atTo ? await settleDoubledStore(from, to, copy) : atFrom ? from : to;
     if (!home) return false;
     const away = home === from ? to : from;
     const holdsKeys = async (address: string) => (await listPasskeys(address)).length > 0 || (await pendingNow(address)) !== null;

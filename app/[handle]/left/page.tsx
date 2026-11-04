@@ -4,9 +4,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { readListing, readListings } from "@/lib/catalog";
-import { cartable, readCartIds } from "@/lib/cart-rules";
-import { canSellProduct } from "@/lib/store-checkout";
+import { readListing } from "@/lib/catalog";
+import { cartItems } from "@/lib/checkout-recovery";
+import { readCartIds } from "@/lib/cart-rules";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { cartWords } from "@/lib/buyer-words/cart";
 import type { Listing, Store } from "@/lib/store";
@@ -50,7 +50,8 @@ export default async function LeftPage({ params, searchParams }: Params) {
   // still in this browser, one press away, and one reminder of it can be asked for.
   const cartIds = readCartIds(read("cart").slice(0, 400).split(","));
   if (cartIds.length) {
-    const items = (await readListings(store, cartIds)).filter((p) => cartable(p) && canSellProduct(store, p));
+    // As the cart's reminder lists them (lib/checkout-recovery.ts): none sold out, Stripe not asked.
+    const items = await cartItems(store, cartIds);
     if (items.length === 0) redirect(`/@${store.handle}`);
     return leftCart(store, items, status);
   }

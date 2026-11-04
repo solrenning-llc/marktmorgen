@@ -49,7 +49,7 @@ import { RECOVERY_OPEN_SECONDS, recoveryOn } from "@/lib/recovery-setting";
 import { isSettled } from "@/lib/instant-pay";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { canSellProduct, fromPriceCents } from "@/lib/store-checkout";
-import { stockLeft } from "@/lib/stock";
+import { shownOnly, stockLeft } from "@/lib/stock";
 import { type SessionRecord, fromCreator, storeBase } from "@/lib/purchase-email";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { SITE_URL } from "@/lib/site-url";
@@ -182,8 +182,13 @@ async function paidSince(store: Store, email: string, productIds: string[], sinc
 
 export type RemindOutcome = "sent" | "skip" | "failed";
 
-/** The products of a cart that can still go in one and be bought now, in its order: none sold out. */
-async function cartItems(store: Store, raw: (string | undefined)[]): Promise<Listing[]> {
+/**
+ * The products of a cart that can still go in one and be bought now, in its
+ * order: none sold out. Only shown (a reminder, the way back from a cart's
+ * checkout), so Stripe is never asked: a hold that ran out and was not
+ * settled counts as used (lib/stock.ts, shownOnly).
+ */
+export async function cartItems(store: Store, raw: (string | undefined)[]): Promise<Listing[]> {
   const ids = readCartIds(raw.filter((id): id is string => typeof id === "string" && id !== ""));
   if (ids.length === 0) return [];
   const listed = await readListings(store, ids);
@@ -192,7 +197,7 @@ async function cartItems(store: Store, raw: (string | undefined)[]): Promise<Lis
     return product && cartable(product) && canSellProduct(store, product) ? [product] : [];
   });
   // A limited one with none left is not reminded of, as for one product below (513 [PF1], unit 3).
-  const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product).catch(() => null) : Promise.resolve(null))));
+  const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product, Date.now(), { checks: shownOnly() }).catch(() => null) : Promise.resolve(null))));
   return kept.filter((_, i) => left[i] !== 0);
 }
 

@@ -43,7 +43,7 @@ import { IMAGE_SIZES } from "@/lib/product-image";
 import { aboutBlocks, aboutExcerpt, readAbout } from "@/lib/product-about";
 import { activePlan, bumpTargets } from "@/lib/product-extras";
 import { activePwyw } from "@/lib/pay-what-you-want";
-import { stockLeft } from "@/lib/stock";
+import { shownOnly, stockLeft } from "@/lib/stock";
 import { outOfKeys } from "@/lib/licence-keys";
 import { canWrite } from "@/lib/mail";
 import { canManage } from "@/lib/membership-manage";
@@ -484,7 +484,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const pairedSoon = cartOn && paired.length ? (await soonState(store).catch(() => ({ soon: new Set<string>() }))).soon : new Set<string>();
   // A limited one with none left is not offered for the cart (lib/stock.ts); only limited ones are counted, at most MAX_PAIRS.
   // A count that cannot be read is offered, as the store page does; the cart's own read refuses it if it is added.
-  const pairedOut = new Set((await Promise.all(paired.filter((p) => cartOn && p.stock !== null).map(async (p) => ((await stockLeft(store, p).catch(() => null)) === 0 ? p.id : null)))).filter((id) => id !== null));
+  const pairedOut = new Set((await Promise.all(paired.filter((p) => cartOn && p.stock !== null).map(async (p) => ((await stockLeft(store, p, Date.now(), { checks: shownOnly() }).catch(() => null)) === 0 ? p.id : null)))).filter((id) => id !== null));
   const pairedCart = new Set(paired.filter((p) => cartOn && cartable(p) && canSellProduct(store, p) && !pairedSoon.has(p.id) && !pairedOut.has(p.id)).map((p) => p.id));
   const shownElsewhere = [...paired.map((p) => p.id), ...alsoBought.map((item) => item.product.id)];
   const more = (

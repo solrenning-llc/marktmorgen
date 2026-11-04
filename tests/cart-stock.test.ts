@@ -34,7 +34,8 @@ import { NextRequest } from "next/server";
 import { cartable } from "@/lib/cart-rules";
 import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
-import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds, withStockHold } from "@/lib/stock";
+import { STOCK_ORDER_COMMANDS, confirmCartStock, heldCheckout, releaseCartStockHolds, shownOnly, stockLeft, stockReading, withCartStockHolds, withStockHold } from "@/lib/stock";
+import { cartItems } from "@/lib/checkout-recovery";
 import { addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setProductPairs, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { GET as readCart, POST as payCart } from "@/app/api/store/cart/route";
 import { NO_DEAL } from "@/lib/cart-rules";
@@ -61,15 +62,17 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     sent.push(new URLSearchParams(String(init?.body)));
     opened += 1;
     const id = `cs_test_cartstock${String(opened).padStart(8, "0")}`;
-    sessions.set(id, { id, status: "open" });
+    const metadata = Object.fromEntries([...sent.at(-1)!].flatMap(([name, value]) => (/^metadata\[(\w+)\]$/.exec(name) ? [[/^metadata\[(\w+)\]$/.exec(name)![1], value]] : [])));
+    sessions.set(id, { id, status: "open", metadata });
     return new Response(JSON.stringify({ id, url: `https://checkout.stripe.com/c/pay/${id}` }));
   }
   const expire = /^\/v1\/checkout\/sessions\/([^/]+)\/expire$/.exec(url.pathname);
   if (url.hostname === "api.stripe.com" && expire && method === "POST") {
     if (complete.has(expire[1])) return new Response(JSON.stringify({ error: { message: "Only Checkout Sessions with a status of open can be expired." } }), { status: 400 });
     expired.push(expire[1]);
-    sessions.set(expire[1], { id: expire[1], status: "expired" });
-    return new Response(JSON.stringify({ id: expire[1], status: "expired" }));
+    const closed = { ...(sessions.get(expire[1]) ?? { id: expire[1] }), status: "expired" };
+    sessions.set(expire[1], closed);
+    return new Response(JSON.stringify(closed));
   }
   const one = /^\/v1\/checkout\/sessions\/([^/]+)$/.exec(url.pathname);
   if (url.hostname === "api.stripe.com" && one && method === "GET") gets.push(one[1]);
@@ -79,6 +82,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 
+const readEntriesOf = async (store: Store, id: string) => {
+  const [raw] = await redis.pipeline([["HGETALL", `nl:stock:${store.statsId}:${id}`]]);
+  const list = raw as string[];
+  return Object.fromEntries(list.flatMap((value, i) => (i % 2 === 0 ? [[value, JSON.parse(list[i + 1]) as { until: number; paid?: boolean }]] : []))) as Record<string, { until: number; paid?: boolean }>;
+};
 const limited = (id: string, stock: number) => parseProduct({ id, title: `Print ${id}`, summary: "", priceCents: 2000, stock, link: `https://example.com/${id}` }) as Listing;
 const plain = (id: string) => parseProduct({ id, title: `Guide ${id}`, summary: "", priceCents: 900, link: `https://example.com/${id}` }) as Listing;
 
@@ -251,7 +259,9 @@ async function main(): Promise<void> {
   const again = await pay([made.Guide, made.Print, made.Poster]);
   is("the same cart from another browser: its print is sold out, back to the cart", again.to, "?cart=changed");
   const back = await pay([made.Guide, made.Print, made.Poster], paid.cookie.split(";")[0]);
-  is("the browser that went back from Stripe: its old checkout closed, its units held again", [back.to, expired.includes(paid.cookie.split(";")[0].split("=")[1])], ["stripe", true]);
+  const sessionOf = (cookie: string) => cookie.split(";")[0].split("=")[1].split(".")[0];
+  is("the cookie names the checkout, signed for this store", [/^nl_cart_hold=cs_test_\w+\.[0-9a-f]{32};/.test(paid.cookie), heldCheckout(owner, paid.cookie.split(";")[0].split("=")[1]), heldCheckout({ ...owner, statsId: "d".repeat(32) } as Store, paid.cookie.split(";")[0].split("=")[1])], [true, sessionOf(paid.cookie), null]);
+  is("the browser that went back from Stripe: its old checkout closed, its units held again", [back.to, expired.includes(sessionOf(paid.cookie))], ["stripe", true]);
   const open = await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${[made.Guide, made.Print].join(",")}`));
   const cart = (await open.json()) as { items: { id: string; ok: boolean; soldOut: boolean }[]; total: string };
   is("the open cart: the held print sold out, left out of the total", [cart.items.map((item) => [item.ok, item.soldOut]), cart.total], [[[true, false], [false, true]], "$20"]);
@@ -264,13 +274,99 @@ async function main(): Promise<void> {
   const otherBrowser = await readWith("nl_cart_hold=cs_test_cartstocknotmine01");
   is("a cookie naming a checkout that holds nothing frees nothing", otherBrowser.items.map((item) => [item.ok, item.soldOut]), [[true, false], [false, true]]);
   is("a cookie that is not a checkout's id frees nothing", (await readWith("nl_cart_hold=p_x")).items.map((item) => item.soldOut), [false, true]);
+  is("a cookie naming the right checkout without our signature frees nothing", (await readWith(`nl_cart_hold=${sessionOf(back.cookie)}`)).items.map((item) => item.soldOut), [false, true]);
+  is("nor with a signature that is not ours", (await readWith(`nl_cart_hold=${sessionOf(back.cookie)}.${"0".repeat(32)}`)).items.map((item) => item.soldOut), [false, true]);
+  // Someone who learned another person's checkout id cannot close it by naming it in a cookie (3 November 2026).
+  const expiredBefore = expired.length;
+  const forged = await pay([made.Guide], `nl_cart_hold=${sessionOf(back.cookie)}.${"0".repeat(32)}`);
+  const bare = await pay([made.Guide], `nl_cart_hold=${sessionOf(back.cookie)}`);
+  is("a forged or unsigned cookie never closes another person's checkout", [forged.to, bare.to, expired.length - expiredBefore, expired.includes(sessionOf(back.cookie))], ["stripe", "stripe", 0, false]);
   const printListing = parseProduct({ id: made.Print, title: "Print", summary: "", priceCents: 2000, stock: 1 }) as Listing;
   is("the count for everyone else is unchanged", await stockLeft(owner, printListing), 0);
-  await confirmCartStock(owner, [printListing], backCookie.split("=")[1]);
+  await confirmCartStock(owner, [printListing], sessionOf(backCookie));
   is("once that checkout is paid, its print is sold out to that browser too", (await readWith(backCookie)).items.map((item) => item.soldOut), [false, true]);
   await redis.pipeline([["HSET", `nl:stock:${owner.statsId}:${made.Poster}`, "cs_test_cartstockjunk0001", "not a hold"]]);
   const unread = (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${made.Poster}`))).json()) as { items: { ok: boolean; soldOut: boolean }[] };
   is("a count that cannot be read is not paid for, and never said to be sold out", unread.items.map((item) => [item.ok, item.soldOut]), [[false, false]]);
+
+  part("What is only shown never asks Stripe, and a checkout asks it a bounded number of times");
+  const key2 = (store: Store, id: string) => `nl:stock:${store.statsId}:${id}`;
+  const ranOut = JSON.stringify({ until: Date.now() - 1000 });
+  await redis.pipeline([["HSET", key("print30"), "cs_test_shownonly000001", ranOut]]);
+  const asked = gets.length;
+  is("a reading only shown counts a hold that ran out as used, says it is unchecked, and asks Stripe nothing", [await stockReading(creator, limited("print30", 1), Date.now(), { checks: shownOnly() }), gets.length - asked], [{ left: 0, unchecked: 0 + 1 }, 0]);
+  const four = ["print31", "print32", "print33", "print34"];
+  for (const id of four) await redis.pipeline([1, 2, 3].map((n) => ["HSET", key(id), `cs_test_ranout${id}${n}00`, ranOut]));
+  const before4 = gets.length;
+  const counted = await withCartStockHolds(creator, four.map((id) => limited(id, 3)), async () => ({ id: "cs_test_cartstockfour0001" }));
+  is("a cart's counts share MAX_CHECKS questions to Stripe, whatever it holds", [counted, gets.length - before4], [{ ok: false, reason: "soldout", ids: ["print31", "print32", "print33", "print34"] }, 5]);
+
+  const LAMPS = "lamps@example.com";
+  await claimHandle(LAMPS, "lampshop", "Lamp Shop", "");
+  await ensureStatsId(LAMPS);
+  await setStripeAccount(LAMPS, "acct_1TestLamps001", true);
+  await setSubscription(LAMPS, { customerId: "cus_Lamps00001", subscriptionId: "sub_Lamps00001", active: true, period: paidPeriod() });
+  const l: Record<string, string> = {};
+  for (const [title, stock] of [["Lamp", 1], ["Shade", 2], ["Bulb", 2], ["Cord", 2], ["Card", 1]] as const) {
+    const added = await addProduct(LAMPS, title, "", "20", null);
+    if (!added.ok) throw new Error(`no ${title}`);
+    l[title] = added.product.id;
+    await setProductLink(LAMPS, added.product.id, `https://example.com/${title.toLowerCase()}`);
+    if (!(await setProductExtras(LAMPS, added.product.id, { stock })).ok) throw new Error(`no stock on ${title}`);
+  }
+  const lamps = (await storeForEmail(LAMPS))!;
+  const lampOf = async (id: string) => (await (await import("@/lib/catalog")).readListing(lamps, id))!;
+  const payLamps = async (ids: string[], cookie = "") => {
+    const form = new URLSearchParams({ handle: "lampshop", dc: "yes", dc_v: TEST_CONSENT.version });
+    for (const id of ids) form.append("id", id);
+    const answer = await payCart(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: form.toString() }));
+    const where = new URL(answer.headers.get("location") ?? "https://x/");
+    const set = answer.headers.getSetCookie().find((c) => c.startsWith("nl_cart_hold=")) ?? "";
+    return { to: where.hostname === "checkout.stripe.com" ? "stripe" : where.search, cookie: set.split(";")[0], cleared: /Max-Age=0/.test(set) };
+  };
+  const readLamps = async (ids: string[], cookie = "") =>
+    (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=lampshop&ids=${ids.join(",")}`, cookie ? { headers: { cookie } } : undefined))).json()) as { items: { id: string; ok: boolean; soldOut: boolean }[] };
+
+  await redis.pipeline([["HSET", key2(lamps, l.Card), "cs_test_cardranout00001", ranOut]]);
+  const beforeOpen = gets.length;
+  const cardLine = (await readLamps([l.Card])).items.map((item) => [item.ok, item.soldOut]);
+  is("the open cart asks Stripe nothing: a hold that ran out and is not settled is not available right now, never sold out", [cardLine, gets.length - beforeOpen], [[[false, false]], 0]);
+
+  // The stock commands of a full cart's checkout, its old checkout handed back first, at most STOCK_ORDER_COMMANDS.
+  await redis.pipeline([["HDEL", key2(lamps, l.Card), "cs_test_cardranout00001"]]);
+  const firstFull = await payLamps([l.Shade, l.Bulb, l.Cord, l.Card]);
+  const firstCookie = firstFull.cookie;
+  let stockCommands = 0;
+  const counting = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    for (const command of commands) if (command.some((arg) => typeof arg === "string" && arg.startsWith("nl:stock:"))) stockCommands += 1;
+    return counting(commands);
+  };
+  const again4 = await payLamps([l.Shade, l.Bulb, l.Cord, l.Card], firstCookie);
+  redis.pipeline = counting;
+  is("a full cart's checkout, its old one handed back first, sends at most STOCK_ORDER_COMMANDS stock commands", [firstFull.to, again4.to, stockCommands > 0 && stockCommands <= STOCK_ORDER_COMMANDS], ["stripe", "stripe", true]);
+
+  part("Handing back an old checkout");
+  // What it held outside the new cart is let go too (read from the checkout Stripe closed).
+  for (const id of [l.Shade, l.Bulb, l.Cord, l.Card]) await redis.pipeline([["DEL", key2(lamps, id)]]);
+  const shadeAndBulb = await payLamps([l.Shade, l.Bulb]);
+  const onlyShade = await payLamps([l.Shade], shadeAndBulb.cookie);
+  is("an old checkout's hold is let go on every product it held, in the new cart or not", [onlyShade.to, await stockLeft(lamps, await lampOf(l.Shade)), await stockLeft(lamps, await lampOf(l.Bulb))], ["stripe", 1, 2]);
+  // Paid, with nobody back on the thanks page: Stripe will not close it, so it is read back and marked sold.
+  const lampPaid = await payLamps([l.Lamp]);
+  const lampSession = lampPaid.cookie.split("=")[1].split(".")[0];
+  complete.add(lampSession);
+  sessions.set(lampSession, { ...(sessions.get(lampSession) ?? {}), status: "complete", payment_status: "paid" });
+  const looked = await readLamps([l.Lamp], lampPaid.cookie);
+  is("before paying again, the browser sees the lamp it paid for as its own", looked.items.map((item) => [item.ok, item.soldOut]), [[true, false]]);
+  const lampAgain = await payLamps([l.Lamp], lampPaid.cookie);
+  is("paying again finds it paid: marked sold, back to the cart, and its cookie cleared", [lampAgain.to, lampAgain.cleared, (await readEntriesOf(lamps, l.Lamp))[lampSession]?.paid], ["?cart=changed", true, true]);
+  is("the open cart then says it is sold out, even to that browser", (await readLamps([l.Lamp], lampPaid.cookie)).items.map((item) => [item.ok, item.soldOut]), [[false, true]]);
+
+  part("The way back from a cart's checkout");
+  const beforeLeft = gets.length;
+  await redis.pipeline([["HSET", key2(lamps, l.Card), "cs_test_cardranout00002", ranOut]]);
+  is("lists what is left of it, as its reminder does: none sold out, Stripe never asked", [(await cartItems(lamps, [l.Lamp, l.Shade, l.Card])).map((p) => p.id), gets.length - beforeLeft], [[l.Shade], 0]);
 
   part("What the open cart offers");
   const SHOP = "mugs@example.com";
@@ -315,6 +411,7 @@ async function main(): Promise<void> {
 
   part("Where else a sold out one is not offered");
   const { readFileSync } = await import("node:fs");
+  is("the way back from a cart's checkout lists it as the reminder does", readFileSync("app/[handle]/left/page.tsx", "utf8").includes("const items = await cartItems(store, cartIds);"), true);
   is("the store page, the product page and Goes well with", [
     readFileSync("app/[handle]/page.tsx", "utf8").includes("cartable(product) && left.get(product.id) !== 0"),
     readFileSync("app/[handle]/p/[product]/page.tsx", "utf8").includes("cartable(product) && remaining !== 0"),
@@ -322,7 +419,7 @@ async function main(): Promise<void> {
   ], [true, true, true]);
   const productPage = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
   is("Goes well with: a count that cannot be read is offered, as the store page does (the cart's own read refuses it)", [
-    productPage.includes("(await stockLeft(store, p).catch(() => null)) === 0 ? p.id : null"),
+    productPage.includes("(await stockLeft(store, p, Date.now(), { checks: shownOnly() }).catch(() => null)) === 0 ? p.id : null"),
     productPage.includes("stockLeft(store, p).catch(() => 0)"),
     readFileSync("app/[handle]/page.tsx", "utf8").includes("stockLeft(store, product).catch(() => null)"),
   ], [true, false, true]);

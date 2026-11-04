@@ -7,7 +7,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { countHit } from "@/lib/visit";
-import { releaseStockHold, withStockHold } from "@/lib/stock";
+import { heldCheckout, holdCookieValue, releaseStockHold, withStockHold } from "@/lib/stock";
 import { activePlan } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
@@ -217,7 +217,8 @@ export async function POST(request: NextRequest) {
   try {
     // A buyer who went back from Stripe's page hands back the unit they held
     // before holding another.
-    const previous = request.cookies.get(HOLD_COOKIE)?.value ?? "";
+    // Only a checkout named by the signed cookie this route gave (lib/stock.ts, heldCheckout), so nobody can close another person's.
+    const previous = heldCheckout(store, request.cookies.get(HOLD_COOKIE)?.value);
     if (previous) await releaseStockHold(store, product, previous).catch(() => {});
 
     // When offers follow the payment, this browser gets a secret, and only
@@ -311,8 +312,9 @@ export async function POST(request: NextRequest) {
     if (abTest && bucket !== null) after(() => countTest(store.statsId, product.id, abTest, "c", versionFor(bucket, abTest)));
     const headers = new Headers({ Location: held.value.url, "Cache-Control": "no-store" });
     const secure = origin.startsWith("https://") ? "; Secure" : "";
-    if (product.stock !== null) {
-      headers.append("Set-Cookie", `${HOLD_COOKIE}=${held.value.id}; Path=/api/store/checkout; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
+    const signed = product.stock !== null ? holdCookieValue(store, held.value.id) : null;
+    if (signed) {
+      headers.append("Set-Cookie", `${HOLD_COOKIE}=${signed}; Path=/api/store/checkout; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
     }
     if (upsell) {
       headers.append("Set-Cookie", `${UPSELL_COOKIE}=${upsell.secret}; Path=/; Max-Age=7200; HttpOnly; SameSite=Lax${secure}`);

@@ -33,6 +33,11 @@
  *     cleanup, due on its own schedule (`sweepDue`), and the refusal while
  *     any open or draft
  *     invoice is known or the list was not read;
+ *   - after a 402, paid invoices of the change refunded in full, the 402's
+ *     own invoice kept in the marker and re-read by id, invoices listed by
+ *     the customer too, a five-minute window, and the sweep's schedule
+ *     (`nextSweepAt`, slower after the limit; an unsigned marker due at once);
+ *   - the server's record of the last change winning over a tampered one;
  *   - after the change, the excess above the ceiling to refund
  *     (`overCeiling`);
  *   - the last change made is signed: an edit only refuses, never allows;
@@ -109,7 +114,13 @@ import {
   sweepDue,
   sweepMarkBody,
   sweepMarker,
-  sweepQuery,
+  sweepQueries,
+  sweepMarkInvoiceBody,
+  nextSweepAt,
+  refundBody,
+  refundIdempotencyKey,
+  SWEEP_SLOW_SECONDS,
+  RUN_END_CLEAR_SECONDS,
   sweepSigText,
   withinCeiling,
   zoneOf,
@@ -223,6 +234,7 @@ is("the older line shape (price on the line) is read too", cannotMove(sub({ late
 is("the last invoice paid another price (changed mid-period): refused", cannotMove(sub({ latest_invoice: lastLine({ pricing: { price_details: { price: "price_0" } } }) }), NOW, ctx), "changed");
 is("the last invoice paid another amount: refused", cannotMove(sub({ latest_invoice: lastLine({ amount: 800 }) }), NOW, ctx), "changed");
 is("a last invoice of prorations only: refused", cannotMove(sub({ latest_invoice: lastLine({ amount: -200, parent: { subscription_item_details: { proration: true } } }) }), NOW, ctx), "changed");
+is("a last invoice with more lines than one page: refused", cannotMove(sub({ latest_invoice: { ...LAST, lines: { ...LAST.lines, has_more: true } } }), NOW, ctx), "changed");
 is("a last invoice whose lines were not read: refused", cannotMove(sub({ latest_invoice: { id: "in_1", status: "paid" } }), NOW, ctx), "changed");
 is(
   "a last invoice with two periods: refused",
@@ -246,7 +258,10 @@ is(
   cannotMove(sub({ default_payment_method: null, customer: { id: "cus_1", balance: 0, invoice_settings: { default_payment_method: { id: "pm_2", type: "us_bank_account" } } } }), NOW, ctx),
   "card",
 );
-is("an old source is refused", cannotMove(sub({ default_payment_method: null, default_source: "src_1" }), NOW, ctx), "card");
+is("an old source that is not a card is refused", cannotMove(sub({ default_payment_method: null, default_source: "src_1" }), NOW, ctx), "card");
+is("an old card source is a card", cannotMove(sub({ default_payment_method: null, default_source: "card_1" }), NOW, ctx), null);
+is("an old card source, expanded, is a card", cannotMove(sub({ default_payment_method: null, default_source: { id: "card_1", object: "card" } }), NOW, ctx), null);
+is("an expanded source that is not a card is refused", cannotMove(sub({ default_payment_method: null, default_source: { id: "ba_1", object: "bank_account" } }), NOW, ctx), "card");
 is("no payment method at all is refused", cannotMove(sub({ default_payment_method: null }), NOW, ctx), "card");
 is(
   "an affiliate share for a set number of months, still running, is refused",
@@ -285,8 +300,10 @@ is("asked 10 days ago, never completed: allowed", cannotMove(sub({ metadata: { [
   const lapsedOn = at("2026-11-10T12:00:00Z");
   const lapsed = sub({ metadata: req(sub(), lapsedOn) });
   const later = lapsedOn + MOVE_GRACE_SECONDS + 60;
-  is("after a declined or lapsed run, the member may ask again", cannotMove(lapsed, later, ctx), null);
-  is("and days are offered again", daysOffered(lapsed, "UTC", later, ctx).length > 0, true);
+  is("a lapsed request not yet cleared still waits: the member may not ask a second time", cannotMove(lapsed, later, ctx), "pending");
+  const lapsedCleared = sub({ metadata: { store: "shop" } });
+  is("once the route clears it, the member may ask again", cannotMove(lapsedCleared, later, ctx), null);
+  is("and days are offered again", daysOffered(lapsedCleared, "UTC", later, ctx).length > 0, true);
   is("while its grace runs, it still waits", cannotMove(lapsed, lapsedOn + 60, ctx), "pending");
 }
 is("a stale change, past its grace, no longer waits", pendingMove(sub({ metadata: req(sub(), NOW - MOVE_GRACE_SECONDS - 1) }), NOW, verify), null);
@@ -301,6 +318,13 @@ is("a garbled last change is read as made just now: refused, never allowed", can
   is("copied from another subscription: read as just now, refused", cannotMove(sub({ id: "sub_2", metadata: old }), NOW, ctx), "recent");
   is("lastDone: signed is read, none is 0, edited is now", [lastDone(sub({ metadata: old }), NOW, verify), lastDone(sub(), NOW, verify), lastDone(sub({ metadata: { ...old, [META_DONE]: "1700000000" } }), NOW, verify)], [NOW - 40 * DAY, 0, NOW]);
   is("the text signed for the last change", doneSigText(sub(), "1700000000"), "billing-day-done:v1|sub_1|cus_1|1700000000");
+  const tampered = sub({ metadata: { ...old, [META_DONE]: String(NOW - 400 * DAY) } });
+  is("a tampered record with the server's own: the server's wins, not \"now\" forever", lastDone(tampered, NOW, verify, NOW - 40 * DAY), NOW - 40 * DAY);
+  is("so the member may change once a period has passed by the server's record", cannotMove(tampered, NOW, { ...ctx, lastDone: NOW - 40 * DAY }), null);
+  is("and is refused while it has not", cannotMove(tampered, NOW, { ...ctx, lastDone: NOW - 10 * DAY }), "recent");
+  is("deleted from the metadata, the server's record still refuses", cannotMove(sub(), NOW, { ...ctx, lastDone: NOW - 10 * DAY }), "recent");
+  is("an older signed pair put back loses to the server's newer record", lastDone(sub({ metadata: old }), NOW, verify, NOW - 5 * DAY), NOW - 5 * DAY);
+  is("a server record that is not a whole time is not read", lastDone(tampered, NOW, verify, 12.5), NOW);
 }
 is("nothing is offered while refused", daysOffered(sub({ status: "trialing" }), "UTC", NOW, ctx), []);
 
@@ -509,12 +533,12 @@ is("a signer giving anything but 64 hex keeps no request", requestMeta(base, on,
 is("a signed request is read", [pendingMove(pending, NOW, verify), shownOf(pending, verify), ceilingOf(pending, verify)], [on, 1834, 2540]);
 const edited = sub({ metadata: { ...meta, [META_SHOWN]: "999999", [META_CEILING]: "999999" } });
 is("an edited amount shown or ceiling is not read", [shownOf(edited, verify), ceilingOf(edited, verify)], [null, null]);
-is("an edited request is no request: it does not wait, and cannot run", [pendingMove(edited, on, verify), cannotRun(edited, on + 60, ctx)], [null, "due"]);
+is("an edited request is no request: it does not wait, and cannot run", [pendingMove(edited, on, verify), cannotRun(edited, on + 60, ctx)], [null, "none"]);
 is("an edited request does not stop the member asking again", cannotMove(edited, NOW, ctx), null);
 const moved = sub({ metadata: { ...meta, [META_ON]: String(on - DAY) } });
 is("an edited moment is not read", pendingMove(moved, NOW, verify), null);
 const copied = sub({ id: "sub_2", metadata: meta });
-is("a request copied from another subscription is not read", [pendingMove(copied, NOW, verify), shownOf(copied, verify), cannotRun(copied, on + 60, ctx)], [null, null, "due"]);
+is("a request copied from another subscription is not read", [pendingMove(copied, NOW, verify), shownOf(copied, verify), cannotRun(copied, on + 60, ctx)], [null, null, "none"]);
 const otherCustomer = sub({ customer: { id: "cus_2", balance: 0, discount: null, invoice_settings: { default_payment_method: null } }, metadata: meta });
 is("a request copied to another customer's subscription is not read", pendingMove(otherCustomer, NOW, verify), null);
 is("an unsigned request is not read", pendingMove(sub({ metadata: { ...meta, [META_SIG]: "" } }), NOW, verify), null);
@@ -530,16 +554,16 @@ is("a membership whose price id is not read keeps no request", requestMeta(withI
 is("a membership with no period end keeps no request", requestMeta({ ...base, items: { data: [{ quantity: 1, price: PRICE }] } }, on, 1834, 2540, NOW, sign), null);
 is("no amount kept reads as null", [shownOf(sub(), verify), ceilingOf(sub(), verify)], [null, null]);
 is("before its moment: waiting, not due", [pendingMove(pending, on - 60, verify), moveDue(pending, on - 60, verify)], [on, false]);
-is("before its moment: may not run", cannotRun(pending, on - 60, ctx), "due");
-is("at its moment, before Stripe's clock may have reached it: not yet due", [moveDue(pending, on, verify), cannotRun(pending, on + RUN_SKEW_SECONDS - 1, ctx)], [false, "due"]);
+is("before its moment: too early", cannotRun(pending, on - 60, ctx), "early");
+is("at its moment, before Stripe's clock may have reached it: not yet due", [moveDue(pending, on, verify), cannotRun(pending, on + RUN_SKEW_SECONDS - 1, ctx)], [false, "early"]);
 is("a minute after its moment: due and may run", [moveDue(pending, on + RUN_SKEW_SECONDS, verify), cannotRun(pending, on + RUN_SKEW_SECONDS, ctx)], [true, null]);
 is(
-  "within the sweep's window of the period's end: may not run",
-  cannotRun(sub({ end: on + RUN_SKEW_SECONDS + SWEEP_WINDOW_SECONDS, metadata: req(sub({ end: on + RUN_SKEW_SECONDS + SWEEP_WINDOW_SECONDS }), on) }), on + RUN_SKEW_SECONDS, ctx),
-  "due",
+  "within an hour of the period's end: too late",
+  cannotRun(sub({ end: on + RUN_SKEW_SECONDS + RUN_END_CLEAR_SECONDS, metadata: req(sub({ end: on + RUN_SKEW_SECONDS + RUN_END_CLEAR_SECONDS }), on) }), on + RUN_SKEW_SECONDS, ctx),
+  "late",
 );
 is("an hour late: may run", cannotRun(pending, on + 3600, ctx), null);
-is("past its grace: lapsed", [moveDue(pending, on + MOVE_GRACE_SECONDS, verify), cannotRun(pending, on + MOVE_GRACE_SECONDS, ctx)], [false, "due"]);
+is("past its grace: too late", [moveDue(pending, on + MOVE_GRACE_SECONDS, verify), cannotRun(pending, on + MOVE_GRACE_SECONDS, ctx)], [false, "late"]);
 is("behind on a payment by then: may not run", cannotRun({ ...pending, status: "past_due" }, on + 60, ctx), "behind");
 is("set to end by then: may not run", cannotRun({ ...pending, cancel_at_period_end: true }, on + 60, ctx), "ending");
 is("a discount added by then: may not run", cannotRun({ ...pending, discounts: ["di_1"] }, on + 60, ctx), "discount");
@@ -562,15 +586,15 @@ is(
   "changed",
 );
 is("months kept do not match (yearly kept and signed, monthly now): may not run", cannotRun(sub({ metadata: resigned(base, { ...meta, [META_MONTHS]: "12" }) }), on + 60, ctx), "changed");
-is("a request without its period is not read: nothing runs", cannotRun(sub({ metadata: { [META_AT]: String(NOW), [META_ON]: String(on), [META_SHOWN]: "1834" } }), on + 60, ctx), "due");
+is("a request without its period is not read: nothing runs", cannotRun(sub({ metadata: { [META_AT]: String(NOW), [META_ON]: String(on), [META_SHOWN]: "1834" } }), on + 60, ctx), "none");
 is(
   "its moment before the current period started: may not run",
   cannotRun(withItem(pending, { current_period_start: on + 1 }), on + 60, ctx),
   "changed",
 );
 is("no current period start known: may not run", cannotRun({ ...withItem(pending, { current_period_start: undefined }), billing_mode: { type: "classic" } }, on + 60, ctx), "changed");
-is("its moment at or after the period end: may not run", cannotRun(sub({ end: on, metadata: req(sub({ end: on }), on) }), on + 60, ctx), "due");
-is("no change waiting: nothing to run", cannotRun(sub(), on, ctx), "due");
+is("its moment at or after the period end: may not run", cannotRun(sub({ end: on, metadata: req(sub({ end: on }), on) }), on + 60, ctx), "late");
+is("no change waiting: nothing to run", cannotRun(sub(), on, ctx), "none");
 is("Stripe's amount equal to the ceiling may be charged", withinCeiling(2540, 2540), true);
 is("one cent more may not", withinCeiling(2540, 2541), false);
 is("less may", withinCeiling(2540, 1200), true);
@@ -653,16 +677,16 @@ is("an edited ceiling is not read: may not run", runPreviewRefusal(sub({ metadat
 
 part("mayRun: the only door to the change");
 is("due, running normally, fresh preview under the ceiling: may run", mayRun(asked, fresher(1100), on + 60, ctx), null);
-is("before its moment: due", mayRun(asked, taxed, on - 60, ctx), "due");
-is("past its grace: due", mayRun(asked, taxed, on + MOVE_GRACE_SECONDS, ctx), "due");
+is("before its moment: early", mayRun(asked, taxed, on - 60, ctx), "early");
+is("past its grace: late", mayRun(asked, taxed, on + MOVE_GRACE_SECONDS, ctx), "late");
 is("the membership no longer running normally comes first", mayRun({ ...asked, status: "past_due" }, taxed, on + 60, ctx), "behind");
 is("the period changed: changed", mayRun(sub({ end: at("2026-12-20T15:00:00Z"), metadata: asked.metadata }), taxed, on + 60, ctx), "changed");
 is("fresh preview above the ceiling kept: above", mayRun(askedLow, fresher(1270), on + 60, ctx), "above");
 is("an open invoice of the subscription found by then: invoice", mayRun(asked, taxed, on + 60, { verify, openInvoices: [{ id: "in_9", status: "open" }] }), "invoice");
 is("the open invoices not read: invoice", mayRun(asked, taxed, on + 60, { verify, openInvoices: null }), "invoice");
 is("fresh preview with a balance: balance", mayRun(asked, owes, on + 60, ctx), "balance");
-is("an edited request: nothing to run", mayRun(sub({ metadata: { ...asked.metadata!, [META_SHOWN]: "1" } }), taxed, on + 60, ctx), "due");
-is("a request copied from another subscription: nothing to run", mayRun({ ...asked, id: "sub_2" }, taxed, on + 60, ctx), "due");
+is("an edited request: nothing to run", mayRun(sub({ metadata: { ...asked.metadata!, [META_SHOWN]: "1" } }), taxed, on + 60, ctx), "none");
+is("a request copied from another subscription: nothing to run", mayRun({ ...asked, id: "sub_2" }, taxed, on + 60, ctx), "none");
 
 part("Billing mode: read, or refused; flexible refused until a test clock proves the anchor moves");
 const flexible = sub({ billing_mode: { type: "flexible" } });
@@ -694,32 +718,43 @@ is("a price whose usage type is not read is refused", cannotMove(withItem(sub(),
 is("a price whose amount is not read is refused", cannotMove(withItem(sub(), { price: { ...PRICE, unit_amount: null } }), NOW, ctx), "items");
 is("a price whose id is not read is refused", cannotMove(withItem(sub(), { price: { ...PRICE, id: undefined } }), NOW, ctx), "items");
 
-part("After a declined change (402): a marker first, every invoice it may have left cleared, swept again later");
+part("After a declined change (402): a marker first, every invoice it may have left cleared or refunded, swept again later");
 const SENT = on + 120;
-const NONE = { stopAdvance: [], remove: [], void: [] };
-const mark = sweepMarkBody(pending, SENT, sign, verify)!;
-const MARKER = { on, sentAt: SENT, from: NOW, until: SENT + SWEEP_WINDOW_SECONDS };
+const NONE = { stopAdvance: [], remove: [], void: [], refund: [] };
+const mark = sweepMarkBody(pending, SENT, sign, verify, { invoice: null, before: "in_1" })!;
+const MARKER = { on, sentAt: SENT, from: NOW, until: SENT + SWEEP_WINDOW_SECONDS, invoice: null, before: "in_1" };
 const withMarker = (s0: BillingDaySub, body: URLSearchParams) => ({
   ...s0,
   metadata: { ...s0.metadata!, [META_SWEEP]: body.get(`metadata[${META_SWEEP}]`)!, [META_SWEEP_SIG]: body.get(`metadata[${META_SWEEP_SIG}]`)! },
 });
 const marked = withMarker(pending, mark);
-is("the marker is bound to the request's moment, with the send and the window from when the member asked", sweepMarker(marked, verify), MARKER);
+is("the marker is bound to the request's moment, with the send, the window and the last invoice before it", sweepMarker(marked, verify), MARKER);
 is("the marker writes nothing else (the request stays until cleared)", [...mark.keys()], [`metadata[${META_SWEEP}]`, `metadata[${META_SWEEP_SIG}]`]);
-is("its text names the subscription, the customer and every part", sweepSigText(base, MARKER), `billing-day-sweep:v1|sub_1|cus_1|${on}|${SENT}|${NOW}|${SENT + SWEEP_WINDOW_SECONDS}`);
-is("no signed request: no marker", sweepMarkBody(sub(), SENT, sign, verify), null);
-is("a send before the moment: no marker", sweepMarkBody(pending, on - 1, sign, verify), null);
-is("a signer that cannot sign writes no marker", sweepMarkBody(pending, SENT, () => null, verify), null);
-{
-  const nearEnd = sub({ end: SENT + 600, metadata: req(sub({ end: SENT + 600 }), on) });
-  is("the window stops short of the period's end, where a renewal invoice would be", sweepMarker(withMarker(nearEnd, sweepMarkBody(nearEnd, SENT, sign, verify)!), verify)?.until, SENT + 599);
-}
 is(
-  "the sweep lists over the marker's window",
-  [...sweepQuery("sub_1", MARKER, "open").entries()],
-  [["subscription", "sub_1"], ["status", "open"], ["created[gte]", String(NOW)], ["created[lte]", String(SENT + SWEEP_WINDOW_SECONDS)], ["limit", "100"]],
+  "its text names the subscription, the customer and every part",
+  sweepSigText(base, MARKER),
+  `billing-day-sweep:v1|sub_1|cus_1|${on}|${SENT}|${NOW}|${SENT + SWEEP_WINDOW_SECONDS}|-|in_1`,
 );
-is("for drafts and uncollectible ones too", [sweepQuery("sub_1", MARKER, "draft").get("status"), sweepQuery("sub_1", MARKER, "uncollectible").get("status")], ["draft", "uncollectible"]);
+is("the window is short: five minutes after the send", SWEEP_WINDOW_SECONDS, 300);
+is("no signed request: no marker", sweepMarkBody(sub(), SENT, sign, verify, { invoice: null, before: null }), null);
+is("a send before the moment: no marker", sweepMarkBody(pending, on - 1, sign, verify, { invoice: null, before: null }), null);
+is("an id not as Stripe writes it: no marker", sweepMarkBody(pending, SENT, sign, verify, { invoice: "in.2", before: null }), null);
+is("a signer that cannot sign writes no marker", sweepMarkBody(pending, SENT, () => null, verify, { invoice: null, before: null }), null);
+{
+  const nearEnd = sub({ end: SENT + 200, metadata: req(sub({ end: SENT + 200 }), on) });
+  is("the window stops short of the period's end, where a renewal invoice would be", sweepMarker(withMarker(nearEnd, sweepMarkBody(nearEnd, SENT, sign, verify, { invoice: null, before: null })!), verify)?.until, SENT + 199);
+}
+const withOwn = withMarker(marked, sweepMarkInvoiceBody(marked, "in_402", sign, verify)!);
+const OWN = { ...MARKER, invoice: "in_402" };
+is("the 402's own invoice, once found, is signed into the marker", sweepMarker(withOwn, verify), OWN);
+is("without a signed marker there is nothing to add it to", sweepMarkInvoiceBody(pending, "in_402", sign, verify), null);
+{
+  const queries = sweepQueries("sub_1", "cus_1", MARKER);
+  is("the sweep lists four statuses by the subscription and by the customer", queries.map((q) => `${q.get("subscription") ?? "cus:" + q.get("customer")} ${q.get("status")}`), [
+    "sub_1 open", "sub_1 draft", "sub_1 uncollectible", "sub_1 paid", "cus:cus_1 open", "cus:cus_1 draft", "cus:cus_1 uncollectible", "cus:cus_1 paid",
+  ]);
+  is("over the marker's window, 100 a page", [queries[0].get("created[gte]"), queries[0].get("created[lte]"), queries[0].get("limit")], [String(NOW), String(SENT + SWEEP_WINDOW_SECONDS), "100"]);
+}
 
 const sentFrom = (o: Record<string, unknown>) => ({
   created: SENT + 2,
@@ -730,28 +765,43 @@ const sentFrom = (o: Record<string, unknown>) => ({
 is(
   "an invoice Stripe stamped 10 minutes behind the server's clock is still cleared",
   invoicesToVoid([sentFrom({ id: "in_2", status: "open", created: SENT - 600 })], "sub_1", MARKER),
-  { stopAdvance: [], remove: [], void: ["in_2"] },
+  { ...NONE, void: ["in_2"] },
 );
 is(
   "an open one is voided; a draft is stopped from advancing, then deleted; each once, from the list and the 402's payment",
   invoicesToVoid([sentFrom({ id: "in_2", status: "open" }), sentFrom({ id: "in_3", status: "draft" }), sentFrom({ id: "in_2", status: "open" })], "sub_1", MARKER),
-  { stopAdvance: ["in_3"], remove: ["in_3"], void: ["in_2"] },
+  { stopAdvance: ["in_3"], remove: ["in_3"], void: ["in_2"], refund: [] },
 );
-is("an uncollectible one is voided too (its link could still be paid)", invoicesToVoid([sentFrom({ id: "in_4", status: "uncollectible" })], "sub_1", MARKER), { stopAdvance: [], remove: [], void: ["in_4"] });
+is("an uncollectible one is voided too (its link could still be paid)", invoicesToVoid([sentFrom({ id: "in_4", status: "uncollectible" })], "sub_1", MARKER), { ...NONE, void: ["in_4"] });
+is("a 402 invoice the member paid since (by Stripe's link or a retry) is refunded in full", invoicesToVoid([sentFrom({ id: "in_p", status: "paid", amount_paid: 847 })], "sub_1", MARKER), { ...NONE, refund: ["in_p"] });
+is("one already refunded in full needs nothing", invoicesToVoid([sentFrom({ id: "in_p", status: "paid", amount_paid: 847, refunded: 847 })], "sub_1", MARKER), NONE);
+is("one refunded in part is refunded again (the key keeps it to one)", invoicesToVoid([sentFrom({ id: "in_p", status: "paid", amount_paid: 847, refunded: 100 })], "sub_1", MARKER), { ...NONE, refund: ["in_p"] });
+is("the last invoice before the send, paid for the period, is never refunded", invoicesToVoid([sentFrom({ id: "in_1", status: "paid", amount_paid: 1270 })], "sub_1", MARKER), NONE);
 is("stopping a draft sets auto_advance false", stopAdvanceBody().toString(), "auto_advance=false");
-is("the old paid last invoice (what latest_invoice still shows after a 402) is left alone", invoicesToVoid([sentFrom({ id: "in_1", status: "paid", created: NOW - 20 * DAY })], "sub_1", MARKER), NONE);
+is("a refund names the payment, in full or of an amount", [refundBody("pi_1").toString(), refundBody("pi_1", 500).get("amount")], ["payment_intent=pi_1&metadata%5Bbilling_day%5D=refund", "500"]);
+is("a refund's idempotency key names the invoice", refundIdempotencyKey("in_p"), "billing-day-refund:in_p");
 is("an open invoice from before the member asked is not this change's", invoicesToVoid([sentFrom({ id: "in_0", status: "open", created: NOW - 60 })], "sub_1", MARKER), NONE);
-is("an invoice after the window (a renewal) is not this change's", invoicesToVoid([sentFrom({ id: "in_r", status: "draft", created: SENT + SWEEP_WINDOW_SECONDS + 1 })], "sub_1", MARKER), NONE);
+is(
+  "a creator's own subscription update 40 minutes after the 402 is not this change's",
+  invoicesToVoid([sentFrom({ id: "in_c", status: "open", created: SENT + 40 * 60 })], "sub_1", MARKER),
+  NONE,
+);
 is("another subscription's invoice is not touched", invoicesToVoid([sentFrom({ id: "in_5", status: "open", parent: { subscription_details: { subscription: "sub_2" } } })], "sub_1", MARKER), NONE);
 is("an invoice the creator made by hand is not touched", invoicesToVoid([sentFrom({ id: "in_8", status: "open", billing_reason: "manual" })], "sub_1", MARKER), NONE);
 is(
   "any other reason is cleared (which one Stripe gives the declined update is still to be seen)",
   invoicesToVoid([sentFrom({ id: "in_9", status: "open", billing_reason: "subscription_cycle" }), sentFrom({ id: "in_10", status: "open", billing_reason: "subscription_update" })], "sub_1", MARKER),
-  { stopAdvance: [], remove: [], void: ["in_9", "in_10"] },
+  { ...NONE, void: ["in_9", "in_10"] },
 );
-is("the older shape (subscription on the invoice) is read", invoicesToVoid([{ id: "in_6", status: "open", created: SENT, subscription: "sub_1" }], "sub_1", MARKER), { stopAdvance: [], remove: [], void: ["in_6"] });
-is("one whose subscription, reason or time is not read is cleared too", invoicesToVoid([{ id: "in_7", status: "open" }], "sub_1", MARKER), { stopAdvance: [], remove: [], void: ["in_7"] });
-is("void and paid ones need nothing", invoicesToVoid(["void", "paid"].map((status, k) => sentFrom({ id: `in_${k}x`, status })), "sub_1", MARKER), NONE);
+is("the older shape (subscription on the invoice) is read", invoicesToVoid([{ id: "in_6", status: "open", created: SENT, subscription: "sub_1" }], "sub_1", MARKER), { ...NONE, void: ["in_6"] });
+is("an invoice of the customer linked to no subscription is cleared", invoicesToVoid([{ id: "in_u", status: "open", created: SENT, subscription: null }], "sub_1", MARKER), { ...NONE, void: ["in_u"] });
+is("one whose subscription, reason or time is not read is cleared too", invoicesToVoid([{ id: "in_7", status: "open" }], "sub_1", MARKER), { ...NONE, void: ["in_7"] });
+is(
+  "the 402's own invoice is cleared whatever its time or reason",
+  invoicesToVoid([{ id: "in_402", status: "open", created: SENT + 7200, billing_reason: "manual", subscription: null }], "sub_1", OWN),
+  { ...NONE, void: ["in_402"] },
+);
+is("void ones need nothing", invoicesToVoid([sentFrom({ id: "in_vx", status: "void" })], "sub_1", MARKER), NONE);
 is("an id not as Stripe writes it is skipped", invoicesToVoid([sentFrom({ id: "in_2/../x", status: "open" })], "sub_1", MARKER), NONE);
 
 part("The sweep marker holds until a later sweep finds nothing");
@@ -767,32 +817,41 @@ const applied = (s0: BillingDaySub, body: URLSearchParams) => {
   }
   return { ...s0, metadata };
 };
-const cleanedUp = applied(marked, clearRequestBody());
+const cleanedUp = applied(withOwn, clearRequestBody());
 is("clearing the request after a refusal or lapse never touches the marker", [...clearRequestBody().keys()].some((key) => key.includes(META_SWEEP)), false);
-is("after that cleanup the request is gone but the marker stays", [pendingMove(cleanedUp, SENT + 60, verify), sweepMarker(cleanedUp, verify)], [null, MARKER]);
+is("after that cleanup the request is gone but the marker stays", [pendingMove(cleanedUp, SENT + 60, verify), sweepMarker(cleanedUp, verify)], [null, OWN]);
 is("and the member is still refused, 30 days on", cannotMove(cleanedUp, SENT + 30 * DAY, ctx), "sweep");
 is("the change itself never touches the marker either", [...moveBody(base, on, sign)!.keys()].some((key) => key.includes(META_SWEEP)), false);
 is("no sweep is due on the run that got the 402", sweepDue(cleanedUp, SENT + 5, verify), false);
 is("a sweep is due 15 minutes later, whatever moveDue says", [sweepDue(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify), moveDue(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify)], [true, false]);
 is("and still due 30 days later, never stuck", sweepDue(cleanedUp, SENT + 30 * DAY, verify), true);
-is("before then: wait", sweepAction(cleanedUp, SENT + 5, verify, NONE, true), "wait");
-is("a later sweep that finds an invoice: again", sweepAction(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify, { stopAdvance: [], remove: [], void: ["in_2"] }, true), "again");
-is("a later sweep that finds a draft: again", sweepAction(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify, { stopAdvance: ["in_3"], remove: ["in_3"], void: [] }, true), "again");
-is("a later sweep not read to the end: again, never clear", sweepAction(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify, NONE, false), "again");
-is("a later sweep, read to the end, that finds nothing: clear", sweepAction(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, verify, NONE, true), "clear");
-is("still something after the limit: tell the creator, keep the refusal", sweepAction(cleanedUp, SENT + SWEEP_MAX_SECONDS, verify, { stopAdvance: [], remove: [], void: ["in_2"] }, true), "tell");
-is("nothing after the limit: clear", sweepAction(cleanedUp, SENT + SWEEP_MAX_SECONDS, verify, NONE, true), "clear");
-is("no marker: nothing to do", sweepAction(sub(), SENT + SWEEP_AGAIN_SECONDS, verify, NONE, true), "wait");
+is("after a sweep, the next is 15 minutes on", nextSweepAt(cleanedUp, verify, SENT + DAY), SENT + DAY + SWEEP_AGAIN_SECONDS);
+is("after the limit, once a day", nextSweepAt(cleanedUp, verify, SENT + SWEEP_MAX_SECONDS), SENT + SWEEP_MAX_SECONDS + SWEEP_SLOW_SECONDS);
+is("not due between slow sweeps", sweepDue(cleanedUp, SENT + SWEEP_MAX_SECONDS + 3600, verify, SENT + SWEEP_MAX_SECONDS), false);
+is("no marker: never due", [nextSweepAt(sub(), verify, null), sweepDue(sub(), SENT + DAY, verify)], [null, false]);
+const own = { id: "in_402", status: "void", created: SENT };
+const act = (s0: BillingDaySub, t: number, found: Record<string, unknown>[], toEnd = true) => sweepAction(s0, t, verify, found, toEnd);
+is("before then: wait, and still clear what was found", act(cleanedUp, SENT + 5, [sentFrom({ id: "in_2", status: "open" })]), { action: "wait", clear: { ...NONE, void: ["in_2"] } });
+is("a later sweep that finds an invoice: again", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own, sentFrom({ id: "in_2", status: "open" })]).action, "again");
+is("a later sweep that finds a draft: again", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own, sentFrom({ id: "in_3", status: "draft" })]).action, "again");
+is("a later sweep that finds a paid one to refund: again", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [{ ...own, status: "paid", amount_paid: 847 }]).action, "again");
+is("a later sweep not read to the end: again, never clear", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own], false).action, "again");
+is("a later sweep without the 402's own invoice re-read: again, never clear", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, []).action, "again");
+is("a later sweep, read to the end, its own invoice void, nothing else: clear", act(cleanedUp, SENT + SWEEP_AGAIN_SECONDS, [own]), { action: "clear", clear: NONE });
+is("still something after the limit: tell the creator, keep the refusal", act(cleanedUp, SENT + SWEEP_MAX_SECONDS, [own, sentFrom({ id: "in_2", status: "open" })]).action, "tell");
+is("nothing after the limit: clear", act(cleanedUp, SENT + SWEEP_MAX_SECONDS, [own]).action, "clear");
+is("no marker: nothing to do", act(sub(), SENT + SWEEP_AGAIN_SECONDS, []), { action: "wait", clear: NONE });
 const swept = applied(cleanedUp, clearSweepBody());
 is("clearing the marker touches only the marker", [...clearSweepBody().keys()], [`metadata[${META_SWEEP}]`, `metadata[${META_SWEEP_SIG}]`]);
 is("once cleared, the member may ask again", cannotMove(swept, SENT + SWEEP_AGAIN_SECONDS, ctx), null);
 {
-  const edited = { ...cleanedUp, metadata: { ...cleanedUp.metadata, [META_SWEEP]: [on, SENT, NOW, SENT + 7200].join(".") } };
+  const edited = { ...cleanedUp, metadata: { ...cleanedUp.metadata, [META_SWEEP]: [on, SENT, NOW, SENT + 7200, "-", "-"].join(".") } };
   is("an edited marker is not read as a marker", sweepMarker(edited, verify), null);
   is("but it still refuses the member (never unblocks)", cannotMove(edited, SENT + DAY, ctx), "sweep");
-  is("and the route tells the creator", sweepAction(edited, SENT + DAY, verify, NONE, true), "tell");
+  is("it is due for a sweep at once, so someone is told", [nextSweepAt(edited, verify, null), sweepDue(edited, SENT + DAY, verify)], [0, true]);
+  is("and the route tells the creator", act(edited, SENT + DAY, []).action, "tell");
   const halfDeleted = { ...cleanedUp, metadata: { [META_SWEEP_SIG]: cleanedUp.metadata[META_SWEEP_SIG] } };
-  is("a signature left without its marker still refuses", cannotMove(halfDeleted, SENT + DAY, ctx), "sweep");
+  is("a signature left without its marker still refuses, and is due", [cannotMove(halfDeleted, SENT + DAY, ctx), sweepDue(halfDeleted, SENT + DAY, verify)], ["sweep", true]);
   is("a marker copied from another subscription is not read", sweepMarker({ ...cleanedUp, id: "sub_2" }, verify), null);
 }
 is(
@@ -800,6 +859,7 @@ is(
   cannotMove(sub(), on + MOVE_GRACE_SECONDS + 60, { verify, openInvoices: [{ id: "in_2", status: "open" }] }),
   "invoice",
 );
+is("an uncollectible invoice of the subscription refuses too", cannotMove(sub(), NOW, { verify, openInvoices: [{ id: "in_4", status: "uncollectible" }] }), "invoice");
 is("while the subscription's open invoices were not read, the member is refused", cannotMove(sub(), NOW, { verify, openInvoices: null }), "invoice");
 
 part("After the change: anything above the ceiling is refunded");
@@ -861,17 +921,25 @@ is("an unknown zone falls back to UTC", moveWords({ from: NOW + 10 * DAY, on: NO
 
 part("What the member is told after a run that did not move the day");
 const OUTCOMES: RunOutcome[] = [
-  "declined", "above", "lapsed", "due", "invoice", "sweep", "changed", "balance", "extra", "amount", "mode", "pending", "recent",
+  "declined", "above", "early", "late", "none", "invoice", "sweep", "stuck", "changed", "balance", "extra", "amount", "mode", "pending", "recent",
   "interval", "items", "fixed", "plan", "managed", "discount", "affiliate", "trial", "behind", "state", "paused", "ending", "card",
 ];
 const told = OUTCOMES.map((o) => refusalWords(o));
 is("every outcome starts by saying the day stays", told.every((lines) => lines[0] === "Your payment day did not change."), true);
 is("every outcome gives a reason", told.every((lines) => lines.length >= 2 && lines[1].length > 0), true);
-is("a declined payment says nothing was charged", refusalWords("declined"), ["Your payment day did not change.", "The payment did not go through, so nothing was charged for the change.", "You can choose a new day again."]);
+is("a declined payment does not invite a new choice before the payment is closed", refusalWords("declined"), [
+  "Your payment day did not change.",
+  "The payment did not go through, so the change was not made.",
+  "You can choose a new day once we have closed that payment.",
+]);
+is("a cause that stays (changed, balance, extra, sweep, stuck) does not invite a new choice", ["changed", "balance", "extra", "sweep", "stuck"].map((o) => refusalWords(o as RunOutcome).length), [2, 2, 2, 2, 2]);
+is("timing outcomes say what happened", [refusalWords("early")[1], refusalWords("late")[1], refusalWords("none")[1]], ["The change was not due yet.", "The change could not run at its time.", "There was no change waiting."]);
+is("a balance either way, or not read, is said truly", refusalWords("balance")[1], "Your account has a balance, or we could not read it.");
+is("state covers a deleted customer or an unknown period too", refusalWords("state")[1], "We could not confirm that your membership is active and up to date.");
+is("after the creator is told, the member hears it", refusalWords("stuck").slice(1), ["A payment that did not go through is still open. The creator has been told."]);
 is("above the ceiling says it would have cost more than a full period", refusalWords("above")[1], "On the day, it would have cost more than one full billing period.");
 is("an unproven mode never says the membership is not active", refusalWords("mode")[1], "Changing the payment day is not available for this membership yet.");
-is("a sweep pending does not invite a new choice yet", refusalWords("sweep").length, 2);
-is("every sentence is under 21 words", told.flat().filter((line) => line.split(/\s+/).length >= 21), []);
+is("every sentence is under 21 words", told.flat().flatMap((line) => line.split(/(?<=\.)\s+/)).filter((line) => line.split(/\s+/).length >= 21), []);
 is("no British spelling", told.flat().filter((line) => /cancell|colour|centre|favour|licence/i.test(line)), []);
 
 done();

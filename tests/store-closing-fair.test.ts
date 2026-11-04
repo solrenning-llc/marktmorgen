@@ -1,3 +1,4 @@
+import { ENDED_INDEX } from "@/lib/plan-standing";
 /**
  * A store closing fairly for the people who bought from it (queue item 307
  * [EC1], lib/closing-buyers-rules.ts), against stand-ins for Stripe (the
@@ -24,7 +25,7 @@ import { join } from "node:path";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { claimHandle, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
-import { type Hands, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
+import { type Hands, closeEnded, closeOne, closingOf, closingLetter } from "@/lib/plan-closing";
 import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import {
   BUYER_NOTICE_DAYS,
@@ -37,7 +38,7 @@ import {
   stillToGive,
   unusedOf,
 } from "@/lib/closing-buyers-rules";
-import { HELD_INDEX, inClosingDay, paidPeriods, releaseRestarted, startCallBudget } from "@/lib/closing-holds";
+import { FINAL_INDEX, HELD_INDEX, inClosingDay, paidPeriods, releaseRestarted, startCallBudget } from "@/lib/closing-holds";
 import { creditKey } from "@/lib/closing-credit";
 import { tellStaysOpen } from "@/lib/closing-buyers";
 import { giveBackUnused, reviewMark, unusedRows } from "@/lib/closing-refunds";
@@ -309,12 +310,25 @@ async function ended(email: string) {
 }
 
 /** The daily job for one store, day by day from `from` to `to` (both days after the plan's end), with Stripe renewing between. */
-async function daily(email: string, E: number, from: number, to: number) {
+async function daily(email: string, E: number, from: number, to: number, scheduled = false) {
   const out: string[] = [];
   for (let d = from; d <= to; d += 1) {
     const at = E + d * DAY + 60_000;
     clockAt(at);
-    const row = await closeOne(email, at, hands, Number.POSITIVE_INFINITY);
+    // Isolate this synthetic scheduler cohort; other journeys keep their
+    // original queue entries and are restored without being processed here.
+    const hidden: [string, string, string][] = [];
+    if (scheduled) for (const index of [ENDED_INDEX, FINAL_INDEX]) {
+      const [flat] = await redis.pipeline([["ZRANGEBYSCORE", index, "-inf", "+inf", "WITHSCORES"]]);
+      if (!Array.isArray(flat)) throw new Error("Synthetic closing cohort is unreadable");
+      for (let i = 0; i + 1 < flat.length; i += 2) if (flat[i] !== email) hidden.push([index, String(flat[i]), String(flat[i + 1])]);
+    }
+    let row;
+    try {
+      for (const [index, ref] of hidden) await redis.pipeline([["ZREM", index, ref]]);
+      row = scheduled ? (await closeEnded(Number.POSITIVE_INFINITY, at, hands)).find(result => result.key === email) : await closeOne(email, at, hands, Number.POSITIVE_INFINITY);
+    } finally { for (const [index, ref, score] of hidden) await redis.pipeline([["ZADD", index, score, ref]]); }
+    if (!row) throw new Error("The daily closing skipped its synthetic cohort");
     out.push(`${d}:${row.state}${row.note ? `:${row.note}` : ""}`);
     // Stripe renews and retries until the next look.
     renewUntil(at + DAY - 120_000);
@@ -483,7 +497,7 @@ async function main() {
   for (let i = 0; i < 5_050; i += 1) world.subs.set(`sub_hal${String(i).padStart(5, "0")}`, { id: `sub_hal${String(i).padStart(5, "0")}`, status: "active", metadata: { store: "hal" }, pause_collection: null, pe: S(Date.UTC(2026, 11, 30)), amount: 500 });
   clockAt(Date.UTC(2026, 10, 9, 12));
   const H = await ended(hal);
-  const halDays = await daily(hal, H, 0, 1);
+  const halDays = await daily(hal, H, 0, 1, true);
   const halSubs = [...world.subs.values()].filter((s) => s.metadata.store === "hal");
   is("the first run reads fifty pages and waits; the next reads the rest and the notice goes", [halDays, halSubs.filter((s) => s.pause_collection?.behavior === "void").length], [["0:held:its members are not all reached yet", "1:told:ended"], 5_050]);
   for (const sub of halSubs) world.subs.delete(sub.id);

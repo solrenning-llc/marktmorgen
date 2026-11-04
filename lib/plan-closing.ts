@@ -592,10 +592,12 @@ export type Closing = {
    */
   state: "fits" | "running" | "told" | "waiting" | "removed" | "held" | "gone";
   note?: string;
+  /** Only unknown platform billing coverage enters the funded retry index. */
+  coverage?: "unknown";
 };
 
 /** One store whose plan has ended, looked at for today. */
-export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY): Promise<Closing> {
+export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY, mayObserve?: () => Promise<boolean>): Promise<Closing> {
   const store = await storeForEmail(key);
   if (!store) {
     await redisPipeline([["ZREM", ENDED_INDEX, key], ["ZREM", FINAL_INDEX, key], ["DEL", stateKey(key)]]);
@@ -616,8 +618,12 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // The durable final index survives a late active snapshot, which clears
     // planEndedAt. Keep the original closing proof for the refund guard.
     const closingStore = store.planEndedAt ? store : { ...store, planEndedAt: new Date(was).toISOString() };
-    const latePlansChecked = await refuseLatePlans(closingStore);
-    if (!latePlansChecked) return { key, state: "held", note: "its plan subscriptions could not all be checked" };
+    if (mayObserve && !(await mayObserve())) return { key, state: "held", coverage: "unknown", note: "daily-recheck-budget" };
+    const latePlansChecked = await refuseLatePlans(closingStore).catch(error => {
+      console.error("checking a closing store platform coverage failed", error);
+      return false;
+    });
+    if (!latePlansChecked) return { key, state: "held", coverage: "unknown", note: "its plan subscriptions could not all be checked" };
     if (final.removed) {
       if (!final.due) {
         await markDue(key, now);
@@ -751,12 +757,13 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   // The day has come. Stripe is asked, today, before anything is touched:
   // about the subscription this store has written down, and then for any
   // other in good standing that names it.
-  if (!isBillingConfigured()) return { key, state: "held", note: "Stripe could not be asked" };
+  if (mayObserve && !(await mayObserve())) return { key, state: "held", coverage: "unknown", note: "daily-recheck-budget" };
+  if (!isBillingConfigured()) return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
   let live;
   try {
     if (store.subscriptionId) {
       const own = await readSubscription(store.subscriptionId);
-      if (own.state === "unknown") return { key, state: "held", note: "Stripe could not be asked" };
+      if (own.state === "unknown") return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
       if (own.state === "active") {
         await setSubscription(key, { active: true, tier: own.tier, cycle: own.cycle, trialEnds: own.trialing ? own.until : 0, shared: own.shared, period: own.period });
         await redisPipeline([["DEL", stateKey(key)]]);
@@ -775,10 +782,10 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // A positive, independent customer observation can still save the store
     // when search is unavailable; an empty list cannot prove unknown absence.
     live ??= await observation.customerLive();
-    if (!live && !searchKnown) return { key, state: "held", note: "Stripe could not be asked" };
+    if (!live && !searchKnown) return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
   } catch (error) {
     console.error("asking Stripe about an ended plan failed", error);
-    return { key, state: "held", note: "Stripe could not be asked" };
+    return { key, state: "held", coverage: "unknown", note: "Stripe could not be asked" };
   }
   if (live) {
     // Our note was wrong, or the plan was started again a moment ago: put right.
@@ -937,6 +944,7 @@ export async function finishClosed(entry: Batched, now = Date.now()): Promise<vo
 export const ERASED_KEPT_DAYS = 400;
 
 const AFTER = "nl:plan:closing:after";
+const FINAL_AFTER = "nl:held:walk";
 const PAGE = 200;
 
 /**
@@ -955,31 +963,56 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
   const visit = async (ref: string, retry = false) => {
     if (seen.has(ref)) return;
     seen.add(ref);
-    // A known held store is visited only through its daily due index.
-    if (!retry && await heldStoreKnown(ref)) return;
-    let result: Closing;
+    // Earlier versions indexed every held reason. Local pause/notice/member
+    // progress must run before a daily platform-coverage claim is needed.
+    const wasCoverageHeld = await heldStoreKnown(ref);
+    let result: Closing, attempted = false;
     try {
-      result = retry && !(await claimHeldRecheck(ref, now, funding))
-        ? { key: ref, state: "held", note: "funding-or-day-budget" }
-        : await closeOne(ref, now, hands, deadline);
+      const mayObserve = wasCoverageHeld ? async () => {
+        if (!retry) return false;
+        attempted = await claimHeldRecheck(ref, now);
+        return attempted;
+      } : undefined;
+      result = await closeOne(ref, now, hands, deadline, mayObserve);
     } catch (error) {
       console.error("seeing a closing store through failed", error);
       result = { key: ref, state: "held", note: "failed" };
     }
-    if (retry || result.state === "held") await noteHeldClosing(ref, result.state === "held", now, funding);
+    const coverageHeld = result.state === "held" && result.coverage === "unknown";
+    // A store not actually attempted keeps its older due score; otherwise the
+    // ordinary final walk would reset every score and starve stores after50.
+    if (!(wasCoverageHeld && coverageHeld && !attempted) && (wasCoverageHeld || coverageHeld)) await noteHeldClosing(ref, coverageHeld, now, funding);
     finals.push(result);
   };
-  // Oldest due first; each processed entry moves to tomorrow. Reserve and
-  // atomic daily claim precede either provider read, including concurrent runs.
+  // Oldest due first; each processed entry moves to tomorrow. The atomic
+  // daily claim precedes either provider read, including concurrent runs.
   for (const ref of await heldStoresDue(now)) {
     if (Date.now() > deadline) return incomplete();
     await visit(ref, true);
   }
-  const [finalRefs] = await redisPipeline([["ZRANGEBYSCORE", FINAL_INDEX, "-inf", "+inf", "LIMIT", 0, PAGE]]);
-  for (const ref of Array.isArray(finalRefs) ? (finalRefs as unknown[]).map(String) : []) {
-    if (Date.now() > deadline) return incomplete();
-    await visit(ref);
+  const [savedFinal, finalCount] = await redisPipeline([["GET", FINAL_AFTER], ["ZCARD", FINAL_INDEX]]);
+  if (savedFinal !== null && (typeof savedFinal !== "string" || !/^(0|[1-9][0-9]*)$/.test(savedFinal) || !Number.isSafeInteger(Number(savedFinal)))) throw new Error("final closing cursor is unknown");
+  let finalOffset = savedFinal === null ? 0 : Number(savedFinal);
+  let finalWalkComplete = finalOffset === 0;
+  for (;;) {
+    const [finalRefs] = await redisPipeline([["ZRANGEBYSCORE", FINAL_INDEX, "-inf", "+inf", "LIMIT", finalOffset, PAGE]]);
+    if (!Array.isArray(finalRefs) || finalRefs.length > PAGE || Array.from({ length: finalRefs.length }, (_, i) => !Object.hasOwn(finalRefs, i) || typeof finalRefs[i] !== "string").some(Boolean)) throw new Error("final closing page is unknown");
+    for (let i = 0; i < finalRefs.length; i++) {
+      if (Date.now() > deadline) {
+        await redisPipeline([["SET", FINAL_AFTER, finalOffset + i, "EX", 30 * 86400]]);
+        return incomplete();
+      }
+      await visit(finalRefs[i]);
+    }
+    finalOffset += finalRefs.length;
+    if (finalRefs.length < PAGE) break;
+    await redisPipeline([["SET", FINAL_AFTER, finalOffset, "EX", 30 * 86400]]);
   }
+  await redisPipeline([["DEL", FINAL_AFTER]]);
+  const [afterFinalCount] = await redisPipeline([["ZCARD", FINAL_INDEX]]);
+  // Rank shifts caused by concurrent removals may skip a row until the next
+  // cycle. Continue next time, but never certify that partial monthly count.
+  finalWalkComplete &&= typeof finalCount === "number" && Number.isSafeInteger(finalCount) && finalCount >= 0 && afterFinalCount === finalCount;
   const [saved] = await redisPipeline([["GET", AFTER]]);
   let from: string = typeof saved === "string" && /^\d+$/.test(saved) ? saved : "0";
   const out = finals;
@@ -1003,6 +1036,6 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
     from = last === from.replace("(", "") ? `(${last}` : last;
   }
   await redisPipeline([["DEL", AFTER]]);
-  await recordHeldMonth(now, true);
+  await recordHeldMonth(now, finalWalkComplete);
   return out;
 }

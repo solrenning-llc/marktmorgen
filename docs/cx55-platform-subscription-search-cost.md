@@ -132,3 +132,11 @@ report are documented in `docs/funded-exposure-review.md` under CX-67. The real
 policy, full supplier/tax cost and reviewed global case ceiling stay null.
 The two-read memory component is unchanged in checkout/deletion/closing; extra
 held retries and full retained stores belong to company exposure separately.
+
+
+CX-69 corrects the initial CX-67 integration: only `coverage: "unknown"`
+requires the daily two-read claim. Recovery never depends on the null retention
+review; pauses, buyer/member batches and other ordinary closing progress keep
+running. The retention obligation remains counted and unknown until reviewed.
+The final queue is paged with a global continuation cursor; a partial/changing
+walk cannot turn its monthly count into a known zero.

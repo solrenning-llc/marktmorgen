@@ -11,14 +11,19 @@ unreadable independent refund queue) never advances a store to `removed`.
 There is no deletion deadline for uncertainty and no new customer limit.
 
 `lib/held-stores.ts` retains each unresolved obligation in the private shared
-`nl:held:stores` index. The daily closing job revisits oldest due entries,
-requiring a full, current-month `post_cancellation` reserve allocation **before**
-provider work. The existing reviewed allocation supplies the global funded
-case ceiling and consumes its existing ledger, without initializing money,
-refunding slots or offsetting another scope. At most50 rechecks may run company-wide
+`nl:held:stores` index. The daily closing job revisits oldest due entries. **CX-69,4 November2026:**
+only unknown platform billing coverage belongs in this index; known pauses,
+member/buyer batches, notices and refund progress continue through the ordinary
+walk. Previously misclassified entries may make local progress before any
+coverage read is needed. The two-read retry is independent of the retention
+policy and is counted in its existing recovery work line. The current-month
+`post_cancellation` review governs retention only: its allocation supplies the
+global funded retention-case ceiling and consumes its existing ledger without
+initializing money, refunding slots or offsetting another scope. A null review
+leaves retention unknown, but cannot freeze recovery. At most50 rechecks may run company-wide
 per UTC day, and at most one per store/day, committed atomically before either
 of the two recovery reads. A lost acknowledgement consumes its claim and cannot
-permit another attempt. Processed entries rotate to the next UTC day. Once
+permit another attempt. Attempted entries rotate to the next UTC day; unattempted entries retain their older score so the same first50 cannot starve the rest. Once
 complete evidence proves there is no live billing, normal closing continues.
 A refund already independently queued after a confirmed stop does not retain
 files; its refund worker remains responsible after deletion.
@@ -30,7 +35,7 @@ for31days. They add up to31 two-read timeout waits per store,128 bookkeeping
 commands and MAX_STORE_BYTES+128KiB of database replies per retry. The global
 model uses at most1550 attempts/month, the reviewed simultaneous case cap,
 three overlapping daily hashes (50 hashed identities each, two-day TTL) and
-15 monthly aggregate keys (400-day TTL). Daily work caps are internal company
+15 monthly aggregate keys (400-day TTL) plus a1KiB global walk cursor. Daily work caps are internal company
 work bounds. These are modeled components, not a verified complete supplier
 quote: endpoint tariff, deployment coverage, all retained provider records,
 independent refund work and taxes require the complete funded review. The
@@ -38,7 +43,10 @@ runtime floor is only a necessary minimum; it cannot certify missing categories.
 The approved current policy, actual case ceiling and complete total remain
 **null**, never zero. No price, allowance, commercial flag or gate changes.
 
-Funding must be renewed for every calendar month unresolved stores remain.
+Retention funding must be renewed for every calendar month unresolved stores remain.
+A full first page of final closings is not the whole queue: a global cursor
+continues the bounded pages across a job deadline. A partial walk or a changed
+final-index cardinality cannot certify a complete monthly observation.
 Existing obligations above the reviewed case ceiling are **still retained and
 counted**, not hidden or deleted to fit a budget; such overflow or any unknown
 count makes the financed company total unknown and prevents certification of

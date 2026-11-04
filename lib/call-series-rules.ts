@@ -30,7 +30,7 @@
  *     session that has not started yet is canceled (toCancel); one already
  *     started at that moment took place. A canceled session not charged yet
  *     is never charged; whether one already charged is refunded is the
- *     billing rules' answer (lib/call-series-billing.ts, refundsOnEnd and
+ *     billing rules' answer (lib/call-series-billing.ts, toStop and
  *     sessionRefunded), never this file's.
  *     Sessions are known by their position in the series, never by their
  *     start, so a session moved within the rules keeps its place.

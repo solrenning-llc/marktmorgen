@@ -302,25 +302,27 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
       if (after) query.set("starting_after", after);
       const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
       const refunds = Array.isArray(listed.data) ? (listed.data as Row[]) : [];
-      // A dispute closed as lost for the whole charge marks its reviews as a
+      // A dispute closed as lost marks its reviews as a
       // full refund does (lib/refunds.ts, queue 388 [TB14]): read once, with
       // the first page, from Stripe's closing events (kept thirty days).
-      const lost = page === 0 ? await lostDisputesOrRetry(store.stripeAccountId, since) : { rows: [], complete: true };
+      const lost = page === 0 ? await lostDisputesOrRetry(store.stripeAccountId, since, deadline) : { rows: [], complete: true };
       if (!lost.complete) unsure = true;
-      const rows: Row[] = [...lost.rows, ...refunds];
-      for (const refund of rows) {
-        const id = typeof refund.id === "string" ? refund.id : "";
-        const created = typeof refund.created === "number" ? refund.created : 0;
-        if (!id) continue;
-        if (!rowGivesBack(refund)) continue;
-        const pi = idOf(refund.payment_intent);
-        const [seen] = await redisPipeline([["SISMEMBER", seenKey(statsId), id]]);
-        if (Number(seen) !== 1 && INTENT_ID.test(pi)) marked += await markRefunded(statsId, pi);
-        await redisPipeline([
-          ["SADD", seenKey(statsId), id],
-          ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS + 86_400],
-        ]);
-        newest = Math.max(newest, created);
+      // What gives back on the page, and which of it an earlier pass already took: one request for the page, and
+      // nothing written again for one already taken (each pass reads the last days' refunds again).
+      const full = [...lost.rows, ...refunds]
+        .filter((refund) => typeof refund.id === "string" && refund.id && rowGivesBack(refund))
+        .map((refund) => ({ id: refund.id as string, created: typeof refund.created === "number" ? refund.created : 0, pi: idOf(refund.payment_intent) }));
+      const seen = full.length ? await redisPipeline(full.map((refund) => ["SISMEMBER", seenKey(statsId), refund.id])) : [];
+      for (const [i, refund] of full.entries()) {
+        if (Number(seen[i]) !== 1) {
+          if (INTENT_ID.test(refund.pi)) marked += await markRefunded(statsId, refund.pi);
+          // Taken only once its reviews are marked: a busy review throws first, so the next pass tries it again.
+          await redisPipeline([
+            ["SADD", seenKey(statsId), refund.id],
+            ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS + 86_400],
+          ]);
+        }
+        newest = Math.max(newest, refund.created);
       }
       const last = refunds[refunds.length - 1];
       if (listed.has_more !== true || !last || typeof last.id !== "string") {

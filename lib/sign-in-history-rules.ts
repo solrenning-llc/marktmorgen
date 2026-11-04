@@ -280,7 +280,9 @@ export const LOCKED_NOTE = [
   "It cannot change your plan, your Stripe connection, your team or your store settings.",
   "It cannot delete your store, download or import lists, or send email to your list or your members.",
   "It cannot delete anything for good, like people, products, lessons, files, forms or posts.",
-  'It cannot use "Sign out everywhere", add a passkey or change two-step login.',
+  "It cannot put a new file or picture over an old one.",
+  "It cannot cancel, delete or move an event, or send a purchase email again.",
+  'It cannot use "Sign out everywhere", add or remove a passkey or change two-step login.',
   "It cannot change your recovery address or your sign-in address.",
   "Everything else in your studio is open to it.",
 ] as const;

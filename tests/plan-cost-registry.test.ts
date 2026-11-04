@@ -4,7 +4,7 @@ import { COMPANIES_PAGE_READ, COMPANIES_REQUEST, STUDIO_UNIT_SENT } from "./plan
 import { COMPANIES_READ_UNITS, COMPANIES_REQUEST_UNITS, COMPANY_MARKUP_BYTES, COMPANY_PERSON_MARKUP_BYTES, MAX_COMPANIES, MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, companiesSentUnits } from "@/lib/crm-companies-rules";
 import { AGENDA_READ, BUYER_LEDGER } from "./plan-cost-registry";
 import { AGENDA_UNITS } from "@/lib/person-agenda";
-import { BUYER_LEDGER_UNITS } from "@/lib/segments";
+import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT } from "@/lib/segments";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import { PATH_REMINDER_UNITS } from "@/lib/path-reminder-rules";
 /**
@@ -264,6 +264,17 @@ test("a companies request fits its studio requests, and each page that reads eve
 test("a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do", () => {
  assert.ok(BUYER_LEDGER <= UNIT_COST.studio * BUYER_LEDGER_UNITS, `${BUYER_LEDGER} > ${BUYER_LEDGER_UNITS} x ${UNIT_COST.studio}`);
  assert.ok(BUYER_LEDGER > UNIT_COST.studio * (BUYER_LEDGER_UNITS - 1), `${BUYER_LEDGER} <= ${BUYER_LEDGER_UNITS - 1} x ${UNIT_COST.studio}: lower BUYER_LEDGER_UNITS`);
+});
+
+test("what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out", () => {
+ // A megabyte through the database and parsed, at a light request's shape, fits in one studio request.
+ assert.ok(request("light", 2, LEDGER_BYTES_PER_UNIT) <= UNIT_COST.studio, `${request("light", 2, LEDGER_BYTES_PER_UNIT)} > ${UNIT_COST.studio}`);
+ // The imported buyers are read and written again in the copy: twice their address and date.
+ assert.ok(IMPORTED_BUYER_BYTES >= 2 * (254 + 10), "an imported buyer is read and written in the copy: never priced as less");
+ // BUYER_LEDGER prices Stripe's pages and rows only; the imported are counted by size, so the source must count them.
+ const source = read("lib/segments.ts");
+ assert.ok(source.includes('["HLEN", importedWhoKey(store.statsId)]') && source.includes("BUYER_LEDGER_UNITS + ledgerUnits(Number(imported || 0) * IMPORTED_BUYER_BYTES)") && source.indexOf("HLEN") < source.indexOf("await importedBuyers(store.statsId)"), "the imported buyers are counted before they are read");
+ assert.ok(source.includes('["STRLEN", ledgerKey(store.statsId)]') && source.indexOf("STRLEN") < source.indexOf('["GET", ledgerKey(store.statsId)]'), "the copy is measured and counted before it is read");
 });
 
 test("the tasks agenda fits the studio requests it counts, and no fewer would do", () => {

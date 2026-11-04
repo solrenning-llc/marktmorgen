@@ -59,14 +59,14 @@ export function addressesOf(statsId: string, persons: ReadonlySet<string>, email
  * reading of buyers was cut short. `count` is asked before Stripe is read
  * again (buyerLedger), so a page counts that reading only when it happens.
  */
-export async function personAddresses(store: Store, persons: ReadonlySet<string>, count?: () => Promise<boolean>): Promise<{ addresses: Map<string, string>; partial: boolean }> {
+export async function personAddresses(store: Store, persons: ReadonlySet<string>, count?: (units: number) => Promise<boolean>): Promise<{ addresses: Map<string, string>; partial: boolean }> {
   if (!store.statsId || !persons.size) return { addresses: new Map(), partial: false };
   const ledger = await buyerLedger(store, count);
   return { addresses: addressesOf(store.statsId, persons, ledger.buyers.keys()), partial: ledger.partial };
 }
 
 /** The address of one person among the store's buyers, for their page opened from the agenda. */
-export async function addressForPerson(store: Store, person: string, count?: () => Promise<boolean>): Promise<string | null> {
+export async function addressForPerson(store: Store, person: string, count?: (units: number) => Promise<boolean>): Promise<string | null> {
   if (!PERSON_KEY.test(person)) return null;
   const { addresses } = await personAddresses(store, new Set([person]), count);
   return addresses.get(person) ?? null;

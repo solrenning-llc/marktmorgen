@@ -9,12 +9,18 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type AgendaListRow, TasksAgendaList, agendaDay, agendaLinkWords, staleWords } from "@/components/tasks-agenda";
-import { AGENDA_SHOWN, PERSON_KEY, addressForPerson, addressesOf, agendaForDays, agendaGroups, daysAround } from "@/lib/person-agenda";
+import { AGENDA_SHOWN, AGENDA_UNITS, PERSON_KEY, addressForPerson, addressesOf, agendaForDays, agendaGroups, daysAround } from "@/lib/person-agenda";
 import { personKey } from "@/lib/person-key";
 import { redisPipeline } from "@/lib/redis";
-import { LedgerNotCounted, buyerLedger } from "@/lib/segments";
+import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LedgerNotCounted, buyerLedger, ledgerUnits } from "@/lib/segments";
 import type { DueTask, PersonTask } from "@/lib/person-tasks";
 import type { Store } from "@/lib/store";
+import { agendaData } from "@/lib/person-agenda-read";
+import { countStudio } from "@/lib/studio-route";
+import { allowanceFor } from "@/lib/store-allowance-rules";
+import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
+import { store as redis } from "./redis-stub";
+import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
 async function main() {
@@ -81,18 +87,53 @@ async function main() {
   is("a link's own words say where it goes, not an address alone", [agendaLinkWords("ann@example.com"), fortaleza.includes(">Open the buyer page of ann@example.com</a>")], ["Open the buyer page of ann@example.com", true]);
 
   part("What the agenda costs, counted before it reads (round 3, M2)");
-  // The reading of the buyers is counted just before Stripe is read, never when its ten-minute copy answers.
+  // The reading of the buyers is counted before anything big is read: its ten-minute copy by its size, Stripe and
+  // the imported buyers by how many (round 4, H1).
   const shop = { statsId: "ledgerstats", currency: "usd", stripeAccountId: "acct_ledger" } as Store;
-  let asked = 0;
-  const refusedCount = async () => { asked += 1; return false; };
+  const asked: number[] = [];
+  const refusedCount = async (units: number) => { asked.push(units); return false; };
+  const importedPipe = Array.from({ length: 5_000 }, (_, i) => ["HSET", "nl:imp:who:ledgerstats", `imported${i}@example.com`, "1"]);
+  await redisPipeline(importedPipe);
   const notCounted = await buyerLedger(shop, refusedCount).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
-  is("a reading that could not be counted reads nothing from Stripe and says so", [notCounted, asked], ["not counted", 1]);
-  await redisPipeline([["SET", "nl:stats:ledgerstats:ledger", JSON.stringify({ c: "usd", p: false, r: [["ann@example.com", 100, 1, "", 1]], v: 6 }), "EX", 600]]);
-  const kept = await buyerLedger(shop, refusedCount);
-  is("the ten-minute copy answers without counting anything", [kept.buyers.has("ann@example.com"), asked], [true, 1]);
+  is("a reading from Stripe counts BUYER_LEDGER_UNITS and the imported buyers by how many, and reads nothing when not counted", [notCounted, asked], ["not counted", [BUYER_LEDGER_UNITS + ledgerUnits(5_000 * IMPORTED_BUYER_BYTES)]]);
+  is("5,000 imported buyers are 4 studio requests more", ledgerUnits(5_000 * IMPORTED_BUYER_BYTES), 4);
+  const bigCopy = JSON.stringify({ c: "usd", p: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: 9_000 }, (_, i) => [`b${i}@example.com`, 0, 0, "direct", 0])], v: 6 });
+  await redisPipeline([["SET", "nl:stats:ledgerstats:ledger", bigCopy, "EX", 600]]);
+  asked.length = 0;
+  const copyRefused = await buyerLedger(shop, refusedCount).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
+  is("the ten-minute copy is counted by its size before it is read", [copyRefused, asked], ["not counted", [ledgerUnits(bigCopy.length)]]);
+  const kept = await buyerLedger(shop, async (units) => { asked.push(units); return true; });
+  is("and read once counted", [kept.buyers.has("ann@example.com"), asked], [true, [ledgerUnits(bigCopy.length), ledgerUnits(bigCopy.length)]]);
   const buyersPage = readFileSync("app/studio/people/page.tsx", "utf8");
-  is("the agenda counts AGENDA_UNITS studio requests before it reads every task, and says so when they cannot be", buyersPage.includes("const counted = await countStudio(store, null, AGENDA_UNITS).catch(() => null);") && buyersPage.indexOf("countStudio(store, null, AGENDA_UNITS)") < buyersPage.indexOf("readAllTasks(store.statsId)"), true);
-  is("a reading of the buyers from Stripe is counted only when it happens, there and from a task's link", buyersPage.includes("const countLedger = (store: Store) => async () => (await countStudio(store, null, BUYER_LEDGER_UNITS)).ok;") && buyersPage.includes("personAddresses(store, persons, countLedger(store))") && buyersPage.includes("addressForPerson(store, who, countLedger(store))"), true);
+  is("the buyers page reads its agenda through agendaData, and says the allowance's own sentence when it is spent (round 4, L1)", buyersPage.includes("const data = await agendaData(store, today);") && buyersPage.includes('data.state === "refused" && data.message ? data.message') && buyersPage.includes("lookupLedger.said.message ||") && buyersPage.includes("data.ledgerMessage ?"), true);
+
+  part("The agenda counted before it reads, on a real store (round 4, M4 and L5)");
+  redis.clear();
+  const owner = "agenda-owner@example.com";
+  await claimHandle(owner, "agendashop", "Agenda Shop", "");
+  await ensureStatsId(owner);
+  await ensureStoreId(owner);
+  await setSubscription(owner, { customerId: "cus_ag", subscriptionId: "sub_ag", active: true, tier: "creator", period: paidPeriod() });
+  const realStore = (await storeForEmail(owner))!;
+  const watch: string[][] = [];
+  const pipe = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const c of commands) watch.push(c.map(String));
+    return pipe(commands);
+  }) as typeof redis.pipeline;
+  const studioCount = () => { const k = redis.keys().find((key) => key.startsWith("nl:allow:studio:")); return k; };
+  const empty = await agendaData(realStore, "2026-11-04");
+  is("with no task kept, nothing more is read and no studio request is counted (L5)", [empty.state, studioCount(), watch.some((c) => c[0] === "HGETALL")], ["empty", undefined, false]);
+  await redisPipeline([["HSET", `nl:crm:tasks:${realStore.statsId}`, ann, JSON.stringify([{ id: "abcdefghij", text: "Call Ann", due: "", assignee: "", done: false, createdAt: 1, doneAt: 0 }])]]);
+  await countStudio(realStore, null, 1);
+  await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio") - 1)]]);
+  watch.length = 0;
+  const spent = await agendaData(realStore, "2026-11-04");
+  is("with only one studio request left, the agenda is refused with the allowance's sentence and reads no task (M4)", [spent.state, spent.state === "refused" && spent.message.length > 0, watch.some((c) => c[0] === "HGETALL" && c[1] === `nl:crm:tasks:${realStore.statsId}`)], ["refused", true, false]);
+  await redisPipeline([["SET", studioCount()!, "0"]]);
+  const read = await agendaData(realStore, "2026-11-04");
+  is("with room, it reads the tasks and counts AGENDA_UNITS", [read.state, Number((await redisPipeline([["GET", studioCount()!]]))[0])], ["ok", AGENDA_UNITS]);
+  redis.pipeline = pipe;
 
   part("The deals page's day (edge review)");
   const board = readFileSync("components/deals-board.tsx", "utf8");
@@ -103,13 +144,13 @@ async function main() {
   const page = readFileSync("app/studio/people/page.tsx", "utf8");
   is("a named section, waited for without holding the page", page.includes('<Suspense fallback={<TasksAgendaWaiting />}>') && page.includes('aria-labelledby="agenda-title"') && page.includes('aria-busy="true"'), true);
   is("each group under its own heading with its count", list.includes("<h3 className=\"text-base font-semibold text-ink\">{`${group.title} (${group.rows.length + group.more})`}</h3>"), true);
-  is("a row opens the person's page by their key", page.includes("studioPath(store, `who=${row.person}`, \"people\")"), true);
-  is("the page reads that key again among the buyers, and says when it is not there", page.includes("addressForPerson(store, who, countLedger(store))") && page.includes("That person is not among the buyers read from your Stripe account just now."), true);
+  is("a row opens the person's page by their key", readFileSync("lib/person-agenda-read.ts", "utf8").includes("studioPath(store, `who=${row.person}`, \"people\")"), true);
+  is("the page reads that key again among the buyers, and says when it is not there", page.includes("addressForPerson(store, who, lookupLedger.count)") && page.includes("That person is not among the buyers read from your Stripe account just now."), true);
   is("someone not found is said to be so", list.includes("About a person we could not find among your Stripe buyers"), true);
   is("the agenda says what a person's page lets you do: mark done or remove, not change", page.includes("Open a person to mark one done or remove it.") && !page.includes("mark one done or change it"), true);
   is("when the tasks or Stripe cannot be read, it says so", page.includes("tasks could not be read just now. Nothing was changed.") && page.includes("Stripe could not be read just now, so who each task is about is not shown."), true);
-  is("only the shown rows' people are looked up, on any of the days", page.includes("const persons = new Set(agenda.rows.map((row) => row.person));"), true);
-  is("the groups made for each day the creator's may be", page.includes("agendaForDays(all, daysAround(today))") && page.includes("<TasksAgendaList rows={rows} days={agenda.days} serverDay={today}"), true);
+  is("only the shown rows' people are looked up, on any of the days", readFileSync("lib/person-agenda-read.ts", "utf8").includes("const persons = new Set(agenda.rows.map((row) => row.person));"), true);
+  is("the groups made for each day the creator's may be", readFileSync("lib/person-agenda-read.ts", "utf8").includes("agendaForDays(all, daysAround(today))") && page.includes("<TasksAgendaList rows={data.rows} days={data.days} serverDay={today}"), true);
 
   done();
 }

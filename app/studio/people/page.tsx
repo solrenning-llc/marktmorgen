@@ -3,21 +3,21 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { countStudio, studioPath, studioView } from "@/lib/studio-route";
-import { BUYER_LEDGER_UNITS } from "@/lib/segments";
+import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PersonFind } from "@/components/person-find";
 import { PersonNotes } from "@/components/person-notes";
 import { PersonTasks } from "@/components/person-tasks";
 import { PersonCompany } from "@/components/person-company";
-import { readCompanies } from "@/lib/crm-companies";
-import { COMPANIES_READ_UNITS, COMPANY_OPTION_MARKUP_BYTES, type Company, companiesForPerson, companiesSentUnits } from "@/lib/crm-companies-rules";
+import { personCompanies } from "@/lib/companies-read";
+import type { Company } from "@/lib/crm-companies-rules";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
-import { readAllTasks, readFields, readPersonTasks, readValues } from "@/lib/crm";
-import { AGENDA_UNITS, PERSON_KEY, addressForPerson, agendaForDays, daysAround, personAddresses } from "@/lib/person-agenda";
+import { readFields, readPersonTasks, readValues } from "@/lib/crm";
+import { PERSON_KEY, addressForPerson } from "@/lib/person-agenda";
+import { agendaData, countLedger } from "@/lib/person-agenda-read";
 import type { PersonTask } from "@/lib/person-tasks";
 import { TasksAgendaList } from "@/components/tasks-agenda";
 import { readTeam } from "@/lib/team";
@@ -96,6 +96,8 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   const who = typeof query.who === "string" && PERSON_KEY.test(query.who) ? query.who : "";
   let email: string | null = null;
   let lookupFailed = false;
+  // When the reading of the buyers was not counted (the studio's requests are used up), that is what is said (round 4, L1).
+  const lookupLedger = countLedger(store);
   if (token) email = await addressForToken(store, token);
   else if (sale) {
     email = await addressForSale(store, sale).catch((error) => {
@@ -104,7 +106,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       return null;
     });
   } else if (who) {
-    email = await addressForPerson(store, who, countLedger(store)).catch((error) => {
+    email = await addressForPerson(store, who, lookupLedger.count).catch((error) => {
       console.error("reading a task's buyer failed", error);
       lookupFailed = true;
       return null;
@@ -116,9 +118,10 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   const fields = profile ? await readFields(store.statsId) : [];
   const values = profile?.person ? await readValues(store.statsId, profile.person, fields) : {};
   // Tasks about this person (639 [GL7](6)), and who may be made responsible: the owner and teammates who can see orders.
-  const [tasks, team, companies] = profile?.person
-    ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null), readPersonCompanies(store, profile.person).catch(() => null)])
+  const [tasks, team, companyRead] = profile?.person
+    ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null), personCompanies(store, profile.person).catch(() => ({ state: "failed" as const }))])
     : [null, null, null];
+  const companies = companyRead?.state === "ok" ? companyRead.companies : null;
   const assignees = [store.email.toLowerCase(), ...(team?.members ?? []).filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())];
   // Deleting the person needs the page's token, never the address in a link (lib/person-erasure.ts).
   const mayErase = can(view.role, "erase");
@@ -138,7 +141,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
           <p className="eyebrow">Buyers</p>
           {profile ? (
-            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} companies={companies} />
+            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} companies={companies} companiesRefusal={companyRead?.state === "refused" ? companyRead.message : ""} />
           ) : (
             <>
               {erased ? (
@@ -161,7 +164,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
               {asked ? (
                 <p className="notice notice-warn mt-6" role="status">
                   {lookupFailed
-                    ? "Stripe could not be read just now. Nothing was changed. Try again in a moment."
+                    ? lookupLedger.said.message || "Stripe could not be read just now. Nothing was changed. Try again in a moment."
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
                       : who
@@ -197,27 +200,6 @@ function TasksAgendaWaiting() {
   );
 }
 
-/**
- * The companies a person's page offers, counted first (round 3, M2): every
- * company read (COMPANIES_READ_UNITS studio requests, tests/plan-cost-registry.ts,
- * COMPANIES_PAGE_READ), then what is sent on, by its size: the person's own
- * company whole and the others by id and name (companiesForPerson). Null when
- * either is not counted.
- */
-async function readPersonCompanies(store: Store, person: string): Promise<Company[] | null> {
-  const read = await countStudio(store, null, COMPANIES_READ_UNITS);
-  if (!read.ok) return null;
-  const offered = companiesForPerson(await readCompanies(store.statsId), person);
-  const sent = await countStudio(store, null, companiesSentUnits(Buffer.byteLength(JSON.stringify(offered)), offered.length * COMPANY_OPTION_MARKUP_BYTES));
-  return sent.ok ? offered : null;
-}
-
-/**
- * Counts reading the store's buyers from Stripe again (BUYER_LEDGER_UNITS
- * studio requests, tests/plan-cost-registry.ts, BUYER_LEDGER), asked only
- * when the ten-minute copy ran out (lib/segments.ts, buyerLedger).
- */
-const countLedger = (store: Store) => async () => (await countStudio(store, null, BUYER_LEDGER_UNITS)).ok;
 
 /**
  * Everyone's open tasks (lib/person-tasks.ts), past their date first, each
@@ -227,50 +209,31 @@ const countLedger = (store: Store) => async () => (await countStudio(store, null
  */
 async function TasksAgenda({ store }: { store: Store }) {
   const today = new Date().toISOString().slice(0, 10);
-  // Every task of the store and its rows sent on: AGENDA_UNITS studio requests, counted first (tests/plan-cost-registry.ts, AGENDA_READ).
-  const counted = await countStudio(store, null, AGENDA_UNITS).catch(() => null);
-  if (!counted?.ok) {
+  const data = await agendaData(store, today);
+  const title = <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>;
+  if (data.state !== "ok") {
     return (
       <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
-        <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
-        <p className="notice notice-warn mt-4">{counted && !counted.ok && counted.message ? counted.message : "Your team's tasks could not be read just now. Nothing was changed. Try again in a moment."}</p>
+        {title}
+        {data.state === "empty" ? (
+          <p className="mt-2 text-sm text-ink-soft">No open tasks. Add one on a person&apos;s page, under Tasks.</p>
+        ) : (
+          <p className="notice notice-warn mt-4">{data.state === "refused" && data.message ? data.message : "Your team's tasks could not be read just now. Nothing was changed. Try again in a moment."}</p>
+        )}
       </section>
     );
   }
-  const all = await readAllTasks(store.statsId).catch((error) => {
-    console.error("reading the tasks agenda failed", error);
-    return null;
-  });
-  if (!all) {
-    return (
-      <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
-        <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
-        <p className="notice notice-warn mt-4">Your team&apos;s tasks could not be read just now. Nothing was changed. Try again in a moment.</p>
-      </section>
-    );
-  }
-  const agenda = agendaForDays(all, daysAround(today));
-  // Only the people of the tasks shown, on any of those days, are looked up.
-  const persons = new Set(agenda.rows.map((row) => row.person));
-  const found = await personAddresses(store, persons, countLedger(store)).catch((error) => {
-    console.error("reading the agenda's buyers failed", error);
-    return null;
-  });
-  const rows = agenda.rows.map((row) => {
-    const email = found?.addresses.get(row.person) ?? null;
-    return { ...row, email, href: email ? studioPath(store, `who=${row.person}`, "people") : "" };
-  });
-  const open = all.filter((entry) => !entry.task.done).length;
+  const { open, found } = data;
   return (
     <section aria-labelledby="agenda-title" className="card mt-8 p-6 sm:p-8">
-      <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>
+      {title}
       <p className="mt-2 text-sm text-ink-soft">
         {open
           ? `${open} open ${open === 1 ? "task" : "tasks"} across your buyers. Open a person to mark one done or remove it.`
           : "No open tasks. Add one on a person's page, under Tasks."}
       </p>
-      {!found && open ? <p className="notice notice-warn mt-4">Stripe could not be read just now, so who each task is about is not shown. Try again in a moment.</p> : null}
-      <TasksAgendaList rows={rows} days={agenda.days} serverDay={today} found={found ? { partial: found.partial } : null} />
+      {!found && open ? <p className="notice notice-warn mt-4">{data.ledgerMessage ? `${data.ledgerMessage} Who each task is about is not shown until then.` : "Stripe could not be read just now, so who each task is about is not shown. Try again in a moment."}</p> : null}
+      <TasksAgendaList rows={data.rows} days={data.days} serverDay={today} found={found} />
     </section>
   );
 }
@@ -326,7 +289,7 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, companies }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[]; companies: Company[] | null }) {
+function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, companies, companiesRefusal }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[]; companies: Company[] | null; /** The studio's own sentence when its requests are used up (round 4, L1). */ companiesRefusal: string }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
@@ -512,7 +475,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         {profile.person && companies ? (
           <PersonCompany key={profile.person} person={profile.person} initial={companies} />
         ) : profile.person ? (
-          <p className="mt-2 text-sm text-ink-soft" role="status">This person&apos;s company could not be read just now. Open this page again in a moment.</p>
+          <p className="mt-2 text-sm text-ink-soft" role="status">{companiesRefusal || "This person's company could not be read just now. Open this page again in a moment."}</p>
         ) : null}
       </section>
 

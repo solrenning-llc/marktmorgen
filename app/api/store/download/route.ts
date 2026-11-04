@@ -6,7 +6,7 @@ import { type Listing, type Store, normaliseHandle, storeForHandle } from "@/lib
 import { readOrder } from "@/lib/store-checkout";
 import { plain, serveFile } from "@/lib/serve-file";
 import { offerRefunded, upsellDelivery } from "@/lib/upsell";
-import { findPurchase, ordersGrant } from "@/lib/buyer-orders";
+import { OrdersBusy, findPurchase } from "@/lib/buyer-orders";
 import { stampedCopy, wantsStamp } from "@/lib/pdf-stamp";
 import { renewPath } from "@/lib/membership-access";
 import { originFrom } from "@/lib/request-origin";
@@ -100,25 +100,27 @@ export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get("token");
   // Counted by the link, before anything is asked of Stripe.
   const link = token ? `t:${token}` : `s:${request.nextUrl.searchParams.get("session_id") ?? ""}`;
-  if (!(await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer"))) {
-    return new Response(say.tooOften, {
+  const tooOften = () =>
+    new Response(say.tooOften, {
       status: 429,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "600", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
     });
-  }
+  if (!(await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer"))) return tooOften();
   if (token) {
-    let purchase;
-    let email: string | null = null;
+    // The purchases are read as an opening of the list reads them, paid for before each read (lib/buyer-orders.ts,
+    // findPurchase): a store with no room left for them is answered as too often, and nothing more is asked of Stripe.
+    let found;
     try {
-      purchase = await findPurchase(store, token, request.nextUrl.searchParams.get("ref") ?? "");
-      email = await ordersGrant(store, token);
+      found = await findPurchase(store, token, request.nextUrl.searchParams.get("ref") ?? "");
     } catch (error) {
+      if (error instanceof OrdersBusy) return tooOften();
       console.error("looking up a purchase failed", error);
       return plain(502, say.purchaseCheckFailed);
     }
-    if (!purchase) {
+    if (!found) {
       return plain(410, say.linkExpired);
     }
+    const { purchase, email } = found;
     if (purchase.ended) return toRenew(request, store, { id: purchase.productId });
     // A product ticked at checkout is asked for by the key its order names it under.
     const asked = request.nextUrl.searchParams.get("item") ?? "";

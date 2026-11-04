@@ -27,9 +27,11 @@ import {
   OrdersLate,
   OrdersMeter,
   callsFor,
+  findPurchase,
   openOrders,
   ordersLinkFor,
   purchasesFor,
+  requestOrdersLink,
   withinOpening,
 } from "@/lib/buyer-orders";
 import { importedKey } from "@/lib/imported-purchases";
@@ -43,8 +45,11 @@ const OWNER = "olive@example.com";
 const BUYER = "ana@example.com";
 const HOUR = 3_600_000;
 let sessions: Record<string, unknown>[] = [];
+/** Every call asked of Stripe (or any other service) from here on. */
+let asked = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  asked += 1;
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
   const answer = (body: unknown) => new Response(JSON.stringify(body));
@@ -64,7 +69,10 @@ beforeEach(() => {
   redis.clear();
   sessions = [];
   sent.length = 0;
+  asked = 0;
   process.env.STRIPE_SECRET_KEY = "sk_test_orders_only_a_stand_in";
+  // A sender, so the link can be asked for (lib/buyer-orders.ts, canRecover); what it sends goes to the stand-in fetch above.
+  process.env.RESEND_API_KEY = "re_test_orders_only_a_stand_in";
 });
 
 async function callStore(video = false): Promise<{ store: Store; product: string; folder: string; window: string }> {
@@ -246,4 +254,91 @@ test("purchases take their listings, pre-orders and what was brought over before
 test("the commands every opening makes are inside ORDERS_OPEN_COMMANDS", () => {
   // The grant; what waits, four and one an agreement shown (lib/buyer-waiting.ts); the Discord server and its roles.
   assert.ok(ORDERS_OPEN_COMMANDS >= 1 + 4 + WAITING_SHOWN + 2);
+});
+
+const ORIGIN = "https://marktmorgen.com";
+
+test("a link request takes ORDERS_OPEN_UNITS after its limits, and its fixed commands are inside an opening's", async () => {
+  const { store, folder, window } = await callStore();
+  const before = await requestsIn(folder, window);
+  sent.length = 0;
+  assert.equal(await requestOrdersLink({ store, email: "nobody@example.com", ip: "203.0.113.1", origin: ORIGIN }), "sent");
+  assert.equal((await requestsIn(folder, window)) - before, ORDERS_OPEN_UNITS);
+  // Its two limits (a write and a count each); nothing bought, so no grant is written.
+  const fixed = sent.filter((command) => command.includes("nl:rl:orders:") || command.includes("nl:orders:link:"));
+  assert.equal(fixed.length, 4);
+  assert.ok(fixed.length + 1 <= ORDERS_OPEN_COMMANDS);
+  // It runs no longer than an opening, whose units it takes.
+  assert.ok(readFileSync("app/api/store/orders/route.ts", "utf8").includes(`export const maxDuration = ${ORDERS_OPEN_SECONDS};`));
+});
+
+test("a link request for forty bookings takes, past its units, what their moves, listing and rooms cost, as an opening does", async () => {
+  const { store, product, folder, window } = await callStore(true);
+  sessions = bookings(product, MAX_LISTED);
+  const before = await requestsIn(folder, window);
+  await requestOrdersLink({ store, email: BUYER, ip: "203.0.113.2", origin: ORIGIN });
+  const units = Math.ceil((MAX_LISTED + ORDERS_LISTING_COMMANDS + MAX_LISTED * ORDERS_ROOM_COMMANDS) / ORDERS_UNIT_COMMANDS);
+  assert.equal((await requestsIn(folder, window)) - before, ORDERS_OPEN_UNITS + units);
+});
+
+test("a link request the store has no room for asks Stripe nothing, and the per-address limit still holds", async () => {
+  const { store, product, folder, window } = await callStore();
+  sessions = bookings(product, 2);
+  const refused = { ...store, period: null };
+  for (let i = 0; i < 5; i += 1) {
+    assert.equal(await requestOrdersLink({ store: refused, email: BUYER, ip: `203.0.113.${10 + i}`, origin: ORIGIN }), "busy");
+  }
+  assert.equal(asked, 0, "nothing was asked of Stripe");
+  assert.deepEqual(sent.filter((command) => command.includes("nl:orders:link:") || command.includes("nl:call:")), []);
+  // The sixth from the same address is limited before it takes anything, even from a store with room.
+  const before = await requestsIn(folder, window);
+  assert.equal(await requestOrdersLink({ store, email: BUYER, ip: "203.0.113.99", origin: ORIGIN }), "limited");
+  assert.deepEqual([asked, (await requestsIn(folder, window)) - before], [0, 0]);
+  // The route answers a refusal as it answers a store with no room at all.
+  const route = readFileSync("app/api/store/orders/route.ts", "utf8");
+  assert.ok(route.includes('if (result === "busy") return tooMany();') && route.includes("if (!(await takePublicRequest(store, \"buyer\"))) return tooMany();"));
+});
+
+test("a download takes ORDERS_OPEN_UNITS before its grant, then its listing; refused, it reads nothing", async () => {
+  const OWNER3 = "moss@example.com";
+  await claimHandle(OWNER3, "moss", "Moss Notes", "");
+  await ensureStatsId(OWNER3);
+  await setStripeAccount(OWNER3, "acct_1TestMoss000001", true);
+  await setSubscription(OWNER3, { customerId: "cus_moss000001", subscriptionId: "sub_moss000001", active: true, tier: "creator", period: paidPeriod() });
+  const made = await addProduct(OWNER3, "Field notes", "", "19", null);
+  if (!made.ok) throw new Error("no product");
+  await setProductLink(OWNER3, made.product.id, "https://example.com/notes");
+  const store = (await storeForEmail(OWNER3)) as Store;
+  const folder = await storeFolder(OWNER3);
+  const window = allowanceWindow(store)!.id;
+  const reference = `cs_test_${"m".repeat(24)}`;
+  sessions = [{
+    id: reference,
+    object: "checkout.session",
+    status: "complete",
+    payment_status: "paid",
+    mode: "payment",
+    created: Math.floor(Date.now() / 1000),
+    metadata: { store: "moss", product: made.product.id },
+    customer_details: { email: BUYER },
+    payment_intent: { id: "pi_testmoss000001", status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
+  }];
+  const token = new URL((await ordersLinkFor(store, BUYER, `${ORIGIN}/@moss`))!).searchParams.get("token")!;
+  const before = await requestsIn(folder, window);
+  const found = await findPurchase(store, token, reference);
+  assert.deepEqual([found?.purchase.reference, found?.email], [reference, BUYER]);
+  assert.equal((await requestsIn(folder, window)) - before, ORDERS_OPEN_UNITS + Math.ceil(ORDERS_LISTING_COMMANDS / ORDERS_UNIT_COMMANDS));
+  // A store with no room: refused before the grant, and nothing is asked of Stripe.
+  asked = 0;
+  sent.length = 0;
+  await assert.rejects(findPurchase({ ...store, period: null }, token, reference), OrdersBusy);
+  assert.equal(asked, 0);
+  assert.deepEqual(sent.filter((command) => command.includes("nl:orders:link:") || command.includes(":l:")), []);
+  // A token not shaped like one takes nothing and reads nothing.
+  const at = await requestsIn(folder, window);
+  assert.equal(await findPurchase(store, "not-a-token", reference), null);
+  assert.deepEqual([asked, (await requestsIn(folder, window)) - at], [0, 0]);
+  // The route answers a refusal with its own "too often".
+  const route = readFileSync("app/api/store/download/route.ts", "utf8");
+  assert.ok(route.includes("if (error instanceof OrdersBusy) return tooOften();"));
 });

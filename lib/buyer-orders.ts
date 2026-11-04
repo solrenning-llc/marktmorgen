@@ -676,7 +676,7 @@ type Grant = {
   e: string;
 };
 
-export type OrdersRequest = "sent" | "email" | "limited" | "unavailable" | "error";
+export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable" | "error";
 
 /**
  * Emails a way back to what the address bought here.
@@ -684,6 +684,13 @@ export type OrdersRequest = "sent" | "email" | "limited" | "unavailable" | "erro
  * "sent" is the answer whether or not anything was found, and nothing is sent
  * to an address that bought nothing, so this cannot be used to learn who is a
  * customer of whom, or to fill a stranger's inbox.
+ *
+ * What is read for the address is paid for before it is read, as an opening
+ * of the list is (openOrders): past the per-address and per-IP limits,
+ * ORDERS_OPEN_UNITS of the store's buyer requests, then every read that grows
+ * with what the address has through an OrdersMeter, waited on ORDERS_READ_MS
+ * at the most. "busy" when the store has no room: then nothing more is asked
+ * of the creator's Stripe account, and nothing at all when it had none to start.
  */
 export async function requestOrdersLink(input: {
   store: Store;
@@ -700,7 +707,17 @@ export async function requestOrdersLink(input: {
   if (!(await within(ipKey(ip, store.handle), IP_LIMIT))) return "limited";
   if (!(await within(addressKey(email), ADDRESS_LIMIT))) return "limited";
 
-  const [purchases, calls] = await Promise.all([purchasesFor(store, raw), callsFor(store, raw)]);
+  if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS))) return "busy";
+  const meter = new OrdersMeter(store);
+  let read: [Purchase[], BookedCall[]] | "late";
+  try {
+    read = await withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter);
+  } catch (error) {
+    if (error instanceof OrdersBusy) return "busy";
+    throw error;
+  }
+  if (read === "late") return "error";
+  const [purchases, calls] = read;
   if (purchases.length === 0 && calls.length === 0) return "sent";
 
   const token = randomBytes(32).toString("hex");
@@ -774,13 +791,24 @@ export async function ordersGrant(store: Store, token: string): Promise<string |
 }
 
 /**
- * The one purchase a download asks for, when the link's address paid for it.
- * Read again from Stripe, so a refund made a minute ago is already honoured.
+ * The one purchase a download asks for, with the link's address, when that
+ * address paid for it. Read again from Stripe, so a refund made a minute ago
+ * is already honoured.
+ *
+ * Paid for before it is read, as an opening of the list is (openOrders):
+ * ORDERS_OPEN_UNITS of the store's buyer requests before the link's grant,
+ * then every read that grows with what the address has through its meter,
+ * waited on ORDERS_READ_MS at the most. Throws OrdersBusy when the store has
+ * no room (before Stripe is asked anything, or anything more), and OrdersLate
+ * past that time.
  */
-export async function findPurchase(store: Store, token: string, reference: string): Promise<Purchase | null> {
+export async function findPurchase(store: Store, token: string, reference: string): Promise<{ purchase: Purchase; email: string } | null> {
   if (reference.startsWith("imp_") && !IMPORTED_REFERENCE.test(reference)) return null;
-  const email = await ordersGrant(store, token);
-  if (!email) return null;
-  const purchases = await purchasesFor(store, email);
-  return purchases.find((p) => p.reference === reference) ?? null;
+  const opened = await openOrders(store, token);
+  if (!opened.admitted) throw new OrdersBusy();
+  if (!opened.email) return null;
+  const purchases = await withinOpening(purchasesFor(store, opened.email, opened.meter), opened.meter);
+  if (purchases === "late") throw new OrdersLate();
+  const purchase = purchases.find((p) => p.reference === reference);
+  return purchase ? { purchase, email: opened.email } : null;
 }

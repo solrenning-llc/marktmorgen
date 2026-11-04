@@ -70,6 +70,8 @@ import {
   requestOrdersLink,
 } from "@/lib/buyer-orders";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { saveServer, setProductRoles } from "@/lib/discord-store";
+import { storeKey } from "@/lib/learn";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS, bundleMeta } from "@/lib/bundle-rules";
 import { MAX_PRODUCTS, MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
@@ -384,6 +386,43 @@ test("a hundred purchases paid in installments: at most ORDERS_STRIPE_CALLS call
   }
   assert.deepEqual(titles, Array.from({ length: 100 - checks }, (_, i) => `Plan product ${String(checks + i).padStart(3, "0")}`), "every older one, in order, to the last");
   console.log(`a hundred installment purchases: ${checks} checked on opening, the other ${100 - checks} in ${batches} batches of the button, each under ${ORDERS_STRIPE_CALLS} calls to Stripe (1,216 in one opening before)`);
+});
+
+test("Discord stays reachable when only an unchecked older purchase gives a role; complete unrelated purchases and an empty role list offer none", async () => {
+  const previous = [process.env.DISCORD_CLIENT_SECRET, process.env.DISCORD_BOT_TOKEN];
+  process.env.DISCORD_CLIENT_SECRET = "discord_test_orders_only";
+  process.env.DISCORD_BOT_TOKEN = "discord_test_orders_only";
+  try {
+    const store = await shop();
+    const checks = Math.floor((ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS) / PLAN_REFUND_CALLS);
+    const drafts = await addDraftProducts(OWNER, Array.from({ length: checks + 1 }, (_, i) => ({ title: `Discord plan ${i}`, summary: "", priceCents: 1000, link: `https://example.test/discord/${i}` })));
+    assert.ok(drafts.ok);
+    checkouts = drafts.ids.map((id, i) => plan(i, 60 * (i + 1), id));
+    const room = storeKey(store);
+    await saveServer(room, { id: "200000000000000001", name: "Bounds Discord", at: NOW, kick: false });
+    const deferred = drafts.ids[checks];
+    assert.deepEqual(await setProductRoles(room, deferred, ["200000000000000002"]), { ok: true });
+    const html = await open(store);
+    assert.equal(listed(html).length, checks);
+    assert.ok(!listed(html).includes(`Discord plan ${checks}`), "the purchase with the role was not checked or drawn");
+    assert.ok(html.includes(ordersWords("en").checkOlder), "its refund check remains deferred");
+    assert.ok(html.includes('action="/api/store/discord/join"'), "the older purchase must not hide the existing way into Discord");
+    assert.ok(calls.length <= ORDERS_STRIPE_CALLS, "showing the entry makes no additional calls to Stripe");
+
+    await setProductRoles(room, deferred, []);
+    assert.ok(!(await open(store)).includes('action="/api/store/discord/join"'), "a connected server with no product roles offers no entry, even with deferred purchases");
+
+    await setProductRoles(room, deferred, ["200000000000000002"]);
+    checkouts = checkouts.slice(0, 1);
+    assert.ok(!(await open(store)).includes('action="/api/store/discord/join"'), "a fully checked unrelated purchase offers no entry");
+    await setProductRoles(room, drafts.ids[0], ["200000000000000002"]);
+    assert.ok((await open(store)).includes('action="/api/store/discord/join"'), "a checked eligible purchase still offers the entry");
+  } finally {
+    for (const [i, name] of ["DISCORD_CLIENT_SECRET", "DISCORD_BOT_TOKEN"].entries()) {
+      if (previous[i] === undefined) delete process.env[name];
+      else process.env[name] = previous[i];
+    }
+  }
 });
 
 test("checking older purchases pays before it reads and refuses without reading: no room, a link that opens nothing, a checkout not the address's", async () => {

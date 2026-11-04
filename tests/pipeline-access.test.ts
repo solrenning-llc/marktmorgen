@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "pipeshop", "Pipe Shop", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1TestPipeAccess01", true);
+  await setStripeAccount(owner, "acct_1TestPipes0002", true);
   await setSubscription(owner, { customerId: "cus_PipeAccess01", subscriptionId: "sub_PipeAccess01", active: true, tier: "pro", period: paidPeriod() });
   const store = (await storeForEmail(owner))!;
   const statsId = store.statsId!;

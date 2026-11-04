@@ -57,6 +57,7 @@ import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
+import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
@@ -237,6 +238,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:adsrv:sent:@lib/ad-events.ts": { what: "A sale, renewal or lead already sent to the ad platforms", room: ["lib/ad-events.ts"], parts: [per("order", 3, MARK, "A sale's mark, three days."), per("request", 3, MARK, "A lead's mark, three days.", REQ("sign-up"))] },
   "nl:adsrv:sub:@lib/ad-events.ts": { what: "What a membership's renewals are sent with", parts: [per("order", 400, KB, "Its cookies and clicks, once per membership sold, 400 days.", KIND("membership"))] },
   "nl:stats:@lib/ad-spend.ts": { what: "What the creator spent on ads", parts: [capped(MAX_SPEND_ENTRIES * 512, "MAX_SPEND_ENTRIES entries, the oldest let go.", src("lib/ad-spend-rules.ts", "MAX_SPEND_ENTRIES"))] },
+  "nl:stats:@lib/api-numbers.ts": { what: "The numbers as the API and the MCP tools read them, kept an hour", parts: [capped(2 * (NUMBERS_KEPT_BYTES + KB), "Two copies, without and with the products' listings, each at most NUMBERS_KEPT_BYTES and its first line.", src("lib/api-read-rules.ts", "NUMBERS_KEPT_BYTES"))] },
   "nl:aff:@lib/affiliate-bond.ts": { what: "Which affiliate a buyer belongs to", parts: [kept(MARK, "A field per buyer, written with a sale, kept for good.")] },
   "nl:aff:@lib/affiliate-codes.ts": { what: "Discount codes given to affiliates", room: ["lib/affiliate-codes.ts"] },
   "nl:affhub:@lib/affiliate-hub.ts": company("The stores an address is an affiliate of", "Per affiliate across stores, in the set of the quarter it was noted in, kept QUARTERS_KEPT quarters at the most: written with an affiliate record (capped by MAX_AFFILIATES per store, below); what a closed store leaves in it is the company's as the hub is, and runs out with its quarter."),

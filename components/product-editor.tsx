@@ -74,7 +74,8 @@ import {
   intervalName,
   membershipPrice,
 } from "@/lib/product-recurring";
-import { MAX_INTRO_COUNT, introLineEnglish } from "@/lib/intro-price";
+import { MAX_INTRO_COUNT, activeIntro, introLineEnglish } from "@/lib/intro-price";
+import { activeYearly } from "@/lib/yearly-price";
 import { MAX_ABOUT_LENGTH, aboutBlocks } from "@/lib/product-about";
 import { ProductAbout } from "@/components/product-about-view";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
@@ -1097,7 +1098,7 @@ function OptionsBlock({
               // The payment plan and this price's own payment in it, and whether buyers are offered it now and with the new price (lib/product-extras.ts, activePlan).
               const ownPayment = product.plan?.options?.[option.id];
               const review = optionPriceReview(
-                { label: label.trim() || option.label, priceCents: option.priceCents },
+                { label, priceCents: option.priceCents, details, sku: shipped ? sku : undefined },
                 price,
                 {
                   hidden: product.hidden,
@@ -1746,7 +1747,7 @@ export function ProductEditor({
   pairChoices = [],
   ownHosts = [],
   tiers = [],
-  taxOnTop = true,
+  taxOnTop,
 }: {
   /** The products shown: every one, or one page of a long list. */
   products: Product[];
@@ -1800,8 +1801,8 @@ export function ProductEditor({
   ownHosts?: string[];
   /** The plans members switch between (lib/tier-switch.ts): none takes an introductory or yearly price. */
   tiers?: readonly string[];
-  /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts); unknown is said as added. */
-  taxOnTop?: boolean;
+  /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
+  taxOnTop: boolean;
 }) {
   const router = useRouter();
   const sid = useStudioStore();
@@ -2152,8 +2153,9 @@ export function ProductEditor({
                   priceCents: product.priceCents,
                   interval: product.recurring?.interval ?? null,
                   suggestedCents: product.pwyw?.suggestedCents ?? null,
-                  intro: product.intro ? { cents: product.intro.cents, count: product.intro.count } : null,
-                  yearlyCents: product.yearly?.cents ?? null,
+                  // "Now" is what the checkout offers, never only what is stored (lib/store-checkout.ts).
+                  intro: activeIntro(product, tiers),
+                  yearlyCents: activeYearly(product, tiers)?.cents ?? null,
                   trialDays: product.recurring?.trialDays ?? 0,
                   payments: product.recurring?.payments ?? 0,
                   id: product.id,
@@ -2166,8 +2168,13 @@ export function ProductEditor({
                     choose: Boolean(product.call || product.plan || product.bumps.length || product.shipping) || isBundle(product),
                   },
                   taxOnTop,
+                  // The payment plan, offered now and once saved at the new price and schedule (lib/product-extras.ts).
+                  plan: product.plan && product.options.length === 0 ? { payments: product.plan.payments, cents: product.plan.amountCents } : null,
+                  planBefore: activePlan(product as Listing) !== null,
+                  planAfter: (next) => activePlan({ ...product, priceCents: next.priceCents, recurring: next.interval ? { ...(product.recurring ?? { trialDays: 0, payments: 0 }), interval: next.interval } : null, pwyw: null } as Listing) !== null,
                 },
-                draft,
+                // The words the save checks, the description as it will be sent (unread and untouched: not sent).
+                { ...draft, about: aboutUnread && !draft.about ? "" : draft.about },
                 (typed) => readMoney(typed, currency),
                 (cents) => formatMoney(cents, currency),
               );

@@ -148,6 +148,8 @@ type BroadcastRow = {
   total: number;
   sent: number;
   note: string;
+  /** Whether its list of who it goes to was made: a waiting email without one, nothing sent, can still be canceled. */
+  listed?: boolean;
   productId: string | null;
   /** Everybody, only buyers, or only people who have not bought yet (lib/contacts.ts). */
   who: Who;
@@ -1707,11 +1709,11 @@ function History({
             {b.status === "sent" && b.tagged ? (
               <p className="mt-1 text-sm font-semibold text-ink">{broughtWords(b.visits, b.money, currency)}</p>
             ) : null}
-            {b.status === "scheduled" && canSend ? (
+            {(b.status === "scheduled" || (b.status === "waiting" && b.listed === false && b.sent === 0)) && canSend ? (
               <button
                 type="button"
                 aria-busy={busy} disabled={busy}
-                className="mt-2 text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+                className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
                 onClick={async () => {
                   if (busy) return;
                   setBusy(true);
@@ -1722,7 +1724,7 @@ function History({
                     setError("Cancellation of “" + b.subject + "” could not be confirmed. Reload to check its current status. " + message(a));
                     return;
                   }
-                  toast("Scheduled email canceled.");
+                  toast(b.status === "scheduled" ? "Scheduled email canceled." : "Waiting email canceled. Nothing was sent.");
                   refreshHistory();
                 }}
               >

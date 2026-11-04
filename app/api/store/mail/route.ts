@@ -268,7 +268,8 @@ export async function POST(request: NextRequest) {
       if (created.broadcast.sendAt <= Math.floor(Date.now() / 1000) + 60) {
         // Starts as soon as the studio has its answer; the scheduled job
         // finishes anything this run does not.
-        // With the narrowing read and counted just now: not read or counted again.
+        // With the narrowing read and counted just now: not read or counted again. When the scheduled job takes the
+        // lock first, it reads the copy that reading kept, counted by its size (lib/broadcasts.ts, advanceBroadcast).
         const keep = created.keep;
         after(() => advanceBroadcast(id, storeForHandle, Date.now() + 50_000, { keep }).then(() => undefined));
       }

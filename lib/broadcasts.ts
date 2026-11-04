@@ -350,7 +350,9 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
     if (!acquired) return false;
     // Read only after acquiring the same lock used by the sender.
     const b = await readBroadcast(id);
-    if (!b || b.id !== id || b.listId !== store.listId || b.status !== "scheduled" || b.sent !== 0 || b.listed !== false) return false;
+    // Scheduled, or waiting before its list of who it goes to was made (its buyers' reading not counted, the plan
+    // without email, the data room full): nothing was sent, so it can still be called off.
+    if (!b || b.id !== id || b.listId !== store.listId || (b.status !== "scheduled" && b.status !== "waiting") || b.sent !== 0 || b.listed !== false) return false;
     const cancelled = { ...b, status: "cancelled", finishedAt: Math.floor(Date.now() / 1000) };
     const saved = await redisPipeline([["SET", bcKey(id), JSON.stringify(cancelled), "EX", RECORD_DAYS * 86_400]]);
     if (!Array.isArray(saved) || saved.length !== 1 || saved[0] !== "OK") throw new BroadcastCancellationUnconfirmed();
@@ -436,6 +438,9 @@ export async function advanceBroadcast(
         await save(b);
         return b;
       }
+      // Any other run (one that took the lock first, or a send due within the minute that this request left to the
+      // scheduled job) counts its own reading: within ten minutes that is the copy createBroadcast's reading kept,
+      // counted by its size (lib/segments.ts, buyerLedger), never Stripe's pages again. It can count more, never less.
       let keep = given?.keep;
       if (!given) {
         const counting = countLedger(store);

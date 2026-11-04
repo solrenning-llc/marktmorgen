@@ -17,7 +17,7 @@
  * says how many this needs and how many are left.
  */
 import { readFileSync } from "node:fs";
-import { NOTE_ROOM, advanceBroadcast, createBroadcast, notCountedNote } from "@/lib/broadcasts";
+import { NOTE_ROOM, advanceBroadcast, cancelBroadcast, createBroadcast, notCountedNote } from "@/lib/broadcasts";
 import { upsertContact } from "@/lib/contacts";
 import { ROOM } from "./data-room";
 import { broadcastAnswer } from "@/lib/broadcast-response";
@@ -118,11 +118,37 @@ async function main(): Promise<void> {
   is("scheduled, its copy gone and too few requests left: Stripe not read, it waits (not sent, not failed) and stays queued", [waiting?.status, waiting?.listed, waiting?.sent, stripeCalls, queued], ["waiting", false, 0, 0, 1]);
   is("saying why, in the refusal's own words, and that it goes on by itself", [waiting?.note.startsWith(`This needs ${BUYER_LEDGER_UNITS} of your studio requests, and only 3 are left.`), waiting?.note.endsWith("Nothing was sent. It is tried again automatically."), (waiting?.note.length ?? 0) <= NOTE_ROOM], [true, true, true]);
   is("a refusal with no sentence, or one too long for the record, says the studio's requests could not be counted", [notCountedNote(""), notCountedNote("x".repeat(NOTE_ROOM))], Array(2).fill("Your studio's requests could not be counted just now, so the list of who it goes to could not be made. Nothing was sent. It is tried again automatically."));
+  part("A waiting email with no list made, nothing sent, can be canceled (second review M1)");
+  await copy();
+  const callOff = await createBroadcast(shop, { ...narrowed, sendAt: Date.now() + 3_600_000 }, countLedger(shop).count);
+  if (!callOff.ok) throw new Error(`not written: ${callOff.reason}`);
+  const offKey = `nl:mail:bc:${callOff.broadcast.id}`;
+  const offRecord = JSON.parse(String((await redisPipeline([["GET", offKey]]))[0]));
+  await redisPipeline([["SET", offKey, JSON.stringify({ ...offRecord, sendAt: Math.floor(Date.now() / 1000) - 5 })], ["DEL", ledgerKey]]);
+  const held = await advanceBroadcast(callOff.broadcast.id, storeForHandle, Date.now() - 1);
+  is("it waits, its reading not counted", [held?.status, held?.listed, held?.sent], ["waiting", false, 0]);
+  // While a run holds it (making its list), it cannot be canceled: no race with that run.
+  await redisPipeline([["SET", `${offKey}:lock`, "1"]]);
+  is("not while a run holds it", await cancelBroadcast(shop, callOff.broadcast.id), false);
+  await redisPipeline([["DEL", `${offKey}:lock`]]);
+  is("then it cancels, and leaves the queue", [await cancelBroadcast(shop, callOff.broadcast.id), JSON.parse(String((await redisPipeline([["GET", offKey]]))[0])).status, (await redisPipeline([["SISMEMBER", "nl:mail:queue", callOff.broadcast.id]]))[0]], [true, "cancelled", 0]);
+  await redisPipeline([["SET", studioKey()!, "0"]]);
+  stripeCalls = 0;
+  const afterOff = await advanceBroadcast(callOff.broadcast.id, storeForHandle, Date.now() + 5_000);
+  is("a run after that reads and sends nothing", [afterOff?.status, afterOff?.listed, afterOff?.sent, stripeCalls], ["cancelled", false, 0, 0]);
+  for (const changed of [{ listed: true }, { sent: 1, total: 1 }]) {
+    await redisPipeline([["SET", offKey, JSON.stringify({ ...offRecord, status: "waiting", ...changed })]]);
+    is(`a waiting email ${changed.listed ? "whose list was made" : "with some sent"} still cannot be canceled`, [await cancelBroadcast(shop, callOff.broadcast.id), JSON.parse(String((await redisPipeline([["GET", offKey]]))[0])).status], [false, "waiting"]);
+  }
+  await redisPipeline([["SET", studioKey()!, String(allowanceFor(shop, "studio") - 3)]]);
+
   await redisPipeline([["SET", studioKey()!, "0"]]);
   const retried = await advanceBroadcast(later.broadcast.id, storeForHandle, Date.now() - 1);
   is("once there is room, the next run counts the reading, reads Stripe and lists it", [retried?.listed, stripeCalls > 0, await used()], [true, true, BUYER_LEDGER_UNITS]);
 
   part("The routes and the studio");
+  const history = flat("components/email-studio.tsx");
+  is("the studio offers the same button for a waiting email with no list made and nothing sent, at a 44-pixel target", [history.includes('{(b.status === "scheduled" || (b.status === "waiting" && b.listed === false && b.sent === 0)) && canSend ? ('), history.includes('className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"'), flat("app/studio/email/page.tsx").includes("listed: b.listed,")], [true, true, true]);
   const mail = flat("app/api/store/mail/route.ts");
   is("the composer's count counts its reading of the buyers, and says the refusal's sentence", [mail.includes("const ledger = await buyerLedger(store, counting.count)"), mail.includes("if (ledger instanceof LedgerNotCounted) return notCounted(counting.said.message);"), mail.includes('Response.json({ ok: false, error: "studio_used", message: message || NOT_COUNTED }, { status: 429 })')], [true, true, true]);
   is("a narrowed email written down counts it too", [mail.includes("}, counting.count).catch((error) => {"), mail.includes("if (created instanceof LedgerNotCounted) return notCounted(counting.said.message);")], [true, true]);

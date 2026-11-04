@@ -12,7 +12,7 @@
  */
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { MAX_SUMMARY_REVIEWS, MAX_SUMMARY_THEMES, MAX_THEME_TITLE, type SummaryInput, type SummaryTheme, maySummarise, readThemes, summaryInputs } from "@/lib/review-ai-summary-rules";
+import { MAX_SUMMARY_REVIEWS, MAX_SUMMARY_THEMES, MIN_SUMMARY_REVIEWS, MAX_THEME_TITLE, type SummaryInput, type SummaryTheme, maySummarise, readThemes, summaryInputs } from "@/lib/review-ai-summary-rules";
 import { visibleReviews } from "@/lib/reviews";
 import type { Store } from "@/lib/store";
 
@@ -58,7 +58,7 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
   const statsId = store.statsId;
   const kept = await readReviewSummary(statsId, productId);
   const inputs = summaryInputs(await visibleReviews(statsId, productId, 0, MAX_SUMMARY_REVIEWS), productId);
-  if (inputs.length < 5 && !kept) return { ok: false, reason: "few", reviews: inputs.length };
+  if (inputs.length < MIN_SUMMARY_REVIEWS && !kept) return { ok: false, reason: "few", reviews: inputs.length };
   if (!maySummarise(inputs, kept?.at ?? 0, Math.floor(now / 1000))) return kept ? { ok: true, summary: kept, fresh: false, left: null } : { ok: false, reason: "few", reviews: inputs.length };
   const [claimed] = await redisPipeline([["SET", lockKey(statsId), "1", "NX", "EX", 60]]);
   if (claimed === null) return { ok: false, reason: "busy" };

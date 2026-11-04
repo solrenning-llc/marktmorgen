@@ -87,6 +87,11 @@ test("the agent coverage table never blocks: each agent adds the rows of its own
   assert.equal(conflicts({ text: lanesOnly, branch: "codex/shipped", changed: ["lib/agent-coverage.ts"], agentFiles: reserved }).found.length, 0);
 });
 
+test("the privacy policy never blocks: each agent adds only its own unit's sentences (inbox C3-37)", () => {
+  const reserved = [{ path: "docs/reservations/claude2.md", text: own("Claude 2", "| Claude 2 | x | claude2/x | `app/privacy/page.tsx` | 04/11/2026 |\n") }];
+  assert.equal(conflicts({ text: lanesOnly, branch: "claude3/y", changed: ["app/privacy/page.tsx"], agentFiles: reserved }).found.length, 0);
+});
+
 test("the old table is still read while it exists", () => {
   assert.deepEqual(conflicts({ text: sample, branch: "claude3/y", changed: ["lib/call-deposit.ts"], agentFiles: files }).found.map((r: { agent: string }) => r.agent), ["claude 2"]);
 });

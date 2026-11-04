@@ -16,7 +16,8 @@ import { execFileSync } from "node:child_process";
  * of its own new studio routes without touching the others (inbox C3-14).
  * They are never reserved.
  */
-export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts"]);
+// app/privacy/page.tsx (inbox C3-37): each agent adds or changes only its own unit's sentences, never rewrites another's, and keeps both in a conflict.
+export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts", "app/privacy/page.tsx"]);
 
 /** The folder of each agent's own reservations file. */
 export const RESERVATIONS_DIR = "docs/reservations/";

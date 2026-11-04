@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
   }
   if (!(await commentsOn(course.id))) return back("off");
   // The creator deleting a comment, from a session let in without its second step, waits (lib/two-step.ts).
-  if (owner && action === "delete" && (await lockedFor(request, "products", "cm-delete", "course"))) return back("locked");
+  if (owner && action === "delete" && (await lockedFor(request, "products", "cm-delete"))) return back("locked");
 
   // Each act here is one of the store's buyer actions, or the creator's
   // studio requests (lib/buyer-actions.ts); a student deleting their own

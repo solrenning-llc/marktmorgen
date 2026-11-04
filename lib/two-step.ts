@@ -198,11 +198,12 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
 
 /**
  * Single actions under a permission the locked session otherwise keeps, that
- * cannot be undone, keyed by permission. An entry is an action, matched
- * under every route of that permission, or "route:action" for one route
- * (the path after /api/store/). Adding and editing stay open; what deletes
- * something for good, or emails many people at once, waits (4 November 2026,
- * C2-76, after a review found the same harm through other doors):
+ * cannot be undone, keyed by permission. Each is matched under every route
+ * of that permission, so a name used by one route only ("lesson-remove") is
+ * unique to it and never read from the request's path. Adding and editing
+ * stay open; what deletes something for good, or emails many people at once,
+ * waits (4 November 2026, C2-76, after a review found the same harm through
+ * other doors):
  *
  *   - products: "remove" (a product with its files, picture, course and page:
  *     app/api/store/product; a price option and its file: option; a podcast
@@ -214,8 +215,11 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     or a page saved without pictures it showed), and in a course
  *     (app/api/store/course) a lesson, a module or a lesson file taken out
  *     ("lesson-remove", "module-remove", "media-remove"), an assignment taken
- *     off with the work handed in ("task-remove") and a lesson comment
- *     deleted ("cm-delete");
+ *     off with the work handed in ("task-remove"), a quiz taken off
+ *     ("quiz-remove"), a student's certificate withdrawn ("withdraw") and a
+ *     lesson comment deleted ("cm-delete"); and "launch" (app/api/store/
+ *     waitlist: the product goes on sale with one email, in the creator's
+ *     own words, to everyone on its waitlist);
  *   - page: "remove" (a form with its answers, a site page, a saved block, a
  *     link, a short link, the store photo), "delete" (a blog post), "clear"
  *     (the questions the answers and the assistant missed) and "replace";
@@ -227,7 +231,9 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     by studioAccess), "email" (an announcement emailed to every member),
  *     "delete", "delete-comment", "unsay" and "clear" (the chat room);
  *   - orders: "remove" (a task on a person), "unnote" (a note on a person),
- *     "undeal" (a deal); stats: "remove" (a note or a spend on the numbers);
+ *     "undeal" (a deal), "fields-remove" (the store's own fields saved without
+ *     one it had, which takes that field's answers off every person: crm);
+ *     stats: "remove" (a note or a spend on the numbers);
  *     draft: "drop" (an outreach pitch), "segment-remove", "draft-remove";
  *     reviews: "photo" (a buyer's photo taken off a review).
  *
@@ -237,25 +243,21 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  * tests/locked-deletes.test.ts holds every route that deletes to one of them.
  */
 export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
-  products: ["remove", "clear", "detach", "replace", "course:lesson-remove", "course:module-remove", "course:media-remove", "course:task-remove", "course:cm-delete"],
+  products: ["remove", "clear", "detach", "replace", "launch", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
   page: ["remove", "delete", "clear", "replace"],
   events: ["cancel", "delete", "move"],
   community: ["report-delete", "email", "delete", "delete-comment", "unsay", "clear"],
-  orders: ["remove", "unnote", "undeal"],
+  orders: ["remove", "unnote", "undeal", "fields-remove"],
   stats: ["remove"],
   draft: ["drop", "segment-remove", "draft-remove"],
   reviews: ["photo"],
 };
 
-/**
- * Whether a locked session may not do `need` (with `action`, when the route
- * names one, on `route`, the path after /api/store/).
- */
-export function lockedOut(need: string, action = "", route = ""): boolean {
+/** Whether a locked session may not do `need` (with `action`, when the route names one). */
+export function lockedOut(need: string, action = ""): boolean {
   if (LOCKED_NEEDS.includes(need)) return true;
   if (!action || !Object.hasOwn(LOCKED_ACTIONS, need)) return false;
-  const list = LOCKED_ACTIONS[need];
-  return list.includes(action) || (route !== "" && list.includes(`${route}:${action}`));
+  return LOCKED_ACTIONS[need].includes(action);
 }
 
 /**
@@ -268,9 +270,8 @@ export async function lockedFor(
   request: { cookies: { get(name: string): { value: string } | undefined } },
   need: string,
   action: string,
-  route = "",
 ): Promise<boolean> {
-  return lockedOut(need, action, route) && (await lockedUntil(request.cookies.get(SESSION_COOKIE)?.value)) > 0;
+  return lockedOut(need, action) && (await lockedUntil(request.cookies.get(SESSION_COOKIE)?.value)) > 0;
 }
 
 /** Until when a session is locked, in ms, or 0 for a session that is not. */

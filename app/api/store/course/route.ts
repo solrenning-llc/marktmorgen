@@ -105,13 +105,14 @@ export async function GET(request: NextRequest) {
  * creator's own store, so nothing here can reach anyone else's course.
  */
 export async function POST(request: NextRequest) {
-  // What takes a lesson, a module, a file or handed-in work away for good is named
-  // apart, for a session let in without its second step (lib/two-step.ts).
+  // What takes a lesson, a module, a file, a quiz or handed-in work away for good is
+  // named apart, for a session let in without its second step (lib/two-step.ts).
   const guarded = await guardStoreWrite(request, "products", MAX_BODY_LENGTH * 4 + 4_000, (sent) => {
     const asked = text(sent.action, 20);
     const op = text(sent.op, 20);
     if (asked === "edit" && (op === "lesson-remove" || op === "module-remove" || op === "media-remove")) return op;
     if (asked === "task" && sent.task === null) return "task-remove";
+    if (asked === "quiz" && sent.quiz === null) return "quiz-remove";
     return asked;
   });
   if (!guarded.ok) return guarded.response;

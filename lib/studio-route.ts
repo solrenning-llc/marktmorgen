@@ -174,7 +174,7 @@ export async function studioAccess(
   const email = await emailForSession(session);
   if (!email) return { ok: false, reason: "signed_out" };
   // Let in without the second step: what moves money or data out waits (lib/two-step.ts).
-  if (lockedOut(need, action, request.nextUrl.pathname.replace(/^\/api\/store\//, "")) && (await lockedUntil(session)) > 0) return { ok: false, reason: "locked" };
+  if (lockedOut(need, action) && (await lockedUntil(session)) > 0) return { ok: false, reason: "locked" };
   const result = await resolveAccess(
     email,
     { pinned: pinnedStore(request), remembered: request.cookies.get(STORE_COOKIE)?.value ?? null },

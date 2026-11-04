@@ -60,6 +60,10 @@ export class CrmSchemaReadUnavailable extends Error {
 export class CrmSchemaWriteUnconfirmed extends Error {
   constructor() { super("CRM configuration change could not be confirmed"); this.name = "CrmSchemaWriteUnconfirmed"; }
 }
+/** A field would be taken away, with its answers, by a write that may not take any. */
+export class CrmFieldsKept extends Error {
+  constructor() { super("CRM fields may not be taken away here"); this.name = "CrmFieldsKept"; }
+}
 /** Somebody else changed the pipelines between this change's read and its write: nothing was written. */
 export class CrmSchemaConflict extends Error {
   constructor() { super("CRM configuration changed meanwhile"); this.name = "CrmSchemaConflict"; }
@@ -105,8 +109,12 @@ export async function readFields(statsId: string | null): Promise<CrmField[]> {
   return parseFields(json(raw));
 }
 
-/** Saves the fields; the answers kept for a field that is gone go with it. */
-export async function writeFields(statsId: string, fields: CrmField[]): Promise<CrmField[]> {
+/**
+ * Saves the fields; the answers kept for a field that is gone go with it.
+ * With `keepAll`, nothing is written when a field kept now would be gone
+ * (CrmFieldsKept), read in the same step as the write.
+ */
+export async function writeFields(statsId: string, fields: CrmField[], keepAll = false): Promise<CrmField[]> {
   let before: CrmField[];
   try {
     const response = await redisPipeline([["GET", fieldsKey(statsId)]]);
@@ -121,6 +129,7 @@ export async function writeFields(statsId: string, fields: CrmField[]): Promise<
     }
   } catch { throw new CrmSchemaReadUnavailable(); }
   const gone = before.filter(f => !fields.some(n => n.id === f.id));
+  if (keepAll && gone.length) throw new CrmFieldsKept();
   try {
     const response = await redisPipeline([["SET", fieldsKey(statsId), JSON.stringify(fields)], ...gone.map(f => ["DEL", valuesKey(statsId, f.id)])]);
     if (!Array.isArray(response) || response.length !== 1 + gone.length || response[0] !== "OK" || Array.from(response).slice(1).some(value => value !== 0 && value !== 1)) throw new CrmSchemaWriteUnconfirmed();

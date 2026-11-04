@@ -57,6 +57,8 @@ const MESSAGES: Record<string, string> = {
   moves: "Choose where the deals of each stage you remove go.",
   crm_conflict: "Somebody else changed your pipelines a moment ago, so nothing was saved. Reload the page and make your change again.",
   deal_conflict: "Somebody else changed this deal a moment ago, so nothing was saved. Reload the page and make your change again.",
+  // A session let in without its second step takes nothing away for good (lib/two-step.ts): a deal, a pipeline or a field waits.
+  locked: "You got in without your second step, so removing a deal, a pipeline or a field waits until two-step login turns off. Nothing was removed. To do it now, log in with your app's code or a passkey.",
   // A refused change by access (639 [GL7](7)): nothing was saved, and the board stays usable.
   pipeline_access: PIPELINE_ACCESS_REFUSAL,
   server_error: "The change could not be confirmed. Check the saved CRM data before trying again.",

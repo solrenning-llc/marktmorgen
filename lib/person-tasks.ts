@@ -131,6 +131,17 @@ export function taskAssignees(owner: string, members: readonly { email: string; 
   return [owner.toLowerCase(), ...members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())];
 }
 
+/**
+ * What a route answers when the studio would not pay for reading every task
+ * (lib/crm.ts, TasksRecountRefused; the agenda): its own words; "try again"
+ * (503) when it could not be counted just now, as the studio does elsewhere,
+ * and the figure used (429) otherwise.
+ */
+export function studioRefusal(reason: string, message: string): { status: number; body: { ok: false; error: string; message: string } } {
+  if (reason === "unknown") return { status: 503, body: { ok: false, error: "unavailable", message: message || "This can't be counted right now. Try again in a minute." } };
+  return { status: 429, body: { ok: false, error: "studio_used", message: message || "Your studio has no requests left this month for this. Try again next month, or change your plan." } };
+}
+
 export type TaskResult = { ok: true; tasks: PersonTask[] } | { ok: false; error: TaskRefusal };
 
 /** A new task, last in the person's list. */

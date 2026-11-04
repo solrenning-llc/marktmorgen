@@ -4,7 +4,9 @@
  * none, a teammate who can see deals or nobody; refused, never cut; twenty a
  * person, a thousand a store; grouped by date as deals' next actions are.
  */
-import { MAX_PERSON_TASKS, MAX_STORE_TASKS, MAX_TASK_TEXT, TASKS_BUSY, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
+import { MAX_PERSON_TASKS, MAX_STORE_TASKS, MAX_TASK_TEXT, TASKS_BUSY, studioRefusal, TASK_REFUSALS, addTask, dropTask, editTask, markTask, parseTasks, readTaskInput, tasksDue, type PersonTask } from "@/lib/person-tasks";
+import { createHash } from "node:crypto";
+import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
 import { CrmValueWriteUnconfirmed, TASKS_RECOUNT_UNITS, TASK_COUNT_FIELD, TASK_COUNT_WEIGHT, TASK_KEPT_BYTES, TasksRecountRefused, changePersonTasks, forgetCrm, forgetCrmPerson, readAllTasks, readPersonTasks, tasksRecountUnits } from "@/lib/crm";
 import { LockBusyError } from "@/lib/redis-lock";
 import { dataUsed } from "@/lib/store-data";
@@ -248,6 +250,53 @@ async function main(): Promise<void> {
   const other = await changePersonTasks(statsId, ANA, { ...ROOM, sid: (await storeForEmail(owner))!.sid }, (t) => addTask(t, input({ text: "Still here" }), id(41), NOW));
   is("the store still there: the change is kept", other.ok, true);
 
+  part("The agenda reads every task only once it is paid for (review of f6bd3d1f4, M1)");
+  const agendaOwner = "agenda@example.com";
+  await claimHandle(agendaOwner, "agendashop", "Agenda Shop", "");
+  await ensureStatsId(agendaOwner);
+  await ensureStoreId(agendaOwner);
+  await setSubscription(agendaOwner, { customerId: "cus_agenda", subscriptionId: "sub_agenda", active: true, tier: "creator", period: paidPeriod() });
+  const agendaStore = (await storeForEmail(agendaOwner))!;
+  const agendaCookie = `${SESSION_COOKIE}=${await openSession(agendaOwner)}`;
+  const agendaGet = async () => {
+    const response = await GET(new NextRequest("https://marktmorgen.com/api/store/person-tasks?today=2026-11-03", { headers: { cookie: agendaCookie } }));
+    return { status: response.status, body: (await response.json()) as Reply };
+  };
+  const emptyUsed = await allowanceUsed(agendaStore, "studio");
+  is("a store with no tasks: the agenda is one request, nothing more", [(await agendaGet()).status, (await allowanceUsed(agendaStore, "studio")) - emptyUsed], [200, 1]);
+  const full: (string | number)[] = [];
+  const pk = (n: number) => n.toString(16).padStart(32, "0");
+  const old = (n: number) => JSON.stringify(Array.from({ length: MAX_PERSON_TASKS }, (_, i) => ({ id: id(i + 1), text: `Old ${n}.${i}`, due: "", assignee: "", done: false, createdAt: NOW, doneAt: 0 })));
+  for (let n = 1; n <= MAX_STORE_TASKS / MAX_PERSON_TASKS; n += 1) full.push(pk(n), old(n));
+  await redis.pipeline([["HSET", `nl:crm:tasks:${agendaStore.statsId}`, ...full]]);
+  const usedBefore = await allowanceUsed(agendaStore, "studio");
+  const paidAgenda = await agendaGet();
+  is("1,000 tasks: the agenda is answered, and pays the request and the whole read", [paidAgenda.status, paidAgenda.body.undated?.length, (await allowanceUsed(agendaStore, "studio")) - usedBefore], [200, MAX_STORE_TASKS, 1 + tasksRecountUnits(MAX_STORE_TASKS / MAX_PERSON_TASKS)]);
+  // One studio request left: the agenda's own, never its read.
+  const left = await takeAllowance(agendaStore, "studio", 1);
+  if (left.ok && left.left > 1) await takeAllowance(agendaStore, "studio", left.left - 1);
+  const realPipe = redis.pipeline.bind(redis);
+  let readAll = false;
+  redis.pipeline = (async (sent: (string | number)[][]) => {
+    if (sent.some((c) => c[0] === "HGETALL" && c[1] === `nl:crm:tasks:${agendaStore.statsId}`)) readAll = true;
+    return realPipe(sent);
+  }) as typeof redis.pipeline;
+  let unpaidAgenda: Awaited<ReturnType<typeof agendaGet>>;
+  try {
+    unpaidAgenda = await agendaGet();
+  } finally {
+    redis.pipeline = realPipe;
+  }
+  is("without the units: refused with the studio's words, nothing read", [unpaidAgenda.status, unpaidAgenda.body.error, Boolean(unpaidAgenda.body.message), readAll], [429, "studio_used", true, false]);
+
+  part("An add that needs a recount the studio will not pay for: 429 with the studio's words (review of f6bd3d1f4, L6)");
+  // The add's own request is let in; the recount's are not.
+  await redis.pipeline([["DECRBY", (await redis.pipeline([["SCAN", "0", "MATCH", "nl:allow:studio:*"]]) as [[string, string[]]])[0][1].find((k) => k.includes(`:${createHash("sha256").update(`allowance:${agendaStore.sid}`).digest("hex").slice(0, 32)}:`))!, 1]]);
+  const agendaPost = await POST(new NextRequest("https://marktmorgen.com/api/store/person-tasks", { method: "POST", headers: { "content-type": "application/json", cookie: agendaCookie }, body: JSON.stringify({ action: "add", person: pk(900), text: "Call back" }) }));
+  const refusedAdd = (await agendaPost.json()) as Reply;
+  is("refused as the figure used, in the studio's own words", [agendaPost.status, refusedAdd.error, Boolean(refusedAdd.message) && refusedAdd.message !== "Your studio has no requests left this month for this. Try again next month, or change your plan."], [429, "studio_used", true]);
+  is("nothing written, no count made", [await readPersonTasks(agendaStore.statsId, pk(900)), (await redis.pipeline([["HGET", `nl:crm:tasks:${agendaStore.statsId}`, TASK_COUNT_FIELD]]))[0]], [[], null]);
+
   part("As kept: whatever is stored is checked again");
   is("broken entries and repeated ids dropped", parseTasks([{ id: id(1), text: "Fine", due: "", assignee: "", done: false, createdAt: NOW }, { id: id(1), text: "Repeated" }, { id: "BAD", text: "x" }, { id: id(2), text: "Bad date", due: "soon", assignee: "" }, null]).map((t) => t.text), ["Fine"]);
 
@@ -360,9 +409,15 @@ async function countChecks(): Promise<void> {
   const legacy = (n: number, count: number) => JSON.stringify(Array.from({ length: count }, (_, i) => ({ id: id(i + 1), text: `Old ${n}.${i}`, due: "", assignee: "", done: false, createdAt: NOW, doneAt: 0 })));
   await redis.pipeline([["HSET", `nl:crm:tasks:${OLD}`, person(1), legacy(1, 3), person(2), legacy(2, 2), person(3), legacy(3, 1)]]);
   const asked: number[] = [];
-  const refusing = async (units: number) => { asked.push(units); return { ok: false as const, message: "No studio requests left." }; };
+  const refusing = async (units: number) => { asked.push(units); return { ok: false as const, reason: "used", message: "No studio requests left." }; };
   const notPaid = await changePersonTasks(OLD, person(4), ROOM, fill(1), refusing).catch((error: unknown) => error);
   is("not paid for: refused with the studio's words, nothing written, no count made", [notPaid instanceof TasksRecountRefused && notPaid.words, asked, await readPersonTasks(OLD, person(4)), await counted(OLD)], ["No studio requests left.", [tasksRecountUnits(3)], [], null]);
+  is("the recount's lock let go after the refusal (review of f6bd3d1f4, L6)", (await redis.pipeline([["EXISTS", `nl:crm:taskrecount:${OLD}`]]))[0], 0);
+  const thrown = await changePersonTasks(OLD, person(4), ROOM, fill(1), async () => { throw new Error("the studio count failed"); }).catch((error: unknown) => error);
+  is("and after a payment that throws: the error said, the lock let go, nothing written", [thrown instanceof Error && thrown.message, (await redis.pipeline([["EXISTS", `nl:crm:taskrecount:${OLD}`]]))[0], await readPersonTasks(OLD, person(4)), await counted(OLD)], ["the studio count failed", 0, [], null]);
+  const unknownPay = await changePersonTasks(OLD, person(4), ROOM, fill(1), async () => ({ ok: false as const, reason: "unknown", message: "This can't be counted right now. Try again in a minute." })).catch((error: unknown) => error);
+  is("a payment that could not be counted keeps its reason, for a try-again answer (L5)", unknownPay instanceof TasksRecountRefused ? [unknownPay.reason, unknownPay.words] : null, ["unknown", "This can't be counted right now. Try again in a minute."]);
+  is("try again (503) when it could not be counted, the figure used (429) otherwise, each with the studio's words", [studioRefusal("unknown", "Try again in a minute."), studioRefusal("used", "You used this month's studio requests.")], [{ status: 503, body: { ok: false, error: "unavailable", message: "Try again in a minute." } }, { status: 429, body: { ok: false, error: "studio_used", message: "You used this month's studio requests." } }]);
   is("what it asks for covers what three people can keep", tasksRecountUnits(3), Math.ceil((3 * MAX_PERSON_TASKS * (TASK_KEPT_BYTES + 64)) / 50_000));
   const shrink = await watched(() => changePersonTasks(OLD, person(1), ROOM, (t) => ({ ok: true, tasks: dropTask(t, t[0].id) }), refusing));
   is("a removal needs no count: kept without reading every task or paying", [shrink.result.ok, shrink.commands.some((c) => c[0] === "HGETALL"), asked.length, await counted(OLD)], [true, false, 1, null]);
@@ -428,6 +483,30 @@ async function countChecks(): Promise<void> {
   const both = await Promise.all([changePersonTasks(TWO, person(3), ROOM, fill(1), slowPay), changePersonTasks(TWO, person(4), ROOM, fill(1), slowPay)]);
   is("both kept, the recount paid for once", [both.map((r) => r.ok), paidTwice, await counted(TWO), await agrees(TWO)], [[true, true], [tasksRecountUnits(2)], "7", true]);
   is("its lock let go", (await redis.pipeline([["EXISTS", `nl:crm:taskrecount:${TWO}`]]))[0], 0);
+
+  part("The last pass never pays, and a recount lock lost while paying reads nothing (review of f6bd3d1f4, L1, L2)");
+  const GROW = "g".repeat(16);
+  await redis.pipeline([["HSET", `nl:crm:tasks:${GROW}`, person(1), legacy(1, MAX_PERSON_TASKS)]]);
+  let next = 100;
+  const growing: number[] = [];
+  // Each payment sees three more people come, so every pass needs more than was paid.
+  const payAndGrow = async (units: number) => {
+    growing.push(units);
+    for (let n = 0; n < 3; n += 1) { next += 1; await redis.pipeline([["HSET", `nl:crm:tasks:${GROW}`, person(next), legacy(next, MAX_PERSON_TASKS)]]); }
+    return { ok: true as const };
+  };
+  const grown = await watched(() => changePersonTasks(GROW, person(2), ROOM, fill(1), payAndGrow).catch((error: unknown) => error));
+  is("refused as busy after paying twice: the third pass, the last, pays nothing", [grown.result instanceof LockBusyError, growing.length], [true, 2]);
+  is("and never read every task without having paid for it", grown.commands.filter((c) => c[0] === "HGETALL").length, 0);
+  const LOST = "l".repeat(16);
+  await redis.pipeline([["HSET", `nl:crm:tasks:${LOST}`, person(1), legacy(1, 2)]]);
+  const lost = await watched(() => changePersonTasks(LOST, person(2), ROOM, fill(1), async () => {
+    // Paying took longer than the recount's lock: another change took it.
+    await redis.pipeline([["SET", `nl:crm:taskrecount:${LOST}`, "someone-else", "EX", 30]]);
+    return { ok: true as const };
+  }).catch((error: unknown) => error));
+  is("the recount's lock lost while paying: refused as busy, nothing read or written", [lost.result instanceof LockBusyError, lost.commands.some((c) => c[0] === "HGETALL"), await readPersonTasks(LOST, person(2)), await counted(LOST)], [true, false, [], null]);
+  is("the other change's lock is left to it", (await redis.pipeline([["GET", `nl:crm:taskrecount:${LOST}`]]))[0], "someone-else");
 
   part("A deleted store's count goes with it");
   await forgetCrm(OLD);

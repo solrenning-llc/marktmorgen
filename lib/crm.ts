@@ -109,6 +109,8 @@ export const TASK_COUNT_FIELD = "count";
 const recountLockKey = (statsId: string) => `nl:crm:taskrecount:${statsId}`;
 const RECOUNT_LOCK_SECONDS = 30;
 const RECOUNT_WAIT_MS = 5_000;
+/** Passes of a change that needs a recount, under the recount's lock: one to look, one after paying, one more when people were added meanwhile. */
+const RECOUNT_PASSES = 3;
 /** What the count takes in the store's data room: its field at the largest it can be. */
 export const TASK_COUNT_WEIGHT = dataBytes([TASK_COUNT_FIELD, String(MAX_STORE_TASKS)], 1);
 /**
@@ -703,10 +705,13 @@ function countOf(raw: unknown): number | null {
 export class TasksRecountRefused extends Error {
   /** What the studio said when it refused, for the person who asked. */
   readonly words: string;
-  constructor(words: string) {
+  /** Why: "unknown" when it could not be counted just now (try again), else the figure or its pool used. */
+  readonly reason: string;
+  constructor(words: string, reason = "used") {
     super("The store's tasks were not counted: the studio requests for it were refused");
     this.name = "TasksRecountRefused";
     this.words = words;
+    this.reason = reason;
   }
 }
 
@@ -723,6 +728,17 @@ export async function readPersonTasks(statsId: string | null, person: string): P
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
   const [raw] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
   return tasksOf(raw);
+}
+
+/**
+ * How many people have tasks in the store: one HLEN and one HEXISTS, never
+ * the tasks themselves. What reading every task is paid for by
+ * (tasksRecountUnits), before it is read: the agenda and the recount.
+ */
+export async function taskPeople(statsId: string | null): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [fields, counted] = await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]);
+  return Math.max(0, (Number(fields) || 0) - (counted === 1 ? 1 : 0));
 }
 
 /** Everyone's tasks, by person: what the agenda groups (lib/person-tasks.ts, tasksDue). At most MAX_STORE_TASKS. */
@@ -765,23 +781,28 @@ export async function changePersonTasks(
   person: string,
   room: DataStore,
   change: (tasks: PersonTask[]) => TaskResult,
-  pay: (units: number) => Promise<{ ok: true } | { ok: false; message: string }> = async () => ({ ok: false, message: "" }),
+  pay: (units: number) => Promise<{ ok: true } | { ok: false; reason: string; message: string }> = async () => ({ ok: false, reason: "used", message: "" }),
 ): Promise<TaskResult> {
   if (!PERSON.test(person)) return { ok: false, error: "unknown" };
   const first = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, 0, held));
   if ("result" in first) return first.result;
   // A recount: one at a time for the store, so two changes never both pay.
   // Its first pass looks again, and pays nothing when the one before made it.
-  return withLock(recountLockKey(statsId), RECOUNT_LOCK_SECONDS, RECOUNT_WAIT_MS, async () => {
+  return withLock(recountLockKey(statsId), RECOUNT_LOCK_SECONDS, RECOUNT_WAIT_MS, async (recount) => {
     let paid = 0;
     // At most three passes: the second after paying, the third only when
-    // more people were added meanwhile than were paid for.
-    for (let pass = 0; pass < 3; pass += 1) {
+    // more people were added meanwhile than were paid for. The last one
+    // never pays: nothing would read after it.
+    for (let pass = 0; pass < RECOUNT_PASSES; pass += 1) {
       const outcome = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, paid, held));
       if ("result" in outcome) return outcome.result;
+      if (pass === RECOUNT_PASSES - 1) break;
       const answer = await pay(outcome.units - paid);
-      if (!answer.ok) throw new TasksRecountRefused(answer.message);
+      if (!answer.ok) throw new TasksRecountRefused(answer.message, answer.reason);
       paid = outcome.units;
+      // Paying may have taken longer than the recount's lock (a Stripe
+      // read): lost, another change may be recounting too, so nothing is read.
+      if (!(await holdLock(recount))) throw new LockBusyError();
     }
     throw new LockBusyError();
   });
@@ -821,7 +842,9 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
         throw new CrmValueWriteUnconfirmed();
       }
       if (saved !== 0 && saved !== 1 && saved !== 2) throw new CrmValueWriteUnconfirmed();
-      // 0: a whole number was there after all (never under the lock): this pass is read again.
+      // 0: a whole number was there after all, which only a change let in by a
+      // lost lock could have saved: nothing is written and the change is
+      // refused as busy; trying again reads that count, and pays nothing.
       if (saved === 0) throw new LockBusyError();
       if (saved === 1) await noteData(room, [{ slot: TASKS_SLOT, bytes: TASK_COUNT_WEIGHT }]);
     } else {

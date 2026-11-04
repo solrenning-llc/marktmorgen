@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
-import { TasksRecountRefused, changePersonTasks, readAllTasks, readPersonTasks } from "@/lib/crm";
+import { TasksRecountRefused, changePersonTasks, readAllTasks, readPersonTasks, taskPeople, tasksRecountUnits } from "@/lib/crm";
 import { validCrmDate } from "@/lib/crm-rules";
-import { TASKS_BUSY, TASK_ID, TASK_REFUSALS, type TaskRefusal, addTask, dropTask, editTask, markTask, readTaskInput, taskAssignees, tasksDue } from "@/lib/person-tasks";
+import { TASKS_BUSY, TASK_ID, TASK_REFUSALS, type TaskRefusal, addTask, dropTask, editTask, markTask, readTaskInput, studioRefusal, taskAssignees, tasksDue } from "@/lib/person-tasks";
 import { LockBusyError } from "@/lib/redis-lock";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
@@ -15,7 +15,8 @@ import { randomBytes } from "node:crypto";
  * `assignees`, null when the team could not be read); GET with no person lists everyone's open ones by date
  * (`?today=YYYY-MM-DD`, the creator's own day; the server's when it is not
  * one; answered as `day`, beside the groups overdue, today, upcoming and
- * undated). POST `{ action: "add", person, text, due?, assignee? }`, `{ action:
+ * undated), after tasksRecountUnits(people) studio requests are taken for
+ * reading every task. POST `{ action: "add", person, text, due?, assignee? }`, `{ action:
  * "edit", person, id, text, due?, assignee? }`, `{ action: "done", person,
  * id, done }`, `{ action: "remove", person, id }`. The same permission as the
  * deals (orders): owner, Admin, Support. A teammate made responsible must be
@@ -59,7 +60,20 @@ export async function GET(request: NextRequest) {
     }
     const asked = params.get("today") ?? "";
     const today = validCrmDate(asked) ? asked : new Date().toISOString().slice(0, 10);
-    return Response.json({ ok: true, day: today, ...tasksDue(await readAllTasks(store.statsId), today) }, { headers: NO_STORE });
+    // Every task of the store is read for the agenda (up to MAX_STORE_TASKS,
+    // TASKS_RECOUNT_BYTES): paid for first in studio requests, as much as the
+    // people who have tasks can keep (tasksRecountUnits), and refused without
+    // reading when the studio will not. A store with no tasks reads nothing.
+    const people = await taskPeople(store.statsId);
+    if (people > 0) {
+      const counted = await countStudio(store, null, tasksRecountUnits(people));
+      if (!counted.ok) {
+        const refused = studioRefusal(counted.reason, counted.message);
+        return Response.json(refused.body, { status: refused.status, headers: NO_STORE });
+      }
+    }
+    const entries = people > 0 ? await readAllTasks(store.statsId) : [];
+    return Response.json({ ok: true, day: today, ...tasksDue(entries, today) }, { headers: NO_STORE });
   } catch (error) {
     console.error("reading tasks failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
@@ -81,9 +95,9 @@ export async function POST(request: NextRequest) {
     const read = (kept = "") => readTaskInput({ text: body.text, due: body.due, assignee: body.assignee }, (email) => assignees.has(email) || (kept !== "" && email === kept));
     const now = Date.now() / 1000;
     // What making the store's count of tasks again costs, taken before it is made, at most once a store.
-    const pay = async (units: number): Promise<{ ok: true } | { ok: false; message: string }> => {
+    const pay = async (units: number): Promise<{ ok: true } | { ok: false; reason: string; message: string }> => {
       const counted = await countStudio(store, null, units);
-      return counted.ok ? { ok: true } : { ok: false, message: counted.message };
+      return counted.ok ? { ok: true } : { ok: false, reason: counted.reason, message: counted.message };
     };
     let result;
     if (body.action === "add") {
@@ -107,7 +121,10 @@ export async function POST(request: NextRequest) {
     return result.ok ? Response.json({ ok: true, tasks: result.tasks }, { headers: NO_STORE }) : refuse(result.error);
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "data_full" }, { status: 409 });
-    if (error instanceof TasksRecountRefused) return Response.json({ ok: false, error: "studio_used", message: error.words || "Your studio has no requests left this month for this. Try again next month, or change your plan." }, { status: 429 });
+    if (error instanceof TasksRecountRefused) {
+      const refused = studioRefusal(error.reason, error.words);
+      return Response.json(refused.body, { status: refused.status });
+    }
     if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy", message: TASKS_BUSY }, { status: 409 });
     console.error("saving a task failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

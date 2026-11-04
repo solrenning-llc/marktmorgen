@@ -95,15 +95,38 @@ The monthly and annual intervals have the same worst month (one run a day either
 ## 5. What is still unknown (each one fails the review; none is zero)
 
 1. **Vercel's page not reread.** R2 and Upstash were reread on 4 November 2026 (Claude 1, inbox C4-27); the Vercel rates keep their recorded date of 7 October 2026 until someone rereads them.
-2. **R2 billing unit size** (taken as 1 GB-month and 1 million operations) and whether lifecycle expiry deletions are free. Neither is recorded in the repository with a source.
+2. **R2 billing unit size** (taken as 1 GB-month and 1 million operations) and whether lifecycle expiry deletions are free. Neither is recorded in the repository with a source. The official page to read is https://developers.cloudflare.com/r2/pricing/ (with https://developers.cloudflare.com/r2/buckets/object-lifecycles/ for expiry); this session cannot reach developers.cloudflare.com (not in its allowed network domains, 4 November 2026), so it is left to whoever can read it, with the date.
 3. **R2 free quota amount**: 10 GB-month, 1 million Class A and 10 million Class B a month (C4-27); not needed for the result, because it is never credited.
 4. **Vercel run duration**: no route exists, so there is no `maxDuration`; the figures assume 300 s. Also not verified: whether Vercel bills a function's outbound transfer to R2 and Upstash (the repository's traffic model has no such line).
 5. **`SCAN` answer size**: `COUNT 500` is a hint; the names of other products' keys in a shared database are not capped. The bandwidth line assumes at most 500 names of at most 1,024 bytes a page. A byte cap on the walk's answers would make this a bound instead of an assumption.
-6. **Ratio between `DUMP` length and Upstash's billed data size**: taken as at most 1 (copy = 4/3 × stored bytes). Not measured. The independent review in docs/backup.md measured a HyperLogLog `DUMP` of 5–12 KB, so it needs a real measurement.
+6. **Ratio between `DUMP` length and Upstash's billed data size**: measured on 4 November 2026 (Claude 4, inbox C4-30) on a local Redis 7.0.15, with `scripts/backup-dump-ratio.py` (19 keys of every type the stores use: strings random, repetitive and JSON, hashes, sets, sorted sets, a list, HyperLogLogs). Results below. **Against Redis's own memory accounting (`MEMORY USAGE`), `DUMP` was smaller in every case (at most 0.973).** Against the bytes the application sends (key plus values), it was at most 1.609 (a 10-member sorted set, whose scores take more than 8 bytes each) and a few bytes more for tiny keys (22 bytes for a 17-byte string). base64 adds 4/3 on top. **Still open:** which of these two Upstash bills as "data size" is not confirmed from its documentation here. Under the reading with more cost, the copy's bytes are taken as at most 1.7 × the logical bytes + 16 bytes a key, × 4/3 for base64, instead of the 4/3 × stored bytes assumed above. The figures in section 4 need this factor once Upstash's metric is read.
+
+| Case | Logical bytes | DUMP | base64 | MEMORY USAGE | DUMP/logical | base64/logical | DUMP/MEMORY |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| string random 10B | 17 | 22 | 32 | 72 | 1.294 | 1.882 | 0.306 |
+| string random 100B | 108 | 113 | 152 | 168 | 1.046 | 1.407 | 0.673 |
+| string random 1000B | 1009 | 1013 | 1352 | 1080 | 1.004 | 1.340 | 0.938 |
+| string random 10000B | 10010 | 10013 | 13352 | 10296 | 1.000 | 1.334 | 0.973 |
+| string random 100000B | 100011 | 100016 | 133356 | 114744 | 1.000 | 1.333 | 0.872 |
+| string repetitive 1000B | 1009 | 33 | 44 | 1080 | 0.033 | 0.044 | 0.031 |
+| string repetitive 100000B | 100011 | 1162 | 1552 | 114744 | 0.012 | 0.016 | 0.010 |
+| string JSON 13700B | 13707 | 6604 | 8808 | 14392 | 0.482 | 0.643 | 0.459 |
+| hash 10 fields | 227 | 280 | 376 | 376 | 1.233 | 1.656 | 0.745 |
+| hash 100 fields | 2298 | 2580 | 3440 | 3128 | 1.123 | 1.497 | 0.825 |
+| hash 1000 fields | 23899 | 25903 | 34540 | 72304 | 1.084 | 1.445 | 0.358 |
+| set 10 members | 169 | 182 | 244 | 864 | 1.077 | 1.444 | 0.211 |
+| set 1000 members | 16011 | 17013 | 22684 | 64304 | 1.063 | 1.417 | 0.265 |
+| zset 10 members | 248 | 399 | 532 | 504 | 1.609 | 2.145 | 0.792 |
+| zset 1000 members | 24010 | 25013 | 33352 | 118672 | 1.042 | 1.389 | 0.211 |
+| list 500 items | 15007 | 16032 | 21376 | 16560 | 1.068 | 1.424 | 0.968 |
+| HyperLogLog 10 adds | 57 | 60 | 80 | 152 | 1.053 | 1.404 | 0.395 |
+| HyperLogLog 1000 adds | 1912 | 1842 | 2456 | 2104 | 0.963 | 1.285 | 0.875 |
+| HyperLogLog 100000 adds | 12317 | 10645 | 14196 | 14392 | 0.864 | 1.153 | 0.740 |
+
 7. **Per-store key count and per-store Vercel time** for a backup in parts (section 4).
 8. **Repository bundles** (item 4 of BK1): not built; sizes not measured (this session has a shallow clone and no GitHub API access to the three repositories).
 9. **Second copy of sold files** (item 3 of BK1): not built. For scale only, one extra copy of a full Scale store's 80 GiB would be 85.9 GB → 86 GB-month × $0.015 = $1.29 a month per store, before operations. Not a proposal.
-10. **No fixed-cost line exists**: `LLC_FIXED_COST_IDS` in `lib/llc-fixed-costs.ts` has no backup or R2-rounding entry, and `tests/plan-cost-registry.ts` has no backup line. Adding them is a code change for a later unit.
+10. **No fixed-cost line exists**: `LLC_FIXED_COST_IDS` in `lib/llc-fixed-costs.ts` has no backup or R2-rounding entry, and `tests/plan-cost-registry.ts` has no backup line. Adding them is a code change for a later unit; `lib/llc-fixed-costs.ts` is reserved by Codex (docs/reservations.md, #1492) on 4 November 2026.
 
 ## 5a. The owner's setup (inbox C4-25, 4 November 2026) and the retention to set
 
@@ -126,7 +149,7 @@ None of this switches the backup on (docs/backup.md): `BACKUP_COST_REVIEW` is st
 
 **Retention approved** (owner, MR; inbox C4-27, 4 November 2026): 30 days, `maxStoredBytes` 132,055,040.
 
-**Still blocking the review:** the R2 and Upstash prices are reread with today's date (section 2). The Vercel rates keep their recorded date of 7 October 2026. The other open items in section 5 remain: the R2 billing unit's size and whether lifecycle expiry is billed, the route's duration, the `SCAN` answer size, the `DUMP`/billed-size ratio, and the missing fixed-cost line. Until they are closed, this review is not admitted and `BACKUP_COST_REVIEW` stays `null`.
+**Still blocking the review:** the R2 and Upstash prices are reread with today's date (section 2). The Vercel rates keep their recorded date of 7 October 2026. The other open items in section 5 remain: the R2 billing unit's size and whether lifecycle expiry is billed, the route's duration, the `SCAN` answer size, which size Upstash bills (the `DUMP` ratios are now measured, item 6), and the missing fixed-cost line. Until they are closed, this review is not admitted and `BACKUP_COST_REVIEW` stays `null`.
 
 ## 6. Where each cost belongs
 

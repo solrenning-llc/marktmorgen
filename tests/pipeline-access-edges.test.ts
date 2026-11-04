@@ -10,7 +10,7 @@ import { NextRequest } from "next/server";
 import { POST as CRM } from "@/app/api/store/crm/route";
 import { POST as PACC } from "@/app/api/store/pipeline-access/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { readPipelines } from "@/lib/crm";
+import { dealVersion, readPipelines } from "@/lib/crm";
 import { copyPipelineAccess, readAllPipelineAccess, readPipelineAccess, writePipelineAccess } from "@/lib/pipeline-access";
 import { redisPipeline } from "@/lib/redis";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -46,6 +46,8 @@ async function main(): Promise<void> {
   const workshops = { id: "wkshp1", name: "Workshops", stages: [{ id: "wnew01", name: "New", kind: "open" }, { id: "wtlk01", name: "Talking", kind: "open" }, { id: "wwon01", name: "Won", kind: "won" }, { id: "wlost1", name: "Lost", kind: "lost" }] };
   is("(the owner adds Workshops)", (await crm(owner, { action: "pipeline", pipeline: workshops, moves: {} })).status, 200);
   const dealsKey = `nl:crm:deals:${statsId}`;
+  // The version of a deal as it is kept now, as the board sends it with an edit (635 [GL3]).
+  const versionOf = async (id: string) => dealVersion(String((await redisPipeline([["HGET", dealsKey, id]]))[0]));
   const made = await crm(owner, { action: "deal", deal: { title: "W", email: "", cents: 1, stage: "wtlk01", note: "" } });
   const dealId = made.body.deal!.id;
 
@@ -173,10 +175,12 @@ async function main(): Promise<void> {
     }
     return real(commands);
   }) as typeof redis.pipeline;
-  const late = await crm("sam@example.com", { action: "deal", deal: { id: mine, title: "Renamed by Sam", email: "", cents: 1, stage: "wnew01", note: "" } });
+  const mineVersion = await versionOf(mine);
+  const late = await crm("sam@example.com", { action: "deal", version: mineVersion, deal: { id: mine, title: "Renamed by Sam", email: "", cents: 1, stage: "wnew01", note: "" } });
   redis.pipeline = real;
-  is("refused as changed meanwhile, and the owner's move stays", [late.status, late.body.error, (await redisPipeline([["HGET", dealsKey, mine]]))[0] === moved], [409, "deal_conflict", true]);
-  is("a change with nothing in between still saves", (await crm(owner, { action: "deal", deal: { id: mine, title: "Again", email: "", cents: 1, stage: "cnew01", note: "" } })).status, 200);
+  // The edit's conflict (635 [GL3]), without the deal as it is now: it moved where Sam may not see it.
+  is("refused as changed meanwhile, and the owner's move stays", [raced, late.status, late.body.error, "current" in late.body, (await redisPipeline([["HGET", dealsKey, mine]]))[0] === moved], [true, 409, "crm_conflict", false, true]);
+  is("a change with nothing in between still saves", (await crm(owner, { action: "deal", version: await versionOf(mine), deal: { id: mine, title: "Again", email: "", cents: 1, stage: "cnew01", note: "" } })).status, 200);
 
   part("Round 4: a pipelines record that cannot be read changes no access");
   await writePipelineAccess(statsId, "sam@example.com", { coach1: "none", wkshp1: "view" }, store);
@@ -252,9 +256,12 @@ async function main(): Promise<void> {
     if (phase === 1 && commands.some((c) => c[0] === "HGET" && c[1] === dealsKey && c[2] === contested)) throw new Error("down");
     return real(commands);
   }) as typeof redis.pipeline;
-  const lost = await crm("sam@example.com", { action: "deal", deal: { id: contested, title: "A much longer title written by Sam", email: "", cents: 1, stage: "wnew01", note: "" } });
+  const contestedVersion = await versionOf(contested);
+  const lost = await crm("sam@example.com", { action: "deal", version: contestedVersion, deal: { id: contested, title: "A much longer title written by Sam", email: "", cents: 1, stage: "wnew01", note: "" } });
   redis.pipeline = real;
-  is("refused as changed meanwhile, and the room is never set to nothing", [lost.status, Number(await slotOf(contested)) > 0], [409, true]);
+  // The write's own answer measures what is kept now (MOVE_CRM_DEAL v2), so the room is the record's as it is now;
+  // the deal as it is now cannot be read back for the board, which is told so (nothing was written).
+  is("refused as changed meanwhile, and the room is never set to nothing", [phase, lost.status, lost.body.error, Number(await slotOf(contested)) > 0], [1, 503, "crm_deal_read_unavailable", true]);
 
   part("Round 5: a full room's count that cannot be made refuses the copy");
   await redisPipeline([["HSET", `nl:crm:pacc:${statsId}`, "una@example.com", JSON.stringify({ coach1: "none" })], ["HDEL", `nl:crm:pacc:${statsId}`, "uli@example.com"]]);

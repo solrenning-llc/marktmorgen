@@ -16,10 +16,11 @@
  * about them is), one hash a field, so the list's file reads each field once
  * however long the list is.
  */
+import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { type DueTask, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
@@ -233,9 +234,12 @@ async function dealSnapshot(statsId: string): Promise<{ id: string; before: stri
 }
 
 /** Saves the pipelines only over the exact record read before (one key, compare and set): a concurrent change is never overwritten. */
-export const SAVE_CRM_PIPELINES = `-- marktmorgen:crm-pipelines-save:v1
+export const SAVE_CRM_PIPELINES = `-- marktmorgen:crm-pipelines-save:v2
 local current = redis.call("GET", KEYS[1])
-if (current or "") ~= ARGV[1] then return -1 end
+if (current or "") ~= ARGV[1] then
+  if current then return {-1, string.len(current)} end
+  return {-1}
+end
 redis.call("SET", KEYS[1], ARGV[2])
 return 1`;
 
@@ -252,9 +256,11 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
   try {
     saved = await redisPipeline([["EVAL", SAVE_CRM_PIPELINES, 1, pipesKey(statsId), snapshotRaw, record]]);
   } catch { throw new CrmSchemaWriteUnconfirmed(); }
-  if (Array.isArray(saved) && saved.length === 1 && saved[0] === -1) {
-    // Nothing was written: the room goes back to what the saved record weighs.
-    await giveData(room, [{ slot: PIPES_SLOT, bytes: snapshotRaw ? dataBytes([snapshotRaw], 1) : 0, set: true }]).catch(() => {});
+  const lost = changedLength(Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined);
+  if (lost !== undefined) {
+    // Nothing was written: the room goes back to what the record kept there now weighs, as the script measured it in
+    // the same step (the write that changed it meanwhile sized the room to itself, never to the snapshot read here).
+    await giveData(room, [{ slot: PIPES_SLOT, bytes: lost === null ? 0 : dataBytesOfLength(lost, 1), set: true }]).catch(() => {});
     throw new CrmSchemaConflict();
   }
   if (!Array.isArray(saved) || saved.length !== 1 || saved[0] !== 1) throw new CrmSchemaWriteUnconfirmed();
@@ -294,11 +300,21 @@ export async function savePipelineChange(statsId: string, change: { pipeline?: u
   return result;
 }
 
+/**
+ * A compare-and-set script's "changed" answer (SAVE_CRM_PIPELINES, MOVE_CRM_DEAL): the UTF-8 length of the record
+ * there now, null when there is none, undefined for any other answer.
+ */
+function changedLength(answer: unknown): number | null | undefined {
+  if (!Array.isArray(answer) || answer[0] !== -1) return undefined;
+  if (answer.length === 1) return null;
+  return answer.length === 2 && Number.isSafeInteger(answer[1]) && answer[1] >= 0 ? answer[1] : undefined;
+}
+
 /** Move only the exact snapshot reviewed; never resurrect a deleted opportunity. */
-export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v1
+export const MOVE_CRM_DEAL = `-- marktmorgen:crm-deal-move:v2
 local current = redis.call("HGET", KEYS[1], ARGV[1])
 if not current then return 0 end
-if current ~= ARGV[2] then return -1 end
+if current ~= ARGV[2] then return {-1, string.len(current)} end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])
 return 1`;
 
@@ -335,11 +351,22 @@ export async function readDeals(statsId: string | null, stages: readonly Stage[]
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export type OpportunityReviewData = { available: boolean; stages: Stage[]; deals: Deal[]; pipelines: Pipeline[] };
+/**
+ * A deal's version: a hash of its exact stored record, so any change to it,
+ * a stage moved by a pipeline change included (which leaves updatedAt as it
+ * was), gives another one. The board sends it back with an edit, and the
+ * edit lands only over that record (635 [GL3]). Server only.
+ */
+export function dealVersion(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex").slice(0, 32);
+}
+
+/** `versions` holds each deal's version (dealVersion) by id, read in the same step as the deals. */
+export type OpportunityReviewData = { available: boolean; stages: Stage[]; deals: Deal[]; pipelines: Pipeline[]; versions: Record<string, string> };
 
 /** A complete link/contact review read; unknown storage never means no opportunities. */
 export async function readOpportunityReview(statsId: string | null): Promise<OpportunityReviewData> {
-  const unavailable: OpportunityReviewData = { available: false, stages: [], deals: [], pipelines: [] };
+  const unavailable: OpportunityReviewData = { available: false, stages: [], deals: [], pipelines: [], versions: {} };
   if (!statsId || !isRedisConfigured()) return unavailable;
   try {
     const replies = await redisPipeline([["GET", stagesKey(statsId)], ["HGETALL", dealsKey(statsId)], ["GET", pipesKey(statsId)]]);
@@ -359,7 +386,7 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
       if (!Array.isArray(raw) || !parsed || parsed.length !== raw.length) return unavailable;
       stages = parsed;
     }
-    const deals: Deal[] = [], seen = new Set<string>();
+    const deals: Deal[] = [], seen = new Set<string>(), versions: Record<string, string> = {};
     const pairs: unknown[] = replies[1];
     for (let i = 0; i < pairs.length; i += 2) {
       const id = pairs[i], value = pairs[i + 1];
@@ -373,8 +400,9 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
       if (raw.email !== undefined && (typeof raw.email !== "string" || (raw.email.trim() && !deal.email))) return unavailable;
       seen.add(id);
       deals.push(deal);
+      versions[id] = dealVersion(value);
     }
-    return { available: true, stages, deals: deals.sort((a, b) => b.updatedAt - a.updatedAt), pipelines: pipelines ?? [firstPipeline(stages)] };
+    return { available: true, stages, deals: deals.sort((a, b) => b.updatedAt - a.updatedAt), pipelines: pipelines ?? [firstPipeline(stages)], versions };
   } catch { return unavailable; }
 }
 
@@ -403,10 +431,8 @@ export const dealBytes = (deal: Deal) => dataBytes([deal.id, JSON.stringify(deal
  * read, with its room given back, so a deleted person's deal never comes back.
  */
 export async function writeDeal(statsId: string, deal: Deal, room: DataStore): Promise<boolean>;
-export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit: "edit", expected?: string): Promise<boolean | "gone">;
-export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit?: "edit", expected?: string): Promise<boolean | "gone"> {
-  // Checked against the record as read (a restricted teammate's edit): written only over that record; one deleted meanwhile is a conflict, never written back.
-  if (expected !== undefined) return replaceDeal(statsId, deal, room, expected);
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit: "edit"): Promise<boolean | "gone">;
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit?: "edit"): Promise<boolean | "gone"> {
   let preflight: unknown;
   try {
     preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)]]);
@@ -424,42 +450,49 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore, ed
 }
 
 /**
- * A deal saved over the exact record read when the change was checked
- * (MOVE_CRM_DEAL): one changed or removed since is never written over, and
- * CrmDealConflict says so. Its room is taken first, and set back to what is
- * saved when nothing was written.
+ * One deal as it is kept now, with its exact record, so a write lands over
+ * that record only (writeDealOver). A read that fails throws
+ * CrmDealReadUnavailable; a deal that is gone reads as null.
  */
-async function replaceDeal(statsId: string, deal: Deal, room: DataStore, expected: string): Promise<boolean> {
+export async function readDealExact(statsId: string, id: string, stages: readonly Stage[]): Promise<{ deal: Deal | null; raw: string | null }> {
+  if (!DEAL_ID.test(id)) return { deal: null, raw: null };
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["HGET", dealsKey(statsId), id]]);
+  } catch { throw new CrmDealReadUnavailable(); }
+  if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) throw new CrmDealReadUnavailable();
+  const raw = reply[0] as string | null;
+  return { deal: raw === null ? null : parseDeal(json(raw), stages), raw };
+}
+
+/**
+ * Saves a deal over the exact record read (readDealExact), in one step on the
+ * Redis side (MOVE_CRM_DEAL): "changed", and nothing written, when the record
+ * is not that one any more or is gone, so a step never lands a stale copy
+ * over what the creator did on the board meanwhile. Its room is taken first,
+ * and put back as it was when nothing was written.
+ */
+export async function writeDealOver(statsId: string, deal: Deal, before: string, room: DataStore): Promise<"saved" | "changed"> {
   await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
   let saved: unknown;
   try {
-    saved = await redisPipeline([["EVAL", MOVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, expected, JSON.stringify(deal)]]);
+    saved = await redisPipeline([["EVAL", MOVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, before, JSON.stringify(deal)]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
-  if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 1 && saved[0] !== 0 && saved[0] !== -1)) throw new CrmDealWriteUnconfirmed();
-  if (saved[0] === 1) return true;
-  // Nothing was written: the room is set to what the record now saved weighs. When that cannot be read, the room
-  // taken for this change is left as it is, which may then differ (more or less) from what is saved until the
-  // next save of this deal sets it again; it is never set to nothing for a record that is there.
-  let now: unknown;
-  try {
-    const reply = await redisPipeline([["HGET", dealsKey(statsId), deal.id]]);
-    if (!Array.isArray(reply) || reply.length !== 1 || (reply[0] !== null && typeof reply[0] !== "string")) throw new Error("unreadable");
-    now = reply[0];
-  } catch { throw new CrmDealConflict(); }
-  await giveData(room, [{ slot: dealSlot(deal.id), bytes: typeof now === "string" ? dataBytes([deal.id, now], 1) : 0, set: true }]);
-  throw new CrmDealConflict();
+  const answer = Array.isArray(saved) && saved.length === 1 ? saved[0] : undefined;
+  const lost = changedLength(answer);
+  if (answer !== 1 && answer !== 0 && typeof lost !== "number") throw new CrmDealWriteUnconfirmed();
+  if (answer === 1) return "saved";
+  // Nothing written: its room put back to what the record kept there now weighs (the board's own write sized it to
+  // that), as the script measured it in the same step, or none when it is gone. So a record the board made bigger is
+  // never counted at its old size, and no second read can fail in between.
+  await giveData(room, [{ slot: dealSlot(deal.id), bytes: typeof lost === "number" ? dataBytesOfLength(utf8Length(deal.id) + lost, 1) : 0, set: true }]);
+  return "changed";
 }
 
 export async function readDeal(statsId: string, id: string, stages: readonly Stage[]): Promise<Deal | null> {
-  return (await readDealRecord(statsId, id, stages))?.deal ?? null;
-}
-
-/** A deal and its record exactly as saved, so a change checked against it is written only over that record (writeDeal `expected`). */
-export async function readDealRecord(statsId: string, id: string, stages: readonly Stage[]): Promise<{ deal: Deal; raw: string } | null> {
   if (!DEAL_ID.test(id)) return null;
   const [raw] = await redisPipeline([["HGET", dealsKey(statsId), id]]);
-  const deal = parseDeal(json(raw), stages);
-  return deal && typeof raw === "string" ? { deal, raw } : null;
+  return parseDeal(json(raw), stages);
 }
 
 /** Removes a deal only while it is the exact record read when the removal was checked: 1 removed, 0 already gone, -1 changed meanwhile. */
@@ -472,7 +505,7 @@ return 1`;
 
 /**
  * Removes a deal. With `expected` (the record read when the removal was
- * checked, 639 [GL7](7)), one changed since, moved into a pipeline the
+ * checked with readDealExact, 639 [GL7](7)), one changed since, moved into a pipeline the
  * person may not change for instance, is never removed: CrmDealConflict.
  */
 export async function dropDeal(statsId: string, id: string, room: DataStore, expected?: string): Promise<boolean> {

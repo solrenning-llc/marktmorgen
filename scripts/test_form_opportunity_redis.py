@@ -161,7 +161,8 @@ def main():
         assert redis.command("HLEN", keys[4]) == 0
         print("PASS: stage migration cannot resurrect deleted records")
         redis.command("HSET", keys[4], "edited", "concurrent-edit")
-        assert redis.command("EVAL", move_script, 1, keys[4], "edited", "stale-snapshot", "stale-moved") == -1
+        # A refusal answers -1 and the size of the record kept (crm-deal-move:v2).
+        assert redis.command("EVAL", move_script, 1, keys[4], "edited", "stale-snapshot", "stale-moved") == [-1, len("concurrent-edit")]
         assert redis.command("HGET", keys[4], "edited") == "concurrent-edit"
         assert redis.command("EVAL", move_script, 1, keys[4], "edited", "concurrent-edit", "latest-moved") == 1
         assert redis.command("HGET", keys[4], "edited") == "latest-moved"

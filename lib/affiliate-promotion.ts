@@ -33,7 +33,7 @@ export function affiliatePromotionRows(lines: PromotionLine[]) {
   const groups = new Map<string, { promotion: AffiliatePromotion | null; currency: string; paidRecords: number; base: number; commission: number }>();
   const seen = new Set<string>();
   for (const line of lines) {
-    if (line.self || !["click","code","buyer","recurring"].includes(line.how)) continue;
+    if (line.self || !["click","code","buyer","contact","recurring"].includes(line.how)) continue;
     const identity = JSON.stringify([line.ref,line.currency]);
     if (seen.has(identity)) continue;
     seen.add(identity);

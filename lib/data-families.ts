@@ -28,7 +28,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:product:pages:", "nl:product:pics:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
   "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
   "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:",
-  "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:watch:last:",
+  "nl:taxobs:v1:", "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:watch:last:",
   "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
   "nl:yearly:price:",
 ];
@@ -52,7 +52,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
-  "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:",
+  "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
   "nl:exposure:v1:", "nl:exposure:v1:YYYY-MM", "nl:fair:c:", "nl:firstsale:", "nl:forms:", "nl:free:claim:",
   "nl:free:in:", "nl:free:n:", "nl:free:uses:", "nl:fshare:", "nl:fshare:n:", "nl:fshares:", "nl:fuse:",
@@ -172,6 +172,8 @@ const Cr = (rest: number): Closing => ({ how: "company", rest });
 const L: Closing = { how: "lapses", days: 13 * 3 * 31 };
 
 export const CLOSING: Readonly<Record<string, Closing>> = {
+  // Inactive diagnostic journal: its absolute expiry is bounded in checkout-sweep.ts.
+  "nl:taxobs:v1:": X(1),
   "nl:": E, // a meter's records (lib/usage-billing.ts), named by the store's folder; "nl:" alone is no key
   "nl:*": C,
   // ---------------------------------------------------------------- an account's sign-in: a person's, not a store's
@@ -231,7 +233,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:dir:listed": I, "nl:dir:page": Cr(1),
   "nl:domain:": T("prepare"),
   "nl:dun:": E, "nl:dun:card:": E, "nl:dun:cards:": E, "nl:dun:count:": E, "nl:dun:cursor": C, "nl:dun:report:": E,
-  "nl:erase:ix:": E, "nl:erase:link:": Cr(1), "nl:erased:": E,
+  "nl:erase:ix:": E, "nl:erase:link:": Cr(1), "nl:transparency:": C, "nl:transparency:acted:": C, "nl:transparency:since": C, "nl:erased:": E,
   "nl:esync:bad:": E, "nl:esync:cfg:": E, "nl:esync:j:": T("prepare", 7), "nl:esync:log:": E, "nl:esync:q": I,
   "nl:esync:seen:": X(30), "nl:esync:tags:": E,
   "nl:exposure:v1:": C, "nl:exposure:v1:YYYY-MM": C,

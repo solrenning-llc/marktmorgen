@@ -13,7 +13,7 @@ export function generateReaderResults(input){
   identities.add(source.reader);
   if(source.conclusion!=="success"||!Number.isSafeInteger(source.jobId)||source.jobId<=0||jobs.has(source.jobId))refuse("successful unique job");
   jobs.add(source.jobId);
-  const url=typeof source.url==="string"&&source.url.match(/^https:\/\/github\.com\/viniciussucupira\/marktmorgen\/actions\/runs\/[1-9]\d*\/job\/(\d+)$/);
+  const url=typeof source.url==="string"&&source.url.match(/^https:\/\/github\.com\/(?:viniciussucupira|solrenning-llc)\/marktmorgen\/actions\/runs\/[1-9]\d*\/job\/(\d+)$/);
   if(!url||Number(url[1])!==source.jobId)refuse("canonical job URL");
   if(typeof source.head!=="string"||!(/^[a-f0-9]{40}$/).test(source.head))refuse("revision");
   heads.add(source.head);

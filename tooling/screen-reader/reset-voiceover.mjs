@@ -1,3 +1,4 @@
+import {ownedRepositoryEnv} from "./owned-repository.mjs";
 import {execFileSync} from "node:child_process";
 const EXECUTABLE="/System/Library/CoreServices/VoiceOver.app/Contents/MacOS/VoiceOver";
 /** Preflight only on the explicitly marked disposable public CI runner.
@@ -6,7 +7,7 @@ const EXECUTABLE="/System/Library/CoreServices/VoiceOver.app/Contents/MacOS/Voic
 export async function resetVoiceOverRunner(options={}){
  const {env=process.env,platform=process.platform,uid=process.getuid?.(),run=execFileSync,kill=process.kill,
   wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=Date.now}=options;
- if(platform!=="darwin"||env.GITHUB_ACTIONS!=="true"||env.GITHUB_REPOSITORY!=="viniciussucupira/marktmorgen"||
+ if(platform!=="darwin"||env.GITHUB_ACTIONS!=="true"||!ownedRepositoryEnv(env)||
     env.AX2_PUBLIC_DISPOSABLE_RUNNER!=="true"||!Number.isSafeInteger(uid)||uid<0)
   throw Error("VoiceOver reset requires the owned disposable public macOS runner");
  const start=now();

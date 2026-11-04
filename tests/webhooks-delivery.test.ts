@@ -159,6 +159,22 @@ async function main(): Promise<void> {
   is("the same sale noticed again is not sent again", [await emitEvent(one, "sale.completed", "cs_test_sale0001", { amount_cents: 4900 }), received.length], [0, 1]);
   is("an event nobody listens for is sent nowhere", [await emitEvent(one, "lead.captured", "lead1", {}), received.length], [0, 1]);
 
+  part("Written again after a lost reply, a delivered event is not sent or counted twice");
+  const usedBeforeRelost = await allowanceUsed(one, "webhook");
+  const receivedBeforeRelost = received.length;
+  await emitEvent(one, "sale.completed", "cs_test_relost01", { amount_cents: 4900 });
+  await deliverDue(Date.now() + 10_000);
+  const relostEvent = eventIdFor(one.statsId as string, "sale.completed", "cs_test_relost01");
+  const relostLines = async () => (await webhooksView(one)).log.filter((d) => d.eventId === relostEvent);
+  is("delivered once, one of the month's deliveries", [(await relostLines()).map((d) => d.state), received.length - receivedBeforeRelost, (await allowanceUsed(one, "webhook")) - usedBeforeRelost], [["delivered"], 1, 1]);
+  // That write's reply was lost: its sent mark was taken back (lib/webhooks.ts emitEvent), and the same event is noticed again.
+  await redis.pipeline([["DEL", `nl:hooks:evt:${relostEvent}`]]);
+  await emitEvent(one, "sale.completed", "cs_test_relost01", { amount_cents: 4900 });
+  await deliverDue(Date.now() + 10_000);
+  const relostIds = (await relostLines()).map((d) => d.id);
+  const relostQueue = ((await redis.pipeline([["ZRANGEBYSCORE", "nl:hooks:q", "-inf", "+inf"]]))[0] as string[]).filter((m) => relostIds.some((id) => m.endsWith(`|${id}`)));
+  is("the same delivery, still delivered: no second request, no second delivery counted, one line, at most one on the queue an endpoint", [(await relostLines()).map((d) => d.state), received.length - receivedBeforeRelost, (await allowanceUsed(one, "webhook")) - usedBeforeRelost, relostQueue.length <= 1], [["delivered"], 1, 1, true]);
+
   part("A failing endpoint is tried again, signed afresh");
   answers.push(500);
   await emitEvent(one, "sale.completed", "cs_test_sale0002", { amount_cents: 1900 });

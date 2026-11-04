@@ -93,3 +93,9 @@ All12 pure projection cases and strict lint pass. Metadata capture creates no to
 An additional audit found another known test blocker: E5 currency inventory is3/4 because the earlier physical body helper reads the original snapshot currency and is missing its descriptive row. The document is touched by Claude2's open#1950/#1952. It was not edited or hidden from the scanner; a narrow own-row exception was requested through the coordinator channel. The new digital metadata projection does not read any store currency or modify that reserved document. The route's two TS2305 errors also remain. No PR or incorporation will be claimed while these gates are red. CX-24 is read; latest usage is still the owner's approximately10% until04/11 03h35, with no fresh balance visible.
 
 Public-data scanner:3,166 tracked files, zero corrections; the new projection unit has no foreign reservation/PR overlap and no currency-document edit.
+
+## CX-25 inventory exception applied (04 November 2026)
+
+The coordinator authorized exactly the physical-option module row and aggregate counts in the reserved E5 inventory. That single row was appended as OTHER with its original-currency/body comparison and explicit no-conversion/repricing/financial-approval limit. Counts are now109 total/2 OTHER; every preexisting file row remains byte-identical and in the same order. The previously missing-reader test passes4/4 without hiding or renaming the source reader or changing the test. Correction to the earlier blocker attribution: #1950/#1952 belong to Claude3, not Claude2. Future integration must keep all rows from both sides and recompute counts.
+
+This resolves the inventory blocker only. The two missing download-route exports remain, #1931 stays excluded, P1 remains partial, actual policies/flags null/false, and no full-suite, account/funding, PR or incorporation approval is implied.

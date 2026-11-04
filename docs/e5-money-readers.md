@@ -37,8 +37,8 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | TOTALS | 34 |
 | PAST-SALE | 11 |
 | SETTING | 41 |
-| OTHER | 1 |
-| All | 108 |
+| OTHER | 2 |
+| All | 109 |
 
 ## The files
 
@@ -152,3 +152,4 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/store-guide.ts` | SETTING | 49–50: price and delivery facts | no |
 | `lib/store.ts` | SETTING | 2497–3911: the smallest charge for box, plan, offer and shipping; field reading and validation; setCurrency | no |
 | `lib/digital-consent-email.ts` | OTHER | 37: speechFor only formats a date; no money | n/a |
+| `lib/physical-option-confirmation.ts` | OTHER | compares the protected original snapshot currency with the exact original checkout body | yes: no conversion, repricing or financial approval; original rights, account and funding must still be proved |

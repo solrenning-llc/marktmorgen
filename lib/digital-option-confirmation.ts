@@ -1,6 +1,6 @@
 /** Detached paid-file selection only. No original catalog/owner proof,
  * financial grant, immutable persisted source, payment or download permission. */
-import type {ProductFile} from '@/lib/product-file';
+import {ownsPath,type ProductFile} from '@/lib/product-file';
 
 export type SelectedDigitalOption=Readonly<{
  id:string;label:string;priceCents:number;file:Readonly<ProductFile>;link:null;details:readonly string[];best:boolean;
@@ -37,4 +37,12 @@ export function selectedDigitalOption(product:unknown,optionId:unknown):Selected
  const timestamp=Date.parse(f.addedAt);if(!Number.isFinite(timestamp)||new Date(timestamp).toISOString()!==f.addedAt)return null;
  const file=Object.freeze({pathname:f.pathname,name:f.name,bytes:Number(f.bytes),contentType:f.contentType,addedAt:f.addedAt});
  return Object.freeze({id:o.id,label:o.label,priceCents:Number(o.priceCents),file,link:null,details:Object.freeze(details as string[]),best:o.best});
+}
+
+/** Prefix comparison only: the caller must independently authenticate the
+ * original folder and prove the original account/file/access funding. */
+export function selectedDigitalOptionForFolder(product:unknown,optionId:unknown,storeFolder:unknown):SelectedDigitalOption|null{
+ if(!text(storeFolder,320)||storeFolder!==storeFolder.trim()||storeFolder.includes('/')||storeFolder.includes('\\'))return null;
+ const selected=selectedDigitalOption(product,optionId);
+ return selected&&ownsPath(selected.file.pathname,storeFolder,selected.id)?selected:null;
 }

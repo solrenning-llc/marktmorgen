@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {selectedDigitalOption} from '@/lib/digital-option-confirmation';
+import {selectedDigitalOption,selectedDigitalOptionForFolder} from '@/lib/digital-option-confirmation';
+import {vaultPath} from '@/lib/vault-rules';
 const option=()=>({id:'original_file',label:'Printable edition',priceCents:6500,
  file:{pathname:'stores/synthetic/original_file/original.pdf',name:'Original.pdf',bytes:1200,contentType:'application/pdf',addedAt:'2026-11-01T00:00:00.000Z'},
  link:null,details:['Original file'],best:false});
@@ -66,4 +67,41 @@ test('inherited, sparse and array-like metadata cannot masquerade as the origina
 test('capturing metadata creates no payment, access, source or financial permission',()=>{
  const c=select(option());assert.ok(c);assert.deepEqual(Object.keys(c),['id','label','priceCents','file','link','details','best']);
  for(const key of ['permitsCheckout','grantsAccess','token','reviewId','owner','accountId','sourceValue'])assert.equal(Object.hasOwn(c,key),false);
+});
+test('the selected file must match both the provided original folder and option ID',()=>{
+ const o=option(),product={options:[o]};
+ const c=selectedDigitalOptionForFolder(product,o.id,'synthetic');assert.ok(c);assert.deepEqual(c,o);assert.equal(Object.isFrozen(c.file),true);
+ assert.equal(selectedDigitalOptionForFolder(product,o.id,'another_store'),null);
+ assert.equal(selectedDigitalOptionForFolder(product,'another_option','synthetic'),null);
+});
+test('the parent product folder cannot substitute for the selected option folder',()=>{
+ const o=option();o.file.pathname='stores/synthetic/parent_product/original.pdf';
+ assert.ok(select(o),'plain metadata capture is deliberately not path ownership');
+ assert.equal(selectedDigitalOptionForFolder({options:[o]},o.id,'synthetic'),null);
+});
+test('existing vault paths preserve exact store and option identities',()=>{
+ const folder='0123456789abcdef0123456789abcdef',other='abcdef0123456789abcdef0123456789';
+ const o=option();o.file.pathname=vaultPath(folder,o.id,'0123456789abcdef','Original.pdf');
+ assert.ok(selectedDigitalOptionForFolder({options:[o]},o.id,folder));
+ assert.equal(selectedDigitalOptionForFolder({options:[o]},o.id,other),null);
+ o.file.pathname=vaultPath(folder,'parent_product','0123456789abcdef','Original.pdf');
+ assert.equal(selectedDigitalOptionForFolder({options:[o]},o.id,folder),null);
+});
+test('prefix collisions, nested objects, traversal and external file URLs refuse',()=>{
+ for(const pathname of ['stores/synthetic/original_file_more/original.pdf','stores/synthetic/original_file/sub/file.pdf',
+  'stores/synthetic/original_file/../file.pdf','stores//synthetic/original_file/file.pdf',
+  'https://example.test/stores/synthetic/original_file/file.pdf']){
+  const o=option();o.file.pathname=pathname;assert.equal(selectedDigitalOptionForFolder({options:[o]},o.id,'synthetic'),null);
+ }
+});
+test('a folder must be an explicit bounded string, never executable or coerced metadata',()=>{
+ let reads=0;const executable={toString(){reads++;throw Error('No coercion');}};
+ for(const folder of [undefined,null,0,'',' ',' synthetic','synthetic ','x'.repeat(321),'synthetic/other','synthetic\\other','bad\nfolder',executable])
+  assert.equal(selectedDigitalOptionForFolder({options:[option()]},'original_file',folder),null);
+ assert.equal(reads,0);
+});
+test('matching a pathname adds no authenticated owner, token, access or funding evidence',()=>{
+ const c=selectedDigitalOptionForFolder({options:[option()]},'original_file','synthetic');assert.ok(c);
+ assert.deepEqual(Object.keys(c),['id','label','priceCents','file','link','details','best']);
+ assert.equal(Object.hasOwn(c,'storeFolder'),false);assert.equal(Object.hasOwn(c,'grantsAccess'),false);
 });

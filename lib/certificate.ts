@@ -282,7 +282,7 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
  * before that list was kept, by reading the course's certificates when it
  * has LEGACY_SCAN or fewer; a standing one is always found by its slot.
  */
-export async function forgetCertificatesPerson(courseIds: string[], email: string): Promise<number> {
+export async function forgetCertificatesPerson(courseIds: string[], email: string, room?: DataStore): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;
   const who = emailKey(email);
   const address = email.trim().toLowerCase();
@@ -300,11 +300,29 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
       });
     }
     const list = [...ids].filter((id) => CERT_ID_PATTERN.test(id));
+    // What each took when it was issued (the record as made, withdrawnAt 0), read before it goes, to give back to the course's slot.
+    let freed = 0;
+    if (room) {
+      for (let i = 0; i < list.length; i += 500) {
+        const chunk = list.slice(i, i + 500);
+        const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
+        for (const raw of Array.isArray(rows) ? rows : []) {
+          if (typeof raw !== "string") continue;
+          try {
+            const value = JSON.parse(raw) as Record<string, unknown>;
+            if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0 })], 3);
+          } catch {
+            // Unreadable: nothing is known of what it took, so nothing is given back for it.
+          }
+        }
+      }
+    }
     await redisPipeline([
       ["DEL", byKey(courseId, who), ...list.map(certKey)],
       ["HDEL", indexKey(courseId), who],
       ...(list.length ? [["SREM", allKey(courseId), ...list]] : []),
     ]);
+    if (room && freed > 0) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: freed }]);
     gone += list.length;
   }
   return gone;

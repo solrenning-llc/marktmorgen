@@ -139,7 +139,7 @@ export const ERASERS: Eraser[] = [
       return records;
     },
   },
-  { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email) },
+  { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email, s.store) },
   {
     module: "lib/lesson-comments.ts",
     run: async (s) => {

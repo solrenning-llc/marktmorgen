@@ -28,25 +28,18 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { installSesMailFixture } from "./ses-mail-fixture";
 
-const sent: { to: string; subject: string; text: string }[] = [];
-globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-  const url = new URL(String(input));
-  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-  if (url.hostname === "api.resend.com") {
-    type Sent = { to: string | string[]; subject: string; text: string };
-    const body = JSON.parse(String(init?.body)) as Sent | Sent[];
-    const all = Array.isArray(body) ? body : [body];
-    for (const m of all) sent.push({ to: [m.to].flat()[0], subject: m.subject, text: m.text });
-    return json(Array.isArray(body) ? { data: all.map((_, i) => ({ id: `email_${sent.length}_${i}` })) } : { id: `email_${sent.length}` });
-  }
-  return json({ object: "list", data: [], has_more: false });
-}) as typeof fetch;
+const mail = installSesMailFixture({
+  fallback: () => new Response(JSON.stringify({ object: "list", data: [], has_more: false })),
+});
 
 const run = () => sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
 
 async function main(): Promise<void> {
   redis.clear();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
   process.env.STRIPE_SECRET_KEY = "sk_test_people_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_people_only_a_stand_in";
 
@@ -116,15 +109,18 @@ async function main(): Promise<void> {
   ], [[["Coaching", talking.id]], [["bendeal001", talking.id, 9900]]]);
   const notes = await readPersonNotes(statsId, personKey(statsId, "ana@example.com"));
   is("a note on her page, saying where it came from", notes.map((n) => n.text), ["Applied for coaching (Sequence “Applicants”, step 3.)"]);
-  const told = sent.filter((m) => m.to === OWNER);
+  const told = mail.ses.filter((message) => message.to.includes(OWNER));
   is("the owner told once, with both of them", [told.length, told[0]?.subject, told[0]?.text.includes("ana@example.com") && told[0]?.text.includes("ben@example.com")], [1, "2 people reached step 4 of “Applicants”", true]);
-  is("and the email goes to each, once", sent.filter((m) => m.subject === "We got your application").map((m) => m.to).sort(), ["ana@example.com", "ben@example.com"]);
+  is("and the email goes to each, once", mail.ses.filter((message) => message.subject === "We got your application").flatMap((message) => message.to).sort(), ["ana@example.com", "ben@example.com"]);
 
   part("A sign-up asked from a form remembers it");
-  sent.length = 0;
+  mail.clearCaptured();
+  mail.disableSes();
   await askToJoin({ store, email: "cleo@example.com", ip: "10.0.0.9", origin: "https://marktmorgen.com", fromForm: true, formId: "applyform1" });
-  const token = /join\?token=([0-9a-f]{48})/.exec(sent[0]?.text ?? "")?.[1] ?? "";
-  is("the confirmation link knows the form", (await readJoinToken(token))?.f, "applyform1");
+  const token = /join\?token=([0-9a-f]{48})/.exec(mail.resend[0]?.text ?? "")?.[1] ?? "";
+  is("the confirmation link uses the service route and knows the form", [mail.ses.length, mail.resend.length, (await readJoinToken(token))?.f], [0, 1, "applyform1"]);
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
 
   part("A workflow for one quiz result (added 17 October 2026)");
   await writeForm(statsId, parseForm({
@@ -136,20 +132,22 @@ async function main(): Promise<void> {
   is("a result the quiz does not have is refused", await quizFlow("nope00"), { ok: false, reason: "form" });
   const forReady = await quizFlow("tierhi");
   is("one of its results is kept on the workflow", forReady.ok ? forReady.flows.find((f) => f.name === "Ready ones")?.formOutcome : forReady, "tierhi");
-  sent.length = 0;
+  mail.clearCaptured();
   await upsertContact(list, "dan@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   await upsertContact(list, "eve@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   store = (await storeForEmail(OWNER))!;
   await enroll(store, "dan@example.com", { joined: false, form: "scorequiz1", formOutcome: "tierlo" });
   await enroll(store, "eve@example.com", { joined: false, form: "scorequiz1", formOutcome: "tierhi" });
   for (let i = 0; i < 3; i += 1) await run();
-  is("only the person who got that result starts it", sent.filter((m) => m.subject === "You are ready").map((m) => m.to), ["eve@example.com"]);
-  sent.length = 0;
+  is("only the person who got that result starts it", mail.ses.filter((message) => message.subject === "You are ready").flatMap((message) => message.to), ["eve@example.com"]);
+  mail.clearCaptured();
+  mail.disableSes();
   await askToJoin({ store, email: "fay@example.com", ip: "10.0.0.10", origin: "https://marktmorgen.com", fromForm: true, formId: "scorequiz1", formOutcome: "tierhi" });
-  const quizToken = /join\?token=([0-9a-f]{48})/.exec(sent[0]?.text ?? "")?.[1] ?? "";
+  const quizToken = /join\?token=([0-9a-f]{48})/.exec(mail.resend[0]?.text ?? "")?.[1] ?? "";
   const grant = await readJoinToken(quizToken);
-  is("a sign-up asked from a quiz remembers the form and the result, for when they confirm", [grant?.f, grant?.r], ["scorequiz1", "tierhi"]);
+  is("a sign-up asked from a quiz keeps the service route, form and result", [mail.ses.length, mail.resend.length, grant?.f, grant?.r], [0, 1, "scorequiz1", "tierhi"]);
 
+  mail.restore();
   done();
 }
 

@@ -8,8 +8,8 @@ import { jsonAccess } from "@/lib/studio-route";
  * The creator's digital business card: 639 [GL7](22), unit 1. GET gives the
  * card as kept (off and empty when there is none); POST `{ action: "save",
  * on, name, title?, email?, phone?, website?, note? }` keeps it as typed, or
- * `{ action: "remove" }` forgets it. Settings (lib/team-roles.ts): owner and
- * Admin. A value too long or not what it should be is refused with its reason
+ * `{ action: "remove" }` forgets it. The store's pages (lib/team-roles.ts), as
+ * the contact form on the store page. A value too long or not what it should be is refused with its reason
  * and nothing is written (lib/creator-card.ts); nothing is ever cut.
  */
 
@@ -18,7 +18,7 @@ const NO_STORE = { "Cache-Control": "private, no-store" };
 const MAX_BODY_BYTES = (MAX_CARD_NAME + MAX_CARD_TITLE + MAX_CARD_EMAIL + 40 + 200 + MAX_CARD_NOTE) * 6 + 1_000;
 
 export async function GET(request: NextRequest) {
-  const access = await jsonAccess(request, "settings");
+  const access = await jsonAccess(request, "page");
   if (access instanceof Response) return access;
   const store = access.store;
   if (!store) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "settings", MAX_BODY_BYTES);
+  const guarded = await guardStoreWrite(request, "page", MAX_BODY_BYTES);
   if (!guarded.ok) return guarded.response;
   const { body, store } = guarded;
   const statsId = store.statsId;

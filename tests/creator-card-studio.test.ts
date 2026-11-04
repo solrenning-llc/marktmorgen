@@ -4,7 +4,7 @@
  * field labeled with an example beside it, off until turned on, a preview in
  * the store's look under its own heading with nothing in it that leaves the
  * studio, refusals said in an alert, deleting it undone by saving again, and
- * the page reached from the studio by those who may change settings.
+ * the page reached from Your pages by those who may change the store's pages.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -49,10 +49,10 @@ is("the words stay on the screen, and saving puts it back", editor.includes("set
 
 part("In the studio");
 const studio = readFileSync("app/studio/card/page.tsx", "utf8");
-is("only for those who may change settings, as the route", studio.includes('"settings");') && readFileSync("app/api/store/creator-card/route.ts", "utf8").includes('jsonAccess(request, "settings")'), true);
+is("for those who may change the store's pages, as the route", studio.includes('"page");') && readFileSync("app/api/store/creator-card/route.ts", "utf8").includes('jsonAccess(request, "page")') && readFileSync("app/api/store/creator-card/route.ts", "utf8").includes('guardStoreWrite(request, "page"'), true);
 is("a link to the card once it is shown", studio.includes("{card?.on ? (") && studio.includes("Open your card at"), true);
 is("said when it cannot be read", studio.includes("Your card could not be read just now. Nothing was changed."), true);
-const home = readFileSync("app/studio/page.tsx", "utf8");
-is("reached from the studio's tools, for the same people", /may\("settings"\)\s*\?\s*\[\{ href: studioPath\(store, "", "card"\), title: "Business card"/.test(home), true);
+const site = readFileSync("app/studio/site/page.tsx", "utf8");
+is("reached from Your pages, for the same people", site.includes('"page");') && site.includes('<Link href={studioPath(store, "", "card")}') && site.includes("Set up your business card"), true);
 
 done();

@@ -22,12 +22,13 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
 /**
  * The creator's digital business card (639 [GL7](22), unit 3): filled in,
  * previewed in the store's own look and language, and shown at the store's
- * contact address only once turned on. Settings: owner and Admin, as the
- * route that keeps it (app/api/store/creator-card).
+ * contact address only once turned on. For whoever may change the store's
+ * pages, as the route that keeps it (app/api/store/creator-card), and
+ * reached from "Your pages" (app/studio/site).
  */
 export default async function StudioCardPage({ searchParams }: Params) {
   const query = await searchParams;
-  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "settings");
+  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "page");
   if (!found.ok) {
     if (found.reason === "signed_out") redirect("/signin");
     redirect(found.store ? studioPath(found.store, "team=forbidden") : "/studio");

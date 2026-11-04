@@ -5,6 +5,7 @@ import { ensureStatsId, setPostCount } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_POST_BODY, cleanPost, deletePost, savePost } from "@/lib/store-blog";
+import { outlinePromptsLeft } from "@/lib/blog-outline";
 
 /**
  * Writes the store's blog (lib/store-blog.ts): `{ action: "save", id?, title,
@@ -28,6 +29,8 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true });
     }
     const input = cleanPost(body);
+    // A post started from an outline (lib/blog-outline.ts) is never published with its prompts left in; a draft may keep them.
+    if (!input.draft && outlinePromptsLeft(input.title, input.body).length) return fail("outline_left");
     // Only one of the store's own products, as it is now.
     if (input.product && !(await readListing(store, input.product))) input.product = null;
     const id = typeof body.id === "string" && body.id ? text(body.id, 20) : null;

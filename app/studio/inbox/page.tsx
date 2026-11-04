@@ -12,6 +12,7 @@ import { openConversation, readInbox } from "@/lib/inbox";
 import { CONVERSATION_ID } from "@/lib/inbox-rules";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
+import { MAX_FAQ } from "@/lib/store-faq";
 
 export const metadata: Metadata = {
   title: "Inbox — Marktmorgen",
@@ -35,6 +36,8 @@ export default async function StudioInboxPage({ searchParams }: Params) {
   const { view } = found;
   const { store } = view;
   const conversations = await readInbox(store.statsId);
+  // When the list on the page was read: the inbox says it as its first check (484 [IT1]).
+  const readAt = readNow();
   const asked = typeof query.c === "string" && CONVERSATION_ID.test(query.c) ? query.c : "";
   const first = asked && store.statsId ? await openConversation(store.statsId, asked, store) : null;
   const team = store.sid ? await readTeam(store.sid) : { members: [] };
@@ -70,11 +73,18 @@ export default async function StudioInboxPage({ searchParams }: Params) {
               setting={store.inbox}
               ai={{ on: aiOn, left }}
               canSettings={can(view.role, "settings")}
+              readAt={readAt}
               chatBlock={chatBlock}
+              faq={can(view.role, "page") ? { room: MAX_FAQ - store.faq.length, href: studioPath(store) } : null}
             />
           </div>
         </main>
       </StudioStorePin>
     </div>
   );
+}
+
+/** Now, in milliseconds: when the list on the page was read. */
+function readNow(): number {
+  return Date.now();
 }

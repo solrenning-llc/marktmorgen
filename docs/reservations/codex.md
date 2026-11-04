@@ -15,8 +15,8 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 | Codex E | 465 [MR2]: reject discarded customer cost evidence | codex/e-mr2-cost-evidence | `lib/net-margin-rules.ts`, `lib/reviewed-resource-envelope.ts`, `lib/funded-exposure-rules.ts`, `tests/net-margin-cost-evidence.test.ts` | 04/11/2026 |
 | Codex C | 465 [MR2]: complete protocol infrastructure profiles | codex/c-mr2-protocol-evidence | `lib/spend-cost-table.ts`, `tests/protocol-infrastructure-cost.test.ts`, `tests/contract-protocol-cost.test.ts` | 04/11/2026 |
 | Codex C | 473 [TX3]: serializable own sales evidence | codex/c-tx3-sales-evidence | `lib/tax-sales-counter.ts`, `tests/tax-sales-counter.test.ts` | 04/11/2026 |
-| Codex E | 465 [MR2]: complete plan payment dispute cost evidence | codex/e-dispute-cost-evidence | `lib/plan-payment-dispute-cost-rules.ts`, `tests/plan-payment-dispute-evidence.test.ts` | 04/11/2026 |
 | Codex C | 472 [TX2]: complete explicit incoming-exchange evidence | codex/c-tx2-exchange-evidence | `lib/receiving-costs.ts`, `tests/receiving-most-correct.test.ts` | 04/11/2026 |
 | Codex F | 309 [EM1], CX-89: erasure delivery fixture waits for the observed completion; production erasure untouched | codex/f-erasure-delivery-wait | `tests/erasure-request-full.test.ts` | 04/11/2026 |
 | Codex D | 474 [TX4]: official U.S. federal filing evidence | codex/d-tx4-us-filing-evidence | `docs/llc-fixed-costs-2026-10-22.md`, `tests/tx4-us-filing-evidence.test.ts` | 04/11/2026 |
 | Codex H | 310 [AX2]: help links reveal answers hidden by search; malformed fragments stay harmless | codex/h-help-navigation | `components/help-search.tsx`, `tests/help-search-navigation.test.ts`, `tests/e2e/accessibility-public-matrix.mjs` | 04/11/2026 |
+| Codex H | 310 [AX2]: copied answer links preserve native modified navigation | codex/h-copy-link-native | `components/copy-link.tsx`, `tests/copy-link-native.test.ts` | 04/11/2026 |

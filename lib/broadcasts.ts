@@ -146,6 +146,22 @@ async function save(b: Broadcast): Promise<void> {
   if (!Array.isArray(response) || response.length !== 1 || response[0] !== "OK") throw new Error("Campaign progress write could not be confirmed");
 }
 
+/**
+ * How many of the newest `limit` broadcasts there are and how many bytes
+ * their records hold, before they are read: for a reading that pays for its
+ * size first (lib/mcp-tools.ts, emailsTool). Null when a size did not come back.
+ */
+export async function broadcastSizes(listId: string | null, limit = 30): Promise<{ count: number; bytes: number } | null> {
+  if (!listId || !isRedisConfigured()) return { count: 0, bytes: 0 };
+  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
+  const list = Array.isArray(ids) ? (ids as string[]) : [];
+  if (!list.length) return { count: 0, bytes: 0 };
+  const lengths = (await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)]))).map(Number);
+  if (lengths.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+  // A broadcast added between this and the reading is a few bytes more, bounded by how fast a store writes them.
+  return { count: list.length, bytes: lengths.reduce((a, b) => a + b, 0) };
+}
+
 /** The store's broadcasts, newest first. */
 export async function listBroadcasts(listId: string | null, limit = 30): Promise<Broadcast[]> {
   if (!listId || !isRedisConfigured()) return [];

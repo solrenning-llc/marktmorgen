@@ -12,7 +12,7 @@ import { GET as affiliatesRead } from "@/app/api/v1/affiliates/route";
 import { GET as bookingsRead } from "@/app/api/v1/bookings/route";
 import { POST as mcp } from "@/app/api/mcp/route";
 import { makeKey } from "@/lib/api-keys";
-import { API_PAGE } from "@/lib/api-read";
+import { AFFILIATE_FIELDS, API_PAGE, BOOKING_FIELDS, STUDENT_FIELDS } from "@/lib/api-read";
 import { apiReadUnits, bookWork, bookingsWork, studentsPageWork } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES, bookSizes } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
@@ -73,6 +73,12 @@ async function leaveOne(s: { store: () => Promise<Store> }): Promise<void> {
   const store = await s.store();
   const left = allowanceFor(store, "api") - (await allowanceUsed(store, "api"));
   if (left > 1) is("the month is taken down to one", (await takeAllowance(store, "api", left - 1)).ok, true);
+}
+
+/** Forgets what every store took this month, so a store emptied above can read again. */
+async function freshMonth(): Promise<void> {
+  const [, keys] = (await redis.pipeline([["SCAN", "0", "MATCH", "nl:allow:api:*", "COUNT", 10_000]]))[0] as [string, string[]];
+  if (keys.length) await redis.pipeline([["DEL", ...keys]]);
 }
 
 async function main(): Promise<void> {
@@ -221,9 +227,24 @@ async function main(): Promise<void> {
     is(`${path}: 400 fields`, [res.status, (await res.json()).error], [400, "fields"]);
     is(`${path}: one request, nothing read`, [(await used(fields)) - before, commands.some((c) => ["HSCAN", "HGETALL", "HLEN", "SMEMBERS"].includes(String(c[0]))), stripe.length], [1, false, 0]);
   }
-  // A field the rows lack is still told after the reading, as before.
-  const unknown = await bookingsRead(get(fields.key, "/api/v1/bookings?fields=nothing_here"));
-  is("an unknown field is answered after reading", unknown.status, 200);
+  // A field the rows never have is checked against each route's fixed list, before anything is taken or read too, rows or none.
+  for (const [route, path] of [[studentsRead, `/api/v1/students?product=${product.product.id}&fields=email,nothing_here`], [affiliatesRead, "/api/v1/affiliates?fields=nothing_here"], [bookingsRead, "/api/v1/bookings?fields=nothing_here"]] as const) {
+    const owner = route === studentsRead ? course : route === affiliatesRead ? program : fields;
+    await freshMonth();
+    before = await used(owner);
+    commands = [];
+    stripe = [];
+    const res = await route(get(owner.key, path));
+    is(`${path}: 400 unknown_field`, [res.status, (await res.json()).error], [400, "unknown_field"]);
+    is(`${path}: one request, nothing read`, [(await used(owner)) - before, commands.some((c) => ["HSCAN", "HGETALL", "HLEN", "SMEMBERS", "SCARD"].includes(String(c[0]))), stripe.length], [1, false, 0]);
+  }
+  // The fixed lists are the rows' own fields.
+  await freshMonth();
+  const studentRows = await (await studentsRead(get(course.key, `/api/v1/students?product=${product.product.id}`))).json();
+  is("students' fields are its list", Object.keys(studentRows.data[0]).sort(), [...STUDENT_FIELDS].sort());
+  const affiliateRows = await (await affiliatesRead(get(program.key, "/api/v1/affiliates"))).json();
+  is("affiliates' fields are its list", Object.keys(affiliateRows.data[0]).sort(), [...AFFILIATE_FIELDS].sort());
+  is("bookings' list is what bookings sends", [...BOOKING_FIELDS].sort(), ["amount", "answers", "buyer_time_zone", "currency", "email", "ends_at", "id", "moved", "name", "product_id", "starts_at", "title"]);
 
   done();
 }

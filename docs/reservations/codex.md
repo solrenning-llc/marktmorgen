@@ -6,4 +6,7 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Codex | CX-29(5): Marketing API default version | codex/meta-marketing-api-version | `lib/meta-ads.ts`, `tests/meta-ads.test.ts`, `docs/meta-marketing-api-version-2026-11-04.md` | 04/11/2026 |
+
+| Codex principal | CX-56(3): prove lost-dispute application fee reversal using pinned dispute list | codex/share-lost-dispute-proof | `lib/share-settle.ts`, `tests/share-lost-dispute.test.ts`, `tests/platform-share.test.ts`, `docs/share-lost-dispute-proof.md` | 04/11/2026 |
 | Codex principal | CX-47: explicit classic subscription Checkout and pinned request version; release merged Meta reservation per CX-42 | codex/subscription-classic-version | `lib/store-checkout.ts`, `lib/assistant-billing.ts`, `lib/billing.ts` (CX-61/CX-62: checkout and restart subscription body/header only, preserve Codex B search changes), `tests/subscription-checkout-version.test.ts`, `tests/subscription-restart-version.test.ts`, `docs/subscription-checkout-version-2026-11-04.md` | 04/11/2026 |

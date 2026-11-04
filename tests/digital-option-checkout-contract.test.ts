@@ -42,6 +42,10 @@ test("both explicit paid-file choices match the actual original checkout body wi
    const form=new URLSearchParams(last.body),consent=form.get("metadata[dc]");assert.ok(consent);
    assert.equal(form.get("metadata[option]"),option.id);assert.equal(form.get("line_items[0][price_data][unit_amount]"),String(option.priceCents));
    assert.equal(digitalOptionBodyMatches(last.body,{options:[selected]},option.id,folder,{storeHandle:store.handle,productId:product.id,title:product.title,currency:store.currency,consent,summary:product.summary},60000),true,"actual Checkout wire matches only the selected original option and summary");
+   for(const key of ["payment_intent_data[metadata][store]","payment_intent_data[metadata][product]","payment_intent_data[metadata][option]","payment_intent_data[application_fee_amount]","payment_intent_data[transfer_data][destination]","payment_intent_data[metadata][gift]"]){
+    const altered=new URLSearchParams(last.body);altered.set(key,"substituted");
+    assert.equal(digitalOptionBodyMatches(altered.toString(),{options:[selected]},option.id,folder,{storeHandle:store.handle,productId:product.id,title:product.title,currency:store.currency,consent,summary:product.summary},60000),false,key);
+   }
    const prepared=new URLSearchParams(last.body),nonce="a".repeat(64);
    prepared.set("metadata[mm_order_origin]","digital-option-v1");prepared.set("metadata[mm_order_intent]",nonce);prepared.set("metadata[mm_order_hash]",confirmationBodyDigest(prepared.toString()));
    const snapshot=captureDigitalOptionRequestSnapshot({store,product,optionId:option.id,folder,body:prepared.toString(),nonce,consent,maximumBytes:60000});

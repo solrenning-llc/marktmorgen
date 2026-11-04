@@ -9,7 +9,7 @@ function fixture() {
   const name = `${identity.title} (${option.label})`;
   const form = new URLSearchParams({ mode: "payment", "metadata[store]": identity.storeHandle, "metadata[product]": identity.productId,
     "metadata[option]": option.id, "metadata[title]": name, "metadata[dc]": identity.consent,
-    "line_items[0][quantity]": "1", "line_items[0][price_data][unit_amount]": "6500", "line_items[0][price_data][currency]": "usd", "line_items[0][price_data][product_data][name]": name, "payment_intent_data[metadata][dc]": identity.consent });
+    "line_items[0][quantity]": "1", "line_items[0][price_data][unit_amount]": "6500", "line_items[0][price_data][currency]": "usd", "line_items[0][price_data][product_data][name]": name, "payment_intent_data[metadata][store]": identity.storeHandle, "payment_intent_data[metadata][product]": identity.productId, "payment_intent_data[metadata][option]": option.id, "payment_intent_data[metadata][dc]": identity.consent });
   return { product, identity, form, match: () => digitalOptionBodyMatches(form.toString(), product, option.id, "synthetic", identity, 60000) };
 }
 test("the exact selected original amount/file namespace and duplicated consent metadata agree", () => {

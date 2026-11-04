@@ -36,10 +36,13 @@ export function digitalOptionBodyMatches(body: unknown, product: unknown, option
     "line_items[0][quantity]": "1", "line_items[0][price_data][unit_amount]": String(selected.priceCents),
     "line_items[0][price_data][currency]": o.currency, "line_items[0][price_data][product_data][name]": name,
     "payment_intent_data[metadata][dc]": o.consent,
+    "payment_intent_data[metadata][store]": o.storeHandle,
+    "payment_intent_data[metadata][product]": o.productId,
+    "payment_intent_data[metadata][option]": selected.id,
   };
   if (o.summary) expected["line_items[0][price_data][product_data][description]"] = o.summary;
   return Object.entries(expected).every(([k, v]) => form.get(k) === v) &&
-    !entries.some(([k]) => /^metadata\[bump(?:2|3)?(?:_|\])/.test(k) || (k.startsWith("line_items[") && !Object.hasOwn(expected, k)) || /^line_items\[(?!0\])/.test(k) || /^(discounts|custom_fields|optional_items|subscription_data|shipping_options|shipping_address_collection)\[/.test(k)) &&
+    !entries.some(([k]) => (k.startsWith("payment_intent_data[") && !Object.hasOwn(expected, k)) || /^metadata\[bump(?:2|3)?(?:_|\])/.test(k) || (k.startsWith("line_items[") && !Object.hasOwn(expected, k)) || /^line_items\[(?!0\])/.test(k) || /^(discounts|custom_fields|optional_items|subscription_data|shipping_options|shipping_address_collection)\[/.test(k)) &&
     !["gift", "group", "people", "preorder", "upsell_key", "bundle", "ship"].some(k => form.has(`metadata[${k}]`));
 }
 

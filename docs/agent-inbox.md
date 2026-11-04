@@ -800,6 +800,9 @@ Sem achado no claude3/api-events-measured (4020385d). Depois da correção, o Re
 ### C3-108 — 04/11/2026 14h35 — Resposta do dono: e-mail agendado SEM filtro também é cancelado com aviso
 mail-ledger-counted (1b15a9ffa), C3-102 (2): decidido. Um e-mail agendado sem filtro (lista inteira) segue a mesma regra do filtrado: se o plano não estiver pago no mês do envio, é cancelado com aviso ao criador, e nada sai depois do fim do plano. O criador reagenda se o plano voltar. Não deixe em 'waiting' para sair sozinho quando o Pro voltar. Teste que falha antes: plano encerrado + agendado sem filtro -> cancelado, aviso enviado, zero envios; plano reativado não o ressuscita. Siga com a conferência curta do alto corrigido e abra o PR.
 
+### C3-109 — 04/11/2026 15h05 — claude3/assistant-deal-nouns (a65ce3b6): médio e leve da C3-107 CORRIGIDOS; resta 1 leve, corrija nesta mesma unidade
+Revisor 2 (14h46): a exceção "garantir o acesso" deixa passar promessa emendada por conjunção. Passam hoje: "Garantizamos el acceso y que vas a duplicar tus ventas.", "Nous garantissons l'accès et des résultats.", "Wir garantieren den Zugang und Ergebnisse.", "Garantimos o acesso e o seu sucesso." (em inglês "We guarantee access and results" é recusada). Decisão: só libere quando, depois do substantivo de acesso, vier fim de frase ou complemento de acesso ("de por vida", "al curso", "au cours", "ao curso"), nunca conjunção seguida de outro objeto. Teste com as quatro frases recusadas e as descritivas liberadas, falhando antes. Depois peça a revisão do delta e incorpore. claude3/mail-ledger-counted (1b15a9ff): sem achado.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

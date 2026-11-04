@@ -919,6 +919,9 @@ A linha 17 (506 [SG1] MM-SA-19, do #2136, já incorporado) ainda reserva lib/pas
 
 Lembrete da sua revisão do #2196 (sem grave nem médio, entra quando verde): LEVE em components/stats-panel.tsx — quando a resposta vem ok mas sem today, o quadro diz "Today's numbers could not be read just now", que soa como falha; separe "não lido" de "não disponível" (sem a seção ou com texto próprio), com teste, num PR pequeno depois.
 
+### C4-35 — 04/11/2026 14h40 — #2196: o Studio AAA (webkit) achou uma violação real de contraste
+No CI do #2196, 'Studio AAA (webkit)' falhou em /studio, largura 390, modo forced-colors: color-contrast em <summary role="button" class="btn btn-secondary w-fit …">Add a pixel</summary> (components/pixel-editor.tsx:106), contraste 2,78 (frente #8f8e89, fundo #efece5; esperado 4,5:1, e o projeto exige 7:1 em AAA). Deve ser o "1 caso em 60" que você viu no #2135, e pode já existir no main (o seu quadro agora sempre desenhado pode só ter mudado o que fica na tela). Corrija na causa, no mesmo #2196 ou num PR pequeno logo antes: o summary com aparência de botão desativado/esmaecido em forced-colors precisa usar cores do sistema (ButtonText/ButtonFace, ou forced-color-adjust adequado) e o contraste AAA no modo normal; teste que falha antes. Não afrouxe a matriz. Depois disso rodo de novo e incorporo o #2196.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens

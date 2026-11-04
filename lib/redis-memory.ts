@@ -418,6 +418,53 @@ export class MemoryRedis {
           this.hash(names).delete(who);
           return [name, gone];
         }
+        if (key.startsWith("-- marktmorgen:lesson-comments-hide:v1\n") && args[0] === "1" && args.length === 4) {
+          if (this.run(["HEXISTS", args[1], args[2]]) !== 1) return 0;
+          this.run(["HSET", args[1], args[2], args[3]]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comments-take:v1\n")) {
+          const count = Number(args[0]);
+          const [comments, all, replies, ...lessonKeys] = args.slice(1, 1 + count);
+          const asked = args.slice(1 + count);
+          const askedSet = new Set(asked);
+          const taken = new Set<string>();
+          const tops = new Set<string>();
+          const gone: string[] = [];
+          const decode = (raw: string): { r?: unknown } | null => {
+            try { const c = JSON.parse(raw); return c && typeof c === "object" ? c : null; } catch { return null; }
+          };
+          for (const id of asked) {
+            if (taken.has(id)) continue;
+            const raw = this.run(["HGET", comments, id]);
+            this.run(["ZREM", all, id]);
+            this.run(["HDEL", replies, id]);
+            for (const k of lessonKeys) this.run(["ZREM", k, id]);
+            if (typeof raw !== "string") continue;
+            taken.add(id);
+            this.run(["HDEL", comments, id]);
+            gone.push(raw);
+            const c = decode(raw);
+            if (!c) continue;
+            const parent = typeof c.r === "string" ? c.r : null;
+            if (parent === null) tops.add(id);
+            else if (!askedSet.has(parent) && !taken.has(parent) && this.run(["HEXISTS", comments, parent]) === 1) this.run(["HINCRBY", replies, parent, -1]);
+          }
+          if (tops.size) for (const k of lessonKeys) {
+            for (const id of this.zset(k).map((e) => e.member)) {
+              const raw = this.run(["HGET", comments, id]);
+              if (typeof raw !== "string") continue;
+              const c = decode(raw);
+              if (!c || typeof c.r !== "string" || !tops.has(c.r)) continue;
+              this.run(["HDEL", comments, id]);
+              this.run(["HDEL", replies, id]);
+              this.run(["ZREM", all, id]);
+              this.run(["ZREM", k, id]);
+              gone.push(raw);
+            }
+          }
+          return gone;
+        }
         if (key.startsWith("-- marktmorgen:list-blank:v1\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);

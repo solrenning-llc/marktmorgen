@@ -41,7 +41,14 @@ const seenKey = (course: string) => `nl:lc:${course}:seen`;
  * place under its lesson, in the studio's list and its count of answers.
  */
 const COMMENTS_SLOT = (course: string) => `lc:${course}`;
-const commentBytes = (comment: LessonComment) => dataBytes([serializeComment(comment)], 4);
+/**
+ * What a comment was charged: it is written visible, and hiding it later adds
+ * a mark that was never charged, so the room it gives back is always the
+ * visible one.
+ */
+const commentBytes = (comment: LessonComment) => dataBytes([serializeComment({ ...comment, hidden: false })], 4);
+/** The room the comments a script really took out give back. */
+const takenBytes = (raws: unknown) => commentsFrom(Array.isArray(raws) ? raws : []).reduce((sum, c) => sum + commentBytes(c), 0);
 
 /** The studio's list keeps this many of a course's newest comments. */
 const RECENT_KEPT = 1_000;
@@ -152,36 +159,99 @@ export async function addComment(input: {
   return { ok: true, comment, parent };
 }
 
+/**
+ * Writes a comment only while it is still kept, so hiding a comment that was
+ * just deleted (by its author, the creator or a person's erasure) never
+ * writes it back. KEYS: the comments; ARGV: its id, what it now is. Answers 1
+ * when it was written.
+ */
+export const HIDE_LESSON_COMMENT = `-- marktmorgen:lesson-comments-hide:v1
+if redis.call("HEXISTS", KEYS[1], ARGV[1]) == 0 then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+return 1`;
+
 export async function setHidden(courseId: string, id: string, hidden: boolean): Promise<LessonComment | null> {
   const comment = await readComment(courseId, id);
   if (!comment) return null;
   const next = { ...comment, hidden };
-  await redisPipeline([["HSET", commentsKey(courseId), id, serializeComment(next)]]);
-  return next;
+  const [written] = await redisPipeline([["EVAL", HIDE_LESSON_COMMENT, 1, commentsKey(courseId), id, serializeComment(next)]]);
+  return Number(written) === 1 ? next : null;
 }
 
-/** Deletes a comment, and the answers under it, and gives back their room. Returns how many went. */
+/**
+ * Takes comments out, on the Redis side, and answers the raw of each one it
+ * really took, so that only the one who took a comment gives its room back,
+ * however many deletions run at once. A comment with no parent takes the
+ * answers under it that its lessons' lists hold. KEYS: the comments, the
+ * newest, the answer counts, then any lessons' comments; ARGV: the ids.
+ */
+export const TAKE_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-take:v1
+local taken = {}
+local gone = {}
+local asked = {}
+for _, id in ipairs(ARGV) do asked[id] = true end
+local tops = {}
+for _, id in ipairs(ARGV) do
+  if not taken[id] then
+    local raw = redis.call("HGET", KEYS[1], id)
+    redis.call("ZREM", KEYS[2], id)
+    redis.call("HDEL", KEYS[3], id)
+    for k = 4, #KEYS do redis.call("ZREM", KEYS[k], id) end
+    if raw then
+      taken[id] = true
+      redis.call("HDEL", KEYS[1], id)
+      table.insert(gone, raw)
+      local ok, c = pcall(cjson.decode, raw)
+      if ok and type(c) == "table" then
+        local parent = c.r
+        if parent == cjson.null then parent = nil end
+        if parent == nil then
+          tops[id] = true
+        elseif not asked[parent] and not taken[parent] and redis.call("HEXISTS", KEYS[1], parent) == 1 then
+          redis.call("HINCRBY", KEYS[3], parent, -1)
+        end
+      end
+    end
+  end
+end
+if next(tops) ~= nil then
+  for k = 4, #KEYS do
+    for _, id in ipairs(redis.call("ZRANGE", KEYS[k], 0, -1)) do
+      local raw = redis.call("HGET", KEYS[1], id)
+      if raw then
+        local ok, c = pcall(cjson.decode, raw)
+        if ok and type(c) == "table" and type(c.r) == "string" and tops[c.r] then
+          redis.call("HDEL", KEYS[1], id)
+          redis.call("HDEL", KEYS[3], id)
+          redis.call("ZREM", KEYS[2], id)
+          redis.call("ZREM", KEYS[k], id)
+          table.insert(gone, raw)
+        end
+      end
+    end
+  end
+end
+return gone`;
+
+async function takeComments(courseId: string, ids: string[], lessonIds: string[]): Promise<unknown[]> {
+  if (!ids.length) return [];
+  const [reply] = await redisPipeline([
+    ["EVAL", TAKE_LESSON_COMMENTS, 3 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), ...ids],
+  ]);
+  return Array.isArray(reply) ? reply : [];
+}
+
+/**
+ * Deletes a comment, and the answers under it, and gives back the room of
+ * what this deletion really took out (a comment another deletion took first
+ * is not given back twice). Returns how many went.
+ */
 export async function deleteComment(courseId: string, id: string, room: DataStore): Promise<number> {
   const comment = await readComment(courseId, id);
   if (!comment) return 0;
-  const gone = [comment.id];
-  let freed = commentBytes(comment);
-  if (comment.parent === null) {
-    for (const other of await lessonComments(courseId, comment.lesson)) {
-      if (other.parent === comment.id) {
-        gone.push(other.id);
-        freed += commentBytes(other);
-      }
-    }
-  }
-  await redisPipeline([
-    ["HDEL", commentsKey(courseId), ...gone],
-    ["ZREM", lessonKey(courseId, comment.lesson), ...gone],
-    ["ZREM", allKey(courseId), ...gone],
-    ["HDEL", repliesKey(courseId), comment.id],
-    ...(comment.parent ? [["HINCRBY", repliesKey(courseId), comment.parent, -1] as (string | number)[]] : []),
-  ]);
-  await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);
+  const gone = await takeComments(courseId, [comment.id], [comment.lesson]);
+  const freed = takenBytes(gone);
+  if (freed) await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);
   return gone.length;
 }
 
@@ -230,19 +300,10 @@ export async function dropLessonComments(courseId: string, lessonIds: string[], 
   if (!isRedisConfigured() || !lessonIds.length) return;
   const rows = await redisPipeline(lessonIds.map((l) => ["ZREVRANGE", lessonKey(courseId, l), 0, -1]));
   const ids = rows.flatMap((r) => (Array.isArray(r) ? (r as string[]) : []));
-  // What they weighed, read before they go, comes back to the store's data room.
-  const [held] = ids.length ? await redisPipeline([["HMGET", commentsKey(courseId), ...ids]]) : [[]];
-  const freed = commentsFrom(held).reduce((sum, c) => sum + commentBytes(c), 0);
-  await redisPipeline([
-    ...(ids.length
-      ? [
-          ["HDEL", commentsKey(courseId), ...ids],
-          ["ZREM", allKey(courseId), ...ids],
-          ["HDEL", repliesKey(courseId), ...ids],
-        ]
-      : []),
-    ...lessonIds.map((l) => ["DEL", lessonKey(courseId, l)]),
-  ]);
+  // Only what the take really removed comes back to the store's data room.
+  const gone = await takeComments(courseId, ids, []);
+  await redisPipeline(lessonIds.map((l) => ["DEL", lessonKey(courseId, l)]));
+  const freed = takenBytes(gone);
   if (freed) await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);
 }
 
@@ -302,7 +363,7 @@ export async function forgetLessonCommentsPerson(courseId: string, lessonIds: st
   const [name, raws] = Array.isArray(reply) ? reply : ["", []];
   const gone = Array.isArray(raws) ? raws : [];
   if (room) {
-    const freed = commentsFrom(gone).reduce((sum, c) => sum + commentBytes(c), 0) + (typeof name === "string" && name ? dataBytes([who, name], 1) : 0);
+    const freed = takenBytes(gone) + (typeof name === "string" && name ? dataBytes([who, name], 1) : 0);
     if (freed > 0) await giveData(room, [{ slot: COMMENTS_SLOT(courseId), bytes: freed }]);
   }
   return gone.length;

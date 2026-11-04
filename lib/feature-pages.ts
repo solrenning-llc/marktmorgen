@@ -2590,7 +2590,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { icon: "download", title: "Downloads that expire", body: "The download on the thank-you page works for 3 days; after that the buyer gets it again by email. Where a file is stored is never shown, and large files go through signed links that expire in minutes." },
           { icon: "file", title: "Files that cannot run", body: "Every file is handed over as a download, with headers that stop a browser running anything inside it." },
-          { icon: "camera", title: "Uploads checked for type and size", body: `A picture you upload is checked by its first bytes, not by its name. It must really be a JPEG or a WebP, at most ${MAX_IMAGE_BYTES / 1_000_000} MB, or it is deleted. A file you sell can be at most ${maxFileLabel()}.` },
+          { icon: "camera", title: "Pictures checked, files size-limited", body: `A product or page picture you upload is checked by its first bytes, not by its name. It must really be a JPEG or a WebP, at most ${MAX_IMAGE_BYTES / 1_000_000} MB, or it is refused. A file you sell can be at most ${maxFileLabel()}.` },
           { icon: "ban", title: "A full refund closes the door", body: "Refund a payment in full on your Stripe account and its download stops at once, its course closes within 10 minutes, the community within 5 minutes, and its license key is revoked within about 5 minutes. A partial refund keeps access." },
           { icon: "clock", title: "Limits that stop bots", body: "Checkouts are limited to 20 per 10 minutes per connection per store, and bookings and every form that sends an email have limits of their own, so a script cannot sit on your limited stock or your call times." },
           { icon: "shield", title: "Hidden traps for bots", body: "The sign-in form and your store's contact and free-product forms have a hidden box that people never see. A request that fills it in is dropped. Sign-in also asks our hosting provider whether the request came from a program." },
@@ -2615,8 +2615,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         intro: "None of these checks proves that there are no faults. Each one finds some kinds of faults early.",
         items: [
           { icon: "flask", title: "Tests on every change", body: "Every proposed change to the code, and the main code once a day, runs our automated tests." },
-          { icon: "eye", title: "Code scanning", body: "CodeQL, GitHub's code scanner, looks for known kinds of security faults in the code on every proposed change and once a day." },
-          { icon: "list", title: "Packages checked for known flaws", body: "npm audit compares the packages the site is built from with public lists of known security flaws, on every proposed change and once a day." },
+          { icon: "eye", title: "Code scanning", body: "CodeQL, GitHub's code scanner, looks for known kinds of security faults in the code on every proposed change to the code and once a day." },
+          { icon: "list", title: "Packages checked for known flaws", body: "npm audit compares the packages the site is built from with public lists of known security flaws, on every proposed change to the code and once a day." },
           { icon: "scroll", title: "A written review", body: "On October 18, 2026, the code was reviewed for security faults. Each fault found was tried out on test data, written down with how serious it was, and then fixed or listed as not fixed yet." },
         ],
       },

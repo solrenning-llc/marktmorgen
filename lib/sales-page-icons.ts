@@ -31,4 +31,5 @@ export const KIND_ICONS: Record<BlockKind, IconName> = {
   form: "list",
   // Not in the block gallery yet (lib/sales-page.ts, BLOCK_KINDS); here because every kind has one.
   row: "layout",
+  booking: "calendar",
 };

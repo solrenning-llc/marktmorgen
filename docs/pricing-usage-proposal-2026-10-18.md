@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $31.98 | $198.38 | $69 / $690 |
+| Store | $31.98 | $198.85 | $69 / $690 |
 | Studio | $84.93 | $815.60 | $449 / $4,490 |
-| Scale | $175.93 | $1,873.88 | $999 / $9,990 |
+| Scale | $175.93 | $1,873.95 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -34,10 +34,10 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | Monthly / yearly price | Share of #553's per-use figures included | Net, monthly | Net, yearly | Net a customer, a month | To equal one #553 customer |
 | --- | --- | --- | --- | --- | --- |
 | $29 / $290 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $35 / $350 | 4.4% | 60.51% | 61.47% | $21.18 | 1.96 |
+| $35 / $350 | 4.1% | 60.51% | 61.48% | $21.18 | 1.96 |
 | $39 / $390 **(recommended)** | 18.0% | 60.46% | 61.23% | $23.58 | 1.76 |
-| $49 / $490 | 46.7% | 60.36% | 60.93% | $29.58 | 1.41 |
-| $59 / $590 | 76.5% | 60.32% | 60.69% | $35.59 | 1.17 |
+| $49 / $490 | 46.5% | 60.36% | 60.93% | $29.58 | 1.41 |
+| $59 / $590 | 76.5% | 60.30% | 60.69% | $35.58 | 1.17 |
 | $69 / $690 | 100.0% | 60.28% | 60.57% | $41.60 | 1.00 |
 
 ### Studio
@@ -66,7 +66,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).
 
-At the competitor's own price instead (Store $35, the lowest that keeps 60% at all, Stan being $29; Studio $99, Stan Creator Pro's; Scale $249, Kajabi Growth's), each plan would include Store 4.4%, Studio 1.3%, Scale 5.2% of #553's per-use figures: nearly everything would be bought in packs, which is HighLevel's own shape (its plans include no email at all).
+At the competitor's own price instead (Store $35, the lowest that keeps 60% at all, Stan being $29; Studio $99, Stan Creator Pro's; Scale $249, Kajabi Growth's), each plan would include Store 4.1%, Studio 1.3%, Scale 5.2% of #553's per-use figures: nearly everything would be bought in packs, which is HighLevel's own shape (its plans include no email at all).
 
 ## The proposed plans
 

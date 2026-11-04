@@ -64,9 +64,10 @@
  *   nl:2fa:lockedset:<hash> the account's locked sessions, to log them out on Cancel
  */
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, endSession, normaliseEmail, openSession } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, dropSecondStep, endSession, isMoving, normaliseEmail, openSession } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { type Held, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
 import { withinLimit } from "@/lib/request-guard";
 import { LOCKED_LIST } from "@/lib/locked-words";
 import { seal, unseal } from "@/lib/secret-box";
@@ -93,6 +94,43 @@ const setupKey = (session: string) => `nl:2fa:setup:${sha(`nimbus-2fa-setup:${se
 const lockedKey = (session: string) => `nl:2fa:locked:${sha(`nimbus-2fa-locked:${session}`).slice(0, 40)}`;
 const lockedSetKey = (email: string) => `nl:2fa:lockedset:${sha(`nimbus-2fa-lockedset:${normaliseEmail(email)}`).slice(0, 40)}`;
 const rescueKey = (token: string) => `nl:2fa:rescue:${sha(`nimbus-2fa-rescue:${token}`).slice(0, 40)}`;
+/**
+ * A code used once: the app's step, or a recovery code, taken with SET NX so
+ * two logins that send the same code at the same moment never both pass.
+ * Minutes for a step (it is past its window by then), a day for a recovery
+ * code (it is gone from the record by then).
+ */
+const onceKey = (email: string, what: string) => `nl:2fa:once:${sha(`nimbus-2fa-once:${normaliseEmail(email)}:${what}`).slice(0, 40)}`;
+
+async function spendOnce(email: string, what: string, seconds: number): Promise<boolean> {
+  const [taken] = await redisPipeline([["SET", onceKey(email, what), "1", "NX", "EX", seconds]]);
+  return taken !== null;
+}
+
+/**
+ * Every read-change-write of an account's two-step record holds its lock, and
+ * every write under it is fenced (lib/redis-lock.ts): checking a code,
+ * turning it off, new recovery codes, a request to turn it off without a
+ * code and calling that off, turning it on, the recovery address's link and
+ * a move. Two of them at the same moment never write back what the other
+ * changed (an app code and recovery code A checked together never bring A
+ * back), and nothing recreates a record turned off meanwhile. Emails go
+ * after the lock is let go.
+ */
+const lockKey = (email: string) => `nl:2fa:lock:${sha(`nimbus-2fa-lock:${normaliseEmail(email)}`).slice(0, 40)}`;
+
+function withTwoStep<T>(email: string, work: (held: Held) => Promise<T>): Promise<T> {
+  return withLock(lockKey(email), 5, 4_000, work);
+}
+
+async function writeHeld(held: Held, email: string, record: TwoStep, options: { absent?: boolean } = {}): Promise<boolean> {
+  return setIfHeldOnly(held, recordKey(email), JSON.stringify(record), options);
+}
+
+async function deleteHeld(held: Held, keys: string[]): Promise<boolean> {
+  return deleteIfHeldOnly(held, keys);
+}
+
 const holdKey = (token: string) => `nl:2fa:hold:${sha(`nimbus-2fa-hold:${token}`).slice(0, 40)}`;
 const context = (email: string) => `two-step|${normaliseEmail(email)}`;
 // Not bound to the address, so a move of the sign-in address keeps them; each code is random enough on its own.
@@ -128,9 +166,6 @@ async function read(email: string): Promise<TwoStep | null> {
   return parse(raw);
 }
 
-async function write(email: string, record: TwoStep): Promise<void> {
-  await redisPipeline([["SET", recordKey(email), JSON.stringify(record)]]);
-}
 
 /** Ten recovery codes, "abcd-efgh", each from 31 letters and digits nobody misreads. */
 function newCodes(): string[] {
@@ -323,9 +358,16 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
   if (Number(removed) !== 1) return null;
-  const first = record.reset === 0;
-  const until = first ? now + RESET_DAYS * 86_400_000 : record.reset;
-  if (first) await write(email, { ...record, reset: until });
+  const marked = await withTwoStep(email, async (held) => {
+    const current = await read(email);
+    if (!current) return null;
+    const first = current.reset === 0;
+    const until = first ? now + RESET_DAYS * 86_400_000 : current.reset;
+    if (first && !(await writeHeld(held, email, { ...current, reset: until }))) return null;
+    return { first, until };
+  });
+  if (!marked) return null;
+  const { first, until } = marked;
   const session = await openLockedSession(email, until, now);
   // The same day for a later login through the recovery address, which then opens everything once it has passed.
   await alignRecoveryLock(email, until, now);
@@ -374,13 +416,17 @@ async function endLocked(email: string): Promise<void> {
   const sessions = (Array.isArray(members) ? members : []).filter((m): m is string => typeof m === "string");
   for (const session of sessions) await endSession(session);
   await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
+  // A passkey removal one of them asked for stays: only "Keep it" calls one off (lib/passkeys.ts).
 }
 
 /** Calls off a pending request: the owner logged in with a code or a passkey, or pressed Cancel. The locked sessions are logged out. */
 export async function cancelReset(email: string, why: "login" | "studio"): Promise<boolean> {
-  const record = await read(email);
-  if (!record || record.reset === 0) return false;
-  await write(email, { ...record, reset: 0 });
+  const called = await withTwoStep(email, async (held) => {
+    const record = await read(email);
+    if (!record || record.reset === 0) return false;
+    return writeHeld(held, email, { ...record, reset: 0 });
+  });
+  if (!called) return false;
   await endLocked(email);
   await endRecoveryLock(email);
   await tell(
@@ -398,11 +444,19 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
  * When it has, two-step login is turned off here, and the link logs in alone.
  */
 export async function resetIfDue(email: string, now = Date.now()): Promise<boolean> {
-  const record = await read(email);
-  if (!record || record.reset === 0 || now < record.reset) return false;
-  // Read before the record goes: an account from before kept its recovery address on it.
-  const backup = await backupOf(email, record);
-  await redisPipeline([["DEL", recordKey(email), lockedSetKey(email)]]);
+  // Never during a move, or while one is left broken (lib/auth.ts isMoving): the app is one of the ways in
+  // being carried, and the owner's way back in while the move cannot be read.
+  if (await isMoving(email)) return false;
+  const backup = await withTwoStep(email, async (held) => {
+    const record = await read(email);
+    if (!record || record.reset === 0 || now < record.reset) return null;
+    // Read before the record goes: an account from before kept its recovery address on it.
+    const kept = await backupOf(email, record);
+    return (await deleteHeld(held, [recordKey(email), lockedSetKey(email)])) ? kept : null;
+  });
+  if (backup === null) return false;
+  // What the app opened goes with it (lib/auth.ts dropSecondStep).
+  await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");
   await tell(email, "Two-step login is off for your Marktmorgen account", `Two-step login was turned off ${RESET_DAYS} days after you got in without it, and nothing in your studio is locked any more. You can turn it on again in your studio, with a new app setup and new recovery codes.`, backup);
   return true;
 }
@@ -465,7 +519,9 @@ export async function finishSetup(
   typed: string,
   backupCode: string,
   now = Date.now(),
-): Promise<{ codes: string[] } | "expired" | "wrong" | "backup-wrong" | "already"> {
+  /** Asked again under the record's lock, just before it is written (review of 8b4ddf6ee); it must take no lock. */
+  mayAdd: () => Promise<boolean> = async () => true,
+): Promise<{ codes: string[] } | "expired" | "wrong" | "backup-wrong" | "already" | "second_step"> {
   if (await twoStepOn(email)) return "already";
   const [raw] = await redisPipeline([["GET", setupKey(session)]]);
   let pending: { e?: unknown; s?: unknown; b?: unknown; c?: unknown } = {};
@@ -482,7 +538,12 @@ export async function finishSetup(
   const step = stepOf(opened.value, typed, now);
   if (step === null) return "wrong";
   const codes = newCodes();
-  await write(email, { s: pending.s, since: now, codes: codes.map((c) => codeHash(c)), last: step, reset: 0, backup: "" });
+  // Only where none is there yet, under the lock: turning it on twice at once makes one record, never two sets of codes.
+  const made = await withTwoStep(email, async (held) => {
+    if (!(await mayAdd())) return "second_step" as const;
+    return (await writeHeld(held, email, { s: pending.s as string, since: now, codes: codes.map((c) => codeHash(c)), last: step, reset: 0, backup: "" }, { absent: true })) ? ("made" as const) : ("already" as const);
+  });
+  if (made !== "made") return made;
   // The account's recovery address from now on, for losing the email too (lib/recovery-address.ts).
   await keepRecoveryAddress(email, pending.b);
   await redisPipeline([["DEL", setupKey(session)]]);
@@ -537,8 +598,13 @@ export async function spendRescue(token: string): Promise<string | null> {
     const [removed] = await redisPipeline([["DEL", rescueKey(token)]]);
     email = Number(removed) === 1 ? readBack : null;
   }
-  if (typeof email !== "string" || !email || !(await twoStepOn(email))) return null;
-  await redisPipeline([["DEL", recordKey(email)]]);
+  if (typeof email !== "string" || !email) return null;
+  const address = email;
+  // Never for an address in a move, or left by one that broke (lib/auth.ts isMoving): its two-step login stays.
+  const off = await withTwoStep(address, async (held) => !(await isMoving(address)) && (await twoStepOn(address)) && deleteHeld(held, [recordKey(address)]));
+  if (!off) return null;
+  // What the app opened goes with it (lib/auth.ts dropSecondStep).
+  await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery");
   await tell(email, "Two-step login is off for your Marktmorgen account", "Two-step login was turned off with a link sent to your recovery address, and your account was logged in. Turn it on again in your studio, with your phone, to get new recovery codes.");
   return email;
 }
@@ -547,48 +613,70 @@ export type CodeCheck = "app" | "recovery" | "wrong" | "unreadable" | "limited";
 
 /**
  * Checks a code for an account that has it on: the app's code for now, used
- * once, or a recovery code, spent. Ten tries an hour per account.
+ * once, or a recovery code, spent. Ten tries an hour per account. With the
+ * record's lock already held (withTwoStep): what it writes is fenced, read
+ * under the same lock.
  */
-export async function checkCode(email: string, typed: string, now = Date.now()): Promise<CodeCheck> {
+async function checkHeld(held: Held, email: string, typed: string, now: number): Promise<{ check: CodeCheck; left?: number }> {
   const record = await read(email);
-  if (!record) return "wrong";
-  if (!(await withinLimit("two-step", normaliseEmail(email), CODES_PER_HOUR, 60 * 60))) return "limited";
+  if (!record) return { check: "wrong" };
+  if (!(await withinLimit("two-step", normaliseEmail(email), CODES_PER_HOUR, 60 * 60))) return { check: "limited" };
   const cleaned = typed.trim();
   if (/^\d[\d\s]{4,8}$/.test(cleaned)) {
     const opened = unseal(record.s, context(email));
-    if (!opened.ok) return "unreadable";
+    if (!opened.ok) return { check: "unreadable" };
     const step = stepOf(opened.value, cleaned, now, record.last);
-    if (step === null) return "wrong";
-    await write(email, { ...record, last: step });
-    return "app";
+    if (step === null) return { check: "wrong" };
+    if (!(await spendOnce(email, `step:${step}`, 5 * 60))) return { check: "wrong" };
+    if (!(await writeHeld(held, email, { ...record, last: step }))) return { check: "wrong" };
+    return { check: "app" };
   }
   const hash = codeHash(cleaned);
-  if (!record.codes.includes(hash)) return "wrong";
+  if (!record.codes.includes(hash)) return { check: "wrong" };
+  if (!(await spendOnce(email, `code:${hash}`, 86_400))) return { check: "wrong" };
   const left = record.codes.filter((c) => c !== hash);
-  await write(email, { ...record, codes: left });
-  await tell(email, "A recovery code was used on your Marktmorgen account", `One of your recovery codes was used to log in to your Marktmorgen account. ${left.length} ${left.length === 1 ? "is" : "are"} left; you can make new ones under Two-step login in your studio.`);
-  return "recovery";
+  if (!(await writeHeld(held, email, { ...record, codes: left }))) return { check: "wrong" };
+  return { check: "recovery", left: left.length };
 }
 
-/** Turns it off, with a right code. */
+async function toldCodeUsed(email: string, left: number): Promise<void> {
+  await tell(email, "A recovery code was used on your Marktmorgen account", `One of your recovery codes was used to log in to your Marktmorgen account. ${left} ${left === 1 ? "is" : "are"} left; you can make new ones under Two-step login in your studio.`);
+}
+
+/** Checks a code (checkHeld), under the record's lock. */
+export async function checkCode(email: string, typed: string, now = Date.now()): Promise<CodeCheck> {
+  const out = await withTwoStep(email, (held) => checkHeld(held, email, typed, now));
+  if (out.check === "recovery") await toldCodeUsed(email, out.left ?? 0);
+  return out.check;
+}
+
+/** Turns it off, with a right code, in one hold of the lock. */
 export async function turnOff(email: string, typed: string): Promise<CodeCheck> {
-  const checked = await checkCode(email, typed);
-  if (checked !== "app" && checked !== "recovery") return checked;
-  await redisPipeline([["DEL", recordKey(email)]]);
+  const out = await withTwoStep(email, async (held) => {
+    const checked = await checkHeld(held, email, typed, Date.now());
+    if (checked.check !== "app" && checked.check !== "recovery") return checked;
+    return (await deleteHeld(held, [recordKey(email)])) ? checked : { check: "wrong" as CodeCheck };
+  });
+  if (out.check !== "app" && out.check !== "recovery") return out.check;
+  if (out.check === "recovery") await toldCodeUsed(email, out.left ?? 0);
   await tell(email, "Two-step login is off for your Marktmorgen account", "Two-step login was turned off for your Marktmorgen account. Logging in now needs only the emailed link or a passkey.");
-  return checked;
+  return out.check;
 }
 
-/** Ten new recovery codes in place of the old ones, with a right code. */
+/** Ten new recovery codes in place of the old ones, with a right code, in one hold of the lock. */
 export async function replaceCodes(email: string, typed: string): Promise<{ codes: string[] } | CodeCheck> {
-  const checked = await checkCode(email, typed);
-  if (checked !== "app" && checked !== "recovery") return checked;
-  const record = await read(email);
-  if (!record) return "wrong";
-  const codes = newCodes();
-  await write(email, { ...record, codes: codes.map((c) => codeHash(c)) });
+  const out = await withTwoStep(email, async (held) => {
+    const checked = await checkHeld(held, email, typed, Date.now());
+    if (checked.check !== "app" && checked.check !== "recovery") return { checked, codes: null };
+    const record = await read(email);
+    if (!record) return { checked: { check: "wrong" as CodeCheck }, codes: null };
+    const codes = newCodes();
+    if (!(await writeHeld(held, email, { ...record, codes: codes.map((c) => codeHash(c)) }))) return { checked: { check: "wrong" as CodeCheck }, codes: null };
+    return { checked, codes };
+  });
+  if (!out.codes) return out.checked.check;
   await tell(email, "New recovery codes for your Marktmorgen account", "New recovery codes were made for your Marktmorgen account. The old ones no longer work.");
-  return { codes };
+  return { codes: out.codes };
 }
 
 /** A login that has passed the emailed link and now waits for its code: the token for the browser's cookie. */
@@ -656,13 +744,32 @@ export async function heldFor(token: string): Promise<string | null> {
 }
 
 /** Carries the second step to a new sign-in address (app/api/auth/move), sealed again for it. */
+/**
+ * Forgets an address's two-step record: only for a move that has to be
+ * undone, where whatever the address gained in the meantime must not stay
+ * (app/api/auth/move). True when there was one.
+ */
+export async function discardTwoStep(email: string): Promise<boolean> {
+  return withTwoStep(email, async (held) => (await read(email)) !== null && deleteHeld(held, [recordKey(email)]));
+}
+
 export async function moveTwoStep(from: string, to: string): Promise<void> {
-  const record = await read(from);
-  if (!record) return;
-  const opened = unseal(record.s, context(from));
-  // The app's secret is sealed again for the new address. One that no longer
-  // opens (the root secret was rolled) still moves, so its recovery codes go
-  // on letting the person in rather than the second step quietly ending.
-  await write(to, opened.ok ? { ...record, s: seal(opened.value, context(to)) } : record);
-  await redisPipeline([["DEL", recordKey(from)]]);
+  await withTwoStep(from, (heldFrom) =>
+    withTwoStep(to, async (heldTo) => {
+      const record = await read(from);
+      if (!record) return;
+      // Never onto an address with a two-step record of its own: two accounts' codes are never merged (app/api/auth/move refuses it first).
+      if (await read(to)) throw new Error("the new address has two-step login of its own");
+      const opened = unseal(record.s, context(from));
+      // The app's secret is sealed again for the new address. One that no longer
+      // opens (the root secret was rolled) still moves, so its recovery codes go
+      // on letting the person in rather than the second step quietly ending.
+      if (!(await writeHeld(heldTo, to, opened.ok ? { ...record, s: seal(opened.value, context(to)) } : record, { absent: true }))) throw new Error("moving two-step login lost its lock");
+      if (!(await deleteHeld(heldFrom, [recordKey(from)]))) {
+        // Never on both addresses: the copy goes again, and the move is refused.
+        await deleteHeld(heldTo, [recordKey(to)]);
+        throw new Error("moving two-step login lost its lock");
+      }
+    }),
+  );
 }

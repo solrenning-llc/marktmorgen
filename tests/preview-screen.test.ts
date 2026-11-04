@@ -30,6 +30,7 @@
  * Not checked here (needs a browser: tests/e2e): the drawing itself at each
  * width, the ResizeObserver measuring, and a screen reader reading the region.
  */
+import { SIDE_COLUMN_PX, SIDE_SCROLLBAR_PX } from "@/lib/side-panel";
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 import {
@@ -97,7 +98,7 @@ is("a tiny room never shrinks it to nothing", [fitScale(1, 1024), fitScale(1, 39
 is("the smallest it is shown at is a tenth", MIN_PREVIEW_SCALE, 0.1);
 is("the shrunk page is never wider than its room, for every room of a tenth of the frame or more", [103, 150, 200].every((room) => 1024 * fitScale(room, 1024) <= room) && [39, 40, 100].every((room) => 390 * fitScale(room, 390) <= room), true);
 is("never enlarged", [500, 2000, 4000].every((room) => fitScale(room, 390) <= 1), true);
-is("a phone fits the page drawn beside the blocks (24.5rem)", fitScale(24.5 * 16, PREVIEW_FRAME_WIDTH.phone), 1);
+is("a phone fits the page drawn beside the blocks, its scroll bar taken (25.5rem)", fitScale(SIDE_COLUMN_PX - SIDE_SCROLLBAR_PX, PREVIEW_FRAME_WIDTH.phone), 1);
 is("the height follows the shrinking, rounded up so nothing is cut", [shrunkHeight(1000, 0.382), shrunkHeight(1001, 0.5), shrunkHeight(-3, 0.5)], [382, 501, 0]);
 is("a shrunk preview says so; one at its size says nothing", [shrunkNote(0.382), shrunkNote(1)], ["Shown at 38% of its size, to fit here.", null]);
 
@@ -126,7 +127,7 @@ is("anything else, or nothing, is no choice yet", [readPreviewScreen(null), read
 is("with no choice: Phone in the narrow column beside the blocks, Computer in the full preview", [screenFor("beside", null), screenFor("full", null)], ["phone", "computer"]);
 is("the defaults", PREVIEW_DEFAULT, { beside: "phone", full: "computer" });
 is("a choice holds in both places", [screenFor("beside", "computer"), screenFor("full", "phone"), screenFor("beside", "phone"), screenFor("full", "computer")], ["computer", "phone", "phone", "computer"]);
-is("a phone shown beside the blocks is at its real size there (24.5rem column)", fitScale(24.5 * 16, PREVIEW_FRAME_WIDTH[screenFor("beside", null)]), 1);
+is("a phone shown beside the blocks is at its real size there, beside the scroll bar (25.5rem column)", fitScale(SIDE_COLUMN_PX - SIDE_SCROLLBAR_PX, PREVIEW_FRAME_WIDTH[screenFor("beside", null)]), 1);
 
 part("The switch and the preview region");
 const frame = readFileSync("components/preview-frame.tsx", "utf8");

@@ -7,6 +7,12 @@ import { fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 2_000;
 
+// The longest one request may run (lib/buyer-orders.ts, ORDERS_OPEN_SECONDS): what bounds every call to Stripe it waits on,
+// as for an opening of the list, whose ORDERS_OPEN_UNITS it takes.
+export const maxDuration = 30;
+
+const tooMany = () => new Response("Please try again later.", { status: 429 });
+
 /**
  * A buyer asks for what they bought from this store, sent to their inbox.
  *
@@ -50,7 +56,7 @@ export async function POST(request: NextRequest) {
   const store = await storeForHandle(handle);
   if (!store) return new Response("No such store.", { status: 404 });
   // One of the store's public requests for its window (lib/traffic.ts).
-  if (!(await takePublicRequest(store, "buyer"))) return new Response("Please try again later.", { status: 429 });
+  if (!(await takePublicRequest(store, "buyer"))) return tooMany();
 
   const page = `/@${store.handle}/orders`;
   // A field no person can see. Whatever filled it in is told it worked.
@@ -63,9 +69,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await requestOrdersLink({ store, email, ip, origin: linkOrigin(request, store) });
+    // The store had no room for what the address's purchases take to read (lib/buyer-orders.ts): nothing was read.
+    if (result === "busy") return tooMany();
     return away(`${page}?status=${result}`);
   } catch (error) {
+    // Said only in the log: the answer must not differ between an address that bought and one that did not.
     console.error("sending a purchases link failed", error);
-    return away(`${page}?status=error`);
+    return away(`${page}?status=sent`);
   }
 }

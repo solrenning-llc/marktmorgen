@@ -15,6 +15,7 @@ import { saveReview } from "@/lib/reviews";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readFileSync } from "node:fs";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 
@@ -65,11 +66,21 @@ async function main(): Promise<void> {
   const later = await makeReviewSummary(store, productId, now + SUMMARY_REFRESH_SECONDS * 1000);
   is("a week later, made again", [later.ok && later.fresh, prompts.length], [true, 2]);
 
+  part("When the model fails");
+  reply = null;
+  const failedAt = later.ok ? now + 2 * SUMMARY_REFRESH_SECONDS * 1000 : now;
+  const countedBefore = Number((await redis.pipeline([["GET", aiMonthKey(store, new Date(failedAt))!]]))[0] ?? 0);
+  const failed = await makeReviewSummary(store, productId, failedAt);
+  const countedAfter = Number((await redis.pipeline([["GET", aiMonthKey(store, new Date(failedAt))!]]))[0] ?? 0);
+  is("a failed try is counted as one of the month's AI jobs", [failed.ok ? "" : failed.reason, countedAfter - countedBefore], ["failed", 1]);
+  const words = readFileSync("components/review-ai-summaries.tsx", "utf8");
+  is("so the screen says it counted, never that nothing was", [words.includes("This try counts as one of this month's AI jobs."), words.includes("Nothing was counted")], [true, false]);
+
   part("Only from enough reviews");
   const other = await addProduct(OWNER, "Glaze Guide", "", "19");
   if (!other.ok) throw new Error("no product");
   store = (await storeForEmail(OWNER))!;
-  is("too few: nothing asked", [await makeReviewSummary(store, other.product.id, now), prompts.length], [{ ok: false, reason: "few", reviews: 0 }, 2]);
+  is("too few: nothing asked", [await makeReviewSummary(store, other.product.id, now), prompts.length], [{ ok: false, reason: "few", reviews: 0 }, 3]);
   is("a product id that is not one", (await makeReviewSummary(store, "../x", now)).ok, false);
 
   part("Through the studio's route");

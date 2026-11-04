@@ -15,7 +15,8 @@ const REFUSALS: Record<string, string> = {
   busy: "Another summary is being made. Try again in a minute.",
   off: "AI summaries are not available for this store just now.",
   slow: "Too many AI requests a moment ago. Try again in a minute.",
-  failed: "The summary could not be made just now. Nothing was counted. Try again later.",
+  // The try is counted before the model answers (lib/ai.ts keeps it counted on purpose), so this never says otherwise.
+  failed: "The summary could not be made just now. This try counts as one of this month's AI jobs. Try again later.",
 };
 
 /**

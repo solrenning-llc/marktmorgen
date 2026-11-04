@@ -122,6 +122,17 @@ async function main() {
   }
   is("refused timestamps leave every key intact", redis.keys(), keysBefore);
 
+  part("Reading one email has a fixed Redis response envelope");
+  const pipeline = redis.pipeline.bind(redis);
+  const reads: (string | number)[][] = [];
+  redis.pipeline = async (commands) => { reads.push(...commands); return pipeline(commands); };
+  try {
+    await mailReportDay(STORE, CAMPAIGN);
+    is("only the four aggregate fields are read", reads.map((command) => [command[0], command.length - 2]), [["HMGET", 4]]);
+  } finally {
+    redis.pipeline = pipeline;
+  }
+
   done();
 }
 

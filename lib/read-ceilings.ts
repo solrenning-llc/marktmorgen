@@ -41,6 +41,8 @@ import { MAX_UPDATE_RECIPIENTS } from "@/lib/product-updates-rules";
 import { ALL_TIME_PAGES, DAY_FIELDS_MAX, KEPT_DAYS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { CALENDAR_FILE_MAX_BYTES, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-sync";
 import { READING_COPY_MAX_BYTES } from "@/lib/store-readings";
+import { SALES_INPUTS_MAX_BYTES } from "@/lib/store-reading-rules";
+import { EVENTS_PAGES, PAYPAL_SINCE_REFUNDS, PAYPAL_SINCE_SALES } from "@/lib/sales-events-read";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 
 export type ReadShape = {
@@ -217,8 +219,23 @@ export const STATS_READ_SHAPE: ReadShape = {
   dbBytes: STATS_DAYS * DAY_FIELDS_MAX * STATS_FIELD_BYTES + STATS_DAYS * 64 + STATS_DAYS * 2 * 32 + LIFE_WRITE_MAX * STATS_FIELD_BYTES + READING_COPY_MAX_BYTES,
 };
 export const SALES_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
-  dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES,
+  // With the kept inputs looked at (GET) and written for the day's next readings (SET, C4-36 (B)).
+  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy + 2, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
+  dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES + 2 * SALES_INPUTS_MAX_BYTES,
+};
+/**
+ * A reading of the sales brought up to date since the day's whole one
+ * (lib/store-readings.ts, keptSales; C4-36 (B)): the kept copy (GET) and its
+ * count (SET NX, INCRBY, EXPIRE NX), the kept inputs read and written (GET,
+ * SET: SALES_INPUTS_MAX_BYTES each), Stripe's events (EVENTS_PAGES pages at
+ * the most), PayPal's sales and refunds since (ZREVRANGEBYSCORE and MGET of
+ * PAYPAL_SINCE_SALES; ZRANGEBYSCORE and MGET of PAYPAL_SINCE_REFUNDS), and the
+ * reading kept (SET). One that cannot be brought up to date is read whole,
+ * from the day's heavy readings (SALES_READ_SHAPE).
+ */
+export const SINCE_READ_SHAPE: ReadShape = {
+  seconds: 2, cpu: 1, commands: 1 + 3 + 2 + 2 + 2 + 1, outBytes: 0, stripePages: EVENTS_PAGES,
+  dbBytes: 2 * SALES_INPUTS_MAX_BYTES + (PAYPAL_SINCE_SALES + PAYPAL_SINCE_REFUNDS) * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES,
 };
 export const MEMBERS_READ_SHAPE: ReadShape = {
   seconds: 2, cpu: 0.5, commands: 2 + READING_COUNT_COMMANDS.light, outBytes: 0, stripePages: 2 * 20,
@@ -230,10 +247,10 @@ export const STORE_READING_SHAPES: readonly ReadShape[] = [STATS_READ_SHAPE, SAL
  * home, a store's line in the totals): up to three kept readings (GET each);
  * for each, when it is no longer fresh and the day's count refuses it, that
  * count and its DECRBY (a light one 3 + 1, a heavy one 5 + 2: two light, one
- * heavy); and the day's two counts, to offer "Update now" only while one is
+ * heavy, and for the sales the count of those brought up to date, 3 + 1); and the day's three counts, to offer "Update now" only while one is
  * left (lib/store-readings.ts, readingsLeft).
  */
-export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands: 3 + 2 * (3 + 1) + (5 + 2) + 2, dbBytes: 3 * READING_COPY_MAX_BYTES + 2 * 32, outBytes: 0, stripePages: 0 };
+export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands: 3 + 2 * (3 + 1) + (3 + 1) + (5 + 2) + 3, dbBytes: 3 * READING_COPY_MAX_BYTES + 3 * 32, outBytes: 0, stripePages: 0 };
 
 /**
  * Not one of these four reads, said so it is not taken for zero: the first

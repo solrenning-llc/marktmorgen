@@ -31,10 +31,10 @@ import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
   CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
-  CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
+  CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, READING_COUNT_COMMANDS, SINCE_READ_SHAPE, STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
-import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading, takeUpdateSearch } from "@/lib/store-readings";
+import { HEAVY_READINGS_PER_DAY, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading, takeUpdateSearch } from "@/lib/store-readings";
 import { GB, STORAGE_PER_GB, providerFeeUsd, worstCost } from "./plan-cost-model";
 import { PRICES_WITHOUT_COMMISSION } from "@/lib/plan";
 import { paidStorageBytes } from "@/lib/storage-rules";
@@ -270,17 +270,20 @@ async function main(): Promise<void> {
   const updateWorst = readShapeCost(STORE_READING_SHAPES[3]);
   const lightWorst = Math.max(readShapeCost(STATS_READ_SHAPE), readShapeCost(MEMBERS_READ_SHAPE));
   is("every light shape is lighter than the heavy ones it is counted apart from", lightWorst <= heavyWorst && lightWorst <= updateWorst && STORE_READING_SHAPES.length === 4, true);
-  is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light, product update searches)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst + UPDATE_SEARCHES_PER_DAY * updateWorst), true);
+  is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light, brought up to date, product update searches)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst + SINCE_READINGS_PER_DAY * readShapeCost(SINCE_READ_SHAPE) + UPDATE_SEARCHES_PER_DAY * updateWorst), true);
   {
     // Inbox C4-33 (1): the day's heavy readings are the most the margin allows, with the room that exists: the first
     // payment refunded in full (tests/plan-margin.test.ts, under US$ 65, a ceiling the owner keeps) stays under it,
     // and one more heavy reading a day would pass it. Computed as that test computes it.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
-    const oneMore = 32 * (heavyWorst - lightWorst);
-    is("the first year given back stays under US$ 65 with the day's heavy readings", year < 65, true);
-    is("and one more heavy reading a day would pass it: the figure is the most the margin allows", year + oneMore >= 65, true);
-    is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
+    const oneMoreHeavy = 32 * (heavyWorst - lightWorst);
+    const oneMoreSince = 32 * readShapeCost(SINCE_READ_SHAPE);
+    is("the first year given back stays under US$ 65 with the day's sales readings, whole and brought up to date", year < 65, true);
+    is("one more whole reading a day would pass it", year + oneMoreHeavy >= 65, true);
+    is("and one more brought up to date: both figures are the most the margin allows (C4-36 (B), C4-41 (f))", year + oneMoreSince >= 65, true);
+    is("together, at least one an hour (inbox C4-33 (1))", HEAVY_READINGS_PER_DAY + SINCE_READINGS_PER_DAY >= 24, true);
+    is("a reading brought up to date costs a fraction of a whole one", readShapeCost(SINCE_READ_SHAPE) < heavyWorst / 4, true);
   }
   {
     // The day's heavy readings stop at their own figure; light ones go on to the day's whole figure.
@@ -304,7 +307,9 @@ async function main(): Promise<void> {
     is("a reading's count, measured: light 3, heavy 5, a product update's search 3, as READING_COUNT_COMMANDS less its GET and SET", [lightTaken.commands, heavyTaken.commands, updateTaken.commands, lightTaken.value && heavyTaken.value && updateTaken.value], [READING_COUNT_COMMANDS.light - 2, READING_COUNT_COMMANDS.heavy - 2, READING_COUNT_COMMANDS.update, true]);
     is("refused, with its DECRBY: light 4, heavy 7, a search 4, inside what KEPT_READINGS_SHAPE prices for a page that reads nothing", [lightRefused.commands, heavyRefused.commands, updateRefused.commands, lightRefused.value || heavyRefused.value || updateRefused.value, 3 + 2 * lightRefused.commands + heavyRefused.commands + 2 <= KEPT_READINGS_SHAPE.commands], [4, 7, 4, false, true]);
     const left = await counted(() => readingsLeft(fresh, day));
-    is("what is left of the day: two GET, and none left once used", [left.commands, left.value], [2, { any: false, heavy: false }]);
+    is("what is left of the day: three GET; the readings used, the sales still brought up to date after the day's whole one", [left.commands, left.value], [3, { any: false, heavy: true }]);
+    redis.run(["SET", `nl:reading:day:${fresh.statsId}:2031-02-04:since`, String(SINCE_READINGS_PER_DAY), "EX", 86_400]);
+    is("and none left once those are used too", await readingsLeft(fresh, day), { any: false, heavy: false });
   }
   is("a store in its trial or past its plan keeps both, priced for it (M2)", nonPayingWorst() >= feedMonth + readingsMonth, true);
   console.log(`  calendar feed: a making $${readShapeCost(CALENDAR_BUILD_SHAPE).toFixed(6)}, an answer $${readShapeCost(CALENDAR_POLL_SHAPE).toFixed(6)}, the month $${feedMonth.toFixed(4)}`);

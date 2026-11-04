@@ -30,14 +30,18 @@
  * when they come back, at 00:00 UTC.
  */
 import { nextUtcMidnight } from "@/lib/local-clock";
-import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY } from "@/lib/store-reading-rules";
+import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, SALES_INPUTS_MAX_BYTES, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
-import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
+import { type SalesInputs, type SalesStats, type Stats, type StatsData, readSales, readSalesInputs, readStats, readsSales, salesFromInputs, studioStats } from "@/lib/stats";
+import { applySalesEvents } from "@/lib/sales-events";
+import { EVENTS_MAX_AGE_MS, readPayPalSince, readSalesEventsSince } from "@/lib/sales-events-read";
+import { compactSalesInputs } from "@/lib/sales-inputs";
+import { saleHandles } from "@/lib/store";
 import { type Numbers, membershipNumbers } from "@/lib/membership-numbers";
 
 // The day's figures live in lib/store-reading-rules.ts, which the help reads without the database.
-export { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY };
+export { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, SALES_INPUTS_MAX_BYTES, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY };
 
 /** How long the last reading is kept to show when the day's readings are used. */
 export const READING_KEEP_SECONDS = 86_400;
@@ -66,7 +70,8 @@ export class ReadingsUsed extends Error {
 }
 
 /**
- * Whether the day still has a reading, and a heavy one, left: two GET, for a
+ * Whether the day still has a reading, and one of the sales (whole, or brought
+ * up to date since the day's whole one), left: three GET, for a
  * page that offers to read again. Unknown is none, so nothing is offered that
  * would be refused.
  */
@@ -74,11 +79,14 @@ export async function readingsLeft(store: Pick<Store, "statsId">, now = Date.now
   if (!store.statsId || !isRedisConfigured()) return { any: false, heavy: false };
   const key = dayKey(store.statsId, utcDay(now));
   try {
-    const [raw, rawHeavy] = await redisPipeline([["GET", key], ["GET", `${key}:heavy`]]);
+    const [raw, rawHeavy, rawSince] = await redisPipeline([["GET", key], ["GET", `${key}:heavy`], ["GET", `${key}:since`]]);
     const n = raw === null ? 0 : Number(raw);
     const h = rawHeavy === null ? 0 : Number(rawHeavy);
-    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(h)) return { any: false, heavy: false };
-    return { any: n < STORE_READINGS_PER_DAY, heavy: n < STORE_READINGS_PER_DAY && h < HEAVY_READINGS_PER_DAY };
+    const sinceN = rawSince === null ? 0 : Number(rawSince);
+    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(h) || !Number.isSafeInteger(sinceN)) return { any: false, heavy: false };
+    // The sales may be read again whole, or, after the day's whole reading, brought up to date (C4-36 (B)).
+    const sales = (n < STORE_READINGS_PER_DAY && h < HEAVY_READINGS_PER_DAY) || (h >= 1 && sinceN < SINCE_READINGS_PER_DAY);
+    return { any: n < STORE_READINGS_PER_DAY, heavy: sales };
   } catch {
     return { any: false, heavy: false };
   }
@@ -145,7 +153,14 @@ export type Kept<T> = { value: T; at: number; stale: boolean };
  * A reading that fails leaves the last one kept, stale, or throws when there
  * is none.
  */
-export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false): Promise<Kept<T> | null> {
+export async function keptReading<T>(
+  store: Pick<Store, "statsId">,
+  kind: ReadingKind,
+  read: () => Promise<T>,
+  now = Date.now(),
+  fresh = false,
+  take: () => Promise<boolean> = () => takeStoreReading(store, now, kind === "sales"),
+): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
   let kept: Kept<T> | null = null;
@@ -159,7 +174,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     kept = null;
   }
   if (kept && !fresh && now - kept.at < READING_FRESH_SECONDS * 1000) return kept;
-  if (!(await takeStoreReading(store, now, kind === "sales"))) {
+  if (!(await take())) {
     if (kept) return { ...kept, stale: true };
     throw new ReadingsUsed();
   }
@@ -188,9 +203,100 @@ export async function keptStats(store: Store, now = Date.now(), fresh = false): 
  * incomplete for being kept (inbox C4-33 (2)).
  */
 export async function keptSales(store: Store, now = Date.now(), fresh = false): Promise<Kept<SalesStats | null>> {
-  const kept = await keptReading(store, "sales", () => readSales(store, now), now, fresh);
+  if (!readsSales(store)) {
+    const kept = await keptReading(store, "sales", () => readSales(store, now), now, fresh);
+    if (!kept) throw new ReadingsUsed();
+    return kept;
+  }
+  // C4-36 (B): the first reading of a UTC day is whole; later ones bring the kept inputs up to date from what changed
+  // since (lib/sales-events.ts), from a count of their own; one that cannot be brought up to date is read whole, from
+  // the day's heavy readings, or the last one kept is shown.
+  // Read only when a reading is to be made, never for a page that shows the kept one.
+  let inputs: KeptInputs | null = null;
+  let mode: "whole" | "since" = "whole";
+  const take = async () => {
+    // The count first (a few commands), the kept inputs (up to SALES_INPUTS_MAX_BYTES) only once one is taken; given
+    // back when they cannot be brought up to date, and the whole reading tried instead.
+    if (await takeCount(store, "since", now, SINCE_READINGS_PER_DAY)) {
+      inputs = await readKeptInputs(store, now);
+      if (inputs) {
+        mode = "since";
+        return true;
+      }
+      await giveCount(store, "since", now);
+    }
+    return takeStoreReading(store, now, true);
+  };
+  const read = async (): Promise<SalesStats | null> => {
+    const since = inputs as KeptInputs | null;
+    if (mode === "since" && since) {
+      const [events, paypal] = await Promise.all([readSalesEventsSince(store, since.at, now), readPayPalSince(store, since.at)]);
+      const brought = events && paypal ? applySalesEvents(store, since.inputs, events, paypal, saleHandles(store), now) : null;
+      if (brought) {
+        await keepInputs(store, brought, now);
+        return salesFromInputs(store, brought, now);
+      }
+      // Not brought up to date: the whole reading, from the day's heavy readings, never past them.
+      if (!(await takeStoreReading(store, now, true))) throw new ReadingsUsed();
+    }
+    const whole = await readSalesInputs(store, now);
+    await keepInputs(store, compactSalesInputs(store, whole, now), now);
+    return salesFromInputs(store, whole, now);
+  };
+  const kept = await keptReading(store, "sales", read, now, fresh, take);
   if (!kept) throw new ReadingsUsed();
   return kept;
+}
+
+/** The kept inputs of the sales numbers, read whole today and brought up to date since (C4-36 (B)). */
+type KeptInputs = { at: number; day: string; inputs: SalesInputs };
+const inputsKey = (statsId: string) => `nl:reading:salesin:${statsId}`;
+
+/** The kept inputs when they may be brought up to date at `now`: read today (UTC), within EVENTS_MAX_AGE_MS. */
+async function readKeptInputs(store: Pick<Store, "statsId">, now: number): Promise<KeptInputs | null> {
+  if (!store.statsId) return null;
+  try {
+    const [raw] = await redisPipeline([["GET", inputsKey(store.statsId)]]);
+    if (typeof raw !== "string" || !raw) return null;
+    const parsed = JSON.parse(raw) as Partial<KeptInputs>;
+    if (typeof parsed.at !== "number" || typeof parsed.day !== "string" || !parsed.inputs || !Array.isArray(parsed.inputs.read)) return null;
+    if (parsed.day !== utcDay(now) || now - parsed.at < 0 || now - parsed.at > EVENTS_MAX_AGE_MS) return null;
+    return parsed as KeptInputs;
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps the inputs for the day's next readings, when they fit SALES_INPUTS_MAX_BYTES; otherwise the next is whole. */
+async function keepInputs(store: Pick<Store, "statsId">, inputs: SalesInputs, now: number): Promise<void> {
+  if (!store.statsId) return;
+  const text = JSON.stringify({ at: now, day: utcDay(now), inputs });
+  const commands: (string | number)[][] = Buffer.byteLength(text, "utf8") <= SALES_INPUTS_MAX_BYTES
+    ? [["SET", inputsKey(store.statsId), text, "EX", READING_KEEP_SECONDS]]
+    : [["DEL", inputsKey(store.statsId)]];
+  await redisPipeline(commands).catch(() => {});
+}
+
+/** One taken by takeCount given back, when what it was taken for was not done. */
+async function giveCount(store: Pick<Store, "statsId">, name: string, now: number): Promise<void> {
+  if (!store.statsId) return;
+  await redisPipeline([["DECRBY", `${dayKey(store.statsId, utcDay(now))}:${name}`, 1]]).catch(() => {});
+}
+
+/** One of a count of the UTC day's, kept two days, refused past `limit` (and given back). */
+async function takeCount(store: Pick<Store, "statsId">, name: string, now: number, limit: number): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured() || limit < 1) return false;
+  const key = `${dayKey(store.statsId, utcDay(now))}:${name}`;
+  try {
+    const [, raw] = await redisPipeline([["SET", key, "0", "NX", "EX", 2 * 86_400], ["INCRBY", key, 1], ["EXPIRE", key, 2 * 86_400, "NX"]]);
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n < 1) return false;
+    if (n <= limit) return true;
+    await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /** The store's memberships, kept (lib/membership-numbers.ts). */
@@ -223,7 +329,7 @@ export async function keptNumbers(store: Store, now = Date.now()): Promise<Stats
  */
 export async function forgetStoreReadings(statsId: string | null | undefined): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", ...READING_KINDS.map((kind) => copyKey(kind, statsId))]]);
+  await redisPipeline([["DEL", ...READING_KINDS.map((kind) => copyKey(kind, statsId)), inputsKey(statsId)]]);
 }
 
 /**
@@ -234,6 +340,6 @@ export async function forgetStoreReadings(statsId: string | null | undefined): P
  */
 export async function forgetReadingsPerson(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId)]]);
+  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId), inputsKey(statsId)]]);
   return Number(gone) || 0;
 }

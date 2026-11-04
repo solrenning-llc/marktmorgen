@@ -410,7 +410,9 @@ test("an API reading that reads more than a page takes further requests that cov
   const paypal = read("lib/paypal-sales.ts");
   assert.ok(
     (paypal.includes(`"LIMIT", "0", "${BOOK_PAYPAL_REFUNDS + 1}"`) && paypal.includes(`Math.min(flat.length, ${BOOK_PAYPAL_REFUNDS * 2})`))
-      || (paypal.includes(`PAYPAL_REFUNDS_READ = ${BOOK_PAYPAL_REFUNDS};`) && paypal.includes('"LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)') && paypal.includes("Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ)")),
+      || (paypal.includes(`PAYPAL_REFUNDS_READ = ${BOOK_PAYPAL_REFUNDS};`) && paypal.includes('"LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)') && paypal.includes("Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ)"))
+      // Since C4-36 (B) a reader may ask fewer (never more): at most PAYPAL_REFUNDS_READ, the default.
+      || (paypal.includes(`PAYPAL_REFUNDS_READ = ${BOOK_PAYPAL_REFUNDS};`) && paypal.includes("since: number, limit = PAYPAL_REFUNDS_READ)") && paypal.includes("const most = Math.min(Math.max(1, Math.floor(limit)), PAYPAL_REFUNDS_READ);") && paypal.includes('"LIMIT", "0", String(most + 1)') && paypal.includes("Math.min(flat.length, 2 * most)")),
     "PayPal refunds read",
   );
   const book = read("lib/affiliates.ts");

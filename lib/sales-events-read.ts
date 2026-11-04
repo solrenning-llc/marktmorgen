@@ -23,8 +23,9 @@ export const EVENTS_PAGES = 5;
 export const EVENTS_OVERLAP_SECONDS = 300;
 /** A kept reading older than this is never brought up to date: the whole reading instead. */
 export const EVENTS_MAX_AGE_MS = 24 * 3_600_000;
-/** PayPal's sales read since the kept reading at the most, as the whole reading's pages of a hundred. */
-export const PAYPAL_SINCE_SALES = 200;
+/** PayPal's sales and refunds read since the kept reading at the most; more than these, the whole reading. */
+export const PAYPAL_SINCE_SALES = 40;
+export const PAYPAL_SINCE_REFUNDS = 20;
 
 const isEvent = (row: Record<string, unknown>): row is Record<string, unknown> & StripeEvent =>
   typeof row.type === "string" && typeof row.created === "number" && Boolean(row.data) && typeof row.data === "object" &&
@@ -62,7 +63,7 @@ export async function readSalesEventsSince(store: Pick<Store, "stripeAccountId">
 export async function readPayPalSince(store: Pick<Store, "statsId">, sinceMs: number): Promise<PayPalSince | null> {
   const since = Math.floor(sinceMs / 1000) - EVENTS_OVERLAP_SECONDS;
   try {
-    const [sales, refunds] = await Promise.all([readPayPalSales(store.statsId, since, PAYPAL_SINCE_SALES), readPayPalRefundsWithCoverage(store.statsId, since)]);
+    const [sales, refunds] = await Promise.all([readPayPalSales(store.statsId, since, PAYPAL_SINCE_SALES), readPayPalRefundsWithCoverage(store.statsId, since, PAYPAL_SINCE_REFUNDS)]);
     if (sales.partial || refunds.partial) return null;
     return {
       sales: sales.sales.map(payPalSale),

@@ -15,7 +15,7 @@
  *   - the rule's words for the help missing a figure.
  */
 import { readFileSync } from "node:fs";
-import { ReadingsUsed, STORE_READINGS_PER_DAY, HEAVY_READINGS_PER_DAY, keptReading, readingsBackAt, readingsLeft } from "@/lib/store-readings";
+import { ReadingsUsed, SINCE_READINGS_PER_DAY, STORE_READINGS_PER_DAY, HEAVY_READINGS_PER_DAY, keptReading, readingsBackAt, readingsLeft } from "@/lib/store-readings";
 import { clockWords, nextUtcMidnight, utcAndLocal } from "@/lib/local-clock";
 import { READINGS_RULE_WORDS, UPDATE_RULE_WORDS } from "@/lib/store-reading-rules";
 import { store as redis } from "./redis-stub";
@@ -48,6 +48,9 @@ async function main(): Promise<void> {
   is("a time on the reader's clock, or UTC before the page runs", [clockWords(t, "America/Fortaleza"), clockWords(t)], ["11:05 AM", "14:05 UTC"]);
 
   part("Update now only while the day has a reading left");
+  // The sales brought up to date since the day's whole one (C4-36 (B)) have their own count: used here, so only the
+  // counts below decide.
+  redis.run(["SET", `nl:reading:day:${store.statsId}:${day}:since`, String(SINCE_READINGS_PER_DAY), "EX", 86_400]);
   is("the day used: nothing left", await readingsLeft(store, t), { any: false, heavy: false });
   redis.run(["SET", `nl:reading:day:${store.statsId}:${day}`, "2", "EX", 86_400]);
   redis.run(["SET", `nl:reading:day:${store.statsId}:${day}:heavy`, String(HEAVY_READINGS_PER_DAY), "EX", 86_400]);
@@ -63,7 +66,7 @@ async function main(): Promise<void> {
   is("a store whose sales are used and none kept is said so, not as an error", studio.includes("used: error instanceof ReadingsUsed"), true);
 
   part("The rule, in words ready for the help (lib/help-content.ts is another agent's file today; inbox C4-33 (5))");
-  is("in plain words, with the figures", [READINGS_RULE_WORDS.includes(`up to ${STORE_READINGS_PER_DAY} times a day (UTC), ${HEAVY_READINGS_PER_DAY} of them with your sales`), READINGS_RULE_WORDS.includes("00:00 UTC"), UPDATE_RULE_WORDS.includes("one product's buyers a day")], [true, true, true]);
+  is("in plain words, with the figures", [READINGS_RULE_WORDS.includes(`Your sales are read whole once a day (UTC) and brought up to date from what changed up to ${SINCE_READINGS_PER_DAY} more times`), READINGS_RULE_WORDS.includes("00:00 UTC"), UPDATE_RULE_WORDS.includes("one product's buyers a day")], [true, true, true]);
   done();
 }
 

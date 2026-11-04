@@ -808,15 +808,17 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
 
 /**
  * PayPal sales refunded in full since `since` (seconds): the payment, how
- * much, in what, and when the refund was seen. At most PAYPAL_REFUNDS_READ,
- * their records read in one MGET.
+ * much, in what, and when the refund was seen. At most `limit`
+ * (PAYPAL_REFUNDS_READ unless a reader asks fewer: C4-36 (B) reads only since
+ * its kept reading), their records read in one MGET; `partial` past it.
  */
-export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
+export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number, limit = PAYPAL_REFUNDS_READ): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { rows: [], partial: false };
-  const [orders] = await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(Math.max(0, since)), "+inf", "WITHSCORES", "LIMIT", "0", String(PAYPAL_REFUNDS_READ + 1)]]);
+  const most = Math.min(Math.max(1, Math.floor(limit)), PAYPAL_REFUNDS_READ);
+  const [orders] = await redisPipeline([["ZRANGEBYSCORE", refundedKey(statsId), String(Math.max(0, since)), "+inf", "WITHSCORES", "LIMIT", "0", String(most + 1)]]);
   const flat = Array.isArray(orders) ? (orders as string[]) : [];
   const listed: { order: string; at: number }[] = [];
-  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) || 0 });
+  for (let i = 0; i + 1 < Math.min(flat.length, 2 * most); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) || 0 });
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
   let missing = listed.some((entry) => !ORDER_ID.test(entry.order));
   const readable = listed.filter((entry) => ORDER_ID.test(entry.order));
@@ -832,7 +834,7 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
     if (paid && paid.store === statsId) out.push({ order: paid.order, capture: paid.capture, cents: paid.cents, currency: paid.currency, at: entry.at });
     else missing = true;
   });
-  return { rows: out, partial: flat.length > 2 * PAYPAL_REFUNDS_READ || missing };
+  return { rows: out, partial: flat.length > 2 * most || missing };
 }
 
 export async function readPayPalRefunds(statsId: string | null, since: number): Promise<{ order: string; capture: string; cents: number; currency: string; at: number }[]> {

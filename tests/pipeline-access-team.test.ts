@@ -16,7 +16,7 @@ import { PipelineAccessEditor } from "@/components/pipeline-access-editor";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { readPipelineAccess, setPipelineAccess } from "@/lib/pipeline-access";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { putMember, readLog } from "@/lib/team";
+import { moveMemberships, putMember, readLog, readTeam } from "@/lib/team";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -94,6 +94,21 @@ async function main(): Promise<void> {
   redis.pipeline = pipe;
   const [after] = await redis.pipeline([["GET", `nl:crm:pacc:lock:${store.statsId}:sam@example.com`]]);
   is("and also when the write fails, so the next save is not refused", [failed.status, after, (await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "none" })).status], [500, null, 200]);
+
+  part("While the teammate changes their sign-in");
+  await post(owner, { email: "sam@example.com", pipeline: "sales0", access: "edit" });
+  await post(owner, { email: "sam@example.com", pipeline: "wkshp1", access: "edit" });
+  const [raced] = await Promise.all([post(owner, { email: "sam@example.com", pipeline: "sales0", access: "none" }), moveMemberships("sam@example.com", "sam5@example.com")]);
+  const onTeam = (await readTeam(store.sid)).members.find((m) => m.email === "sam5@example.com" || m.email === "sam@example.com")!.email;
+  is("whichever comes first, the address on the team holds the restriction the owner saved, and none is lost", [onTeam, raced.status === 200 ? (await readPipelineAccess(store.statsId, onTeam))?.sales0 : raced.status], ["sam5@example.com", raced.status === 200 ? "none" : 404]);
+  await moveMemberships("sam5@example.com", "sam@example.com");
+  is("(back on the first address, with it)", (await readPipelineAccess(store.statsId, "sam@example.com"))?.sales0 ?? (raced.status === 200 ? "lost" : "none-saved"), raced.status === 200 ? "none" : "none-saved");
+  const teamLock = `nl:team:lock:${store.sid}`;
+  await redis.pipeline([["SET", teamLock, "someone", "EX", 10]]);
+  const teamBusy = await post(owner, { email: "sam@example.com", pipeline: "wkshp1", access: "view" });
+  await redis.pipeline([["DEL", teamLock]]);
+  is("while the team is being changed, a save waits, then says so and writes nothing", [teamBusy.status, teamBusy.body.error, teamBusy.body.message, (await readPipelineAccess(store.statsId, "sam@example.com"))?.wkshp1 ?? "edit"], [409, "busy", "Someone else is changing your team right now. Try again in a moment.", "edit"]);
+  is("the route reads the teammate and writes with the team's lock held", readFileSync("app/api/store/pipeline-access/route.ts", "utf8").includes("await withTeamLocked(store.sid, async () => {"), true);
 
   part("The screen");
   const html = renderToStaticMarkup(createElement(PipelineAccessEditor, { members: [{ email: "sam@example.com", role: "support" }], pipelines: [{ id: "sales0", name: "Sales" }, { id: "coach0", name: "Coaching" }], initial: { "sam@example.com": { coach0: "none" } } }));

@@ -67,6 +67,17 @@ function withTeam<T>(sid: string, work: () => Promise<T>): Promise<T> {
   return withLock(teamLockKey(sid), 5, 4_000, work);
 }
 
+/**
+ * The same lock, for a change outside this file that must see the team as it
+ * is while it writes (639 [GL7](7): a teammate's pipeline access, so a
+ * sign-in moving at the same moment never leaves the new address without
+ * it). Throws LockBusyError when the team stays busy. Never call
+ * logTeam or another function of this file that takes the lock inside it.
+ */
+export function withTeamLocked<T>(sid: string, work: () => Promise<T>): Promise<T> {
+  return withTeam(sid, work);
+}
+
 export type Member = {
   email: string;
   role: TeamRole;

@@ -52,6 +52,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { dataKey } from "@/lib/store-data";
+import { dataBytes } from "@/lib/store-data-rules";
 
 globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 })) as typeof fetch;
 
@@ -150,15 +152,29 @@ async function main(): Promise<void> {
 
   part("A concurrent change is never overwritten");
   const original = redis.pipeline;
+  const afterSave: string[] = [];
+  let saving = false;
   try {
     redis.pipeline = async (commands) => {
-      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-pipelines-save"))) await original.call(redis, [["SET", "nl:crm:pipes:" + statsId, JSON.stringify([sales, coaching])]]);
+      if (saving) for (const c of commands) afterSave.push(`${c[0]} ${String(c[1])}`);
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-pipelines-save"))) {
+        await original.call(redis, [["SET", "nl:crm:pipes:" + statsId, JSON.stringify([sales, coaching])]]);
+        saving = true;
+      }
       return original.call(redis, commands);
     };
     let conflict = false;
     try { await savePipelineChange(statsId, { pipeline: { ...coaching, name: "Mine" } }, {}, 2, ROOM); } catch (error) { conflict = error instanceof CrmSchemaConflict; }
     is("the change meanwhile is a conflict", conflict, true);
   } finally { redis.pipeline = original; }
+  // The script that refused the write says how long the record there now is: the room is sized from that, with no
+  // second read that could fail in between.
+  const pipesNow = String((await redis.pipeline([["GET", "nl:crm:pipes:" + statsId]]))[0]);
+  is(
+    "its room is what the other session's record weighs, sized without reading it again",
+    [afterSave.some((c) => c === "GET nl:crm:pipes:" + statsId), Number((await redis.pipeline([["HGET", dataKey(ROOM)!, "crm:pipes"]]))[0])],
+    [false, dataBytes([pipesNow], 1)],
+  );
   is("and the other session's pipelines are what is saved", (await readPipelines(statsId)).map((p) => p.name), ["Sales", "Coaching"]);
 
   part("The route: the plan's number, the moves, and removal");

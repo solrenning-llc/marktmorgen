@@ -17,7 +17,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
-import { productIds, readListing, readListings } from "@/lib/catalog";
+import { listingsToRead, productIds, readListing, readListings } from "@/lib/catalog";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { memberPage } from "@/lib/community";
 import { readCourse } from "@/lib/course";
@@ -25,7 +25,9 @@ import { studentPage } from "@/lib/learn";
 import { BOOK_STRIPE_PAGES, bookSizes, readBook } from "@/lib/affiliates";
 import { paidCalls } from "@/lib/calls";
 import { productLink } from "@/lib/checkout-recovery";
-import { apiReadUnits, bookWork, bookingsWork, studentsPageWork } from "@/lib/api-read-rules";
+import { apiReadUnits, bookWork, bookingsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork } from "@/lib/api-read-rules";
+import { readsSales } from "@/lib/stats";
+import { paypalCounts } from "@/lib/paypal-sales";
 
 export type Page<T> = { data: T[]; next: string | null };
 
@@ -40,6 +42,17 @@ export const API_PAGE = 200;
  */
 export type Charge = (more: number) => Promise<Response | null>;
 
+/** Every field each list's rows go out with, so a field asked for is checked before anything is taken or read (lib/api-fields.ts, badFields). */
+export const PRODUCT_FIELDS = ["id", "title", "price", "currency", "kind", "interval", "hidden", "url"] as const;
+export const LEAD_FIELDS = ["email", "name", "agreed", "agreed_at", "unsubscribed", "unsubscribed_at", "first_at", "last_at", "products", "product_ids", "tags", "source"] as const;
+export const MEMBER_FIELDS = ["email", "name", "handle", "listed", "announcements", "muted", "removed", "joined_at", "last_seen_at"] as const;
+export const STUDENT_FIELDS = ["email", "lessons_done", "lessons_total", "started_at", "last_seen_at", "blocked"] as const;
+export const AFFILIATE_FIELDS = ["id", "email", "code", "status", "applied_at", "clicks", "sales", "earned", "paid", "owed", "payable", "waiting"] as const;
+export const BOOKING_FIELDS = ["id", "product_id", "title", "email", "name", "starts_at", "ends_at", "buyer_time_zone", "moved", "amount", "currency", "answers"] as const;
+
+/** Bytes as sent. */
+const sentBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+
 const isoFromSeconds = (s: number) => (s > 0 ? new Date(s * 1000).toISOString() : null);
 const isoFromMs = (ms: number) => (ms > 0 ? new Date(ms).toISOString() : null);
 const isoFromText = (t: string) => {
@@ -53,13 +66,20 @@ export function storeInfo(store: Store) {
   return { handle: store.handle, name: store.name, currency: store.currency };
 }
 
-/** Every product, in the creator's order, a page at a time. */
-export async function products(store: Store, cursor: string | null): Promise<Page<Record<string, unknown>>> {
+/**
+ * Every product, in the creator's order, a page at a time. What reading the
+ * page's listings costs is taken first, counted from the listings the store's
+ * own record does not hold (lib/api-read-rules.ts, productsPageWork).
+ */
+export async function products(store: Store, cursor: string | null, charge: Charge): Promise<Page<Record<string, unknown>> | Response> {
   // The order is in the store's own index, so only the page asked for is
   // read. It used to read the whole catalogue to answer for twenty of it.
   const ids = productIds(store);
   const from = cursor && /^\d{1,6}$/.test(cursor) ? Number(cursor) : 0;
-  const slice = await readListings(store, ids.slice(from, from + API_PAGE));
+  const page = ids.slice(from, from + API_PAGE);
+  const refused = await charge(apiReadUnits(productsPageWork(page.length, listingsToRead(store, page))));
+  if (refused) return refused;
+  const slice = await readListings(store, page);
   return {
     data: slice.map((p) => ({
       id: p.id,
@@ -82,10 +102,21 @@ export async function products(store: Store, cursor: string | null): Promise<Pag
  * agreed to hear from the creator and have not left.
  */
 export async function leads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<Page<Record<string, unknown>>> {
-  if (!store.listId || !isRedisConfigured()) return { data: [], next: null };
+  return (await scanLeads(store, cursor, onlyAgreed)).page;
+}
+
+/** leads, with what its scan read and what it sends taken before it is sent (scannedPageWork): the refusal, as it is, when it is not left. What /api/v1/leads answers. */
+export async function chargedLeads(store: Store, cursor: string | null, onlyAgreed: boolean, charge: Charge): Promise<Page<Record<string, unknown>> | Response> {
+  const { page, readBytes } = await scanLeads(store, cursor, onlyAgreed);
+  const refused = await charge(apiReadUnits(scannedPageWork(1, readBytes, sentBytes(page))));
+  return refused ?? page;
+}
+
+async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<{ page: Page<Record<string, unknown>>; readBytes: number }> {
+  if (!store.listId || !isRedisConfigured()) return { page: { data: [], next: null }, readBytes: 0 };
   const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";
   const [reply] = await redisPipeline([["HSCAN", leadsKey(store.listId), start, "COUNT", API_PAGE]]);
-  if (!Array.isArray(reply) || reply.length < 2) return { data: [], next: null };
+  if (!Array.isArray(reply) || reply.length < 2) return { page: { data: [], next: null }, readBytes: 0 };
   const next = String(reply[0]);
   const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
   const data: Record<string, unknown>[] = [];
@@ -109,16 +140,18 @@ export async function leads(store: Store, cursor: string | null, onlyAgreed: boo
       source: c.source || null,
     });
   }
-  return { data, next: next === "0" ? null : next };
+  // The bytes the scan answered with, for the reading that pays for them (chargedLeads).
+  const readBytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
+  return { page: { data, next: next === "0" ? null : next }, readBytes };
 }
 
 /** The community's members, as the creator's own member list shows them. */
-export async function members(store: Store, cursor: string | null): Promise<Page<Record<string, unknown>>> {
+export async function members(store: Store, cursor: string | null, charge: Charge): Promise<Page<Record<string, unknown>> | Response> {
   const id = store.community?.id;
   if (!id) return { data: [], next: null };
   const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";
   const page = await memberPage(id, start, API_PAGE);
-  return {
+  const out = {
     data: page.members.map((m) => ({
       email: m.e,
       name: m.n || null,
@@ -132,6 +165,9 @@ export async function members(store: Store, cursor: string | null): Promise<Page
     })),
     next: page.next === "0" ? null : page.next,
   };
+  // What the scan answered and what is sent, counted and taken before anything is sent (scannedPageWork).
+  const refused = await charge(apiReadUnits(scannedPageWork(2, page.bytes, sentBytes(out))));
+  return refused ?? out;
 }
 
 /**
@@ -213,6 +249,20 @@ export async function affiliates(store: Store, charge: Charge): Promise<{ data: 
       waiting: r.waiting,
     })),
   };
+}
+
+/**
+ * What one reading of the numbers takes (lib/stats-report.ts readNumbers, and
+ * lib/mcp-tools.ts readFullNumbers before its listings), sized first by the
+ * PayPal sales and refunds kept, taken before anything else is read: null
+ * when taken, else the refusal (lib/api-read-rules.ts, numbersWork).
+ */
+export async function chargeNumbers(store: Store, charge: Charge): Promise<Response | null> {
+  const kept = Boolean(store.statsId);
+  const sales = readsSales(store);
+  const paypal = kept && sales ? await paypalCounts(store.statsId) : { sales: 0, refunds: 0 };
+  if (!paypal) throw new Error("the PayPal sales could not be counted");
+  return charge(apiReadUnits(numbersWork({ kept, sales, stripe: Boolean(store.stripeAccountId), paypalSales: paypal.sales, paypalRefunds: paypal.refunds })));
 }
 
 /**

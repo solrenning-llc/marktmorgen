@@ -21,14 +21,16 @@ import { paidFiguresComplete } from "@/lib/paid-coverage";
  */
 import type { Store } from "@/lib/store";
 import { type StatsData, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
-import { readListings, readTitles } from "@/lib/catalog";
-import { membershipNumbers } from "@/lib/membership-numbers";
-import { listBroadcasts } from "@/lib/broadcasts";
-import { broadcastMoney, flowMoney, readMailRevenue } from "@/lib/mail-revenue";
-import { flowStats, readFlows } from "@/lib/flows";
+import { listingsToRead, productIds, readListings, readTitles } from "@/lib/catalog";
+import { membershipNumbersPaid } from "@/lib/membership-numbers";
+import { broadcastSizes, listBroadcasts } from "@/lib/broadcasts";
+import { broadcastMoney, flowMoney, readMailRevenuePaid } from "@/lib/mail-revenue";
+import { flowStats, flowsBytes, readFlows } from "@/lib/flows";
 import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { type Charge, chargeBook } from "@/lib/api-read";
+import { EMAILS_BROADCASTS, MEMBERSHIPS_COLD_WORK, apiReadUnits, emailsWork, listingsWork, mailRevenueColdWork, membershipsWork } from "@/lib/api-read-rules";
+import { paypalCounts } from "@/lib/paypal-sales";
 import { insightsFrom } from "@/lib/insights";
 import { readPaths } from "@/lib/next-bought";
 import { campaignResultsFrom } from "@/lib/campaign-results";
@@ -49,6 +51,17 @@ export function windowOf(raw: unknown): Window {
 
 /** The studio's numbers, with the products, for one store. */
 export async function readFullNumbers(store: Store, now = Date.now()): Promise<StatsData | null> {
+  const read = await readFullNumbersPaid(store, null, now);
+  return read instanceof Response ? null : read;
+}
+
+/**
+ * readFullNumbers, taking what reading the listings of the products the
+ * numbers name costs (lib/api-read-rules.ts, listingsWork) once they are
+ * known and before they are read; the refusal, as it is, when it is not left.
+ * The numbers themselves are taken before this, by the caller (lib/api-read.ts, chargeNumbers).
+ */
+export async function readFullNumbersPaid(store: Store, charge: Charge | null, now = Date.now()): Promise<StatsData | null | Response> {
   const stats = await readStats(store, now);
   if (!stats) return null;
   let state: StatsData["sales"] = readsSales(store) ? "ok" : "none";
@@ -58,7 +71,10 @@ export async function readFullNumbers(store: Store, now = Date.now()): Promise<S
         return null;
       })
     : null;
-  const listings = await readListings(store, productsInStats(store, stats, sales)).catch(() => []);
+  const named = productsInStats(store, stats, sales);
+  const refused = charge ? await charge(apiReadUnits(listingsWork(listingsToRead(store, named)))) : null;
+  if (refused) return refused;
+  const listings = await readListings(store, named).catch(() => []);
   return studioStats(store, stats, sales, state, listings);
 }
 
@@ -219,9 +235,23 @@ export async function productsTool(store: Store, data: StatsData, w: Window) {
   };
 }
 
-/** Memberships as the Membership numbers page shows them, without anybody's address or words. */
-export async function membershipsTool(store: Store) {
-  const n = await membershipNumbers(store);
+/**
+ * Memberships as the Membership numbers page shows them, without anybody's
+ * address or words. What reading them costs is taken first: the kept numbers,
+ * the titles and the answer; and, when they are not kept, every page of the
+ * creator's Stripe account they read, just before it (lib/api-read-rules.ts).
+ */
+export async function membershipsTool(store: Store, charge: Charge) {
+  if (!store.stripeAccountId || !store.statsId) return { memberships: null, note: "No memberships could be read: the store has no Stripe account connected, or sells none." };
+  const first = await charge(apiReadUnits(membershipsWork(productIds(store).length)));
+  if (first) return first;
+  const said: { refused: Response | null } = { refused: null };
+  const read = await membershipNumbersPaid(store, async () => {
+    said.refused = await charge(apiReadUnits(MEMBERSHIPS_COLD_WORK));
+    return said.refused === null;
+  });
+  if (said.refused) return said.refused;
+  const n = read === "refused" ? null : read;
   if (!n) return { memberships: null, note: "No memberships could be read: the store has no Stripe account connected, or sells none." };
   const titles = await readTitles(store).catch(() => new Map<string, string>());
   return {
@@ -245,14 +275,32 @@ export async function membershipsTool(store: Store) {
   };
 }
 
-/** The list and what each email sent to it did. */
-export async function emailsTool(store: Store) {
+/**
+ * The list and what each email sent to it did. Its broadcasts and sequences
+ * are measured by their bytes and what reading them costs is taken first
+ * (lib/api-read-rules.ts, emailsWork); what they sold, when it is not kept,
+ * just before its sales are read (mailRevenueColdWork).
+ */
+export async function emailsTool(store: Store, charge: Charge) {
   if (!store.listId) return { list: null, note: "This store keeps no list yet." };
-  const [counts, broadcasts, flows] = await Promise.all([listCounts(store.listId), listBroadcasts(store.listId, 30), readFlows(store.listId)]);
-  const [revenue, flowCounts] = await Promise.all([
-    broadcasts.length || flows.length ? readMailRevenue(store).catch(() => null) : Promise.resolve(null),
+  const [sizes, flowBytes] = await Promise.all([broadcastSizes(store.listId, EMAILS_BROADCASTS), flowsBytes(store.listId)]);
+  if (!sizes || flowBytes === null) throw new Error("the emails could not be measured");
+  const first = await charge(apiReadUnits(emailsWork({ broadcasts: sizes.count, broadcastBytes: sizes.bytes, flowBytes })));
+  if (first) return first;
+  const [counts, broadcasts, flows] = await Promise.all([listCounts(store.listId), listBroadcasts(store.listId, EMAILS_BROADCASTS), readFlows(store.listId)]);
+  const said: { refused: Response | null } = { refused: null };
+  const [revenueRead, flowCounts] = await Promise.all([
+    broadcasts.length || flows.length
+      ? readMailRevenuePaid(store, async () => {
+          const paypal = await paypalCounts(store.statsId);
+          said.refused = paypal ? await charge(apiReadUnits(mailRevenueColdWork(paypal.sales))) : await charge(Number.POSITIVE_INFINITY);
+          return said.refused === null;
+        }).catch(() => null)
+      : Promise.resolve(null),
     flowStats(flows).catch(() => new Map()),
   ]);
+  if (said.refused) return said.refused;
+  const revenue = revenueRead === "refused" ? null : revenueRead;
   return {
     currency: store.currency,
     list: { people: counts.total, agreed_to_hear: counts.agreed, left: counts.left, can_be_emailed: counts.mailable },

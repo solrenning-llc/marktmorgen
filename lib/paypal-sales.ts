@@ -753,6 +753,13 @@ export async function watchPayPal(
  * The store's PayPal sales paid since `since` (seconds), newest first, at most
  * `limit`: one range and one read of the orders. Nothing is asked of PayPal.
  */
+/** How many PayPal sales and refunds a store keeps, before they are read (lib/api-read.ts, the numbers); null when a count did not come back. */
+export async function paypalCounts(statsId: string | null): Promise<{ sales: number; refunds: number } | null> {
+  if (!statsId || !isRedisConfigured()) return { sales: 0, refunds: 0 };
+  const [sales, refunds] = (await redisPipeline([["ZCARD", salesKey(statsId)], ["ZCARD", refundedKey(statsId)]])).map(Number);
+  return [sales, refunds].every((n) => Number.isSafeInteger(n) && n >= 0) ? { sales, refunds } : null;
+}
+
 export async function readPayPalSales(statsId: string | null, since: number, limit: number): Promise<{ sales: Paid[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { sales: [], partial: false };
   const [orders] = await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]);

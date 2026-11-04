@@ -11,6 +11,9 @@ import type { CodeAskedRefusal } from "@/lib/discount-input";
 import type { Currency } from "@/lib/money";
 
 /** One code as the API gives it out. */
+/** Every field a code goes out with (codeOut), so a field asked for can be checked before anything is read. */
+export const CODE_FIELDS = ["id", "code", "off", "times_redeemed", "max_redemptions", "expires_at", "active", "minimum", "first_order", "duration", "other_rules"] as const;
+
 export function codeOut(code: DiscountCode): Record<string, unknown> {
   return {
     id: code.id,

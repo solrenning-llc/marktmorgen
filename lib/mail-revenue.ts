@@ -83,12 +83,24 @@ export function flowMoney(revenue: MailRevenue | null, flowId: string): MailMone
 
 /** The store's email sales, from the cache when it is fresh. Never throws: a page is not lost over a number. */
 export async function readMailRevenue(store: Store): Promise<MailRevenue | null> {
+  const read = await readMailRevenuePaid(store, null);
+  return read === "refused" ? null : read;
+}
+
+/**
+ * readMailRevenue, asking `beforeStripe` first when it is not kept and the
+ * sales are about to be read, so a reading that pays for its size
+ * (lib/mcp-tools.ts, emailsTool) takes it then: "refused" when it says no,
+ * with nothing read. Never throws otherwise.
+ */
+export async function readMailRevenuePaid(store: Store, beforeStripe: (() => Promise<boolean>) | null): Promise<MailRevenue | null | "refused"> {
   if (!store.stripeAccountId || !store.statsId) return null;
   try {
     if (isRedisConfigured()) {
       const [cached] = await redisPipeline([["GET", cacheKey(store.statsId)]]);
       if (typeof cached === "string") return JSON.parse(cached) as MailRevenue;
     }
+    if (beforeStripe && !(await beforeStripe())) return "refused";
     const since = Math.floor(Date.now() / 1000) - STATS_DAYS * 86400;
     const { sales, partial } = await readPaidSales(store, since, PAGES);
     const out: MailRevenue = { by: moneyByCampaign(sales, store.currency), partial };

@@ -1,6 +1,6 @@
 import { apiError, apiStore, takeMoreApi } from "@/lib/api-guard";
 import { apiOkFields, badFields } from "@/lib/api-fields";
-import { students } from "@/lib/api-read";
+import { STUDENT_FIELDS, students } from "@/lib/api-read";
 
 /**
  * GET /api/v1/students?product=<id>&cursor= — everybody who has opened one course, with how far
@@ -10,8 +10,8 @@ import { students } from "@/lib/api-read";
 export async function GET(request: Request) {
   const store = await apiStore(request);
   if (store instanceof Response) return store;
-  // A `?fields=` that cannot be read is refused before any further request is taken or anything read.
-  const bad = badFields(request);
+  // A `?fields=` that cannot be answered is refused before any further request is taken or anything read.
+  const bad = badFields(request, STUDENT_FIELDS);
   if (bad) return bad;
   const params = new URL(request.url).searchParams;
   const product = (params.get("product") ?? "").slice(0, 60);

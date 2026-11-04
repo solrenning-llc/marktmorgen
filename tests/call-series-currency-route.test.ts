@@ -79,9 +79,20 @@ async function main(): Promise<void> {
   const refusedWrite = async (f: () => Promise<void>) => { try { await f(); return false; } catch { return true; } };
   is("an id that is not 32 hex characters, or an end not in milliseconds after now, is refused", [await refusedWrite(() => markSeriesOpen(diary, "s1", now + 86_400_000, now)), await refusedWrite(() => markSeriesOpen(diary, id("c"), Math.floor((now + 86_400_000) / 1000), now)), await refusedWrite(() => markSeriesOpen(diary, id("c"), now, now)), await refusedWrite(() => markSeriesOpen(diary, id("c"), Number.NaN, now)), await refusedWrite(() => markSeriesOpen(diary, id("c"), now + 0.5, now))], [true, true, true, true, true]);
   await markSeriesOpen(diary, id("c"), now + 2 * 86_400_000, now);
+  await markSeriesOpen(diary, id("e"), now + 2 * 86_400_000 + 1, now);
   const charged = (await room()) - before;
-  await markSeriesOpen(diary, id("d"), now + 30 * 86_400_000, now + 3 * 86_400_000);
-  is("a write removes the series over first and gives their bytes back to the room, never more than was charged", [(await redis.pipeline([["ZSCORE", seriesOpenKey(diary.callsId), id("c")]]))[0], charged >= seriesReleaseBytes(), seriesReleaseBytes() > 0], [null, true, true]);
+  // Moving b's end is free (the member is there already): the room changes only by what the pruning gives back.
+  const beforePrune = await room();
+  await markSeriesOpen(diary, id("b"), now + 9 * 86_400_000, now + 3 * 86_400_000);
+  const zset = seriesOpenKey(diary.callsId);
+  is("a write removes the series over first and gives back exactly seriesReleaseBytes() for each one removed, never more than was charged", [(await redis.pipeline([["ZSCORE", zset, id("c")]]))[0], (await redis.pipeline([["ZSCORE", zset, id("e")]]))[0], beforePrune - (await room()), charged >= 2 * seriesReleaseBytes(), seriesReleaseBytes() > 0], [null, null, 2 * seriesReleaseBytes(), true, true]);
+  const beforeAgain = await room();
+  await markSeriesOpen(diary, id("b"), now + 10 * 86_400_000, now + 3 * 86_400_000);
+  is("nothing over: nothing given back a second time", beforeAgain - (await room()), 0);
+  const beforeEnd = await room();
+  await markSeriesEnded(diary, id("b"), now + 3 * 86_400_000);
+  await markSeriesEnded(diary, id("b"), now + 3 * 86_400_000);
+  is("a series ended early gives its bytes back once, however often it is ended", beforeEnd - (await room()), seriesReleaseBytes());
 
   part("The studio says why");
   const panel = readFileSync("components/payments-panel.tsx", "utf8");

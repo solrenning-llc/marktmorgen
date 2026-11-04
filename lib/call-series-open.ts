@@ -42,12 +42,8 @@ export function seriesReleaseBytes(): number {
 
 /** Removes the members whose series is over at `now` and gives their bytes back to the room. */
 async function tidy(store: Store & { callsId: string }, now: number): Promise<void> {
-  const key = seriesOpenKey(store.callsId);
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", key, "-inf", now]]);
-  const over = Array.isArray(raw) ? (raw as string[]) : [];
-  if (!over.length) return;
-  // Only what this call removed is given back, so two writers never give the same member back twice.
-  const [gone] = await redisPipeline([["ZREM", key, ...over]]);
+  // One step: only what this call removed is counted, so two writers never give the same member back twice.
+  const [gone] = await redisPipeline([["ZREMRANGEBYSCORE", seriesOpenKey(store.callsId), "-inf", now]]);
   await releaseOrderData(store, (Number(gone) || 0) * seriesReleaseBytes());
 }
 

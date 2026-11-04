@@ -219,7 +219,9 @@ is("refused once its PaymentIntent is canceled", payLink({ ...link, status: "can
 is("nothing to pay without a PaymentIntent", payLink({ ...link, status: null }), "none");
 is("refused from its time on", payLink({ ...link, now: starts[2] - 72 * HOUR }), "late");
 is("nothing to pay once reserved or paid", [payLink({ ...link, status: "requires_capture" }), payLink({ ...link, status: "succeeded" })], ["done", "done"]);
-is("an owed charge stays payable after the start, until OWED_PAY_DAYS after it, never for ever (C2-94)", [payLink({ ...link, stopped: true, owed: true, now: starts[2] + DAY, payBy: owedPayBy(starts[2]) }), payLink({ ...link, owed: true, now: owedPayBy(starts[2]) - 1, payBy: owedPayBy(starts[2]) }), payLink({ ...link, owed: true, now: owedPayBy(starts[2]), payBy: owedPayBy(starts[2]) }), owedPayBy(starts[2]) - starts[2]], ["pay", "pay", "late", OWED_PAY_DAYS * DAY]);
+// The caller passes the failed step's payBy (a failed charge: the session's start); the owed deadline is payLink's own (owedPayBy).
+const owedLink = { ...link, owed: true, payBy: payBy(starts[2], 72, "charge") };
+is("an owed charge stays payable after the start, until OWED_PAY_DAYS after it, never for ever, whatever payBy the caller passes (C2-94)", [payLink({ ...owedLink, stopped: true, now: starts[2] + DAY }), payLink({ ...owedLink, now: owedPayBy(starts[2]) - 1 }), payLink({ ...owedLink, now: owedPayBy(starts[2]) }), owedLink.payBy, owedPayBy(starts[2]) - starts[2]], ["pay", "pay", "late", starts[2], OWED_PAY_DAYS * DAY]);
 is("after a stop in time a payment is refunded in full and a hold released; after a buyer's late stop both are kept", [paidAfterStop("succeeded"), paidAfterStop("requires_capture"), paidAfterStop("requires_action"), paidAfterStop("canceled"), paidAfterStop("succeeded", true), paidAfterStop("requires_capture", true)], ["refund_in_full", "release", "cancel", "none", "none", "capture"]);
 is("as Stripe allows: one processing is waited on, never canceled or refunded; one refunded already, never again", [paidAfterStop("processing"), paidAfterStop("processing", true), paidAfterStop("succeeded", false, true)], ["wait", "wait", "none"]);
 

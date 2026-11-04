@@ -153,6 +153,23 @@ export function indexBytes(parts: string[]): number {
   return distinct(parts).length * INDEX_WORD_BYTES;
 }
 
+/**
+ * The commands indexing these things will send at the most (index, below):
+ * one SMEMBERS, a ZADD for each of the new words, a ZREM for each word it was
+ * found by before, and its SADD and SREM; counted with one SCARD each, which
+ * are counted here too. Null when they cannot be counted. For the walk of a
+ * community's archive, paid before it writes (lib/community-walk.ts).
+ */
+export async function indexCommands(id: string, kind: SearchKind, things: { thing: string; parts: string[] }[]): Promise<number | null> {
+  if (!things.length) return 0;
+  try {
+    const before = await redisPipeline(things.map(({ thing }) => ["SCARD", indexKey(id, kind, thing)]));
+    return things.reduce((sum, { parts }, at) => sum + 1 + 1 + distinct(parts).length + (Number(before[at]) || 0) + 2, 0);
+  } catch {
+    return null;
+  }
+}
+
 /** The distinct words a post is found by, capped, in the order they appear. */
 function distinct(parts: string[]): string[] {
   const seen = new Set<string>();

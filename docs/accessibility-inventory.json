@@ -1650,6 +1650,7 @@
     "app/api/store/assistant/route.ts",
     "app/api/store/attribution/route.ts",
     "app/api/store/audience/route.ts",
+    "app/api/store/blog/link/route.ts",
     "app/api/store/blog/route.ts",
     "app/api/store/book/move/route.ts",
     "app/api/store/book/route.ts",

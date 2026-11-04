@@ -14,7 +14,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
 import type { Broadcast } from "@/lib/broadcasts";
 import { itemFor } from "@/lib/catalog";
-import { LETTER_ID, LETTER_KEEP_DAYS, MAX_LETTER_PRODUCTS, MAX_PUBLISHED_LETTERS, type Letter, letterProducts, parseLetter } from "@/lib/letter-rules";
+import { LETTER_ID, LETTER_KEEP_DAYS, MAX_LETTER_PRODUCTS, MAX_PUBLISHED_LETTERS, type Letter, letterProducts, parseLetter, productChoice } from "@/lib/letter-rules";
 
 const DAY = 86_400_000;
 const listKey = (sid: string) => `nl:letters:s:${sid}`;
@@ -49,10 +49,10 @@ export async function publishLetter(store: Store, broadcast: Broadcast, now = Da
   if (!isRedisConfigured() || !store.sid) return { ok: false, reason: "unavailable", message: "This can't be saved right now. Try again in a minute." };
   if (!store.listId || broadcast.listId !== store.listId || broadcast.status !== "sent") return { ok: false, reason: "not_sent", message: "Only an email this store has sent can be published." };
   const refuse: Published = { ok: false, reason: "products", message: `Check up to ${MAX_LETTER_PRODUCTS} of this store's products. Reload the page if one was just deleted.` };
-  const keep = products === undefined || products === null;
-  if (!keep && !Array.isArray(products)) return refuse;
-  const ids = keep ? [] : letterProducts(products);
-  if (!keep && (ids.length !== (products as unknown[]).length || ids.some((id) => !itemFor(store, id)))) return refuse;
+  const choice = productChoice(products, (pid) => itemFor(store, pid) !== null);
+  if (!choice) return refuse;
+  const keep = choice.keep;
+  const ids = choice.keep ? [] : choice.ids;
   const id = letterIdFor(store.sid, broadcast.id);
   try {
     // Entries whose copy has gone by itself leave the count first; the copy

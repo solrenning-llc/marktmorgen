@@ -58,9 +58,26 @@ export function letterProducts(raw: unknown): string[] {
   return [...new Set(ids)].slice(0, MAX_LETTER_PRODUCTS);
 }
 
-/** Whether only the holders of some products may read this email's words. */
+/** Whether only the holders of some products may read this email's (or blog post's, lib/store-blog.ts) words. */
 export function membersOnly(letter: Pick<Letter, "products">): boolean {
   return Boolean(letter.products && letter.products.length > 0);
+}
+
+/**
+ * What the studio sent as the products that open a publication kept for
+ * members (an email, or a blog post, lib/store-blog.ts), read the one way
+ * both read it: left out (undefined or null), it keeps what it had, so
+ * saving again never opens it by itself; an array is the choice, an empty
+ * one for everyone, and only of products `has` knows, at most
+ * MAX_LETTER_PRODUCTS; anything else is refused (null), never read as
+ * "everyone".
+ */
+export function productChoice(raw: unknown, has: (id: string) => boolean): { keep: true } | { keep: false; ids: string[] } | null {
+  if (raw === undefined || raw === null) return { keep: true };
+  if (!Array.isArray(raw)) return null;
+  const ids = letterProducts(raw);
+  if (ids.length !== raw.length || ids.some((id) => !has(id))) return null;
+  return { keep: false, ids };
 }
 
 /** Whatever came back from storage, made safe to use; null when it is not a published email. */

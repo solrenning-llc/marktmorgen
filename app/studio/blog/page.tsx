@@ -10,6 +10,7 @@ import { AiOn } from "@/components/ai-assist";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
 import { BlogEditor } from "@/components/blog-editor";
 import { allPosts, postSegment, readPost } from "@/lib/store-blog";
+import { readTitles } from "@/lib/catalog";
 import { NewTab } from "@/components/new-tab";
 
 export const metadata: Metadata = {
@@ -36,10 +37,12 @@ export default async function StudioBlogPage({ searchParams }: Params) {
   const { view } = found;
   const { store } = view;
   const editing = typeof query.edit === "string" ? query.edit : "";
-  const [posts, open, left] = await Promise.all([
+  const [posts, open, left, titles] = await Promise.all([
     allPosts(store.statsId),
     editing && editing !== "new" ? readPost(store.statsId, editing) : Promise.resolve(null),
     aiAvailableFor(store) ? aiLeft(store).catch(() => 0) : Promise.resolve(0),
+    // Every product's name, hidden ones too, in one command (lib/catalog.ts): those that may open a post for members.
+    readTitles(store).catch(() => new Map<string, string>()),
   ]);
   const back = studioPath(store, "", "blog");
   const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ id: p.id, title: p.title }));
@@ -75,7 +78,7 @@ export default async function StudioBlogPage({ searchParams }: Params) {
                     <li key={post.id} className="py-2.5">
                       <Link href={`${back}${back.includes("?") ? "&" : "?"}edit=${post.id}`} className={`block rounded-lg px-2 py-1.5 hover:bg-paper ${post.id === editing ? "bg-lilac" : ""}`} aria-current={post.id === editing ? "page" : undefined}>
                         <span className="block font-semibold text-ink">{post.title}</span>
-                        <span className="block text-xs text-ink-soft">{post.draft ? "Draft" : `Published ${DATE.format(new Date(post.publishedAt * 1000))}`}</span>
+                        <span className="block text-xs text-ink-soft">{post.draft ? "Draft" : `Published ${DATE.format(new Date(post.publishedAt * 1000))}`}{post.products?.length ? " · For members" : ""}</span>
                       </Link>
                     </li>
                   ))}
@@ -88,8 +91,9 @@ export default async function StudioBlogPage({ searchParams }: Params) {
                 <AiOn value={aiAvailableFor(store) ? { on: true, left } : { on: false, left: 0 }}>
                   <BlogEditor
                     key={open?.id ?? "new"}
-                    post={open ? { id: open.id, title: open.title, body: open.body, product: open.product, draft: open.draft, href: open.draft ? null : live(open.id, open.title) } : { id: null, title: "", body: "", product: null, draft: true, href: null }}
+                    post={open ? { id: open.id, title: open.title, body: open.body, product: open.product, draft: open.draft, href: open.draft ? null : live(open.id, open.title), products: open.products ?? [] } : { id: null, title: "", body: "", product: null, draft: true, href: null, products: [] }}
                     products={products}
+                    openers={[...titles].map(([id, title]) => ({ id, title }))}
                     back={back}
                     look={store.look}
                     language={parseLanguage(store.language)}

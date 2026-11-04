@@ -13,6 +13,7 @@ import { PostBody } from "@/components/blog-body";
 import { BLOG_OUTLINES, OUTLINE_LEFT_MESSAGE, outlinePromptsLeft } from "@/lib/blog-outline";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
+import { MAX_LETTER_PRODUCTS } from "@/lib/letter-rules";
 
 const MAX_TITLE = 120;
 const MAX_BODY = 20_000;
@@ -26,22 +27,27 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   server_error: "Something went wrong on our side. Try again in a moment.",
   outline_left: OUTLINE_LEFT_MESSAGE,
+  products: `Check up to ${MAX_LETTER_PRODUCTS} of your store's products. Reload the page if one was just deleted.`,
 };
 
-export type EditedPost = { id: string | null; title: string; body: string; product: string | null; draft: boolean; href: string | null };
+export type EditedPost = { id: string | null; title: string; body: string; product: string | null; draft: boolean; href: string | null; /** The products whose holders alone may read it; none for everyone. */ products?: string[] };
+
+const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id) => b.includes(id));
 
 /**
  * Writing one post of the store's blog (lib/store-blog.ts): a title, the
  * words — plain text, as a product's description is, with "## " for a
  * heading — and, if the creator likes, one of their products to end on.
  * Published, kept as a draft, or deleted from here; a draft is seen by no
- * one but the studio.
+ * one but the studio. The creator may check products whose holders alone
+ * may read its words (lib/letter-access.ts); nothing checked, everyone can.
  */
-export function BlogEditor({ post, products, back, look, language = "en" }: { post: EditedPost; products: { id: string; title: string }[]; back: string; /** The store's look, so the preview is drawn as the blog is. */ look: StoreLook; /** The store's language, so the preview is marked as the blog is. */ language?: LanguageCode }) {
+export function BlogEditor({ post, products, openers = [], back, look, language = "en" }: { post: EditedPost; products: { id: string; title: string }[]; /** Every product of the store, hidden ones too, that may open a post for members. */ openers?: { id: string; title: string }[]; back: string; /** The store's look, so the preview is drawn as the blog is. */ look: StoreLook; /** The store's language, so the preview is marked as the blog is. */ language?: LanguageCode }) {
   const router = useRouter();
   const [title, setTitle] = useState(post.title);
   const [body, setBody] = useState(post.body);
   const [product, setProduct] = useState(post.product ?? "");
+  const [members, setMembers] = useState<string[]>(post.products ?? []);
   const [busy, setBusy] = useState<string | null>(null);
   // The preview starts at a phone's width, where most posts are read (487 [IT4], pattern 7).
   const [phone, setPhone] = useState(true);
@@ -55,9 +61,9 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
   // A post written and not saved is never lost to a click away (487 [IT4], item 6): leaving asks first, as the email studio does.
   const [done, setDone] = useState(false);
   // What a confirmed save sent, until the saved post comes back: what is typed after it stays guarded, and is kept.
-  const [sent, setSent] = useState<{ title: string; body: string; product: string } | null>(null);
-  const base = sent ?? { title: post.title, body: post.body, product: post.product ?? "" };
-  const dirty = title !== base.title || body !== base.body || product !== base.product;
+  const [sent, setSent] = useState<{ title: string; body: string; product: string; members: string[] } | null>(null);
+  const base = sent ?? { title: post.title, body: post.body, product: post.product ?? "", members: post.products ?? [] };
+  const dirty = title !== base.title || body !== base.body || product !== base.product || !sameSet(members, base.members);
   useLeaveGuard(dirty && !done);
   // The saved post comes back as new props (router.refresh): from then on, changes to it are guarded again.
   const [seen, setSeen] = useState(post);
@@ -69,6 +75,7 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
       if (title === sent.title) setTitle(post.title);
       if (body === sent.body) setBody(post.body);
       if (product === sent.product) setProduct(post.product ?? "");
+      if (sameSet(members, sent.members)) setMembers(post.products ?? []);
       setSent(null);
     }
     setDone(false);
@@ -102,9 +109,10 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
       setTries((n) => n + 1);
       return;
     }
-    const data = await send({ action: "save", id: post.id, title, body, product: product || null, draft }, draft ? "draft" : "publish");
+    // The products always go with a save, [] for everyone: the server keeps a post's products only when none are sent.
+    const data = await send({ action: "save", id: post.id, title, body, product: product || null, products: members, draft }, draft ? "draft" : "publish");
     if (!data) return;
-    setSent({ title, body, product });
+    setSent({ title, body, product, members });
     toast(draft ? "Saved as a draft." : "Published on your blog.");
     router.push(`${back}${back.includes("?") ? "&" : "?"}edit=${data.post?.id ?? ""}`);
     router.refresh();
@@ -244,6 +252,37 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
         </select>
         <p className="field-hint mt-1">Its card, with today&apos;s picture and price, after the last line. Products among the first 24 on your store page can be shown.</p>
       </div>
+      {openers.length || members.length ? (
+        <fieldset aria-describedby="post-members-hint">
+          <legend className="field-label">Who can read it</legend>
+          <p className="field-hint mt-1" id="post-members-hint">
+            {`Check nothing and everyone can. Check products and only people who have one of them can read its words (up to ${MAX_LETTER_PRODUCTS}). Everyone still sees its title, its date and which products open it; search engines and the blog's feed get no words of it.`}
+          </p>
+          <div className="mt-2 max-h-48 overflow-y-auto">
+            {openers.map((p) => {
+              const on = members.includes(p.id);
+              return (
+                <label key={p.id} className="flex min-h-11 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    disabled={busy !== null || (!on && members.length >= MAX_LETTER_PRODUCTS)}
+                    onChange={(e) => setMembers((now) => (e.target.checked ? [...now, p.id] : now.filter((x) => x !== p.id)))}
+                  />
+                  <span className="[overflow-wrap:anywhere]">{p.title}</span>
+                </label>
+              );
+            })}
+            {/* A product checked before and no longer listed stays checked, so saving never opens the post by itself. */}
+            {members.filter((id) => !openers.some((p) => p.id === id)).map((id) => (
+              <label key={id} className="flex min-h-11 items-center gap-2">
+                <input type="checkbox" checked disabled={busy !== null} onChange={() => setMembers((now) => now.filter((x) => x !== id))} />
+                <span>A product no longer on your store</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
       {error ? (
         <p key={tries} className="notice notice-error" role="alert">
           {error}

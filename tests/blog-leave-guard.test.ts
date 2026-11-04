@@ -7,12 +7,12 @@ import { done, is } from "./check";
 
 const editor = readFileSync("components/blog-editor.tsx", "utf8");
 is("the blog editor uses the leave guard", editor.includes('import { useLeaveGuard } from "@/components/leave-guard";') && editor.includes("useLeaveGuard(dirty && !done);"), true);
-is("unsaved means the title, the text or the product differ from the saved post", editor.includes("const dirty = title !== base.title || body !== base.body || product !== base.product;"), true);
+is("unsaved means the title, the text, the product or who can read it differ from the saved post", editor.includes("const dirty = title !== base.title || body !== base.body || product !== base.product || !sameSet(members, base.members);"), true);
 is("a delete lets the page go without asking", (editor.match(/setDone\(true\);/g) ?? []).length, 1);
-is("a confirmed save is what is compared against until the saved post comes back, so typing after it stays guarded", editor.includes('const base = sent ?? { title: post.title, body: post.body, product: post.product ?? "" };') && editor.includes("setSent({ title, body, product });"), true);
+is("a confirmed save is what is compared against until the saved post comes back, so typing after it stays guarded", editor.includes('const base = sent ?? { title: post.title, body: post.body, product: post.product ?? "", members: post.products ?? [] };') && editor.includes("setSent({ title, body, product, members });"), true);
 is("and once the saved post comes back, its changes are guarded again", /if \(seen !== post\) \{\s*setSeen\(post\);[\s\S]{0,700}?setDone\(false\);\s*\}/.test(editor), true);
 const faq = readFileSync("components/faq-editor.tsx", "utf8");
-is("after a save, the editor takes the post as the server kept it, except a field typed in since", /if \(sent\) \{\s*if \(title === sent\.title\) setTitle\(post\.title\);\s*if \(body === sent\.body\) setBody\(post\.body\);\s*if \(product === sent\.product\) setProduct\(post\.product \?\? ""\);\s*setSent\(null\);/.test(editor), true);
+is("after a save, the editor takes the post as the server kept it, except a field typed in since", /if \(sent\) \{\s*if \(title === sent\.title\) setTitle\(post\.title\);\s*if \(body === sent\.body\) setBody\(post\.body\);\s*if \(product === sent\.product\) setProduct\(post\.product \?\? ""\);\s*if \(sameSet\(members, sent\.members\)\) setMembers\(post\.products \?\? \[\]\);\s*setSent\(null\);/.test(editor), true);
 is("the FAQ editor asks too, with its own measure of unsaved answers", faq.includes("useLeaveGuard(changed && !saving);") && faq.includes("const changed = JSON.stringify(rows.map"), true);
 is("and takes its rows as they were saved, compared against what was saved until the page brings the new list", faq.includes("setRows(expected.map((item, key) => ({ ...item, key })));") && faq.includes("setBase(expected);") && faq.includes("!== JSON.stringify(base);"), true);
 const quiz = readFileSync("components/quiz-editor.tsx", "utf8");

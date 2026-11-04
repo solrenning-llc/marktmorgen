@@ -810,7 +810,9 @@ export default function PrivacyPage() {
           same cookie for that store a course and a community use, for 90
           days. The answer about whether an address may read it is kept for
           up to five minutes, and, to limit abuse, one-way hashes of the
-          address and network address that asked for a link for one hour.
+          address and network address that asked for a link for one hour. A
+          blog post a creator keeps for the buyers of some products works the
+          same way, with the same link, cookie and limits.
         </p>
         <p id="live-events">
           <strong className="text-black">Live events in a community.</strong>{" "}

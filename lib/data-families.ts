@@ -294,7 +294,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:outreach:": E, "nl:outreach:stop:all": C, "nl:outreach:stoplink:": T("nl:outreach:"),
   // Emails published on the store (lib/letters.ts): the store's list goes, and each copy through it.
   "nl:letters:s:": E, "nl:letters:i:": T("nl:letters:s:", 400),
-  // Who may read an email kept for members (lib/letter-access.ts): an answer kept for minutes, a link and the counts of links asked, an hour each.
+  // Who may read an email or blog post kept for members (lib/letter-access.ts): an answer kept for minutes, a link and the counts of links asked, an hour each.
   "nl:letters:ok:": X(1), "nl:letters:link:": X(1), "nl:letters:rl:addr:": X(1), "nl:letters:rl:ip:": X(1),
   // The owner's Path (lib/path.ts): deleted by the prepare step (forgetPath).
   "nl:path:": E,

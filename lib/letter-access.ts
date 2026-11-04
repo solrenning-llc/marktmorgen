@@ -1,7 +1,9 @@
 /**
  * Who may read a published email kept for members (lib/letter-rules.ts,
  * membersOnly; queue items 28 [E11] and 100 [E2-MEMBER-PUBLICATIONS], added
- * 4 November 2026), asked again on every page.
+ * 4 November 2026), or a blog post kept for members (lib/store-blog.ts, unit
+ * 2 of the same items), asked again on every page. One door for both: the
+ * same answer, the same proof, the same link and the same limits.
  *
  * The answer is the one a community's door gives (lib/community-access.ts,
  * holdsProducts): the address holds one of the email's products now, read
@@ -18,7 +20,7 @@
  * only is not enough. The creator always reads their own.
  *
  *   nl:letters:ok:<sid>:<products>:<address>   whether the address holds one of the products, for minutes
- *   nl:letters:link:<hash>                     an emailed link: who, which store, which email (1 hour)
+ *   nl:letters:link:<hash>                     an emailed link: who, which store, which email or post (1 hour)
  *   nl:letters:link:<hash>:opens               how often it was used (at most 10)
  *   nl:letters:rl:ip:<hash>, nl:letters:rl:addr:<hash>   how often a link was asked for (an hour)
  *
@@ -26,7 +28,9 @@
  * requests (lib/buyer-actions.ts takeBuyerRead), the answer is one cached
  * read, and the link is one of the store's access emails, counted and
  * refused past its allowance by the email meter before it is sent. The form
- * answers before any of that is done (requestLetterLink).
+ * answers before any of that is done (requestMemberLink). A post adds no key
+ * and no cost of its own: its answer is the key an email kept for the same
+ * products uses, and its links and their limits are the emails'.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
@@ -43,10 +47,12 @@ export const LETTER_LINK_SECONDS = 60 * 60;
 const MAX_LINK_OPENS = 10;
 const IP_LIMIT = 10;
 const ADDRESS_LIMIT = 5;
+/** A blog post's id (lib/store-blog.ts), as a link names the post it opens. */
+const POST_ID = /^[0-9a-f]{10}$/;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const addressKey = (email: string) => sha(`nimbus-letter-reader:${normaliseEmail(email)}`).slice(0, 32);
-/** One answer per address and set of products, so emails kept for the same products share it. */
+/** One answer per address and set of products, so emails and posts kept for the same products share it. */
 const okKey = (sid: string, products: string[], email: string) =>
   `nl:letters:ok:${sid}:${sha([...products].sort().join(",")).slice(0, 16)}:${addressKey(email)}`;
 const linkKey = (token: string) => `nl:letters:link:${sha(`nimbus-letter:${token}`).slice(0, 40)}`;
@@ -54,7 +60,16 @@ const opensKey = (token: string) => `${linkKey(token)}:opens`;
 
 type CookieJar = { get(name: string): { value: string } | undefined };
 
-export type LetterReader =
+/**
+ * What a members' door opens: a published email, or a blog post. `title` is
+ * what the emailed link names (an email's subject, a post's title), never
+ * its words.
+ */
+export type MembersDoor = { kind: "letter" | "post"; id: string; title: string; products?: string[] };
+
+const letterDoor = (letter: Letter): MembersDoor => ({ kind: "letter", id: letter.id, title: letter.subject, products: letter.products });
+
+export type MemberReader =
   /** Everyone may read it. */
   | { state: "public" }
   /** The creator, reading their own. */
@@ -65,21 +80,31 @@ export type LetterReader =
   | { state: "out" }
   /** A proved address that holds none of them. */
   | { state: "closed"; email: string };
+export type LetterReader = MemberReader;
+
+/** Whether this address holds one of these products now (cached for minutes); never for nothing chosen. */
+async function holdsAny(store: Store, products: string[] | undefined, email: string): Promise<boolean> {
+  if (!membersOnly({ products }) || !store.sid) return false;
+  return holdsProducts(store, products!, email, okKey(store.sid, products!, email), "1");
+}
 
 /** Whether this address holds one of the email's products now (cached for minutes). */
 export async function holdsLetter(store: Store, letter: Letter, email: string): Promise<boolean> {
-  if (!membersOnly(letter) || !store.sid) return false;
-  const products = letter.products!;
-  return holdsProducts(store, products, email, okKey(store.sid, products, email), "1");
+  return holdsAny(store, letter.products, email);
+}
+
+/** Who is looking at a publication kept for these products, and whether they may read its words, asked afresh. */
+export async function memberReader(store: Store, products: string[] | undefined, cookies: CookieJar): Promise<MemberReader> {
+  if (!membersOnly({ products })) return { state: "public" };
+  const learner = await learnerFrom(store, cookies).catch(() => null);
+  if (learner?.owner) return { state: "owner" };
+  if (!learner || learner.scope !== "all") return { state: "out" };
+  return (await holdsAny(store, products, learner.email)) ? { state: "in", email: learner.email } : { state: "closed", email: learner.email };
 }
 
 /** Who is looking at this email, and whether they may read its words, asked afresh. */
 export async function letterReader(store: Store, letter: Letter, cookies: CookieJar): Promise<LetterReader> {
-  if (!membersOnly(letter)) return { state: "public" };
-  const learner = await learnerFrom(store, cookies).catch(() => null);
-  if (learner?.owner) return { state: "owner" };
-  if (!learner || learner.scope !== "all") return { state: "out" };
-  return (await holdsLetter(store, letter, learner.email)) ? { state: "in", email: learner.email } : { state: "closed", email: learner.email };
+  return memberReader(store, letter.products, cookies);
 }
 
 /**
@@ -105,7 +130,8 @@ function senderAddress(): string {
 }
 
 export type LetterLinkRequest = "sent" | "email" | "limited" | "error";
-export type LetterGrant = { e: string; k: string; h: string; l: string };
+/** An emailed link's grant: who, which store, and which email (`l`), or which post when `t` is "post". */
+export type LetterGrant = { e: string; k: string; h: string; l: string; t?: "post" };
 
 /**
  * Emails a way to read the email, when the address holds one of its
@@ -118,21 +144,26 @@ export type LetterGrant = { e: string; k: string; h: string; l: string };
  * server's log.
  */
 export async function requestLetterLink(input: { store: Store; letter: Letter; email: string; ip: string; origin: string }): Promise<LetterLinkRequest> {
-  const { store, letter, ip, origin } = input;
+  return requestMemberLink({ ...input, door: letterDoor(input.letter) });
+}
+
+/** requestLetterLink, for any door kept for members: an email or a blog post. */
+export async function requestMemberLink(input: { store: Store; door: MembersDoor; email: string; ip: string; origin: string }): Promise<LetterLinkRequest> {
+  const { store, door, ip, origin } = input;
   const raw = input.email.trim();
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
-  if (!membersOnly(letter) || !store.sid || !isRedisConfigured()) return "error";
+  if (!membersOnly(door) || !store.sid || !isRedisConfigured()) return "error";
   if (!(await within(`nl:letters:rl:ip:${sha(`${ip}|${store.handle}`).slice(0, 32)}`, IP_LIMIT))) return "limited";
   if (!(await within(`nl:letters:rl:addr:${addressKey(raw)}`, ADDRESS_LIMIT))) return "limited";
-  afterAnswer(() => sendLetterLink(store, letter, raw, origin));
+  afterAnswer(() => sendMemberLink(store, door, raw, origin));
   return "sent";
 }
 
-/** The link itself, for an address that holds one of the email's products; nothing for one that does not. */
-async function sendLetterLink(store: Store, letter: Letter, raw: string, origin: string): Promise<void> {
-  if (!(await holdsLetter(store, letter, raw))) return;
+/** The link itself, for an address that holds one of the door's products; nothing for one that does not. */
+async function sendMemberLink(store: Store, door: MembersDoor, raw: string, origin: string): Promise<void> {
+  if (!(await holdsAny(store, door.products, raw))) return;
   const token = randomBytes(32).toString("hex");
-  const grant: LetterGrant = { e: normaliseEmail(raw), k: storeKey(store), h: store.handle, l: letter.id };
+  const grant: LetterGrant = { e: normaliseEmail(raw), k: storeKey(store), h: store.handle, l: door.id, ...(door.kind === "post" ? { t: "post" as const } : {}) };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LETTER_LINK_SECONDS]]);
   const link = `${origin}/api/store/letters/open?token=${token}`;
   const w = letterWords(store.language);
@@ -140,10 +171,10 @@ async function sendLetterLink(store: Store, letter: Letter, raw: string, origin:
     meter: { by: "store", store, kind: "transactional" },
     from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
     to: normaliseEmail(raw),
-    subject: w.linkSubject(letter.subject).slice(0, 200),
-    text: w.linkBody(letter.subject, link, store.name),
+    subject: w.linkSubject(door.title).slice(0, 200),
+    text: w.linkBody(door.title, link, store.name),
   });
-  if (!sent) console.error("a link to read an email kept for members was not sent");
+  if (!sent) console.error(`a link to read ${door.kind === "post" ? "a post" : "an email"} kept for members was not sent`);
 }
 
 /**
@@ -163,7 +194,7 @@ function afterAnswer(task: () => Promise<void>): void {
   }
 }
 
-/** Spends one open of an emailed link, and says who and which email it was for. */
+/** Spends one open of an emailed link, and says who and which email or post it was for. */
 export async function openLetterLink(token: string): Promise<LetterGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
   const [raw, opens] = await redisPipeline([
@@ -174,8 +205,15 @@ export async function openLetterLink(token: string): Promise<LetterGrant | null>
   if (typeof raw !== "string" || Number(opens) > MAX_LINK_OPENS) return null;
   try {
     const grant = JSON.parse(raw) as LetterGrant;
-    return typeof grant.e === "string" && typeof grant.k === "string" && typeof grant.h === "string" && typeof grant.l === "string" && LETTER_ID.test(grant.l) ? grant : null;
+    if (typeof grant.e !== "string" || typeof grant.k !== "string" || typeof grant.h !== "string" || typeof grant.l !== "string") return null;
+    if (grant.t === "post") return POST_ID.test(grant.l) ? grant : null;
+    return grant.t === undefined && LETTER_ID.test(grant.l) ? grant : null;
   } catch {
     return null;
   }
+}
+
+/** Where an opened link goes back to, on the store's pages: the email, or the post (whose page finds its full address). */
+export function grantPath(grant: LetterGrant): string {
+  return grant.t === "post" ? `/blog/${grant.l}` : `/letters/${grant.l}`;
 }

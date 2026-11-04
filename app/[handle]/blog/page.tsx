@@ -3,7 +3,8 @@ import { storeRoot } from "@/lib/store-sitemap";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
-import { POSTS_PER_PAGE, postSegment, publishedPosts } from "@/lib/store-blog";
+import { POSTS_PER_PAGE, postForMembers, postSegment, publishedPosts } from "@/lib/store-blog";
+import { letterWords } from "@/lib/buyer-words/letters";
 import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
 import { isResting } from "@/lib/traffic";
@@ -38,7 +39,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 /**
  * A store's blog (lib/store-blog.ts): its published posts, newest first, a
- * page of them at a time. A store with none has no blog to show.
+ * page of them at a time. A store with none has no blog to show. A post kept
+ * for members is listed by its title and date and says so; it has no first
+ * lines to show, and its words stay on its own page, behind its door
+ * (lib/letter-access.ts).
  */
 export default async function BlogPage({ params, searchParams }: Params) {
   const store = await load((await params).handle);
@@ -53,6 +57,7 @@ export default async function BlogPage({ params, searchParams }: Params) {
   const { w } = say;
   const date = new Intl.DateTimeFormat(say.lang.locale, { year: "numeric", month: "long", day: "numeric" });
   const pages = Math.max(1, Math.ceil(total / POSTS_PER_PAGE));
+  const membersLabel = letterWords(store.language).membersLabel;
   const base = `/@${store.handle}/blog`;
   return (
     <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -93,6 +98,7 @@ export default async function BlogPage({ params, searchParams }: Params) {
                   <span className="st-muted block text-sm">
                     <time dateTime={new Date(post.publishedAt * 1000).toISOString()}>{date.format(new Date(post.publishedAt * 1000))}</time>
                     {` · ${w.blogMinutes(post.minutes)}`}
+                    {postForMembers(post) ? ` · ${membersLabel}` : null}
                   </span>
                   <span className="font-display mt-1 block text-xl font-semibold leading-snug">{post.title}</span>
                   {post.excerpt ? <span className="st-muted mt-2 block leading-relaxed">{post.excerpt}</span> : null}

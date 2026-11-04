@@ -26,7 +26,7 @@ import { KIND, readListings, visibleCount } from "@/lib/catalog";
 import { collectionSegment, shownCollections } from "@/lib/store-collections";
 import { productSegment } from "@/lib/product-slug";
 import { pageOut } from "@/lib/site-page-rules";
-import { POSTS_PER_PAGE, postSegment, publishedPosts } from "@/lib/store-blog";
+import { POSTS_PER_PAGE, postForMembers, postSegment, publishedPosts } from "@/lib/store-blog";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 
@@ -66,7 +66,8 @@ export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.no
   }
   if (posts.length) {
     out.push({ url: `${root}/blog`, lastModified: new Date(Math.max(...posts.map((p) => p.updatedAt)) * 1000).toISOString() });
-    for (const post of posts) out.push({ url: `${root}/blog/${postSegment(post)}`, lastModified: new Date(post.updatedAt * 1000).toISOString() });
+    // A post kept for members is not offered to search engines (its page says noindex).
+    for (const post of posts) if (!postForMembers(post)) out.push({ url: `${root}/blog/${postSegment(post)}`, lastModified: new Date(post.updatedAt * 1000).toISOString() });
   }
   return out;
 }

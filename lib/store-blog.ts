@@ -19,12 +19,23 @@
  * The list of a blog is two reads (which posts, then their lines); a post is
  * one. The store's record carries only how many are published
  * (lib/store.ts, posts), so the store page links to the blog without asking.
+ *
+ * For members only (queue items 28 [E11] and 100 [E2-MEMBER-PUBLICATIONS],
+ * unit 2, added 4 November 2026): the creator may check the products that
+ * open a post, kept with what a list shows (`products`), by the rules a
+ * published email follows (lib/letter-rules.ts, productChoice). Then its
+ * title, date and who it is for are shown to everyone, its words only to
+ * somebody who proved their address and holds one of those products now
+ * (lib/letter-access.ts), and its first lines are kept nowhere a list, the
+ * feed or a search engine reads (no excerpt). Nothing checked: a post as
+ * before.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Block, aboutBlocks, aboutExcerpt, cleanAbout } from "@/lib/product-about";
 import { slugOf } from "@/lib/product-slug";
+import { letterProducts, membersOnly } from "@/lib/letter-rules";
 
 export const MAX_POSTS = 200;
 export const MAX_POST_TITLE = 120;
@@ -49,6 +60,8 @@ export type PostMeta = {
   updatedAt: number;
   /** About how many minutes it takes to read, at 220 words a minute. */
   minutes: number;
+  /** The products whose holders alone may read its words; absent for a post everyone can read. */
+  products?: string[];
 };
 
 export type Post = PostMeta & { body: string; product: string | null };
@@ -96,10 +109,13 @@ export function postBlocks(body: string): PostBlock[] {
   return out;
 }
 
-function metaOf(id: string, input: { title: string; body: string; draft: boolean }, publishedAt: number, updatedAt: number): PostMeta {
+function metaOf(id: string, input: { title: string; body: string; draft: boolean }, publishedAt: number, updatedAt: number, products: string[] = []): PostMeta {
   const plain = input.body.replace(/^##\s+/gm, "");
   const words = plain.split(/\s+/).filter(Boolean).length;
-  return { id, title: input.title, excerpt: aboutExcerpt(plain, 200, MAX_POST_BODY), draft: input.draft, publishedAt, updatedAt, minutes: Math.max(1, Math.round(words / 220)) };
+  const kept = products.length > 0;
+  // A post kept for members keeps no first lines: they would be its words.
+  const meta: PostMeta = { id, title: input.title, excerpt: kept ? "" : aboutExcerpt(plain, 200, MAX_POST_BODY), draft: input.draft, publishedAt, updatedAt, minutes: Math.max(1, Math.round(words / 220)) };
+  return kept ? { ...meta, products } : meta;
 }
 
 function parseMeta(raw: unknown): PostMeta | null {
@@ -107,15 +123,20 @@ function parseMeta(raw: unknown): PostMeta | null {
   try {
     const v = JSON.parse(raw) as Partial<PostMeta>;
     if (typeof v.id !== "string" || !POST_ID.test(v.id) || typeof v.title !== "string") return null;
-    return {
+    const products = letterProducts(v.products);
+    // A post that names products but none readable is kept closed, never opened to everyone.
+    if (v.products !== undefined && (!Array.isArray(v.products) || (v.products.length > 0 && products.length === 0))) return null;
+    const meta: PostMeta = {
       id: v.id,
       title: v.title,
-      excerpt: typeof v.excerpt === "string" ? v.excerpt : "",
+      // Never a member post's first lines, whatever an older copy kept.
+      excerpt: typeof v.excerpt === "string" && !products.length ? v.excerpt : "",
       draft: v.draft === true,
       publishedAt: Number(v.publishedAt) || 0,
       updatedAt: Number(v.updatedAt) || 0,
       minutes: Math.max(1, Number(v.minutes) || 1),
     };
+    return products.length ? { ...meta, products } : meta;
   } catch {
     return null;
   }
@@ -196,11 +217,16 @@ export type SaveResult = { ok: true; post: Post; published: number } | { ok: fal
  * Writes a post: a new one when `id` is null, else the one with that id. A
  * post first published keeps that date; one made a draft again leaves the
  * blog until it is published again. Says how many are published after it.
+ *
+ * `products`: the products whose holders alone may read it, already checked
+ * against the store (lib/letter-rules.ts, productChoice), [] for everyone;
+ * left out, the post keeps what it had, so saving again never opens a post
+ * kept for members by itself.
  */
 export async function savePost(
   statsId: string | null,
   id: string | null,
-  input: { title: string; body: string; product: string | null; draft: boolean },
+  input: { title: string; body: string; product: string | null; draft: boolean; products?: string[] },
   newId: () => string,
   /** The store whose data room the post takes from (DataRoomError when it does not fit). */
   room: DataStore,
@@ -220,7 +246,7 @@ export async function savePost(
   }
   const postId = before?.id ?? newId();
   const publishedAt = input.draft ? before?.publishedAt ?? 0 : before?.publishedAt || now;
-  const meta = metaOf(postId, input, publishedAt, now);
+  const meta = metaOf(postId, input, publishedAt, now, input.products ?? before?.products ?? []);
   // Its room first: the post's two records and its place among the published, counted as it now is.
   const bodyJson = JSON.stringify({ body: input.body, product: input.product });
   await needData(room, [{ slot: `bl:${postId}`, bytes: dataBytes([JSON.stringify(meta), bodyJson], 3), set: true }]);
@@ -231,6 +257,11 @@ export async function savePost(
     ["ZCARD", pubKey(statsId)],
   ]);
   return { ok: true, post: { ...meta, body: input.body, product: input.product }, published: Number(total) || 0 };
+}
+
+/** Whether only the holders of some products may read this post's words. */
+export function postForMembers(post: Pick<PostMeta, "products">): boolean {
+  return membersOnly(post);
 }
 
 /** Removes a post for good. Says how many are published after it. */

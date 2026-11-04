@@ -52,6 +52,8 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
+import { type Member, parseTeam } from "@/lib/team";
+import { can } from "@/lib/team-roles";
 
 import { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME, agentScopeOf } from "@/lib/api-key-rules";
 export { type AgentScope, type ApiKey, KEY_PREFIX, MAX_KEYS, MAX_KEY_NAME };
@@ -82,13 +84,17 @@ export type KeyMaker = { owner: boolean; by: string; step: boolean; left?: true 
  * A key's hold (lib/api-key-pause.ts): "paused", refused, its maker not yet
  * told; "told", refused, its maker emailed (or nobody to tell); "left",
  * refused for good, its maker left the team; "role", refused, its maker's
- * role no longer allows it, until the owner turns it back on; "vouched",
- * turned back on with a second step; none, as made.
+ * role no longer allows it, until the owner turns it back on; "unmatched",
+ * refused, its maker's fingerprint matches nobody on the team (a secret
+ * changed, or a change half done), until the owner turns it back on;
+ * "vouched", turned back on with a second step; "adopted", turned back on by
+ * the owner, who keeps it working whoever made it and whatever their role,
+ * until its maker leaves; none, as made.
  */
-export type Hold = "paused" | "told" | "left" | "role" | "vouched";
-const HOLDS: readonly string[] = ["paused", "told", "left", "role", "vouched"];
+export type Hold = "paused" | "told" | "left" | "role" | "unmatched" | "vouched" | "adopted";
+const HOLDS: readonly string[] = ["paused", "told", "left", "role", "unmatched", "vouched", "adopted"];
 /** Whether a hold refuses the key. */
-export const isPaused = (hold: Hold | null): boolean => hold !== null && hold !== "vouched";
+export const isPaused = (hold: Hold | null): boolean => hold !== null && hold !== "vouched" && hold !== "adopted";
 
 /** A key's record with who made it and its hold, never the key or its fingerprint. */
 export type KeyRecord = ApiKey & { maker: KeyMaker | null; hold: Hold | null };
@@ -245,7 +251,7 @@ export async function swapHolds(sid: string, ids: string[], to: Hold | null, fro
 }
 
 /** Every hold but the one for good: what any change may start from. */
-export const NOT_LEFT: (Hold | null)[] = [null, "paused", "told", "role", "vouched"];
+export const NOT_LEFT: (Hold | null)[] = [null, "paused", "told", "role", "unmatched", "vouched", "adopted"];
 
 /** The compare-and-set swapHolds runs, modelled by lib/redis-memory.ts. */
 export const HOLD_SWAP = `-- marktmorgen:api-hold-swap:v1
@@ -276,12 +282,12 @@ export async function keyStates(sid: string, ids: string[]): Promise<Map<string,
     return out;
   }
   const [records, holds, team] = await redisPipeline([["HMGET", listKey(sid), ...wanted], ["HMGET", holdKey(sid), ...wanted], ["GET", teamRecordKey(sid)]]);
-  const members = teamEmails(team);
+  const members = parseTeam(team).members;
   wanted.forEach((id, at) => {
     const stored = parseStored(Array.isArray(records) ? records[at] : null);
     const hold = Array.isArray(holds) ? String(holds[at] ?? "") : "";
     // The same reading as a request with the key (pauseWhy): its hold, or a maker no longer on the team.
-    out.set(id, !stored ? "gone" : pauseWhy(sid, stored.maker ?? null, HOLDS.includes(hold) ? (hold as Hold) : null, members) ? "paused" : "live");
+    out.set(id, !stored ? "gone" : pauseWhy(sid, stored.maker ?? null, HOLDS.includes(hold) ? (hold as Hold) : null, members, stored.write) ? "paused" : "live");
   });
   return out;
 }
@@ -296,8 +302,9 @@ export async function rewriteMakers(sid: string, change: (maker: KeyMaker) => Ke
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
   const done: string[] = [];
   // Each record is written only over exactly the text read (RECORD_SWAP), so a key revoked meanwhile is never
-  // written back, and one changed meanwhile is read again, a few times at most.
-  for (let tries = 0; tries < 3; tries += 1) {
+  // written back, and one changed meanwhile is read again, a few times at most; still changing after that,
+  // this throws, so a caller that must not go on half done (a move) undoes what it did.
+  for (let tries = 0; ; tries += 1) {
     const [raw] = await redisPipeline([["HGETALL", listKey(sid)]]);
     const flat = flatOf(raw);
     const swaps: string[] = [];
@@ -309,6 +316,7 @@ export async function rewriteMakers(sid: string, change: (maker: KeyMaker) => Ke
       swaps.push(s.id, String(flat[i + 1]), JSON.stringify({ ...s, maker: next }));
     }
     if (!swaps.length) break;
+    if (tries >= 3) throw new Error("The records of some API keys kept changing while their maker was rewritten.");
     const [changed] = await redisPipeline([["EVAL", RECORD_SWAP, 1, listKey(sid), ...swaps]]);
     const ids = Array.isArray(changed) ? changed.map(String) : [];
     done.push(...ids);
@@ -331,36 +339,32 @@ return changed`;
 /**
  * Why a key is refused (lib/api-guard.ts says it in these terms): "rule", the
  * team's two-step rule, turned back on by whoever made it; "left", made by
- * somebody no longer on the team, only revoked, by the owner; "role", its
- * maker's role no longer allows it, turned back on by the owner;
- * "unrecorded", nobody is recorded as its maker, turned back on by the owner.
+ * somebody who left the team, only revoked, by the owner; "unmatched", its
+ * maker could not be matched to anybody on the team, turned back on by the
+ * owner; "role", its maker's role does not allow it, turned back on by the
+ * owner; "unrecorded", nobody is recorded as its maker, turned back on by the
+ * owner.
  */
-export type PauseWhy = "rule" | "left" | "role" | "unrecorded";
-
-/** The emails on a store's team as its record keeps them (lib/team.ts), read here without that module. */
-function teamEmails(raw: unknown): string[] {
-  if (typeof raw !== "string" || !raw) return [];
-  try {
-    const members = (JSON.parse(raw) as { members?: unknown }).members;
-    return Array.isArray(members) ? members.map((m) => (m && typeof (m as { email?: unknown }).email === "string" ? String((m as { email: string }).email) : "")).filter(Boolean) : [];
-  } catch {
-    return [];
-  }
-}
+export type PauseWhy = "rule" | "left" | "unmatched" | "role" | "unrecorded";
 
 /**
- * Why a key is refused, or null when it is not: its hold, or its maker, read
- * against the team as it is (a teammate's key whose fingerprint matches nobody
- * on the team now counts as one whose maker left, whatever wrote, or failed to
- * write, its hold).
+ * Why a key is refused, or null when it is not: its hold, or its maker read
+ * against the team as it is (lib/team.ts parseTeam, so only members the
+ * studio accepts count). A teammate's key whose fingerprint matches nobody on
+ * the team is refused as unmatched, and one whose maker's role does not allow
+ * it (any key without "export", one that writes without "import") as role,
+ * whatever wrote, or failed to write, its hold; unless the owner adopted it.
  */
-export function pauseWhy(sid: string, maker: KeyMaker | null, hold: Hold | null, members: string[]): PauseWhy | null {
+export function pauseWhy(sid: string, maker: KeyMaker | null, hold: Hold | null, members: Pick<Member, "email" | "role">[], write: boolean): PauseWhy | null {
   if (hold === "left" || maker?.left) return "left";
+  if (hold === "adopted") return null;
   if (maker && !maker.owner) {
-    const prints = new Set(members.flatMap((email) => makerPrints(sid, email)));
-    if (!prints.has(maker.by)) return "left";
+    const member = members.find((m) => makerPrints(sid, m.email).includes(maker.by));
+    if (!member) return "unmatched";
+    if (!can(member.role, "export") || (write && !can(member.role, "import"))) return "role";
   }
-  if (hold === "role") return "role";
+  if (hold === "unmatched") return "unmatched";
+  if (hold === "role") return maker ? "role" : "unrecorded";
   if (!isPaused(hold)) return null;
   return maker ? "rule" : "unrecorded";
 }
@@ -424,7 +428,7 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   // Paused by the team's two-step rule, its maker's role, or its maker leaving (lib/api-key-pause.ts):
   // known, refused, and not counted as used. A maker who left refuses it even with no hold written.
   const holdNow = typeof hold === "string" && HOLDS.includes(hold) ? (hold as Hold) : null;
-  const why = pauseWhy(sid, stored.maker ?? null, holdNow, teamEmails(team));
+  const why = pauseWhy(sid, stored.maker ?? null, holdNow, parseTeam(team).members, stored.write);
   if (why) return { sid, id, write: stored.write, agent: stored.agent, paused: true, why };
 
   const seconds = Math.floor(now / 1000);

@@ -2,7 +2,7 @@ import { type NextRequest, after } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { linkOrigin } from "@/lib/request-origin";
 import { noticeCreator } from "@/lib/account-notice";
-import { KeysNotSwept, inviteMember, logTeam, readTeam, removeMember, revokeInvite, setMemberRole, setRequireTwoStep } from "@/lib/team";
+import { KeysNotSwept, inviteMember, logTeam, readLog, readTeam, removeMember, revokeInvite, setMemberRole, setRequireTwoStep } from "@/lib/team";
 import { applyPause, pauseForRule, pausePreview, planPause, tellPaused, undoPause } from "@/lib/api-key-pause";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
@@ -30,6 +30,7 @@ const ANSWERS: Record<string, number> = {
   changed: 409,
   unsaved: 503,
   unsure: 503,
+  not_found: 404,
 };
 
 /**
@@ -88,11 +89,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "remove") {
-      const who = text(body.email, 300);
-      const removed = await removeMember(store, who).catch((error: unknown) => (error instanceof KeysNotSwept ? "repeat" : Promise.reject(error)));
-      if (removed === "repeat") return repeat();
-      // Already off the team (a removal repeated): its API keys were swept again all the same (lib/team.ts removeMember).
-      if (!removed) return Response.json({ ok: true, already: true });
+      const who = text(body.email, 300).trim().toLowerCase();
+      // Somebody the log shows taken off, or leaving, before: a removal repeated, which sweeps their API keys
+      // again (lib/team.ts removeMember). Anybody else not on the team is not found, and nothing is touched.
+      const gone = (await readLog(store.sid)).some((line) => line.what === `Took ${who} off the team` || (line.who === who && line.what === "Left the team"));
+      const removed = await removeMember(store, who, { repeat: gone }).catch((error: unknown) => (error instanceof KeysNotSwept ? "repeat" : Promise.reject(error)));
+      if (removed === "repeat") {
+        // Off the team already: written in the log now, so pressing again is known for a repeat.
+        await logTeam(store.sid, { who: email, role, what: `Took ${who} off the team` });
+        return repeat();
+      }
+      if (!removed) return gone ? Response.json({ ok: true, already: true }) : fail("not_found");
       await forgetDevices(store, who);
       await logTeam(store.sid, { who: email, role, what: `Took ${who.toLowerCase()} off the team` });
       return Response.json({ ok: true });

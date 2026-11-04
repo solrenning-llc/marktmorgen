@@ -70,9 +70,13 @@ setSendHooksForTests({ fetch: { resolve: (async () => { throw new Error("no netw
 type Commands = (string | number)[][];
 const realPipeline = redis.pipeline;
 let hook: ((commands: Commands) => Promise<void>) | null = null;
+// And after it ran, to act between two steps of a real route.
+let afterHook: ((commands: Commands) => Promise<void>) | null = null;
 redis.pipeline = async (commands: Commands) => {
   if (hook) await hook(commands);
-  return realPipeline(commands);
+  const out = await realPipeline(commands);
+  if (afterHook) await afterHook(commands);
+  return out;
 };
 const writes = (commands: Commands, verb: string, key: string) => commands.some((c) => c[0] === verb && c[1] === key);
 
@@ -98,6 +102,8 @@ const FIN = "fin-admin@example.com";
 const GIA = "gia-admin@example.com";
 const HAL = "hal-admin@example.com";
 const FIN2 = "fin-moved@example.com";
+const FIN3 = "fin-again@example.com";
+const IVY = "ivy-admin@example.com";
 
 async function newStore(owner: string, handle: string): Promise<Store> {
   await claimHandle(owner, handle, handle, "");
@@ -584,12 +590,17 @@ async function main(): Promise<void> {
   // As if the secret its fingerprint was made under were gone: it matches nobody now.
   const ghost = await makeKey(fourth.sid, "Ghost's sync", Date.now(), false, "none", makerFor(fourth.sid, "admin", "ghost@example.com", false));
   if (!ghost.ok) throw new Error("ghost key not made");
-  is("refused, as made by someone not on the team", [await asApi(ghost.key), lastMessage], [{ status: 403, error: "key_paused" }, KEY_PAUSED_WORDS.left]);
-  is("and the endpoints it added would hear nothing", (await shownKeys(fourth, OWNER4, "owner")).find((k) => k.name === "Ghost's sync")?.why, "left");
+  is("refused, as made by someone who could not be matched to the team (not as one who left)", [await asApi(ghost.key), lastMessage], [{ status: 403, error: "key_paused" }, KEY_PAUSED_WORDS.unmatched]);
+  is("and the endpoints it added would hear nothing", (await shownKeys(fourth, OWNER4, "owner")).find((k) => k.name === "Ghost's sync")?.why, "unmatched");
 
-  part("M5 (a): a teammate leaving holds every key whose maker matches nobody, for good");
+  part("M5 (a), N2: a teammate leaving holds a key whose maker matches nobody, but never for good on a guess");
   await removeMember(fourth, HAL);
-  is("the ghost's key is held as left", await hold4(ghost.made.id), "left");
+  is("the ghost's key is held as unmatched", await hold4(ghost.made.id), "unmatched");
+  const ghostShown = (await shownKeys(fourth, OWNER4, "owner")).find((k) => k.name === "Ghost's sync")!;
+  is("the owner may turn it back on", ghostShown.mayTurnOn, true);
+  is("turned on, it is adopted and works, though its maker still matches nobody", [(await keys(owner4Passkey, { action: "turn_on", id: ghost.made.id }, fourth)).body.ok, await hold4(ghost.made.id), (await asApi(ghost.key)).status], [true, "adopted", 200]);
+  await removeMember(fourth, HAL, { repeat: true });
+  is("and a later exit leaves it adopted", await hold4(ghost.made.id), "adopted");
   is("Fin's is untouched", [await hold4(finKey.body.made?.id ?? ""), (await asApi(finKey.body.key ?? "")).status], [null, 200]);
 
   part("M6: the owner is told which keys a teammate leaving paused, and each refusal says why");
@@ -623,19 +634,21 @@ async function main(): Promise<void> {
     if (writes(commands, "SET", `nl:team:${fourth.sid}`)) teamSaved = true;
     else if (teamSaved && commands.some((c) => c[0] === "HGETALL" && c[1] === `nl:api:keys:${fourth.sid}`)) {
       hook = null;
-      // Its hold as if the sweep before had missed it (a key made in between), then the sweep after fails.
-      await realPipeline([["HDEL", `nl:api:hold:${fourth.sid}`, halKey.body.made?.id ?? ""]]);
+      // A key Hal made in between the two sweeps, then the sweep after fails.
+      await makeKey(fourth.sid, "Hal's late one", Date.now(), false, "none", makerFor(fourth.sid, "admin", HAL, false));
       throw new Error("a stand-in for a failed sweep");
     }
   };
   const cutRemove = await team(owner4Passkey, { action: "remove", email: HAL }, fourth);
   hook = null;
   is("answered: repeat the removal", [cutRemove.status, cutRemove.body.error], [503, "repeat"]);
-  is("Hal is off the team, and his key is refused all the same", [(await readTeam(fourth.sid)).members.some((m) => m.email === HAL), (await asApi(halKey.body.key ?? "")).error], [false, "key_paused"]);
+  const halLate = (await keyRecords(fourth.sid)).find((k) => k.name === "Hal's late one")!;
+  is("Hal is off the team, and his keys are refused all the same", [(await readTeam(fourth.sid)).members.some((m) => m.email === HAL), (await asApi(halKey.body.key ?? "")).error, halLate.hold], [false, "key_paused", null]);
   const repeated = await team(owner4Passkey, { action: "remove", email: HAL }, fourth);
   is("repeated: answered, not a silent 404", [repeated.status, repeated.body.ok, (repeated.body as { already?: boolean }).already], [200, true, true]);
-  is("and his key is held for good", await hold4(halKey.body.made?.id ?? ""), "left");
+  is("and the key he made in between is held for good", await hold4(halLate.id), "left");
   await revokeKey(fourth.sid, halKey.body.made?.id ?? "");
+  await revokeKey(fourth.sid, halLate.id);
 
   await newDay();
   part("L5: a role change that cannot be saved undoes its pause; one whose pause fails changes nothing");
@@ -666,7 +679,7 @@ async function main(): Promise<void> {
   await revokeKey(fourth.sid, noMaker.made.id);
 
   part("L7: turning a key back on says it will not be paused by the rule again, before it is done");
-  is("the note for a key paused for its maker's role", turnOnNote({ why: "role" }), "It works again at once, and the team's two-step rule will not pause it again. Its maker's role no longer allows such a key, so turn it on only if you want it to keep working for them.");
+  is("the note for a key paused for its maker's role", turnOnNote({ why: "role" }), "It works again at once, whatever their role and the team's two-step rule, until the person who made it leaves the team. Their role does not allow such a key, so turn it on only if you want it to keep working for them.");
   is("and for one nobody is recorded as making", turnOnNote({ why: "unrecorded" }).includes("will not pause it again"), true);
   const editorSource = readFileSync("components/api-key-editor.tsx", "utf8");
   is("the panel asks with it before turning on", editorSource.includes("{turnOnNote(key)}") && editorSource.includes("Yes, turn it on") && editorSource.includes("onClick={() => setTurning(key.id)}"), true);
@@ -693,6 +706,114 @@ async function main(): Promise<void> {
   await rewriteMakers(fourth.sid, (m) => (!m.owner && m.by === makerPrint(fourth.sid, FIN) ? { ...m, step: true } : null));
   hook = null;
   is("the revoked key's record stays gone", await realPipeline([["HGET", `nl:api:keys:${fourth.sid}`, finMove.body.made?.id ?? ""]]), [null]);
+
+
+  // ------------------------------------------------------------------ the fourth review
+  await putMember(fourth, IVY, "admin");
+  const ivyLink = await openSession(IVY);
+  const setRoleRaw = async (on: Store, who: string, role: string) => {
+    const raw = JSON.parse(String((await realPipeline([["GET", `nl:team:${on.sid}`]]))[0])) as { members: { email: string; role: string }[] };
+    await realPipeline([["SET", `nl:team:${on.sid}`, JSON.stringify({ ...raw, members: raw.members.map((m) => (m.email === who ? { ...m, role } : m)) })]]);
+  };
+
+  await newDay();
+  part("N1: a key written as its maker is demoted, checked against the old role, is refused at the door by the new one");
+  let keyWritten = false;
+  afterHook = async (commands) => {
+    if (commands.some((c) => c[0] === "HSET" && c[1] === `nl:api:keys:${fourth.sid}`)) keyWritten = true;
+    else if (keyWritten && commands.some((c) => c[0] === "GET" && c[1] === `nl:team:${fourth.sid}`)) {
+      // The route read the team (still an Admin); the demotion is saved right after, its pause having read the keys before.
+      afterHook = null;
+      await setRoleRaw(fourth, IVY, "editor");
+    }
+  };
+  const ivyKey = await make(ivyLink, "Ivy's writer", fourth, true);
+  afterHook = null;
+  is("made and not paused by the route, which saw the old role", [ivyKey.body.ok, ivyKey.body.paused, await hold4(ivyKey.body.made?.id ?? "")], [true, false, null]);
+  is("refused at the door: the role does not allow it", [(await asApi(ivyKey.body.key ?? "")).error, lastMessage], ["key_paused", KEY_PAUSED_WORDS.role]);
+  await setRoleRaw(fourth, IVY, "admin");
+  is("an Admin's key works again", (await asApi(ivyKey.body.key ?? "")).status, 200);
+  await revokeKey(fourth.sid, ivyKey.body.made?.id ?? "");
+
+  part("N3: a demotion that pauses keys nobody is recorded as making tells the owner, and says so plainly");
+  const nobodys = await makeKey(fourth.sid, "Owner's older zap");
+  if (!nobodys.ok) throw new Error("key not made");
+  const beforeRole = sent.length;
+  await setMemberRole(fourth, IVY, "support");
+  const roleMail = sent.slice(beforeRole).filter((m) => m.to === OWNER4);
+  is("one email to the owner, naming the key", [roleMail.length, roleMail[0]?.text.includes("- Owner's older zap"), roleMail[0]?.text.includes('press "Turn back on"')], [1, true, true]);
+  is("its refusal says nobody is recorded as its maker, not whose role", [(await asApi(nobodys.key)).error, lastMessage, /role of the person/.test(lastMessage)], ["key_paused", KEY_PAUSED_WORDS.unrecorded, false]);
+  await revokeKey(fourth.sid, nobodys.made.id);
+  await setMemberRole(fourth, IVY, "admin");
+
+  await newDay();
+  part("N4: removing an address that was never on the team is not found, and touches nothing");
+  const untouched = await makeKey(fourth.sid, "Untouched zap");
+  if (!untouched.ok) throw new Error("key not made");
+  const beforeTypo = sent.length;
+  const typo = await team(owner4Passkey, { action: "remove", email: "never-here@example.com" }, fourth);
+  is("404 not_found", [typo.status, typo.body.error], [404, "not_found"]);
+  is("no key paused and nobody emailed", [await hold4(untouched.made.id), sent.length - beforeTypo], [null, 0]);
+  await revokeKey(fourth.sid, untouched.made.id);
+
+  await newDay();
+  part("N2: a teammate leaving never reads the team in the middle of a move");
+  const finThere = await make(finLink, "Fin's stay", fourth);
+  let sweep: Promise<unknown> | null = null;
+  afterHook = async (commands) => {
+    if (!commands.some((c) => c[0] === "EVAL" && c[1] === RECORD_SWAP)) return;
+    afterHook = null;
+    // Fin's keys now carry the new address's print, the team still the old: an exit starting here must wait.
+    sweep = leftTeam(fourth, GIA);
+  };
+  await moveMemberships(FIN, FIN3);
+  await sweep;
+  is("the move went through", (await readTeam(fourth.sid)).members.some((m) => m.email === FIN3), true);
+  is("and Fin's key was never held", [await hold4(finThere.body.made?.id ?? ""), (await asApi(finThere.body.key ?? "")).status], [null, 200]);
+  await revokeKey(fourth.sid, finThere.body.made?.id ?? "");
+
+  await newDay();
+  part("N5: a rewrite that cannot finish throws, so a move is undone");
+  const finAgain = await make(await openSession(FIN3), "Fin's again", fourth);
+  let changes = 0;
+  hook = async (commands) => {
+    const swap = commands.find((c) => c[0] === "EVAL" && c[1] === RECORD_SWAP);
+    if (!swap) return;
+    if ((changes += 1) > 3) {
+      hook = null;
+      return;
+    }
+    // The record changes under every try (as if used and rewritten elsewhere each time).
+    const id = String(swap[4]);
+    const raw = JSON.parse(String((await realPipeline([["HGET", `nl:api:keys:${fourth.sid}`, id]]))[0])) as Record<string, unknown>;
+    await realPipeline([["HSET", `nl:api:keys:${fourth.sid}`, id, JSON.stringify({ ...raw, name: `${String(raw.name)}.` })]]);
+  };
+  await moveMemberships(FIN3, FIN2);
+  hook = null;
+  is("the membership stayed on the address before", [(await readTeam(fourth.sid)).members.some((m) => m.email === FIN3), (await readTeam(fourth.sid)).members.some((m) => m.email === FIN2)], [true, false]);
+  is("and the key is still Fin's there, and works", [(await shownKeys(fourth, FIN3, "admin")).find((k) => k.id === finAgain.body.made?.id)?.maker, (await asApi(finAgain.body.key ?? "")).status], ["you", 200]);
+  await revokeKey(fourth.sid, finAgain.body.made?.id ?? "");
+
+  part("N6: the door reads the team as the studio does: a member it would not accept matches nobody");
+  const odd = "odd-member@example.com";
+  const oddKey = await makeKey(fourth.sid, "Odd's sync", Date.now(), false, "none", makerFor(fourth.sid, "admin", odd, false));
+  if (!oddKey.ok) throw new Error("key not made");
+  const teamNowRaw = JSON.parse(String((await realPipeline([["GET", `nl:team:${fourth.sid}`]]))[0])) as { members: unknown[] };
+  await realPipeline([["SET", `nl:team:${fourth.sid}`, JSON.stringify({ ...teamNowRaw, members: [...teamNowRaw.members, { email: odd, role: "boss", joinedAt: "" }] })]]);
+  is("a member with a role the studio does not know counts for nothing", [(await asApi(oddKey.key)).error, lastMessage], ["key_paused", KEY_PAUSED_WORDS.unmatched]);
+  await realPipeline([["SET", `nl:team:${fourth.sid}`, JSON.stringify(teamNowRaw)]]);
+  await revokeKey(fourth.sid, oddKey.made.id);
+
+  part("The door still fits an API request's own commands");
+  const door = await make(await openSession(FIN3), "Door check", fourth);
+  let counted = 0;
+  hook = async (commands) => {
+    counted += commands.length;
+  };
+  await asApi(door.body.key ?? "");
+  hook = null;
+  is("at most 20 commands and the take", counted <= 20 + TAKE_COMMANDS, true);
+  await revokeKey(fourth.sid, door.body.made?.id ?? "");
 
   part("The developers page names the answer");
   const docs = readFileSync("app/developers/page.tsx", "utf8");

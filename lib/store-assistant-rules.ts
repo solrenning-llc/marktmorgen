@@ -215,37 +215,57 @@ export const HANDOFF_WORDS =
  * Words of a deal or of pressure, singular and plural, in English and in
  * every language a store can speak (Spanish, French, German, Italian, Dutch,
  * Portuguese). A reply may use one only when the store's own text does.
- * Whole words only, by Unicode letters, so an accented word is matched at its
- * edges and a longer word that merely contains one ("barcode", "promotion")
- * is not.
+ * Whole words only, by Unicode letters, so a longer word that merely
+ * contains one ("barcode", "Postversand") is not caught. They are written
+ * lowercase and are matched on text folded to one form (foldedText), so an
+ * accent the term spells as a choice ("cup[oó]n") matches with or without
+ * it. A stem with an open ending (written \p{L}* after it) takes every form
+ * of the word: "garantiert", "Gutscheinen", "promoção"; one with letters
+ * before it (\p{L}+) is the German or Dutch compound ("Frühlingsrabatt").
+ * Singular and plural share one term, so the store's "Discounts" allows "a
+ * discount"; another form ("discounted") is its own term.
  */
 const DEAL_TERMS = [
   // English
-  "discount(?:s|ed)?", "coupons?", "promos?", "promo codes?", "vouchers?", "codes?", "percent off", "sale prices?", "free shipping",
-  "limited[- ]time", "only \\d+ left", "hurry", "selling fast", "last chance", "ends (?:today|tonight|soon)", "act now", "today only",
-  "exclusive offers?", "guarantee[ds]?", "best[- ]selling", "best[- ]?sellers?", "testimonials?", "five[- ]stars?", "5[- ]stars?",
+  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|uv\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
+  "per[- ]?cent off", "on sale", "sale prices?", "free shipping", "limited[- ]time", "only \\d+ left", "hurry", "selling fast", "last chance",
+  "ends (?:today|tonight|soon)", "act now", "today only", "exclusive offers?", "guarant\\p{L}*", "best[- ]?sell(?:ing|ers?)", "testimonials?",
+  "five[- ]stars?", "5[- ]stars?",
   // Spanish
-  "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promocional(?:es)?", "rebajas?", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad", "date prisa", "s[oó]lo hoy",
-  "garant[ií]as?", "testimonios?", "cinco estrellas", "m[aá]s vendidos?",
+  "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promociona(?:l|les|is)", "rebaj\\p{L}*", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad",
+  "date prisa", "s[oó]lo hoy", "garant\\p{L}*", "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
   // French
-  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement", "livraison gratuite",
-  "garanties?", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
+  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
+  "livraison gratuite", "soldes", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
   // German
-  "\\p{L}*rabatt(?:e|en|s)?", "rabattcodes?", "\\p{L}*gutscheine?", "gutscheincodes?", "kostenloser versand", "aktionscodes?", "sonderangebote?", "letzte chance", "nur heute",
-  "beeilen sie sich", "garantien?", "kundenstimmen?", "erfahrungsberichte?", "f[uü]nf sterne",
+  "rabatt\\p{L}*", "\\p{L}+rabatt\\p{L}*", "gutschein\\p{L}*", "\\p{L}+gutschein\\p{L}*", "kostenlos\\p{L}* versand", "\\p{L}*(?:gratis|kostenlos)versand\\p{L}*",
+  "versandkostenfrei\\p{L}*", "aktionscodes?", "sonderangebot\\p{L}*", "letzte chance", "nur heute", "beeilen sie sich", "kundenstimmen?", "erfahrungsberichte?",
+  "f[uü]nf sterne",
   // Italian
-  "scont[oi]", "scontat[aeio]", "spedizione gratuita", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi", "garanzi[ae]",
-  "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
+  "scont[oi]", "scontat[aeio]", "spedizione gratuita", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi",
+  "garanz\\p{L}*", "saldi", "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
   // Dutch
-  "\\p{L}*korting(?:en)?", "kortingscodes?", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag", "garanties?", "vijf sterren",
+  "korting\\p{L}*", "\\p{L}+korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
+  "gegarandeerd\\p{L}*", "uitverkoop\\p{L}*", "vijf sterren",
   // Portuguese
-  "descontos?", "cupom", "cupons", "cup[aã]o", "cup[oõ]es", "c[oó]digo promocional", "c[oó]digos promocionais", "ofertas? limitadas?", "[uú]ltima oportunidade",
-  "s[oó] hoje", "frete gr[aá]tis", "garantias?", "depoimentos?", "testemunhos?", "cinco estrelas", "mais vendidos?",
-];
+  "descontos?", "cup(?:om|ons)", "cup(?:[aã]o|[oõ]es)", "ofertas? limitadas?", "[uú]ltima oportunidade", "s[oó] hoje", "frete gr[aá]tis", "depoimentos?",
+  "testemunhos?", "cinco estrelas", "mais vendid[oa]s?",
+].filter((term, i, all) => all.indexOf(term) === i);
 /** Between the words of a term: any run of spaces (a line break, a no-break space) or a hyphen of any kind. */
 const BETWEEN = "[\\s\\-\\u2010-\\u2015]+";
+const termSource = (term: string) => term.replace(/\[- \]\?/g, `(?:${BETWEEN})?`).replace(/\[- \]| /g, BETWEEN);
+/** Deal signs that are not words: "20% off" however it is spaced, and star ratings. */
+const DEAL_SIGNS = ["%\\s*off(?!\\p{L})", "[\\u2605\\u2606\\u2729-\\u2730\\u2B50\\u2B51\\u{1F31F}]"];
+const WORD_EDGE_BEFORE = "(?<![\\p{L}\\p{N}_])";
+const WORD_EDGE_AFTER = "(?![\\p{L}\\p{N}_])";
+type DealTerm = { find: RegExp; open: boolean };
+const DEAL_TERM_RULES: DealTerm[] = [
+  ...DEAL_TERMS.map((term) => ({ find: new RegExp(`${WORD_EDGE_BEFORE}(?:${termSource(term)})${WORD_EDGE_AFTER}`, "gu"), open: /\\p\{L\}[*+]/.test(term) })),
+  ...DEAL_SIGNS.map((sign) => ({ find: new RegExp(sign, "gu"), open: false })),
+];
+/** Every deal word or sign, as typed (case ignored): for a quick refusal where no deal may pass at all. */
 export const DEAL_WORDS = new RegExp(
-  `(?<![\\p{L}\\p{N}_])(?:${DEAL_TERMS.map((term) => term.replace(/\[- \]\?/g, `(?:${BETWEEN})?`).replace(/\[- \]| /g, BETWEEN)).join("|")})(?![\\p{L}\\p{N}_])|%\\s?off(?![\\p{L}])`,
+  `${WORD_EDGE_BEFORE}(?:${DEAL_TERMS.map(termSource).join("|")})${WORD_EDGE_AFTER}|${DEAL_SIGNS.join("|")}`,
   "iu",
 );
 
@@ -258,34 +278,88 @@ function numberForms(n: string): string[] {
 }
 const LINK = /\b(?:https?:\/\/|www\.)\S+/i;
 
-/** Text as one form with the characters that hide inside words removed (soft hyphen, combining grapheme joiner, zero-width space and joiners, word joiner and the invisible operators, BOM, Mongolian variation selectors), so no word slips past a rule. */
-export function readableText(text: string): string {
-  return text.normalize("NFC").replace(/[\u00AD\u034F\u200B-\u200D\u2060-\u2064\uFEFF\u180B-\u180F]/gu, "");
+/** Every apostrophe-like sign, read as "'" (the modifier letters among them would otherwise count as letters of another script). */
+const APOSTROPHES = /[\u2018\u2019\u201B\u02BB\u02BC\u2032\u00B4`\uFF07]/g;
+/** A decimal digit of any script as its ASCII digit: Unicode encodes each script's ten digits in a row, 0 first. */
+function asciiDigit(digit: string): string {
+  let code = digit.codePointAt(0)!;
+  let start = code;
+  while (/\p{Nd}/u.test(String.fromCodePoint(start - 1))) start -= 1;
+  code = (code - start) % 10;
+  return String(code);
 }
+/**
+ * Text folded to the one form it is matched in, never shown: compatibility
+ * forms as their plain letter and digit (fullwidth, mathematical bold, a
+ * digit of any script as ASCII), every mark (accent) and every invisible or
+ * format character removed (bidirectional marks, variation selectors, tags),
+ * the Turkish dotted and dotless i as "i", lowercase.
+ */
+export function foldedText(text: string): string {
+  return text
+    .replace(APOSTROPHES, "'")
+    .normalize("NFKC")
+    .replace(/[\u0130\u0131]/g, "i")
+    .normalize("NFKD")
+    .replace(/[\p{M}\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\p{Nd}/gu, asciiDigit);
+}
+/** Letters joined by a single dot, hyphen, underscore or middle dot read as one word: "dis.count" is "discount". */
+const joinedText = (folded: string) => folded.replace(/(?<=\p{L})[._\-\u2010-\u2015\u00B7\u2022\u2027\u2219\u22C5\u30FB](?=\p{L})/gu, "");
+/** The text as typed, only lowercased: a deal word found folded but not here was hidden (a lookalike letter, a hidden mark, a split). */
+const plainText = (text: string) =>
+  text.normalize("NFC").replace(/\p{Lu}/gu, (c) => {
+    const lower = c.toLowerCase();
+    return c.normalize("NFKC") === c && lower.normalize("NFKC") === lower && /^\p{Ll}$/u.test(lower) ? lower : c;
+  });
+/** A word with Latin letters and a letter of any other script ("dis\u0441ount" with a Cyrillic "\u0441"): never an honest reply's word. */
+const mixesScripts = (text: string) => (text.match(/\p{L}+/gu) ?? []).some((word) => /\p{Script=Latin}/u.test(word) && /[^\p{Script=Latin}]/u.test(word));
+
+const countIn = (find: RegExp, text: string) => text.match(find)?.length ?? 0;
+/** The word without a plural or inflection ending, for terms with an open ending: "Gutscheinen" and "Gutschein" are the same word. */
+const stem = (word: string) => (word.length > 4 ? word.replace(/(?:en|es|e|s)$/, "") : word);
 
 /**
  * Whether a reply says only what the store published: every number in it
  * (prices, percentages, days, counts) appears in the facts, every deal or
- * pressure word too, and it carries no link. A reply that fails is never
- * shown, whatever the model was told or tricked into.
+ * pressure word too, and it carries no link. A reply is read folded to one
+ * form, so a lookalike letter, a hidden character or a split word cannot
+ * hide one; a deal word found only that way, or a word mixing scripts,
+ * refuses it whatever the facts say. A reply that fails is never shown,
+ * whatever the model was told or tricked into. The reply itself is never
+ * changed by this: the folding is only for the comparison.
  */
 export function heldToFacts(raw: string, facts: string): boolean {
-  const reply = readableText(raw);
-  if (!reply.trim() || LINK.test(reply)) return false;
-  const factNumbers = new Set((facts.match(NUMBERS) ?? []).flatMap(numberForms));
-  for (const n of reply.match(NUMBERS) ?? []) {
+  const folded = foldedText(raw);
+  const joined = joinedText(folded);
+  if (!folded.trim() || LINK.test(folded) || LINK.test(joined)) return false;
+  if (mixesScripts(folded) || mixesScripts(joined)) return false;
+  const factsFolded = foldedText(facts);
+  const factsJoined = joinedText(factsFolded);
+  const factNumbers = new Set((factsFolded.match(NUMBERS) ?? []).flatMap(numberForms));
+  for (const n of folded.match(NUMBERS) ?? []) {
     if (!numberForms(n).some((form) => factNumbers.has(form))) return false;
   }
-  // Both sides as one form, spaces single, so a word the store wrote is found however either was typed.
-  const plain = (text: string) => readableText(text).toLowerCase().replace(/[\s\-\u2010-\u2015]+/gu, " ");
-  const lowerFacts = plain(facts);
-  for (const m of reply.matchAll(new RegExp(DEAL_WORDS.source, "giu"))) {
-    // The same word as the store wrote it, as a whole word: "discount" is not allowed by "discounted", nor "Rabatt" by "Frühlingsrabatt".
-    const said = plain(m[0]);
-    const word = said.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // A term that starts with a sign ("% off") follows a figure ("20% off"): only a letter before it makes it another word.
-    const before = /^[\p{L}\p{N}]/u.test(said) ? "(?<![\\p{L}\\p{N}])" : "(?<![\\p{L}])";
-    if (!new RegExp(`${before}${word}(?![\\p{L}\\p{N}])`, "u").test(lowerFacts)) return false;
+  const plain = plainText(raw);
+  for (const { find, open } of DEAL_TERM_RULES) {
+    const found = Math.max(countIn(find, folded), countIn(find, joined));
+    if (!found) continue;
+    // Found more often folded than as typed: hidden by a lookalike, a mark, an invisible character or a split.
+    if (found > countIn(find, plain)) return false;
+    if (!open) {
+      // The same term in the store's text, in any of its forms: "Discounts" allows "a discount", "Cupón" allows "cupon".
+      if (!find.test(factsFolded) && !find.test(factsJoined)) return false;
+      find.lastIndex = 0;
+      continue;
+    }
+    // A stem with an open ending: the same word, but for a plural ending; "Rabattcode" does not allow "Rabatt".
+    const allowed = new Set([...(factsFolded.match(find) ?? []), ...(factsJoined.match(find) ?? [])].map((w) => stem(w.replace(/[\s\-\u2010-\u2015]+/gu, " "))));
+    for (const word of [...(folded.match(find) ?? []), ...(joined.match(find) ?? [])]) {
+      if (!allowed.has(stem(word.replace(/[\s\-\u2010-\u2015]+/gu, " ")))) return false;
+    }
   }
   return true;
 }

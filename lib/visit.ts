@@ -75,7 +75,9 @@ export async function countHit(
         ? { channel: channelOfRequest(request, store.handle, requestHost(request), Date.now() / 1000, store.attributionDays).channel }
         : {}),
     });
-    // Asked only at 64, 128, 256… views in a day, so a visit costs nothing more.
+    // Asked only at 64, 128, 256… views in a day: the fortnight before is read
+    // once a day per store, and each later power of two costs a few commands
+    // (lib/stats-report.ts, maybeBusyAlert; priced in tests/traffic-cost.ts).
     if (today) await maybeBusyAlert(store, today);
   } catch (error) {
     console.error("counting a visit failed", error);

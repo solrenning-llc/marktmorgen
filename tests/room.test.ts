@@ -23,6 +23,7 @@ import { GET as news } from "@/app/api/store/community/chat/new/route";
 import { type Grant, grantRoom } from "@/lib/chat-grant";
 import { AWAY_AFTER_MS, GRANT_MS, IDLE_LOOKS, IDLE_MS, LIVE_LOOKS, LIVE_MS, ROOM_GRANT_MINUTES, TALKING_FOR_MS, askEvery, isTalking, paceFor, shareFor } from "@/lib/chat-pace";
 import { passFits, roomPass, slotOf } from "@/lib/chat-pass";
+import { HELP_SECTIONS } from "@/lib/help-content";
 import { lastSaid, parseChatSetting, quietFor, room, say } from "@/lib/community-chat";
 import { monthKey } from "@/lib/delivery";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -146,7 +147,7 @@ async function main(): Promise<void> {
   await recordVisit(paid, "203.0.113.9", t1);
   is("beside the people who came", await trafficIn(folder, month), { people: 1, parts: counted, visits: 1 + Math.floor(counted / PARTS_PER_VISIT) });
   is("a store whose only visits are its room is known to the daily job", (await visitedFolders(calendar)).includes(folder), true);
-  is("what a page prints of it", [partsWords(ROOM_LIVE_PARTS), partsWords(ROOM_IDLE_PARTS), roomHourWords(ROOM_LIVE_PARTS), roomHourWords(ROOM_IDLE_PARTS)], ["2.3", "0.6", "14", "3.6"]);
+  is("what a page prints of it", [partsWords(ROOM_LIVE_PARTS), partsWords(ROOM_IDLE_PARTS), roomHourWords(ROOM_LIVE_PARTS), roomHourWords(ROOM_IDLE_PARTS)], ["2.6", "0.6", "16", "3.6"]);
   await recordParts(paid, (VISITS_INCLUDED.creator + 2_000) * PARTS_PER_VISIT, t1);
   // Since 17 October 2026 visits past a plan are not sold: the room past the figure rests, and nothing is billed.
   is("and past the plan's visits the room rests like the store's other buyer pages", await isResting(paid, t1, "buyer"), true);
@@ -170,7 +171,16 @@ async function main(): Promise<void> {
 
   part("What it is counted as is what it can cost, and a little over");
   const part$ = visitCost() / PARTS_PER_VISIT;
-  is("ten minutes of a talking room, every look answered by the database", [roomMinutesCost(LIVE_LOOKS) <= ROOM_LIVE_PARTS * part$, roomMinutesCost(LIVE_LOOKS) > (ROOM_LIVE_PARTS - 15) * part$], [true, true]);
+  // The talking room's 260 hundredths were kept by the owner on 4 November
+  // 2026 (C2-58): never below what ten minutes cost, and at most a quarter
+  // over it. The room over the cost (about 19.5% that day) is not a margin
+  // the room keeps for itself: it covers what the model prices only roughly,
+  // the bytes of the count script sent whole with every EVAL a visit makes
+  // (tests/traffic-cost.ts) and the busy-day email's once-a-day reads
+  // (lib/stats-report.ts, maybeBusyAlert).
+  const liveCost = roomMinutesCost(LIVE_LOOKS);
+  is("ten minutes of a talking room, every look answered by the database", [liveCost <= ROOM_LIVE_PARTS * part$, ROOM_LIVE_PARTS * part$ < 1.25 * liveCost], [true, true]);
+  console.log(`ten minutes of a talking room: ${(liveCost / part$).toFixed(1)} hundredths of a visit, counted as ${ROOM_LIVE_PARTS} (${((ROOM_LIVE_PARTS * part$ / liveCost - 1) * 100).toFixed(1)}% over)`);
   is("ten minutes of a quiet one", [roomMinutesCost(IDLE_LOOKS) <= ROOM_IDLE_PARTS * part$, roomMinutesCost(IDLE_LOOKS) > (ROOM_IDLE_PARTS - 15) * part$], [true, true]);
   is("a look is a small thing, and being handed leave a larger one", [roomLookCost() < 0.000006, roomLeaveCost() < 0.00005, roomLeaveCost() > roomLookCost()], [true, true, true]);
   // What the room cost before: a look every four seconds at a route that
@@ -180,7 +190,8 @@ async function main(): Promise<void> {
 
   part("What is published");
   const terms = readFileSync(join(process.cwd(), "app/terms/page.tsx"), "utf8");
-  const help = readFileSync(join(process.cwd(), "lib/help-content.ts"), "utf8");
+  const helpSource = readFileSync(join(process.cwd(), "lib/help-content.ts"), "utf8");
+  const help = `${helpSource}\n${HELP_SECTIONS.flatMap((section) => section.items.flatMap((item) => item.a)).join("\n")}`;
   is("the Terms say what a buyer coming back counts as, from the figures the count is made from", [/ROOM_GRANT_MINUTES\} minutes it is open: \{partsWords\(ROOM_LIVE_PARTS\)\}/.test(terms), /partsWords\(ROOM_IDLE_PARTS\)\} of a visit while the room is/.test(terms), /one visit on each day their podcast app checks/.test(terms), /is that\s+day&apos;s visit, once/.test(terms)], [true, true, true, true]);
   is("the help page says the same, in the same figures", [help.includes(`by the ${ROOM_GRANT_MINUTES} minutes it is open, for each member: ${partsWords(ROOM_LIVE_PARTS)} visits while people are talking, when it checks every ${LIVE_MS / 1000} seconds, and ${partsWords(ROOM_IDLE_PARTS)} of a visit while the room is quiet`), help.includes(`one nobody has touched for ${AWAY_AFTER_MS / MINUTE} minutes, checks nothing and counts nothing`)], [true, true]);
   is("both say what a resting store's room does", [/stops checking by itself and shows new\s+messages when a member asks for them/.test(terms), /stops checking by itself,? and shows new messages when a member presses a button/.test(help)], [true, true]);

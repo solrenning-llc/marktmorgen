@@ -25,6 +25,22 @@ import { makeKey } from "@/lib/api-keys";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { GET as mcpGet, POST as mcp } from "@/app/api/mcp/route";
 import { store as redis } from "./redis-stub";
+import { BUSY } from "./traffic-cost";
+
+/** What a piece of work sent to the database, command by command, and what it answered. */
+async function sent<T>(work: () => Promise<T>): Promise<{ result: T; sent: string[][] }> {
+  const list: string[][] = [];
+  const real = redis.pipeline;
+  (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((commands: (string | number)[][]) => {
+    for (const command of commands) list.push(command.map(String));
+    return real.call(redis, commands);
+  }) as typeof redis.pipeline;
+  try {
+    return { result: await work(), sent: list };
+  } finally {
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = real;
+  }
+}
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -115,16 +131,36 @@ async function main(): Promise<void> {
   store = (await storeForEmail(OWNER))!;
   is("only at 64, 128, 256…", await maybeBusyAlert(store, 65, TODAY), false);
   await setWeeklyOff("harbor", true);
-  is("never after the creator stopped the emails", await maybeBusyAlert(store, 64, TODAY), false);
+  const firstAsk = await sent(() => maybeBusyAlert(store, 64, TODAY));
+  is("never after the creator stopped the emails", firstAsk.result, false);
   await setWeeklyOff("harbor", false);
-  is("written to once the day is busy", await maybeBusyAlert(store, 64, TODAY), true);
+  const sending = await sent(() => maybeBusyAlert(store, 64, TODAY));
+  is("written to once the day is busy", sending.result, true);
   is("to the creator, saying where they came from and how to stop it", [
     emails.length,
     emails[0]?.to,
     /Most of them came from TikTok\./.test(emails[0]?.text ?? ""),
     /To stop these emails/.test(emails[0]?.text ?? ""),
   ], [1, OWNER, true, true]);
-  is("and once a day, however busy it gets", [await maybeBusyAlert(store, 128, TODAY), emails.length], [false, 1]);
+  const after = await sent(() => maybeBusyAlert(store, 128, TODAY));
+  is("and once a day, however busy it gets", [after.result, emails.length], [false, 1]);
+  // What it asks the database (4 November 2026): the fortnight before is read
+  // once a day, by the day's first power of two, under a claim made before
+  // any read; every later one reads it back with its claim. Held to what
+  // tests/traffic-cost.ts prices a store's day of it at (BUSY).
+  const fortnightReads = (list: string[][]) => list.filter((c) => c[0] === "HGET" && c[2] === "v").length;
+  is("the fortnight before is read once a day, after the day is claimed", [fortnightReads(firstAsk.sent), firstAsk.sent[1]?.[0], firstAsk.sent[1]?.[3], fortnightReads(sending.sent), fortnightReads(after.sent)], [14, "SET", "NX", 0, 0]);
+  is("and each ask is inside what a day of it is priced at", [
+    firstAsk.sent.length <= BUSY.first + BUSY.busy,
+    sending.sent.length <= BUSY.later + BUSY.busy + BUSY.send,
+    after.sent.length <= BUSY.later,
+  ], [true, true, true]);
+  console.log(`the busy-day email, commands: the day's first ask ${firstAsk.sent.length}, the one that sends ${sending.sent.length}, a later one ${after.sent.length}`);
+  const quietStore = (await storeForEmail(OWNER))!;
+  redis.run(["DEL", `nl:busy:${new Date(TODAY).toISOString().slice(0, 10)}:harbor:before`]);
+  redis.run(["SET", `nl:busy:${new Date(TODAY).toISOString().slice(0, 10)}:harbor:before`, JSON.stringify(Array(14).fill(500))]);
+  const quiet = await sent(() => maybeBusyAlert(quietStore, 256, TODAY));
+  is("a day that is not busy asks only for the fortnight it kept", [quiet.result, quiet.sent.length <= BUSY.later, fortnightReads(quiet.sent)], [false, true, 0]);
 
   part("The MCP server");
   const rpc = (body: unknown, key?: string) =>

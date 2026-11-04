@@ -574,27 +574,69 @@ export function isBusy(today: number, before: number[]): { busy: boolean; times:
   return { busy, times: usual >= 5 ? Math.floor(today / usual) : 0 };
 }
 
+const busyDayKey = (handle: string, day: string) => `nl:busy:${day}:${handle}:before`;
+/** What the day's key holds once its email has gone: no later power of two reads anything more. */
+const BUSY_SENT = "sent";
+
+/**
+ * The views a usual day of the last two weeks had, read once a day per store:
+ * the first power of two a store reaches that day claims the day (SET NX,
+ * before any read) and keeps the fourteen days it read under the claim; every
+ * later one that day reads them back, one command. Before 4 November 2026 the
+ * fourteen days and the creator's choice were read again at every power of
+ * two, before the day's email was claimed. "sent" once the day's email has
+ * gone; null while another request holds the claim and has not written the
+ * days yet: that power of two is not checked, and a later one is.
+ */
+async function busyBefore(store: Store, day: string, now: number): Promise<number[] | typeof BUSY_SENT | null> {
+  const key = busyDayKey(store.handle, day);
+  const [held] = await redisPipeline([["GET", key]]);
+  if (typeof held === "string" && held !== "") {
+    if (held === BUSY_SENT) return BUSY_SENT;
+    try {
+      const days = JSON.parse(held) as unknown;
+      return Array.isArray(days) ? days.map((n) => Number(n) || 0) : null;
+    } catch {
+      return null;
+    }
+  }
+  if (held !== null && held !== undefined) return null;
+  const [claimed] = await redisPipeline([["SET", key, "", "NX", "EX", 2 * 86400]]);
+  if (claimed === null) return null;
+  const before = await viewsBefore(store, 14, now);
+  await redisPipeline([["SET", key, JSON.stringify(before), "XX", "EX", 2 * 86400]]);
+  return before;
+}
+
 /**
  * The email when a store is busier than usual (added 11 October 2026): a post
  * is bringing people now, which is the moment to answer comments, pin the
  * post or post again — and the one the creator would otherwise learn about
  * the next week.
  *
- * Asked only when today's views reach 64, 128, 256 and so on (lib/visit.ts),
- * so it costs a visit nothing: the few reads it makes happen a handful of
- * times a day at most. Once a day per store, only for a store with a plan
- * running, and never for one whose creator stopped the numbers emails.
+ * Asked only when today's views reach 64, 128, 256 and so on (lib/visit.ts).
+ * The fourteen days before are read once a day per store (busyBefore); each
+ * later power of two that day reads them back, one command, and on a busy
+ * day before the email has gone also the creator's choice. Bounded, and
+ * priced in tests/traffic-cost.ts (BUSY). Once a day per store, only for a
+ * store with a plan running, and never for one whose creator stopped the
+ * numbers emails.
  */
 export async function maybeBusyAlert(store: Store, today: number, now = Date.now()): Promise<boolean> {
   if (today < BUSY_FLOOR || (today & (today - 1)) !== 0) return false;
   if (!isRedisConfigured() || !isSenderConfigured()) return false;
   const standing = standingOf(store);
   if (standing !== "paid" && standing !== "trial") return false;
-  if (await weeklyOff(store.handle)) return false;
-  const verdict = isBusy(today, await viewsBefore(store, 14, now));
-  if (!verdict.busy) return false;
   const day = new Date(now).toISOString().slice(0, 10);
-  const [claimed] = await redisPipeline([["SET", busyKey(store.handle, day), "1", "NX", "EX", 2 * 86400]]);
+  const before = await busyBefore(store, day, now);
+  if (!before || before === BUSY_SENT) return false;
+  const verdict = isBusy(today, before);
+  if (!verdict.busy) return false;
+  if (await weeklyOff(store.handle)) return false;
+  const [claimed] = await redisPipeline([
+    ["SET", busyKey(store.handle, day), "1", "NX", "EX", 2 * 86400],
+    ["SET", busyDayKey(store.handle, day), BUSY_SENT, "XX", "EX", 2 * 86400],
+  ]);
   if (claimed === null) return false;
 
   const top = (await sourcesToday(store, now)).filter((s) => s.name !== "direct")[0];

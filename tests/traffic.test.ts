@@ -54,7 +54,7 @@ import { countHit, countVisit } from "@/lib/visit";
 import { isSoon, soonProducts } from "@/lib/waitlist";
 import { centsWords } from "@/lib/watch-rules";
 import { store as redis } from "./redis-stub";
-import { COMMANDS, PAGES_PER_VISIT, STATIC_FILES, visitCost } from "./traffic-cost";
+import { COMMANDS, EVALS, EVAL_BYTES, PAGES_PER_VISIT, STATIC_FILES, visitCost } from "./traffic-cost";
 import { POST as readRoute } from "@/app/api/store/read/route";
 import { STORE_SCOPE, readToken } from "@/lib/page-read";
 import { done, is, part } from "./check";
@@ -138,16 +138,25 @@ let commands = 0;
 /** Any other script a counted request sent: its inside is not counted here, so a visit must send none. */
 const uncounted: string[] = [];
 let measuring = false;
+/**
+ * The count scripts sent while something ran: each is sent whole, its bytes
+ * moved through the database every time, priced in tests/traffic-cost.ts
+ * (EVALS). The last measurement's, read after counted().
+ */
+let evals = 0;
 const real = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
   commands += list.length;
   for (const command of list) {
-    if (measuring && command[0] === "EVAL" && !String(command[1]).startsWith("-- marktmorgen:capped-count:")) uncounted.push(String(command[1]).split("\n")[0]);
+    if (command[0] !== "EVAL") continue;
+    if (String(command[1]).startsWith("-- marktmorgen:capped-count:")) evals += 1;
+    else if (measuring) uncounted.push(String(command[1]).split("\n")[0]);
   }
   return real(list);
 }) as typeof redis.pipeline;
 async function counted(work: () => Promise<unknown>): Promise<number> {
   commands = 0;
+  evals = 0;
   const inside = redis.scriptCalls;
   measuring = true;
   try {
@@ -329,6 +338,7 @@ async function main(): Promise<void> {
   const listings = await drawFront();
   // And the request the page is, counted in the store's window: priced apart (tests/plan-cost-registry.ts, public-requests).
   is("a full page of a store that pays is drawn in a few reads", [listings.length, (await counted(drawFront)) <= COMMANDS.frontPage + REQUEST_COMMANDS], [24, true]);
+  const evalsSent = { page: [evals], front: [] as number[], later: [] as number[], read: [] as number[] };
   const countFront = async (ip: string) => {
     const store = (await storeForHandle("joy"))!;
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
@@ -339,9 +349,11 @@ async function main(): Promise<void> {
   // beside the count is written once in a hundred visits, not by each.
   await countFront("192.0.2.49");
   const firstView = await counted(() => countFront("192.0.2.50"));
+  evalsSent.front.push(evals);
   const secondView = await counted(() => countFront("192.0.2.50"));
+  evalsSent.front.push(evals);
   is("counting it a second time that day is inside the model", secondView <= COMMANDS.frontCount, true);
-  is("and what somebody new to the day adds is too", firstView - secondView <= COMMANDS.firstOfDay, true);
+  is("and with what somebody new to the day adds, the whole view is too", firstView <= COMMANDS.frontCount + COMMANDS.firstOfDay, true);
   const product = listings[0];
   const drawLater = async () => {
     const store = (await storeForPage("joy"))!;
@@ -356,6 +368,7 @@ async function main(): Promise<void> {
     ]);
   };
   is("a product's page is drawn inside it", (await counted(drawLater)) <= COMMANDS.laterPage + REQUEST_COMMANDS, true);
+  evalsSent.page.push(evals);
   const countLater = async (ip: string) => {
     const store = (await storeForHandle("joy"))!;
     await withinLimit("hit", `${ip}|${store.handle}`, 120, 600);
@@ -366,6 +379,7 @@ async function main(): Promise<void> {
   // Somebody before them today: the product's first visitor of the day also gives the day's record its end, once.
   await countLater("192.0.2.52");
   const laterCount = await counted(() => countLater("192.0.2.51"));
+  evalsSent.later.push(evals);
   is("and saying it was opened is too, with the product's own visitor", laterCount <= COMMANDS.laterCount, true);
   // The heaviest view (313 [CV1], 31 October 2026): a medium and a campaign
   // beside its source, nine counts in all (lib/stats.ts), with the day's
@@ -383,8 +397,10 @@ async function main(): Promise<void> {
   for (let i = 0; redis.run(["HLEN", `nl:stats:${joyStats}:${today}`]) as number < DAY_FIELDS_MAX; i += 1) redis.run(["HSET", `nl:stats:${joyStats}:${today}`, `f:${i}`, "1"]);
   for (let i = 0; i < LIFE_WRITE_MAX - 2; i += 1) redis.run(["HSET", `nl:stats:${joyStats}:life`, `f:${i}`, "1"]);
   const fullFirst = await counted(() => countTagged("192.0.2.60"));
+  evalsSent.front.push(evals);
   const fullSecond = await counted(() => countTagged("192.0.2.60"));
-  is("the heaviest view is inside the model too, at its record's most", [fullSecond <= COMMANDS.frontCount, fullFirst - fullSecond <= COMMANDS.firstOfDay], [true, true]);
+  evalsSent.front.push(evals);
+  is("the heaviest view is inside the model too, at its record's most", [fullSecond <= COMMANDS.frontCount, fullFirst <= COMMANDS.frontCount + COMMANDS.firstOfDay], [true, true]);
   is("and what it counted beyond the most is kept under ~, so the day's total stays right", Number(redis.run(["HGET", `nl:stats:${joyStats}:${today}`, "~"])) >= 2, true);
   // What was counted before 31 October 2026 for this view, and what it is now (printed for the record of 313 [CV1]).
   console.log(`a view's count, billed: ${secondView} (${firstView} by somebody new to the day); the heaviest: ${fullSecond} (${fullFirst})`);
@@ -394,7 +410,7 @@ async function main(): Promise<void> {
   // nine counts, both lookups of which names are there, and the writes made
   // once a day with the day's first view (lib/stats.ts). The most a single
   // view can send; held to the model with somebody new to the day's share.
-  const kim = await storeWith("kim", "paid");
+  await storeWith("kim", "paid");
   const kimStore = (await storeForHandle("kim"))!;
   const kimDay = `nl:stats:${kimStore.statsId}:${new Date().toISOString().slice(0, 10)}`;
   const tagged = async (handle: string, ip: string) => {
@@ -409,12 +425,30 @@ async function main(): Promise<void> {
   for (let i = 0; i < DAY_FIELDS_MAX - 1; i += 1) redis.run(["HSET", kimDay, `f:${i}`, "1"]);
   for (let i = 0; i < LIFE_WRITE_MAX; i += 1) redis.run(["HSET", `nl:stats:${kimStore.statsId}:life`, `f:${i}`, "1"]);
   const dayFirst = await counted(() => tagged("kim", "192.0.2.71"));
+  evalsSent.front.push(evals);
   is("the store's first view of the day, by somebody new, at its records' most, is inside the model", dayFirst <= COMMANDS.frontCount + COMMANDS.firstOfDay, true);
   is("and it is the day's first: its expiry is written with it", redis.run(["TTL", kimDay]) as number > 0, true);
-  void kim;
   console.log(`a view's count, billed, the store's first of the day at its records' most, by somebody new: ${dayFirst}`);
+  // The same view, when the visit it adds is the month's hundredth: what the
+  // month is marked with (lib/traffic.ts, markMonth) lands on it too. It is
+  // counted apart, COMMANDS.monthMark, and priced on every visit at a share
+  // (tests/traffic-cost.ts, MONTH_MARKS_PER_VISIT).
+  const lia = await storeWith("lia", "paid");
+  const liaStore = (await storeForHandle("lia"))!;
+  const liaDay = `nl:stats:${liaStore.statsId}:${new Date().toISOString().slice(0, 10)}`;
+  await tagged("lia", "192.0.2.80");
+  for (let i = 0; i < 98; i += 1) await recordVisit(liaStore, `198.18.0.${i + 1}`);
+  redis.run(["DEL", liaDay]);
+  for (let i = 0; i < DAY_FIELDS_MAX - 1; i += 1) redis.run(["HSET", liaDay, `f:${i}`, "1"]);
+  for (let i = 0; i < LIFE_WRITE_MAX; i += 1) redis.run(["HSET", `nl:stats:${liaStore.statsId}:life`, `f:${i}`, "1"]);
+  const before100 = await visitsIn(lia.folder, windowOf(liaStore));
+  const marked = await counted(() => tagged("lia", "192.0.2.81"));
+  evalsSent.front.push(evals);
+  is("and when that visit is the month's hundredth, with what the month is marked with", [before100, marked <= COMMANDS.frontCount + COMMANDS.firstOfDay + COMMANDS.monthMark, marked - dayFirst <= COMMANDS.monthMark], [99, true, true]);
+  console.log(`the same view as the month's hundredth visit, billed: ${marked}`);
   // A product page opened with the day's record at its most (made so above): its one count asks which names are there.
   const laterFull = await counted(() => countLater("192.0.2.61"));
+  evalsSent.later.push(evals);
   is("and so is a product's page with the day's record at its most", laterFull <= COMMANDS.laterCount, true);
   console.log(`a later page's count, billed: ${laterCount}; with the day's record at its most: ${laterFull}`);
   // How a page was read, sent by one visitor in eight as they leave (lib/page-read.ts):
@@ -424,7 +458,11 @@ async function main(): Promise<void> {
     readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (iPhone)" }, body: JSON.stringify(body) }) as never);
   await readRequest({ t: readToken(readStore.statsId, product.id), k: "d", p: product.id, b: "blok0001" });
   const depthCount = await counted(() => readRequest({ t: readToken(readStore.statsId, product.id), k: "d", p: product.id, b: "blok0001" }));
+  evalsSent.read.push(evals);
   const reachCount = await counted(() => readRequest({ t: readToken(readStore.statsId, STORE_SCOPE), k: "s", n: 2, b: `p:${product.id}`, c: "" }));
+  evalsSent.read.push(evals);
+  is("and every count script a visit sends is in what its bytes are priced at", [Math.max(...evalsSent.page), Math.max(...evalsSent.front) <= EVALS.frontCount, Math.max(...evalsSent.later) <= EVALS.laterCount, Math.max(...evalsSent.read) <= EVALS.readBeacon, Math.min(...evalsSent.front, ...evalsSent.later, ...evalsSent.read) >= 1], [0, true, true, true, true]);
+  console.log(`count scripts sent, each ${EVAL_BYTES} bytes: a view ${evalsSent.front.join("/")}, a later page ${evalsSent.later.join("/")}, a reading ${evalsSent.read.join("/")}`);
   // Billed, the count script with its one name inside (lib/capped-count.ts): never more than the model,
   // and never one or none, which would mean the script's inside or the count itself went uncounted.
   is("and how a page was read is too, without reading the store", [depthCount <= COMMANDS.readBeacon, reachCount <= COMMANDS.readBeacon, depthCount >= 3, reachCount >= 3], [true, true, true, true]);

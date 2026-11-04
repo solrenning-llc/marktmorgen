@@ -93,7 +93,7 @@ import {
   UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { PAGES_PER_VISIT, busyDayCommands, laterPageCost, visitCost } from "./traffic-cost";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -109,6 +109,12 @@ export const STREAM_STORAGE_PER_GB = 0.02;
 export const STREAM_DELIVERY_PER_GB = 0.005;
 export const FETCHED_AHEAD = 1.25;
 export const PER_EMAIL = 0.0009;
+/** Days a billing month can have, for what is asked at most once a day. */
+export const BUSY_DAYS_A_MONTH = 31;
+/** A store's day of the busy-day email at the most: its commands and the one email (tests/traffic-cost.ts, BUSY). */
+export function busyDayCost(): number {
+  return busyDayCommands() * COMMAND + PER_EMAIL;
+}
 /** An order's pages and jobs, set well over a visit's whole page (tests/traffic-cost.ts). */
 export const ORDER_COMPUTE = 0.0003;
 /**
@@ -357,6 +363,13 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/traffic.ts", names: ["isResting"] },
     ],
     basis: "The month's figure, every visit made by the heavy visitor a visit is costed as. Nothing is sold past it: public pages rest at 95% and buyers' pages at 100%.",
+  },
+  {
+    id: "busy-day-email",
+    feature: "The busy-day email to the creator (added 11 October 2026; costed 4 November 2026)",
+    monthlyUsd: ALL_TIERS_SAME(BUSY_DAYS_A_MONTH * busyDayCost()),
+    sources: [{ file: "lib/stats-report.ts", names: ["maybeBusyAlert", "BUSY_FLOOR"] }],
+    basis: "Asked by a store's views at 64, 128, 256 and so on in a day, which no plan figure bounds: every day of the month at every power of two a day's count can reach, the fortnight before read once a day, and its one email a day at the company's cost (tests/traffic-cost.ts, BUSY; measured in tests/numbers-three.test.ts). A line of its own, so a cut to the visits never takes it off.",
   },
   {
     id: "orders",
@@ -827,6 +840,8 @@ export function nonPayingWorst(): number {
   const allowances = NON_PAYING_ALLOWANCES.trial;
   const requests = (REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * (REQUEST_COMMANDS + 1) * COMMAND + TRIAL_EXTRA_REQUESTS * laterPageCost();
   return TRIAL_VISITS * visitCost()
+    // The busy-day email its views can ask for, on each of the fifteen UTC days a trial touches.
+    + 15 * busyDayCost()
     + requests
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL

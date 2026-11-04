@@ -96,7 +96,7 @@ The same packs at one, four, ten and forty times their amount, each prepaid on i
 
 | Pack | 1×: price, per unit, price over cost | 4×: price, per unit, price over cost | 10×: price, per unit, price over cost | 40×: price, per unit, price over cost |
 | --- | --- | --- | --- | --- |
-| 5,000 visits | $48, $9.60 per 1,000 visits, 30.77× | $140, $7.00 per 1,000 visits, 22.47× | $324, $6.48 per 1,000 visits, 20.81× | $1,241, $6.21 per 1,000 visits, 19.94× |
+| 5,000 visits | $48, $9.60 per 1,000 visits, 30.77× | $140, $7.00 per 1,000 visits, 22.44× | $324, $6.48 per 1,000 visits, 20.78× | $1,243, $6.22 per 1,000 visits, 19.94× |
 | 250 orders, with their access and store emails | $35, $0.14 per order, 39.33× | $87, $0.09 per order, 24.65× | $191, $0.08 per order, 21.66× | $711, $0.07 per order, 20.16× |
 | 2,500 list emails | $62, $24.80 per 1,000 emails, 27.56× | $195, $19.50 per 1,000 emails, 21.67× | $460, $18.40 per 1,000 emails, 20.44× | $1,786, $17.86 per 1,000 emails, 19.84× |
 | 20 AI writing jobs and 100 answers | $50, $2.50 per writing job with 5 answers, 31.25× | $143, $1.79 per writing job with 5 answers, 22.45× | $331, $1.66 per writing job with 5 answers, 20.78× | $1,269, $1.59 per writing job with 5 answers, 19.92× |
@@ -111,11 +111,11 @@ A credit balance bought on its own payment and spent on any of the six resources
 
 | Credit bought | Price over cost | Per 1,000 visits | Per order | Per 1,000 emails | Per writing job with 5 answers | Per GB | Per hour | Net, the whole credit on its dearest-to-serve resource |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| $50 | 30.12× | $9.38 | $0.11 | $27.11 | $2.40 | $1.55 | $0.44 | 60.36% |
-| $100 | 23.70× | $7.38 | $0.09 | $21.33 | $1.89 | $1.22 | $0.35 | 60.18% |
+| $50 | 30.12× | $9.39 | $0.11 | $27.11 | $2.40 | $1.55 | $0.44 | 60.36% |
+| $100 | 23.70× | $7.39 | $0.09 | $21.33 | $1.89 | $1.22 | $0.35 | 60.18% |
 | $250 | 21.11× | $6.58 | $0.08 | $19.01 | $1.69 | $1.09 | $0.31 | 60.07% |
-| $500 | 20.35× | $6.34 | $0.08 | $18.32 | $1.63 | $1.05 | $0.30 | 60.03% |
-| $1,000 | 19.98× | $6.22 | $0.08 | $17.99 | $1.60 | $1.03 | $0.29 | 60.01% |
+| $500 | 20.35× | $6.35 | $0.08 | $18.32 | $1.63 | $1.05 | $0.30 | 60.03% |
+| $1,000 | 19.98× | $6.23 | $0.08 | $17.99 | $1.60 | $1.03 | $0.29 | 60.01% |
 
 Each rate column is per the unit its pack prints (per 1,000 visits, per order with its emails, per 1,000 list emails, per writing job with 5 answers, per GB of storage for a window and its closing days, per video hour watched).
 

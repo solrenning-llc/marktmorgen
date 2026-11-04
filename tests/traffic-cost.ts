@@ -65,7 +65,9 @@
  * for its feed (lib/podcast-access.ts). tests/room.test.ts and
  * tests/podcast.test.ts hold what each is counted as over what it costs.
  */
+import { CAPPED_COUNT } from "@/lib/capped-count";
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
+import { UPSTASH_MICRO_USD_PER_GB_TRANSFER } from "@/lib/spend-cost-table";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
 
 export const CDN_PER_REQUEST = 2.0 / 1_000_000;
@@ -113,19 +115,29 @@ export const COMMANDS = {
    * read each hash's length once rather than before every count: 15, and 21
    * at the heaviest, measured in tests/traffic.test.ts. The most one view
    * can send is the store's first of the day, by somebody new, with both
-   * records at their most: 29 measured, which is this and firstOfDay.
-   * Held at 25.
+   * records at their most: 29 measured, held by tests/traffic.test.ts at
+   * this and firstOfDay together (25 + 4 = 29). Held at 25.
    */
   frontCount: 25,
   /**
    * What a visitor new to the day adds, once: the visit, how long the day
-   * is kept, and the store's all-time visitors. A month's first visit, and
-   * each hundredth after, writes five more (lib/traffic.ts, markMonth):
-   * a twentieth of a command to the visit, inside what is rounded up here.
-   * Since October 11, 2026 also the expiry of the day's visitors, written
-   * with the visitor new to the day rather than with every view.
+   * is kept, and the store's all-time visitors. Since October 11, 2026 also
+   * the expiry of the day's visitors, written with the visitor new to the
+   * day rather than with every view. What the month is marked with is
+   * counted apart, monthMark.
    */
   firstOfDay: 4,
+  /**
+   * What a month is marked with (lib/traffic.ts, markMonth): how long its
+   * counts are kept, the line of stores the daily job reads and whose folder
+   * this is, five commands. Written with the month's first visit and every
+   * hundredth after, and the same with the live room's hundredths (each
+   * hundred visits' worth); tests/traffic.test.ts measures it landing on the
+   * heaviest view there is, the store's first of the day (4 November 2026:
+   * until then it was said to fit inside firstOfDay, which it did not).
+   * Priced on every visit at MONTH_MARKS_PER_VISIT.
+   */
+  monthMark: 5,
   /**
    * Drawing another page of the store, and saying it was opened. On a
    * product's own page that also counts the page's view (lib/stats.ts, added
@@ -168,6 +180,65 @@ export const COMMANDS = {
   feed: 9,
 };
 
+/**
+ * The marks a month gets, shared over its visits: the month's first visit,
+ * every hundredth after, and the same for the live room's hundredths (its
+ * first and every hundred visits' worth), so 2 + visits / 100 at the most.
+ * A fiftieth on every visit pays for them in any month of 200 visits or more;
+ * a plan's worst month is every visit it covers, the fewest of which is
+ * Store's 3,400 (lib/traffic-rules.ts, VISITS_INCLUDED), and a store under
+ * 200 visits costs less in all than one at its plan's figure.
+ */
+export const MONTH_MARKS_PER_VISIT = 1 / 50;
+
+/**
+ * The count script (lib/capped-count.ts, CAPPED_COUNT) is sent whole with
+ * every EVAL, not by its hash, so each one moves its bytes through the
+ * database, priced by the byte as tests/plan-cost-registry.ts prices them
+ * (Upstash's bandwidth, lib/spend-cost-table.ts). How many a visit sends is
+ * measured in tests/traffic.test.ts and held to these figures: the front
+ * page's count, a later page's, and a reading of a page.
+ */
+export const EVAL_BYTES = Buffer.byteLength(CAPPED_COUNT);
+const DB_BYTE = UPSTASH_MICRO_USD_PER_GB_TRANSFER / 1_000_000 / 1e9;
+export const EVALS = {
+  /** The front page's view and its visit: the view's counts go in one script (lib/stats.ts, recordHit), 1 measured. */
+  frontCount: 1,
+  /** A later page's count, with the product's own visitor: 1 measured. */
+  laterCount: 1,
+  /** A reading of a page (lib/page-depth.ts): 1 measured. */
+  readBeacon: 1,
+};
+const evalCost = (n: number) => n * EVAL_BYTES * DB_BYTE;
+
+/**
+ * The busy-day email (lib/stats-report.ts, maybeBusyAlert), asked by a
+ * view when the day's views reach 64, 128, 256 and so on: at most once a
+ * store a day for each power of two a day's count can reach, and a day's
+ * count is a 64-bit integer in the database, so from 2^6 to 2^62, BUSY_POWERS.
+ * Commands, as tests/numbers-three.test.ts measures them (4 November 2026):
+ */
+export const BUSY = {
+  /** The day's first ask: whether the day is kept, its claim, the fourteen days before, and keeping them. */
+  first: 17,
+  /** Any later ask that day: the fourteen days read back, or that the email has gone. */
+  later: 1,
+  /** On a busy day before the email has gone, each ask also: whether the creator stopped the emails. */
+  busy: 1,
+  /** The one that sends: the day's email claim and its mark, today's channels, and the email's own bookkeeping: 5 measured, held at 6. */
+  send: 6,
+};
+export const BUSY_POWERS = 62 - 6 + 1;
+
+/**
+ * A store's day of the busy-day email at the most, in commands: every power
+ * of two reached, every one of them on a busy day, and the email sent. The
+ * email itself is priced where emails are (tests/plan-cost-registry.ts).
+ */
+export function busyDayCommands(): number {
+  return BUSY.first + (BUSY_POWERS - 1) * BUSY.later + BUSY_POWERS * BUSY.busy + BUSY.send;
+}
+
 /** Answering one page and its count: two calls, a tenth of a second of work, and memory held while the database is waited on. */
 const PAGE_AND_COUNT = 2 * CALL + 0.1 * CPU_PER_SECOND + 1.3 * MEMORY_PER_SECOND;
 
@@ -177,18 +248,19 @@ const PAGE_AND_COUNT = 2 * CALL + 0.1 * CPU_PER_SECOND + 1.3 * MEMORY_PER_SECOND
  * an empty answer.
  */
 export function readBeaconCost(): number {
-  return CDN_PER_REQUEST + CALL + COMMANDS.readBeacon * COMMAND + 0.005 * CPU_PER_SECOND + 0.04 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
+  return CDN_PER_REQUEST + CALL + COMMANDS.readBeacon * COMMAND + evalCost(EVALS.readBeacon) + 0.005 * CPU_PER_SECOND + 0.04 * MEMORY_PER_SECOND + 500 * ORIGIN_PER_BYTE;
 }
 
 /** What one visit costs at the most this is worked out for, in dollars. */
 export function visitCost(): number {
   const later = PAGES_PER_VISIT - 1;
   const requests = 1 + STATIC_FILES + 1 + 1 + STORE_PAGE_SIZE + later * (1 + 1 + PICTURES_ON_A_LATER_PAGE);
-  const commands = COMMANDS.frontPage + COMMANDS.frontCount + COMMANDS.firstOfDay + later * (COMMANDS.laterPage + COMMANDS.laterCount);
+  const commands = COMMANDS.frontPage + COMMANDS.frontCount + COMMANDS.firstOfDay + MONTH_MARKS_PER_VISIT * COMMANDS.monthMark + later * (COMMANDS.laterPage + COMMANDS.laterCount);
   // Every page of the visit is taken to be measured for how it is read, at the
   // share of visitors the pages send it for: the store's page and two sales pages.
   const reading = (PAGES_PER_VISIT / READ_SAMPLE) * readBeaconCost();
-  return requests * CDN_PER_REQUEST + commands * COMMAND + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE) + reading;
+  const evals = evalCost(EVALS.frontCount + later * EVALS.laterCount);
+  return requests * CDN_PER_REQUEST + commands * COMMAND + evals + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE) + reading;
 }
 
 /**
@@ -201,7 +273,7 @@ export function visitCost(): number {
  * more than a page does.
  */
 export function laterPageCost(): number {
-  return (1 + 1 + PICTURES_ON_A_LATER_PAGE) * CDN_PER_REQUEST + (COMMANDS.laterPage + COMMANDS.laterCount) * COMMAND + PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE;
+  return (1 + 1 + PICTURES_ON_A_LATER_PAGE) * CDN_PER_REQUEST + (COMMANDS.laterPage + COMMANDS.laterCount) * COMMAND + evalCost(EVALS.laterCount) + PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE;
 }
 
 /**

@@ -23,7 +23,9 @@ const rows = (r: ReturnType<typeof priceReview>) => r?.rows.map((x) => [x.label,
 const PRICE = "Your store's price is this, before any sale, offer or discount code.";
 const TAXED = "Your store's price is this, before any sale, offer or discount code, plus sales tax or VAT where it applies.";
 const STORE = `Your store shows this as soon as you save. ${PRICE}`;
-const KEEP = `New members join at this once you save. ${PRICE} A checkout already open keeps what it opened with. Members who already joined keep the price and schedule they joined at.`;
+const KEEP = `New members join at this once you save. ${PRICE} A checkout already open keeps what it opened with. Members who already joined keep the price, schedule, trial and end they joined at.`;
+// A trial or an end alone: no price changed, so nothing said about sales or tax.
+const KEEP_TERMS = "New members join at this once you save. A checkout already open keeps what it opened with. Members who already joined keep the price, schedule, trial and end they joined at.";
 const STOPPED = "Members who already joined are still charged what they joined at. Saving does not cancel them. Each membership ends when they or you cancel it, or after its last payment. To stop them, cancel their memberships in your Stripe dashboard. New buyers see this once you save.";
 const STILL = `${STOPPED} ${PRICE}`;
 
@@ -43,6 +45,17 @@ const yearlyOnly = { ...member, yearlyCents: 9000 };
 is("a new schedule takes the yearly price away, and the introductory price down to one payment: both said", rows(review(withYearly, { price: "9", every: "week", yearlyPrice: "90", introPrice: "1", introCount: "3" })), [["How buyers pay", "Every month", "Every week", "every"], ["Price", "$9", "$9", "price"], ["Introductory price", "$1 for the first 3 payments", "$1 for the first payment", "intro"], ["Yearly price", "$90", "None", "every"]]);
 is("a new yearly or introductory price on its own", [rows(review(yearlyOnly, { price: "9", every: "month", yearlyPrice: "80" })), rows(review(withIntro, { price: "9", every: "month", introPrice: "2", introCount: "3" }))], [[["Yearly price", "$90", "$80", "yearly"]], [["Introductory price", "$1 for the first 3 payments", "$2 for the first 3 payments", "intro"]]]);
 is("an introductory or yearly price that cannot be read: nothing reviewed", [review(yearlyOnly, { price: "9", every: "month", yearlyPrice: "x" }), review(withIntro, { price: "9", every: "month", introPrice: "x" })], [null, null]);
+
+const trialed: PricedProduct = { ...member, trialDays: 7, payments: 12 };
+is("a new free trial or a new end, each its own row back to its field; members who joined keep theirs", [rows(review(trialed, { price: "9", every: "month", trial: "14", payments: "12" })), rows(review(trialed, { price: "9", every: "month", trial: "7", payments: "" })), review(trialed, { price: "9", every: "month", trial: "14", payments: "12" })?.note], [[["Free trial", "7 days free", "14 days free", "trial"]], [["Ends", "After 12 payments", "Runs until canceled", "payments"]], KEEP_TERMS]);
+is("the same trial and end: nothing; a trial or end that is not a whole number: nothing, the save says why", [review(trialed, { price: "9", every: "month", trial: "7", payments: "12" }), review(trialed, { price: "9", every: "month", trial: "seven", payments: "12" }), review(trialed, { price: "9", every: "month", trial: "7", payments: "1.5" })], [null, null, null]);
+
+is("a trial or an end the route would refuse (out of range): nothing reviewed", [review(trialed, { price: "9", every: "month", trial: "7", payments: "1" }), review(trialed, { price: "9", every: "month", trial: "7", payments: "37" }), review(trialed, { price: "9", every: "month", trial: "91", payments: "12" }), review(trialed, { price: "9", every: "month", trial: "-3", payments: "12" })], [null, null, null, null]);
+is("nor a combination it refuses: an introductory price with a trial or an end, a yearly price with an end", [review(member, { price: "9", every: "month", introPrice: "1", trial: "7" }), review(member, { price: "9", every: "month", introPrice: "1", payments: "12" }), review(member, { price: "9", every: "month", yearlyPrice: "90", payments: "12" })], [null, null, null]);
+is("something bought once neither ends nor runs, either way: said as not a membership, never an ambiguous None", [rows(review(trialed, { price: "9", every: "" }))?.find((r) => r[0] === "Ends"), rows(review(once, { price: "9", every: "month", payments: "12" }))?.find((r) => r[0] === "Ends")], [["Ends", "After 12 payments", "Not a membership", "every"], ["Ends", "Not a membership", "After 12 payments", "payments"]]);
+is("made bought once: the trial and end fields are gone, so their Change goes to the schedule", rows(review(trialed, { price: "9", every: "" }))?.filter((r) => r[0] === "Free trial" || r[0] === "Ends").map((r) => r[3]), ["every", "every"]);
+is("an introductory price with a trial or an end on any schedule, or on a yearly membership with an end: the route's own rules", [review(member, { price: "9", every: "week", introPrice: "1", trial: "3" }), review(member, { price: "9", every: "year", introPrice: "1", payments: "3" }), rows(review(member, { price: "9", every: "month", yearlyPrice: "90", trial: "7" }))], [null, null, [["Free trial", "None", "7 days free", "trial"], ["Yearly price", "None", "$90", "yearly"]]]);
+is("on a product with price options, the trial and the end are still reviewed, with no price row", rows(review({ ...trialed, options: 2 }, { price: "9", every: "month", trial: "14", payments: "12" })), [["Free trial", "7 days free", "14 days free", "trial"]]);
 
 part("A membership that stops being one");
 const toOnce = review(member, { price: "9", every: "" });
@@ -135,6 +148,6 @@ const route = readFileSync("app/api/store/product/route.ts", "utf8");
 is("an option's price is what its checkout charges, read on the server from the saved option", checkout.includes("const priceCents = plan ? plan.amountCents : chosen ? chosen.priceCents : product.priceCents;"), true);
 is("each membership is made at checkout at that moment's price and schedule; saving the product or one of its prices calls Stripe for no subscription", [checkout.includes('body.set("line_items[0][price_data][recurring][interval]", membership.interval);'), /\/subscriptions/.test(route), /\/subscriptions/.test(readFileSync("app/api/store/option/route.ts", "utf8"))], [true, false, false]);
 const editor = readFileSync("components/product-editor.tsx", "utf8");
-is("every field a row names is on the form under the id its Change goes to, the price when it is not shown", [["price", "pwyw", "suggested", "every", "intro", "yearly"].every((f) => editor.includes(`id={\`product-${f}-\${id}\`}`)), editor.includes("document.getElementById(`product-${field}-${productId}`) ?? document.getElementById(`product-price-${productId}`)")], [true, true]);
+is("every field a row names is on the form under the id its Change goes to, the price when it is not shown", [["price", "pwyw", "suggested", "every", "intro", "yearly", "trial", "payments"].every((f) => editor.includes(`id={\`product-${f}-\${id}\`}`)), editor.includes("document.getElementById(`product-${field}-${productId}`) ?? document.getElementById(`product-price-${productId}`)")], [true, true]);
 
 done();

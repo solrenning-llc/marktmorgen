@@ -1,0 +1,287 @@
+/**
+ * What one opening of a buyer's orders page takes from its store before it
+ * reads (lib/buyer-orders.ts, openOrders and OrdersMeter; C3-77, MR, 4
+ * November 2026): ORDERS_OPEN_UNITS of the store's buyer requests before the
+ * link's grant is read, and, past them, requests in proportion to what the
+ * buyer has, each taken before its read. A refused opening reads nothing.
+ * tests/plan-cost-registry.test.ts holds the units above what they stand for.
+ */
+import { test, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { store as redis } from "./redis-stub";
+import { paidPeriod } from "./billing-period-fixture";
+import {
+  MAX_LISTED,
+  ORDERS_LISTING_COMMANDS,
+  ORDERS_OPEN_COMMANDS,
+  ORDERS_CALL_MOVES,
+  ORDERS_IMPORTED_COMMANDS,
+  ORDERS_IMPORTED_ENTRY_COMMANDS,
+  ORDERS_OPEN_SECONDS,
+  ORDERS_OPEN_UNITS,
+  ORDERS_PREORDER_COMMANDS,
+  ORDERS_READ_MS,
+  ORDERS_ROOM_COMMANDS,
+  ORDERS_UNIT_COMMANDS,
+  OrdersBusy,
+  OrdersLate,
+  OrdersMeter,
+  callsFor,
+  openOrders,
+  ordersLinkFor,
+  purchasesFor,
+  withinOpening,
+} from "@/lib/buyer-orders";
+import { importedKey } from "@/lib/imported-purchases";
+import { WAITING_SHOWN } from "@/lib/buyer-waiting";
+import { requestsIn } from "@/lib/traffic";
+import { allowanceWindow } from "@/lib/allowance-window";
+import type { CallSetup } from "@/lib/call-setup";
+import { addProduct, claimHandle, ensureStatsId, setProductCall, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
+
+const OWNER = "olive@example.com";
+const BUYER = "ana@example.com";
+const HOUR = 3_600_000;
+let sessions: Record<string, unknown>[] = [];
+
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const path = url.pathname.replace(/^\/v1/, "");
+  const answer = (body: unknown) => new Response(JSON.stringify(body));
+  if (path === "/checkout/sessions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: sessions, has_more: false });
+  return answer({ object: "list", data: [], has_more: false });
+}) as typeof fetch;
+
+/** Every command the store is sent from here on. */
+const sent: string[] = [];
+const pipeline = redis.pipeline.bind(redis);
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  for (const command of commands) sent.push(command.map(String).join(" "));
+  return pipeline(commands);
+}) as typeof redis.pipeline;
+
+beforeEach(() => {
+  redis.clear();
+  sessions = [];
+  sent.length = 0;
+  process.env.STRIPE_SECRET_KEY = "sk_test_orders_only_a_stand_in";
+});
+
+async function callStore(video = false): Promise<{ store: Store; product: string; folder: string; window: string }> {
+  await claimHandle(OWNER, "olive", "Olive Studio", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestOlive00001", true);
+  await setSubscription(OWNER, { customerId: "cus_olive00001", subscriptionId: "sub_olive00001", active: true, tier: "creator", period: paidPeriod() });
+  const made = await addProduct(OWNER, "Coaching", "", "80", null);
+  if (!made.ok) throw new Error("no product");
+  const weekly = { kind: "weekly", minutes: 60, tz: "America/New_York", weekly: [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []], noticeHours: 1, horizonDays: 30, bufferMinutes: 0, seats: 1, room: video ? null : "https://example.com/room", video, meet: null };
+  await setProductCall(OWNER, made.product.id, weekly as unknown as CallSetup);
+  const store = { ...((await storeForEmail(OWNER)) as Store), callsId: "c".repeat(32) };
+  return { store, product: made.product.id, folder: await storeFolder(OWNER), window: allowanceWindow(store)!.id };
+}
+
+/** Bookings this buyer paid for, each an hour long, the first tomorrow. */
+function bookings(product: string, count: number): Record<string, unknown>[] {
+  const first = Date.now() + 24 * HOUR;
+  return Array.from({ length: count }, (_, i) => ({
+    id: `cs_test_${String(i).padStart(24, "0")}`,
+    object: "checkout.session",
+    status: "complete",
+    payment_status: "paid",
+    mode: "payment",
+    created: Math.floor(Date.now() / 1000) - i,
+    metadata: { kind: "call", store: "olive", product, start: String(first + i * 2 * HOUR), end: String(first + i * 2 * HOUR + HOUR), tz: "America/New_York" },
+    customer_details: { email: BUYER },
+    payment_intent: { id: `pi_test${String(i).padStart(10, "0")}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
+  }));
+}
+
+test("an opening with a link takes ORDERS_OPEN_UNITS of the store's buyer requests, then reads its grant", async () => {
+  const { store, folder, window } = await callStore();
+  const link = (await ordersLinkFor(store, BUYER, "https://marktmorgen.com/@olive"))!;
+  const token = new URL(link).searchParams.get("token")!;
+  const before = await requestsIn(folder, window);
+  const opened = await openOrders(store, token);
+  assert.deepEqual([opened.admitted, opened.email], [true, BUYER]);
+  assert.equal((await requestsIn(folder, window)) - before, ORDERS_OPEN_UNITS);
+});
+
+test("an opening the store has no room for reads nothing, not even its grant", async () => {
+  const { store } = await callStore();
+  const link = (await ordersLinkFor(store, BUYER, "https://marktmorgen.com/@olive"))!;
+  const token = new URL(link).searchParams.get("token")!;
+  sent.length = 0;
+  // A paying store whose month is not known answers nothing that costs (lib/traffic.ts).
+  const opened = await openOrders({ ...store, period: null }, token);
+  assert.deepEqual([opened.admitted, opened.email], [false, null]);
+  assert.deepEqual(sent.filter((command) => command.includes("nl:orders:link:")), []);
+});
+
+test("a token not shaped like one takes nothing and reads nothing", async () => {
+  const { store, folder, window } = await callStore();
+  sent.length = 0;
+  const opened = await openOrders(store, "not-a-token");
+  assert.deepEqual([opened.admitted, opened.email, await requestsIn(folder, window)], [true, null, 0]);
+  assert.deepEqual(sent.filter((command) => !command.startsWith("GET nl:traffic") && !command.includes(":requests:")), []);
+});
+
+test("an opening with forty bookings takes the most moves first, and pays their listing and video rooms from what the moves left", async () => {
+  const { store, product, folder, window } = await callStore(true);
+  sessions = bookings(product, MAX_LISTED);
+  const link = (await ordersLinkFor(store, BUYER, "https://marktmorgen.com/@olive"))!;
+  const opened = await openOrders(store, new URL(link).searchParams.get("token")!);
+  sent.length = 0;
+  const calls = await callsFor(store, BUYER, opened.meter);
+  assert.equal(calls.length, MAX_LISTED);
+  assert.ok(calls.every((call) => call.room), "each booking was given its room");
+  // Each booking's move, the product's listing, and each room: four reads, and a video room made and read back.
+  const rooms = sent.filter((command) => command.includes("nl:call:room:") || command.includes("nl:meet:r:")).length;
+  assert.ok(rooms > 4 * MAX_LISTED && rooms <= ORDERS_ROOM_COMMANDS * MAX_LISTED, String(rooms));
+  // ORDERS_CALL_MOVES taken before any booking is read; the forty moves, the listing and the rooms fit in it.
+  assert.ok(MAX_LISTED + ORDERS_LISTING_COMMANDS + MAX_LISTED * ORDERS_ROOM_COMMANDS <= ORDERS_CALL_MOVES);
+  const units = Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS);
+  assert.equal(opened.meter.taken, units);
+  assert.equal(await requestsIn(folder, window), ORDERS_OPEN_UNITS + units);
+});
+
+test("an opening at a store that sells calls takes the moves up front, and nothing more until what they left is used", async () => {
+  const { store, product } = await callStore(true);
+  sessions = bookings(product, 2);
+  const meter = new OrdersMeter(store);
+  assert.equal((await callsFor(store, BUYER, meter)).length, 2);
+  const upFront = Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS);
+  assert.equal(meter.taken, upFront);
+  // What the two moves, the listing and the two rooms left pays the opening's next reads (feeds, keys, listings).
+  const left = upFront * ORDERS_UNIT_COMMANDS - (2 + ORDERS_LISTING_COMMANDS + 2 * ORDERS_ROOM_COMMANDS);
+  await meter.take(left);
+  assert.equal(meter.taken, upFront);
+  await meter.take(1);
+  assert.equal(meter.taken, upFront + 1);
+});
+
+test("the opening's other reads wait for the bookings' count and use what the moves left, never asking the store meanwhile", async () => {
+  const { store, product } = await callStore(true);
+  sessions = bookings(product, 2);
+  const meter = new OrdersMeter(store);
+  const upFront = Math.ceil(ORDERS_CALL_MOVES / ORDERS_UNIT_COMMANDS);
+  // Started together, as the page does: purchases' reads asked for while the bookings are still being read.
+  const left = upFront * ORDERS_UNIT_COMMANDS - (2 + ORDERS_LISTING_COMMANDS + 2 * ORDERS_ROOM_COMMANDS);
+  const [calls] = await Promise.all([callsFor(store, BUYER, meter), meter.take(left - 100), meter.take(100)]);
+  assert.equal(calls.length, 2);
+  assert.equal(meter.taken, upFront, "paid from what the moves left, not from new requests");
+});
+
+test("a read that uses more than the most taken before it pays the rest before anything after it", async () => {
+  const { store } = await callStore();
+  const meter = new OrdersMeter(store);
+  const read = await meter.takeFor(ORDERS_UNIT_COMMANDS, async () => 3 * ORDERS_UNIT_COMMANDS, (n) => n);
+  assert.equal(read, 3 * ORDERS_UNIT_COMMANDS);
+  assert.equal(meter.taken, 3);
+  await meter.take(1);
+  assert.equal(meter.taken, 4);
+});
+
+test("a meter the store has no room for reads none of the bookings, not even their moves", async () => {
+  const { store, product } = await callStore();
+  sessions = bookings(product, MAX_LISTED);
+  const refused = { ...store, period: null };
+  sent.length = 0;
+  await assert.rejects(callsFor(refused, BUYER, new OrdersMeter(refused)), OrdersBusy);
+  const bookingReads = (command: string) => /nl:call:|nl:catalog:[^ ]*:l:|nl:meet:/.test(command);
+  assert.deepEqual(sent.filter(bookingReads), []);
+  // Read without a meter (the other readers of bookings), the same store reads them all.
+  assert.equal((await callsFor(store, BUYER)).length, MAX_LISTED);
+  assert.ok(sent.filter(bookingReads).length >= MAX_LISTED * 5, String(sent.filter(bookingReads).length));
+});
+
+test("the moves taken before a store's bookings are read cover every booking its pages can hold", () => {
+  // lib/calls.ts reads at most MAX_PAGES pages of a hundred checkouts and every booking's move on them (withMoves).
+  const calls = readFileSync("lib/calls.ts", "utf8");
+  const pages = Number(/const MAX_PAGES = (\d+);/.exec(calls)?.[1]);
+  const perPage = Number(/\/checkout\/sessions\?limit=(\d+)&status=complete/.exec(calls)?.[1]);
+  assert.ok(pages > 0 && perPage > 0 && pages * perPage <= ORDERS_CALL_MOVES, `${pages} x ${perPage} > ${ORDERS_CALL_MOVES}`);
+});
+
+test("a meter's takes run one after another, and a refusal is kept: nothing more is taken or read", async () => {
+  const { store, folder, window } = await callStore();
+  const meter = new OrdersMeter(store);
+  await Promise.all(Array.from({ length: 10 }, () => meter.take(10)));
+  assert.equal(meter.taken, Math.ceil(100 / ORDERS_UNIT_COMMANDS));
+  assert.equal(await requestsIn(folder, window), Math.ceil(100 / ORDERS_UNIT_COMMANDS));
+  const refused = new OrdersMeter({ ...store, period: null });
+  await assert.rejects(refused.take(1), OrdersBusy);
+  sent.length = 0;
+  await assert.rejects(refused.take(1), OrdersBusy);
+  assert.throws(() => refused.alive(), OrdersBusy);
+  assert.deepEqual(sent, [], "a meter already refused asks the store nothing");
+});
+
+test("an opening waits ORDERS_READ_MS at the most, inside the page's maxDuration, and then reads nothing more", async () => {
+  assert.ok(ORDERS_READ_MS < ORDERS_OPEN_SECONDS * 1000 - 3_000);
+  const page = readFileSync("app/[handle]/orders/page.tsx", "utf8");
+  assert.ok(page.includes(`export const maxDuration = ${ORDERS_OPEN_SECONDS};`));
+  assert.ok(page.includes("const outcome = await withinOpening(reading, meter);") && page.includes('if (outcome === "late") failed = true;'));
+  const { store } = await callStore();
+  const meter = new OrdersMeter(store);
+  assert.equal(await withinOpening(Promise.resolve("read"), meter, 50), "read");
+  meter.alive();
+  // A Stripe that does not answer: the opening is said as not read, and the meter stops what was still to come.
+  const never = new Promise<string>(() => {});
+  assert.equal(await withinOpening(never, meter, 20), "late");
+  assert.throws(() => meter.alive(), OrdersLate);
+  await assert.rejects(meter.take(1), OrdersLate);
+  // A reading that fails is its own failure, never "late".
+  await assert.rejects(withinOpening(Promise.reject(new Error("stripe")), new OrdersMeter(store), 50), /stripe/);
+});
+
+test("purchases take their listings, pre-orders and what was brought over before each is read", async () => {
+  const OWNER2 = "fern@example.com";
+  await claimHandle(OWNER2, "fern", "Fern Press", "");
+  await ensureStatsId(OWNER2);
+  await setStripeAccount(OWNER2, "acct_1TestFern000001", true);
+  await setSubscription(OWNER2, { customerId: "cus_fern000001", subscriptionId: "sub_fern000001", active: true, tier: "creator", period: paidPeriod() });
+  const ids: Record<string, string> = {};
+  for (const title of ["Guide", "Templates", "Checklist", "Workbook", "Planner", "Archive"]) {
+    const made = await addProduct(OWNER2, title, "", "19", null);
+    if (!made.ok) throw new Error(`no ${title}`);
+    ids[title] = made.product.id;
+    await setProductLink(OWNER2, made.product.id, `https://example.com/${title.toLowerCase()}`);
+  }
+  const shop = (await storeForEmail(OWNER2)) as Store;
+  const store = { ...shop, pastBuyers: true };
+  const paid = (id: string, metadata: Record<string, string>) => ({
+    id: `cs_test_${id.padEnd(24, "0")}`,
+    object: "checkout.session",
+    status: "complete",
+    payment_status: "paid",
+    mode: "payment",
+    created: Math.floor(Date.now() / 1000),
+    metadata: { store: "fern", ...metadata },
+    customer_details: { email: BUYER },
+    payment_intent: { id: `pi_test${id.padEnd(10, "0")}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
+  });
+  sessions = [
+    // A guide with a bundle of two inside and a box ticked at checkout: four listings.
+    paid("a", { product: ids.Guide, bundle: `${ids.Templates},${ids.Checklist}`, bump: ids.Workbook }),
+    // A pre-order: its listing, and its entry and when it ships.
+    paid("b", { product: ids.Planner, preorder: "1" }),
+  ];
+  await redis.pipeline([["HSET", importedKey(store.statsId!, BUYER), ids.Archive, JSON.stringify({ at: 1, job: "api:1" }), ids.Guide, JSON.stringify({ at: 1, job: "api:2" })]]);
+  const meter = new OrdersMeter(store);
+  const purchases = await purchasesFor(store, BUYER, meter);
+  assert.ok(purchases.length >= 3, String(purchases.length));
+  // Six listings (the Guide once, though bought and brought over), the pre-order's reads, and the two entries brought over.
+  const commands = 6 * ORDERS_LISTING_COMMANDS + ORDERS_PREORDER_COMMANDS + ORDERS_IMPORTED_COMMANDS + 2 * ORDERS_IMPORTED_ENTRY_COMMANDS;
+  assert.equal(meter.taken, Math.ceil(commands / ORDERS_UNIT_COMMANDS));
+  // The store with no room reads none of them.
+  const refused = { ...store, period: null };
+  sent.length = 0;
+  await assert.rejects(purchasesFor(refused, BUYER, new OrdersMeter(refused)), OrdersBusy);
+  assert.deepEqual(sent.filter((command) => command.includes(":l:") || command.includes("nl:imp:buy:") || command.includes("nl:pre")), []);
+});
+
+test("the commands every opening makes are inside ORDERS_OPEN_COMMANDS", () => {
+  // The grant; what waits, four and one an agreement shown (lib/buyer-waiting.ts); the Discord server and its roles.
+  assert.ok(ORDERS_OPEN_COMMANDS >= 1 + 4 + WAITING_SHOWN + 2);
+});

@@ -239,6 +239,9 @@ A Claude 3 abriu o #2049 (CRM): edição pelo quadro só grava se o negócio ain
 ### C2-71 — 04/11/2026 06h30 — Auditoria AAA (AX274) do quadro de negócios, passada pela Claude 3
 O quadro agora é seu (C2-62). A Claude 3 fez em 04/11 uma auditoria AAA de B = components/deals-board.tsx, A = components/deal-agenda.tsx e P = app/studio/deals/page.tsx (o E, pipeline-access-editor, fica com ela). ALTOS: (1) foco perdido (2.4.3): fieldset disabled, Save, Cancel, select de mover, Remove, Clear selection, Up/Down, remover etapa ou campo, abrir editores: usar aria-disabled e levar o foco ao lugar certo; (2) remover negócio é imediato, sem desfazer (3.3.6), B:422, e o select de mover grava na mudança, B:409; (3) erros não ligados aos campos, B:350/443/538/620; (4) gravação não confirmada anunciada duas vezes, B:147-148 e B:222; (5) região ao vivo B:305 relê frase longa a cada tecla, e B:221-223 tem três status; (6) desativado sem motivo, B:235/245/251/258/408/417/422/541/631/301/533; (7) aviso de só leitura só em B:544-546. MÉDIOS: (8) vencido só por cor, B:397; (9) 'Edit', 'Request payment' e 'Note' repetidos sem nome; (10) troca de funil sem padrão de abas ou aria-pressed; (11) rolagem horizontal fora do teclado, B:264 e A:10; (12) <p> como título e um landmark por etapa; (13) trilha de navegação em P:67; (14) placeholders como exemplo e sem marca de obrigatório; (15) jargão e datas ISO; (16) sucesso só por toast. LEVES: 'Move {name} up', Open/Won/Lost sempre visíveis, status de salvar perto do controle, role=search no filtro. Ordem: depois do #1853 e da correção do quadro (C2-62), faça os ALTOS como uma unidade AX274, com testes de navegador (foco, desfazer, erro ligado ao campo) e a revisão independente; os médios e leves numa segunda unidade.
 
+### C2-72 — 04/11/2026 07h10 — Sala ao vivo: fica 260/60 (pelo dono)
+Decisão (delegação do dono; ele já tinha decidido manter 16 visitas por hora na C2-58): ROOM_LIVE_PARTS 260 e ROOM_IDLE_PARTS 60 ficam como estão, sem mudar os Termos. Com a visita mais cara, a sala segue acima do custo (+82% e +63%) e todas as unidades positivas; baixar só daria menos lucro. Repassei ao Codex o aviso do MR2 (CX-49). Siga com o #1496.
+
 ## Claude 3
 
 ### C3-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -602,6 +605,9 @@ Corrija os três, cada um com teste que falha antes, e incorpore com CI verde; n
 ### C3-75 — 04/11/2026 06h30 — Auditoria AAA repassada
 Repassei à Claude 2 a sua auditoria do quadro, da agenda e da página de negócios (C2-71). Os itens do E (components/pipeline-access-editor.tsx: E:59 disabled={busy} com foco perdido, select que grava na mudança, E:78 erro não ligado ao campo, frase de admins sempre visível) ficam com você, junto com os três leves da C3-73, no próprio #2036.
 
+### C3-76 — 04/11/2026 07h05 — Primeiro a liberação de lib/crm.ts (um minuto), depois o resto
+A ordem da sua mensagem das 04h53 está certa, com uma troca: **o PR só de documento que tira a linha 10 (lib/crm.ts) vai antes de tudo**, porque o #1853 da Claude 2 está parado só por ela e o PR leva um minuto. Depois, o seguimento da C3-71/C3-74 (página de pedidos), os 3 leves do #2036 e o resto da C3-70, como você disse. Sem problema pelo #1966: o seguimento resolve.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -777,4 +783,7 @@ A revisão do HN6(14) da Claude 2 achou que lib/store-checkout.ts cria assinatur
 
 ### CX-48 — 04/11/2026 06h40 — Aprovado: no conflito de docs/reservations.md da base, use o arquivo do main
 Aprovado como você propôs: na junção de origin/main na base codex/deemed-record-own-fields (#1492), resolva o único conflito em docs/reservations.md com **exatamente** o arquivo do main (as suas reservas já estão em docs/reservations/codex.md), sem tocar em nenhuma reserva de outro agente, e envie. As duas famílias novas de registro do #2020 já estão aprovadas na CX-46 (#2050, no main). Siga com a validação final da CX-43.
+
+### CX-49 — 04/11/2026 07h10 — Aviso da Claude 2 sobre o 465 [MR2]
+No #1496 (C2-68 aprovou) a Claude 2 trocou duas conferências do seu 465 [MR2]: limits-proposal nº 2 (60% por plano → lucro > 0 com a folga do spend floor, mensal e anual) e plan-margin nº 14 (mesma regra); registrou numa linha sob o 465 [MR2] em docs/codex-queue.md. A busca exaustiva do pricing-optimization agora usa os mesmos 5¢ do solucionador. A revisão do #1496 também achou que a visita não pagava a leitura do registro inteiro da loja: o pior custo de uma visita passou de US$ 0,000304 para US$ 0,000484; todas as unidades seguem positivas com folga. Leve isso em conta no MR2 e no relatório mensal (os 60% são meta, não trava).
 

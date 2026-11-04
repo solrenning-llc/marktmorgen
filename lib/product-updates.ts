@@ -41,7 +41,7 @@ import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, rel
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
-import { ALL_TIME_PAGES, readPaidSales } from "@/lib/stats";
+import { ALL_TIME_PAGES, readPaidSales, readsSales } from "@/lib/stats";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -51,6 +51,9 @@ import { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuye
 import { noteForErasure } from "@/lib/erasure-index";
 import { orderWrite } from "@/lib/order-data";
 import { suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { BUYER_LEDGER_UNITS, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
+import { paypalKept } from "@/lib/paypal-sales";
+import { countUnits } from "@/lib/person-agenda-read";
 
 export { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuyers };
 
@@ -129,7 +132,21 @@ export function buyersFrom(rows: Record<string, unknown>[], handles: ReadonlySet
 
 export type StartResult =
   | { ok: true; job: UpdateJob }
-  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe"; until?: number };
+  | { ok: false; reason: "plan" | "kind" | "soon" | "none" | "stripe"; until?: number }
+  | { ok: false; reason: "studio_used"; message: string; until?: undefined };
+
+/**
+ * Studio requests reading every paid sale of the store costs, before it is
+ * read (lib/stats.ts, readPaidSales): when Stripe is read (a Stripe account),
+ * as much as a reading of its buyers from Stripe (lib/segments.ts,
+ * BUYER_LEDGER_UNITS, which reads these pages and more); and the PayPal sales
+ * kept (`paypalSales`), read whenever the store reads sales, by their weight.
+ * Nothing when it reads no sales.
+ */
+export function updateReadUnits(store: Pick<Store, "stripeAccountId" | "paypalSeller">, paypalSales: number): number {
+  if (!readsSales(store)) return 0;
+  return (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales, paypalRefunds: 0 }));
+}
 
 /** When this product's buyers may next be told, in seconds; 0 when they may now. */
 export async function nextUpdateAt(store: Store, productId: string): Promise<number> {
@@ -145,6 +162,11 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   if (!canTellBuyers(product)) return { ok: false, reason: "kind" };
   const next = await nextUpdateAt(store, product.id);
   if (next > nowSeconds) return { ok: false, reason: "soon", until: next };
+  // Every paid sale, read again from Stripe each time: counted in the studio's requests first, nothing read when not.
+  const kept = await paypalKept(store.statsId, false).catch(() => null);
+  if (!kept) return { ok: false, reason: "stripe" };
+  const counted = await countUnits(store, updateReadUnits(store, kept.sales)).catch(() => null);
+  if (!counted?.ok) return { ok: false, reason: "studio_used", message: counted && !counted.ok ? counted.message : "" };
   let rows: Record<string, unknown>[];
   try {
     rows = (await readPaidSales(store, 0, ALL_TIME_PAGES)).sales.filter((s) => !s.upsell).map((s) => s.row);

@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Held, LockBusyError, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
 import {
@@ -2121,6 +2121,45 @@ export type MoveResult =
  * account's other stores keep their folders as they are, because their keys
  * never held the address.
  */
+/**
+ * A move that wrote the store at its new address and could not take it off
+ * the old one leaves it on both (lib/move-repair.ts). With both stores' locks
+ * held: the address the store's handle points to (written in the same step
+ * that takes the old record away) is the store; the copy on the other is
+ * deleted (fenced), and the account's other stores, rewritten for the new
+ * address before that step, are written back to it or listed under it. When
+ * the two records differ in anything but the address (somebody edited one of
+ * them since), nothing is deleted and null is answered: the record stays for
+ * a person (scripts/move-repair.mjs). Answers the address that keeps it, or
+ * null when that cannot be told.
+ */
+export async function settleDoubledStore(fromEmail: string, toEmail: string): Promise<string | null> {
+  const from = fromEmail.toLowerCase();
+  const to = toEmail.toLowerCase();
+  const settled = await withStore(from, (a, _saveA, heldA) =>
+    withStore(to, async (b, _saveB, heldB): Promise<string | null> => {
+      if (!a.handle || a.handle !== b.handle) return null;
+      if (recordJson({ ...a, email: "" }) !== recordJson({ ...b, email: "" })) return null;
+      const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
+      const home = typeof points === "string" ? points.toLowerCase() : "";
+      if (home !== from && home !== to) return null;
+      const [members] = await redisPipeline([["SMEMBERS", await accountKey(from)]]);
+      const extras = (Array.isArray(members) ? members : []).filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id));
+      for (const sid of extras) {
+        const back = await withStore(extraRef(sid), async (extra, _save, held) => {
+          if (extra.email.toLowerCase() === home) return true;
+          return setIfHeld(held, await ownerKey(extraRef(sid)), recordJson({ ...extra, email: home }));
+        });
+        if (back === false) throw new StoreBusyError();
+      }
+      if (home === to && extras.length) await redisPipeline([["SADD", await accountKey(to), ...extras], ["DEL", await accountKey(from)]]);
+      if (!(await deleteIfHeldOnly(home === from ? heldB : heldA, [await ownerKey(home === from ? to : from)]))) throw new StoreBusyError();
+      return home;
+    }),
+  );
+  return typeof settled === "string" ? settled : null;
+}
+
 export async function moveAccount(
   fromEmail: string,
   toEmail: string,
@@ -2302,7 +2341,7 @@ async function onProduct<R extends string>(
 
 export type CallResult =
   | { ok: true; store: Store; product: Product }
-  | { ok: false; reason: "none" | "unknown" | "free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle" };
+  | { ok: false; reason: "none" | "unknown" | "free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle" | "lengths_package" | "lengths_price" };
 
 /**
  * Makes a product a paid call, changes when it can be booked, or turns it
@@ -2317,10 +2356,16 @@ export async function setProductCall(
   id: string,
   setup: CallSetup | null,
 ): Promise<CallResult> {
-  return onProduct<"free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle">(
+  return onProduct<"free" | "recurring" | "options" | "delivery" | "course" | "pwyw" | "bundle" | "lengths_package" | "lengths_price">(
     email,
     id,
     (product) => {
+      // Several lengths (lib/call-lengths.ts), read again on the record as it is now, under its write: never with a package,
+      // whose sessions are free once bought, and only while the first is still at the product's price.
+      if (setup?.lengths?.length) {
+        if (product.callPackage) return { ok: false, reason: "lengths_package" };
+        if (setup.lengths[0].cents !== product.priceCents) return { ok: false, reason: "lengths_price" };
+      }
       if (setup) {
         if (isFree(product)) return { ok: false, reason: "free" };
         // A bundle hands over its products; a time in a calendar is not one.
@@ -2415,9 +2460,11 @@ export async function setPodcastEpisodes(email: string, id: string, episodes: nu
  * (null). Only a call booked in weekly hours: dated live sessions are bought
  * one date at a time.
  */
-export async function setCallPackage(email: string, id: string, pkg: CallPackage | null): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "call" }> {
-  return onProduct<"call">(email, id, (product) => {
+export async function setCallPackage(email: string, id: string, pkg: CallPackage | null): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "call" | "lengths" }> {
+  return onProduct<"call" | "lengths">(email, id, (product) => {
     if (pkg && product.call?.kind !== "weekly") return { ok: false, reason: "call" };
+    // A package's sessions are free once bought, so a call with several lengths (lib/call-lengths.ts) has none: a long one would be had at a short one's price.
+    if (pkg && product.call?.lengths?.length) return { ok: false, reason: "lengths" };
     return { ...product, callPackage: pkg };
   });
 }
@@ -2756,7 +2803,7 @@ export type CurrencyShortfall = {
    * payment of a payment plan, or the deposit on an in-person booking
    * (lib/call-deposit.ts).
    */
-  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan" | "deposit";
+  what: "price" | "minimum" | "option" | "bump" | "offer" | "plan" | "deposit" | "length";
   /** The option's label, or the title of the product offered; "" otherwise. */
   label: string;
   /** In the smallest unit, the same number in either currency. */
@@ -2784,6 +2831,8 @@ export function chargesBelow(products: Product[], currency: Currency): CurrencyS
     if (p.plan && p.plan.amountCents < least) on("plan", "", p.plan.amountCents);
     // A deposit below the smallest charge would quietly become the whole price (lib/call-deposit.ts, chargeNow): said instead.
     if (p.call?.deposit && p.call.deposit < least) on("deposit", "", p.call.deposit);
+    // A call's other lengths (lib/call-lengths.ts) are charged at their own prices: each one below the smallest charge is said too.
+    for (const length of (p.call?.lengths ?? []).slice(1)) if (length.cents < least) on("length", `${length.minutes} minutes`, length.cents);
   }
   return out;
 }

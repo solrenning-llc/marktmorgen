@@ -15,6 +15,7 @@
  *     Never an introductory price or the yearly price beside it: those are
  *     offers with their own terms, said on the product's page.
  *   - Several options: "from $9", the lowest one a buyer can pick.
+ *   - A call with several lengths: "from $45", the lowest length's price.
  *   - One price under a running store sale: "Sale price: $20, until Oct 9,
  *     3:00 PM UTC", only while the sale still has more than a day to run
  *     (MAIL_SALE_MARGIN_SECONDS). An email is read hours or days after it
@@ -44,6 +45,8 @@ export type PriceFacts = {
   fromCents: number;
   /** How many options a buyer can pick (sellableOptions); 0 with none. */
   optionCount: number;
+  /** How many lengths a call offers a buyer (listedLengths, lib/call-lengths.ts); 0 or left out with one. */
+  lengthCount?: number;
   /** A membership's interval, or null for something bought once. */
   interval: PriceInterval | null;
   /** Whether the buyer chooses the amount, from priceCents up. */
@@ -60,6 +63,8 @@ export function mailPriceLabel(store: { language?: unknown; currency: string }, 
   if (f.free) return w.free;
   const tax = f.taxOnTop ? ` ${w.plusTax}` : "";
   if (f.pwyw) return `${w.orMore(money(f.priceCents))}${tax}`;
+  // A call with several lengths: from the lowest of their prices, as the store's card says it (pricePill).
+  if ((f.lengthCount ?? 0) > 1) return `${w.fromPrice(money(f.fromCents))}${tax}`;
   if (f.interval) {
     const every = `${money(f.fromCents)} ${w.every(f.interval)}`;
     return `${f.optionCount > 1 ? w.fromPrice(every) : every}${tax}`;

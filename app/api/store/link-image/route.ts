@@ -5,6 +5,9 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsImagePath } from "@/lib/product-image";
 import { LINK_IMAGE_SIDE, type LinkImage } from "@/lib/store-link";
 import { checkUploadedImage } from "@/lib/uploaded-image";
+import { dropTakenPictures, takePictureDoor } from "@/lib/picture-door";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 
 /**
  * A link's own small picture (lib/store-link.ts, LinkImage): put on after
@@ -28,23 +31,32 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   }
 
+  // Pictures this request took from the door (lib/picture-door.ts): the only ones a failure here may delete.
+  // A path the browser names may be another product's, link's or page's picture in the same folder.
+  let fresh = new Map<string, number>();
+  const dropFresh = (path: string) => dropTakenPictures(fresh, [path]);
   try {
     let image: LinkImage | null = null;
     if (action === "attach") {
-      if (!(await storeForEmail(ref))) return Response.json({ ok: false, error: "none" }, { status: 400 });
+      const store = await storeForEmail(ref);
+      if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
+      // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
+      if ((await lockedFor(request, "page", "replace")) && store.links.some((link) => link.id === id && link.image)) return refusedJson("locked");
       const path = text(body.path, 200);
       if (!ownsImagePath(path, await imageFolder(ref))) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
+      fresh = await takePictureDoor([path]);
       const side = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n > 0 && n <= LINK_IMAGE_SIDE ? n : 0);
       const width = side(body.width);
       const height = side(body.height);
       if (!width || !height) {
-        await del(path).catch(() => {});
+        await dropFresh(path);
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
       const checked = await checkUploadedImage(path);
       if (!checked.ok) {
+        await dropFresh(path);
         return Response.json({ ok: false, error: checked.error }, { status: checked.error === "too_big" ? 413 : 400 });
       }
       image = { path, width, height, bytes: checked.bytes };
@@ -52,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     const result = await setLinkImage(ref, id, image);
     if (!result.ok) {
-      if (image) await del(image.path).catch(() => {});
+      if (image) await dropFresh(image.path);
       return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
     }
     // Best effort, and deliberately after the write.

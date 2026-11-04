@@ -248,7 +248,9 @@ async function run(): Promise<void> {
   store.run(["HSET", dayKey, "sent", String(DEMO_COMMANDS_PER_DAY - DEMO_COMMANDS_PER_ACTION + 1)]);
   is("one command past the day's is refused", await takeDemoAction(as(s), cost, at(clock)), { ok: false, reason: "commands" });
   store.run(["HDEL", dayKey, "sent"]);
+  const refusedBefore = store.run(["HGET", sandboxKey(s.id, "session")!, "refused"]);
   is("the day's count missing refuses", await takeDemoAction(as(s), cost, at(clock)), { ok: false, reason: "unknown" });
+  is("a refusal of our own making is not counted against the session (review of #2176)", store.run(["HGET", sandboxKey(s.id, "session")!, "refused"]), refusedBefore);
   store.run(["HSET", dayKey, "sent", "0"]);
 
   part("Unknown counts refuse, before any command");

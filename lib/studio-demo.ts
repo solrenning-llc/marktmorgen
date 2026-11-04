@@ -464,6 +464,9 @@ export async function takeDemoAction(
   const own = fields[5] === null ? 0 : digits(fields[5]);
   if (own !== null && own >= DEMO_REFUSALS_PER_SESSION) return { ok: false, reason: "refusals" };
   const refuse = async (reason: DemoRefusal): Promise<DemoActionTaken> => {
+    // A refusal of our own making (the database not answering, a record that does not read) never counts against the
+    // session's refusals: only what its visitor asked for does (review of #2176).
+    if (reason === "unknown") return { ok: false, reason };
     try {
       await redisPipeline([["EVAL", STUDIO_DEMO_SESSION_REFUSE_SCRIPT, 1, key, DEMO_REFUSALS_PER_SESSION]]);
     } catch {

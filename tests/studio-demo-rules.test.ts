@@ -139,6 +139,13 @@ const doc = readFileSync("docs/studio-demo.md", "utf8");
 is("an action at its worst, in micro-USD", Math.round(perAction * 100) / 100, 51.77);
 is(`the doc states the day's known worst (${dollars(dayMicroUsd)})`, doc.includes(`${dollars(dayMicroUsd)} a day`), true);
 is(`the doc states thirty days (${dollars(thirtyMicroUsd)})`, doc.includes(`${dollars(thirtyMicroUsd)} in thirty days`), true);
+{
+  // The cost registry's demo lines say the same day's worst, so a change of the figure cannot leave them behind
+  // (review of #2176: they had kept $1.38).
+  const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
+  const demoLines = registry.split("\n").filter((line) => /^\s+DEMO_[A-Z_]+: "/.test(line) && line.includes(" a day at the most"));
+  is(`every DEMO_ line of the registry states ${dollars(dayMicroUsd)} a day`, [demoLines.length > 0, demoLines.every((line) => line.includes(`${dollars(dayMicroUsd)} a day`))], [true, true]);
+}
 is(`the doc states the sessions' own refused actions (${sessionRefusals})`, doc.includes(`sessions' own ${sessionRefusals.toLocaleString("en-US")} refused actions`), true);
 is(`the doc states the reachable sessions and actions (${reachable}, ${actions})`, doc.includes(`${reachable} openings and ${actions.toLocaleString("en-US")} actions`), true);
 is("the doc says the demo stays off while a cost is unknown", /unknown/i.test(doc) && /STUDIO_DEMO_ON/.test(doc), true);

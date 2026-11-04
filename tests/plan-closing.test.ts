@@ -548,7 +548,7 @@ async function main(): Promise<void> {
     /keeps the rule it ended under: the store and its records stay/.test(terms),
   ], [true, true, true, true, true, true]);
   const help = JSON.stringify(HELP_SECTIONS);
-  is("the help pages say the same", [help.includes(`stays as it is for ${CLOSING_DAYS} days`), help.includes(`${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it`), help.includes(`keeps more than ${storageWords(SETUP_STORAGE_BYTES)} has a date`), help.includes("download your store's main data as one file")], [true, true, true, true]);
+  is("the help pages say the same", [help.includes(`stays as it is for ${CLOSING_DAYS} days`), help.includes(`${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it`), help.includes(`keeps more than ${storageWords(SETUP_STORAGE_BYTES)} has a date`), help.includes("download your whole store as one file")], [true, true, true, true]);
   is("and the privacy policy says when such files are deleted", read("app/privacy/page.tsx").includes(`deleted ${CLOSING_DAYS} days after the plan`), true);
   const studio = read("app/studio/page.tsx");
   is("and the studio shows a store past its room the day, counted the way the job counts it", [/closingOf\(store\)/.test(studio), /keptNow > keptRoom/.test(studio), /keptRoomFor\(closingAt\.endedAt\)/.test(studio), /dayWords\(closing\.day\)/.test(studio)], [true, true, true, true]);

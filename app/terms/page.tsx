@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 2, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 4, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -893,10 +893,10 @@ export default function TermsPage() {
           runs, as often as your plan&rsquo;s studio use allows, and{" "}
           {ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`}{" "}
           after it ends, before the closing day, whatever the store&rsquo;s
-          size. It holds your products and their pages, posts,
+          size. It holds your store&rsquo;s name, bio, links and currency, your products and their pages, thank-you notes, posts,
           courses with every lesson&rsquo;s text, forms and their answers,
           contacts and your orders as a spreadsheet. Files and videos
-          download from their own pages. Nothing else is in the file: files, videos, community posts, email sequences, broadcasts, reviews and CRM deals and tasks are not in it. Your students can download their
+          download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, bookings, funnels and CRM deals and tasks stay in your studio. Your students can download their
           course certificates until the closing day, and not after.
         </p>
         <p>

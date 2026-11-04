@@ -2342,9 +2342,9 @@ export default async function StudioPage({
               <div className="card mt-8 p-6 sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
                 <p className="mt-2 text-ink-soft">
-                  Your products and their pages, posts, courses with every lesson&rsquo;s text, forms and their answers,
+                  Your store&rsquo;s name, bio, links and currency, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
                   contacts and a summary of your orders. It is counted from your studio&rsquo;s requests by its size.
-                  Files and videos download from their own pages. Nothing else is in the file: files, videos, community posts, email sequences, broadcasts, reviews and CRM deals and tasks are not in it.
+                  Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, bookings, funnels and CRM deals and tasks stay in your studio.
                 </p>
                 <form action="/api/store/export" method="get" className="mt-4 max-w-full">
                   <input type="hidden" name="store" value={store.sid} />
@@ -2421,7 +2421,7 @@ export default async function StudioPage({
                     </button>
                   </form>
                   <span className="text-sm text-ink-soft">
-                    {`One file: your products and their pages, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in the file: files, videos, community posts, email sequences, broadcasts, reviews and CRM deals and tasks are not in it.`}
+                    {`One file: your store's name, bio, links and currency, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, bookings, funnels and CRM deals and tasks stay in your studio.`}
                   </span>
                 </div>
                 <p className="mt-3 text-sm text-ink-soft">

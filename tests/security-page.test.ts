@@ -69,23 +69,34 @@ is("the export keys are products, courses, posts, forms, contactsCsv, ordersCsv"
 const hasWord = (text: string, word: string) => new RegExp(`(^|[^a-z])${word}([^a-z]|$)`, "i").test(text);
 const NAMED = ["products", "courses", "posts", "forms", "contacts", "orders"];
 const LEFT_OUT = ["files", "videos", "community posts", "email sequences", "broadcasts", "reviews", "CRM deals", "tasks"];
-const sentenceFor = (raw: string) => {
+// Every place the export is promised, each occurrence of it: from where the sentence starts to "stay in your studio".
+const windows = (raw: string): string[] => {
   const text = raw.replace(/",\s*"\s*/g, " ").replace(/\s+/g, " ");
-  const at = Math.max(0, text.search(/main data/i));
-  const end = text.indexOf("are not", at);
-  return text.slice(at, end < 0 ? at + 700 : end + 12);
+  return [...text.matchAll(/main data|One file: your/g)].map((m) => {
+    const end = text.indexOf("stay in your studio", m.index);
+    return end < 0 ? text.slice(m.index, m.index! + 700) : text.slice(m.index, end + 19);
+  });
 };
+const LISTS_PARTS = (name: string) => name !== "lib/plan-refund-words.ts" && name !== "app/mission/page.tsx";
+const LISTS_LEFT_OUT = (name: string) => name !== "app/mission/page.tsx";
 // Every place that promises the export, in the page items and across the site (review of #2114, items 1 to 4).
 const promiseSites: [string, string][] = [
   ["security page item", copyText],
-  ["feature page 'as one file' item", (() => { const at = words.indexOf("Your store's main data as one file"); return at < 0 ? "" : words.slice(at, words.indexOf("}", at)); })()],
-  ...["app/studio/page.tsx", "lib/plan-closing.ts", "app/terms/page.tsx", "lib/help-content.ts", "lib/plan-refund-words.ts", "app/mission/page.tsx"].map((file): [string, string] => [file, read(file)]),
+  ["lib/feature-pages.ts", read("lib/feature-pages.ts")],
+  ...["app/studio/page.tsx", "lib/plan-closing.ts", "app/terms/page.tsx", "lib/plan-refund-words.ts", "app/mission/page.tsx"].map((file): [string, string] => [file, read(file)]),
 ];
+const occurrences = promiseSites.flatMap(([name, text]) => windows(text).map((window): [string, string] => [name, window]));
+const INCLUDED = [...NAMED, "name", "bio", "links", "currency", "thank-you notes"];
+const LEFT_OUT_NOW = ["files", "videos", "community posts", "email sequences", "broadcasts", "reviews", "coupons", "affiliates", "bookings", "funnels", "CRM deals", "tasks"];
+is("every promise site is found, the card for a closed store and the studio title included", [promiseSites.every(([name, text]) => windows(text).length > 0), occurrences.filter(([name]) => name === "app/studio/page.tsx").length, occurrences.filter(([name]) => name === "lib/feature-pages.ts").length], [true, 2, 2]);
 is("the copy names each exported part, as whole words", NAMED.map((word) => hasWord(promised.replace(/blog posts/, "posts"), word)), NAMED.map(() => true));
 is("the copy lists each exclusion of notIncluded and the CRM tasks (not in storeExport)", [["files", "videos", "community posts"].map((word) => excluded.includes(word) && hasWord(copyText, word)), !/readPersonTasks|crm/.test(exporter) && hasWord(copyText, "CRM deals and tasks")], [[true, true, true], true]);
-is("the copy says nothing else is in the file, and the file's own note says it too", [/nothing else is in the file/.test(copyText), /nothing else is in this file/i.test(exporter)], [true, true]);
-is("no site text promises everything or the whole store", promiseSites.map(([, text]) => /\b(everything|whole store|entire store)\b/i.test(sentenceFor(text)) || /download everything your store|your whole store, as one file|downloaded your whole store/i.test(text)), promiseSites.map(() => false));
-is("each place says what is left out, as whole words", promiseSites.filter(([name]) => name !== "app/mission/page.tsx" && name !== "feature page 'as one file' item").map(([, text]) => LEFT_OUT.every((word) => hasWord(sentenceFor(text), word))), [true, true, true, true, true, true].slice(0, promiseSites.length - 2));
+is("the file's own note says nothing else is in it and what stays in the studio", [/nothing else is in this file\. for example/.test(excluded), LEFT_OUT_NOW.every((word) => hasWord(excluded, word))], [true, true]);
+is("the export holds the store's name, bio, links, currency and thank-you notes", [/name: store\.name, bio: store\.bio, links: store\.links/.test(exporter), /currency: store\.currency/.test(exporter), /thanks: notes\[i\]/.test(exporter)], [true, true, true]);
+is("no occurrence promises everything or the whole store", occurrences.map(([, w]) => /\b(everything|whole store|entire store)\b/i.test(w)), occurrences.map(() => false));
+is("no site text uses the old promises", promiseSites.map(([, text]) => /download everything your store|your whole store, as one file|downloaded your whole store|whole store as one file/i.test(text)), promiseSites.map(() => false));
+is("every occurrence says what is left out, as whole words, and never reads as a full list", occurrences.filter(([name]) => LISTS_LEFT_OUT(name)).map(([, w]) => LEFT_OUT_NOW.every((word) => hasWord(w, word)) && /nothing else is in (it|the file)\. for example/i.test(w)), occurrences.filter(([name]) => LISTS_LEFT_OUT(name)).map(() => true));
+is("every occurrence that lists the contents lists all of them", occurrences.filter(([name]) => LISTS_PARTS(name) && LISTS_LEFT_OUT(name)).map(([, w]) => INCLUDED.every((word) => hasWord(w.replace(/blog posts/, "posts"), word))), occurrences.filter(([name]) => LISTS_PARTS(name) && LISTS_LEFT_OUT(name)).map(() => true));
 is("the studio button is not 'Download everything' for the store file", /name="what" value="store"[\s\S]{0,200}Download the file/.test(read("app/studio/page.tsx")), true);
 is("the export is offered from the studio", [/what === "store"/.test(read("app/api/store/export/route.ts")), /export function storeExport/.test(exporter)], [true, true]);
 is("a buyer deletes their own data by an emailed link", [says("Buyers can delete their own data"), words.includes('"href":"/privacy/delete"'), existsSync("app/privacy/delete/page.tsx"), existsSync("app/api/privacy/erase/route.ts")], [true, true, true, true]);

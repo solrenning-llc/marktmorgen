@@ -126,7 +126,7 @@ export function storeExport(store: Store, now = Date.now()): ReadableStream<Uint
       const { csv, partial } = await salesCsv(store, 0);
       return `,"ordersCsv":${JSON.stringify(csv)}${partial ? `,"ordersNote":"More orders than one file reads: the rest are on your own Stripe account."` : ""}`;
     },
-    async () => `,"notIncluded":"Nothing else is in this file: files, videos, community posts, email sequences, broadcasts, reviews and CRM deals and tasks are not in it. Download files and videos from your studio."}\n`,
+    async () => `,"notIncluded":"Nothing else is in this file. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, bookings, funnels and CRM deals and tasks stay in your studio. Download files and videos from their own pages in your studio."}\n`,
   ];
   let at = 0;
   return new ReadableStream<Uint8Array>({

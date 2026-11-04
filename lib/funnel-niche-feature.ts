@@ -64,6 +64,6 @@ export function startersFeature() {
   return {
     icon: "list" as const,
     title: "Campaigns with first words",
-    body: `${FUNNEL_STARTERS.length} campaigns with their first words written. ${online.length} for what you sell, teach or offer online, such as ${quoted(online.slice(0, NAMED_ON_CARD))}. ${shipped.length} for something you ship: ${quoted(shipped)}. In your studio, open Funnels and go to “${STARTER_GALLERY_TITLE}”; choose your kind of creator under “What kind of creator are you?” to see the ones that fit you. Where a step sells something, you choose one of your own products for it. Every sentence is one you can say as it stands, or a part in [brackets] for you to fill in; none states a result, a number or a deadline. Everything is made as a draft for you to check.`,
+    body: `${FUNNEL_STARTERS.length} campaigns with their first words written. ${online.length} for what you sell, teach or offer online, such as ${quoted(online.slice(0, NAMED_ON_CARD))}. ${shipped.length} for something you ship: ${quoted(shipped)}. In your studio, open Funnels and go to “${STARTER_GALLERY_TITLE}”. Choose your kind of creator under “What kind of creator are you?” to see the ones that fit you. Where a step sells something, you choose one of your own products for it. Every sentence is one you can say as it stands, or a part in [brackets] for you to fill in. None states a result, a number or a deadline. Everything is made as a draft for you to check.`,
   };
 }

@@ -789,6 +789,9 @@ A sua linha 636 [GL4](d) (ramo claude3/review-summary-keep, já incorporado no #
 ### C3-105 — 04/11/2026 14h05 — Homógrafo: falta a escrita inteira (Revisor 2, 13h46)
 Em claude3/orders-page-bounds (a8d0a70c), a escrita misturada está corrigida, mas a escrita inteira passa: xn--80ak6aa92e.com vira "аррӏе.com" (todo em cirílico) e é lido como apple.com na linha "Kept on". Chrome e Firefox mostram xn-- nesse caso (UTS #39, whole-script confusables). Mostre em Unicode só quando a escrita do rótulo for a mesma do TLD (пример.рф e 日本のサイト.jp seguem; аррӏе.com vira xn--), ou só latim sob TLD ASCII; teste com xn--80ak6aa92e.com. O claude3/api-events-measured (dc039a11) saiu sem achado.
 
+### C3-106 — 04/11/2026 14h30 — #2192 (14h12): o modelo novo do fim do teste grátis está certo, com uma condição
+Aprovado (pelo dono, MR): o custo deve contar o que o código de fato permite, e AFTER_TRIAL_UNITS pelo maior entre "ended" e "none" de lib/plan-standing.ts é isso, igual a ENDED_UNITS da loja paga encerrada; a asserção não afrouxou. Condição: um teste que prove, pelo código real e não pela constante, que depois do fim do teste nenhum caminho (webhook, estúdio, API, e-mails) usa as unidades do próprio teste, e que uma assinatura reativada antes de CLOSING_DAYS passa ao modelo pago. Com isso, siga; mantenha o webhook a 64 KB como você mediu.
+
 ## Claude 4
 
 ### C4-1 — 04/11/2026 07h00 — Bem-vindo: quem você é, sua faixa e como trabalhar

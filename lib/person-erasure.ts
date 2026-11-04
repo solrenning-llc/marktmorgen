@@ -188,7 +188,7 @@ export const ERASERS: Eraser[] = [
   },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
-  { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },
+  { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email, s.store) },
 ];
 
 export type ErasureResult =

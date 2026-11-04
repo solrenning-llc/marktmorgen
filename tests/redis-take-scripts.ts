@@ -1,5 +1,5 @@
 /**
- * The scripts of lib/redis-take.ts, run by the stand-in Redis the tests use
+ * The scripts of lib/redis-take.ts (and lib/community.ts's CAS_MEMBER), run by the stand-in Redis the tests use
  * (tests/redis-stub.ts), each as the same plain commands in one step: read
  * and deleted, written or deleted only as read. Kept beside the stub rather
  * than in lib/redis-memory.ts, so the scripts' tests need nothing of it but
@@ -32,6 +32,13 @@ const SCRIPTS: Record<string, Script> = {
     const n = Number(run(["SCARD", set])) || 0;
     run(["DEL", set]);
     return n;
+  },
+  // lib/community.ts CAS_MEMBER: a member's record written only over what was read, the directory with it.
+  "member-cas:v1": (run, [members, dir], [member, was, next, listed, at]) => {
+    if (run(["HGET", members, member]) !== was) return 0;
+    run(["HSET", members, member, next]);
+    run(listed === "1" ? ["ZADD", dir, at, member] : ["ZREM", dir, member]);
+    return 1;
   },
   "set-and-values-take:v1": (run, [set, ...plain]) => {
     const members = Number(run(["SCARD", set])) > 0 ? (run(["SMEMBERS", set]) as string[]) : [];

@@ -45,7 +45,8 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataOwner, orderWrite } from "@/lib/order-data";
+import { type DataOwner, fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
+import { HASH_TAKE_FIELD } from "@/lib/redis-take";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
 import {
@@ -161,6 +162,14 @@ export type Member = {
   qq: string[];
   /** When they answered, in seconds; 0 until they have. */
   qa: number;
+  /**
+   * "o" on a record written since 4 November 2026: made by an order (counted
+   * in the orders' part, lib/order-data.ts) and grown in the members' slot
+   * at what setProfile counts (countedMember), so deleting it gives each
+   * part back where it was taken. Absent on records written before, whose
+   * room is left counted.
+   */
+  r?: "o";
 };
 
 export type CommunityImage = { path: string; w: number; h: number; alt: string };
@@ -349,11 +358,31 @@ function parseMember(raw: unknown): Member | null {
       q: Array.isArray(v.q) ? v.q.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_ANSWER)).slice(0, MAX_QUESTIONS) : [],
       qa: typeof v.qa === "number" ? v.qa : 0,
       qq: Array.isArray(v.qq) ? v.qq.filter((a): a is string => typeof a === "string").map((a) => a.slice(0, MAX_QUESTION)).slice(0, MAX_QUESTIONS) : [],
+      ...(v.r === "o" ? { r: "o" as const } : {}),
     };
   } catch {
     return null;
   }
 }
+
+/**
+ * A member's record as the members' slot counts it: without what is written
+ * without being counted (when they were last seen, the emails switch, their
+ * unsubscribe token, a mute or removal) and with the handle the name gives,
+ * the one setProfile counts. Only setProfile changes it, and counts each
+ * change, so the slot holds exactly what it grew by since the record was made.
+ */
+function countedMember(member: Member): string {
+  return JSON.stringify({ ...member, h: member.n.slice(0, 40), mail: false, seen: member.at, muted: false, removed: false, t: "" });
+}
+
+/** A member's record as touchMember first writes it (an order's write, lib/order-data.ts). */
+function firstMember(key: string, email: string, at: number): Member {
+  return { k: key, e: email, n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], r: "o" };
+}
+
+/** What a member's name takes in the members' slot beside the record: the words it is found by and its handle. */
+const nameBytes = (name: string) => (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0);
 
 export function memberKey(email: string): string {
   return emailKey(email);
@@ -396,6 +425,7 @@ export async function readMembers(id: string, keys: string[]): Promise<Map<strin
 
 /** Writes a member's record only if it is still exactly what was read. */
 const CAS_MEMBER = [
+  "-- marktmorgen:member-cas:v1",
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
   "if cur ~= ARGV[2] then return 0 end",
   'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
@@ -444,7 +474,7 @@ export async function touchMember(id: string, email: string, existing: Member | 
   }
   const [size] = await redisPipeline([["HLEN", membersKey(id)]]);
   if (Number(size) >= MAX_MEMBERS) return null;
-  const member: Member = { k: key, e: normaliseEmail(email), n: "", h: "", dir: false, mail: false, at, seen: at, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+  const member = firstMember(key, normaliseEmail(email), at);
   // HSETNX: two first visits at once make one record, not two. Counted in
   // the store's room at what it adds (lib/order-data.ts); what a member adds
   // to it later is taken from the room (MEMBERS_SLOT).
@@ -469,7 +499,7 @@ export async function setProfile(
   // their name is found by. A record that shrinks gives it back.
   const answers = change.answers && change.questions ? answersFor(change.answers, change.questions, member.qa) : {};
   const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers });
-  const grown = dataBytes([after]) - dataBytes([JSON.stringify(member)]) + (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0) - (member.n ? indexBytes([member.n]) + SET_ENTRY_BYTES : 0);
+  const grown = dataBytes([countedMember(JSON.parse(after) as Member)]) - dataBytes([countedMember(member)]) + nameBytes(name) - nameBytes(member.n);
   if (grown > 0) await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
   else if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
   // The handle is taken before the name is written, so a member is never left
@@ -759,14 +789,15 @@ export async function editPost(id: string, post: Post, input: { title: string; t
 export async function deletePost(id: string, post: Post, room: DataStore): Promise<void> {
   const [raw] = await redisPipeline([["HKEYS", commentsKey(id, post.id)]]);
   const commentIds = Array.isArray(raw) ? (raw as string[]) : [];
-  await redisPipeline([
+  const gone = await redisPipeline([
     ["DEL", postKey(id, post.id), commentsKey(id, post.id), likesKey(id, post.id), reportersKey(id, `p:${post.id}`), ...pollKeys(id, post.id), ...commentIds.map((c) => commentLikesKey(id, post.id, c))],
     ["ZREM", feedKey(id), post.id],
     ["ZREM", spaceKey(id, post.sp), post.id],
     ["ZREM", reportsKey(id), `p:${post.id}`, ...commentIds.map((c) => `c:${post.id}:${c}`)],
     ...(post.a !== CREATOR ? [["SREM", traceKey(id, post.a), `p:${post.id}`]] : []),
   ]);
-  if (post.a !== CREATOR) await giveData(room, [TRACE_ENTRY]);
+  // Its entry in the author's trace comes back only when this took it out: a deletion of the author takes the whole trace.
+  if (post.a !== CREATOR && Number(gone[4]) === 1) await giveData(room, [TRACE_ENTRY]);
   await unindexPost(id, post.id).catch((error) => {
     console.error("taking a deleted post out of the search index failed", error);
   });
@@ -840,11 +871,13 @@ async function toggleIn(id: string, key: string, ref: string, post: string, who:
   const [held] = await redisPipeline([["SISMEMBER", key, who]]);
   // The like and its entry in the member's trace (traceKey) take their room first.
   if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
-  const [added] = await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]);
+  const [added, traced] = await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]);
   if (Number(added) === 1) return true;
-  await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]);
+  const [, untraced] = await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]);
   const times = Number(held) === 1 ? 1 : 2;
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
+  // The trace: what this took first, and the entry it took out when that one was there before it (a deletion of the member takes the whole trace).
+  const traceBack = (Number(held) === 1 ? 0 : 1) + (Number(untraced) === 1 && Number(traced) !== 1 ? 1 : 0);
+  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, ...(traceBack ? [{ ...TRACE_ENTRY, bytes: traceBack * TRACE_ENTRY.bytes }] : [])]);
   return false;
 }
 
@@ -975,14 +1008,16 @@ export async function deleteComment(id: string, post: string, comment: Comment, 
   const all = comment.parent ? [] : (await readComments(id, post)).filter((c) => c.parent === comment.id);
   const gone = [comment.id, ...all.map((c) => c.id)];
   const freed = [comment, ...all].reduce((sum, c) => sum + commentBytes(c), 0);
-  await redisPipeline([
+  const authored = [comment, ...all].filter((c) => c.a !== CREATOR);
+  const replies = await redisPipeline([
     ["HDEL", commentsKey(id, post), ...gone],
     ["DEL", ...gone.map((c) => commentLikesKey(id, post, c))],
     ["ZREM", reportsKey(id), ...gone.map((c) => `c:${post}:${c}`)],
     ...gone.map((c) => ["DEL", reportersKey(id, `c:${post}:${c}`)]),
-    ...[comment, ...all].filter((c) => c.a !== CREATOR).map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
+    ...authored.map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
   ]);
-  const traced = [comment, ...all].filter((c) => c.a !== CREATOR).length;
+  // Each entry in an author's trace comes back only when this took it out.
+  const traced = replies.slice(replies.length - authored.length).filter((n) => Number(n) === 1).length;
   await giveData(room, [{ slot: POST_SLOT(post), bytes: freed }, ...(traced ? [{ ...TRACE_ENTRY, bytes: traced * TRACE_ENTRY.bytes }] : [])]);
   await reindexComments(id, post);
 }
@@ -1061,15 +1096,24 @@ export async function dropSpace(id: string, space: string): Promise<void> {
  * for their limits. Answers the record as it was, for the keys it names
  * elsewhere (their handle, their unsubscribe token), or null.
  */
-export async function forgetMemberRecord(id: string, who: string): Promise<Member | null> {
+export async function forgetMemberRecord(id: string, who: string, room?: DataStore): Promise<Member | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", membersKey(id), who]]);
-  const member = parseMember(raw);
-  await redisPipeline([
-    ["HDEL", membersKey(id), who],
+  // Read and deleted in one step: two deletions at once give its room back once.
+  const [raw] = await redisPipeline([
+    ["EVAL", HASH_TAKE_FIELD, 1, membersKey(id), who],
     ["ZREM", dirKey(id), who],
     ["DEL", ...(Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind))],
   ]);
+  const member = parseMember(raw);
+  // A record made by an order gives back its first write to the orders' part
+  // and what it grew by, its name's words and handle with it, to the members'
+  // slot. One written before this was recorded (no `r`) stays counted.
+  if (room && member?.r === "o") {
+    const first = firstMember(member.k, member.e, member.at);
+    const grown = dataBytes([countedMember(member)]) - dataBytes([countedMember(first)]) + nameBytes(member.n);
+    await releaseOrderData(room, fieldReleaseBytes(who, JSON.stringify(first)));
+    if (grown > 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
+  }
   return member;
 }
 

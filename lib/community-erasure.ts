@@ -21,7 +21,9 @@
  */
 import { redisPipeline } from "@/lib/redis";
 import type { DataStore } from "@/lib/store-data";
-import { traceKey } from "@/lib/community-trace";
+import { TRACE_ENTRY, traceKey } from "@/lib/community-trace";
+import { SET_TAKE_COUNT } from "@/lib/redis-take";
+import { giveData } from "@/lib/store-data";
 import { forgetMemberRecord, readConfig } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
 import { forgetCommunityUnsub } from "@/lib/community-mail";
@@ -37,20 +39,23 @@ import { unindexMember } from "@/lib/community-index";
 
 /**
  * Deletes one person from one community. Answers how many records went.
- * `room` is the store's data room: their devices, private conversations,
- * the people they declined and their places at live events give back what
- * they took there.
+ * `room` is the store's data room: their record, their trace, their
+ * devices, private conversations, the people they declined and their places
+ * at live events give back what they took there.
  */
 export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[], room?: DataStore): Promise<number> {
   const config = await readConfig(id).catch(() => null);
-  const member = await forgetMemberRecord(id, who);
+  const member = await forgetMemberRecord(id, who, room);
   let records = member ? 1 : 0;
   if (member?.h) records += await forgetHandle(id, member.h, who);
   if (member?.t) records += await forgetCommunityUnsub(member.t);
   await unindexMember(id, who);
-  // Their trace (lib/community-trace.ts): what they wrote and did, by reference.
-  const [traced] = await redisPipeline([["DEL", traceKey(id, who)]]);
-  records += Number(traced) || 0;
+  // Their trace (lib/community-trace.ts): what they wrote and did, by
+  // reference; counted and deleted in one step, each entry's room given back once.
+  const [traced] = await redisPipeline([["EVAL", SET_TAKE_COUNT, 1, traceKey(id, who)]]);
+  const entries = Number(traced) || 0;
+  records += entries ? 1 : 0;
+  if (room && entries > 0) await giveData(room, [{ ...TRACE_ENTRY, bytes: entries * TRACE_ENTRY.bytes }]);
   records += await forgetPointsPerson(id, who);
   records += await forgetNoticesPerson(id, who);
   records += await forgetPushPerson(id, who, room);

@@ -132,15 +132,28 @@ async function main(): Promise<void> {
 
   part("The screen");
   const html = renderToStaticMarkup(createElement(BulkLabels));
-  is("every field labeled, with an example read with it", html.includes("Their email addresses") && html.includes('aria-describedby="bulk-text-hint"') && html.includes("Label</span>") && html.includes('aria-describedby="bulk-label-hint"'), true);
+  is("every field labeled, with an example read with it", html.includes('<label for="bulk-text"') && html.includes("Their email addresses") && html.includes('aria-describedby="bulk-text-hint"') && html.includes('<label for="bulk-label"') && html.includes('aria-describedby="bulk-label-hint"'), true);
   is("what to do, as a group of choices", html.includes("<fieldset") && html.includes("<legend") && html.includes("Add the label") && html.includes("Take the label off"), true);
   is("says before confirming that no automation starts", html.includes("Adding a label here doesn&#x27;t start its automations."), true);
   is("a review first, its result in a status, refusals in an alert", html.includes("Review the change") && html.includes('role="status"') && html.includes('role="alert"'), true);
   const screen = readFileSync("components/bulk-labels.tsx", "utf8");
+
+  part("The screen: accessibility (AAA audit, 4 Nov 2026)");
+  is("no control is disabled while busy, so focus stays on it (2.4.3)", [/\sdisabled=\{/.test(screen), screen.includes("aria-disabled={busy || undefined}"), screen.includes("aria-disabled={busy || review.changes === 0 || undefined}")], [false, true, true]);
+  is("a press while busy, or with nothing to change, does nothing", [screen.includes("if (busy) return;"), screen.includes("if (busy || !review || review.changes === 0) return;"), screen.includes("if (busy || !done) return;")], [true, true, true]);
+  is("the live region holds one short sentence, not the review", [html.includes('<p role="status" class="sr-only"></p>'), /role="status"[^>]*>\s*\{review/.test(screen), screen.includes("{live}")], [true, false, true]);
+  is("the review's title takes focus when it arrives", screen.includes('id="bulk-review-title" ref={reviewTitle} tabIndex={-1}') && screen.includes('focusNext.current = "review";'), true);
+  is("after Apply, focus goes to Undo (or the done line); after Undo, to the form's title", [screen.includes('focusNext.current = changed.length ? "undo" : "done";'), screen.includes("ref={undoButton}"), screen.includes("ref={doneLine} tabIndex={-1}"), screen.includes('focusNext.current = "title";'), html.includes('id="bulk-title" tabindex="-1"')], [true, true, true, true, true]);
+  is("focus is moved by refs, after the screen changed", screen.includes("useEffect(() => {") && screen.includes(".current?.focus();"), true);
+  is("Undo says what it undoes", screen.includes('aria-describedby="bulk-done-line"'), true);
+  is("a refusal is tied to its field: text, label or the choice (3.3.1)", ['none: "text"', 'many: "text"', 'label: "label"', 'change: "change"', 'aria-invalid={errorField === "text" || undefined}', 'aria-invalid={errorField === "label" || undefined}', '`bulk-${field}-error`'].every((piece) => screen.includes(piece)), true);
+  is("shown next to the field, the end of the form keeps only the others", [html.includes('id="bulk-text-error" class="field-error mt-1 block" role="alert"'), html.includes('id="bulk-label-error"'), html.includes('id="bulk-change-error"'), screen.includes('{errorField ? "" : error}')], [true, true, true, true]);
+  is("nothing is said twice: no toast beside the live line (4.1.3)", [screen.includes("toast("), screen.includes("@/components/toast")], [false, false]);
+  is("a full store is said in plain words (3.1.5)", [screen.includes("data room"), screen.includes("Your store has no room left for more records. Delete some you no longer need first.")], [false, true]);
   is("the review lists how many, and that nothing is sent", screen.includes("will ${change === \"add\" ? \"get\" : \"lose\"} the label") && screen.includes("No automation starts and no email is sent. You can undo this right after."), true);
   is("anything typed after a review asks for a new one", screen.includes("setReview(null);"), true);
   is("the undo sends back exactly what changed, with each label as it was", screen.includes("change: undoing, emails: done.changed") && screen.includes("restore: done.removed") && screen.includes("const undoing = opposite(done.change);"), true);
-  is("and says what the route answered, kept on the screen when not everything went back", screen.includes("undoSummary(done.changed.length,") && screen.includes("else setNote(summary.words);") && !screen.includes('toast("Undone. Every contact is as it was.")'), true);
+  is("and says what the route answered, kept on the screen", screen.includes("undoSummary(done.changed.length,") && screen.includes("setNote(summary.words);") && !screen.includes('toast("Undone. Every contact is as it was.")'), true);
   is("the server code never reaches the browser", !screen.includes('from "@/lib/bulk-labels"') && !readFileSync("lib/bulk-label-rules.ts", "utf8").includes('from "@/lib/contacts"'), true);
   is("nothing here starts a workflow", !readFileSync("lib/bulk-labels.ts", "utf8").includes('from "@/lib/flows"') && !readFileSync("app/api/store/contact-labels/route.ts", "utf8").includes("enroll"), true);
   is("reached from the contacts import, for those who may use it", readFileSync("app/studio/import/page.tsx", "utf8").includes('kind === "contacts" && can(access.role, "send")') && readFileSync("app/studio/labels/page.tsx", "utf8").includes('"send");'), true);

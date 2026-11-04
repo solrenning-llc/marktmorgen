@@ -107,7 +107,8 @@ export type BlockKind =
   | "product"
   | "quotes"
   | "form"
-  | "row";
+  | "row"
+  | "booking";
 
 export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "hero", label: "Hero", hint: "The big headline at the top, with the product's picture or a video." },
@@ -305,6 +306,25 @@ export type QuotesBlock = { id: string; kind: "quotes"; heading: string; items: 
 /** One of the store's forms, surveys or quizzes (lib/forms.ts), by its id: only on the store's own pages. */
 export type FormBlock = { id: string; kind: "form"; heading: string; form: string };
 
+/**
+ * One of the store's calls, booked from the page itself (552 [BB1], added
+ * 4 November 2026): a paid call, a call also sold in packages, or a free
+ * intro call (551 [FB1]), by its product id. Only the id and an optional
+ * heading are kept, so the call's name, length and place are always today's,
+ * read from the call itself; a call taken off, made a draft or no longer a
+ * call is simply not drawn. Unit 1 draws a link to the call's own booking
+ * page (/@<store>/book/<id>); the time picker inside the block comes with
+ * unit 2, from the same picker and the same times, never a second way of
+ * booking.
+ *
+ * One per page (MAX_BOOKING_BLOCKS), as the reviews have one place: two would
+ * ask a visitor the same question twice, and once the picker is in the block
+ * each one reads the call's times, so a second one would double the reads for
+ * nothing.
+ */
+export type BookingBlock = { id: string; kind: "booking"; product: string; heading: string };
+export const MAX_BOOKING_BLOCKS = 1;
+
 /** An https address as it will be linked, or "" when it is not one: no other scheme, no login in it, no address on this machine. */
 export function quoteUrl(raw: unknown): string {
   if (typeof raw !== "string") return "";
@@ -462,6 +482,7 @@ export type PageBlock = { screens?: BlockShow; saved?: string } & (
   | QuotesBlock
   | FormBlock
   | RowBlock
+  | BookingBlock
 );
 
 export type SalesPage = {
@@ -942,6 +963,13 @@ function rowSentWhole(raw: Record<string, unknown>): boolean {
   });
 }
 
+/** Whether a booking block as sent can be kept whole: a call's id, and no heading or one within MAX_HEADING (never cut short). */
+function bookingSentWhole(raw: Record<string, unknown>): boolean {
+  if (typeof raw.product !== "string" || !PRODUCT_ID_PATTERN.test(raw.product)) return false;
+  if (raw.heading === undefined) return true;
+  return typeof raw.heading === "string" && line(raw.heading, Infinity).length <= MAX_HEADING;
+}
+
 /** Every picture file a page shows, each once: what is kept when the page is saved, and deleted when it is not. */
 export function picturePaths(page: Pick<SalesPage, "blocks"> & { variant?: PageVariant | null }): string[] {
   const out: string[] = [];
@@ -1093,6 +1121,9 @@ function parseBlock(raw: unknown): PageBlock | null {
       const columns = parseRowColumns(value.columns);
       return columns ? { id, kind: "row", columns } : null;
     }
+    // Kept whole or not at all: without a call it books nothing, and its heading is never cut short (blocksProblem tells it back).
+    case "booking":
+      return bookingSentWhole(value) ? { id, kind: "booking", product: value.product as string, heading } : null;
     default:
       return null;
   }
@@ -1116,6 +1147,7 @@ function parseBlocks(list: unknown, pictures: Set<string>): PageBlock[] {
     pictures.add(path);
   };
   let reviews = false;
+  let bookings = 0;
   for (const entry of list.slice(0, MAX_BLOCKS * 2)) {
     const block = parseBlock(entry);
     if (!block || seen.has(block.id)) continue;
@@ -1127,6 +1159,10 @@ function parseBlocks(list: unknown, pictures: Set<string>): PageBlock[] {
     if (block.kind === "reviews") {
       if (reviews) continue;
       reviews = true;
+    }
+    if (block.kind === "booking") {
+      if (bookings >= MAX_BOOKING_BLOCKS) continue;
+      bookings += 1;
     }
     // Pictures are counted across the page, and one file is shown once.
     if (block.kind === "pictures") {
@@ -1225,6 +1261,7 @@ export type PageProblem =
   | "too_big"
   | "same_version"
   | "row"
+  | "booking"
   | null;
 
 /** The rules of one version's blocks, told back; `kept` is that version as parsed. */
@@ -1233,6 +1270,8 @@ function blocksProblem(sent: unknown[], kept: PageBlock[]): PageProblem {
   const kinds = sent.map((b) => (b && typeof b === "object" ? (b as { kind?: unknown }).kind : null));
   if (kinds.slice(1).includes("hero")) return "hero_first";
   if (kinds.filter((k) => k === "reviews").length > 1) return "two_reviews";
+  // One booking block a page, with a call chosen and its heading whole.
+  if (kinds.filter((k) => k === "booking").length > MAX_BOOKING_BLOCKS) return "booking";
   for (const block of sent) {
     const value = block && typeof block === "object" ? (block as Record<string, unknown>) : {};
     if (value.kind === "hero" && value.media === "video" && !parseVideo(value.video)) return "video";
@@ -1252,6 +1291,7 @@ function blocksProblem(sent: unknown[], kept: PageBlock[]): PageProblem {
     }
     // A row with no columns or more than three, too many elements, or an element that cannot be kept as sent.
     if (value.kind === "row" && !rowSentWhole(value)) return "row";
+    if (value.kind === "booking" && !bookingSentWhole(value)) return "booking";
   }
   // A picture sent that was not kept: not a picture, a second copy of one, or past what a page holds.
   const sentPictures = sent.reduce<number>((n, b) => {
@@ -1334,6 +1374,8 @@ export function emptyBlock(kind: BlockKind, id = newBlockId()): PageBlock {
       return { id, kind, heading: "", form: "" };
     case "row":
       return { id, kind, columns: [[], []] };
+    case "booking":
+      return { id, kind, product: "", heading: "" };
   }
 }
 

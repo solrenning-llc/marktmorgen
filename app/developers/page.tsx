@@ -5,7 +5,8 @@ import { API_PAGE } from "@/lib/api-read";
 import { API_RATE } from "@/lib/api-guard";
 import { MAX_KEYS } from "@/lib/api-key-rules";
 import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
-import { API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { SALES_PAGE, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { PLAN_TITLES } from "@/lib/plan";
 
 export const metadata: Metadata = {
@@ -86,14 +87,14 @@ export default function DevelopersPage() {
           separated by commas, for example <code className="font-mono">/api/v1/leads?fields=email,agreed</code>. The paging
           fields beside <code className="font-mono">data</code> always stay. A field no row has is answered 400{" "}
           <code className="font-mono">unknown_field</code>, with its name. This works on every list above, on
-          Store, on Bookings and on Discount codes.
+          Store, on Bookings, on Discount codes and on Sales.
         </p>
         <p>
           {`Each key may make ${API_RATE} requests a minute. Past that, the answer is 429 with `}
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
         <p>
-          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}. Past it, the answer is 429 `}
+          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}, and a page of sales as ${API_SALES_UNITS}. Past it, the answer is 429 `}
           <code className="font-mono">monthly_limit</code>
           {", and its message says when the figure opens again, if it does. A trial or a store without a paid plan also needs one of the month's places for such stores; without one, the answer is 429 "}
           <code className="font-mono">no_place</code>
@@ -523,10 +524,11 @@ export default function DevelopersPage() {
       <LegalSection title="Sales and refunds">
         <Endpoint path="/api/v1/sales">
           Your store&apos;s paid checkouts, newest first, read from your own Stripe account as your studio&apos;s list of
-          sales reads them, in the same shape as the <code className="font-mono">sale.completed</code> webhook. Up to 100
-          checkouts are read per call; a page can be empty and still have a <code className="font-mono">next</code>, when
-          those checkouts were not this store&apos;s. What a buyer typed at checkout is not included. 409 with{" "}
-          <code className="font-mono">not_selling</code> while the store is not taking payments.
+          sales reads them, in the same shape as the <code className="font-mono">sale.completed</code> webhook.
+          {` Up to ${SALES_PAGE} checkouts are read per call, and each call counts as ${API_SALES_UNITS} API requests, because it waits on Stripe. `}
+          A page can be empty and still have a <code className="font-mono">next</code>, when those checkouts were not this
+          store&apos;s. A checkout that only saved a card is not a sale and is not listed. What a buyer typed at checkout is
+          not included. 409 with <code className="font-mono">not_selling</code> while the store is not taking payments.
         </Endpoint>
         <Code>{`{
   "data": [
@@ -535,29 +537,63 @@ export default function DevelopersPage() {
       "kind": "one_time",
       "product": { "id": "k3j9x2p1ab", "title": "The 7-Day Reset" },
       "option": null,
-      "amount_cents": 4900,
+      "bundle_items": [{ "id": "q8w2e4r6ty", "title": "Reset Workbook" }],
+      "order_bump": { "id": "m5n7b9v1cx", "title": "Meal Planner", "bundle_items": null },
+      "order_bumps": [{ "id": "m5n7b9v1cx", "title": "Meal Planner", "bundle_items": null }],
+      "amount_cents": 5800,
       "discount_cents": 0,
       "currency": "usd",
       "buyer": { "email": "dana@example.com", "name": "Dana Ortiz" },
       "paid_at": "2026-09-20T09:41:10.000Z",
+      "refunded_cents": 0,
+      "disputed": false,
       "trial": false,
       "source": { "utm_source": "newsletter", "utm_medium": "email", "utm_campaign": null, "utm_content": null, "site": null }
     }
   ],
-  "next": "cs_live_a1B2c3",
-  "refunds_checked": false
+  "next": "cs_live_a1B2c3"
 }`}</Code>
+        <p>
+          <code className="font-mono">amount_cents</code> is what the buyer paid at checkout, products checked at checkout
+          included, in the currency&apos;s smallest unit, as Stripe counts it: cents for dollars, but whole yen for{" "}
+          <code className="font-mono">jpy</code> and whole units for the other currencies Stripe has without decimals,
+          such as <code className="font-mono">krw</code>. So 4900 is $49.00 in <code className="font-mono">usd</code> and
+          ¥4,900 in <code className="font-mono">jpy</code>. <code className="font-mono">discount_cents</code> is in the same
+          unit, and is <code className="font-mono">null</code> if Stripe gave no discount details.
+        </p>
         <p>
           <code className="font-mono">paid_at</code> is when the buyer paid: the charge, or for a membership or
           payment plan, when its first invoice was paid (with a free trial, that invoice is for $0, so this is when the
           trial began). It is not when the checkout page was opened. It is{" "}
           <code className="font-mono">null</code> when nothing was charged at checkout, such as a free order.{" "}
-          <code className="font-mono">currency</code> is <code className="font-mono">null</code> if Stripe did not give one.
+          <code className="font-mono">currency</code> is <code className="font-mono">null</code> if Stripe did not give
+          one (the webhook says <code className="font-mono">usd</code> there).
         </p>
         <p>
-          Refunds are not read per sale (<code className="font-mono">refunds_checked</code> says so): add the{" "}
-          <code className="font-mono">refund.issued</code> webhook in your studio to be told of each one, or read them in
-          Stripe&apos;s own API with your own Stripe key.
+          Products checked at checkout are in <code className="font-mono">order_bumps</code>, in the order of their boxes,
+          and the first is also in <code className="font-mono">order_bump</code>; a bundle&apos;s products are in{" "}
+          <code className="font-mono">bundle_items</code>, which is <code className="font-mono">null</code> when there is
+          no bundle. A product&apos;s <code className="font-mono">title</code> is{" "}
+          <code className="font-mono">null</code> when the product is no longer in your store
+          {`, or, on a page naming more than ${SALES_TITLE_IDS} different products, for those past the ${SALES_TITLE_IDS}th. `}
+          A one-click extra taken after the checkout (an upsell) is its own payment, not a checkout, so it is not on this
+          list: the <code className="font-mono">sale.completed</code> webhook with{" "}
+          <code className="font-mono">&quot;kind&quot;: &quot;upsell&quot;</code> tells you of each one.
+        </p>
+        <p>
+          <code className="font-mono">refunded_cents</code> and <code className="font-mono">disputed</code> are not in the
+          webhook, which is sent when the sale is made. For a one-time payment they are read from its charge when you
+          call: how much of it was refunded so far, in the same unit as <code className="font-mono">amount_cents</code>, and
+          whether the buyer disputed it. For a membership or payment plan, and when nothing was charged, both are{" "}
+          <code className="font-mono">null</code>: not read here, which is not the same as none. Add the{" "}
+          <code className="font-mono">refund.issued</code> and <code className="font-mono">dispute.opened</code> webhooks in
+          your studio to be told of each one, or read them in Stripe&apos;s own API with your own Stripe key.
+        </p>
+        <p>
+          A <code className="font-mono">cursor</code> this list did not give, or sent twice, is answered 400{" "}
+          <code className="font-mono">invalid_cursor</code>: start again without one. If Stripe is busy with your account,
+          the answer is 503 with <code className="font-mono">Retry-After</code>. If Stripe&apos;s answer cannot be read
+          whole, the answer is 502 <code className="font-mono">unavailable</code>, never a page with guessed amounts.
         </p>
       </LegalSection>
 

@@ -890,7 +890,10 @@ export default function PrivacyPage() {
           email from the store&apos;s name, through our email provider, saying
           what they were given, within the same 20,000 in 30 days as the
           emails above. We keep how many of these a store made each day, for a
-          day, to hold them to their limits.
+          day, to hold them to their limits. Any key of a store, one that only
+          reads included, can also list the store&apos;s sales with each
+          buyer&apos;s email address and name, read from the creator&apos;s own
+          Stripe account when the tool asks; we do not keep that list.
         </p>
         <p id="code-links">
           <strong className="text-black">

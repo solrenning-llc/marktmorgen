@@ -82,6 +82,8 @@ import { ORDER_KEY_BYTES } from "@/lib/order-data";
 import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { SALES_TITLE_IDS } from "@/lib/api-sales";
+import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS } from "@/lib/store-blog";
 import { MAX_FORMS } from "@/lib/forms";
@@ -601,8 +603,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "API_WRITE_UNITS"] },
       { file: "lib/api-guard.ts", names: ["takeAllowance", "API_RATE"] },
       { file: "lib/api-write.ts", names: ["ADDS_PER_DAY", "GIVES_PER_DAY", "monthly_limit"] },
+      { file: "app/api/v1/sales/route.ts", names: ["takeAllowance(store, \"api\", API_SALES_UNITS - 1)"] },
+      { file: "lib/store-allowance-rules.ts", names: ["API_SALES_UNITS"] },
+      { file: "lib/api-sales.ts", names: ["SALES_PAGE", "SALES_TITLE_IDS"] },
     ],
-    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs (held below). The per-minute and daily limits only spread them.",
+    basis: "The plan's API requests at a light request each; a write takes API_WRITE_UNITS of them, more than a write costs, and a page of sales API_SALES_UNITS, more than API_SALES_READ (held below). The per-minute and daily limits only spread them.",
   },
   {
     id: "inbox",
@@ -1035,6 +1040,19 @@ export const EMAIL_SITES: Record<string, string[]> = {
   // A proposal or agreement to sign, its new versions and its signed copies are the store's own emails (18 October 2026).
   "lib/agreements.ts": STORE,
 };
+
+/**
+ * One page of sales read through the API (GET /api/v1/sales, lib/api-sales.ts), at the most: Stripe waited on for
+ * its whole ceiling (STRIPE_TIMEOUT_MS) on top of the request's own light seconds, at 2 GB; a CPU second through up
+ * to SALES_PAGE expanded checkouts; the key, the store and the figure taken twice, and one read of up to
+ * SALES_TITLE_IDS listings at 16 KB each; and an answer of up to API_SALES_ANSWER_BYTES on to the browser (a
+ * hundred sales, each with its bundle and three checked boxes of twenty products, at Stripe's longest strings). It
+ * is taken as API_SALES_UNITS API requests, which cost at least this (tests/plan-cost-registry.test.ts), so it stays
+ * inside the plan's rest-api figure.
+ */
+export const API_SALES_ANSWER_BYTES = 2_000_000;
+export const API_SALES_READ = CALL + 1 * CPU_SECOND + (STRIPE_TIMEOUT_MS / 1000 + SHAPES.light.seconds) * MEMORY_SECOND
+  + (20 + 2 * TAKE_COMMANDS + 1) * COMMAND + (20_000 + SALES_TITLE_IDS * 16_384) * DB_BYTE + API_SALES_ANSWER_BYTES * ORIGIN_PER_BYTE;
 
 /** Additional Path growth reading: at most eight 256 KB products, three 80 KB campaigns, three bounded reviews and their indexes. Fifty commands and 3 MB include admission overhead; reserved separately before reading. No provider call. */
 export const PATH_GROWTH_READ = request("write", 50, 3_000_000);

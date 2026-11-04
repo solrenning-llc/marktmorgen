@@ -1,5 +1,5 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
-import { PATH_GROWTH_READ } from "./plan-cost-registry";
+import { API_SALES_READ, PATH_GROWTH_READ } from "./plan-cost-registry";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import { PATH_REMINDER_UNITS } from "@/lib/path-reminder-rules";
 /**
@@ -24,7 +24,7 @@ import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/l
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
-import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
@@ -192,6 +192,8 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(STUDIO_PAGE_UNITS * UNIT_COST.studio >= request("heavy", 80, 400_000));
   // A contact added or a product given is API_WRITE_UNITS requests: more than a write of sixty commands.
   assert.ok(API_WRITE_UNITS * UNIT_COST.api >= request("write", 60, 20_000));
+  // A page of sales read through the API is API_SALES_UNITS requests: more than its wait on Stripe, its reads and its answer cost (lib/api-sales.ts).
+  assert.ok(API_SALES_UNITS * UNIT_COST.api >= API_SALES_READ, `${API_SALES_UNITS} x ${UNIT_COST.api} < ${API_SALES_READ}`);
   // A booked call is CALL_ORDER_UNITS orders: its confirmation to buyer and host and its two reminders are four emails.
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.

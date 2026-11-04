@@ -517,6 +517,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:wf:runs:@lib/flow-runs.ts": { what: "A workflow's runs", room: ["lib/flows.ts"] },
   "nl:mail:flowstats:@lib/flow-stats.ts": { what: "A workflow's counts", parts: [capped(20 * KB, "A hash of counts for each of MAX_FLOWS.", src("lib/flow-limits.ts", "MAX_FLOWS"))] },
   "nl:mail:enr:@lib/flows.ts": { what: "Who started a workflow, 400 days", room: ["lib/flows.ts"] },
+  "nl:flow-rotate:@lib/flows.ts": short("A store's lock while a workflow step shares its deals: one key a store, ROTATE_LOCK_SECONDS (two minutes), counted as if each run left one for a day", "run", 1, 128),
   "nl:mail:flowq:lease@lib/flows.ts": company("Steps being worked on", "One sorted set, minutes."),
   "nl:mail:flowq@lib/flows.ts": { what: "Steps due", room: ["lib/flows.ts"] },
   "nl:mail:flows:@lib/flows.ts": { what: "The store's workflows", room: ["lib/flows.ts"] },

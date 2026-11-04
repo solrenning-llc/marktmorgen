@@ -17,7 +17,7 @@ import { END, type RoutedStep } from "@/lib/flow-paths";
 
 export type StopRule = {
   /** What the rule is about: the workflow's own goal, conditions and ends, or the engine's. */
-  kind: "goal" | "condition" | "end_after" | "last" | "left" | "paused" | "refused" | "waits" | "held";
+  kind: "goal" | "condition" | "end_after" | "last" | "left" | "paused" | "refused" | "waits" | "held" | "taken_out";
   /** The step it is at (0 for the first), when it is one step's. */
   step?: number;
   text: string;
@@ -43,6 +43,7 @@ export function stopRules(
     { kind: "left", text: "They leave your list: they unsubscribe, an email to them bounces, or they are removed." },
     { kind: "paused", text: "You pause the workflow, remove the step they are waiting at, or email stops being part of your plan." },
     { kind: "refused", text: "The sending service refuses an email as it is written." },
+    { kind: "taken_out", text: "Another of your workflows reaches a step that takes them out of this one." },
     {
       kind: "waits",
       text: `A step that cannot go yet waits and is tried again by itself: when the month's emails turn, the next day, or after a growing delay. A run waits ${MAX_WAITS_PER_RUN} times at the most, and one step ${MAX_WAIT_DAYS_PER_STEP} days; past that it stops, with nothing done at that step.`,

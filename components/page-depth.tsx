@@ -1,18 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { READ_TOKEN_SECONDS } from "@/lib/page-read-sample";
 import { WHY_NOT, type WhyNot } from "@/lib/why-not-rules";
 import type { WhyNotWords } from "@/lib/buyer-words/why-not";
 
-/** The store's address the page is drawn under (app/[handle]), which the route reads the store's window by. */
-export function useStoreHandle(): string {
-  const raw = useParams<{ handle?: string }>()?.handle ?? "";
-  try {
-    return decodeURIComponent(raw).replace(/^@+/, "");
-  } catch {
-    return "";
-  }
+/**
+ * How long after the page started measuring its reading is still sent: the
+ * token is good for READ_TOKEN_SECONDS after the page was drawn, which was a
+ * little before, so a minute is kept in hand. A reading that could never
+ * count is not sent at all.
+ */
+export const READ_SEND_MS = (READ_TOKEN_SECONDS - 60) * 1000;
+
+/** Whether a page that started measuring at `since` (performance.now()) may still send its reading. */
+export function stillReadable(since: number, now = performance.now()): boolean {
+  return now - since < READ_SEND_MS;
 }
 
 /** Sends a page's reading to /api/store/read, by beacon where the browser has one. */
@@ -52,7 +55,6 @@ function quartile(percent: number): string {
 export function PageDepth({ token, product, ask = null }: { token: string; product: string; ask?: WhyNotWords | null }) {
   const [asking, setAsking] = useState<"no" | "yes" | "done">("no");
   const answer = useRef<WhyNot | "">("");
-  const handle = useStoreHandle();
   // The thanks goes by itself after a moment.
   useEffect(() => {
     if (asking !== "done") return;
@@ -62,7 +64,9 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
 
   useEffect(() => {
     // No token: this visitor was not drawn (or nothing can be signed), so nothing is measured or asked.
-    if (!token || !handle) return;
+    if (!token) return;
+    // When this page started measuring: past READ_SEND_MS it stops, and asks and sends nothing.
+    const since = performance.now();
     const blocks = [...document.querySelectorAll<HTMLElement>("[data-block]")];
     if (blocks.length === 0 || typeof IntersectionObserver === "undefined") return;
     let furthest = -1;
@@ -163,6 +167,10 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
       } catch {}
       if (!askedBefore) {
         timer = window.setInterval(() => {
+          if (!stillReadable(since)) {
+            window.clearInterval(timer);
+            return;
+          }
           if (sawBuy && !started && document.visibilityState === "visible") {
             window.clearInterval(timer);
             try {
@@ -177,9 +185,9 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
     const send = () => {
       if (sent || furthest < 0) return;
       sent = true;
+      if (!stillReadable(since)) return;
       sendRead({
         t: token,
-        h: handle,
         k: "d",
         p: product,
         b: blocks[furthest].dataset.block ?? "",
@@ -201,15 +209,18 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
     };
     document.addEventListener("visibilitychange", hidden);
     window.addEventListener("pagehide", send);
+    // Past the token's time nothing more is watched: what is measured then could never be counted.
+    const stop = window.setTimeout(() => watch.disconnect(), READ_SEND_MS);
     return () => {
       watch.disconnect();
+      window.clearTimeout(stop);
       window.clearInterval(timer);
       document.removeEventListener("click", onClick, true);
       window.removeEventListener("message", onMessage);
       document.removeEventListener("visibilitychange", hidden);
       window.removeEventListener("pagehide", send);
     };
-  }, [token, handle, product, ask]);
+  }, [token, product, ask]);
 
   if (!ask || asking === "no") return null;
   return (

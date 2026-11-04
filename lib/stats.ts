@@ -42,7 +42,7 @@ import { plainAmount } from "@/lib/money";
 import { revenueBySource } from "@/lib/came-from";
 import { type AttributionTable, attributionTable } from "@/lib/attribution-rules";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
-import { reachRows } from "@/lib/page-read";
+import { type ReadingsPartial, reachRows, readingsPartial } from "@/lib/page-read";
 import { PAGE_PARTS } from "@/lib/store-order";
 import { type CappedCount, cappedCount, cappedCountCommand } from "@/lib/capped-count";
 
@@ -451,6 +451,8 @@ export type Stats = {
   previousTrafficAvailable?: Record<"d7" | "d30" | "d90", boolean>;
   /** Everything since `since`, or null when it could not be read. */
   life: (WindowStats & { since: string }) | null;
+  /** Whether this window's page readings went past their ceiling, so time on page and reading depth are partial (lib/page-read.ts). */
+  readsPartial?: ReadingsPartial | null;
 };
 
 const ranked = (map: Map<string, number>): Ranked =>
@@ -598,11 +600,14 @@ export async function readStats(store: Store, now = Date.now()): Promise<Stats |
     d30: { visitors: Number(results[base + 4]) || 0, ...sum(days.slice(-60, -30)) },
     d90: { visitors: Number(results[base + 5]) || 0, ...olderTotals },
   };
-  const life = await readLife(store, now).catch((error) => {
-    console.error("reading all-time counts failed", error);
-    return null;
-  });
-  return { days, windows, previous, previousTrafficAvailable: traffic.previous, life };
+  const [life, readsPartial] = await Promise.all([
+    readLife(store, now).catch((error) => {
+      console.error("reading all-time counts failed", error);
+      return null;
+    }),
+    readingsPartial(store, now),
+  ]);
+  return { days, windows, previous, previousTrafficAvailable: traffic.previous, life, readsPartial };
 }
 
 /**
@@ -1988,6 +1993,8 @@ export type StatsData = {
    * clicked it, in the order of the page. Measured on one visitor in eight.
    */
   reach: Record<"d7" | "d30" | "d90", { visitors: number; rows: ReachItem[] }>;
+  /** Set when this month's page readings went past their ceiling: only the first `counted` were counted (lib/page-read.ts, readingsPartial). */
+  readsPartial?: ReadingsPartial | null;
   /**
    * The stretch of days just before each window, to set the window beside:
    * the 7 days before the last 7, and so on. Sales and money are null where
@@ -2299,6 +2306,7 @@ export function studioStats(
       d30: reachItems(store, w.d30.reach ?? {}, titles),
       d90: reachItems(store, w.d90.reach ?? {}, titles),
     },
+    readsPartial: stats.readsPartial ?? null,
   };
 }
 

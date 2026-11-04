@@ -55,7 +55,7 @@ import { centsWords } from "@/lib/watch-rules";
 import { store as redis } from "./redis-stub";
 import { COMMANDS, PAGES_PER_VISIT, STATIC_FILES, visitCost } from "./traffic-cost";
 import { POST as readRoute } from "@/app/api/store/read/route";
-import { STORE_SCOPE, readSampled, readToken } from "@/lib/page-read";
+import { STORE_SCOPE, noteReadStore, readSampled, readToken } from "@/lib/page-read";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { addMonthsMs, allowanceWindow } from "@/lib/allowance-window";
@@ -347,9 +347,11 @@ async function main(): Promise<void> {
   is("and saying it was opened is too, with the product's own visitor", laterCount <= COMMANDS.laterCount, true);
   // How a page was read, sent by one visitor in eight as they leave (lib/page-read.ts):
   // the route, with a block of a sales page counted before and one of the store's page.
-  // Since 639 [GL7](25) each reading is one of the store's public requests, once a visit, drawn by the server
-  // (lib/page-read.ts): the mark, the store, its request and the count, at most a later page's commands.
+  // Since 639 [GL7](25) each reading is counted once a visit, drawn by the server, in the window's own count of
+  // readings and never as one of its public requests (lib/page-read.ts): the mark, the count of readings with its
+  // expiry, and the reading's count, at most COMMANDS.readBeacon.
   const readStore = (await storeForHandle("joy"))!;
+  noteReadStore(readStore.statsId, readStore);
   let visit = 0;
   const drawnToken = (scope: string) => {
     for (;;) {
@@ -358,15 +360,15 @@ async function main(): Promise<void> {
     }
   };
   const readRequest = (body: Record<string, unknown>) =>
-    readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (iPhone)" }, body: JSON.stringify({ h: "joy", ...body }) }) as never);
+    readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": "Mozilla/5.0 (iPhone)" }, body: JSON.stringify(body) }) as never);
   await readRequest({ t: drawnToken(product.id), k: "d", p: product.id, b: "blok0001" });
   const depthCount = await counted(() => readRequest({ t: drawnToken(product.id), k: "d", p: product.id, b: "blok0001" }));
   const reachCount = await counted(() => readRequest({ t: drawnToken(STORE_SCOPE), k: "s", n: 2, b: `p:${product.id}`, c: "" }));
   const repeat = drawnToken(STORE_SCOPE);
   await readRequest({ t: repeat, k: "s", n: 2, b: `p:${product.id}`, c: "" });
   const repeatCount = await counted(() => readRequest({ t: repeat, k: "s", n: 2, b: `p:${product.id}`, c: "" }));
-  // More than the request alone: none past it would mean nothing was counted, which would pass the model for the wrong reason.
-  is("and how a page was read is a public request inside a later page's commands", [depthCount > REQUEST_COMMANDS, depthCount <= COMMANDS.laterPage + REQUEST_COMMANDS, reachCount > REQUEST_COMMANDS, reachCount <= COMMANDS.laterPage + REQUEST_COMMANDS], [true, true, true, true]);
+  // More than the mark and the count of readings: none past them would mean nothing was counted, which would pass the model for the wrong reason.
+  is("and how a page was read is inside what a reading is priced at, with no public request", [depthCount > 3, depthCount <= COMMANDS.readBeacon, reachCount > 3, reachCount <= COMMANDS.readBeacon], [true, true, true, true]);
   is("and the same token again costs one command", repeatCount, 1);
   is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.0002, visitCost() < 0.0003], [3, 13, true, true]);
 

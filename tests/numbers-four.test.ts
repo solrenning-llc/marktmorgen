@@ -23,7 +23,7 @@
  *     goes once, only where it may;
  *   - a cohort is read only at ages all its members have reached.
  */
-import { STORE_SCOPE, reachField, reachRows, readSampled, readToken, readTokenStats } from "@/lib/page-read";
+import { STORE_SCOPE, noteReadStore, reachField, reachRows, readSampled, readToken, readTokenStats } from "@/lib/page-read";
 import { countDepth, readDepth } from "@/lib/page-depth";
 import { readStats, recordHit, readSales, studioStats } from "@/lib/stats";
 import { classifySource } from "@/lib/source-rules";
@@ -96,6 +96,8 @@ async function main(): Promise<void> {
       if (readSampled(nonce)) return nonce;
     }
   };
+  // What the store's page check leaves for its token (lib/traffic.ts, isResting): its window and ceiling.
+  noteReadStore(statsId, store);
   const tokenFor = (scope: string) => readToken(statsId, scope, Date.now(), drawn());
   const productToken = tokenFor("prod000001");
   is("opens its own store's numbers for its own page", readTokenStats(productToken, "prod000001"), statsId);
@@ -131,7 +133,7 @@ async function main(): Promise<void> {
 
   part("Measured through the route, once a visit");
   const send = (body: Record<string, unknown>, userAgent = PHONE) =>
-    readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": userAgent }, body: JSON.stringify({ h: "harbor", ...body }) }) as never);
+    readRoute(new Request("https://marktmorgen.com/api/store/read", { method: "POST", headers: { "user-agent": userAgent }, body: JSON.stringify(body) }) as never);
   await send({ t: tokenFor("prod000001"), k: "d", p: "prod000001", b: "blok0001" });
   await send({ t: tokenFor("prod000001"), k: "d", p: "prod000001", b: "blok0002" });
   await send({ t: tokenFor("prod000001"), k: "d", p: "prod000002", b: "blok0001" });

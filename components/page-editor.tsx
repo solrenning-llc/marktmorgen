@@ -275,6 +275,8 @@ export function PageEditor({
   const [answers, setAnswers] = useState<{ whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach>; asking: boolean } | null>(null);
   // How long measured visitors stayed (639 [GL7](25)), in ranges.
   const [stay, setStay] = useState<{ words: string; count: number; share: number }[] | null>(null);
+  // Set when this month's readings went past their ceiling, so the time and depth are partial (lib/page-read.ts).
+  const [partial, setPartial] = useState<{ counted: number; opens: number } | null>(null);
   // The key the page's blocks and earlier versions are kept under.
   const pageKey = site ? `site-${site.id}` : product.id;
   useEffect(() => {
@@ -282,8 +284,9 @@ export function PageEditor({
     let live = true;
     fetch(`/api/store/depth?id=${encodeURIComponent(product.id)}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((data: { ok?: boolean; shares?: Record<string, number>; visitors?: number; whyNot?: Partial<Record<WhyNot, number>>; videos?: Record<string, VideoReach>; asking?: boolean; time?: { words: string; count: number; share: number }[] }) => {
+      .then((data: { ok?: boolean; shares?: Record<string, number>; visitors?: number; whyNot?: Partial<Record<WhyNot, number>>; videos?: Record<string, VideoReach>; asking?: boolean; time?: { words: string; count: number; share: number }[]; partial?: { counted: number; opens: number } | null }) => {
         if (live && data.ok && Array.isArray(data.time)) setStay(data.time);
+        if (live && data.ok && data.partial && Number.isSafeInteger(data.partial.counted) && Number.isFinite(data.partial.opens)) setPartial(data.partial);
         if (live && data.ok && data.shares) setReach({ shares: data.shares, visitors: data.visitors ?? 0 });
         if (live && data.ok) setAnswers({ whyNot: data.whyNot ?? {}, videos: data.videos ?? {}, asking: data.asking === true });
       })
@@ -1863,7 +1866,7 @@ export function PageEditor({
             />
           ) : null}
 
-          {stay ? <PageTime ranges={stay} least={MIN_DEPTH_VISITORS} /> : null}
+          {stay ? <PageTime ranges={stay} least={MIN_DEPTH_VISITORS} partial={partial} /> : null}
 
           {answers && !product.free ? (
             <PageAnswers

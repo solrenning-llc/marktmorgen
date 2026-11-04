@@ -955,10 +955,13 @@ export default function PrivacyPage() {
           item they saw &mdash; a product, a link or a part of the page &mdash;
           where it stood, and the item they clicked, if any, and we add one to
           that day&apos;s count of it. Our server picks one page view in eight
-          at random and gives only that page a random code, good for two hours;
-          the page sends this once, with that code and the store&apos;s address,
-          and we keep the code for those two hours only, so the same reading is
-          never counted twice. On a sales page it can
+          at random and gives only that page a random code, good for two hours
+          from when the page was shown; the page sends this once, with that
+          code, and we keep the code for those two hours only, so the same reading is
+          never counted twice. Each store counts at most a set number of these
+          readings a month, the same for every store on its plan, and past it a
+          reading is not counted. We keep how many readings came that month,
+          and nothing about who sent them, until a day after the month ends. On a sales page it can
           also say how far into the page&apos;s video they got, and, where the
           creator turned the question on, which of five answers they tapped
           when asked what was stopping them from buying. On a sales page it also

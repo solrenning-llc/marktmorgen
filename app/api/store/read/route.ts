@@ -2,10 +2,8 @@ import type { NextRequest } from "next/server";
 import { isBot } from "@/lib/source-rules";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { countDepth, depthField } from "@/lib/page-depth";
-import { READ_TOKEN_MAX, STORE_SCOPE, reachField, readTokenPass, spendReadToken } from "@/lib/page-read";
+import { READ_TOKEN_MAX, STORE_SCOPE, reachField, readTokenPass, spendReadToken, takeReading } from "@/lib/page-read";
 import { countReach } from "@/lib/stats";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { takePublicRequest } from "@/lib/traffic";
 
 const MAX_BODY_BYTES = 600;
 
@@ -21,8 +19,11 @@ const done = () => new Response(null, { status: 204, headers: { "Cache-Control":
  * what is not what a page sends, a token not made for this page by this
  * deployment, older than READ_TOKEN_SECONDS or of a visitor not drawn costs
  * no command; a token used already costs the one command that says so
- * (spendReadToken); a reading past the store's monthly window of public
- * requests (takePublicRequest) is not counted. The answer is always empty.
+ * (spendReadToken); a reading past its window's ceiling costs that command
+ * and the count's two (takeReading) and is not counted. The store is never
+ * read and its window of public requests never touched: the token says which
+ * window and ceiling the reading counts against, so readings never make a
+ * store's pages rest. The answer is always empty.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return done();
@@ -57,12 +58,9 @@ export async function POST(request: NextRequest) {
   const pass = count ? readTokenPass(token, scope) : null;
   if (!count || !pass) return done();
   // Once a visit: the token's nonce is marked used before anything else is asked.
-  if (!(await spendReadToken(pass.nonce))) return done();
-  // The store the page belongs to, for its window: the page says its address, the token which numbers.
-  const handle = normaliseHandle(text("h", 60));
-  const store = handle ? await storeForHandle(handle).catch(() => null) : null;
-  if (!store || store.statsId !== pass.statsId) return done();
-  if (!(await takePublicRequest(store, "public"))) return done();
+  if (!(await spendReadToken(pass.nonce, pass.issued))) return done();
+  // One of the window's readings, counted and checked against its ceiling in one pipeline: past it, nothing more.
+  if (!(await takeReading(pass))) return done();
   await count(pass.statsId).catch(() => {});
   return done();
 }

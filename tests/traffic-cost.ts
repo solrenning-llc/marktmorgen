@@ -66,7 +66,6 @@
  * tests/podcast.test.ts hold what each is counted as over what it costs.
  */
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
-import { READ_SAMPLE } from "@/lib/page-read-sample";
 
 export const CDN_PER_REQUEST = 2.0 / 1_000_000;
 export const COMMAND = 2.0 / 1_000_000;
@@ -125,9 +124,16 @@ export const COMMANDS = {
    * one visitor in READ_SAMPLE: one command, and an expiry the first time a
    * block of a sales page is counted at all, which is once per block and not
    * per visit. Until October 11, 2026 this went through the store's general
-   * count at seven commands and was in none of these sums.
+   * count at seven commands and was in none of these sums. Held at 12 since
+   * 4 November 2026 (639 [GL7](25), the cost lane's CX-35): the token's mark,
+   * the window's count of readings and its expiry, the count of the reading
+   * (one script) and each record's expiry the first time, six measured at the
+   * most (tests/page-read-ceiling.test.ts), with room. Readings are no longer
+   * one of the window's public requests and have a ceiling of their own, so
+   * every one the ceiling allows is priced on its own line
+   * (tests/plan-cost-registry.ts, page-readings), and not inside visitCost.
    */
-  readBeacon: 1,
+  readBeacon: 12,
   /**
    * Handing a member's page ten minutes' leave to ask the room, at the
    * route that knows who is asking: the store, the community's settings,
@@ -163,10 +169,10 @@ export function visitCost(): number {
   const later = PAGES_PER_VISIT - 1;
   const requests = 1 + STATIC_FILES + 1 + 1 + STORE_PAGE_SIZE + later * (1 + 1 + PICTURES_ON_A_LATER_PAGE);
   const commands = COMMANDS.frontPage + COMMANDS.frontCount + COMMANDS.firstOfDay + later * (COMMANDS.laterPage + COMMANDS.laterCount);
-  // Every page of the visit is taken to be measured for how it is read, at the
-  // share of visitors the pages send it for: the store's page and two sales pages.
-  const reading = (PAGES_PER_VISIT / READ_SAMPLE) * readBeaconCost();
-  return requests * CDN_PER_REQUEST + commands * COMMAND + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE) + reading;
+  // How the visit's pages were read is not here since 4 November 2026 (639 [GL7](25)): readings have their own
+  // count and ceiling in the store's window (lib/page-read.ts, readCeiling), and every reading that ceiling allows
+  // is priced at readBeaconCost on its own line (tests/plan-cost-registry.ts, page-readings), whatever the visits.
+  return requests * CDN_PER_REQUEST + commands * COMMAND + PAGES_PER_VISIT * (PAGE_AND_COUNT + PAGE_BYTES * ORIGIN_PER_BYTE);
 }
 
 /**

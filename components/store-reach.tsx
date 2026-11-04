@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { sendRead, useStoreHandle } from "@/components/page-depth";
+import { READ_SEND_MS, sendRead, stillReadable } from "@/components/page-depth";
 
 /**
  * On the store's own page, for one visitor in READ_SAMPLE, drawn by the
@@ -12,9 +12,10 @@ import { sendRead, useStoreHandle } from "@/components/page-depth";
  * no cookie, no time, only which items.
  */
 export function StoreReach({ token }: { token: string }) {
-  const handle = useStoreHandle();
   useEffect(() => {
-    if (!token || !handle) return;
+    if (!token) return;
+    // When this page started measuring: past READ_SEND_MS it stops and sends nothing (lib/page-read.ts).
+    const since = performance.now();
     if (typeof IntersectionObserver === "undefined") return;
     const items = [...document.querySelectorAll<HTMLElement>("[data-item]")];
     if (items.length === 0) return;
@@ -45,7 +46,8 @@ export function StoreReach({ token }: { token: string }) {
       const at = Math.max(furthest, clicked ? items.findIndex((item) => item.dataset.item === clicked) : -1);
       if (at < 0) return;
       sent = true;
-      sendRead({ t: token, h: handle, k: "s", n: at, b: items[at].dataset.item ?? "", c: clicked });
+      if (!stillReadable(since)) return;
+      sendRead({ t: token, k: "s", n: at, b: items[at].dataset.item ?? "", c: clicked });
     };
     const hidden = () => {
       if (document.visibilityState === "hidden") send();
@@ -54,13 +56,15 @@ export function StoreReach({ token }: { token: string }) {
     document.addEventListener("auxclick", onClick, true);
     document.addEventListener("visibilitychange", hidden);
     window.addEventListener("pagehide", send);
+    const stop = window.setTimeout(() => watch.disconnect(), READ_SEND_MS);
     return () => {
       watch.disconnect();
+      window.clearTimeout(stop);
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("auxclick", onClick, true);
       document.removeEventListener("visibilitychange", hidden);
       window.removeEventListener("pagehide", send);
     };
-  }, [token, handle]);
+  }, [token]);
   return null;
 }

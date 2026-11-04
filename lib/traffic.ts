@@ -10,6 +10,7 @@
  *   nl:traffic:r:<folder>:<window>   pages drawn and public requests answered
  *   nl:traffic:c:<folder>:<window>   each connection's share of them, by day (MM-SA-01)
  *   nl:traffic:folders:<month>       the stores that had any, that calendar month
+ *   nl:traffic:read:<statsId>:<window> page readings, apart from the requests (lib/page-read.ts)
  *
  * The window is the store's billing month when it pays us, and the calendar
  * month otherwise (lib/allowance-window.ts, since 17 October 2026): one
@@ -40,6 +41,7 @@ import { type AllowanceWindow, WINDOW_ID, allowanceWindow, calendarWindow, keepS
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { admitNonPaying } from "@/lib/free-pool";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
+import { noteReadStore } from "@/lib/page-read";
 import { deriveKey } from "@/lib/secret-box";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { PARTS_PER_VISIT, SHARE_BATCH, clientDayShare, publicVisitLimit, requestLimitFor, shareAddress, visitLimitFor, visitorAddress } from "@/lib/traffic-rules";
@@ -231,6 +233,21 @@ export async function trafficForAdmission(folder: string, month = calendarWindow
  * (lib/traffic-rules.ts).
  */
 export async function isResting(store: Store, now = Date.now(), who: "public" | "buyer" = "public", from: { shared?: boolean } = {}): Promise<boolean> {
+  const resting = await restingNow(store, now, who, from);
+  // What a reading of the public page about to be drawn may count, for its
+  // token (lib/page-read.ts, readToken): the window and its ceiling while
+  // the page may be drawn, nothing when it rests or the store is suspended.
+  // Readings are counted apart from the window's requests, so they never make
+  // a page rest (639 [GL7](25)).
+  if (who === "public") {
+    try {
+      noteReadStore(store.statsId, resting || store.suspended ? null : store, now);
+    } catch {}
+  }
+  return resting;
+}
+
+async function restingNow(store: Store, now: number, who: "public" | "buyer", from: { shared?: boolean }): Promise<boolean> {
   try {
     const window = allowanceWindow(store, now);
     if (!window) return true;

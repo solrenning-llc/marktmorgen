@@ -35,30 +35,51 @@
  *     the same draw, so a call made by hand cannot pick itself in;
  *   - a token is good for READ_TOKEN_SECONDS after the page was drawn and
  *     for one reading: the route marks its nonce used (spendReadToken, one
- *     SET NX that expires with the token) before anything else is asked, so
- *     the same token sent again costs that one command and counts nothing;
- *   - a reading the route takes is one of the store's public requests
- *     (lib/traffic.ts, takePublicRequest), in its monthly window like a page
- *     drawn: past the window nothing is counted.
+ *     SET NX that expires two hours after the page was drawn) before
+ *     anything else is asked, so the same token sent again costs that one
+ *     command and counts nothing;
+ *   - a reading is counted in the store's own count of readings for its
+ *     window (takeReading, nl:traffic:read:), never in the window of public
+ *     requests its pages are drawn from (lib/traffic.ts): until 4 November
+ *     2026 it was one of those requests, so readings made a Store plan's
+ *     pages rest about 7% before its visits, a visible limit cut by stealth.
+ *     The count stops at readCeiling, one reading for every READ_SAMPLE
+ *     requests the store's public pages may answer in the window; past it
+ *     nothing is counted, and the studio says the window's readings are
+ *     partial (readingsPartial), with no figure made up for the rest;
+ *   - the route never reads the store: the token says which window it counts
+ *     in, when that window ends and its ceiling, signed with the rest. The
+ *     page learns them from the check every store page makes before it is
+ *     drawn (lib/traffic.ts, isResting, through noteReadStore), and a page
+ *     with nothing learned, or a store resting or suspended, gets no token.
  *
  * Nothing about the visitor is sent or kept: no cookie, no address, only
  * which block or item, and on the store page which one was clicked.
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { redisPipeline } from "@/lib/redis";
+import { type WindowFields, WINDOW_ID, allowanceWindow } from "@/lib/allowance-window";
+import type { Tier } from "@/lib/plan";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { deriveKey } from "@/lib/secret-box";
-import { READ_SAMPLE } from "@/lib/page-read-sample";
+import { READ_SAMPLE, READ_TOKEN_SECONDS } from "@/lib/page-read-sample";
+import { publicVisitLimit, requestLimitFor } from "@/lib/traffic-rules";
 
-export { READ_MIN_VISITORS, READ_SAMPLE } from "@/lib/page-read-sample";
+export { READ_MIN_VISITORS, READ_SAMPLE, READ_TOKEN_SECONDS } from "@/lib/page-read-sample";
 
-/** How long after its page was drawn a token is good for: a visitor who leaves later is not counted. */
-export const READ_TOKEN_SECONDS = 2 * 3600;
 /** How far ahead of this server's clock a token's time may be, for servers whose clocks differ a little. */
 const CLOCK_SLACK_SECONDS = 60;
-/** The longest token there is: a statistics id of 40, a time, a nonce of 16 and a signature of 22, with their dots. */
-export const READ_TOKEN_MAX = 100;
+/**
+ * The longest token there is: a statistics id of 40, the time it was made
+ * (9), a nonce of 16, its window's name (10), the window's end (9), its
+ * ceiling (7) and a signature of 22, with their six dots.
+ */
+export const READ_TOKEN_MAX = 40 + 9 + 16 + 10 + 9 + 7 + 22 + 6;
 const NONCE = /^[A-Za-z0-9_-]{16}$/;
 const ISSUED = /^[0-9a-z]{1,9}$/;
+const END = /^[0-9a-z]{1,9}$/;
+const CAP = /^[1-9a-z][0-9a-z]{0,6}$/;
+/** What a signature is: checked before it is compared, so nothing but 22 such letters reaches timingSafeEqual. */
+const SIGNATURE = /^[A-Za-z0-9_-]{22}$/;
 
 /** What the store's own page is called where a product's id would go. */
 export const STORE_SCOPE = "~store";
@@ -74,9 +95,53 @@ function key(): Buffer | null {
   return signing;
 }
 
-function sign(statsId: string, scope: string, issued: string, nonce: string): string {
+/** The signature of a token's fields (statistics id, time, nonce, window, end, ceiling) for a page. */
+function sign(scope: string, fields: readonly string[]): string {
   const k = key();
-  return k ? createHmac("sha256", k).update(`${statsId}|${scope}|${issued}|${nonce}`).digest("base64url").slice(0, 22) : "";
+  return k ? createHmac("sha256", k).update([fields[0], scope, ...fields.slice(1)].join("|")).digest("base64url").slice(0, 22) : "";
+}
+
+/**
+ * The most readings a store's window counts: one for every READ_SAMPLE
+ * requests its public pages may answer in it (lib/traffic-rules.ts,
+ * requestLimitFor and publicVisitLimit), rounded up. A page view is one of
+ * those requests and one in READ_SAMPLE is measured, so a store drawing all
+ * of its pages has no more readings than this to send. Zero when the figure
+ * is not one. Pure.
+ */
+export function readCeiling(store: WindowFields & { tier?: Tier }, now = Date.now()): number {
+  const cap = Math.ceil(publicVisitLimit(requestLimitFor(store, now / 1000)) / READ_SAMPLE);
+  return Number.isSafeInteger(cap) && cap > 0 ? cap : 0;
+}
+
+/** A store's readings' window as its last page check found it: its name, its end in seconds, its ceiling, and when it was found. */
+type ReadWindow = { id: string; end: number; cap: number; at: number };
+/** By statistics id, the oldest let go past READ_WINDOWS_HELD: a page's token is made moments after its check. */
+const readWindows = new Map<string, ReadWindow>();
+export const READ_WINDOWS_HELD = 1_000;
+/** How long after its check a store's window may still sign a token. */
+const READ_WINDOW_FRESH_MS = 10 * 60_000;
+
+/**
+ * What a reading of the store page about to be drawn may count: its window
+ * and ceiling, kept for the page's token (readToken). Called by the check
+ * every store page makes before it is drawn (lib/traffic.ts, isResting),
+ * with the store when its public pages may be drawn, and with null when
+ * they rest or the store is suspended, which forgets what was kept, so such
+ * a page can make no token. No command.
+ */
+export function noteReadStore(statsId: string | null, store: (WindowFields & { tier?: Tier }) | null, now = Date.now()): void {
+  if (!statsId) return;
+  readWindows.delete(statsId);
+  if (!store || !STATS_ID.test(statsId)) return;
+  const window = allowanceWindow(store, now);
+  const cap = readCeiling(store, now);
+  if (!window || !WINDOW_ID.test(window.id) || cap <= 0 || !(window.end > now)) return;
+  if (readWindows.size >= READ_WINDOWS_HELD) {
+    const oldest = readWindows.keys().next().value;
+    if (oldest !== undefined) readWindows.delete(oldest);
+  }
+  readWindows.set(statsId, { id: window.id, end: Math.ceil(window.end / 1000), cap, at: now });
 }
 
 /**
@@ -90,34 +155,49 @@ export function readSampled(nonce: string): boolean {
 
 /**
  * The token a page view carries: which store's numbers it writes to, that it
- * may, when the page was drawn and the visit's nonce. Empty for the visitors
- * not drawn, seven in eight (readSampled), so their pages send nothing, and
- * when nothing can be signed. A fresh nonce each page view.
+ * may, when the page was drawn, the visit's nonce, and the window its reading
+ * counts in with that window's end and ceiling (noteReadStore). Empty for the
+ * visitors not drawn, seven in eight (readSampled), so their pages send
+ * nothing; when the store's window was not found by its page's check moments
+ * before (never a token without its ceiling); and when nothing can be
+ * signed. A fresh nonce each page view.
  */
 export function readToken(statsId: string | null, scope: string, now = Date.now(), nonce = randomBytes(12).toString("base64url")): string {
   if (!statsId || !STATS_ID.test(statsId) || !SCOPE.test(scope) || !readSampled(nonce)) return "";
-  const issued = Math.floor(now / 1000).toString(36);
-  const signature = sign(statsId, scope, issued, nonce);
-  return signature ? `${statsId}.${issued}.${nonce}.${signature}` : "";
+  const window = readWindows.get(statsId);
+  if (!window || Math.abs(now - window.at) > READ_WINDOW_FRESH_MS || now >= window.end * 1000) return "";
+  const fields = [statsId, Math.floor(now / 1000).toString(36), nonce, window.id, window.end.toString(36), window.cap.toString(36)];
+  const signature = sign(scope, fields);
+  return signature ? `${fields.join(".")}.${signature}` : "";
 }
 
-/** What a good token says: the statistics id it writes to and its visit's nonce. */
-export type ReadPass = { statsId: string; nonce: string };
+/**
+ * What a good token says: the statistics id it writes to, its visit's nonce,
+ * when its page was drawn (seconds), and the window its reading counts in,
+ * with the window's end (seconds) and its ceiling.
+ */
+export type ReadPass = { statsId: string; nonce: string; issued: number; window: string; end: number; cap: number };
 
 /**
- * The statistics id and nonce of a token made for this page by this
- * deployment, drawn, and not older than READ_TOKEN_SECONDS; else null. No
- * command: whether it was used already is spendReadToken's.
+ * What a token made for this page by this deployment says, when it was
+ * drawn and is not older than READ_TOKEN_SECONDS; else null. No command:
+ * whether it was used already is spendReadToken's, and whether its window
+ * has room takeReading's.
  */
 export function readTokenPass(token: unknown, scope: string, now = Date.now()): ReadPass | null {
   if (typeof token !== "string" || token.length > READ_TOKEN_MAX || !SCOPE.test(scope)) return null;
-  const [statsId, issued, nonce, given, ...rest] = token.split(".");
-  if (rest.length || !STATS_ID.test(statsId ?? "") || !ISSUED.test(issued ?? "") || !readSampled(nonce ?? "")) return null;
-  const age = now / 1000 - parseInt(issued, 36);
-  if (!(age <= READ_TOKEN_SECONDS && age >= -CLOCK_SLACK_SECONDS)) return null;
-  const want = sign(statsId, scope, issued, nonce);
-  if (!want || typeof given !== "string" || given.length !== want.length) return null;
-  return timingSafeEqual(Buffer.from(given), Buffer.from(want)) ? { statsId, nonce } : null;
+  const parts = token.split(".");
+  if (parts.length !== 7) return null;
+  const [statsId, issued, nonce, window, end, cap, given] = parts;
+  if (!STATS_ID.test(statsId) || !ISSUED.test(issued) || !readSampled(nonce) || !WINDOW_ID.test(window) || !END.test(end) || !CAP.test(cap) || !SIGNATURE.test(given)) return null;
+  const at = parseInt(issued, 36);
+  const until = parseInt(end, 36);
+  const most = parseInt(cap, 36);
+  const age = now / 1000 - at;
+  if (!(age <= READ_TOKEN_SECONDS && age >= -CLOCK_SLACK_SECONDS) || !(at < until) || !Number.isSafeInteger(most) || most < 1) return null;
+  const want = sign(scope, [statsId, issued, nonce, window, end, cap]);
+  if (!SIGNATURE.test(want)) return null;
+  return timingSafeEqual(Buffer.from(given, "ascii"), Buffer.from(want, "ascii")) ? { statsId, nonce, issued: at, window, end: until, cap: most } : null;
 }
 
 /** The statistics id a good token was made for (readTokenPass), or null. */
@@ -131,15 +211,68 @@ const onceKey = (nonce: string) => `nl:read:once:${nonce}`;
 /**
  * Marks a good token's nonce used: true the first time, false when it was
  * used already or the mark cannot be made. One command, made before anything
- * else is asked, so a token sent again costs only this.
+ * else is asked, so a token sent again costs only this. The mark lasts until
+ * the token could no longer pass anyway, counted from when its page was
+ * drawn (`issued`, seconds), and a minute more: two hours after the page was
+ * drawn, as the privacy policy says, never two hours after the reading.
  */
-export async function spendReadToken(nonce: string): Promise<boolean> {
-  if (!NONCE.test(nonce)) return false;
+export async function spendReadToken(nonce: string, issued: number, now = Date.now()): Promise<boolean> {
+  if (!NONCE.test(nonce) || !Number.isSafeInteger(issued)) return false;
+  const seconds = Math.max(1, issued + READ_TOKEN_SECONDS + CLOCK_SLACK_SECONDS - Math.floor(now / 1000));
   try {
-    const [reply] = await redisPipeline([["SET", onceKey(nonce), "1", "NX", "EX", READ_TOKEN_SECONDS + CLOCK_SLACK_SECONDS]]);
+    const [reply] = await redisPipeline([["SET", onceKey(nonce), "1", "NX", "EX", seconds]]);
     return reply === "OK";
   } catch {
     return false;
+  }
+}
+
+/** A store's readings counted in one window, by its statistics id: what the route knows it by, from the token alone. */
+const readsKey = (statsId: string, window: string) => `nl:traffic:read:${statsId}:${window}`;
+
+/**
+ * One reading taken in its window's count: true while the count is within
+ * the token's ceiling, false past it or when it cannot be counted. One
+ * pipeline of two commands, the count and its expiry together, never a read
+ * and then an add, so readings sent at once can never pass the ceiling
+ * between them. Kept to the window's end and a day, as the window's other
+ * counts are (lib/allowance-window.ts, keepSecondsFor).
+ */
+export async function takeReading(pass: ReadPass, now = Date.now()): Promise<boolean> {
+  if (!STATS_ID.test(pass.statsId) || !WINDOW_ID.test(pass.window) || !Number.isSafeInteger(pass.cap) || pass.cap < 1) return false;
+  const key = readsKey(pass.statsId, pass.window);
+  const keep = Math.max(86_400, pass.end - Math.floor(now / 1000) + 86_400);
+  try {
+    const [count] = await redisPipeline([["INCR", key], ["EXPIRE", key, keep]]);
+    const n = Number(count);
+    return Number.isSafeInteger(n) && n >= 1 && n <= pass.cap;
+  } catch {
+    return false;
+  }
+}
+
+/** A window whose readings went past their ceiling: only the first `counted` were counted, and counting starts again at `opens` (milliseconds). */
+export type ReadingsPartial = { counted: number; opens: number };
+
+/**
+ * Whether the store's readings of its current window went past the window's
+ * ceiling, for the studio to say that the window's time on page and reading
+ * depth are partial: then only the first `counted` readings were counted.
+ * One command; null when they did not, or when it cannot be told. Compared
+ * with the ceiling of the store's plan now: a plan changed during the window
+ * is read at its new figure.
+ */
+export async function readingsPartial(store: WindowFields & { tier?: Tier; statsId: string | null }, now = Date.now()): Promise<ReadingsPartial | null> {
+  const statsId = store.statsId;
+  const window = allowanceWindow(store, now);
+  const cap = readCeiling(store, now);
+  if (!statsId || !STATS_ID.test(statsId) || !window || cap <= 0 || !isRedisConfigured()) return null;
+  try {
+    const [raw] = await redisPipeline([["GET", readsKey(statsId, window.id)]]);
+    const n = Number(raw);
+    return Number.isSafeInteger(n) && n > cap ? { counted: cap, opens: window.end } : null;
+  } catch {
+    return null;
   }
 }
 

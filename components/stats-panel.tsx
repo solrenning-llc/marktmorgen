@@ -23,7 +23,7 @@ import { RefundActivityPanel } from "@/components/refund-activity";
 import { KeptByCurrency } from "@/components/kept-by-currency";
 import { WeeklyCohortsPanel } from "@/components/weekly-cohorts";
 import { RevenueQuality, BuyerChannelsPanel } from "@/components/revenue-quality";
-import { READ_MIN_VISITORS, READ_SAMPLE } from "@/lib/page-read-sample";
+import { READ_MIN_VISITORS, READ_SAMPLE, readingsPartialWords } from "@/lib/page-read-sample";
 import { NumbersNotes } from "@/components/numbers-notes";
 import { AdSpendEditor } from "@/components/ad-spend-editor";
 import type { MetaAdsView } from "@/lib/meta-ads";
@@ -1190,6 +1190,11 @@ export function StatsPanel({
         </p>
       ) : null}
 
+      {reach && reach.visitors > 0 && data.readsPartial ? (
+        <p className="notice notice-info mt-6 text-sm" role="note">
+          {readingsPartialWords(data.readsPartial.counted, data.readsPartial.opens)}
+        </p>
+      ) : null}
       {reach && reach.visitors > 0 ? (
         reach.visitors >= READ_MIN_VISITORS ? (
           <div className="mt-6 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="numbers-reach">

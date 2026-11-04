@@ -156,17 +156,22 @@ export const NO_BUYERS_NOTE = "Your store can no longer read its sales (Stripe a
 export const LIST_RETRY_SECONDS = 3_600;
 /** Said when a narrowed email's list could not be made now for a reason that passes: tried again in an hour. */
 const LIST_WAIT_NOTE = "The list of who it goes to could not be prepared just now. Nothing was sent. It is tried again in an hour.";
-/** Said on an email canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
+/** Said on an email to the whole list canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
 export const PLAN_OFF_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent and none of your studio requests were used for it. To send it, write it again while your plan is on.";
+/**
+ * The same for a narrowed email: counting its buyers when it was written, and any reading of them since, used studio
+ * requests that stay used, so it never says none were (review of #2205, C3-112); what it set aside is given back.
+ */
+export const PLAN_OFF_NARROWED_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent. What it set aside of your studio requests is given back; what finding its buyers already used stays used. To send it, write it again while your plan is on.";
 /** Said on an email stopped partway because the plan stopped being paid and running: how many had gone, and nothing more. */
 export function planOffPartNote(sent: number, total: number): string {
   return `Your plan stopped being active while this email was going out, so the rest was canceled: ${sent.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} had gone out. Nothing more is sent. To reach the rest, write it again while your plan is on.`;
 }
 /** Said on a narrowed email whose reading of its buyers failed at Stripe or PayPal: nothing spent, tried again later. */
 export const READ_FAILED_NOTE = `Your sales could not be read just now, so the list of who it goes to could not be made. Nothing was sent. What that try used of your studio requests stays used. It is tried again later, up to ${READ_MISSES_ALLOWED} times in a row, then it stops.`;
-/** Said on a narrowed email waiting for the month whose studio requests will pay for its reading of the buyers. */
+/** Said on a narrowed email waiting for the month whose studio requests will pay for its reading of the buyers: only if the plan still runs then (a trial or a plan set to end that ends first cancels it). */
 export function studioWaitNote(opens: string): string {
-  return `Your studio requests for this month are used up, so the list of who it goes to could not be made. Nothing was sent. It goes out by itself when they open again, on ${opens} (UTC).`;
+  return `Your studio requests for this month are used up, so the list of who it goes to could not be made. Nothing was sent. It goes out by itself when they open again, on ${opens} (UTC), if your plan is still active then; if it ends first, the email is canceled.`;
 }
 
 /** The note of an email stopped because its readings of the buyers ran out: why it waited, without "tried again". */
@@ -548,7 +553,7 @@ export async function advanceBroadcast(
     const standing = costStandingOf(store, now);
     if (standing !== "paid" && standing !== "trial") {
       const held = b.hold;
-      b = { ...b, status: "cancelled", note: b.sent > 0 ? planOffPartNote(b.sent, b.total) : PLAN_OFF_NOTE, finishedAt: now, ...(held ? { hold: { ...held, units: 0 } } : {}) };
+      b = { ...b, status: "cancelled", note: b.sent > 0 ? planOffPartNote(b.sent, b.total) : b.narrow ? PLAN_OFF_NARROWED_NOTE : PLAN_OFF_NOTE, finishedAt: now, ...(held ? { hold: { ...held, units: 0 } } : {}) };
       await save(b);
       await redisPipeline([["SREM", QUEUE, id], ["DEL", toKey(id)]]);
       if (held?.units) await giveAllowanceIn(store, "studio", held.units, held.window);

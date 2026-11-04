@@ -1271,7 +1271,7 @@ function Compose(props: {
               {/* A narrowed email holds its later readings of the buyers in the month it goes out (lib/broadcasts.ts, createBroadcast). */}
               {minSpent || channel || quietDays || buyerGroup || activeDays
                 ? later
-                  ? " Scheduling it sets aside, from the month it goes out, the studio requests needed to find these buyers then, and to find them once more if it has to wait. If that month has too few left, it is not scheduled, and you see how many it needs. What it does not use, or all of it if you cancel, is given back."
+                  ? " Scheduling it sets aside, from the month it goes out, the studio requests needed to find these buyers then, and to find them once more if it has to wait. If that month has too few left, it is not scheduled, and you see how many it needs. What it has not used is given back, also if you cancel."
                   : " Sending it sets aside the studio requests needed to find these buyers once more if it has to wait. What it does not use is given back."
                 : null}
             </p>

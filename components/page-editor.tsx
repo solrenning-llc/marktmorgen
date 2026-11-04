@@ -2188,6 +2188,13 @@ export function PageEditor({
                   }
                   return true;
                 }}
+                kindName={kindLabel}
+                onGo={(block) => {
+                  // The version it is in comes to the front, then its panel opens with the focus in its first field.
+                  if (block.b !== onB) switchVersion(block.b);
+                  focusNew.current = block.id;
+                  setOpen(block.id);
+                }}
               />
             </div>
           ) : null}

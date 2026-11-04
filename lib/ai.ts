@@ -43,7 +43,7 @@ import {
 } from "@/lib/ai-rules";
 
 import { type PageBlock, type SalesPage, emptyBlock, parsePage } from "@/lib/sales-page";
-import { MAX_TRANSLATE_PARTS, keepEveryBlock, pageWords, translateParts, withWords } from "@/lib/page-translate";
+import { type LeftBlock, MAX_TRANSLATE_PARTS, keepEveryBlock, pageWords, translateParts, withWords } from "@/lib/page-translate";
 import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 import { type DraftedQuestion, MAX_QUIZ_SOURCE, readDrafted, shuffleAnswers } from "@/lib/quiz-draft";
 import { type DraftedStep, readDraftedSteps } from "@/lib/sequence-draft";
@@ -408,7 +408,7 @@ export async function translatePage(
   store: Store,
   input: { page: SalesPage; language: string },
   now = Date.now(),
-): Promise<AiResult<{ page: SalesPage; untranslated: number }> | { ok: false; reason: "long" }> {
+): Promise<AiResult<{ page: SalesPage; untranslated: number; left: LeftBlock[] }> | { ok: false; reason: "long" }> {
   const words = pageWords(input.page);
   if (words.length === 0) return { ok: false, reason: "notes" };
   const parts = translateParts(words);

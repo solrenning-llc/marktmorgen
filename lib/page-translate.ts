@@ -120,7 +120,7 @@ export function withWords(page: SalesPage, words: string[]): SalesPage {
  * as the first is dropped there, as it always was, rather than coming back
  * whole in the old language beside a translated first one.
  */
-export function keepEveryBlock(original: SalesPage, translated: SalesPage): { page: SalesPage; untranslated: number } {
+export function keepEveryBlock(original: SalesPage, translated: SalesPage): { page: SalesPage; untranslated: number; left: LeftBlock[] } {
   // The blocks put back as they were, by version: counted only once the page is read, so a second version dropped
   // there for being the same as the first does not count its blocks (inbox C4-19 (a)).
   const restored = { main: new Set<PageBlock>(), variant: new Set<PageBlock>() };
@@ -140,9 +140,16 @@ export function keepEveryBlock(original: SalesPage, translated: SalesPage): { pa
     : translated.variant;
   const page = parsePage({ ...translated, blocks: fit(original.blocks, translated.blocks, restored.main), variant });
   const ids = (kept: Set<PageBlock>) => new Set([...kept].map((block) => block.id));
-  const left = (blocks: PageBlock[] | undefined, kept: Set<PageBlock>) => (blocks ?? []).filter((block) => ids(kept).has(block.id)).length;
-  return { page, untranslated: left(page.blocks, restored.main) + left(page.variant?.blocks, restored.variant) };
+  // Each block put back as it was, by the version it is in and its place there, so the creator can be told which
+  // one to translate by hand and taken to it (inbox C4-29).
+  const left = (blocks: PageBlock[] | undefined, kept: Set<PageBlock>, b: boolean): LeftBlock[] =>
+    (blocks ?? []).flatMap((block, at) => (ids(kept).has(block.id) ? [{ id: block.id, kind: block.kind, at, b }] : []));
+  const all = [...left(page.blocks, restored.main, false), ...left(page.variant?.blocks, restored.variant, true)];
+  return { page, untranslated: all.length, left: all };
 }
+
+/** A block a translation left as it was: its id, its kind, its place in its version (from 0), and whether that is the second version. */
+export type LeftBlock = { id: string; kind: PageBlock["kind"]; at: number; b: boolean };
 
 /** The words split into parts of at most TRANSLATE_PART_CHARS characters (a longer single one is a part of its own). */
 export function translateParts(words: string[]): string[][] {

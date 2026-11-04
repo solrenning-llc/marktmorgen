@@ -30,6 +30,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { type BlockContext, BlockView } from "@/components/sales-blocks";
 import { BLOCK_GROUPS } from "@/components/block-picker";
 import { MESSAGES as EDITOR_MESSAGES, kindLabel } from "@/components/page-editor";
+import { ordinal } from "@/components/translate-page";
 import { NOT_IN_SECTIONS, readSectionInput } from "@/lib/saved-blocks";
 import { KIND_ICONS } from "@/lib/sales-page-icons";
 import { SITE_KINDS } from "@/lib/site-page-rules";
@@ -118,6 +119,18 @@ part("A second version the translation makes the same as the first counts none o
   const translated = withWords(twoVersions, pageWords(twoVersions).map(same));
   const kept = keepEveryBlock(twoVersions, translated);
   is("the second version is dropped, and only the shown page's block is counted", [kept.page.variant, kept.untranslated], [null, 1]);
+  is("and the block is named by its kind and its place in its version (inbox C4-29)", kept.left, [{ id: "book0001", kind: "booking", at: 0, b: false }]);
+}
+
+part("The creator is told which block stayed as it was, and taken to it (inbox C4-29)");
+{
+  const page = parsePage({
+    blocks: [{ id: "text0001", kind: "text", heading: "Why", body: "One." }, { id: "text0002", kind: "text", heading: "How", body: "Two." }, booking({ heading: "x".repeat(95) })],
+    variant: { id: "", blocks: [booking({ heading: "x".repeat(95) }), { id: "text0001", kind: "text", heading: "Why not", body: "One." }] },
+  });
+  const translated = keepEveryBlock(page, withWords(page, pageWords(page).map((w) => `${w} (traducido al español)`)));
+  is("each one: its kind, its place in its version, and which version", translated.left, [{ id: "book0001", kind: "booking", at: 2, b: false }, { id: "book0001", kind: "booking", at: 0, b: true }]);
+  is("its place said as the creator counts it", [1, 2, 3, 4, 11, 12, 13, 21, 22, 103].map(ordinal), ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "103rd"]);
 }
 
 part("A copy into another store maps the call, or leaves the block out");

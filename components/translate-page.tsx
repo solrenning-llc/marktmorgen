@@ -4,7 +4,7 @@ import { useContext, useState } from "react";
 import { Icon } from "@/components/icons";
 import { AiOn } from "@/components/ai-assist";
 import type { SalesPage } from "@/lib/sales-page";
-import { MAX_TRANSLATE_PARTS, pageWords, translateParts } from "@/lib/page-translate";
+import { type LeftBlock, MAX_TRANSLATE_PARTS, pageWords, translateParts } from "@/lib/page-translate";
 import { LANGUAGES, LANGUAGE_CODES, type LanguageCode } from "@/lib/store-language";
 
 const MESSAGES: Record<string, string> = {
@@ -35,6 +35,8 @@ export function TranslatePage({
   storeLanguage,
   page,
   onResult,
+  kindName,
+  onGo,
 }: {
   productId: string;
   storeLanguage: LanguageCode;
@@ -45,11 +47,17 @@ export function TranslatePage({
    * the editor; false when the editor no longer holds what was sent.
    */
   onResult: (page: SalesPage, sent: SalesPage) => boolean;
+  /** A block kind's name in the editor ("Booking", "Columns"), to say which block was left as it was. */
+  kindName: (kind: LeftBlock["kind"]) => string;
+  /** Opens that block in the editor, its version brought to the front, and puts the focus in it. */
+  onGo: (block: LeftBlock) => void;
 }) {
   const { on, left: startLeft } = useContext(AiOn);
   const [to, setTo] = useState<LanguageCode>(storeLanguage);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ error: boolean; text: string } | null>(null);
+  // The blocks the last translation left as they were, named and reachable (inbox C4-29).
+  const [leftBlocks, setLeftBlocks] = useState<LeftBlock[]>([]);
   const [left, setLeft] = useState(startLeft);
   if (!on) return null;
   const parts = translateParts(pageWords(page())).length;
@@ -57,6 +65,7 @@ export function TranslatePage({
   async function run() {
     setBusy(true);
     setNote(null);
+    setLeftBlocks([]);
     const sent = page();
     try {
       const response = await fetch("/api/store/ai", {
@@ -64,14 +73,15 @@ export function TranslatePage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: "translate", product: productId, language: to, page: sent }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: { page?: SalesPage; untranslated?: number }; left?: number; error?: string };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: { page?: SalesPage; untranslated?: number; left?: LeftBlock[] }; left?: number; error?: string };
       if (data.ok && data.value?.page) {
         if (typeof data.left === "number") setLeft(data.left);
         const applied = onResult(data.value.page, sent);
+        setLeftBlocks(applied && Array.isArray(data.value.left) ? data.value.left : []);
         // A block whose translated words would not fit came back as it was (lib/page-translate.ts, keepEveryBlock): said, never hidden.
         const kept = typeof data.value.untranslated === "number" && data.value.untranslated > 0 ? data.value.untranslated : 0;
         const keptWords = kept
-          ? ` ${kept === 1 ? "One block was" : `${kept} blocks were`} left in the old language, because the translated words were too long for it: change ${kept === 1 ? "it" : "them"} by hand.`
+          ? ` ${kept === 1 ? "One block was" : `${kept} blocks were`} left in the old language, because the translated words were too long for ${kept === 1 ? "it" : "them"}: change ${kept === 1 ? "it" : "them"} by hand, listed below.`
           : "";
         setNote(
           applied
@@ -126,7 +136,28 @@ export function TranslatePage({
             {note.text}
           </p>
         ) : null}
+        {leftBlocks.length ? (
+          <ul className="space-y-1" aria-label="Blocks left in the old language">
+            {leftBlocks.map((block) => {
+              const where = `${kindName(block.kind)}, ${ordinal(block.at + 1)} block${block.b ? " of the second version" : ""}`;
+              return (
+                <li key={`${block.b ? "b" : "a"}-${block.id}`}>
+                  <button type="button" className="inline-flex min-h-11 items-center text-sm font-semibold text-violet-deep underline underline-offset-4" onClick={() => onGo(block)}>
+                    Go to {where}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
       </div>
     </details>
   );
+}
+
+/** 1st, 2nd, 3rd, 4th…, 11th, 12th, 13th, 21st: a block's place, as the creator counts it. */
+export function ordinal(n: number): string {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
+  return `${n}${suffix}`;
 }

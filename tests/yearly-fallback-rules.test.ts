@@ -15,6 +15,7 @@ const sub: FallbackSub = {
   status: "past_due",
   collection_method: "charge_automatically",
   metadata: { store: "lena" },
+  default_payment_method: { id: "pm_1", type: "card" },
   items: { data: [{ quantity: 1, price: { unit_amount: 20000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] },
 };
 const invoice: FallbackInvoice = { subscription: "sub_1", billing_reason: "subscription_cycle", status: "open", amount_due: 20000, currency: "usd" };
@@ -49,6 +50,33 @@ is(
   ],
   [null, null, null, null, null, null, null, null, null],
 );
+is(
+  "never driven by a schedule, never with a discount on its item, never on an invoice partly paid or whose retries were stopped (review, 4 November 2026)",
+  [
+    offer({ ...sub, schedule: "sub_sched_1" }),
+    offer({ ...sub, items: { data: [{ quantity: 1, discounts: ["di_item"], price: { unit_amount: 20000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] } }),
+    offer(sub, { ...invoice, amount_paid: 5000 }),
+    offer(sub, { ...invoice, auto_advance: false }),
+  ],
+  [null, null, null, null],
+);
+is("an invoice nothing was paid on, still retried, is offered", offer(sub, { ...invoice, amount_paid: 0, auto_advance: true }) !== null, true);
+const paidWith = (own: unknown, theirs?: unknown) => offer({ ...sub, default_payment_method: own, customer: theirs === undefined ? "cus_1" : { invoice_settings: { default_payment_method: theirs } } });
+is(
+  "only paid with a method that can carry a change made only if paid: never a bank debit, never a method that cannot be read",
+  [
+    paidWith({ type: "sepa_debit" }),
+    paidWith({ type: "us_bank_account" }),
+    paidWith({ type: "bacs_debit" }),
+    paidWith({ type: "au_becs_debit" }),
+    paidWith("pm_unexpanded"),
+    paidWith(null),
+    paidWith(null, "pm_unexpanded"),
+    paidWith(null, { type: "sepa_debit" }),
+  ],
+  [null, null, null, null, null, null, null, null],
+);
+is("a card, a wallet or Link, its own or the customer's default", [paidWith({ type: "link" }) !== null, paidWith(null, { type: "card" }) !== null, paidWith({ type: "paypal" }) !== null], [true, true, true]);
 is(
   "only once a year, one item of one, in the store's currency",
   [

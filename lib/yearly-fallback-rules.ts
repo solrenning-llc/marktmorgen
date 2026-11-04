@@ -13,13 +13,16 @@
  *
  *   - the failed invoice is this membership's own renewal (Stripe's
  *     `billing_reason` "subscription_cycle"), still open, never an invoice
- *     already paid, voided or of another subscription;
+ *     already paid (even in part), voided or of another subscription, and
+ *     still retried by itself (never one whose retries were stopped);
  *   - the membership pays once a year, one item of one, in the store's
  *     currency, charged automatically (never sent as an invoice to pay by
  *     hand), past due on that renewal (not canceled, not set to end, not
- *     paused), with no discount and no affiliate share still running for a
- *     set number of months (yearly-switch-rules' own reasons, read the same
- *     way);
+ *     paused), not driven by a subscription schedule, with no discount (on
+ *     the subscription or on its item) and no affiliate share still running
+ *     for a set number of months (yearly-switch-rules' own reasons, read the
+ *     same way), and paid with a method that can carry a change made only if
+ *     paid (PENDING_UPDATE_METHODS: never a bank debit, never unknown);
  *   - the product still sells monthly with a yearly price beside it
  *     (lib/yearly-price.ts, activeYearly): the monthly price offered is the
  *     product's own today, never one typed for the offer;
@@ -33,11 +36,58 @@
 import { type Yearly, type YearlyCandidate, activeYearly } from "@/lib/yearly-price";
 import { type YearlySub, affiliateMonthsLeft, discounted } from "@/lib/yearly-switch-rules";
 
-/** The parts of a Stripe subscription these rules read: yearly-switch-rules' own, and how it is collected. */
-export type FallbackSub = YearlySub & { collection_method?: unknown };
+/** The parts of a Stripe subscription these rules read: yearly-switch-rules' own, how it is collected and with what. */
+export type FallbackSub = Omit<YearlySub, "items"> & {
+  collection_method?: unknown;
+  /** Set when a subscription schedule drives it (the creator's dashboard): a phase change voids a pending update. */
+  schedule?: unknown;
+  items?: {
+    data?: {
+      quantity?: unknown;
+      /** A discount on the item itself, which `discounted` (the subscription's own) does not see. */
+      discounts?: unknown;
+      price?: { unit_amount?: unknown; currency?: unknown; recurring?: { interval?: unknown; interval_count?: unknown } | null } | null;
+    }[];
+  } | null;
+  /** The membership's own payment method, expanded (`expand[]=default_payment_method`). */
+  default_payment_method?: unknown;
+  /** Its customer, expanded with the customer's default (`expand[]=customer.invoice_settings.default_payment_method`). */
+  customer?: unknown;
+};
+
+/**
+ * Payment methods whose payments can carry a change made only if paid (Stripe, Pending updates, "Before you begin",
+ * docs.stripe.com/billing/subscriptions/pending-updates, read 4 November 2026). Bank debits (SEPA Direct Debit, ACH,
+ * Bacs, BECS) are not among them: a move paid with one would apply before its money is known, so none is offered.
+ * Apple Pay and Google Pay are cards to Stripe.
+ */
+export const PENDING_UPDATE_METHODS: ReadonlySet<string> = new Set([
+  "card", "link", "alipay", "amazon_pay", "afterpay_clearpay", "cashapp", "eps", "kakao_pay", "klarna", "kr_card", "naver_pay",
+  "paypal", "payto", "pix", "promptpay", "revolut_pay", "satispay", "swish", "twint", "wechat_pay",
+]);
+
+const typeOf = (method: unknown) => (method && typeof method === "object" ? (method as { type?: unknown }).type : undefined);
+
+/**
+ * The type of the payment method the month would be charged to: the membership's own, else its customer's default
+ * (Stripe's order for a subscription's invoices), read only from expanded objects; null when it cannot be read.
+ */
+export function payingMethodType(sub: FallbackSub): string | null {
+  if (sub.default_payment_method) {
+    const own = typeOf(sub.default_payment_method);
+    return typeof own === "string" ? own : null;
+  }
+  const settings = sub.customer && typeof sub.customer === "object" ? (sub.customer as { invoice_settings?: { default_payment_method?: unknown } | null }).invoice_settings : null;
+  const theirs = typeOf(settings?.default_payment_method);
+  return typeof theirs === "string" ? theirs : null;
+}
 
 /** The parts of a Stripe invoice these rules read. */
 export type FallbackInvoice = {
+  /** Part paid already: such an invoice is never offered, its part could not be kept by a void. */
+  amount_paid?: unknown;
+  /** False when its retries were stopped (by the creator, or by Stripe at the end of its retries): never offered. */
+  auto_advance?: unknown;
   /** Where the API versions since 2025 name the invoice's subscription. */
   parent?: { subscription_details?: { subscription?: unknown } | null } | null;
   /** Where older API versions name it. */
@@ -89,22 +139,33 @@ export function monthlyFallback(
   // paid can be (Stripe, Pending updates: "if the subscription's collection_method is charge_automatically").
   if (sub.status !== "past_due") return null;
   if (sub.collection_method !== "charge_automatically") return null;
+  // Paid with a method that can carry a change made only if paid; unknown is never offered.
+  const method = payingMethodType(sub);
+  if (!method || !PENDING_UPDATE_METHODS.has(method)) return null;
   if (num(sub.cancel_at) > 0 || sub.cancel_at_period_end === true) return null;
   if (sub.pause_collection && typeof sub.pause_collection === "object") return null;
   const meta = sub.metadata ?? {};
   if (meta.ends_after || meta.kind === "plan") return null;
-  if (discounted(sub)) return null;
+  if (discounted(sub as YearlySub)) return null;
+  // Not driven by a schedule: its next phase would put the year back, and a phase change voids a pending update.
+  if (sub.schedule) return null;
   if (affiliateMonthsLeft(meta, nowSeconds)) return null;
   // Once a year, one item of one, in the store's currency.
   const items = sub.items?.data ?? [];
   if (items.length !== 1) return null;
   const item = items[0];
   if ((item.quantity ?? 1) !== 1) return null;
+  // No discount on the item either: the yearly figure compared would be the undiscounted price.
+  if (Array.isArray(item.discounts) && item.discounts.length > 0) return null;
   const price = item.price;
   if (!price?.recurring || price.recurring.interval !== "year" || (price.recurring.interval_count ?? 1) !== 1) return null;
   if (String(price.currency ?? "").toLowerCase() !== storeCurrency.toLowerCase()) return null;
   // Still owed, and compared on one footing: the membership's own yearly price, before tax and credit.
   if (num(invoice.amount_due) <= 0) return null;
+  // Nothing paid on it yet, and still retried by itself: an invoice partly paid could not be voided whole, and one
+  // whose retries were stopped is not this offer's to turn back on.
+  if (invoice.amount_paid !== undefined && invoice.amount_paid !== 0) return null;
+  if (invoice.auto_advance === false) return null;
   const yearly = num(price.unit_amount);
   if (yearly <= 0) return null;
   // The product still sells monthly with a yearly price beside it: its own monthly price, today.

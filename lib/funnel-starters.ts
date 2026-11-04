@@ -12,9 +12,21 @@
  * a number, a deadline or what somebody said about them, and the pages
  * arrive kept back from visitors until the creator has made them theirs.
  */
-import { BUNDLE_FORMAT, BUNDLE_SCHEMA, type FunnelBundle } from "@/lib/funnel-bundle";
+import { BUNDLE_FORMAT, BUNDLE_SCHEMA, outlineOf, type BundleOutline, type FunnelBundle, type PlanLine } from "@/lib/funnel-bundle";
 
-export type FunnelStarter = { id: string; label: string; hint: string; bundle: FunnelBundle };
+export type FunnelStarter = {
+  id: string;
+  label: string;
+  hint: string;
+  bundle: FunnelBundle;
+  /**
+   * What the creator is told to do first, said in its preview before the
+   * parts to fill in (starterOutline) and again in the list of what to do
+   * once it is made (starterBeforeLines). A starter's own, never part of a
+   * shared file.
+   */
+  before?: string[];
+};
 
 const nextSteps = (first: { title: string; detail: string }) => ({
   ref: "p2",
@@ -433,6 +445,59 @@ FUNNEL_STARTERS.push(
   },
 );
 
+// 242 [CF5], unit 3 (added 2 November 2026): for a creator who ships what
+// they sell. Where it ships, what shipping costs and when it ships are never
+// written for them: the product's page and the checkout show those from its
+// shipping settings (components/store-product.tsx, lib/store-checkout.ts),
+// and the campaign's own answers are parts in [brackets] for the creator's
+// words. Which product ships is not known without reading each one in full,
+// so the preview and the list after it is made say, every time, which
+// products can ship and how to turn it on (lib/shipping.ts, shipProblem). No
+// health, beauty or other result, no rating, badge or "best seller", no
+// delivery date.
+const SHIP_FIRST =
+  "Choose a product you ship. Only a paid product bought once can ship: not a membership, a call, a bundle, a payment plan or a price the buyer chooses, and with no file, link, course or podcast to hand over. In its editor, turn on “Ship it: a physical product, sent by you”: its page then shows what shipping costs and where it ships, and the checkout asks for an address.";
+FUNNEL_STARTERS.push({
+  id: "physical-product",
+  label: "Sell something you ship",
+  hint: "Show what comes in the box, its size and materials, and how shipping and returns work, then lead to the product you ship.",
+  before: [SHIP_FIRST],
+  bundle: {
+    format: BUNDLE_FORMAT, schema: BUNDLE_SCHEMA, name: "Something you ship",
+    products: [{ ref: "x1", label: "The product you ship", wants: "paid" }],
+    forms: [],
+    steps: [{ kind: "page", ref: "p1" }, { kind: "product", ref: "x1" }, { kind: "page", ref: "p2" }],
+    pages: [
+      {
+        ref: "p1", title: "Your product", slug: "your-product", target: "x1", style: "cards",
+        blocks: [
+          { id: "sp01", kind: "hero", headline: "[Your product]: [what it is, in a few words]", sub: "[Say what it is, what it is made of and who it is for.]", media: "none", video: null, button: true },
+          { id: "sp02", kind: "benefits", heading: "What comes in the box", items: ["[The first thing in the box]", "[The next thing in the box]"] },
+          { id: "sp03", kind: "text", heading: "Size and materials", body: "[Give its measurements and weight, what it is made of and how to look after it. Say anything it needs that is not in the box.]" },
+          { id: "sp04", kind: "faq", heading: "Before you order", items: [
+            { q: "Where does it ship, and what does shipping cost?", a: "[Say where you ship and what shipping costs, as your shipping settings say. The product's page and the checkout show both from there.]" },
+            { q: "When does it ship?", a: "[Say when you ship it, in the same words as the note in your shipping settings.]" },
+            { q: "Can I return or exchange it?", a: "[Say how returns and exchanges work, as your refund policy says.]" },
+          ] },
+          { id: "sp05", kind: "cta", label: "See the product and price", note: "" },
+        ],
+      },
+      nextSteps({ title: "Your order", detail: "[Tell the buyer when you will send it and how they will hear from you.]" }),
+    ],
+  },
+});
+
 export function funnelStarter(id: unknown): FunnelStarter | null {
   return FUNNEL_STARTERS.find((starter) => starter.id === id) ?? null;
+}
+
+/** A starter's outline, with what to do first ahead of the parts to fill in, as its preview says them. */
+export function starterOutline(starter: FunnelStarter): BundleOutline {
+  const outline = outlineOf(starter.bundle);
+  return { ...outline, fill: [...(starter.before ?? []), ...outline.fill] };
+}
+
+/** What to do first, as lines of the list shown once the starter is made. */
+export function starterBeforeLines(starter: FunnelStarter): PlanLine[] {
+  return (starter.before ?? []).map((text) => ({ level: "fix", text }));
 }

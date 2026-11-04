@@ -255,6 +255,37 @@ export async function listRequests(store: Store, now = Date.now()): Promise<Paym
   }
 }
 
+/**
+ * One person's requests in the store, from their own set (at most
+ * MAX_PER_PERSON, and twice that read at most): two commands whatever the
+ * store keeps, for a page about one buyer (lib/buyer-waiting.ts). A record
+ * gone is skipped; one that does not read as this store's is null, never a
+ * guess.
+ */
+export async function requestsOfPerson(store: Pick<Store, "sid">, email: string): Promise<PaymentRequest[] | null> {
+  if (!isRedisConfigured() || !store.sid) return null;
+  try {
+    const [members] = await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]);
+    if (!Array.isArray(members)) return null;
+    const ids = members.map(String).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
+    if (!ids.length) return [];
+    const [values] = await redisPipeline([["MGET", ...ids.map(recordKey)]]);
+    if (!Array.isArray(values) || values.length !== ids.length) return null;
+    const out: PaymentRequest[] = [];
+    ids.forEach((id, i) => {
+      const raw = values[i];
+      if (raw === null) return;
+      const request = typeof raw === "string" ? parseRequest(JSON.parse(raw)) : null;
+      if (!request || request.sid !== store.sid || request.id !== id) throw new Error("Payment request record unreadable");
+      out.push(request);
+    });
+    return out;
+  } catch (error) {
+    console.error("reading a person's payment requests failed", error);
+    return null;
+  }
+}
+
 /** How many of the store's requests are open now. */
 export async function openCount(sid: string, now = Date.now()): Promise<number> {
   if (!isRedisConfigured() || !sid) throw new Error("Payment request count unavailable");
@@ -316,7 +347,7 @@ const intentOf = (value: unknown): string =>
  * is. A payment that comes in after the request expired or was withdrawn
  * still paid it (its checkout was opened while it was open), so it is paid.
  */
-export async function markPaid(store: Pick<Store, "sid">, id: string, session: PaidSession, now = Date.now()): Promise<{ request: PaymentRequest; fresh: boolean } | null> {
+export async function markPaid(store: Store, id: string, session: PaidSession, now = Date.now()): Promise<{ request: PaymentRequest; fresh: boolean } | null> {
   const done = await changeRequest(store, id, (request) => {
     if (request.state === "paid" || request.state === "refunded") return { next: null, answer: false };
     const paid: PaymentRequest = {
@@ -331,7 +362,15 @@ export async function markPaid(store: Pick<Store, "sid">, id: string, session: P
     };
     return { next: paid, answer: true };
   }, now);
-  return done ? { request: done.request, fresh: done.answer } : null;
+  if (!done) return null;
+  // 635 [GL3]: the first time it is written as paid, however that was learned, the workflow that starts on it,
+  // for the person it was sent to, only while on the list (lib/payment-flow-trigger.ts; never throws). Loaded
+  // here, not at the top, so the payment path and the workflows never load each other.
+  if (done.answer) {
+    const { paymentRequestPaid } = await import("@/lib/payment-flow-trigger");
+    await paymentRequestPaid(store, done.request.email);
+  }
+  return { request: done.request, fresh: done.answer };
 }
 
 /** Requests whose reminder is due, at most `limit`, as "<sid>|<id>". */

@@ -84,6 +84,7 @@ import {
   seatsTaken,
   zoneName,
 } from "@/lib/call-setup";
+import { bookingLength, ownLength } from "@/lib/call-lengths";
 import { planCheck, planReminders, readMoves, unplanReminders, writeMove } from "@/lib/call-records";
 import { calendarBusy } from "@/lib/calendar-sync";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
@@ -692,9 +693,17 @@ export function callCheckoutBody(input: {
    * than the discounted price, and the rest is what is left of it.
    */
   code?: { id: string; code: string; figures: DepositFigures } | null;
+  /**
+   * The length the buyer chose, on a call with several (lib/call-lengths.ts,
+   * bookingLength): its price is what is charged, and the length is said on
+   * the line and kept on the sale. None: the product's own price.
+   */
+  length?: { minutes: number; cents: number } | null;
 }): URLSearchParams {
   const { store, product, start, end, buyerTz, origin } = input;
   const pkg = input.fromPackage;
+  const length = product.call?.lengths?.length ? input.length ?? null : null;
+  const priceCents = length ? length.cents : product.priceCents;
   // Said in the buyer's own time zone: they are the one reading Stripe's page,
   // in the store's language (lib/store-language.ts). The same title is kept
   // on the sale, as what the buyer saw.
@@ -703,11 +712,12 @@ export function callCheckoutBody(input: {
   // Never from a package: the package was the payment.
   const code = pkg ? null : input.code ?? null;
   const due = pkg
-    ? { cents: product.priceCents, rest: 0 }
+    ? { cents: priceCents, rest: 0 }
     : code
       ? { cents: code.figures.charged, rest: code.figures.rest }
-      : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
-  const name = `${product.title} \u2014 ${when}`;
+      : chargeNow({ priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
+  // A call with several lengths says the one chosen, in the store's language, on Stripe's page and on the sale.
+  const name = `${product.title}${length ? bookingWords(store.language).chosenLength(length.minutes) : ""} \u2014 ${when}`;
   const body = new URLSearchParams({
     mode: "payment",
     locale: lang.stripe,
@@ -730,7 +740,8 @@ export function callCheckoutBody(input: {
     "payment_intent_data[metadata][kind]": "call",
     "payment_intent_data[metadata][start]": String(start),
     success_url: `${origin}/@${store.handle}/thanks?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
+    // Back from Stripe's page, the length chosen is still chosen (3.3.7).
+    cancel_url: `${origin}/@${store.handle}/book/${product.id}${length && length.minutes !== product.call?.minutes ? `?length=${length.minutes}` : ""}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
   // The creator's cancellation deadline (lib/call-setup.ts, cancelHours): said before paying; never for a session from a package, which pays nothing here.
@@ -762,12 +773,13 @@ export function callCheckoutBody(input: {
     }
     if (code) {
       // The whole price, the code and what it took off, on the sale for the creator's orders.
-      body.set("metadata[price]", String(product.priceCents));
+      body.set("metadata[price]", String(priceCents));
       body.set("metadata[code]", code.code);
       body.set("metadata[code_off]", String(code.figures.off));
       body.set("payment_intent_data[metadata][code]", code.code);
     }
   }
+  if (length) body.set("metadata[minutes]", String(length.minutes));
   if (input.team) {
     body.set("metadata[hosts]", input.team.hosts.join(","));
     body.set("metadata[claim]", input.team.claim);
@@ -837,10 +849,19 @@ export async function holdAndCheckout(input: {
   fromPackage?: { id: string; coupon: string; email: string; back: string } | null;
   /** The channel this sale is credited to, as Stripe metadata (lib/visit-channel.ts channelOfRequest). */
   channel?: Record<string, string>;
+  /** The length the buyer chose, in minutes, on a call with several (lib/call-lengths.ts); none is the setup's own. */
+  minutes?: unknown;
 }): Promise<HoldResult> {
   const { store, product, start, origin } = input;
-  const setup = product.call;
   if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  // Weekly hours: the length chosen, at its own price, or the booking is refused, never charged at another length's price.
+  const booked = product.call.kind === "weekly" ? bookingLength(product.call, product.priceCents, input.minutes) : null;
+  if (product.call.kind === "weekly" && !booked) return { ok: false, reason: "invalid" };
+  // Another length than the setup's own is never had from a package, with a deposit or with a code, whose figures are the product's own price.
+  const other = booked !== null && booked.minutes !== product.call.minutes;
+  if (other && (input.fromPackage || product.call.deposit || input.code)) return { ok: false, reason: "invalid" };
+  // Every check below, and the hold, are at the chosen length.
+  const setup: CallSetup = booked ? { ...product.call, minutes: booked.minutes } : product.call;
   const length = lengthAt(setup, start);
   // A dated session the creator has since taken off.
   if (length === null) return { ok: false, reason: "taken" };
@@ -853,6 +874,8 @@ export async function holdAndCheckout(input: {
   const chosen = whole && input.host?.key ? chosenTeam(whole, input.host.key, input.host.label) : null;
   if (chosen === "changed") return { ok: false, reason: "host-changed" };
   const team = chosen ?? whole;
+  // A team's hosts' times are read at the setup's own length (lib/call-lengths.ts).
+  if (team && other) return { ok: false, reason: "invalid" };
 
   // Counted as orders, admitted before anything is held or opened: nobody is stopped while paying.
   const admitted = await admitOrders(store, CALL_ORDER_UNITS);
@@ -891,7 +914,7 @@ export async function holdAndCheckout(input: {
     }
 
     const pkg = input.fromPackage ?? null;
-    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, lead: input.lead ?? null, code: input.code ?? null });
+    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, length: booked, lead: input.lead ?? null, code: input.code ?? null });
     // The share of the sale, when the store's plan has one (lib/platform-share.ts).
     // A session from a package pays nothing here: its share was taken on the package.
     if (!pkg) {
@@ -974,13 +997,17 @@ function offerFrom(product: CallListing, now: number, seats: TeamBusy[], session
  * Every open time or session for a call product, or null when it cannot be
  * read, and the paid calls read on the way, for catchUpBookings.
  */
-export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null) {
+export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null, minutes?: number | null) {
+  // One of a call's lengths (lib/call-lengths.ts): its times, at that length. Never on a team, whose hosts' times are read
+  // at the setup's own length: there the length asked is not read, and `team` says so, so the page offers no lengths.
+  const atLength = Boolean(minutes && product.call.kind === "weekly" && minutes !== product.call.minutes && product.call.lengths?.some((l) => l.minutes === minutes));
   try {
     const now = Date.now();
     const { busy, paid, blocked, sessions } = await readBusy(store, now);
     const whole = await activeTeam(store, product);
     // A team event type the plan or the team no longer allows: nothing on offer.
-    if (whole === "closed") return { days: [], left: {}, sessions: [], paid };
+    if (whole === "closed") return { days: [], left: {}, sessions: [], paid, team: true };
+    if (atLength && !whole) product = { ...product, call: { ...product.call, minutes: minutes as number } };
     if (whole) {
       // A team that lets buyers choose: who they may pick, and only the chosen host's times once they have.
       const hosts = hostChoices(whole);
@@ -989,9 +1016,9 @@ export async function slotsForProduct(store: Store, product: CallListing, pick?:
       const team = narrowed && narrowed !== "changed" ? narrowed : whole;
       // The page is where each host's calendar is read again, when its last reading is old.
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true });
-      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked };
+      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked, team: true };
     }
-    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid };
+    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid, team: false };
   } catch {
     return null;
   }
@@ -1007,14 +1034,23 @@ export async function slotsForMove(
   product: CallListing,
   session: string,
   current: number,
+  /** How long the booking is, in milliseconds: times are offered at the booking's own length (lib/call-lengths.ts, ownLength). */
+  bookedMs: number,
 ): Promise<Offer | null> {
+  const kept = ownLength(product.call, bookedMs);
+  if (kept === "unknown") return null;
+  // The team is read as it is kept, at the call's own length, as moveBooking reads it; only its hosts' times are read at the
+  // length paid for. Read at the paid length, a host stretch shorter than it would drop the whole team, and the page would
+  // fall back to the store's hours, which the move then refuses.
+  const listed = product;
+  if (kept !== null) product = { ...product, call: { ...product.call, minutes: kept } };
   try {
     const now = Date.now();
     const { busy, blocked, sessions } = await readBusy(store, now);
     // A team booking moves with the host it has: only their free times are offered. The
     // team as it was saved is used, so a plan that now allows fewer never takes a buyer's move away.
     const own = busy.find((b) => b.session === session && b.hosts && b.claim);
-    const team = own ? await teamForMove(store, product) : null;
+    const team = own ? await teamForMove(store, listed) : null;
     if (team && own && own.hosts && own.claim) {
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true, except: { session, claim: own.claim } });
       return { days: teamMoveDays(product.call, ctx, own.hosts, current, now), left: {}, sessions: [] };
@@ -1090,7 +1126,7 @@ export async function moveBooking(input: {
   if (!store.callsId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
   const length = lengthAt(setup, start);
   if (length === null) return { ok: false, reason: "taken" };
-  const end = start + length;
+  let end = start + length;
   const callsId = store.callsId;
   // Moves keep their hosts, so the team as it was saved is used whatever the plan allows now.
   const team = await teamForMove(store, product).catch(() => null);
@@ -1107,6 +1143,11 @@ export async function moveBooking(input: {
       ? { start: recorded.s, end: recorded.e, moves: recorded.n }
       : { start: input.booked.start, end: input.booked.end, moves: 0 };
     if (from.moves >= MAX_MOVES) return { ok: false, reason: "limit" };
+    // Weekly hours move at the length paid for, whatever the setup says now (lib/call-lengths.ts, ownLength).
+    const kept = ownLength(setup, from.end - from.start);
+    if (kept === "unknown") return { ok: false, reason: "error" };
+    if (kept !== null) end = start + kept * 60_000;
+    const at: CallSetup = kept !== null ? { ...setup, minutes: kept } : setup;
     if (now > movableUntil(setup, from.start)) return { ok: false, reason: "late" };
     if (start === from.start) return { ok: false, reason: "same" };
 
@@ -1124,14 +1165,17 @@ export async function moveBooking(input: {
       // The booking keeps its hosts, and their claim moves to the new time in one step.
       teamOwn = { hosts: own.hosts, claim: own.claim };
       try {
-        const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: false, except: { session, claim: own.claim } });
-        if (!(await moveTeamClaim({ store, product, ctx, hosts: own.hosts, claim: own.claim, start, end, now }))) return { ok: false, reason: "taken" };
+        // The hosts are checked at the length paid for (`at`), the length the booking is written at, never the call's
+        // length now: a paid hour never runs past a host's working hours or into their next event.
+        const paid: CallListing = { ...product, call: at };
+        const ctx = await teamContext(store, paid, team, [...busy, ...sessions, ...blocked], now, { refresh: false, except: { session, claim: own.claim } });
+        if (!(await moveTeamClaim({ store, product: paid, ctx, hosts: own.hosts, claim: own.claim, start, end, now }))) return { ok: false, reason: "taken" };
       } catch {
         return { ok: false, reason: "error" };
       }
     } else {
       const others = against(product, busy.filter((b) => b.session !== session), sessions, blocked, ownerOf(store));
-      if (!isBookable(setup, now, others, start, product.id)) return { ok: false, reason: "taken" };
+      if (!isBookable(at, now, others, start, product.id)) return { ok: false, reason: "taken" };
     }
 
     await writeMove(session, { s: start, e: end, n: from.moves + 1 });
@@ -1426,11 +1470,12 @@ export async function confirmBooking(input: {
   // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
   // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
   // (catchUpBookings, the daily job), which carries it, instead of sending both emails without it.
-  // The deadline promised when paying is read the same way, only when the product has one now (none now, none said).
+  // The deadline promised when paying is read the same way whenever it was not handed, whatever the product says now:
+  // a deadline the creator turned off after the sale is still the promise the buyer paid under (lib/call-setup.ts, readCancelPromise).
   let due = input.due;
   let cancel = input.cancel;
   const needDue = due === undefined && whereOf(product.call).kind === "place";
-  const needCancel = cancel === undefined && Boolean(product.call.cancelHours);
+  const needCancel = cancel === undefined;
   if (needDue || needCancel) {
     try {
       const sale = await paidCall(store, session);

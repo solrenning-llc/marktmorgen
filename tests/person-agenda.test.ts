@@ -96,7 +96,7 @@ async function main() {
   is("a link's own words say where it goes, not an address alone", [agendaLinkWords("ann@example.com"), fortaleza.includes(">Open the buyer page of ann@example.com</a>")], ["Open the buyer page of ann@example.com", true]);
 
   part("What the agenda costs, counted before it reads (round 3, M2)");
-  // The reading of the buyers is counted before anything big is read: its ten-minute copy by its size, Stripe and
+  // The reading of the buyers is counted before anything big is read: its one-hour copy by its size, Stripe and
   // the imported buyers by how many (round 4, H1).
   const shop = { statsId: "ledgerstats", currency: "usd", stripeAccountId: "acct_ledger" } as Store;
   const asked: number[] = [];

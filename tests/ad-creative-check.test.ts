@@ -77,4 +77,9 @@ is("Greek epsilon and lunate sigma inside a Latin word", [rules({ headline: "Lim
 is("a combining grapheme joiner, a Hangul filler or a tag character", [rules({ headline: "Li\u034Fmited time" }), rules({ headline: "Bread\u3164 at home" }), rules({ headline: "Bread\u{E0041} at home" })].map((r) => r.includes("disguised")), [true, true, true]);
 is("and the rules still read the words behind a combining grapheme joiner", rules({ text: "Li\u034Fmited time offer." }).includes("false_urgency"), true);
 
+part("Third review: flags made of tags and Mongolian letter shapes are written on purpose");
+is("England's and Scotland's flags", [rules({ headline: "Bread for England \u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F} fans" }), rules({ headline: "Scotland \u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F} bakes" })].map((r) => r.includes("disguised")), [false, false]);
+is("Mongolian with its variation selectors", rules({ headline: "ᠠ᠋ ᠨ᠌" }).includes("disguised"), false);
+is("but a tag character alone, or a selector after a Latin letter, still is", [rules({ headline: "Bread\u{E0041} at home" }), rules({ headline: "Bre᠋ad at home" })].map((r) => r.includes("disguised")), [true, true]);
+
 done();

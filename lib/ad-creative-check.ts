@@ -74,8 +74,9 @@ export function adPlain(text: string): string {
 
 /**
  * Greek capitals and small letters that look like Latin ones: a Latin word
- * holding one is a disguise. Other Greek letters (Δ, Ω, π, μ) are ordinary
- * in brand names ("Δelta Yoga", "Ωmega 3") and are let through.
+ * holding one is a disguise (β, γ, ε, η, ω among them, since they pass for
+ * b, y, e, n, w). Other Greek letters (Δ, Ω, π, μ) are ordinary in brand
+ * names ("Δelta Yoga", "Ωmega 3") and are let through.
  */
 const GREEK_LOOKALIKES = /[ΑΒΕΖΗΙΚΜΝΟΡΤΥΧαβγεηικνορτυχωϲϹϳͿ]/u;
 
@@ -98,8 +99,15 @@ function mixedScriptWord(text: string): string | null {
  * of (U+200C, U+200D), nor the direction marks Arabic and Hebrew text use.
  */
 const HIDDEN = /[\u200B\u2060-\u2064\uFEFF\u00AD\u034F\u115F\u1160\u3164\u180B-\u180F\u202A-\u202E]|[\u{E0000}-\u{E007F}]/u;
+/** A flag emoji made of tags (England, Scotland, Wales): the black flag, its tag letters and the cancel tag. */
+const TAG_FLAG = /\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F}/gu;
+/** Mongolian free variation selectors right after a Mongolian letter: how the script chooses a letter's shape. */
+const MONGOLIAN_SHAPE = /(?<=\p{Script=Mongolian})[\u180B-\u180D\u180F]/gu;
+/** A line with what is written on purpose (flag emoji, Mongolian letter shapes) set aside, so only hiding characters are left to find. */
+const withoutPurposefulMarks = (text: string) => text.replace(TAG_FLAG, "\uD83C\uDFF4").replace(MONGOLIAN_SHAPE, "");
 /** Where a hidden character is, with the words around it, for the creator to find it. */
-function hiddenAt(text: string): string {
+function hiddenAt(raw: string): string {
+  const text = withoutPurposefulMarks(raw);
   const at = text.search(HIDDEN);
   if (at < 0) return "";
   return `${text.slice(Math.max(0, at - 20), at)}[hidden character]${text.slice(at + 1, at + 21)}`.replace(new RegExp(HIDDEN.source, "gu"), "");
@@ -127,7 +135,7 @@ export function checkAdText(ad: AdText, context: AdContext): AdCheck {
     if (!text) continue;
     // Hidden characters or letters of another alphabet inside a word: refused, whatever the words say.
     const mixed = mixedScriptWord(raw);
-    if (HIDDEN.test(raw) || mixed) {
+    if (HIDDEN.test(withoutPurposefulMarks(raw)) || mixed) {
       refusals.push({
         field,
         rule: "disguised",

@@ -24,6 +24,8 @@ import { phoneBeginnerQuestions } from "@/lib/phone-faq";
 import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 import { teamBeginnerQuestions } from "@/lib/team-faq";
 import { securityBeginnerQuestions } from "@/lib/security-faq";
+import { MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { maxFileLabel } from "@/lib/product-file";
 import { domainBeginnerQuestions } from "@/lib/domain-faq";
 import { insightsBeginnerQuestions } from "@/lib/insights-faq";
 import { reviewsBeginnerQuestions } from "@/lib/reviews-faq";
@@ -2544,7 +2546,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "How your store",
     highlight: "and your buyers are protected",
     intro:
-      "What we do, written so you can check it: payments on your own Stripe account, sign-in without passwords, strict rules on what your pages may run, and a refund that closes what it paid for. And, at the end, what none of it does.",
+      "What we do, written so you can check it: payments on your own Stripe account, sign-in without passwords, strict rules on what your pages may run, a refund that closes what it paid for, your data yours to take or delete, and how the code is checked. And, at the end, what none of it does.",
     visual: "security",
     badge: WORKING,
     accent: "from-violet-brand to-mint-brand",
@@ -2559,12 +2561,13 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { icon: "bank", title: "Sales on your own Stripe", body: "The buyer pays on Stripe's own checkout, on your account. We never see a card number and never hold a balance of yours." },
           { icon: "tag", title: "Prices worked out on our side", body: "What a buyer is charged is read on our server from what you saved, never from anything the page sends." },
-          { icon: "key", title: "No password to steal", body: "You sign in with a link sent to your email. It works once, stops working after 15 minutes, and there is a limit on how often a link can be requested." },
+          { icon: "key", title: "No password to steal", body: "You sign in with a link sent to your email. It works once and stops working after 15 minutes. We keep only a hash of the link, not the link itself, and there is a limit on how often a link can be requested." },
           { icon: "phone", title: "Passkeys, if you want them", body: "Optional: sign in with the face, fingerprint or PIN that unlocks your phone or laptop. We keep only the public half of the key, and the emailed link keeps working." },
           { icon: "lock", title: "Two-step login", body: "Turn it on and the emailed link also asks for the six-digit code in your authenticator app, so somebody who gets into your email still cannot open your studio. Ten recovery codes for when your phone is not at hand, each good once; a passkey needs no code. A code is never taken twice, five wrong ones end the login, and turning it on or off emails you. Turning it on asks for a recovery address, a second inbox: lose your phone and your codes, and a link sent there lets you straight back in." },
           { icon: "mail", title: "Lost your email? Still yours", body: "Add a recovery address, a second inbox you confirm with a code, and a passkey. If you can no longer open the inbox you log in with, a passkey logs you in with everything open, and a link to your recovery address lets you in at once, with payments, exports, settings, sending and your sign-in address opening a week later, unless your old inbox answers first. Then move your sign-in address to one you have. Nobody here has to open anything for you." },
           { icon: "users", title: "Team roles checked on our server", body: "What an Admin, an Editor or Support may do is checked on the server for every request, not only hidden on the screen." },
           { icon: "refresh", title: "A fresh session every time", body: "Each sign-in starts a new session, and a session the browser held before is closed." },
+          { icon: "lock", title: "A session cookie scripts cannot read", body: "After you sign in, your browser keeps a cookie that says it is you. Scripts on a page cannot read it, because it is HttpOnly, and on the live site it is sent only over an encrypted connection. We keep only a hash of it. It ends after 30 days, or when you log out." },
           { icon: "door", title: "Log out of all devices", body: "One button at the bottom of your studio closes every session you have open, everywhere." },
           { icon: "mail", title: "An email when something important changes", body: "Whenever your Stripe account, your domain or your webhooks change, we write to your sign-in address saying what changed and when." },
         ],
@@ -2586,11 +2589,34 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { icon: "download", title: "Downloads that expire", body: "The download on the thank-you page works for 3 days; after that the buyer gets it again by email. Where a file is stored is never shown, and large files go through signed links that expire in minutes." },
           { icon: "file", title: "Files that cannot run", body: "Every file is handed over as a download, with headers that stop a browser running anything inside it." },
+          { icon: "camera", title: "Uploads checked for type and size", body: `A picture you upload is checked by its first bytes, not by its name. It must really be a JPEG or a WebP, at most ${MAX_IMAGE_BYTES / 1_000_000} MB, or it is deleted. A file you sell can be at most ${maxFileLabel()}.` },
           { icon: "ban", title: "A full refund closes the door", body: "Refund a payment in full on your Stripe account and its download stops at once, its course closes within 10 minutes, the community within 5 minutes, and its license key is revoked within about 5 minutes. A partial refund keeps access." },
           { icon: "clock", title: "Limits that stop bots", body: "Checkouts are limited to 20 per 10 minutes per connection per store, and bookings and every form that sends an email have limits of their own, so a script cannot sit on your limited stock or your call times." },
-          { icon: "plug", title: "Signed webhooks, guarded addresses", body: "Webhooks are signed with HMAC-SHA256, and a calendar or webhook address that points into a private network is refused." },
+          { icon: "shield", title: "Hidden traps for bots", body: "The sign-in form and your store's contact and free-product forms have a hidden box that people never see. A request that fills it in is dropped. Sign-in also asks our hosting provider whether the request came from a program." },
+          { icon: "plug", title: "Signed webhooks, guarded addresses", body: "Webhooks are signed with HMAC-SHA256. When our server fetches an address someone typed, such as a webhook or a calendar feed, it first looks up where the address leads and refuses one inside a private network." },
+          { icon: "gauge", title: "Ceilings on paid work", body: "Work that costs us money, such as AI writing and uploads, is counted against a monthly ceiling for your store, and one for the whole site, before it starts. If a ceiling is reached, or cannot be checked, the work is refused instead of run." },
           { icon: "lock", title: "Email platform keys kept encrypted", body: "The API key of your Mailchimp, Kit, beehiiv or MailerLite is encrypted before it is stored, and never shown again." },
           { icon: "star", title: "Reviews only from paying buyers", body: "A review can be written only for an order your own Stripe account says was paid and not refunded in full." },
+        ],
+      },
+      {
+        kind: "features",
+        title: "Your data, yours to take or delete",
+        items: [
+          { icon: "download", title: "A copy of your whole store", body: "You, or a teammate allowed to export, can download everything your store keeps as one file, from your studio." },
+          { icon: "trash", title: "Buyers can delete their own data", body: "A buyer can delete what a store keeps about them through a link emailed to them. No account is needed, and nobody has to approve it.", href: "/privacy/delete" },
+          { icon: "users", title: "Delete a person when they ask", body: "You, or a teammate allowed to, can delete one person from your store. Before you confirm, the studio says what is deleted, what is kept and why." },
+        ],
+      },
+      {
+        kind: "features",
+        title: "How the code is checked",
+        intro: "None of these checks proves that there are no faults. Each one finds some kinds of faults early.",
+        items: [
+          { icon: "flask", title: "Tests on every change", body: "Every proposed change to the code, and the main code once a day, runs our automated tests." },
+          { icon: "eye", title: "Code scanning", body: "CodeQL, GitHub's code scanner, looks for known kinds of security faults in the code on every proposed change and once a day." },
+          { icon: "list", title: "Packages checked for known flaws", body: "npm audit compares the packages the site is built from with public lists of known security flaws, on every proposed change and once a day." },
+          { icon: "scroll", title: "A written review", body: "On October 18, 2026, the code was reviewed for security faults. Each fault found was tried out on test data, written down with how serious it was, and then fixed or listed as not fixed yet." },
         ],
       },
       {
@@ -2598,6 +2624,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "What this does not do",
         intro: "Said here so nobody relies on it for more than it does.",
         items: [
+          "No system is free of faults, and this one is not either. The checks above find some kinds of faults, not every one. If you find one, please tell us: the question “How do I report a security problem?” below says how.",
           "Two-step login is off until you turn it on. Without it, your account is as safe as your email inbox: protect that one.",
           "Lose your phone, your recovery codes and every passkey, and a link to your recovery address gets you straight back in. Lose that inbox too, and you still get in at once, with the emailed link alone: you can sell, edit your products and pages and answer buyers, while payments, your plan, your team, exports, settings, sending to your list and your sign-in address stay locked for 7 days, until two-step login turns off. That lock is what stops somebody who only has your sign-in inbox, and a login with a code or a passkey, or Cancel in your studio, logs them out.",
           "On a payment plan, a refund in full of the first payment closes access like any refund in full; a refund of a later payment is not detected, so take the buyer off the course, or remove their access, yourself. A refunded membership closes when its subscription is canceled in Stripe.",
@@ -2616,6 +2643,23 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "Who handles a refund?", a: "You do, in your own Stripe dashboard. What a full refund closes here happens by itself, read from Stripe." },
           { q: "Can I sign in with a password?", a: "No. There is no password to set, and none kept here to be stolen. Each link we email works once, for 15 minutes." },
           { q: "How do I report a security problem?", a: "Email support@marktmorgen.com with what you found and how to see it, and a person answers by email. Please test only your own store and your own data. The same address is in our security.txt file, at marktmorgen.com/.well-known/security.txt, the standard place security researchers look." },
+        ],
+      },
+      {
+        kind: "terms",
+        title: "Words on this page",
+        items: [
+          { term: "Passkey", meaning: "A way to sign in with the face, fingerprint or PIN that unlocks your phone or computer. Your device keeps the private part of the key; we keep only the public part." },
+          { term: "Two-step login", meaning: "Signing in with two things instead of one: the link sent to your email, and a six-digit code from an authenticator app on your phone." },
+          { term: "Recovery code", meaning: "A code you save when you turn on two-step login. Each one works once, for when your phone is not at hand." },
+          { term: "Hash", meaning: "A scrambled stand-in for a piece of text. The same text always gives the same hash, but there is no practical way to turn the hash back into the text. So a stolen hash does not give anyone the link or the session it came from." },
+          { term: "Cookie, HttpOnly", meaning: "A cookie is a small note a website asks your browser to keep. HttpOnly means scripts on the page cannot read it; only the browser sends it back to us." },
+          { term: "Content-Security-Policy", meaning: "A rule a page sends to the browser saying which scripts may run on it. Anything else is blocked." },
+          { term: "HSTS", meaning: "HTTP Strict Transport Security: a rule that tells the browser to use only the encrypted connection to this site." },
+          { term: "Webhook", meaning: "A message our server sends to an address you choose when something happens in your store." },
+          { term: "HMAC-SHA256", meaning: "A way to sign a message with a secret key, so the receiver can check that it came from us and was not changed on the way." },
+          { term: "Private network", meaning: "Addresses inside a company's or a cloud's own network, which the open internet cannot reach." },
+          { term: "Code scanning", meaning: "A program that reads the code and points out patterns that often lead to security faults." },
         ],
       },
     ],

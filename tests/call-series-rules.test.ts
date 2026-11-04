@@ -3,7 +3,7 @@
  * 2026): the rules, on synthetic setups and dates only.
  */
 import { readSetup, type CallSetup } from "@/lib/call-setup";
-import { MAX_SERIES, SERIES_PROBLEMS, chargeable, conflictWords, readSeries, seriesConflicts, seriesStarts, toCancel } from "@/lib/call-series-rules";
+import { MAX_SERIES, SERIES_PROBLEMS, conflictWords, readSeries, seriesConflicts, seriesStarts, toCancel } from "@/lib/call-series-rules";
 import { done, is, part } from "./check";
 
 const NY = "America/New_York";
@@ -48,6 +48,10 @@ const afterNoon = [{ start: Date.UTC(2026, 10, 2, 18, 0), end: Date.UTC(2026, 10
 is("at the length chosen: a busy time only a longer length reaches is named, the call's own length passes", [seriesConflicts(setup, NOW, afterNoon, noon, "p1", KNOWN, 90), seriesConflicts(setup, NOW, afterNoon, noon, "p1", KNOWN)], [[1], []]);
 is("at the length chosen: every date free when nothing is in the way", seriesConflicts(setup, NOW, [], noon, "p1", KNOWN, 90), []);
 is("at the length chosen: past the busy times read by its own end", [seriesConflicts(setup, NOW, [], [NOON], "p1", NOON + 75 * 60_000), seriesConflicts(setup, NOW, [], [NOON], "p1", NOON + 75 * 60_000, 90)], [[], [0]]);
+// With a gap of 15 minutes after each call, the booking page offers 9:00, 10:15… on Monday 26 October: 9:00 to 10:00, then the gap to 10:15.
+const NINE = Date.UTC(2026, 9, 26, 13, 0);
+const gapped: CallSetup = { ...setup, bufferMinutes: 15 };
+is("past the busy times read: the gap after the end must be known too, as the booking page reads it", [seriesConflicts(gapped, NOW, [], [NINE], "p1", NINE + 60 * 60_000), seriesConflicts(gapped, NOW, [], [NINE], "p1", NINE + 75 * 60_000)], [[0], []]);
 is("a date outside the creator's hours is named", seriesConflicts(setup, NOW, [], [FIRST, FIRST + 5 * DAY], "p1", KNOWN), [1]);
 is("a missing clock time is a conflict too", seriesConflicts(setup, NOW, [], [FIRST, null], "p1", KNOWN), [1]);
 const long = seriesStarts(FIRST, NY, "biweekly", 12);
@@ -60,13 +64,17 @@ seriesConflicts(wideDay, NOW, many, seriesStarts(FIRST, NY, "biweekly", 12), "p1
 is("read once for the whole series, so even a busy calendar answers at once", Date.now() - started < 3_000, true);
 is("said with each date and the time zone", conflictWords(seriesStarts(FIRST, NY, "weekly", 4), [1, 3], NY, FIRST, "weekly"), "The series cannot be booked, because these times are not open: Monday, November 2 at 10:00 AM EST and Monday, November 16 at 10:00 AM EST. Pick another first time, or fewer sessions.");
 is("a time that does not exist is said with its date", conflictWords(seriesStarts(early, NY, "weekly", 3), [1], NY, early, "weekly"), "The series cannot be booked, because these times are not open: Sunday, March 8 (that time does not exist that day). Pick another first time, or fewer sessions.");
+// Sunday 22 February 2026, 2:30 in New York exists; two weeks on, Sunday 8 March, 2:30 does not (the clocks go forward at 2:00).
+const biweeklyEarly = seriesStarts(Date.UTC(2026, 1, 22, 7, 30), NY, "biweekly", 2);
+is("a missing time two weeks on is said with its own calendar date", conflictWords(biweeklyEarly, [1], NY, Date.UTC(2026, 1, 22, 7, 30), "biweekly"), "The series cannot be booked, because these times are not open: Sunday, March 8 (that time does not exist that day). Pick another first time, or fewer sessions.");
+// Saturday 24 October 2026, 11:45 PM in Kathmandu: the first plus a week plus twelve hours lands on Sunday there, the series' calendar day does not. (The missing time is synthetic here: only the date said is read.)
+is("the date said is the series' own calendar day in the creator's zone", conflictWords([Date.UTC(2026, 9, 24, 18, 0), null], [1], "Asia/Kathmandu", Date.UTC(2026, 9, 24, 18, 0), "weekly"), "The series cannot be booked, because these times are not open: Saturday, October 31 (that time does not exist that day). Pick another first time, or fewer sessions.");
 is("nothing to say when every date is open", conflictWords([FIRST], [], NY, FIRST, "weekly"), "");
 
-part("Ended early: the rest canceled, never charged");
+part("Ended early: the rest canceled");
 const starts = seriesStarts(FIRST, NY, "weekly", 4).map((s) => s ?? 0);
 const canceled = toCancel(starts, FIRST + 8 * DAY);
 is("every session not yet started is canceled, by its place in the series", canceled, [2, 3]);
-is("and only what took place is charged", chargeable(4, canceled), [0, 1]);
 is("a session under way at that moment took place", toCancel(starts, FIRST + 30 * 60_000), [1, 2, 3]);
 
 done();

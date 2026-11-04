@@ -623,7 +623,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
       return each(emails, "uncertain", `Whether they were started on “${target.name}” could not be confirmed.`);
     }
   }
-  if (action.do === "field" || action.do === "deal" || action.do === "note" || action.do === "notify" || action.do === "assign" || action.do === "next") return actOnPeople(store, action, emails, at);
+  if (action.do === "field" || action.do === "deal" || action.do === "note" || action.do === "notify" || action.do === "assign" || action.do === "next" || action.do === "rotate") return actOnPeople(store, action, emails, at);
   if (action.do === "untag") {
     try {
       const { changed, same } = await changeLabels(listId, emails, (tags) =>
@@ -669,7 +669,7 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
  */
 async function actOnPeople(
   store: Store,
-  action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" }>,
+  action: Extract<FlowAction, { do: "field" | "deal" | "note" | "notify" | "assign" | "next" | "rotate" }>,
   emails: string[],
   at: { flow: Flow; step: FlowStep; index: number },
 ): Promise<Acted[]> {
@@ -706,7 +706,7 @@ async function actOnPeople(
     }
     return out;
   }
-  if (action.do === "deal" || action.do === "assign" || action.do === "next") {
+  if (action.do === "deal" || action.do === "assign" || action.do === "next" || action.do === "rotate") {
     const pipelines = await readPipelines(statsId);
     const stages = allStages(pipelines);
     let deals: Awaited<ReturnType<typeof readDeals>>;
@@ -717,9 +717,25 @@ async function actOnPeople(
       return each(emails, "deferred", "Your deals board could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
     }
     const now = Math.floor(Date.now() / 1000);
-    if (action.do === "assign") {
+    // Who may be responsible for a deal now, read again as for "assign": the owner, and teammates who can see orders.
+    // Their open deals counted, so each deal goes to whoever has the fewest, the owner first on a tie.
+    const load = new Map<string, number>();
+    // The team, read once for both steps that need it; unreadable, nothing is written and the step is tried again later.
+    let team: Awaited<ReturnType<typeof readTeam>> | null = null;
+    if (action.do === "rotate" || action.do === "assign") {
+      try {
+        team = await readTeam(store.sid);
+      } catch {
+        return each(emails, "deferred", "Your team could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
+      }
+    }
+    if (action.do === "rotate" && team) {
+      for (const who of [store.email.toLowerCase(), ...team.members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())]) load.set(who, 0);
+      const openStage = new Set(stages.filter((s) => s.kind === "open").map((s) => s.id));
+      for (const d of deals) if (d.assignee && openStage.has(d.stage) && load.has(d.assignee)) load.set(d.assignee, (load.get(d.assignee) ?? 0) + 1);
+    }
+    if (action.do === "assign" && team) {
       // Checked again now: a teammate who left, or lost the role, is never made responsible.
-      const team = await readTeam(store.sid);
       const eligible = action.assignee === store.email.toLowerCase() || team.members.some((m) => m.email.toLowerCase() === action.assignee && can(m.role, "orders"));
       if (!eligible) return each(emails, "failed", `${action.assignee} can no longer be responsible for deals in this store.`);
     }
@@ -732,7 +748,18 @@ async function actOnPeople(
       // Their open deal moves; with none open, a new one is made for them.
       const open = deals.find((d) => d.email === email && (!inPipeline || inPipeline.has(d.stage)) && stages.find((s) => s.id === d.stage)?.kind === "open");
       let deal;
-      if (action.do === "next") {
+      if (action.do === "rotate") {
+        if (!open) {
+          out.push({ email, state: "failed", note: "They have no open deal to give to someone on your team." });
+          continue;
+        }
+        if (open.assignee && load.has(open.assignee)) {
+          out.push({ email, state: "confirmed", note: `${open.assignee} was already responsible for their deal.` });
+          continue;
+        }
+        const [who] = [...load.entries()].sort((a, b) => a[1] - b[1])[0];
+        deal = { ...open, assignee: who, updatedAt: now };
+      } else if (action.do === "next") {
         if (!open) {
           out.push({ email, state: "failed", note: "They have no open deal to set a next action on." });
           continue;
@@ -764,12 +791,17 @@ async function actOnPeople(
           : { id: newCrmId(10), title: (action.title || at.flow.name).slice(0, 90), email, cents: 0, stage: stage!.id, note: `Made by the sequence “${at.flow.name}”.`.slice(0, 500), createdAt: now, updatedAt: now };
       }
       try {
-        out.push((await writeDeal(statsId, deal, store)) ? { email, state: "confirmed", changed: true, note: action.do === "next" ? `Next action on their deal: “${action.text}”, due ${deal.dueDate}.` : action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
+        const written = await writeDeal(statsId, deal, store);
+        // Counted only once written, so a deal not written leaves the share as it was.
+        if (written && action.do === "rotate" && deal.assignee) load.set(deal.assignee, (load.get(deal.assignee) ?? 0) + 1);
+        out.push(written ? { email, state: "confirmed", changed: true, note: action.do === "rotate" ? (load.size === 1 ? `${deal.assignee} is now responsible for their deal: nobody else on your team can be responsible for deals.` : `${deal.assignee} is now responsible for their deal, as the one on your team with the fewest open deals.`) : action.do === "next" ? `Next action on their deal: “${action.text}”, due ${deal.dueDate}.` : action.do === "assign" ? `${action.assignee} is now responsible for their deal.` : open ? `Deal moved to “${stage!.name}”.` : `New deal made in “${stage!.name}”.` } : { email, state: "failed", note: "Your deals board is full; nothing was added." });
       } catch (error) {
         if (error instanceof DataRoomError) {
           out.push({ email, state: "failed", note: "The deal was not written: the store's data room is full." });
           continue;
         }
+        // Not known whether it was written: counted, so the share leans away from them rather than onto them.
+        if (!(error instanceof CrmDealReadUnavailable) && action.do === "rotate" && deal.assignee) load.set(deal.assignee, (load.get(deal.assignee) ?? 0) + 1);
         out.push(error instanceof CrmDealReadUnavailable ? { email, state: "deferred", note: "Your deals board could not be read; tried again in a few minutes.", wait: "board" } : { email, state: "uncertain", note: "Whether the deal was saved could not be confirmed." });
       }
     }

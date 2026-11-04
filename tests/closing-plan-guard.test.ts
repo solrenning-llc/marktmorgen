@@ -24,6 +24,7 @@ import { FINAL_INDEX, inClosingDay } from "@/lib/closing-holds";
 import { prepareStore } from "@/lib/closed-store-data";
 import { UNDO_KEY, expirePlanCheckouts, markShut, planReturnedLetter, refusePlanIfClosing, refuseSession, retryPlanUndos } from "@/lib/closing-plan-guard";
 import { syncSubscriptions } from "@/lib/billing-sync";
+import { closeOne, type Hands } from "@/lib/plan-closing";
 import { redisPipeline } from "@/lib/redis";
 
 const S = (ms: number) => Math.floor(ms / 1000);
@@ -338,6 +339,62 @@ async function main() {
   is("another store's checkout is not this store's to refuse or expire", [await refuseSession((await storeForEmail(rosa.email))!, "cs_test_rosaother0001"), world.expired.length], ["no", 1]);
   world.sessions.push({ id: "cs_test_rosaopen00002", status: "open", mode: "subscription", customer: rosa.customer, metadata: { store: "rosa" } });
   is("one of its own still open when met on the way back is expired there", [await refuseSession((await storeForEmail(rosa.email))!, "cs_test_rosaopen00002"), world.expired.at(-1)], ["no", "cs_test_rosaopen00002"]);
+
+  part("A stopped late plan's queued refund outlives the closing store");
+  const handoff = await closingStore("handoff", day);
+  const handoffStore = (await storeForEmail(handoff.email))!;
+  const originalFetch = globalThis.fetch;
+  let refusedEnd = "", planReads = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    if (url.pathname === "/v1/subscriptions/search" || url.pathname === "/v1/subscriptions") planReads++;
+    if (refusedEnd && url.pathname === `/v1/subscriptions/${refusedEnd}` && init?.method === "DELETE") return Response.json({ error: { message: "synthetic cancellation failure" } }, { status: 503 });
+    const response = await originalFetch(input, init);
+    if (url.pathname === "/v1/subscriptions" && (init?.method ?? "GET") === "GET") {
+      const page = await response.json() as { data: Record<string, unknown>[]; has_more: boolean };
+      return Response.json({ ...page, data: page.data.map(row => String((row.metadata as { store?: string })?.store).startsWith("handoff") ? {
+        ...row, items: { data: [{ quantity: 1, current_period_start: S(day) - 86400, current_period_end: S(day) + 30 * 86400,
+          price: { lookup_key: "nimbus_creator_month", currency: "usd", unit_amount: 6900, recurring: { interval: "month", interval_count: 1 } } }] },
+      } : row) });
+    }
+    return response;
+  };
+  const noFiles: Hands = { measure: async () => 0, list: async () => [], remove: async () => {} };
+  try {
+    world.refundErrors = 1;
+    const closed = await closeOne(storeRef(handoffStore), day + 60_000, noFiles, Number.POSITIVE_INFINITY);
+    is("closing uses the same two observations without a third customer-list read", planReads, 2);
+    is("a confirmed stopped plan and self-contained refund queue do not retain the store's files", [world.subs.get(handoff.id)?.status, closed.state], ["canceled", "removed"]);
+    is("the failed refund keeps the creator and obligation in its independent queue", [(await undo(handoff.id))?.to, Boolean((await undo(handoff.id))?.done), refundsOf(handoff.pi).length], [handoff.email, false, 0]);
+    await prepareStore(handoffStore);
+    is("erasing the store does not erase its pending plan refund", (await undo(handoff.id))?.to, handoff.email);
+    world.refundErrors = 0;
+    await retryPlanUndos(Number.POSITIVE_INFINITY);
+    is("the independent worker refunds once after the store is gone", [refundsOf(handoff.pi).map(row => [row.amount, row.status]), Boolean((await undo(handoff.id))?.done)], [[[6900, "succeeded"]], true]);
+    await retryPlanUndos(Number.POSITIVE_INFINITY);
+    is("a second worker pass never refunds twice", refundsOf(handoff.pi).length, 1);
+
+    const corrupt = await closingStore("handoffbad", day);
+    const corruptStore = (await storeForEmail(corrupt.email))!;
+    await redisPipeline([["HSET", UNDO_KEY, corrupt.id, "not readable"]]);
+    const keptCorrupt = await closeOne(storeRef(corruptStore), day + 60_000, noFiles, Number.POSITIVE_INFINITY);
+    is("returning with an unreadable queue is not proof of a stopped plan or a recoverable refund", [keptCorrupt.state, world.subs.get(corrupt.id)?.status], ["held", "active"]);
+    await redisPipeline([["HDEL", UNDO_KEY, corrupt.id]]);
+
+    const uncertain = await closingStore("handoffhold", day);
+    refusedEnd = uncertain.id;
+    const keptActive = await closeOne(storeRef((await storeForEmail(uncertain.email))!), day + 60_000, noFiles, Number.POSITIVE_INFINITY);
+    is("a readable queue without confirmed cancellation cannot release file retention", [keptActive.state, world.subs.get(uncertain.id)?.status, Boolean((await undo(uncertain.id))?.done)], ["held", "active", false]);
+    refusedEnd = "";
+
+    const lost = await closingStore("handofflost", day);
+    const pipeline = redis.pipeline.bind(redis);
+    redis.pipeline = async commands => commands.some(command => command[0] === "HSETNX" && command[1] === UNDO_KEY && command[2] === lost.id) ? [undefined] : pipeline(commands);
+    try {
+      const outcome = await refusePlanIfClosing({ store: (await storeForEmail(lost.email))!, handle: "handofflost", subscriptionId: lost.id, customerId: lost.customer });
+      is("a missing queue acknowledgement never reports an active plan as returned", [outcome, world.subs.get(lost.id)?.status, refundsOf(lost.pi).length], ["returning", "active", 0]);
+    } finally { redis.pipeline = pipeline; }
+  } finally { globalThis.fetch = originalFetch; world.refundErrors = 0; }
 
   part("Where it is wired");
   const closing = readFileSync(join(process.cwd(), "lib/plan-closing.ts"), "utf8");

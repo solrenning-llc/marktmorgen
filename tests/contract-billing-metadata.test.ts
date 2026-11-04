@@ -383,7 +383,7 @@ test('subscription search rejects accessor completeness even when descriptor pro
  try{
   Object.defineProperty(Object.prototype,'value',{value:false,configurable:true});
   await assert.rejects(findStoreSubscriptions(owner),/Subscription search page is incomplete/);
-  assert.equal(getters,0);assert.equal(reads,1);assert.equal(writes,0);
+  assert.equal(getters,0);assert.equal(reads,2);assert.equal(writes,0);
  }finally{
   delete (Object.prototype as {value?:unknown}).value;
   if(prior)Object.defineProperty(Object.prototype,'value',prior);
@@ -477,8 +477,8 @@ test('DeletedCustomer exception cannot turn ambiguous, funded or active observat
  const old=globalThis.fetch,now=Math.floor(Date.now()/1000);
  const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:['old-harbor'],releasedHandles:['released-harbor']} as Store;
  const terminal={id:'sub_Deleted001',created:now-100,status:'canceled',metadata:{store:'harbor'},customer:{id:'cus_Test000001',object:'customer',deleted:true}};
- let page:unknown,reads=0,writes=0,getters=0;
- globalThis.fetch=async(_input,init)=>{reads++;if(init?.method!=='GET')writes++;return {ok:true,json:async()=>page} as Response;};
+ let page:unknown,reads=0,writes=0,getters=0,searchOnly=false;
+ globalThis.fetch=async(input,init)=>{reads++;if(init?.method!=='GET')writes++;return {ok:true,json:async()=>searchOnly&&new URL(String(input)).pathname==='/v1/subscriptions'?{data:[],has_more:false}:page} as Response;};
  try{
   const malformed:Record<string,unknown>[]=[
    {...terminal,status:'active'}, {...terminal,status:'trialing'}, {...terminal,status:'incomplete'},
@@ -495,12 +495,13 @@ test('DeletedCustomer exception cannot turn ambiguous, funded or active observat
    malformed.push({...terminal,[prefix+'proof']:undefined});
   }
   for(const row of malformed){page={data:[row],has_more:false};await assert.rejects(findStoreSubscriptions(owner),/Subscription search/);}
-  for(const id of [null,'','invalid']){page={data:[terminal],has_more:false};await assert.rejects(findStoreSubscriptions({...owner,stripeCustomerId:id} as Store),/Subscription search/);}
+  for(const id of [null,'','invalid']){page={data:[terminal],has_more:false};assert.deepEqual(await findStoreSubscriptions({...owner,stripeCustomerId:id} as Store),{live:null,customerId:null,lapsed:[]});}
   const accessor={...owner};Object.defineProperty(accessor,'stripeCustomerId',{get(){getters++;return owner.stripeCustomerId;}});
   const inherited={...owner};delete (inherited as Partial<Store>).stripeCustomerId;Object.setPrototypeOf(inherited,{stripeCustomerId:owner.stripeCustomerId});
-  for(const context of [accessor,inherited]){page={data:[terminal],has_more:false};await assert.rejects(findStoreSubscriptions(context),/Subscription search/);}
-  // A different current/previous owner cannot be excluded merely by mismatch.
-  for(const handle of ['harbor','old-harbor']){page={data:[{...terminal,metadata:{store:handle},customer:{...terminal.customer,id:'cus_Foreign001'}}],has_more:false};await assert.rejects(findStoreSubscriptions(owner),/Subscription search/);}
+  for(const context of [accessor,inherited]){page={data:[terminal],has_more:false};assert.deepEqual(await findStoreSubscriptions(context),{live:null,customerId:null,lapsed:[]});}
+  // A valid canceled DeletedCustomer is terminal history, including a prior owner of the current name.
+  searchOnly=true;
+  for(const handle of ['harbor','old-harbor']){page={data:[{...terminal,metadata:{store:handle},customer:{...terminal.customer,id:'cus_Foreign001'}}],has_more:false};assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});}
   assert.equal(getters,0);assert.equal(writes,0);assert.ok(reads>0);
  }finally{globalThis.fetch=old;}
 });
@@ -512,7 +513,7 @@ test('DeletedCustomer ownership is captured before awaiting the provider, withou
  let writes=0;
  try{
   globalThis.fetch=async(_input,init)=>{if(init?.method!=='GET')writes++;owner.stripeCustomerId='cus_Test000001';return Response.json({data:[terminal],has_more:false});};
-  await assert.rejects(findStoreSubscriptions(owner),/Subscription search/);
+  assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});
   owner.stripeCustomerId='cus_Test000001';
   const foreign={...terminal,metadata:{store:'released-harbor'},customer:{...terminal.customer,id:'cus_Foreign001'}};
   globalThis.fetch=async(input,init)=>{if(init?.method!=='GET')writes++;owner.stripeCustomerId='cus_Foreign001';owner.releasedHandles.length=0;return Response.json({data:new URL(String(input)).pathname==='/v1/subscriptions/search'?[foreign]:[],has_more:false});};
@@ -747,6 +748,21 @@ test('CX-61 malformed released-name evidence is unknown, never an empty history 
    const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles} as Store;
    globalThis.fetch=async(input)=>Response.json({data:new URL(String(input)).pathname==='/v1/subscriptions/search'?[]:[live],has_more:false});
    await assert.rejects(findStoreSubscriptions(owner),/Subscription search handle coverage is unknown/);
+  }
+ }finally{globalThis.fetch=old;}
+});
+
+test('review: a reused current or previous name is not blocked by canceled DeletedCustomer history',async()=>{
+ const old=globalThis.fetch;
+ activationObservations.calls.length=0;
+ const terminal={id:'sub_Deleted001',created:1,status:'canceled',metadata:{store:'harbor'},customer:{id:'cus_Foreign001',object:'customer',deleted:true}};
+ try{
+  for(const named of ['harbor','old-harbor'])for(const customerId of [null,'cus_Test000001'])for(const marked of [false,true]){
+   const owner={...store,stripeCustomerId:customerId,previousHandles:['old-harbor'],releasedHandles:[]} as Store;
+   const row={...terminal,metadata:{store:named,...(marked?{funding_grant:'not_an_activation_proof'}:{})}};
+   globalThis.fetch=async(input)=>Response.json({data:new URL(String(input)).pathname==='/v1/subscriptions/search'?[row]:[],has_more:false});
+   assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});
+   assert.equal(activationObservations.calls.length,0,'terminal foreign or unidentified history never activates a grant');
   }
  }finally{globalThis.fetch=old;}
 });

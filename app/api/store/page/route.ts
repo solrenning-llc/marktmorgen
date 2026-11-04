@@ -48,6 +48,11 @@ export async function POST(request: NextRequest) {
     if (problem) return Response.json({ ok: false, error: problem }, { status: 400 });
     // A form is asked on the store's own pages, where it can lead a funnel on; a product's page has its own checkout.
     if (page.blocks.some((block) => block.kind === "form")) return Response.json({ ok: false, error: "kind" }, { status: 400 });
+    // A booking block is kept and drawn but not offered yet (552 [BB1] unit 1): nothing saves one, in either version,
+    // until its picker and its call chooser exist, so a hand-made request cannot put any id on a page.
+    if ([...page.blocks, ...(page.variant?.blocks ?? [])].some((block) => block.kind === "booking")) {
+      return Response.json({ ok: false, error: "kind" }, { status: 400 });
+    }
     if (oversized(page)) return Response.json({ ok: false, error: "too_big" }, { status: 400 });
     // What is shown after a free sign-up is another product of this store,
     // one that costs money; a paid product's page shows nothing after.

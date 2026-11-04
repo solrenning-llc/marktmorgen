@@ -24,3 +24,29 @@ test("only shared essential checkout/deletion events and daily closing receive t
   }
   assert.equal(line.sources.some(source => source.file === "lib/traffic.ts"), false);
 });
+
+test("CX-67 holds the full retained store and global retries as company exposure with unknown totals", async () => {
+  const { HELD_EXPOSURE: held, heldStoreMonthlyExposure, heldCompanyMonthlyExposure, DB_BYTE_MONTH, STORAGE_PER_GB, GB } = await import("./plan-cost-registry");
+  const { DATA_ROOM_BYTES } = await import("@/lib/store-data-rules");
+  const { reservePeakBytes } = await import("./store-data-registry");
+  const { heldRecheckMemoryUsd, heldStoreFundingFloorCents } = await import("@/lib/held-store-rules");
+  assert.equal(held.dailyAttempts, 50); assert.equal(held.monthlyAttempts, 1550);
+  assert.equal(heldRecheckMemoryUsd(), event);
+  assert.equal(held.completeMonthlyCostUsd, null); assert.equal(held.reviewedGlobalCaseCeiling, null);
+  assert.equal(held.stripeEndpointTariffUsd, null);
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    const cost = heldStoreMonthlyExposure(tier);
+    assert.ok(cost.fileBytes > 0);
+    assert.equal(cost.databaseBytes, DATA_ROOM_BYTES[tier] + reservePeakBytes(tier) + 4096);
+    assert.equal(cost.retentionUsd, cost.fileBytes / GB * STORAGE_PER_GB * 31 / 30 + cost.databaseBytes * DB_BYTE_MONTH * 31 / 30);
+    assert.ok(cost.retryUsd > event); assert.ok(cost.modeledMonthlyUsd > 0);
+    assert.equal(cost.completeMonthlyUsd, null);
+  }
+  assert.ok(heldStoreFundingFloorCents() > 0);
+  assert.equal(heldCompanyMonthlyExposure(null, 0).modeledUsd, null);
+  assert.equal(heldCompanyMonthlyExposure(1, 2).modeledUsd, null);
+  assert.equal(heldCompanyMonthlyExposure(1, null).modeledUsd, null);
+  assert.ok(heldCompanyMonthlyExposure(1, 1).modeledUsd! > heldStoreMonthlyExposure("scale").retentionUsd);
+  assert.equal(heldCompanyMonthlyExposure(1, 1).completeUsd, null);
+  assert.equal(COST_LINES.some(row => row.id === "held-stores"), false);
+});

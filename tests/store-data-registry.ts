@@ -57,6 +57,7 @@ import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
+import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
@@ -237,6 +238,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:adsrv:sent:@lib/ad-events.ts": { what: "A sale, renewal or lead already sent to the ad platforms", room: ["lib/ad-events.ts"], parts: [per("order", 3, MARK, "A sale's mark, three days."), per("request", 3, MARK, "A lead's mark, three days.", REQ("sign-up"))] },
   "nl:adsrv:sub:@lib/ad-events.ts": { what: "What a membership's renewals are sent with", parts: [per("order", 400, KB, "Its cookies and clicks, once per membership sold, 400 days.", KIND("membership"))] },
   "nl:stats:@lib/ad-spend.ts": { what: "What the creator spent on ads", parts: [capped(MAX_SPEND_ENTRIES * 512, "MAX_SPEND_ENTRIES entries, the oldest let go.", src("lib/ad-spend-rules.ts", "MAX_SPEND_ENTRIES"))] },
+  "nl:stats:@lib/api-numbers.ts": { what: "The numbers as the API and the MCP tools read them, kept an hour", parts: [capped(2 * (NUMBERS_KEPT_BYTES + KB), "Two copies, without and with the products' listings, each at most NUMBERS_KEPT_BYTES and its first line.", src("lib/api-read-rules.ts", "NUMBERS_KEPT_BYTES"))] },
   "nl:aff:@lib/affiliate-bond.ts": { what: "Which affiliate a buyer belongs to", parts: [kept(MARK, "A field per buyer, written with a sale, kept for good.")] },
   "nl:aff:@lib/affiliate-codes.ts": { what: "Discount codes given to affiliates", room: ["lib/affiliate-codes.ts"] },
   "nl:affhub:@lib/affiliate-hub.ts": company("The stores an address is an affiliate of", "Per affiliate across stores, in the set of the quarter it was noted in, kept QUARTERS_KEPT quarters at the most: written with an affiliate record (capped by MAX_AFFILIATES per store, below); what a closed store leaves in it is the company's as the hub is, and runs out with its quarter."),
@@ -515,6 +517,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:transparency:acted:@lib/transparency.ts": company("The notices acted on each year, so each counts once", "The company's: notice ids only, one set a year."),
   "nl:transparency:since@lib/transparency.ts": company("The day counting began", "The company's: one key for the whole platform, a date and nothing else."),
   "nl:erase:link:@lib/erasure-request.ts": company("A person's link to delete themselves from the stores they ask, an hour", "A person's, across stores, behind a per-address limit."),
+  "nl:held:stores@lib/held-stores.ts": company("Held closing stores awaiting complete billing evidence", "One private reference up to1280bytes plus score/member overhead per existing obligation; funded post_cancellation case ceiling bounds financed cases, overflow stays counted and funding is unknown. Pruned on deletion; never expires an unresolved obligation. Cost in HELD_EXPOSURE of tests/plan-cost-registry.ts."),
+  "nl:held:retry:@lib/held-stores.ts": company("Daily held recheck claims", "At most HELD_RECHECKS_PER_DAY hashed identities and one count, two days TTL (up to3 dated hashes overlap). Global funded work ceiling; no raw store/address in the hash. Cost in HELD_EXPOSURE."),
+  "nl:held:month:@lib/held-stores.ts": company("Monthly held store aggregate", "Count, observed peak, last observation day and completeness only; at most15 monthly keys alive for400days. Cost in HELD_EXPOSURE; unknown/partial is never zero."),
   "nl:exposure:v1:YYYY-MM@lib/exposure-budget-policy.ts": company("The exposure ledger's name", "The company's ledger."),
   "nl:exposure:v1:@lib/exposure-budget.ts": company("The company's exposure ledger, a month", "The company's ledger, carried by its fixed costs."),
   "nl:fair:c:@lib/fair-coupon.ts": { what: "A fair-price coupon made on the creator's Stripe", parts: [capped(96 * KEY, "One per percent offered.")] },

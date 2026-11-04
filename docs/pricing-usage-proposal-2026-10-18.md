@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $34.48 | $231.20 | $69 / $690 |
+| Store | $34.48 | $231.25 | $69 / $690 |
 | Studio | $87.90 | $848.45 | $449 / $4,490 |
-| Scale | $178.55 | $1,906.83 | $999 / $9,990 |
+| Scale | $178.55 | $1,906.95 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -35,7 +35,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | --- | --- | --- | --- | --- | --- |
 | $29 / $290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $35 / $350 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $39 / $390 | 9.4% | 60.46% | 61.22% | $23.58 | 1.76 |
+| $39 / $390 | 9.3% | 60.46% | 61.22% | $23.58 | 1.76 |
 | $49 / $490 **(recommended)** | 38.2% | 60.40% | 60.94% | $29.60 | 1.40 |
 | $59 / $590 | 70.0% | 60.32% | 60.66% | $35.59 | 1.17 |
 | $69 / $690 | 97.1% | 60.27% | 60.52% | $41.59 | 1.00 |

@@ -3,6 +3,62 @@
 > **MR vigente — dono27/10/2026 07h42 Fortaleza,464[MR1]:** [REGRA DE MARGEM](../AGENTS.md#mr--regra-de-margem-vigente-27-de-outubro-de-2026) substitui todos os pisos históricos de60% neste documento e suas referências. Exigir lucro líquido por unidade maior que zero no pior caso com a folga existente do spend floor,100% direitos mensal/anual e complementos; empresa sem prejuízo a partir de base mínima calculada com100%FX275 e exposições.60% é meta real mensal da empresa. Preservados ISS5%, leitura mais onerosa, recebimento mais caro, reservas/tetos/gates; desconhecido reprova, não é zero. Texto/citações/números antigos abaixo são histórico, não recalculados nem certificados. Código/relatório/regeneração pertencem a MR2; resultados atuais a MR3. Sem mudança de preços/limites/comissão/vendas.
 
 
+## CX-67 — Held stores: financed company exposure (4 November2026)
+
+This is an explicit exception to the historical closing-day deletion statements
+below. Unknown billing coverage (`has_more`, malformed/failed evidence or an
+unreadable independent refund queue) never advances a store to `removed`.
+There is no deletion deadline for uncertainty and no new customer limit.
+
+`lib/held-stores.ts` retains each unresolved obligation in the private shared
+`nl:held:stores` index. The daily closing job revisits oldest due entries,
+requiring a full, current-month `post_cancellation` reserve allocation **before**
+provider work. The existing reviewed allocation supplies the global funded
+case ceiling and consumes its existing ledger, without initializing money,
+refunding slots or offsetting another scope. At most50 rechecks may run company-wide
+per UTC day, and at most one per store/day, committed atomically before either
+of the two recovery reads. A lost acknowledgement consumes its claim and cannot
+permit another attempt. Processed entries rotate to the next UTC day. Once
+complete evidence proves there is no live billing, normal closing continues.
+A refund already independently queued after a confirmed stop does not retain
+files; its refund worker remains responsible after deletion.
+
+`HELD_EXPOSURE` and `heldStoreMonthlyExposure` in `tests/plan-cost-registry.ts`
+count the full paid-tier file/task/community ceiling and the full data room
+plus **peak** outside-room keys and a4096-byte index allowance per held store,
+for31days. They add up to31 two-read timeout waits per store,128 bookkeeping
+commands and MAX_STORE_BYTES+128KiB of database replies per retry. The global
+model uses at most1550 attempts/month, the reviewed simultaneous case cap,
+three overlapping daily hashes (50 hashed identities each, two-day TTL) and
+15 monthly aggregate keys (400-day TTL). Daily work caps are internal company
+work bounds. These are modeled components, not a verified complete supplier
+quote: endpoint tariff, deployment coverage, all retained provider records,
+independent refund work and taxes require the complete funded review. The
+runtime floor is only a necessary minimum; it cannot certify missing categories.
+The approved current policy, actual case ceiling and complete total remain
+**null**, never zero. No price, allowance, commercial flag or gate changes.
+
+Funding must be renewed for every calendar month unresolved stores remain.
+Existing obligations above the reviewed case ceiling are **still retained and
+counted**, not hidden or deleted to fit a budget; such overflow or any unknown
+count makes the financed company total unknown and prevents certification of
+an adequate minimum paid base. An unknown-duration hold has no invented finite
+lifetime cost. The whole reviewed monthly exposure belongs100% in company
+fixed/exposure accounting and its minimum paid base, never subsidized by a
+paid customer's modeled profit or a hoped-for conversion.
+
+The daily job atomically records aggregate count, observed daily peak, date and
+walk completeness in `nl:held:month:YYYY-MM`; index mutations invalidate its
+completion in the same Redis operation. Only a complete last-calendar-day
+observation may populate `heldStores` and `heldStoresPeak` in the prior-month
+company report (`companyMonthlyMarginReportWithHeld`). Missing, partial or stale
+counts stay null; private store references, addresses and refund data never
+enter the report. This connects operational counts to the existing report
+calculator; reconciled money ingestion, scheduling and owner presentation are
+still separate work, as before. No message, account or provider action is made
+by the report. Synthetic tests and disposable-Redis Lua checks do not establish
+an actual balance or authorize commercial release.
+
 The owner authorized a calculated minimum paid customer base and separately funded acquisition/refund exposure. A free account has no positive revenue on which a 60% profit margin could be computed. It is never reported as a profitable paid customer.
 
 Commercial review now separates nine revenue-bearing scenarios (six fixed plan/cycle offers and three overage cases) from seven funded exposure scopes: trial, setup, full refunds, non-payment, post-cancellation, paused accounts and accrued legacy credits. Every scope requires explicit maximum occurrences in the worst recognized month and complete per-occurrence cost/tax ceilings, even when the reviewed occurrence cap is zero. Expected conversions, future invoices and another scope's profit cannot offset losses. Full refunds preserve non-refundable card fees, taxes and service costs.

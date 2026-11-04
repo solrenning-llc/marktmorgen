@@ -3091,7 +3091,9 @@ function RowEditor({
   }
 
   return (
-    <div className="space-y-4">
+    // A container: the columns below stand side by side only when this editor itself has the room for
+    // their fields (32rem for two, 48rem for three), whatever the window's width (375 [TB1]).
+    <div className="@container space-y-4">
       <fieldset>
         <legend className="field-label">Columns side by side</legend>
         <div className="mt-1 flex flex-wrap gap-2">
@@ -3113,7 +3115,7 @@ function RowEditor({
       <p role="status" aria-atomic="true" className="sr-only">
         {said}
       </p>
-      <div className={`grid gap-3 ${columns.length === 3 ? "2xl:grid-cols-3" : columns.length === 2 ? "lg:grid-cols-2" : ""}`}>
+      <div className={`grid gap-3 ${columns.length === 3 ? "@3xl:grid-cols-3" : columns.length === 2 ? "@lg:grid-cols-2" : ""}`}>
         {columns.map((column, c) => (
           <div key={c} role="group" aria-labelledby={`${base}-c${c}-title`} className="min-w-0 rounded-xl bg-paper p-3 ring-1 ring-line">
             <p id={`${base}-c${c}-title`} className="text-sm font-semibold text-ink">{`Column ${c + 1}`}</p>

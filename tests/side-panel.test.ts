@@ -60,6 +60,11 @@ is(
 is("the column stays in view as the blocks scroll, its switch always there and its panel scrolling under it", editor.includes('<div className="sticky top-24 mt-6 flex max-h-[calc(100vh-7rem)] flex-col gap-3">') && editor.includes('aria-label="Blocks to add" className="min-h-0 overflow-y-auto rounded-2xl"'), true);
 is("the choice is remembered; the switch made by Add here is not", editor.includes("const [sidePanel, chooseSidePanel, showSidePanel] = useSidePanel();") && editor.includes('showSidePanel("add");'), true);
 is("a card chosen in the menu still waits for its place while the page is shown", editor.includes("const armed = sideBySide ? chosenKind : null;"), true);
+is(
+  "a row's columns stand side by side only when the row's own editor has the room (32rem for two, 48rem for three), not by the window's width",
+  editor.includes('<div className="@container space-y-4">') && editor.includes('columns.length === 3 ? "@3xl:grid-cols-3" : columns.length === 2 ? "@lg:grid-cols-2" : ""') && !editor.includes('"lg:grid-cols-2"'),
+  true,
+);
 
 const panelSwitch = readFileSync("components/side-panel-switch.tsx", "utf8");
 part("The switch");

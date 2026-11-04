@@ -522,8 +522,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                           </select>
                         </label>
                         {/* Choosing only marks the stage; "Move" sends it (3.2.5), so arrowing through stages never moves the deal. */}
-                        <button type="button" id={`deal-move-${deal.id}`} className="btn btn-primary btn-sm" disabled={locked || editing || writeUnconfirmed || pendingMoves[deal.id] === undefined} onClick={() => stageEvent(deal, { kind: "move" })}>
-                          Move<span className="sr-only">{` ${deal.title}`}</span>
+                        <button type="button" id={`deal-move-${deal.id}`} className="btn btn-primary btn-sm" disabled={locked || editing || writeUnconfirmed || pendingMoves[deal.id] === undefined} onClick={() => stageEvent(deal, { kind: "move" })} aria-label={`Move ${deal.title}`}>
+                          Move
                         </button>
                         {/* Always there, outside the label (so it is not part of the select's name), said when a stage is chosen (4.1.3). */}
                         <p id={`deal-stage-hint-${deal.id}`} role="status" className={pendingMoves[deal.id] !== undefined ? "w-full text-xs text-ink-soft" : "sr-only"}>{stageChosenText(pendingMoves[deal.id], stageName)}</p>

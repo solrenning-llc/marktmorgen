@@ -362,6 +362,8 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     const grown = reviewBytes(review) - reviewBytes(before);
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     await write(statsId, review);
+    // Words rewritten (perhaps to take something out): the AI summary built from the old words goes.
+    if (before && before.text !== review.text) await forgetReviewSummary(statsId, review.productId);
     await redisPipeline([
       ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],
       ["SADD", REVIEW_STORES_KEY, statsId],

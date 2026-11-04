@@ -84,6 +84,9 @@ export async function makeReviewSummary(store: Store, productId: string, now = D
     if (!done.ok) return { ok: false, reason: done.reason === "notes" ? "failed" : done.reason };
     // No theme held to the reviews' words: nothing kept, so the week is not taken by an empty summary.
     if (!done.value.themes.length) return { ok: false, reason: "empty" };
+    // A review deleted, hidden, refunded or rewritten while the model answered: the summary would count it, so it is not kept.
+    const still = summaryInputs(await visibleReviews(statsId, productId, 0, MAX_SUMMARY_REVIEWS), productId);
+    if (JSON.stringify(still.map((i) => i.text)) !== JSON.stringify(inputs.map((i) => i.text))) return { ok: false, reason: "failed" };
     await redisPipeline([["SET", summaryKey(statsId, productId), JSON.stringify(done.value), "EX", KEEP_SECONDS]]);
     return { ok: true, summary: done.value, fresh: true, left: done.left };
   } finally {

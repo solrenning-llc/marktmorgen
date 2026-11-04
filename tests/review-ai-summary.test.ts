@@ -9,7 +9,7 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/review-summary/route";
 import { aiMonthKey } from "@/lib/ai";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { SUMMARY_REFRESH_SECONDS } from "@/lib/review-ai-summary-rules";
+import { SUMMARY_REFRESH_SECONDS, summaryInputs } from "@/lib/review-ai-summary-rules";
 import { makeReviewSummary, readReviewSummary, summaryPrompt } from "@/lib/review-ai-summary";
 import { deleteReview, saveReview, visibleReviews } from "@/lib/reviews";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
@@ -52,7 +52,10 @@ async function main(): Promise<void> {
   const now = Date.UTC(2026, 10, 4, 12);
 
   part("Made from the reviews");
-  reply = JSON.stringify({ themes: [{ title: "Clear lessons", reviews: [5, 6] }, { title: "Friendly teacher", reviews: [2, 3] }, { title: "Rated 5 stars", reviews: [4, 1] }, { title: "Short", reviews: [1] }] });
+  // The numbers the reviews are sent under, newest first: the model's themes cite the ones that say them.
+  const numbered = summaryInputs(await visibleReviews(statsId, productId, 0, 60), productId);
+  const citing = (word: string) => numbered.filter((i) => i.text.toLowerCase().includes(word)).map((i) => i.id);
+  reply = JSON.stringify({ themes: [{ title: "Clear lessons", reviews: citing("clear") }, { title: "Friendly teacher", reviews: citing("friendly") }, { title: "Rated 5 stars", reviews: citing("stars").concat(citing("short")) }, { title: "Short", reviews: citing("short") }] });
   const first = await makeReviewSummary(store, productId, now);
   is("made, the model's themes held to the rules, counted from the reviews", first.ok ? [first.fresh, first.summary.read, first.summary.themes] : first, [true, 6, [{ title: "Clear lessons", reviews: 2 }, { title: "Friendly teacher", reviews: 2 }]]);
   is("as one of the month's AI jobs", Number((await redis.pipeline([["GET", aiMonthKey(store, new Date(now))!]]))[0]), 1);
@@ -100,7 +103,8 @@ async function main(): Promise<void> {
     await saveReview(statsId, { productId: glaze, email: `glaze${i}@example.com`, reference: `cs_test_glz${i}0000000000`, pi: `pi_glz${i}`, rating: 5, text, name: `Glazer ${i}` }, ROOM);
   }
   store = (await storeForEmail(OWNER))!;
-  const day = Date.UTC(2026, 10, 20, 12);
+  // Days inside the store's paid month (tests/billing-period-fixture.ts: from ten days before today to twenty after).
+  const day = Date.now() - 2 * 86_400_000;
   reply = JSON.stringify({ themes: [{ title: "Lifetime access included", reviews: [1, 2] }] });
   const empty = await makeReviewSummary(store, glaze, day);
   is("no theme held to the reviews' words: said so, nothing kept, the week not taken", [empty, await readReviewSummary(statsId, glaze)], [{ ok: false, reason: "empty" }, null]);
@@ -112,6 +116,22 @@ async function main(): Promise<void> {
   const one = (await visibleReviews(statsId, glaze, 0, 10))[0];
   await deleteReview(statsId, glaze, one.id, ROOM);
   is("a review deleted takes the summary that counted it", await readReviewSummary(statsId, glaze), null);
+  part("Review of the fixes: a rewritten review, and a review that goes while the model answers");
+  reply = JSON.stringify({ themes: [{ title: "Clear steps", reviews: [1, 2, 3, 4, 5] }, { title: "Nice photos", reviews: [1, 2, 3, 4, 5] }] });
+  const remade = await makeReviewSummary(store, glaze, day + 7 * 86_400_000 + 120_000);
+  is("made again", remade.ok && remade.fresh ? true : remade, true);
+  await saveReview(statsId, { productId: glaze, email: "glaze1@example.com", reference: "cs_test_glz10000000000", pi: "pi_glz1", rating: 5, text: "Clear steps, I changed my words", name: "Glazer 1" }, ROOM);
+  is("a review rewritten takes the summary built from its old words", await readReviewSummary(statsId, glaze), null);
+  const keep = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    // While the model answers, one of the reviews it was handed is deleted.
+    const gone = (await visibleReviews(statsId, glaze, 0, 10))[0];
+    if (gone) await deleteReview(statsId, glaze, gone.id, ROOM);
+    return keep(input, init);
+  }) as typeof fetch;
+  const raced = await makeReviewSummary(store, glaze, day + 14 * 86_400_000 + 240_000);
+  globalThis.fetch = keep;
+  is("a review gone while the model answered: the summary is not kept", [raced.ok, await readReviewSummary(statsId, glaze)], [false, null]);
   done();
 }
 

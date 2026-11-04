@@ -8,18 +8,27 @@
  *     same booking page and checkout as everyone else's; nothing is
  *     discounted and no time is hidden or shown as taken to look busy.
  *   - It is valid for BOOKING_LINK_DAYS days the creator picks (7 if they
- *     pick none) and for one paid booking: once paid for it never opens
- *     again ("used"), and past its day it never opens ("expired").
+ *     pick none), counted as calendar days in the creator's time zone, so it
+ *     ends at the same clock time it was made even across a change of the
+ *     clocks; and for one paid booking: once paid for it never opens again
+ *     ("used"), and past its day it never opens ("expired").
  *   - While a checkout opened from it is open, it is "held" by that
- *     checkout, so two tabs cannot book twice from one link; it is let go
- *     only when Stripe reports that checkout expired unpaid, never by a
+ *     checkout, so two tabs cannot book twice from one link. It is let go
+ *     (letGo) only on what Stripe reports about that checkout, never by a
  *     clock of our own (a payment made in its last minute is confirmed
- *     later), and then it is open again until its day. A checkout opened
- *     before the link's day may be paid until it closes: past the day, a
- *     held link is still "held", no new checkout opens from it, and its own
- *     checkout's payment is confirmed (mayConfirm). A buyer coming back
- *     while it is held is sent to that same checkout (resumable), never a
- *     second one.
+ *     later): the checkout expired unpaid; its payment, made by a way that
+ *     settles later, failed (checkout.session.async_payment_failed); or it
+ *     was paid but refunded without a booking (the time was taken
+ *     meanwhile). Then the link is open again until its day.
+ *   - A checkout that completed with its payment still on its way
+ *     (payment_status unpaid) leaves the link "paying": no new checkout, and
+ *     nobody is sent back to that closed checkout. The payment arriving
+ *     books the call (mayConfirm); failing, it lets the link go.
+ *   - A checkout opened before the link's day may be paid until it closes:
+ *     past the day, a held link is still "held", no new checkout opens from
+ *     it, and its own checkout's payment is confirmed (mayConfirm). A buyer
+ *     coming back while it is held is sent to that same checkout
+ *     (resumable), never a second one.
  *   - Made out to one person: their address, if the creator typed one, is
  *     put on the checkout as its customer_email, so the booking is made out
  *     to them; it does not prove who holds the link, and the studio says so:
@@ -34,9 +43,11 @@
  *   - Take the hold in one atomic step with the time's own hold (a script,
  *     or SET NX on the link's hold), never by reading linkState first and
  *     writing after, so two tabs reading "open" at once cannot both pass.
- *   - Clear heldBy only when Stripe reports that checkout expired (its
- *     webhook, or the sweep reading the session), never on a timer: unknown
- *     is never free.
+ *   - Clear heldBy only through letGo, on what Stripe reports for that very
+ *     checkout (its webhook, or the sweep reading the session): expired,
+ *     async payment failed, or refunded with no booking made. Never on a
+ *     timer: unknown is never free. Set `paying` on
+ *     checkout.session.completed when its payment_status is unpaid.
  *   - Mark it used by compare-and-set when the booking is confirmed, and
  *     only for the checkout that holds it (mayConfirm): a checkout paid that
  *     does not hold the link is refunded and not booked, so the one the
@@ -48,6 +59,8 @@
  *     when the link is made and when it is opened, and that the link is the
  *     store's own and for that product (opensFor).
  */
+
+import { partsIn, zonedToUtc } from "@/lib/call-setup";
 
 export const LINK_TOKEN = /^[0-9a-f]{48}$/;
 export const BOOKING_LINK_DAYS = [1, 3, 7, 14, 30] as const;
@@ -65,11 +78,13 @@ export type BookingLink = {
   expiresAt: number;
   /** When a booking paid for from it was confirmed; then it never opens again. */
   usedAt?: number;
-  /** The checkout open on it now: kept until Stripe reports that checkout expired unpaid, or it is paid. */
+  /** The checkout open on it now: kept until it books the call, or letGo lets it go. */
   heldBy?: string;
+  /** That checkout completed with its payment still on its way (payment_status unpaid). */
+  paying?: true;
 };
 
-export type LinkState = "open" | "held" | "used" | "expired";
+export type LinkState = "open" | "held" | "paying" | "used" | "expired";
 
 /**
  * Where a link is: used outranks everything, so a used link never opens,
@@ -78,7 +93,7 @@ export type LinkState = "open" | "held" | "used" | "expired";
  */
 export function linkState(link: BookingLink, now: number): LinkState {
   if (link.usedAt !== undefined) return "used";
-  if (link.heldBy) return "held";
+  if (link.heldBy) return link.paying ? "paying" : "held";
   if (now >= link.expiresAt) return "expired";
   return "open";
 }
@@ -86,6 +101,25 @@ export function linkState(link: BookingLink, now: number): LinkState {
 /** Whether a paid checkout may book from the link: only the one that holds it, and only once. */
 export function mayConfirm(link: BookingLink, session: string): boolean {
   return link.usedAt === undefined && !!link.heldBy && link.heldBy === session;
+}
+
+/** What Stripe reports about a checkout that lets the link go. */
+export const LET_GO = ["expired", "payment_failed", "refunded_unbooked"] as const;
+export type LetGo = (typeof LET_GO)[number];
+
+/**
+ * The link once Stripe reports that its checkout expired unpaid, that the
+ * payment made by a way that settles later failed, or that it was refunded
+ * without a booking: open again until its day. A report about any other
+ * checkout or of anything else (a checkout completed with its payment still
+ * on its way, say), or about a link already used, changes nothing.
+ */
+export function letGo(link: BookingLink, session: string, why: LetGo): BookingLink {
+  if (!(LET_GO as readonly string[]).includes(why) || link.usedAt !== undefined || link.heldBy !== session) return link;
+  const rest: BookingLink = { ...link };
+  delete rest.heldBy;
+  delete rest.paying;
+  return rest;
 }
 
 /** Whether a link opened under this store, for this product, is that store's own link for it. */
@@ -98,7 +132,7 @@ export function mayBook(link: BookingLink, now: number): boolean {
   return linkState(link, now) === "open";
 }
 
-/** Whether a buyer coming back is sent to the checkout already open on it: never a second checkout. */
+/** Whether a buyer coming back is sent to the checkout already open on it: never a second checkout, and never one already completed. */
 export function resumable(link: BookingLink, now: number, session: string): boolean {
   return linkState(link, now) === "held" && link.heldBy === session;
 }
@@ -111,6 +145,7 @@ export function readLinkRequest(
   raw: { product?: unknown; days?: unknown; email?: unknown },
   store: string,
   now: number,
+  timeZone: string,
 ): { ok: true; link: BookingLink } | { ok: false; why: "product" | "days" | "email" } {
   const product = typeof raw.product === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(raw.product) ? raw.product : "";
   if (!product) return { ok: false, why: "product" };
@@ -125,14 +160,35 @@ export function readLinkRequest(
   if (!(BOOKING_LINK_DAYS as readonly number[]).includes(days)) return { ok: false, why: "days" };
   const typed = typeof raw.email === "string" ? raw.email.trim().toLowerCase() : "";
   if (typed && (typed.length > 254 || !EMAIL.test(typed))) return { ok: false, why: "email" };
-  return { ok: true, link: { store, product, ...(typed ? { email: typed } : {}), madeAt: now, expiresAt: now + days * DAY } };
+  return { ok: true, link: { store, product, ...(typed ? { email: typed } : {}), madeAt: now, expiresAt: linkEnd(now, days, timeZone) } };
+}
+
+/**
+ * When a link made at `now` for `days` ends: the same clock time `days`
+ * calendar days later in the creator's time zone (UTC when that is not
+ * one). When that clock time is skipped that day, an hour later.
+ */
+export function linkEnd(now: number, days: number, timeZone: string): number {
+  let tz = timeZone;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+  } catch {
+    tz = "UTC";
+  }
+  const p = partsIn(now, tz);
+  const day = new Date(Date.UTC(p.year, p.month - 1, p.day + days));
+  const minute = p.hour * 60 + p.minute;
+  const at = (m: number) => zonedToUtc(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), m, tz);
+  // Seconds are kept, so the link ends at the very moment of the clock it was made at.
+  const seconds = now % 60_000;
+  return (at(minute) ?? at(minute + 60) ?? now + days * DAY) + seconds;
 }
 
 /** What the studio says, with how to fix it. */
 export const LINK_PROBLEMS: Record<"product" | "days" | "email", string> = {
   product: "Pick the call this link books.",
   days: `Pick how long the link works: ${BOOKING_LINK_DAYS.slice(0, -1).join(", ")} or ${BOOKING_LINK_DAYS.at(-1)} days.`,
-  email: "Type the person's email address in full, like name@example.com, or leave it empty so whoever has the link can use it once.",
+  email: "Type the person's full email address, like name@example.com. Or leave it empty: then anyone with the link can use it once.",
 };
 
 /** What the studio says about a link it lists, in the creator's time zone (UTC when that is not one). */
@@ -152,7 +208,9 @@ export function linkStateWords(link: BookingLink, now: number, timeZone: string)
     case "expired":
       return `Expired on ${day(link.expiresAt)}. It no longer opens.`;
     case "held":
-      return `A checkout is open on it now. ${madeOut}, until ${day(link.expiresAt)}.`;
+      return now >= link.expiresAt ? `A checkout is open on it now. The link expired on ${day(link.expiresAt)}, so no new checkout opens.` : `A checkout is open on it now. ${madeOut}, until ${day(link.expiresAt)}.`;
+    case "paying":
+      return "A payment made from it is on its way. The call is booked when it arrives.";
     case "open":
       return `${madeOut}, until ${day(link.expiresAt)}.`;
   }

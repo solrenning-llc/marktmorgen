@@ -11,7 +11,7 @@ import { aiMonthKey } from "@/lib/ai";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { SUMMARY_REFRESH_SECONDS, summaryInputs } from "@/lib/review-ai-summary-rules";
 import { markRefundedReviews } from "@/lib/review-proof";
-import { KEEP_REVIEW_SUMMARY, makeReviewSummary, readReviewSummary, summaryPrompt } from "@/lib/review-ai-summary";
+import { KEEP_REVIEW_SUMMARY, makeReviewSummary, readReviewSummaries, readReviewSummary, summaryPrompt, summaryReadKey } from "@/lib/review-ai-summary";
 import { deleteReview, dropReviews, forgetReviewsPerson, markOneRefunded, markRefunded, readReview, saveReview, setHidden, setReply, setReviewPhoto, visibleReviews } from "@/lib/reviews";
 import { dataUsed } from "@/lib/store-data";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, imageFolder, setSubscription, storeForEmail } from "@/lib/store";
@@ -189,13 +189,21 @@ async function main(): Promise<void> {
 
   part("Second review of 4 November 2026: a summary's deletion that fails fails the change with it");
   const kilnKey = `nl:rsum:${statsId}:${kiln}`;
+  const kilnRead = summaryReadKey(statsId, kiln);
   const keptRaw = String((await redis.pipeline([["GET", kilnKey]]))[0]);
-  is("the summary kept holds only its themes and counts: no review's id, words or writer", Object.keys(JSON.parse(keptRaw) as object).sort(), ["at", "read", "themes", "v"]);
+  const [keptEntry, keptScore] = (await redis.pipeline([["ZRANGEBYSCORE", kilnRead, "-inf", "+inf", "WITHSCORES"]]))[0] as string[];
+  is("the summary kept holds only its themes and counts: no review's id, words or writer", [Object.keys(JSON.parse(keptRaw) as object).sort(), Object.keys(JSON.parse(keptEntry) as object).sort()], [["at", "g", "read", "v"], ["g", "themes"]]);
+  is("its themes scored by the newest review it read", Number(keptScore), Math.max(...(await visibleReviews(statsId, kiln, 0, 60)).map((r) => r.createdAt)));
   const { v: _version, ...unversioned } = JSON.parse(keptRaw) as Record<string, unknown>;
-  await redis.pipeline([["SET", `nl:rsum:${statsId}:${glaze}`, JSON.stringify(unversioned), "EX", 8 * 86_400]]);
-  is("a summary kept before version 2 (never taken away when a review left) is never read", [_version, await readReviewSummary(statsId, glaze)], [2, null]);
-  // The same summary put back before each change, so each is tested against one (no AI job for it).
-  const putBack = () => redis.pipeline([["SET", kilnKey, keptRaw, "EX", 8 * 86_400]]);
+  const oldShape = { v: 2, at: unversioned.at, read: unversioned.read, themes: (JSON.parse(keptEntry) as { themes: unknown }).themes };
+  const asKept = async (head: unknown) => {
+    await redis.pipeline([["SET", `nl:rsum:${statsId}:${glaze}`, JSON.stringify(head), "EX", 8 * 86_400], ["ZADD", summaryReadKey(statsId, glaze), 1, keptEntry]]);
+    return readReviewSummary(statsId, glaze);
+  };
+  is("a summary kept before version 3 (themes in the head, taken away by any review's change), or with no version, is never read", [_version, await asKept(oldShape), await asKept(unversioned), (await asKept(JSON.parse(keptRaw)))?.themes.length], [3, null, null, 1]);
+  await redis.pipeline([["DEL", `nl:rsum:${statsId}:${glaze}`, summaryReadKey(statsId, glaze)]]);
+  // The same summary put back before each change, so each is tested against one (no AI job for it); `newest` as if it had read up to then.
+  const putBack = (newest = Number(keptScore)) => redis.pipeline([["SET", kilnKey, keptRaw, "EX", 8 * 86_400], ["DEL", kilnRead], ["ZADD", kilnRead, newest, keptEntry], ["EXPIRE", kilnRead, 8 * 86_400]]);
   const realPipeline = redis.pipeline.bind(redis);
   const takesSummary = (c: (string | number)[]) => String(c[1] ?? "").startsWith("nl:rsum:ver:");
   const failing = async (change: () => Promise<unknown>, fails: (c: (string | number)[]) => boolean = takesSummary): Promise<boolean> => {
@@ -228,11 +236,12 @@ async function main(): Promise<void> {
   }
   is("the same review hidden when Redis answers: the summary goes with it", [Boolean(await setHidden(statsId, kiln, target.id, true, "private")), await readReviewSummary(statsId, kiln)], [true, null]);
   const studioPage = readFileSync("app/studio/reviews/page.tsx", "utf8");
-  is("so the studio page only reads the summary: one small GET a product, no review read for it", [readFileSync("lib/review-ai-summary.ts", "utf8").match(/export async function readReviewSummary[\s\S]*?\n}/)?.[0].includes("visibleReviews"), studioPage.includes("readReviewSummary(store.statsId, p.id)")], [false, true]);
+  is("so the studio page only reads the summaries: one request for every product, no review read for it", [readFileSync("lib/review-ai-summary.ts", "utf8").match(/export async function readReviewSummaries[\s\S]*?\n}/)?.[0].includes("visibleReviews"), studioPage.includes("await readReviewSummaries(store.statsId, summed.map((p) => p.id))")], [false, true]);
 
   part("A person's deletion that cannot take the summary away fails as a whole");
   await saveReview(statsId, { productId: kiln, email: "kiln8@example.com", reference: "cs_test_kln80000000000", pi: "pi_kln8", rating: 5, text: "Useful tips here", name: "Kiln 8" }, ROOM);
-  await putBack();
+  // As if the summary had read their review too.
+  await putBack(Number.MAX_SAFE_INTEGER);
   const person = (await visibleReviews(statsId, kiln, 0, 20)).find((r) => r.text === "Useful tips here")!;
   is("their deletion fails, their review still there, so nothing counts a review that is gone", [await failing(() => forgetReviewsPerson(statsId, [kiln], "kiln8@example.com", ROOM)), (await readReview(statsId, kiln, person.id)) !== null], [true, true]);
   is("tried again, it goes with the summary", [(await forgetReviewsPerson(statsId, [kiln], "kiln8@example.com", ROOM)).records, await readReview(statsId, kiln, person.id), await readReviewSummary(statsId, kiln)], [1, null, null]);
@@ -297,7 +306,8 @@ async function main(): Promise<void> {
   // A removed product's reviews: read once, the deletion tried again. The first deletion runs but does not answer.
   const photoPath = `images/${await imageFolder(OWNER)}/${"cd".repeat(16)}.webp`;
   await setReviewPhoto(statsId, slipId, slipA.id, { path: photoPath, width: 800, height: 800 });
-  await redis.pipeline([["SET", `nl:rsum:${statsId}:${slipId}`, keptRaw, "EX", 8 * 86_400]]);
+  await redis.pipeline([["SET", `nl:rsum:${statsId}:${slipId}`, keptRaw, "EX", 8 * 86_400], ["ZADD", summaryReadKey(statsId, slipId), Number.MAX_SAFE_INTEGER, keptEntry]]);
+  is("(a summary there before the product goes)", (await readReviewSummary(statsId, slipId)) !== null, true);
   let timedOut = 0;
   const realDrop = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -350,6 +360,25 @@ async function main(): Promise<void> {
   const quotesAfter = (await storeForEmail(OWNER))!.quotes ?? [];
   is("the pass stops at the busy review, the first marked", [pass, (await readReview(statsId, mixIds[0], freeOne.id))?.refunded, (await readReview(statsId, mixId, busyOneReview.id))?.refunded], ["thrown", true, false]);
   is("and the store's quotes are refreshed for what it marked, the refunded review left out", [JSON.stringify(quotesAfter) !== quotesBefore, quotesAfter.some((q) => q.t.includes("Lovely glaze mixes"))], [true, false]);
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.hostname === "api.stripe.com" && url.pathname === "/v1/refunds") {
+      const row = (n: number) => ({ id: `re_mix${n}`, created: Math.floor(Date.now() / 1000), status: "succeeded", payment_intent: `pi_mixrefund${n}0000`, charge: { object: "charge", refunded: true, amount: 2500, amount_refunded: 2500 } });
+      return new Response(JSON.stringify({ object: "list", data: [row(0), row(1)], has_more: false }));
+    }
+    return refundsFetch(input, init);
+  }) as typeof fetch;
+  is("the next pass marks the review that was busy", [await markRefundedReviews(paid, Date.now() + 30_000), (await readReview(statsId, mixId, busyOneReview.id))?.refunded], [1, true]);
+  const passRequests: string[][] = [];
+  const realPass = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    passRequests.push(commands.map((c) => String(c[0])));
+    return realPass(commands);
+  }) as typeof redis.pipeline;
+  const passAgain = await markRefundedReviews(paid, Date.now() + 30_000);
+  redis.pipeline = realPass;
+  globalThis.fetch = keep;
+  is("a pass over refunds already taken: one request reads the page's, nothing written for them (#2066 review)", [passAgain, passRequests.filter((r) => r.includes("SISMEMBER")).length, passRequests.filter((r) => r.includes("SADD")).length], [0, 1, 0]);
 
   const fifth = await addProduct(OWNER, "Wheel Basics", "", "45");
   if (!fifth.ok) throw new Error("no product");
@@ -368,6 +397,113 @@ async function main(): Promise<void> {
   globalThis.fetch = keep;
   is("a call whose lock ran out keeps nothing, nor takes the week", [late.ok, await readReviewSummary(statsId, wheel), (await redis.pipeline([["GET", `nl:rsum:last:${statsId}:${wheel}`]]))[0]], [false, null, null]);
   is("and leaves the other call's lock to it", (await redis.pipeline([["GET", `nl:rsum:lock:${statsId}`]]))[0], "another-call");
+  is("nor any themes: the entry of a try not kept is taken out at once", (await redis.pipeline([["ZCARD", summaryReadKey(statsId, wheel)]]))[0], 0);
+  await redis.pipeline([["DEL", `nl:rsum:lock:${statsId}`]]);
+
+  part("Review of #2066: only a review the summary counted takes it away");
+  const tools = await addProduct(OWNER, "Clay Tools", "", "35");
+  if (!tools.ok) throw new Error("no product");
+  const toolsId = tools.product.id;
+  const writeTool = (i: number, text: string, at = Date.now()) =>
+    saveReview(statsId, { productId: toolsId, email: `tool${i}@example.com`, reference: `cs_test_tol${i}0000000000`, pi: `pi_tol${i}`, rating: 5, text, name: `Tool ${i}` }, ROOM, at);
+  for (const [i, text] of ["Sharp tools", "Sharp tools, sturdy", "Sturdy tools", "Sturdy and sharp", "Sharp and sturdy", "Sturdy tools again"].entries()) await writeTool(i, text);
+  store = (await storeForEmail(OWNER))!;
+  reply = JSON.stringify({ themes: [{ title: "Sharp tools", reviews: [1, 2, 3, 4, 5] }] });
+  const toolsMade = await makeReviewSummary(store, toolsId, day + 900_000);
+  is("made", toolsMade.ok && toolsMade.fresh, true);
+  const toolsRead = summaryReadKey(statsId, toolsId);
+  const toolsHead = String((await redis.pipeline([["GET", `nl:rsum:${statsId}:${toolsId}`]]))[0]);
+  const [toolsEntry, toolsScore] = (await redis.pipeline([["ZRANGEBYSCORE", toolsRead, "-inf", "+inf", "WITHSCORES"]]))[0] as string[];
+  const toolsBack = () => redis.pipeline([["SET", `nl:rsum:${statsId}:${toolsId}`, toolsHead, "EX", 8 * 86_400], ["DEL", toolsRead], ["ZADD", toolsRead, toolsScore, toolsEntry]]);
+  // Written after the summary was made (a second later), so never counted by it.
+  const later2 = Number(toolsScore) + 1_000;
+  for (const [i, text] of ["Late words one", "Late words two", "Late words three", "Late words four"].entries()) await writeTool(10 + i, text, later2 + i);
+  const lateOne = async (i: number) => (await readReview(statsId, toolsId, (await visibleReviews(statsId, toolsId, 0, 20)).find((r) => r.text === ["Late words one", "Late words two", "Late words three", "Late words four"][i])!.id))!;
+  const lateChanges: [string, () => Promise<unknown>][] = [
+    ["rewritten", () => writeTool(10, "Late words changed", later2 + 10)],
+    ["hidden", async () => setHidden(statsId, toolsId, (await lateOne(1)).id, true, "private")],
+    ["refunded", async () => markOneRefunded(statsId, toolsId, (await lateOne(2)).id)],
+    ["deleted", async () => deleteReview(statsId, toolsId, (await lateOne(3)).id, ROOM)],
+  ];
+  for (const [what, change] of lateChanges) {
+    await change();
+    is(`a review written after the summary and then ${what}: the summary stays`, (await readReviewSummary(statsId, toolsId))?.themes.length, 1);
+  }
+  is("and the week's limit is the same, nothing given back or taken", (await makeReviewSummary(store, toolsId, day + 960_000)).ok && !(await makeReviewSummary(store, toolsId, day + 960_000) as { fresh?: boolean }).fresh, true);
+  const counted = (text: string) => visibleReviews(statsId, toolsId, 0, 20).then((all) => all.find((r) => r.text === text)!);
+  const countedChanges: [string, () => Promise<unknown>][] = [
+    ["rewritten", () => writeTool(0, "Sharp tools, new words")],
+    ["hidden", async () => setHidden(statsId, toolsId, (await counted("Sharp tools, sturdy")).id, true, "private")],
+    ["refunded", async () => markOneRefunded(statsId, toolsId, (await counted("Sturdy tools")).id)],
+    ["deleted", async () => deleteReview(statsId, toolsId, (await counted("Sturdy and sharp")).id, ROOM)],
+  ];
+  for (const [what, change] of countedChanges) {
+    await toolsBack();
+    await change();
+    is(`a review the summary counted, ${what}: the summary goes`, await readReviewSummary(statsId, toolsId), null);
+  }
+
+  part("Second review of #2066: a hidden or refunded review was never counted");
+  const quiet = (await readReview(statsId, toolsId, (await counted("Sturdy tools again")).id))!;
+  await setHidden(statsId, toolsId, quiet.id, true, "private");
+  // A summary made after it was hidden, so it never read it.
+  await toolsBack();
+  const hiddenChanges: [string, () => Promise<unknown>][] = [
+    ["rewritten by its buyer", () => writeTool(5, "Sturdy tools, other words")],
+    ["refunded", () => markOneRefunded(statsId, toolsId, quiet.id)],
+    ["deleted by its buyer", () => deleteReview(statsId, toolsId, quiet.id, ROOM)],
+  ];
+  for (const [what, change] of hiddenChanges) {
+    await change();
+    is(`a review hidden before the summary, then ${what}: the summary stays`, (await readReviewSummary(statsId, toolsId))?.themes.length, 1);
+  }
+  const refundedOne = (await readReview(statsId, toolsId, (await visibleReviews(statsId, toolsId, 0, 20)).find((r) => r.refunded)!.id))!;
+  is("(a review refunded earlier, still shown, marked so)", refundedOne.refunded, true);
+  await deleteReview(statsId, toolsId, refundedOne.id, ROOM);
+  is("a review refunded before the summary, then deleted: the summary stays", (await readReviewSummary(statsId, toolsId))?.themes.length, 1);
+
+  part("Review of #2066: the race with the keeping");
+  const race = await addProduct(OWNER, "Clay Bats", "", "25");
+  if (!race.ok) throw new Error("no product");
+  const raceId = race.product.id;
+  const writeBat = (i: number, text: string, at = Date.now()) =>
+    saveReview(statsId, { productId: raceId, email: `bat${i}@example.com`, reference: `cs_test_bat${i}0000000000`, pi: `pi_bat${i}`, rating: 5, text, name: `Bat ${i}` }, ROOM, at);
+  for (const [i, text] of ["Flat bats", "Flat bats, light", "Light bats", "Light and flat", "Flat and light", "Light bats again"].entries()) await writeBat(i, text);
+  store = (await storeForEmail(OWNER))!;
+  reply = JSON.stringify({ themes: [{ title: "Flat bats", reviews: [1, 2, 3, 4, 5] }] });
+  const realKeep = redis.pipeline.bind(redis);
+  const keepsBats = (commands: (string | number)[][]) => commands.some((c) => c[0] === "EVAL" && c.includes(`nl:rsum:${statsId}:${raceId}`));
+  let afterKeep: (() => Promise<unknown>) | null = null;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await realKeep(commands);
+    // Right after the keeping's step, before the call has answered: a change lands.
+    if (keepsBats(commands) && afterKeep) { const next = afterKeep; afterKeep = null; await next(); }
+    return replies;
+  }) as typeof redis.pipeline;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    // While the model answers, a buyer writes a review: read by no one yet.
+    if (new URL(String(input)).hostname === "api.anthropic.com") await writeBat(9, "Arrived chipped", Date.now() + 5_000);
+    return keep(input, init);
+  }) as typeof fetch;
+  afterKeep = async () => setHidden(statsId, raceId, (await visibleReviews(statsId, raceId, 0, 20)).find((r) => r.text === "Arrived chipped")!.id, true, "private");
+  const raced2 = await makeReviewSummary(store, raceId, day + 1_200_000);
+  globalThis.fetch = keep;
+  is("a review written while the model answered and hidden right after the keeping: the summary is kept and stays", [raced2.ok && raced2.fresh, (await readReviewSummary(statsId, raceId))?.read], [true, 6]);
+  afterKeep = async () => setHidden(statsId, raceId, (await visibleReviews(statsId, raceId, 0, 20)).find((r) => r.text === "Flat bats")!.id, true, "private");
+  const racedCounted = await makeReviewSummary(store, raceId, day + 1_200_000 + 7 * 86_400_000);
+  redis.pipeline = realKeep;
+  is("a review it counted hidden right after the keeping: the summary goes, the week stays taken", [racedCounted.ok, await readReviewSummary(statsId, raceId), Number((await redis.pipeline([["GET", `nl:rsum:last:${statsId}:${raceId}`]]))[0]) > 0], [true, null, true]);
+  is("what is left of the summaries kept and replaced is only the last head and no themes", (await redis.pipeline([["ZCARD", summaryReadKey(statsId, raceId)]]))[0], 0);
+  // A try not kept whose clean-up failed leaves an entry under no head; a kept summary's is there too.
+  const batsRead = summaryReadKey(statsId, raceId);
+  const ghost = JSON.stringify({ g: "cd".repeat(12), themes: [] });
+  const thirdBats = await makeReviewSummary(store, raceId, day + 1_200_000 + 14 * 86_400_000);
+  await redis.pipeline([["ZADD", batsRead, 1, ghost]]);
+  const fourthBats = await makeReviewSummary(store, raceId, day + 1_200_000 + 21 * 86_400_000);
+  const left = (await redis.pipeline([["ZRANGEBYSCORE", batsRead, "-inf", "+inf"]]))[0] as string[];
+  is("a new summary kept: the one it replaced and the one a failed clean-up left are taken out, its own alone in the set", [thirdBats.ok, fourthBats.ok && fourthBats.fresh, left.length, left.includes(ghost), (await readReviewSummary(statsId, raceId))?.at], [true, true, 1, false, Math.floor((day + 1_200_000 + 21 * 86_400_000) / 1000)]);
+  const both = await readReviewSummaries(statsId, [toolsId, raceId, "../x"]);
+  is("the studio's read of several products, in one request", [both.size, both.get(raceId)?.summary?.read, both.get(toolsId)?.summary?.read, (both.get(raceId)?.lastAt ?? 0) > 0], [2, 5, 6, true]);
   done();
 }
 

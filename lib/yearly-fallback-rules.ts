@@ -51,6 +51,11 @@ export type FallbackSub = Omit<YearlySub, "items"> & {
   } | null;
   /** The membership's own payment method, expanded (`expand[]=default_payment_method`). */
   default_payment_method?: unknown;
+  /**
+   * An older source on the membership itself (a card or a bank account added before payment methods): Stripe charges
+   * it before the customer's default, and its kind is not read here, so a membership with one is never offered.
+   */
+  default_source?: unknown;
   /** Its customer, expanded with the customer's default (`expand[]=customer.invoice_settings.default_payment_method`). */
   customer?: unknown;
 };
@@ -77,6 +82,8 @@ export function payingMethodType(sub: FallbackSub): string | null {
     const own = typeOf(sub.default_payment_method);
     return typeof own === "string" ? own : null;
   }
+  // Stripe's next in line is the membership's own older source, which can be a bank debit: never read as a card.
+  if (sub.default_source) return null;
   const settings = sub.customer && typeof sub.customer === "object" ? (sub.customer as { invoice_settings?: { default_payment_method?: unknown } | null }).invoice_settings : null;
   const theirs = typeOf(settings?.default_payment_method);
   return typeof theirs === "string" ? theirs : null;
@@ -96,6 +103,9 @@ export type FallbackInvoice = {
   status?: unknown;
   amount_due?: unknown;
   currency?: unknown;
+  /** Discounts on the invoice itself (a customer's coupon lands here): any one means the price compared is not paid. */
+  discounts?: unknown;
+  total_discount_amounts?: unknown;
 };
 
 /** What the member may move to, in the smallest unit of the store's currency. */
@@ -111,6 +121,21 @@ export type MonthlyFallback = {
   /** What twelve months cost more than the year: never negative, said in the email. */
   extraPerYear: number;
 };
+
+/** A discount on the expanded customer (`customer.discount`), or one that cannot be read: an unexpanded customer has none here. */
+function customerDiscounted(customer: unknown): boolean {
+  if (!customer || typeof customer !== "object") return false;
+  const discount = (customer as { discount?: unknown }).discount;
+  return discount !== undefined && discount !== null;
+}
+
+/** Any discount the invoice carries, in either of the two places Stripe lists them. */
+function invoiceDiscounted(invoice: FallbackInvoice): boolean {
+  const listed = (value: unknown) => Array.isArray(value) && value.some((entry) => entry !== null && entry !== undefined);
+  if (listed(invoice.discounts)) return true;
+  const amounts = invoice.total_discount_amounts;
+  return Array.isArray(amounts) && amounts.some((entry) => typeof entry === "object" && entry !== null && num((entry as { amount?: unknown }).amount) !== 0);
+}
 
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
@@ -147,6 +172,9 @@ export function monthlyFallback(
   const meta = sub.metadata ?? {};
   if (meta.ends_after || meta.kind === "plan") return null;
   if (discounted(sub as YearlySub)) return null;
+  // Nor on the customer, nor on the invoice: a coupon there lowers what is charged, and the email would quote the
+  // undiscounted price for both the month and the year.
+  if (customerDiscounted(sub.customer) || invoiceDiscounted(invoice)) return null;
   // Not driven by a schedule: its next phase would put the year back, and a phase change voids a pending update.
   if (sub.schedule) return null;
   if (affiliateMonthsLeft(meta, nowSeconds)) return null;

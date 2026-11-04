@@ -456,7 +456,7 @@ FUNNEL_STARTERS.push(
 // health, beauty or other result, no rating, badge or "best seller", no
 // delivery date.
 const SHIP_FIRST =
-  "Choose a product you ship. Only a paid product bought once can ship: not a membership, a call, a bundle, a payment plan or a price the buyer chooses, and with no file, link, course or podcast to hand over. In its editor, turn on “Ship it: a physical product, sent by you”: its page then shows what shipping costs and where it ships, and the checkout asks for an address.";
+  "Choose a product you ship. Only a paid product bought once can ship. A membership, a call, a bundle, a payment plan or a price the buyer chooses cannot. Neither can a product with a file, link, course or podcast to hand over. In its editor, turn on “Ship it: a physical product, sent by you”. Its page then shows what shipping costs and where it ships. The checkout asks for an address.";
 FUNNEL_STARTERS.push({
   id: "physical-product",
   label: "Sell something you ship",
@@ -487,6 +487,112 @@ FUNNEL_STARTERS.push({
   },
 });
 
+// 242 [CF5], unit 4 (added 2 November 2026): four more campaigns of the
+// owner's complement of 29 October 2026 for what a creator ships; handmade
+// pieces, printed art and pet products use "Sell something you ship" above.
+// Built as that one: the product's page with what comes in it, its own details and the
+// same questions before ordering, every shipping fact in the creator's words,
+// and turning shipping on said first. Food also says, first, what only the
+// creator can check: no rule of any country is stated or promised here.
+const FOOD_RULES =
+  "Before you sell food, check the rules where you make it and where you ship it. Check whether you may sell and ship it from there. Check what its label must say and which ingredients and allergens to list. Check how long it keeps and how it must be packed. Marktmorgen cannot tell you what the rules are or whether you meet them.";
+
+type Shipped = {
+  id: string;
+  label: string;
+  hint: string;
+  name: string;
+  product: string;
+  /** Two letters for the blocks' ids, so none repeats on its page. */
+  key: string;
+  title: string;
+  slug: string;
+  headline: string;
+  sub: string;
+  box: { heading: string; items: string[] };
+  details: { heading: string; body: string }[];
+  before?: string[];
+};
+
+function shipped(c: Shipped): FunnelStarter {
+  const id = (n: number) => `${c.key}${String(n).padStart(2, "0")}`;
+  return {
+    id: c.id,
+    label: c.label,
+    hint: c.hint,
+    before: [...(c.before ?? []), SHIP_FIRST],
+    bundle: {
+      format: BUNDLE_FORMAT, schema: BUNDLE_SCHEMA, name: c.name,
+      products: [{ ref: "x1", label: c.product, wants: "paid" }],
+      forms: [],
+      steps: [{ kind: "page", ref: "p1" }, { kind: "product", ref: "x1" }, { kind: "page", ref: "p2" }],
+      pages: [
+        {
+          ref: "p1", title: c.title, slug: c.slug, target: "x1", style: "cards",
+          blocks: [
+            { id: id(1), kind: "hero", headline: c.headline, sub: c.sub, media: "none", video: null, button: true },
+            { id: id(2), kind: "benefits", heading: c.box.heading, items: c.box.items },
+            ...c.details.map((d, i) => ({ id: id(3 + i), kind: "text" as const, heading: d.heading, body: d.body })),
+            { id: id(3 + c.details.length), kind: "faq", heading: "Before you order", items: [
+              { q: "Where does it ship, and what does shipping cost?", a: "[Say where you ship and what shipping costs, as your shipping settings say. The product's page and the checkout show both from there.]" },
+              { q: "When does it ship?", a: "[Say when you ship it, in the same words as the note in your shipping settings.]" },
+              { q: "Can I return or exchange it?", a: "[Say how returns and exchanges work, as your refund policy says.]" },
+            ] },
+            { id: id(4 + c.details.length), kind: "cta", label: "See the product and price", note: "" },
+          ],
+        },
+        nextSteps({ title: "Your order", detail: "[Tell the buyer when you will send it and how they will hear from you.]" }),
+      ],
+    },
+  };
+}
+
+FUNNEL_STARTERS.push(
+  shipped({
+    id: "printed-book", label: "Sell a printed book", name: "Printed book", key: "pb",
+    hint: "Show what the book covers and its format, and how shipping and returns work, then lead to the book you ship.",
+    product: "The book you ship", title: "Your book", slug: "your-book",
+    headline: "[Your book's title]: [what it is about, in a few words]",
+    sub: "[Say who it is for and what they will find in it.]",
+    box: { heading: "What is inside", items: ["[The first part of the book]", "[The next part of the book]"] },
+    details: [{ heading: "Format", body: "[Give its binding, its size, how many pages it has and the language it is written in.]" }],
+  }),
+  shipped({
+    id: "branded-apparel", label: "Sell clothing with your brand", name: "Clothing", key: "ba",
+    hint: "Show the garment, its sizes, fabric and care, and how shipping and returns work, then lead to the clothing you ship.",
+    product: "The clothing you ship", title: "Your clothing", slug: "your-clothing",
+    headline: "[Your garment]: [what it is, in a few words]",
+    sub: "[Say what it is made of and what is printed or sewn on it.]",
+    box: { heading: "What you get", items: ["[The garment, its fabric and its colors]", "[Anything printed or sewn on it]"] },
+    details: [{ heading: "Sizes and care", body: "[Give each size's measurements, how it fits and how to wash it. If you sell sizes as price options, name them the same way here.]" }],
+  }),
+  shipped({
+    id: "course-kit", label: "A kit to go with your course", name: "Course kit", key: "ck",
+    hint: "Show what comes in the kit and how it goes with your course, and how shipping and returns work, then lead to the kit you ship.",
+    product: "The kit you ship", title: "Your kit", slug: "your-kit",
+    headline: "[Your kit]: [what is in it, in a few words]",
+    sub: "[Say which course it goes with and who it is for.]",
+    box: { heading: "What comes in the kit", items: ["[The first thing in the kit]", "[The next thing in the kit]"] },
+    details: [
+      { heading: "How it goes with the course", body: "[Say which lessons use it and what to do with it. Say that the kit does not include the course, which is bought on its own, and where to get it.]" },
+      { heading: "Size and materials", body: "[Give its measurements, what it is made of and how to look after it.]" },
+    ],
+  }),
+  shipped({
+    id: "homemade-food", label: "Sell food you make", name: "Food you make", key: "hf",
+    hint: "Show what it is, its ingredients and allergens and how to keep it, and how shipping and returns work, then lead to the food you ship.",
+    product: "The food you ship", title: "Your food", slug: "your-food",
+    headline: "[Your food]: [what it is, in a few words]",
+    sub: "[Say how you make it and what comes in each package.]",
+    box: { heading: "What comes in the package", items: ["[What is in each package, and how much]", "[Anything else that comes with it]"] },
+    details: [
+      { heading: "Ingredients and allergens", body: "[List every ingredient and every allergen, as the label on the package says. Check what a label must say under the rules where you make it and where you ship it.]" },
+      { heading: "How to keep it", body: "[Say how to store it once it arrives and how long it keeps, as the label says.]" },
+    ],
+    before: [FOOD_RULES],
+  }),
+);
+
 export function funnelStarter(id: unknown): FunnelStarter | null {
   return FUNNEL_STARTERS.find((starter) => starter.id === id) ?? null;
 }
@@ -495,6 +601,11 @@ export function funnelStarter(id: unknown): FunnelStarter | null {
 export function starterOutline(starter: FunnelStarter): BundleOutline {
   const outline = outlineOf(starter.bundle);
   return { ...outline, fill: [...(starter.before ?? []), ...outline.fill] };
+}
+
+/** Whether a starter is for something the creator ships: what it says first ends with turning shipping on. */
+export function forShipping(starter: FunnelStarter): boolean {
+  return starter.before?.at(-1) === SHIP_FIRST;
 }
 
 /** What to do first, as lines of the list shown once the starter is made. */

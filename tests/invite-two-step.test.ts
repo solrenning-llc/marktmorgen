@@ -22,12 +22,13 @@ process.env.RESEND_API_KEY = "re_test_invite_two_step_only_a_stand_in";
 const mails: { to: string; subject: string; text: string }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = String(input instanceof Request ? input.url : input);
-  if (url.includes("resend")) {
+  const host = new URL(url).hostname;
+  if (host === "api.resend.com") {
     const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
     mails.push({ to: Array.isArray(body.to) ? body.to[0] : String(body.to ?? ""), subject: String(body.subject ?? ""), text: String(body.text ?? "") });
     return new Response(JSON.stringify({ id: `email_${mails.length}` }), { status: 200 });
   }
-  if (url.includes("api.stripe.com")) return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
+  if (host === "api.stripe.com") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 

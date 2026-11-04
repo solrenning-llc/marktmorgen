@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MIN_SUMMARY_REVIEWS, SUMMARY_REFRESH_SECONDS, type SummaryTheme, summaryLine } from "@/lib/review-ai-summary-rules";
 
 type Kept = { at: number; read: number; themes: SummaryTheme[] } | null;
-type Product = { id: string; title: string; reviews: number; summary: Kept };
+/** lastAt: when the week's last summary was made, in seconds, even when it was deleted since (a review changed or gone). */
+type Product = { id: string; title: string; reviews: number; summary: Kept; lastAt?: number };
 
 const DAY = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 const day = (seconds: number) => DAY.format(new Date(seconds * 1000));
@@ -17,6 +18,7 @@ const REFUSALS: Record<string, string> = {
   slow: "Too many AI requests a moment ago. Try again in a minute.",
   // The try is counted before the model answers (lib/ai.ts keeps it counted on purpose), so this never says otherwise.
   failed: "The summary could not be made just now. This try counts as one of this month's AI jobs. Try again later.",
+  week: "A summary of this product was made in the last 7 days. A new one can be made a week after it.",
   empty: "No theme came out that two or more reviews share in their own words, so nothing was kept. This try counts as one of this month's AI jobs. You can try again another day.",
 };
 
@@ -37,6 +39,19 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
   const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   // One short sentence for screen readers, said once; the full one stays beside the product.
   const [announce, setAnnounce] = useState("");
+  // The same sentence twice is not read again by screen readers: the region is emptied first, the sentence put back on the next tick.
+  const announceTimer = useRef<number | null>(null);
+  function say(text: string) {
+    if (announceTimer.current !== null) window.clearTimeout(announceTimer.current);
+    setAnnounce("");
+    announceTimer.current = window.setTimeout(() => {
+      announceTimer.current = null;
+      setAnnounce(text);
+    }, 50);
+  }
+  useEffect(() => () => {
+    if (announceTimer.current !== null) window.clearTimeout(announceTimer.current);
+  }, []);
 
   async function make(product: Product) {
     if (busy) return;
@@ -44,20 +59,23 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
     setSaid((all) => ({ ...all, [product.id]: `Making the summary of ${product.title}'s reviews…` }));
     try {
       const response = await fetch("/api/store/review-summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ product: product.id }) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; summary?: Kept; error?: string; left?: number | null };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; summary?: Kept; error?: string; left?: number | null; next?: number | null };
       if (answer.ok && answer.summary) {
         setShown((all) => all.map((p) => (p.id === product.id ? { ...p, summary: answer.summary! } : p)));
         setSaid((all) => ({ ...all, [product.id]: typeof answer.left === "number" ? `Made. ${answer.left} AI ${answer.left === 1 ? "job" : "jobs"} left this month.` : "This week's summary." }));
-        setAnnounce(`The summary of ${product.title}'s reviews is ready.`);
+        say(`The summary of ${product.title}'s reviews is ready.`);
         window.setTimeout(() => statusRefs.current[product.id]?.focus(), 0);
       } else {
-        setSaid((all) => ({ ...all, [product.id]: REFUSALS[answer.error ?? "failed"] ?? REFUSALS.failed }));
-        setAnnounce(`No summary of ${product.title}'s reviews was made.`);
-        window.setTimeout(() => buttonRefs.current[product.id]?.focus(), 0);
+        const why = answer.error === "week" && typeof answer.next === "number" ? `A summary of this product was made in the last 7 days. A new one can be made from ${day(answer.next)} (UTC).` : REFUSALS[answer.error ?? "failed"] ?? REFUSALS.failed;
+        setSaid((all) => ({ ...all, [product.id]: why }));
+        if (answer.error === "week" && typeof answer.next === "number") setShown((all) => all.map((p) => (p.id === product.id ? { ...p, lastAt: answer.next! - SUMMARY_REFRESH_SECONDS } : p)));
+        say(`No summary of ${product.title}'s reviews was made.`);
+        // A week's refusal takes the button away: focus goes to what was said instead.
+        window.setTimeout(() => (answer.error === "week" ? statusRefs.current[product.id] : buttonRefs.current[product.id])?.focus(), 0);
       }
     } catch {
       setSaid((all) => ({ ...all, [product.id]: "That did not work. Check your connection and try again." }));
-      setAnnounce(`No summary of ${product.title}'s reviews was made.`);
+      say(`No summary of ${product.title}'s reviews was made.`);
       window.setTimeout(() => buttonRefs.current[product.id]?.focus(), 0);
     } finally {
       setBusy(null);
@@ -77,8 +95,10 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
         <ul className="mt-3 space-y-4">
           {shown.map((product) => {
             const line = product.summary ? summaryLine(product.summary.themes, product.summary.read) : "";
-            const nextAt = product.summary ? product.summary.at + SUMMARY_REFRESH_SECONDS : 0;
-            const canMake = product.reviews >= MIN_SUMMARY_REVIEWS && (!product.summary || nextAt <= now);
+            // The week counts from the last one made, even one deleted since because a review changed or went.
+            const lastAt = Math.max(product.summary?.at ?? 0, product.lastAt ?? 0);
+            const nextAt = lastAt ? lastAt + SUMMARY_REFRESH_SECONDS : 0;
+            const canMake = product.reviews >= MIN_SUMMARY_REVIEWS && (!lastAt || nextAt <= now);
             return (
               <li key={product.id} className="text-sm">
                 <h3 className="font-semibold text-ink [overflow-wrap:anywhere]">{product.title}</h3>
@@ -101,7 +121,7 @@ export function ReviewAiSummaries({ products, now }: { products: Product[]; /** 
                   </>
                 ) : (
                   <p className="mt-1 text-sm text-ink-soft">
-                    {product.reviews < MIN_SUMMARY_REVIEWS ? `A summary needs at least ${MIN_SUMMARY_REVIEWS} reviews; this one has ${product.reviews}.` : `A new one can be made from ${day(nextAt)} (UTC).`}
+                    {product.reviews < MIN_SUMMARY_REVIEWS ? `A summary needs at least ${MIN_SUMMARY_REVIEWS} reviews; this one has ${product.reviews}.` : `${product.summary ? "" : "The last summary was taken away because a review it counted was changed or removed. "}A new one can be made from ${day(nextAt)} (UTC).`}
                   </p>
                 )}
                 <p className="mt-1 text-sm text-ink" tabIndex={-1} ref={(node) => { statusRefs.current[product.id] = node; }}>

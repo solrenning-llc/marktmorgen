@@ -45,6 +45,7 @@ const ALLOWED: { pattern: RegExp; why: string }[] = [
   { pattern: /^nl:(health|stats:[0-9a-f]+:ledger)/, why: "ten-minute copies, worked out again when next read" },
   { pattern: /^nl:(sender|wf:day):/, why: "counts of emails and workflow runs, never who" },
   { pattern: /^nl:tasks:doors$/, why: "files waiting for the daily job to delete them, when the file store did not answer" },
+  { pattern: /^nl:rsum:ver:[0-9a-f]+:[A-Za-z0-9_-]+$/, why: "a random mark that a product's reviews changed, so an AI summary counting the deleted review is never kept (lib/reviews.ts), never who" },
   { pattern: /^nl:data:/, why: "the store's data room, counting what a deletion gave back (lib/store-data.ts), never who" },
 ];
 

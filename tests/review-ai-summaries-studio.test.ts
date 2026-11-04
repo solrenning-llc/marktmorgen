@@ -40,9 +40,18 @@ is("months written out, not abbreviated", html.includes("Made ") && !/\b(Jan|Feb
 const screenText = readFileSync("components/review-ai-summaries.tsx", "utf8");
 is("while it is made, that is said", screenText.includes("Making the summary of ${product.title}'s reviews…"), true);
 
+part("Review of 4 November 2026: the same sentence said again, the week kept after a delete");
+const says = source.match(/setAnnounce\(([^)]*)\)/g) ?? [];
+is("the live region is emptied first and the sentence put back on the next tick, so the same words twice are read twice", [says, /setAnnounce\(""\);\s*announceTimer\.current = window\.setTimeout\(/.test(source), (source.match(/\bsay\(`/g) ?? []).length], [['setAnnounce("")', "setAnnounce(text)"], true, 3]);
+const removed = draw([{ id: "p1", title: "Pottery Course", reviews: 12, summary: null, lastAt: NOW - 86_400 }]);
+is("a summary taken away by a review change: no button before the week is over, and why", [removed.includes("Make the summary"), removed.includes("The last summary was taken away because a review it counted was changed or removed. A new one can be made from")], [false, true]);
+is("a week after the last one, the button", draw([{ id: "p1", title: "Pottery Course", reviews: 12, summary: null, lastAt: NOW - SUMMARY_REFRESH_SECONDS }]).includes(">Make the summary<"), true);
+is("a week's refusal said with its date", source.includes('answer.error === "week" && typeof answer.next === "number"') && /week: "/.test(source), true);
+
 part("The page");
 const page = readFileSync("app/studio/reviews/page.tsx", "utf8");
 is("opening the page only reads what was made, never makes one", page.includes("readReviewSummary(store.statsId, p.id)") && !page.includes("makeReviewSummary"), true);
+is("and the week's last time, kept after a delete", page.includes("lastAt: await lastReviewSummaryAt(store.statsId, p.id)"), true);
 const screen = readFileSync("components/review-ai-summaries.tsx", "utf8");
 is("every refusal in plain words", ["few", "used", "busy", "off", "slow", "failed"].every((k) => new RegExp(`${k}: ["\x60]`).test(screen)), true);
 

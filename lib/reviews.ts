@@ -41,7 +41,7 @@
  *   nl:rev:pay:<s>            -> hash: payment -> the reviews it paid for (refunds)
  *   nl:rev:stores             -> set of statsIds with any review (the refund pass)
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
@@ -433,9 +433,16 @@ async function creatorChange(
   });
 }
 
+/**
+ * A new mark for a product's reviews (lib/review-ai-summary.ts keeps a summary only while the mark it read is
+ * still there), set before the summary is deleted, so a summary being made now is never kept either. Kept eight
+ * days, as the summary. When the week's last summary was made (nl:rsum:last:) is never deleted here.
+ */
+const markChange = (statsId: string, productId: string) => ["SET", `nl:rsum:ver:${statsId}:${productId}`, randomBytes(12).toString("hex"), "EX", 8 * 86_400];
+
 /** The product's AI summary of its reviews (lib/review-ai-summary.ts), which counts reviews that are gone: deleted. */
 async function forgetReviewSummary(statsId: string, productId: string): Promise<void> {
-  await redisPipeline([["DEL", `nl:rsum:${statsId}:${productId}`]]).catch((error: unknown) => console.error("forgetting a review summary failed", error));
+  await redisPipeline([markChange(statsId, productId), ["DEL", `nl:rsum:${statsId}:${productId}`]]).catch((error: unknown) => console.error("forgetting a review summary failed", error));
 }
 
 /**
@@ -627,6 +634,7 @@ export async function dropReviews(statsId: string | null, productId: string): Pr
     ["DEL", productKey(statsId, productId)],
     ["DEL", visibleKey(statsId, productId)],
     ["HDEL", summaryKey(statsId), productId],
+    markChange(statsId, productId),
     ["DEL", `nl:rsum:${statsId}:${productId}`],
     ...(members.length ? [["ZREM", allKey(statsId), ...members], ["ZREM", newKey(statsId), ...members]] : []),
   ]);

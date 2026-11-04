@@ -112,7 +112,7 @@ async function main(): Promise<void> {
   const next = await makeReviewSummary(store, glaze, day + 60_000);
   is("the next try the same day may be made", next.ok && next.fresh, true);
   is("the lock is let go only by the call that took it", readFileSync("lib/review-ai-summary.ts", "utf8").includes("if (held === mine)"), true);
-  is("and a summary found under the lock is the answer, not a second AI job", readFileSync("lib/review-ai-summary.ts", "utf8").includes("const now2 = await readReviewSummary(statsId, productId);"), true);
+  is("and a summary found under the lock is the answer, not a second AI job", readFileSync("lib/review-ai-summary.ts", "utf8").includes("const now2 = await week(statsId, productId);"), true);
   const one = (await visibleReviews(statsId, glaze, 0, 10))[0];
   await deleteReview(statsId, glaze, one.id, ROOM);
   is("a review deleted takes the summary that counted it", await readReviewSummary(statsId, glaze), null);
@@ -132,6 +132,55 @@ async function main(): Promise<void> {
   const raced = await makeReviewSummary(store, glaze, day + 14 * 86_400_000 + 240_000);
   globalThis.fetch = keep;
   is("a review gone while the model answered: the summary is not kept", [raced.ok, await readReviewSummary(statsId, glaze)], [false, null]);
+
+  part("Review of 4 November 2026: a new review, a review gone just before keeping, the week kept after a delete");
+  const fourth = await addProduct(OWNER, "Kiln Notes", "", "39");
+  if (!fourth.ok) throw new Error("no product");
+  const kiln = fourth.product.id;
+  for (const [i, text] of ["Clear notes", "Clear notes, useful", "Useful tips", "Useful and clear", "Clear and useful", "Useful tips again"].entries()) {
+    await saveReview(statsId, { productId: kiln, email: `kiln${i}@example.com`, reference: `cs_test_kln${i}0000000000`, pi: `pi_kln${i}`, rating: 5, text, name: `Kiln ${i}` }, ROOM);
+  }
+  store = (await storeForEmail(OWNER))!;
+  reply = JSON.stringify({ themes: [{ title: "Clear notes", reviews: [1, 2, 3, 4, 5] }, { title: "Useful tips", reviews: [1, 2, 3, 4, 5] }] });
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    // While the model answers, a buyer writes a new review: the summary read the others, all still shown.
+    if (new URL(String(input)).hostname === "api.anthropic.com") {
+      await saveReview(statsId, { productId: kiln, email: "kiln9@example.com", reference: "cs_test_kln90000000000", pi: "pi_kln9", rating: 2, text: "Arrived late", name: "Kiln 9" }, ROOM);
+    }
+    return keep(input, init);
+  }) as typeof fetch;
+  const grown = await makeReviewSummary(store, kiln, day + 300_000);
+  globalThis.fetch = keep;
+  is("a review written while the model answered: the summary is kept, the new one not counted yet", [grown.ok && grown.fresh, grown.ok && grown.summary.read, (await readReviewSummary(statsId, kiln))?.read], [true, 6, 6]);
+
+  // A review deleted after the reviews were read again and before the summary is kept: the mark it sets stops the keeping.
+  const kilnId = (await visibleReviews(statsId, kiln, 0, 10)).find((r) => r.text === "Clear notes")!.id;
+  const real = redis.pipeline.bind(redis);
+  const summaryOfKiln = `nl:rsum:${statsId}:${kiln}`;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The delete lands between the last read of the reviews and the keeping, the window the review found.
+    if (commands.some((c) => (c[0] === "SET" && c[1] === summaryOfKiln) || (c[0] === "EVAL" && c.includes(summaryOfKiln)))) {
+      redis.pipeline = real;
+      await deleteReview(statsId, kiln, kilnId, ROOM);
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const window2 = await makeReviewSummary(store, kiln, day + 7 * 86_400_000 + 360_000);
+  redis.pipeline = real;
+  is("a review deleted between the last read and the keeping: the summary is not kept", [window2.ok, await readReviewSummary(statsId, kiln)], [false, null]);
+  is("and the review is gone", (await visibleReviews(statsId, kiln, 0, 20)).some((r) => r.id === kilnId), false);
+
+  // A summary kept, then a review changed: the summary goes, the week's limit stays.
+  reply = JSON.stringify({ themes: [{ title: "Useful tips", reviews: [1, 2, 3, 4, 5] }] });
+  const weekly = await makeReviewSummary(store, kiln, day + 14 * 86_400_000 + 420_000);
+  is("made", weekly.ok && weekly.fresh, true);
+  const asked = prompts.length;
+  const hidden = (await visibleReviews(statsId, kiln, 0, 10))[0];
+  await deleteReview(statsId, kiln, hidden.id, ROOM);
+  is("a review deleted takes the summary", await readReviewSummary(statsId, kiln), null);
+  const reset = await makeReviewSummary(store, kiln, day + 14 * 86_400_000 + 480_000);
+  is("but not the week: no second AI job, said when the next may be made", [reset, prompts.length], [{ ok: false, reason: "week", next: Math.floor((day + 14 * 86_400_000 + 420_000) / 1000) + SUMMARY_REFRESH_SECONDS }, asked]);
+  is("a week later, made again", (await makeReviewSummary(store, kiln, day + 21 * 86_400_000 + 480_000)).ok, true);
   done();
 }
 

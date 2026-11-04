@@ -78,6 +78,27 @@ export function summaryInputs(reviews: readonly Review[], productId: string): Su
     .map((text, i) => ({ id: i + 1, text }));
 }
 
+/**
+ * Whether every review's words a summary was made from are still shown, as
+ * they were sent: a review deleted, hidden, refunded or rewritten since is
+ * not, so the summary would count it and is not kept; a review written
+ * since is only not counted yet, and does not undo the summary.
+ */
+export function inputsStillShown(inputs: readonly SummaryInput[], reviews: readonly Review[], productId: string): boolean {
+  const shown = new Map<string, number>();
+  for (const r of reviews) {
+    if (r.productId !== productId || r.hidden || r.refunded || !r.text.trim()) continue;
+    const text = cleanReviewText(r.text);
+    shown.set(text, (shown.get(text) ?? 0) + 1);
+  }
+  for (const input of inputs) {
+    const left = shown.get(input.text) ?? 0;
+    if (left < 1) return false;
+    shown.set(input.text, left - 1);
+  }
+  return true;
+}
+
 /** Whether a summary may be made now: enough reviews, and none made in the last week. */
 export function maySummarise(inputs: readonly SummaryInput[], lastAt: number, nowSeconds: number): boolean {
   return inputs.length >= MIN_SUMMARY_REVIEWS && (lastAt <= 0 || nowSeconds - lastAt >= SUMMARY_REFRESH_SECONDS);

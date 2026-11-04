@@ -31,7 +31,7 @@ import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
 import { lostDisputesSince } from "@/lib/refunds";
 import { callScope, readRecord, writeRecord, type MeetRecord } from "@/lib/meet-records";
 import { MEET_STORES } from "@/lib/meet-links";
-import { bookedCalendarFeed } from "@/lib/calendar-sync";
+import { bookedCalendarFeed, ensureFeedToken } from "@/lib/calendar-sync";
 import { markRefundedReviews, provePurchase } from "@/lib/review-proof";
 import { readReview, saveReview, visibleReviews } from "@/lib/reviews";
 import { readListing } from "@/lib/catalog";
@@ -262,6 +262,9 @@ async function main(): Promise<void> {
   refunds = [refund];
   await syncMeetings(plainFor, Date.now() + 10_000, "https://marktmorgen.com");
   is("so before its feed is read, its refunds are not", (await redis.pipeline([["GET", bookingsChangedKey(plainId)]]))[0], null);
+  // A feed is answered only while the store's calendar settings exist (lib/calendar-sync.ts, KEEP_COPY; inbox C4-48):
+  // the store subscribed, as a creator does from the studio.
+  await ensureFeedToken(store);
   const fed = await bookedCalendarFeed({ statsId: store.statsId!, handle: "kilnworks", callsId: plainId }, async () => "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n");
   const [listedAt] = await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]);
   is("its feed made, the store's refunds are read for two days", [fed.state, Number(listedAt) > Date.now() + 86_400_000], ["made", true]);

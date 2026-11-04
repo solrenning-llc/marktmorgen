@@ -775,8 +775,11 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
   }
   // Kept only while the store's settings are still there: a deletion that ran while this was being made
-  // (forgetStoreCalendar) is not undone by a copy written after it, with its buyers' names.
-  await redisPipeline([["EVAL", KEEP_COPY, 2, cfgKey(owner.statsId), outKey(owner.statsId), file, CALENDAR_COPY_SECONDS]]).catch(() => {});
+  // (forgetStoreCalendar) is not undone by a copy written after it, with its buyers' names; and what was made is
+  // not answered either (inbox C4-48, medium 1). When the step cannot be run, nothing is answered: the app asks again.
+  const [written] = await redisPipeline([["EVAL", KEEP_COPY, 2, cfgKey(owner.statsId), outKey(owner.statsId), file, CALENDAR_COPY_SECONDS]]).catch(() => [null]);
+  if (Number(written) === 0) return { state: "gone" };
+  if (Number(written) !== 1) return { state: "none" };
   // A store whose feed is read has its refunds read by the five-minute job, meeting rooms or not, so a call refunded
   // or cancelled marks its bookings changed and the feed is made again at the app's next check (inbox C4-33, M3):
   // for FEED_REFUNDS_SECONDS after each making, which a feed that is read makes at least every CALENDAR_REFRESH_SECONDS.

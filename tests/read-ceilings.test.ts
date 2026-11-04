@@ -414,7 +414,8 @@ async function main(): Promise<void> {
       await forgetStoreCalendar(thirdOwner.statsId);
       return "BEGIN:VCALENDAR\r\nX-WHO:raced\r\nEND:VCALENDAR";
     }, third0 + 2 * 86_400_000);
-    is("the file made answers once, but no copy is written after the deletion", [racing.state, redis.run(["GET", copyKey])], ["made", null]);
+    // Inbox C4-48, medium 1: the deletion won the race, so what was made is not answered either, and no copy is written.
+    is("the file made is neither answered nor kept: the feed is gone", [racing.state, "ics" in racing, redis.run(["GET", copyKey])], ["gone", false, null]);
   }
 
   part("A store deleted from the studio forgets its feed at once (M2-bis, 1; light 6)");

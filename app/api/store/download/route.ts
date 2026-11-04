@@ -295,7 +295,7 @@ export async function paidDownloadRenewalPost(request: NextRequest, runtime: Shi
   const person = createHash("sha256").update(`${store.sid}\n${identity.email}`).digest("hex");
   if (!(await withinStore("download", `${store.handle}:renew:${person}`, 5, 3600, store, "buyer"))) return plain(429, words.tooOften);
   const result = await enqueueSingleDigitalRenewal(store, capsule, nonce, runtime);
-  if (!result.ok) return plain(result.reason === "not_paid" ? 410 : 503, result.reason === "not_paid" ? words.notPaid : result.reason === "capacity" ? words.capacity : words.unavailable);
+  if (!result.ok) return plain(result.reason === "not_paid" ? 410 : 503, result.reason === "not_paid" ? words.notPaid : result.reason === "capacity" ? words.capacity : result.reason === "acceptance_unknown" ? words.acceptanceUnknown : result.reason === "on_hold" ? words.onHold : result.reason === "refused" ? words.refused : words.unavailable);
   return privatePage(store.language, words.savedTitle, `<p>${htmlValue(words.savedBody)}</p>`);
 }
 

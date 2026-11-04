@@ -51,12 +51,12 @@ export function shipmentOutboxFixture() {
       else if (raw !== expected) answer = ["changed"];
       else {
         const value = JSON.parse(raw);
-        if (op === "accepted" || op === "cancel") {
+        if (op === "accepted" || op === "cancel" || op === "refused" && value.originKind === "single_digital_renewal" && value.state === "dispatching" && value.owner === owner) {
           if(value.originKind==="single_digital_renewal"){store.run(["DEL",k[10]]);store.run(["SREM",k[11],value.id]);}
           store.run(["DEL", k[0]]); store.run(["ZREM", k[2], value.id]);
           for (const index of [3, 4, 7]) store.run(["SREM", k[index], value.id]);
           store.run(["EXPIRE", k[1], 400 * 86_400]);
-          answer = [op === "accepted" ? "accepted" : "canceled"];
+          answer = [op === "accepted" ? "accepted" : op === "refused" ? "refused" : "canceled"];
         } else if (op === "claim" && value.state !== "queued" && !(value.state === "preparing" && value.leaseUntil <= now)) answer = ["held", raw];
         else if (op === "claim") {
           value.state = "preparing"; value.owner = owner; value.leaseUntil = now + 60_000;

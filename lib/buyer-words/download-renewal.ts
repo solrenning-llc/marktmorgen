@@ -16,11 +16,17 @@ type RenewalWords = {
   tooOften: string;
   unavailable: string;
   capacity: string;
+  acceptanceUnknown: string;
+  onHold: string;
+  refused: string;
   notPaid: string;
 };
 
 const WORDS: Record<LanguageCode, RenewalWords> = {
   en: {
+    acceptanceUnknown: "The previous email may have been sent, but acceptance could not be confirmed. Another email has not been scheduled. Contact the store for help.",
+    onHold: "Your previous request is retained, but no further attempt is scheduled. Contact the store for help.",
+    refused: "The previous email was refused. It is not scheduled to be sent again. Contact the store for help.",
     sameSite: "This request must come from this site.",
     badForm: "Please use the download link's form.",
     unreadable: "This request could not be read.",
@@ -38,6 +44,9 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     notPaid: "This purchase is no longer paid or has been refunded, so its download is closed.",
   },
   es: {
+    acceptanceUnknown: "El correo anterior puede haberse enviado, pero no se pudo confirmar su aceptación. No se ha programado otro correo. Contacta con la tienda.",
+    onHold: "Tu solicitud anterior se conserva, pero no hay otro intento programado. Contacta con la tienda.",
+    refused: "El correo anterior fue rechazado. No se ha programado otro envío. Contacta con la tienda.",
     sameSite: "Esta solicitud debe proceder de este sitio.",
     badForm: "Usa el formulario del enlace de descarga.",
     unreadable: "No hemos podido leer esta solicitud.",
@@ -55,6 +64,9 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     notPaid: "Esta compra ya no está pagada o se ha reembolsado, por lo que la descarga está cerrada.",
   },
   fr: {
+    acceptanceUnknown: "Le courriel précédent a peut-être été envoyé, mais son acceptation n’a pas pu être confirmée. Aucun autre courriel n’est programmé. Contactez la boutique.",
+    onHold: "Votre demande précédente est conservée, mais aucune nouvelle tentative n’est programmée. Contactez la boutique.",
+    refused: "Le courriel précédent a été refusé. Aucun nouvel envoi n’est programmé. Contactez la boutique.",
     sameSite: "Cette demande doit provenir de ce site.",
     badForm: "Veuillez utiliser le formulaire du lien de téléchargement.",
     unreadable: "Cette demande n’a pas pu être lue.",
@@ -72,6 +84,9 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     notPaid: "Cet achat n’est plus payé ou a été remboursé, le téléchargement est donc fermé.",
   },
   de: {
+    acceptanceUnknown: "Die vorherige E-Mail wurde möglicherweise gesendet, ihre Annahme konnte aber nicht bestätigt werden. Eine weitere E-Mail ist nicht geplant. Bitte kontaktiere den Shop.",
+    onHold: "Deine vorherige Anfrage wird aufbewahrt, aber ein weiterer Versuch ist nicht geplant. Bitte kontaktiere den Shop.",
+    refused: "Die vorherige E-Mail wurde abgewiesen. Ein erneuter Versand ist nicht geplant. Bitte kontaktiere den Shop.",
     sameSite: "Diese Anfrage muss von dieser Website kommen.",
     badForm: "Bitte nutze das Formular des Download-Links.",
     unreadable: "Diese Anfrage konnte nicht gelesen werden.",
@@ -89,6 +104,9 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     notPaid: "Dieser Kauf ist nicht mehr bezahlt oder wurde erstattet. Der Download ist deshalb geschlossen.",
   },
   it: {
+    acceptanceUnknown: "L’email precedente potrebbe essere stata inviata, ma non è stato possibile confermarne l’accettazione. Non è programmata un’altra email. Contatta il negozio.",
+    onHold: "La richiesta precedente è conservata, ma non è programmato un altro tentativo. Contatta il negozio.",
+    refused: "L’email precedente è stata rifiutata. Non è programmato un nuovo invio. Contatta il negozio.",
     sameSite: "Questa richiesta deve provenire da questo sito.",
     badForm: "Usa il modulo del link per scaricare.",
     unreadable: "Non è stato possibile leggere questa richiesta.",
@@ -106,6 +124,9 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     notPaid: "Questo acquisto non risulta più pagato o è stato rimborsato, quindi il download è chiuso.",
   },
   nl: {
+    acceptanceUnknown: "De vorige e-mail is mogelijk verzonden, maar de acceptatie kon niet worden bevestigd. Er staat geen nieuwe e-mail gepland. Neem contact op met de winkel.",
+    onHold: "Je vorige verzoek blijft bewaard, maar er staat geen nieuwe poging gepland. Neem contact op met de winkel.",
+    refused: "De vorige e-mail is geweigerd. Er staat geen nieuwe verzending gepland. Neem contact op met de winkel.",
     sameSite: "Dit verzoek moet van deze website komen.",
     badForm: "Gebruik het formulier van de downloadlink.",
     unreadable: "Dit verzoek kon niet worden gelezen.",
@@ -123,6 +144,9 @@ const WORDS: Record<LanguageCode, RenewalWords> = {
     notPaid: "Deze aankoop is niet meer betaald of is terugbetaald. De download is daarom gesloten.",
   },
   pt: {
+    acceptanceUnknown: "O email anterior pode ter sido enviado, mas não foi possível confirmar a aceitação. Não está programado outro email. Contacte a loja para obter ajuda.",
+    onHold: "O seu pedido anterior está guardado, mas não está programada outra tentativa. Contacte a loja para obter ajuda.",
+    refused: "O email anterior foi recusado. Não está programado um novo envio. Contacte a loja para obter ajuda.",
     sameSite: "Este pedido tem de ser feito a partir deste site.",
     badForm: "Utilize o formulário da ligação para descarregar.",
     unreadable: "Não foi possível ler este pedido.",

@@ -44,6 +44,8 @@
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
+import { RENEWAL_NOTICE_ROWS, RENEWAL_NOTICE_SCRIPT } from "@/lib/renewal-mail-notice";
+import { CURRENT_SHIPMENT_MAIL_LIFECYCLE, SHIPMENT_MAIL_MAX_ROW_BYTES } from "@/lib/shipment-mail-outbox";
 import { ESSENTIAL_PER_DAY } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
@@ -369,6 +371,13 @@ export type CostLine = {
 const ALL_TIERS_SAME = (usd: number) => () => usd;
 
 export const COST_LINES: CostLine[] = [
+  {
+    id: "renewal-mail-owner-notice",
+    feature: "Bounded owner reconciliation notice for uncertain download-link requests (CX-59)",
+    monthlyUsd: tier => CURRENT_SHIPMENT_MAIL_LIFECYCLE === "never_activated" ? 0 : STORE_ALLOWANCES[tier].studio * request("studio", 4 + RENEWAL_NOTICE_ROWS, Buffer.byteLength(RENEWAL_NOTICE_SCRIPT) + RENEWAL_NOTICE_ROWS * (SHIPMENT_MAIL_MAX_ROW_BYTES + 1) + 4096),
+    sources: [{file:"lib/renewal-mail-notice.ts",names:["RENEWAL_NOTICE_ROWS","RENEWAL_NOTICE_SCRIPT","renewalMailSummary"]}, {file:"components/renewal-mail-notice.tsx",names:["RenewalMailNotice"]}],
+    basis: "Never-activated lifecycle returns before all IO (actual use zero, not an unknown provider rate). Activation must price this line and pass every margin check; the active projection currently fails the Scale/Pro relative-margin invariant, so it is not approved. Conservative one aggregate read for every studio allowance unit, although an owner page takes four: TYPE/SCARD/SMEMBERS, up to eight bounded GETRANGEs and EVAL itself. Prices the script plus all internal row bytes as if transferred, and the existing studio function/CPU ceiling. Only aggregates leave Redis; no retry, provider request or pending-row mutation. Missing funding/lifecycle prevents the read. Future funding must include this line; no cost or activation certification from a null policy.",
+  },
   {
     id: "storage",
     feature: "Files and lesson files kept",

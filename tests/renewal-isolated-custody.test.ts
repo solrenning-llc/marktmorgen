@@ -97,6 +97,39 @@ async function reserveCourse(w: World) {
 for (const real of [false, true]) {
   const label = real ? "native Redis" : "fixture";
   const options = { skip: real && !native };
+  test(`CX59 ${label}: eight known refusals release capacity but keep their source receipts`, options, async()=>{
+    const w=await world(real);
+    try {
+      for(let i=0;i<8;i++){
+        const buyer=w.buyer(40+i);const result=await enqueueSingleDigitalRenewal(w.f.store,buyer.capsule,nonce(800+i),w.runtime);assert.ok(result.ok);
+        const source=`nl:order-confirmation:source:${result.id}`;const [originalSource]=await w.run([["GET",source]]);
+        await runOrderConfirmationMail(w.runtime.now!()+30000,async(_m,barrier)=>{assert.equal(await barrier(),true);return "refused";},w.runtime);
+        assert.deepEqual(await w.run([["GET",w.pointer(buyer.capsule)],["SCARD",w.pendingKey]]),[null,0],"confirmed non-delivery cannot consume a lifetime pending slot");
+        assert.equal((await w.run([["GET",source]]))[0],originalSource,"terminal source evidence is retained");
+        assert.ok(Number((await w.run([["TTL",source]]))[0])>399*86400);
+      }
+      assert.equal((await w.post(w.buyer(49).capsule,810)).status,200);
+    }finally{await w.cleanup();}
+  });
+  test(`CX59 ${label}: an unknown dispatch is never described as saved and scheduled again`, options, async()=>{
+    const w=await world(real);
+    try{
+      const result=await enqueueSingleDigitalRenewal(w.f.store,w.original,nonce(820),w.runtime);assert.ok(result.ok);let sends=0;
+      await runOrderConfirmationMail(w.runtime.now!()+30000,async(_m,barrier)=>{assert.equal(await barrier(),true);sends++;return "unknown";},w.runtime);
+      const response=await w.post(w.original,821);assert.equal(response.status,503);assert.doesNotMatch(await response.text(),/Your request is saved|will be emailed/);
+      assert.equal((await readSingleDigitalRenewalOrigin(result.id,w.runtime))?.row.state,"dispatching");assert.equal(sends,1);
+    }finally{await w.cleanup();}
+  });
+  test(`CX59 ${label}: exhausted retained work is not promised as scheduled`, options, async()=>{
+    const w=await world(real);
+    try{
+      const result=await enqueueSingleDigitalRenewal(w.f.store,w.original,nonce(830),w.runtime);assert.ok(result.ok);
+      const saved=await readSingleDigitalRenewalOrigin(result.id,w.runtime);assert.ok(saved);
+      const held={...saved.row,next:0,checks:w.runtime.policy!.maximumChecks};await w.run([["SET",confirmationOriginRowKey(result.id),JSON.stringify(held)]]);
+      const response=await w.post(w.original,831);assert.equal(response.status,503);assert.doesNotMatch(await response.text(),/Your request is saved|will be emailed/);
+      assert.ok(await readSingleDigitalRenewalOrigin(result.id,w.runtime));
+    }finally{await w.cleanup();}
+  });
   test(`R5 ${label}: buyer A's pending renewal permits paid buyer B in the same store`, options, async () => {
     const w = await world(real);
     try {
@@ -149,7 +182,7 @@ for (const real of [false, true]) {
       }
       await runOrderConfirmationMail(w.runtime.now!()+30_000, unknown, w.runtime);
       assert.equal(posts, 1); assert.equal((await readSingleDigitalRenewalOrigin(result.id, w.runtime))?.row.state, "dispatching");
-      assert.deepEqual(await enqueueSingleDigitalRenewal(w.f.store, w.original, nonce(55), w.runtime), result, "unknown ACK keeps capsule deduplication after thirty days");
+      assert.deepEqual(await enqueueSingleDigitalRenewal(w.f.store, w.original, nonce(55), w.runtime), {ok:false,reason:"acceptance_unknown"}, "unknown ACK keeps capsule deduplication and reports its unresolved state after thirty days");
       assert.equal((await w.post(w.buyer(3).capsule, 6)).status, 200);
       assert.deepEqual(await w.run([["TTL", confirmationOriginRowKey(result.id)], ["GET", w.pointer(w.original)]]), [-1, result.id]);
       assert.deepEqual(await w.run([["SCARD", w.pendingKey]]), [2]);

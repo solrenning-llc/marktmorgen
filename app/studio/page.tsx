@@ -158,6 +158,7 @@ import { TipsEditor } from "@/components/tips-editor";
 import { KitEditor } from "@/components/kit-editor";
 import { StoreSetupAi } from "@/components/store-setup-ai";
 import { StudioHelp } from "@/components/studio-help";
+import { RenewalMailNotice } from "@/components/renewal-mail-notice";
 import { joinOpen } from "@/lib/store-join";
 import { contactOpen } from "@/lib/store-contact";
 import { visibleCount } from "@/lib/catalog";
@@ -1270,6 +1271,7 @@ export default async function StudioPage({
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.left} /> : null}
+            {role === "owner" ? <RenewalMailNotice store={store} /> : null}
             {/* Once there is something on the store: what else it does to sell, with a score (lib/store-coach.ts). */}
             {may("page") ? (
               <StoreCoach checks={storeChecks(store, { path: (page) => studioPath(store, "", page) })} />

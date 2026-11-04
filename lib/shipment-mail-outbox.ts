@@ -368,6 +368,9 @@ elseif op == 'not-accepted' then
  r.state='queued'; r.owner=''; r.next=now+p.retryMilliseconds
 elseif op == 'refused' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
+ -- Known non-delivery ends only a renewal request, never an unknown ACK.
+ -- drop preserves its source receipt while atomically releasing its slot.
+ if r.originKind=='single_digital_renewal' then drop(); return {'refused'} end
  r.state='refused'; r.next=0
 elseif op == 'accepted' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end

@@ -1010,7 +1010,13 @@ export async function readSingleDigitalRenewalOrigin(id: string, runtime: Shipme
   const capture: { found?: RenewalFound } = {};
   await readOrigin(id, runtime, capture); return capture.found ?? null;
 }
-export async function enqueueSingleDigitalRenewal(store: Store, capsule: string, requestNonce: string, runtime: ConfirmationOriginRuntime = {}): Promise<{ ok:true; id:string } | { ok:false; reason:"not_paid"|"unknown"|"capacity" }> {
+function renewalRequestStatus(row: RenewalRow): { ok:true; id:string } | { ok:false; reason:"acceptance_unknown"|"on_hold"|"refused" } {
+  if (row.state === "dispatching") return { ok:false,reason:"acceptance_unknown" };
+  if (row.state === "refused") return { ok:false,reason:"refused" };
+  if (row.state === "queued" && row.next === 0) return { ok:false,reason:"on_hold" };
+  return { ok:true,id:row.id };
+}
+export async function enqueueSingleDigitalRenewal(store: Store, capsule: string, requestNonce: string, runtime: ConfirmationOriginRuntime = {}): Promise<{ ok:true; id:string } | { ok:false; reason:"not_paid"|"unknown"|"capacity"|"acceptance_unknown"|"on_hold"|"refused" }> {
   const p = confirmationOutboxPolicy(runtime);
   if (!p || !singleDigitalRenewalCovered(p) || !canSeal() || !HASH.test(requestNonce)) return { ok:false,reason:"unknown" };
   const identity = singleDigitalRenewalIdentity(store, capsule);
@@ -1036,11 +1042,11 @@ export async function enqueueSingleDigitalRenewal(store: Store, capsule: string,
       // Re-read its authenticated row; a pointer alone is never proof of custody.
       if (receipt.length !== 2 || typeof receipt[1] !== "string" || !HASH.test(receipt[1])) return {ok:false,reason:"unknown"};
       const pending = await readSingleDigitalRenewalOrigin(receipt[1],runtime);
-      return pending && pending.row.statsId===store.statsId && pending.row.accountId===identity.accountId && pending.row.person===person && pending.row.capsuleDigest===capsuleDigest ? {ok:true,id:pending.row.id} : {ok:false,reason:"unknown"};
+      return pending && pending.row.statsId===store.statsId && pending.row.accountId===identity.accountId && pending.row.person===person && pending.row.capsuleDigest===capsuleDigest ? renewalRequestStatus(pending.row) : {ok:false,reason:"unknown"};
     }
     if (!receipt || !["queued","existing"].includes(String(receipt[0]))) return { ok:false,reason:"unknown" };
     const found = await readSingleDigitalRenewalOrigin(id,runtime);
-    return found && found.row.capsuleDigest === capsuleDigest && found.row.person === person && found.row.sourceValue === row.sourceValue ? {ok:true,id} : {ok:false,reason:"unknown"};
+    return found && found.row.capsuleDigest === capsuleDigest && found.row.person === person && found.row.sourceValue === row.sourceValue ? renewalRequestStatus(found.row) : {ok:false,reason:"unknown"};
   } catch { return {ok:false,reason:"unknown"}; }
 }
 async function processRenewal(initial: RenewalFound, p: ShipmentMailPolicy, runtime: ConfirmationOriginRuntime, dispatch: ShipmentMailDispatch,

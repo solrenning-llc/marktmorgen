@@ -18,7 +18,8 @@
  *   - the membership pays once a year, one item of one, in the store's
  *     currency, charged automatically (never sent as an invoice to pay by
  *     hand), past due on that renewal (not canceled, not set to end, not
- *     paused), not driven by a subscription schedule, with no discount (on
+ *     paused), not driven by a subscription schedule nor in flexible billing
+ *     mode, with no discount (on
  *     the subscription or on its item) and no affiliate share still running
  *     for a set number of months (yearly-switch-rules' own reasons, read the
  *     same way), and paid with a method that can carry a change made only if
@@ -41,6 +42,13 @@ export type FallbackSub = Omit<YearlySub, "items"> & {
   collection_method?: unknown;
   /** Set when a subscription schedule drives it (the creator's dashboard): a phase change voids a pending update. */
   schedule?: unknown;
+  /**
+   * "classic" or "flexible". In flexible mode a reset of the billing cycle to now invoices nothing unless
+   * `proration_behavior=always_invoice`, and a trial no longer moves the billing date (Stripe, Set the subscription
+   * billing renewal date, docs.stripe.com/billing/subscriptions/billing-cycle, read 4 November 2026): neither the move
+   * (no first month charged) nor its undoing (lib/yearly-fallback-sweep.ts) would do what they say, so none is offered.
+   */
+  billing_mode?: { type?: unknown } | null;
   items?: {
     data?: {
       quantity?: unknown;
@@ -149,6 +157,7 @@ export function monthlyFallback(
   if (discounted(sub as YearlySub)) return null;
   // Not driven by a schedule: its next phase would put the year back, and a phase change voids a pending update.
   if (sub.schedule) return null;
+  if (sub.billing_mode?.type === "flexible") return null;
   if (affiliateMonthsLeft(meta, nowSeconds)) return null;
   // Once a year, one item of one, in the store's currency.
   const items = sub.items?.data ?? [];

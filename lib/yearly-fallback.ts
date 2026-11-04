@@ -88,6 +88,11 @@ export const FALLBACK_STRIPE_VERSION = "2026-08-26.dahlia";
 export const FALLBACK_VOID_KEY = "nl:yearly:fallback:void";
 export const FALLBACK_CHECK_KEY = "nl:yearly:fallback:check";
 export const FALLBACK_BOTH_KEY = "nl:yearly:fallback:both";
+/**
+ * Which store each connected account left on those lists belongs to (account -> store id): the daily job tells the
+ * creator when it cannot reach the account or finish a move, and a list's entry names only the account.
+ */
+export const FALLBACK_STORES_KEY = "nl:yearly:fallback:stores";
 /** The same lock as a switch between plans or to yearly: one change to a membership at a time (lib/tier-switch.ts). */
 export const fallbackLockKey = (subscription: string) => `nl:tier:${subscription}:lock`;
 /** One try at a move counted per failed invoice, so a second try after a decline is never Stripe's saved answer to the first. */
@@ -148,10 +153,10 @@ const refused = (error: unknown) => error instanceof StripeError && error.status
 /** A monthly price Stripe no longer has or no longer sells: the cached one is dropped, so the next try makes another. */
 const priceGone = (error: unknown) =>
   error instanceof StripeError && (error.code === "resource_missing" || /\binactive\b|no such price/i.test(error.stripeMessage));
-/** Whether the entry is on its list for the daily job. */
-const record = async (key: string, entry: string): Promise<boolean> => {
+/** Whether the entry is on its list for the daily job, with the store its account belongs to. */
+const record = async (key: string, entry: string, store: Store): Promise<boolean> => {
   try {
-    await redisPipeline([["SADD", key, entry]]);
+    await redisPipeline([["SADD", key, entry], ["HSET", FALLBACK_STORES_KEY, String(store.stripeAccountId), store.sid]]);
     return true;
   } catch (error) {
     console.error("a move to monthly could not be left for the daily job; the result says so", key, entry, error);
@@ -217,7 +222,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
         }
         // No answer, a 409 or Stripe's own failure: the move may have been made and the month charged. The year stays
         // with no automatic retry, and the daily job reads the membership again before anything else.
-        return { ok: false, reason: (await record(FALLBACK_CHECK_KEY, check)) ? "unknown" : "unknown-unrecorded" };
+        return { ok: false, reason: (await record(FALLBACK_CHECK_KEY, check, store)) ? "unknown" : "unknown-unrecorded" };
       }
       const latest = updated.latest_invoice && typeof updated.latest_invoice === "object" ? (updated.latest_invoice as InvoiceRead) : null;
       const latestId = typeof latest?.id === "string" && INVOICE_PATTERN.test(latest.id) && latest.id !== failedInvoice ? latest.id : "";
@@ -238,7 +243,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
             return { ok: false, reason: "declined" };
           }
         }
-        return { ok: false, reason: (await record(FALLBACK_CHECK_KEY, check)) ? "unknown" : "unknown-unrecorded" };
+        return { ok: false, reason: (await record(FALLBACK_CHECK_KEY, check, store)) ? "unknown" : "unknown-unrecorded" };
       }
       const paid = latest?.status === "paid";
       const result: Extract<FallbackResult, { ok: true }> = {
@@ -252,7 +257,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
       if (!paid || !latestId) {
         // Applied with the first month not paid yet (a payment still processing), or with no month's invoice read
         // back: the year is voided only once the month is, by the daily job; until then it is never retried by itself.
-        if (!(await record(FALLBACK_CHECK_KEY, check))) result.unrecorded = "check";
+        if (!(await record(FALLBACK_CHECK_KEY, check, store))) result.unrecorded = "check";
         return result;
       }
       // Moved and the month paid: the year can never be paid as well.
@@ -263,10 +268,10 @@ export async function moveToMonthly(store: Store, customer: string, subscription
         if (again?.status === "paid") {
           // Paid in the seconds the month was: the month is refunded, never both kept.
           console.error("a yearly invoice was paid while the monthly move was made; the month is refunded by the daily job", error);
-          if (!(await record(FALLBACK_BOTH_KEY, `${account}|${failedInvoice}|${latestId}`))) result.unrecorded = "both";
+          if (!(await record(FALLBACK_BOTH_KEY, `${account}|${failedInvoice}|${latestId}`, store))) result.unrecorded = "both";
         } else if (again?.status !== "void") {
           console.error("voiding the yearly invoice after a monthly move failed; kept for the daily job", error);
-          if (!(await record(FALLBACK_VOID_KEY, `${account}|${failedInvoice}|${latestId}`))) result.unrecorded = "void";
+          if (!(await record(FALLBACK_VOID_KEY, `${account}|${failedInvoice}|${latestId}`, store))) result.unrecorded = "void";
         }
       }
       return result;

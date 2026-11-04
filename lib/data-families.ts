@@ -108,8 +108,8 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
   "nl:weekly:lock", "nl:weekly:off", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:",
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
-  "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check", "nl:yearly:fallback:refunded:",
-  "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
+  "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check", "nl:yearly:fallback:denied:",
+  "nl:yearly:fallback:refunded:", "nl:yearly:fallback:since", "nl:yearly:fallback:stores", "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
 ];
 
 /** Whether a key belongs to a family the room counts: the longest family name it starts with is one of COUNTED_FAMILIES. */
@@ -381,7 +381,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A yearly member moved to the monthly price (lib/yearly-fallback.ts): the company's lists of moves to settle are
   // kept until the daily job settles them (a closing store's member is never charged both), the marks go by themselves.
   "nl:yearly:fallback:void": C, "nl:yearly:fallback:check": C, "nl:yearly:fallback:both": C,
-  "nl:yearly:fallback:try:": X(2), "nl:yearly:fallback:refunded:": X(2),
+  "nl:yearly:fallback:try:": X(2), "nl:yearly:fallback:refunded:": X(2), "nl:yearly:fallback:denied:": X(7),
+  "nl:yearly:fallback:since": C, "nl:yearly:fallback:stores": C,
 };
 
 /**

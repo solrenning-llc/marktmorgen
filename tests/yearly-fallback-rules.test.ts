@@ -51,15 +51,17 @@ is(
   [null, null, null, null, null, null, null, null, null],
 );
 is(
-  "never driven by a schedule, never with a discount on its item, never on an invoice partly paid or whose retries were stopped (review, 4 November 2026)",
+  "never driven by a schedule nor in flexible billing mode, never with a discount on its item, never on an invoice partly paid or whose retries were stopped (review, 4 November 2026)",
   [
     offer({ ...sub, schedule: "sub_sched_1" }),
+    offer({ ...sub, billing_mode: { type: "flexible" } }),
     offer({ ...sub, items: { data: [{ quantity: 1, discounts: ["di_item"], price: { unit_amount: 20000, currency: "usd", recurring: { interval: "year", interval_count: 1 } } }] } }),
     offer(sub, { ...invoice, amount_paid: 5000 }),
     offer(sub, { ...invoice, auto_advance: false }),
   ],
-  [null, null, null, null],
+  [null, null, null, null, null],
 );
+is("classic billing mode is offered", offer({ ...sub, billing_mode: { type: "classic" } }) !== null, true);
 is("an invoice nothing was paid on, still retried, is offered", offer(sub, { ...invoice, amount_paid: 0, auto_advance: true }) !== null, true);
 const paidWith = (own: unknown, theirs?: unknown) => offer({ ...sub, default_payment_method: own, customer: theirs === undefined ? "cus_1" : { invoice_settings: { default_payment_method: theirs } } });
 is(

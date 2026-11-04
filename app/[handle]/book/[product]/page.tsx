@@ -11,6 +11,7 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
+import { ownLength } from "@/lib/call-lengths";
 import { type CallListing, canMove, catchUpBookings, icsLink, isCallProduct, slotsForMove, slotsForProduct, whyNotMove } from "@/lib/calls";
 import { chargeNow } from "@/lib/call-deposit";
 import { type CallSetup, MAX_MOVES, MEET_NAMES, movableUntil, readableTime, zoneName } from "@/lib/call-setup";
@@ -202,6 +203,12 @@ export default async function BookPage({ params, searchParams }: Params) {
 }
 
 /** What the time picker says, for this page, in the store's language. */
+/** The length a booking moves at, as moveBooking keeps it (lib/call-lengths.ts, ownLength). */
+function movesAt(setup: CallListing["call"], booking: { start: number; end: number }): number {
+  const kept = ownLength(setup, booking.end - booking.start);
+  return typeof kept === "number" ? kept : setup.minutes;
+}
+
 function slotWords(store: Store, b: BookingWords, minutes: number, price: string, move: boolean, fromPackage: boolean): SlotWords {
   const { w, lang } = speech(store);
   return {
@@ -340,7 +347,7 @@ async function MovePage({
   const notice = moved ? null : b.moveNotices[status] ?? null;
   const blocked = whyNotMove(setup, booking.start, booking.moves);
   const movable = blocked === null;
-  const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start) : null;
+  const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start, booking.end - booking.start) : null;
   const leftMoves = MAX_MOVES - booking.moves;
   const until = movableUntil(setup, booking.start);
   const price = money(product.priceCents);
@@ -425,7 +432,7 @@ async function MovePage({
                 productId={product.id}
                 seatsLeft={setup.seats > 1 ? seatLabels(offer.left, b) : undefined}
                 move={session}
-                words={slotWords(store, b, setup.minutes, price, true, false)}
+                words={slotWords(store, b, movesAt(setup, booking), price, true, false)}
               />
             )}
           </>

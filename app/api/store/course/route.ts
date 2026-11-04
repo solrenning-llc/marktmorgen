@@ -107,7 +107,9 @@ export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", MAX_BODY_LENGTH * 4 + 4_000);
   if (!guarded.ok) return guarded.response;
   const { ref, body } = guarded;
-  const action = text(body.action, 10);
+  // Long enough for the longest action below ("cert-months" has 11 letters);
+  // tests/certificate-validity.test.ts holds every action within it.
+  const action = text(body.action, 20);
   const id = text(body.id, 40);
   if (!id) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
 

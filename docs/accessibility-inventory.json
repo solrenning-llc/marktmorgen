@@ -1783,6 +1783,7 @@
     "app/api/store/paypal/disconnect/route.ts",
     "app/api/store/paypal/onboarded/route.ts",
     "app/api/store/paypal/return/route.ts",
+    "app/api/store/person-tasks/route.ts",
     "app/api/store/person/route.ts",
     "app/api/store/phone/route.ts",
     "app/api/store/photo/route.ts",

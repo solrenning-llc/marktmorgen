@@ -37,7 +37,7 @@ import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
 import { isLiveSub, soldAMembership } from "@/lib/membership-access";
-import { purchaseRefunded, refundedInFull } from "@/lib/refunds";
+import { keptUnlessLost, purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, readListings, sellsAny, sellsThings } from "@/lib/catalog";
 import { paidCalls } from "@/lib/calls";
@@ -584,12 +584,17 @@ async function purchaseFromSession(
 }
 
 /** What one payment taken in one click after a checkout hands over again, or null: the list's reading and one download's. */
-async function purchaseFromIntent(store: Store, intent: Row, find: Finder): Promise<Purchase | null> {
+async function purchaseFromIntent(store: Store, intent: Row, find: Finder, account: string, meter?: OrdersMeter): Promise<Purchase | null> {
   const id = typeof intent.id === "string" ? intent.id : "";
   if (!INTENT_ID_PATTERN.test(id)) return null;
   const meta = (intent.metadata ?? {}) as Record<string, string>;
   if (meta.kind !== "upsell" || !saleHandles(store).has(meta.store ?? "")) return null;
   if (intent.status !== "succeeded" || refunded(intent)) return null;
+  // Lost to a dispute is given back too (lib/refunds.ts); asked only of a
+  // charge Stripe marks disputed, and a failed read keeps it on the list.
+  // Past the opening's time or its meter refused, Stripe is not asked.
+  meter?.alive();
+  if (await keptUnlessLost(account, intent)) return null;
   const product = await find(meta.product);
   const items = product ? await linesOf(find, bundleFromMeta(meta, "bundle")) : null;
   if (!product || !(product.file || product.link || items)) return null;
@@ -685,7 +690,7 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
     for (const intent of rows(listed)) {
       const id = typeof intent.id === "string" ? intent.id : "";
       if (found.has(id)) continue;
-      const purchase = await purchaseFromIntent(store, intent, find);
+      const purchase = await purchaseFromIntent(store, intent, find, account as string, meter);
       if (purchase) found.set(purchase.reference, purchase);
     }
   }
@@ -1012,7 +1017,7 @@ async function lookUp(
   // A payment taken in one click: shown on the list when it was made for the customer of one of the address's checkouts
   // that the list hands over (purchasesFor: that checkout's own reading names the customer). Read here with the checkout
   // it followed (lib/upsell.ts, metadata[parent]), which must have been paid with this address and be read by that same
-  // rule: its product and the products ticked with it, and nothing of a bundle.
+  // rule: its product and the products checked with it, and nothing of a bundle.
   const intent = await readOne(store, `/payment_intents/${encodeURIComponent(reference)}?expand[]=latest_charge`, meter);
   const intentMeta = (intent?.metadata ?? {}) as Record<string, string>;
   const parent = intentMeta.parent ?? "";
@@ -1025,5 +1030,5 @@ async function lookUp(
   const customer = (await purchaseFromSession(store, session, find, meter))?.customer ?? null;
   if (!customer || customer !== intent.customer) return null;
   allow(intentMeta.product, want.pid);
-  return done(await purchaseFromIntent(store, intent, find));
+  return done(await purchaseFromIntent(store, intent, find, store.stripeAccountId, meter));
 }

@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type AgendaListRow, TasksAgendaList, agendaDay, agendaLinkWords, staleWords } from "@/components/tasks-agenda";
-import { AGENDA_SHOWN, AGENDA_UNITS, PERSON_KEY, agendaReadUnits, addressForPerson, addressesOf, agendaForDays, agendaGroups, daysAround } from "@/lib/person-agenda";
+import { AGENDA_ROW_MARKUP_BYTES, AGENDA_SHOWN, AGENDA_UNITS, PERSON_KEY, agendaReadUnits, addressForPerson, addressesOf, agendaForDays, agendaGroups, daysAround } from "@/lib/person-agenda";
 import { personKey } from "@/lib/person-key";
 import { redisPipeline } from "@/lib/redis";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LedgerNotCounted, buyerLedger, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
@@ -63,6 +63,15 @@ async function main() {
   const rows: AgendaListRow[] = agenda.rows.map((row) => ({ ...row, email: row.person === ann ? "ann@example.com" : null, href: row.person === ann ? `/studio/people?who=${ann}` : "" }));
   const drawn = (serverDay: string) => renderToStaticMarkup(createElement(TasksAgendaList, { rows, days: agenda.days, serverDay, found: { partial: false } }));
   const fortaleza = drawn("2026-11-03");
+  // One row's own markup, beside what the row says, fits AGENDA_ROW_MARKUP_BYTES, found or not (round 7, L2).
+  const oneRow = (email: string | null) => {
+    const row: AgendaListRow = { person: ann, task: { id: "abcdefghij", text: "Call", due: "2026-11-03", assignee: "sam@example.com", done: false, createdAt: 1, doneAt: 0 }, email, href: email ? `/studio/people?who=${ann}` : "" };
+    const one = agendaForDays([{ person: ann, task: row.task }], ["2026-11-03"]);
+    const html = renderToStaticMarkup(createElement(TasksAgendaList, { rows: [row], days: one.days, serverDay: "2026-11-03", found: { partial: false } }));
+    const li = html.slice(html.indexOf("<li"), html.indexOf("</li>") + 5);
+    return Buffer.byteLength(li) - [row.task.text, row.task.assignee, email ?? "", row.href].reduce((n, t) => n + Buffer.byteLength(t), 0);
+  };
+  is("one agenda row's own markup fits AGENDA_ROW_MARKUP_BYTES, with the person found and not", [oneRow("ann@example.com") <= AGENDA_ROW_MARKUP_BYTES, oneRow(null) <= AGENDA_ROW_MARKUP_BYTES, oneRow("ann@example.com") > 100], [true, true, true]);
   is("drawn for the 3rd: due today, not past", [fortaleza.includes("Due today (1)"), fortaleza.includes("Due Nov 3, 2026"), fortaleza.includes("Was due Nov 3, 2026")], [true, true, false]);
   is("and the 2nd's past, the 4th's to come", [fortaleza.includes("Was due Nov 2, 2026"), fortaleza.includes("Due Nov 4, 2026")], [true, true]);
   is("drawn for the 4th, the 3rd's is past", drawn("2026-11-04").includes("Was due Nov 3, 2026"), true);
@@ -137,9 +146,32 @@ async function main() {
   is("a store with one person's tasks counts nothing beyond its page; 1,000 people count at most AGENDA_UNITS", [agendaReadUnits(1), agendaReadUnits(3), agendaReadUnits(1_000), AGENDA_UNITS], [0, 1, 2, 5]);
   await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio") - 3)]]);
   const tooMany = await countUnits(realStore, 5);
-  is("asking more than are left says how many this needs and how many are left, not that all are spent (round 5, L4)", [tooMany.ok, !tooMany.ok && tooMany.message], [false, "This needs 5 of your studio requests, and 3 are left."]);
+  is("asking more than are left says how many this needs, how many were left by the figure's own count, and when they come back (round 7, M2)", [tooMany.ok, !tooMany.ok && /^This needs 5 of your studio requests, and only 3 are left\. This opens again (with your next billing month, )?on [A-Z][a-z]+ \d+ \(UTC\)\.$/.test(tooMany.message)], [false, true]);
+  await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio"))]]);
+  const none = await countUnits(realStore, 250);
+  is("none left, said as such (round 7, L3)", !none.ok && none.message.startsWith("This needs 250 of your studio requests, and none are left. This opens again"), true);
+  const never = await countUnits(realStore, 1_500);
+  is("more than the whole month's figure: the figure's own words, with its number and when it comes back", !never.ok && never.message.startsWith("Your studio's requests for this month are used: 300 studio requests. This opens again"), true);
+  await redisPipeline([["SET", studioCount()!, "0"]]);
+  const before = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "INCRBY")) throw new Error("down");
+    return before(commands);
+  }) as typeof redis.pipeline;
+  const unread = await countUnits(realStore, 5);
+  redis.pipeline = before;
+  is("when the count cannot be read, it says so, never how many are left (round 7, M2)", [!unread.ok && unread.reason, !unread.ok && unread.message.includes("left")], ["unknown", false]);
   is("one sentence, with how many this needs and how many are left (round 6, L1); a refusal keeps its reason", [!tooMany.ok && tooMany.reason], ["used"]);
   await redisPipeline([["SET", studioCount()!, "0"]]);
+
+  part("A store with imported buyers only (round 7, M1)");
+  const importedOnly = { statsId: "ppstats", handle: "ppshop", previousHandles: [], currency: "usd", pastBuyers: true } as unknown as Store;
+  await redisPipeline([["ZADD", "nl:ppsell:sales:ppstats", 1, "ORDER0000000001"]]);
+  watch.length = 0;
+  const importedAsked: number[] = [];
+  await buyerLedger(importedOnly, async (units) => { importedAsked.push(units); return true; });
+  is("reads no sales, so counts none and asks nothing of the PayPal sales kept", [importedAsked.length === 0 || importedAsked.every((u) => u === 0), watch.some((c) => c[0] === "ZCARD")], [true, false]);
+  await redisPipeline([["DEL", "nl:ppsell:sales:ppstats", "nl:stats:ppstats:ledger"]]);
 
   part("A store selling with PayPal (round 5, H1)");
   const paypalShop = { statsId: "ppstats", handle: "ppshop", previousHandles: [], currency: "usd", paypalSeller: "SELLER1" } as unknown as Store;

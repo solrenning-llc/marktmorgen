@@ -637,6 +637,7 @@ function Terms({
   const [numbers, setNumbers] = useState(setting.numbers);
   const [kit, setKit] = useState(setting.kit);
   const [lifetime, setLifetime] = useState(setting.lifetime);
+  const [contacts, setContacts] = useState(setting.contacts === true);
   const [recurringMonths, setRecurringMonths] = useState(String(setting.recurring));
   const [paidSearch, setPaidSearch] = useState(setting.paidSearch);
   const [secondTier, setSecondTier] = useState(String(setting.secondTier));
@@ -683,6 +684,8 @@ function Terms({
               hold: Number(hold.trim()),
               buyers,
               lifetime,
+              // Only a program that pays per lead has confirmed contacts to credit (lib/affiliate-setting.ts creditsContacts).
+              contacts: lead.kind !== "none" && contacts,
               recurring: Number(recurringMonths),
               paidSearch,
               secondTier: Number(secondTier),
@@ -1129,6 +1132,32 @@ function Terms({
 
         {/* Pay per lead (components/affiliate-leads-studio.tsx, lib/affiliate-leads.ts). */}
         <LeadTerms value={lead} onChange={setLead} currency={storeCurrency} />
+        {/*
+          A purchase by a contact an affiliate brought (630 [HN6](1),
+          lib/affiliate-leads.ts contactFor). Shown only while leads are paid,
+          because only then is a contact confirmed and written down as theirs.
+          Off until the creator says so, like the bond above.
+        */}
+        {lead.kind !== "none" ? (
+          <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
+            <input
+              type="checkbox"
+              checked={contacts}
+              onChange={(e) => setContacts(e.target.checked)}
+              className="h-5 w-5 shrink-0 accent-[var(--violet)]"
+            />
+            <span className="text-sm">
+              <span className="block font-semibold text-ink">A lead who buys later earns the affiliate who brought them</span>
+              <span className="block text-ink-soft">
+                A one-off purchase not credited to an affiliate&rsquo;s link, code or an earlier purchase goes to the affiliate
+                who brought the buyer as a confirmed lead before they bought, at that affiliate&rsquo;s share, on any device. A
+                lead counts from when it is confirmed, even while it waits for your approval. Once you mark a lead as not
+                genuine, or delete the person from your store, their later purchases earn nobody. Your affiliate page says so
+                before anyone applies.
+              </span>
+            </span>
+          </label>
+        ) : null}
 
         <label className="mt-5 flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3">
           <input

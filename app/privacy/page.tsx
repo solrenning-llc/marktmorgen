@@ -1012,8 +1012,9 @@ export default function PrivacyPage() {
           one-way hash of the visitor&apos;s network address and browser for
           two days. When a purchase counts, we note which product, when, what
           was paid before tax and in all, the share it earns, and whether it was
-          credited by a click, by a discount code or by the buyer already
-          belonging to that affiliate &mdash; and never the buyer&apos;s name or
+          credited by a click, by a discount code, by the buyer already
+          belonging to that affiliate or by the buyer having been that
+          affiliate&apos;s confirmed lead &mdash; and never the buyer&apos;s name or
           email address. Where a creator credits memberships and payment plans,
           the affiliate, the share and the terms ride on the subscription in the
           creator&apos;s own Stripe account, and each payment is read from there
@@ -1024,7 +1025,13 @@ export default function PrivacyPage() {
           such clicks, and nothing about the visitor. A creator may give one of their own discount codes to
           one affiliate, and then a purchase that used that code counts for them
           with no cookie involved; what we keep for that is which code belongs
-          to which affiliate, and nothing about whoever typed it. A creator may
+          to which affiliate, and nothing about whoever typed it. A creator who
+          pays affiliates per lead may also credit a one-off purchase to the
+          affiliate who brought the buyer as a confirmed lead before they
+          bought. This applies only when no link, code or earlier purchase
+          already credits it. To find it, we compare the email address the
+          order was paid with against that program&apos;s leads. Nothing is
+          kept for it beyond what any credited purchase keeps. A creator may
           also ask that a buyer credited to an affiliate stays credited to them
           for every later purchase. Where they have, we keep a one-way hash of
           the buyer&apos;s email address together with the store&apos;s own id,

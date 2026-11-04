@@ -95,6 +95,7 @@ import {
   MIN_COMMISSION,
   commissionOn,
   commissionRate,
+  creditsContacts,
   RECURRING_ALWAYS,
   readViaCookie,
 } from "@/lib/affiliate-setting";
@@ -207,6 +208,9 @@ export type Affiliate = {
  *            click anywhere (lib/affiliate-codes.ts);
  *   "buyer"  they had been credited to that affiliate before, and the creator
  *            asked for their buyers to stay theirs (lib/affiliate-bond.ts);
+ *   "contact" nothing else credited it, and the buyer is a confirmed lead
+ *            that affiliate brought, where the creator asked for contacts to
+ *            earn their affiliate (lib/affiliate-leads.ts contactFor; 630 [HN6](1));
  *   "partner" nobody brought this buyer to them: they hold a standing share
  *            of the product itself (lib/partner-share.ts);
  *   "recurring" a payment of a membership or payment plan sold through their
@@ -217,7 +221,7 @@ export type Affiliate = {
  *   "lead"   not a sale: a confirmed lead, earning the program's fixed amount
  *            per lead (lib/affiliate-leads.ts, added 18 October 2026).
  */
-export type Credit = "click" | "code" | "buyer" | "partner" | "recurring" | "bonus" | "tier2" | "lead";
+export type Credit = "click" | "code" | "buyer" | "partner" | "contact" | "recurring" | "bonus" | "tier2" | "lead";
 
 /** A sale that came through an affiliate's link. */
 export type Referral = {
@@ -442,7 +446,7 @@ function parseReferral(raw: unknown): Referral | null {
       // neither field, and every one of those came from a click. `byCode` is
       // read for the ones written in between.
       how:
-        value.how === "code" || value.how === "buyer" || value.how === "partner"
+        value.how === "code" || value.how === "buyer" || value.how === "partner" || value.how === "contact"
           ? value.how
           : value.byCode === true
             ? "code"
@@ -1496,8 +1500,19 @@ export async function noteSession(
       found = await bondFor(store, buyer);
       how = "buyer";
     }
+    // Then the affiliate who brought this buyer as a confirmed lead, where the
+    // creator asked for that (lib/affiliate-leads.ts contactFor). Read lazily:
+    // that file reads this one.
+    if (!found && buyer && creditsContacts(store.affiliates)) {
+      const { contactFor } = await import("@/lib/affiliate-leads");
+      // Only a lead confirmed before this checkout was opened, and never the
+      // lead this very checkout made (a paid booking is one): a sale written
+      // down again later must not reach back to a lead that came after it.
+      found = await contactFor(store, buyer, at, session.id);
+      how = "contact";
+    }
     if (!found) return;
-    // A code or a bond only ever credits somebody the creator approves today.
+    // A code, a bond or a contact only ever credits somebody the creator approves today.
     // An affiliate they declined or removed keeps their record — it is
     // history — and earns nothing more through either.
     const who = await readAffiliate(store, found);
@@ -2071,7 +2086,7 @@ export function bonusLines(store: Pick<Store, "affiliates" | "currency">, lines:
 }
 
 /** What a line credited this way is: a sale somebody brought, as opposed to a share, a bonus or a second tier. */
-const BROUGHT: readonly Credit[] = ["click", "code", "buyer", "recurring"];
+const BROUGHT: readonly Credit[] = ["click", "code", "buyer", "contact", "recurring"];
 
 /**
  * The second tier: for each sale an affiliate brought that earns them

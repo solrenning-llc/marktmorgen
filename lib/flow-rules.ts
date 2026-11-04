@@ -87,8 +87,8 @@ export type Otherwise = "skip" | "end" | "jump";
 export type FlowGoal = { productId: string } | { any: true } | { tag: string };
 
 /** What starts a workflow (lib/flows.ts, Flow.trigger). */
-export type FlowTrigger = "joined" | "product" | "bought" | "tagged" | "finished" | "form" | "started" | "abandoned" | "stage";
-export const FLOW_TRIGGERS: readonly FlowTrigger[] = ["joined", "product", "bought", "tagged", "finished", "form", "started", "abandoned", "stage"];
+export type FlowTrigger = "joined" | "product" | "bought" | "tagged" | "finished" | "form" | "started" | "abandoned" | "stage" | "signed";
+export const FLOW_TRIGGERS: readonly FlowTrigger[] = ["joined", "product", "bought", "tagged", "finished", "form", "started", "abandoned", "stage", "signed"];
 
 /** The longest label a condition can name; the same as an imported label's (lib/contacts.ts). */
 export const MAX_CONDITION_TAG = 40;

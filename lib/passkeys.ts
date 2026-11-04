@@ -38,6 +38,7 @@ import {
 import { normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, headerText, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { recoveryAddress } from "@/lib/recovery-address";
 import { SITE_URL } from "@/lib/site-url";
 
 /** Passkeys one account may hold. */
@@ -130,13 +131,13 @@ async function saveList(email: string, list: Passkey[]): Promise<void> {
   await redisPipeline([list.length ? ["SET", listKey(email), JSON.stringify(list)] : ["DEL", listKey(email)]]);
 }
 
-/** A short plain notice to the account's address when its passkeys change. */
-async function tell(email: string, subject: string, line: string): Promise<void> {
+/** A short plain notice to the account's address (or `to`, its recovery address) when its passkeys change. */
+async function tell(email: string, subject: string, line: string, to = email): Promise<void> {
   if (!isSenderConfigured()) return;
   const when = new Date().toISOString().replace("T", " ").slice(0, 16);
   await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
-    to: normaliseEmail(email),
+    to: normaliseEmail(to),
     replyTo: "support@marktmorgen.com",
     subject,
     text: [
@@ -148,7 +149,7 @@ async function tell(email: string, subject: string, line: string): Promise<void>
       "",
       "If it was not you: log in at",
       `${SITE_URL}/signin`,
-      "with this email address, remove any passkey you do not recognize, choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.",
+      `${to === email ? "with this email address" : `as ${normaliseEmail(email)}`}, remove any passkey you do not recognize, choose “Log out of all devices” at the bottom of your studio, and reply to this email so we can help.`,
     ].join("\n"),
   }).catch(() => false);
 }
@@ -234,7 +235,14 @@ export async function removePasskey(email: string, id: string): Promise<boolean>
   if (!gone) return false;
   await saveList(address, list.filter((p) => p.id !== id));
   await redisPipeline([["DEL", credKey(id)]]);
-  await tell(address, "A passkey was removed from your Marktmorgen account", `The passkey called “${headerText(gone.name, 60)}” was removed from your Marktmorgen account (${address}). It cannot log in anymore.`);
+  const line = `The passkey called “${headerText(gone.name, 60)}” was removed from your Marktmorgen account (${address}). It cannot log in anymore.`;
+  await tell(address, "A passkey was removed from your Marktmorgen account", line);
+  // A passkey is one of the ways the owner calls off a login without two-step login (lib/two-step.ts),
+  // so its removal is told to the recovery address too, which whoever holds the sign-in inbox cannot read.
+  const backup = await recoveryAddress(address).catch(() => "");
+  if (backup && normaliseEmail(backup) !== address) {
+    await tell(address, "A passkey was removed from your Marktmorgen account", `This is the recovery address for the Marktmorgen account ${address}, so you get this notice too.\n\n${line}`, backup);
+  }
   return true;
 }
 

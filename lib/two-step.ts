@@ -33,9 +33,10 @@
  * When the recovery inbox is lost as well (or for an account set up before
  * there was one), the creator still gets in at once, from the same page, with
  * the emailed link alone — into a studio where what could take money, data or
- * the account itself away is locked for RESET_DAYS (LOCKED_NEEDS: payments,
- * the plan, the team, deleting, exports, settings, sending to the list,
- * imports, the sign-in address, passkeys, two-step login). They can sell, edit
+ * the account itself away is locked for RESET_DAYS (all that LOCKED_ALLOWS
+ * does not allow: payments, the plan, the team, deleting the store or a
+ * person, exports, settings, sending to the list, imports, the sign-in
+ * address, passkeys, two-step login). They can sell, edit
  * their products and pages, answer buyers and read their numbers meanwhile.
  * After those days two-step login turns off and nothing is locked. In that
  * time the account is emailed, every browser still logged in shows it, and any
@@ -70,6 +71,7 @@ import { seal, unseal } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
 import { newSecret, otpauthUri, stepOf } from "@/lib/totp";
 import { alignRecoveryLock, endRecoveryLock, hideAddress, keepRecoveryAddress, recoveryAddress } from "@/lib/recovery-address";
+import type { Permission } from "@/lib/team-roles";
 
 export { hideAddress };
 
@@ -138,13 +140,25 @@ function newCodes(): string[] {
   });
 }
 
-/** A short plain notice to the account's address when its second step changes or is used. */
-async function tell(email: string, subject: string, line: string): Promise<void> {
+/**
+ * A short plain notice to the account's address when its second step changes
+ * or is used. `backup`: the confirmed recovery address, told the same, for what
+ * happens on the path that assumes somebody else may hold the sign-in inbox.
+ */
+async function tell(email: string, subject: string, line: string, backup = ""): Promise<void> {
   if (!isSenderConfigured()) return;
+  const address = normaliseEmail(email);
+  await notice(address, subject, line);
+  if (backup && normaliseEmail(backup) !== address) {
+    await notice(normaliseEmail(backup), subject, `This is the recovery address for the Marktmorgen account ${address}, so you get this notice too.\n\n${line}`);
+  }
+}
+
+async function notice(to: string, subject: string, line: string): Promise<void> {
   const when = new Date().toISOString().replace("T", " ").slice(0, 16);
   await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
-    to: normaliseEmail(email),
+    to,
     replyTo: "support@marktmorgen.com",
     subject,
     text: [
@@ -185,11 +199,42 @@ export async function twoStepStatus(email: string): Promise<TwoStepStatus> {
 const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 /**
- * What a session opened without the second step may not do until its days
- * are over (lib/studio-route.ts studioAccess): everything that moves money or
- * data out, changes who can get in, or cannot be undone.
+ * What a session opened without the second step may do until its days are
+ * over (lib/studio-route.ts studioAccess), written as an allow-list: true for
+ * a permission it keeps, false for one that waits. What waits is everything
+ * that moves money or data out, changes who can get in, or cannot be undone.
+ * Every permission of lib/team-roles.ts has to be named here (the type says
+ * so, and tests/locked-session.test.ts checks it), so a new one is never open
+ * to a locked session by being forgotten; anything not named is refused.
  */
-export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "delete", "export", "settings", "send", "import"];
+export const LOCKED_ALLOWS: Readonly<Record<Permission, boolean>> = {
+  billing: false,
+  payments: false,
+  team: false,
+  delete: false,
+  settings: false,
+  page: true,
+  products: true,
+  stats: true,
+  orders: true,
+  export: false,
+  community: true,
+  events: true,
+  reviews: true,
+  draft: true,
+  send: false,
+  import: false,
+  erase: false,
+};
+
+/** The permissions a locked session waits for: the ones LOCKED_ALLOWS says false to. */
+export const LOCKED_NEEDS: readonly Permission[] = (Object.keys(LOCKED_ALLOWS) as Permission[]).filter((p) => !LOCKED_ALLOWS[p]);
+
+/** Whether a locked session is refused `need`: every permission LOCKED_ALLOWS does not allow by name ("member" is only being on the team). */
+export function lockedRefuses(need: string): boolean {
+  if (need === "member") return false;
+  return !Object.prototype.hasOwnProperty.call(LOCKED_ALLOWS, need) || LOCKED_ALLOWS[need as Permission] !== true;
+}
 
 /** Until when a session is locked, in ms, or 0 for a session that is not. */
 export async function lockedUntil(session: string | undefined, now = Date.now()): Promise<number> {
@@ -211,7 +256,7 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   const email = held?.email ?? null;
   const record = email ? await read(email) : null;
   if (!email || !record) return null;
-  const through = held?.viaRecovery ? "a login link sent to your recovery address" : "a login link sent to this address";
+  const through = held?.viaRecovery ? "a login link sent to your recovery address" : "a login link sent to your sign-in address";
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
   if (Number(removed) !== 1) return null;
@@ -224,11 +269,12 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   await tell(
     email,
     first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",
-    `Somebody who opened ${through} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, payments, your plan, your team, exports, settings, sending to your list, your sign-in address, passkeys and two-step login are locked for them; after that, two-step login turns off.
+    `Somebody who opened ${through} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, payments, your plan, your team, deleting people's data, exports, settings, sending to your list, your sign-in address, passkeys and two-step login are locked for them; after that, two-step login turns off.
 
 If that was you, keep working: everything else is open.
 
 If it was not you, somebody can read your email: log in with your app's code or a passkey, or open your studio in a browser that is still logged in and press Cancel. That logs them out and keeps two-step login on. Then change your email password.`,
+    await backupOf(email, record),
   );
   return { session, email, until };
 }
@@ -288,8 +334,10 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
 export async function resetIfDue(email: string, now = Date.now()): Promise<boolean> {
   const record = await read(email);
   if (!record || record.reset === 0 || now < record.reset) return false;
+  // Read before the record goes: an account from before kept its recovery address on it.
+  const backup = await backupOf(email, record);
   await redisPipeline([["DEL", recordKey(email), lockedSetKey(email)]]);
-  await tell(email, "Two-step login is off for your Marktmorgen account", `Two-step login was turned off ${RESET_DAYS} days after you got in without it, and nothing in your studio is locked any more. You can turn it on again in your studio, with a new app setup and new recovery codes.`);
+  await tell(email, "Two-step login is off for your Marktmorgen account", `Two-step login was turned off ${RESET_DAYS} days after somebody got in without it, and nothing in your studio is locked any more. You can turn it on again in your studio, with a new app setup and new recovery codes.`, backup);
   return true;
 }
 

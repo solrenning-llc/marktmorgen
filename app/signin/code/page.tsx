@@ -97,7 +97,7 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
             </summary>
             <p className="mt-2">
               {reset
-                ? `You can get in now, as before. Payments, your plan, your team, exports, settings, sending to your list, your sign-in address, passkeys and two-step login stay locked until ${resetDay}, when two-step login turns off; everything else is open.`
+                ? `You can get in now, as before. Payments, your plan, your team, deleting people's data, exports, settings, sending to your list, your sign-in address, passkeys and two-step login stay locked until ${resetDay}, when two-step login turns off; everything else is open.`
                 : `Get in now. Everything you need to keep selling is open at once: your products, pages, buyers, numbers and drafts. What could take money, data or the account away — payments, your plan, your team, exports, settings, sending to your list, your sign-in address — stays locked for ${RESET_DAYS} days, and then two-step login turns off. That is what keeps someone who only got into your email from doing harm: we email you, and logging in with a code or a passkey in that time, or Cancel in your studio, logs them out.`}
             </p>
             <form method="post" action="/api/auth/code" className="mt-3">

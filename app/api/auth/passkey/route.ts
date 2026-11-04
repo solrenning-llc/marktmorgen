@@ -26,7 +26,8 @@ const ANSWERS: Record<string, number> = { expired: 400, invalid: 400, full: 409,
  * isFreshSession): a passkey outlives the session that adds it, so an old
  * session — or one that walked off on a borrowed laptop — is asked to log in
  * again first ("reauth"). Removing one does not: it can only take a way in
- * away, and the emailed link always works.
+ * away, and the emailed link always works. A session let in without the
+ * second step (lib/two-step.ts) may do none of the three ("locked").
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -48,8 +49,10 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
 
-  // A session let in without its second step cannot add a way in of its own (lib/two-step.ts).
-  if ((body.action === "options" || body.action === "add") && (await lockedUntil(session)) > 0) {
+  // A session let in without its second step cannot change the passkeys at all
+  // (lib/two-step.ts): adding one would be a way in of its own, and removing one
+  // takes away a way the owner calls the reset off.
+  if ((await lockedUntil(session)) > 0) {
     return Response.json({ ok: false, error: "locked" }, { status: 403 });
   }
   if ((body.action === "options" || body.action === "add") && !(await isFreshSession(session))) {

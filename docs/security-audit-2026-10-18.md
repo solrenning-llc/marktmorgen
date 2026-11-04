@@ -208,6 +208,15 @@ the same figure by the same two commands, so the figure and its cost are
 unchanged. A known affiliate's sign-in link is not capped this way; a new
 applicant's is.
 
+**The same class, found later (506 [SG1], 4 November 2026).** The public
+deletion form (`lib/erasure-request.ts`) emailed its link from the same
+figure without `asked`, and a store "knows" every address on its list, which
+the sign-up box lets a stranger fill: forty confirmed sign-ups and one hour
+of deletion asks spent the Store plan's 150 and a buyer's course link was not
+sent. Its link is now `asked` too. Proof:
+`tests/security/erasure-request-asked.redis-run.ts` (2 of 5 checks failed on
+the code before the fix) and `tests/erasure-request-asked.test.ts`.
+
 ## Low findings
 
 ### MM-SA-06: the sign-in link's address throttle counts strangers

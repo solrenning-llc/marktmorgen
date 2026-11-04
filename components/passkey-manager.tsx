@@ -19,6 +19,7 @@ const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
   rate_limited: "That is a lot of passkey changes in an hour. Try again later.",
   reauth: "Adding a passkey needs a login from the last 15 minutes. Log in again below, then add it.",
+  locked: "Passkeys are locked because you signed in without your second step. Check the recovery date at the top of your studio.",
 };
 
 type Answer = { ok?: boolean; error?: string; options?: unknown; passkeys?: PasskeyRow[] };

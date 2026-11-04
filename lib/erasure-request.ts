@@ -17,7 +17,8 @@
  *
  * Bounded like the library's link: a few asks an hour from one network
  * address and for one email address, one email per ask (taken from the
- * first store's figure for such emails), and each store's own erasure
+ * first store's figure for such emails, only up to the share a visitor's
+ * typed address may take, as the sign-up box's are), and each store's own erasure
  * counted against that store's studio figure (lib/person-erasure.ts).
  *
  *   nl:erase:link:<hash of a token>  { e: address, s: [store ids still to do] }, an hour
@@ -87,7 +88,10 @@ export async function requestErasureLink(input: { email: string; ip: string; ori
   const names = stores.map((s) => s.name).slice(0, 10);
   const more = stores.length - names.length;
   const sent = await sendEmail({
-    meter: { by: "store", store: stores[0], kind: "transactional" },
+    // `asked` (MM-SA-05): the address was typed by a visitor, and a store knows every address on its
+    // list, which a stranger can fill through the sign-up box, so these links take only the share of
+    // the access emails such confirmations may (askedCeiling); the rest is kept for buyers' own links.
+    meter: { by: "store", store: stores[0], kind: "transactional", asked: true },
     from: NIMBUS_FROM,
     to: email,
     subject: stores.length === 1 ? `Delete your data from ${stores[0].name}` : "Delete your data from stores on Marktmorgen",

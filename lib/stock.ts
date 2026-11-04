@@ -10,22 +10,85 @@
  * The number a buyer sees is therefore the real number: units nobody has
  * paid for or is paying for right now.
  */
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { HOLD_SECONDS, onAccount } from "@/lib/stripe-account";
+import { BUMP_KEYS } from "@/lib/bundle-rules";
+import { MAX_CART } from "@/lib/cart-rules";
+import { deriveKey } from "@/lib/secret-box";
 import { isSettled } from "@/lib/instant-pay";
 import { limitedStock } from "@/lib/product-extras";
 import { type Held, LockBusyError, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import type { Listing, Store } from "@/lib/store";
 
 const HOLD_MS = HOLD_SECONDS * 1000;
-const MAX_CHECKS = 5;
+/** How many times one count, or one cart's counts together, may ask Stripe about holds that ran out. */
+export const MAX_CHECKS = 5;
+/**
+ * The longest one question to Stripe about a checkout waits (2 November
+ * 2026): a count runs under the product's lock, so it is kept short; an
+ * answer that does not come in time counts the unit as used, the safe way
+ * to be wrong. The same ceiling bounds closing an old checkout and reading
+ * one back (releaseCartStockHolds).
+ */
+export const CHECK_MS = 2_000;
+
+/**
+ * How many times a reading may still ask Stripe, shared by every product it
+ * counts (3 November 2026). A reading that is only shown (a suggestion, a
+ * bundle, "Goes well with", a reminder) gets none: a hold that ran out is
+ * then counted as used without asking, and said to be unchecked.
+ */
+export type StripeChecks = { left: number };
+/** A budget of no questions to Stripe, for a reading that is only shown. */
+export const shownOnly = (): StripeChecks => ({ left: 0 });
+
+export type StockOptions = {
+  /**
+   * A checkout this browser opened (the open cart's signed cookie,
+   * heldCheckout): its own live, unpaid hold is not counted against it, and
+   * a question to Stripe goes to it first.
+   */
+  mine?: string;
+  /** The questions to Stripe this reading may ask; MAX_CHECKS of its own when left out. */
+  checks?: StripeChecks;
+};
+
+/** A count, and how many of the holds counted as used are so only because Stripe was not asked or did not answer. */
+export type StockReading = { left: number; unchecked: number };
+
+/**
+ * What one order's stock work costs at the most (3 November 2026), priced
+ * on every order in tests/plan-cost-registry.ts (ORDER_STOCK) and held by
+ * tests/cart-stock.test.ts against the commands a cart's checkout really
+ * sends. Waited on Stripe: the cart's counts together (MAX_CHECKS
+ * questions), closing the old checkout and reading it back
+ * (releaseCartStockHolds), and closing a new one whose hold could not be
+ * written; each CHECK_MS at the most. Opening the checkout itself is every
+ * order's (ORDER_COMPUTE). The open cart and every reading that is only
+ * shown never ask Stripe (shownOnly).
+ */
+export const STOCK_ORDER_STRIPE_MS = (MAX_CHECKS + 3) * CHECK_MS;
+/**
+ * Database commands for each limited product of a checkout: taking its lock
+ * (ten tries at the most in takeLock's wait), the count, renewing and letting
+ * go of the lock (two each where scripts are not run), the provisional hold
+ * and taking it back, the checkout's own hold, letting both go when it
+ * cannot be written, the old checkout's two reads and its hold let go, and
+ * the thanks page's mark.
+ */
+export const STOCK_COMMANDS_PER_PRODUCT = 25;
+/** Every limited product of a cart, the settled holds its counts write, and what the old checkout held outside the new cart. */
+export const STOCK_ORDER_COMMANDS = MAX_CART * STOCK_COMMANDS_PER_PRODUCT + MAX_CHECKS + 2 * MAX_CART;
+/** A Stripe Checkout session's id, as it may be named in a cookie. */
+const CHECKOUT_ID = /^cs_(test|live)_[A-Za-z0-9]{8,200}$/;
 
 type Entry = { until: number; paid?: boolean };
 
 const stockKey = (id: string, productId: string) => `nl:stock:${id}:${productId}`;
 const lockKey = (id: string, productId: string) => `nl:stock:lock:${id}:${productId}`;
 
-async function readEntries(store: Store, product: Listing): Promise<Map<string, Entry>> {
+async function readEntries(store: Store, product: Pick<Listing, "id">): Promise<Map<string, Entry>> {
   const receipt = await redisPipeline([["HGETALL", stockKey(store.statsId!, product.id)]]);
   if (!Array.isArray(receipt) || receipt.length !== 1) throw new Error("Stock reading unavailable");
   const raw: unknown = receipt[0];
@@ -51,22 +114,33 @@ async function readEntries(store: Store, product: Listing): Promise<Map<string, 
  * are handed back. When Stripe cannot be asked, a hold stays counted — the
  * safe way to be wrong is to show one unit too few, never to sell one too many.
  *
- * `mine` is a checkout this browser opened (the open cart's cookie): its own
- * live, unpaid hold is not counted against it, so a buyer back from Stripe
- * is not told the unit they hold is sold out. Paying again closes that
- * checkout before holding a unit anew (releaseCartStockHolds), so the unit
- * is never sold twice.
+ * `options.mine` is a checkout this browser opened (the open cart's signed
+ * cookie): its own live, unpaid hold is not counted against it, so a buyer
+ * back from Stripe is not told the unit they hold is sold out. Paying again
+ * closes that checkout before holding a unit anew (releaseCartStockHolds),
+ * so the unit is never sold twice. `options.checks` bounds the questions to
+ * Stripe (StripeChecks).
  */
-export async function stockLeft(store: Store, product: Listing, now = Date.now(), mine?: string): Promise<number | null> {
+export async function stockLeft(store: Store, product: Listing, now = Date.now(), options: StockOptions = {}): Promise<number | null> {
+  return (await stockReading(store, product, now, options))?.left ?? null;
+}
+
+/** stockLeft, saying also how many units are counted as used only because a hold that ran out was not settled. */
+export async function stockReading(store: Store, product: Listing, now = Date.now(), options: StockOptions = {}): Promise<StockReading | null> {
   const limit = limitedStock(product);
   if (limit === null) return null;
   if (!store.statsId || !isRedisConfigured()) throw new Error("Stock reading unavailable");
   const entries = await readEntries(store, product);
+  const checks = options.checks ?? { left: MAX_CHECKS };
+  const mine = options.mine;
   let used = 0;
-  let checks = 0;
+  let unchecked = 0;
   const writes: (string | number)[][] = [];
-  for (const [session, entry] of entries) {
-    if (mine !== undefined && session === mine && !entry.paid && entry.until > now) continue;
+  // This browser's own checkout first, so a reading that may ask Stripe once asks about it.
+  const own = mine !== undefined ? entries.get(mine) : undefined;
+  const ordered: [string, Entry][] = own ? [[mine!, own], ...[...entries].filter(([session]) => session !== mine)] : [...entries];
+  for (const [session, entry] of ordered) {
+    if (own && session === mine && !entry.paid && entry.until > now) continue;
     if (entry.paid || entry.until > now) {
       used += 1;
       continue;
@@ -76,13 +150,14 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
       writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
       continue;
     }
-    if (checks >= MAX_CHECKS || !store.stripeAccountId) {
+    if (checks.left <= 0 || !store.stripeAccountId) {
       used += 1;
+      unchecked += 1;
       continue;
     }
-    checks += 1;
+    checks.left -= 1;
     try {
-      const found = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`);
+      const found = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS);
       if (isSettled(found)) {
         writes.push(["HSET", stockKey(store.statsId, product.id), session, JSON.stringify({ until: 0, paid: true })]);
         used += 1;
@@ -95,10 +170,39 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
       }
     } catch {
       used += 1;
+      unchecked += 1;
     }
   }
   if (writes.length) await redisPipeline(writes).catch(() => {});
-  return Math.max(0, limit - used);
+  return { left: Math.max(0, limit - used), unchecked };
+}
+
+/**
+ * The cookie that names a checkout this browser opened, signed for this
+ * store (3 November 2026), or null when no key is set: someone who learns
+ * another person's checkout id cannot make a cookie that closes it.
+ */
+export function holdCookieValue(store: Store, session: string): string | null {
+  const mac = holdMac(store, session);
+  return mac ? `${session}.${mac}` : null;
+}
+
+/** The checkout a hold cookie names, only when it is this store's and signed by us; otherwise null. */
+export function heldCheckout(store: Store, value: string | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const dot = value.lastIndexOf(".");
+  if (dot <= 0) return null;
+  const session = value.slice(0, dot);
+  const given = value.slice(dot + 1);
+  if (!CHECKOUT_ID.test(session) || !/^[0-9a-f]{32}$/.test(given)) return null;
+  const made = holdMac(store, session);
+  return made && timingSafeEqual(Buffer.from(made), Buffer.from(given)) ? session : null;
+}
+
+function holdMac(store: Store, session: string): string | null {
+  const key = deriveKey("stock-hold-cookie");
+  if (!key || !store.statsId || !CHECKOUT_ID.test(session)) return null;
+  return createHmac("sha256", key).update(`${store.statsId}|${session}`).digest("hex").slice(0, 32);
 }
 
 export type StockHold<T> = { ok: true; value: T } | { ok: false; reason: "soldout" | "busy" };
@@ -143,7 +247,7 @@ export async function confirmStock(store: Store, product: Listing, session: stri
  */
 export async function releaseStockHold(store: Store, product: Listing, session: string): Promise<void> {
   if (limitedStock(product) === null || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return;
-  if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
+  if (!CHECKOUT_ID.test(session)) return;
   const entries = await readEntries(store, product);
   const entry = entries.get(session);
   if (!entry || entry.paid) return;
@@ -153,6 +257,9 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
       store.stripeAccountId,
       `/checkout/sessions/${encodeURIComponent(session)}/expire`,
       new URLSearchParams(),
+      undefined,
+      undefined,
+      CHECK_MS,
     );
     if (closed.status !== "expired") return;
   } catch {
@@ -213,12 +320,16 @@ export async function withCartStockHolds<T extends { id: string }>(
   const pending = `${PENDING}${crypto.randomUUID().replace(/-/g, "")}`;
   const taken: Held[] = [];
   try {
-    for (const product of limited) taken.push(await takeLock(lockKey(statsId, product.id), 15, 1500));
+    // Long enough for the counts to ask Stripe their most times together, each at its ceiling.
+    const lockSeconds = 15 + Math.ceil((MAX_CHECKS * CHECK_MS) / 1000);
+    for (const product of limited) taken.push(await takeLock(lockKey(statsId, product.id), lockSeconds, 1500));
     const now = Date.now();
     const out: string[] = [];
+    // The cart's counts share MAX_CHECKS questions to Stripe, so the time under the locks is bounded whatever the cart holds.
+    const checks: StripeChecks = { left: MAX_CHECKS };
     for (const product of limited) {
       // A count that cannot be read throws, as it always has for one product: nothing opens, every lock is let go below.
-      const left = await stockLeft(store, product, now);
+      const left = await stockLeft(store, product, now, { checks });
       if (left !== null && left <= 0) out.push(product.id);
     }
     if (out.length > 0) return { ok: false, reason: "soldout", ids: out };
@@ -247,7 +358,7 @@ export async function withCartStockHolds<T extends { id: string }>(
   const written = acknowledged(receipt, limited.length * 2);
   if (!written) {
     // Nobody is sent to a checkout whose units are not written as its own: it is closed at Stripe, and the provisional holds lapse.
-    if (store.stripeAccountId) await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => {});
+    if (store.stripeAccountId) await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams(), undefined, undefined, CHECK_MS).catch(() => {});
     return { ok: false, reason: "busy" };
   }
   return { ok: true, value };
@@ -265,27 +376,59 @@ export async function confirmCartStock(store: Store, products: Listing[], sessio
  * Hands back what a buyer was holding with a cart's checkout when they go
  * back from Stripe's page and pay for a cart again, as releaseStockHold does
  * for one product: the old checkout is closed at Stripe first, so it can
- * never be paid as well; then its hold is let go on every limited product of
- * the new cart that it held. A hold on a product no longer in the cart is
- * let go by stockLeft once Stripe says the checkout expired.
+ * never be paid as well; then its hold is let go on every product it held,
+ * in the new cart or not (read from the checkout Stripe closed).
+ *
+ * When Stripe will not close it, it is read back (3 November 2026): one
+ * paid with nobody back on the thanks page is marked sold on every product
+ * it held, so the cart says so at once instead of offering the unit again;
+ * one that had closed already is let go as above. `session` must come from
+ * the signed cookie (heldCheckout). Each question to Stripe waits CHECK_MS
+ * at the most.
  */
 export async function releaseCartStockHolds(store: Store, products: Listing[], session: string): Promise<void> {
-  const limited = products.filter((product) => limitedStock(product) !== null);
-  if (limited.length === 0 || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return;
-  if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
-  const holding: Listing[] = [];
-  for (const product of limited) {
-    const entry = (await readEntries(store, product)).get(session);
-    if (entry?.paid) return;
-    if (entry) holding.push(product);
-  }
-  if (holding.length === 0) return;
-  try {
-    const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
-    if (closed.status !== "expired") return;
-  } catch {
-    return;
-  }
+  if (!store.statsId || !store.stripeAccountId || !isRedisConfigured()) return;
+  if (!CHECKOUT_ID.test(session)) return;
   const statsId = store.statsId;
-  await redisPipeline(holding.map((product) => ["HDEL", stockKey(statsId, product.id), session]));
+  const account = store.stripeAccountId;
+  const limited = products.filter((product) => limitedStock(product) !== null);
+  // Read once each, and kept for what the old checkout held below.
+  const known = new Map<string, Map<string, Entry>>();
+  for (const product of limited) {
+    const entries = await readEntries(store, product);
+    if (entries.get(session)?.paid) return;
+    known.set(product.id, entries);
+  }
+  const path = `/checkout/sessions/${encodeURIComponent(session)}`;
+  let closed: Record<string, unknown> | null = await onAccount("POST", account, `${path}/expire`, new URLSearchParams(), undefined, undefined, CHECK_MS).catch(() => null);
+  if (closed?.status !== "expired") {
+    const found = await onAccount("GET", account, path, undefined, undefined, undefined, CHECK_MS).catch(() => null);
+    if (!found) return;
+    if (isSettled(found)) {
+      const sold = await holdingOf(store, found, known, session);
+      if (sold.length) await redisPipeline(sold.map((id) => ["HSET", stockKey(statsId, id), session, JSON.stringify({ until: 0, paid: true })]));
+      return;
+    }
+    if (found.status !== "expired") return;
+    closed = found;
+  }
+  const held = await holdingOf(store, closed, known, session);
+  if (held.length) await redisPipeline(held.map((id) => ["HDEL", stockKey(statsId, id), session]));
+}
+
+/**
+ * The products a checkout holds a unit of: those of the new cart, and those
+ * Stripe's record of it names (its product and what was added, BUMP_KEYS),
+ * each only where a hold of it is kept. What the new cart's counts read is
+ * not read again: at most MAX_CART reads more.
+ */
+async function holdingOf(store: Store, session: Record<string, unknown>, known: Map<string, Map<string, Entry>>, id: string): Promise<string[]> {
+  const meta = (session.metadata ?? {}) as Record<string, unknown>;
+  const named = [meta.product, ...BUMP_KEYS.map((key) => meta[key])].filter((value): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(value));
+  const out: string[] = [];
+  for (const productId of new Set([...known.keys(), ...named])) {
+    const entries = known.get(productId) ?? (await readEntries(store, { id: productId }).catch(() => new Map<string, Entry>()));
+    if (entries.has(id)) out.push(productId);
+  }
+  return out;
 }

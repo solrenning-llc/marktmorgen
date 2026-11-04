@@ -37,7 +37,7 @@ import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { deliversDigitally } from "@/lib/digital-consent";
-import { releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { type StripeChecks, heldCheckout, holdCookieValue, releaseCartStockHolds, shownOnly, stockLeft, stockReading, withCartStockHolds } from "@/lib/stock";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 
 /** The cart's checkout last opened in this browser, whose held units are handed back when it pays for a cart again (lib/stock.ts). */
@@ -63,11 +63,14 @@ export async function GET(request: NextRequest) {
   const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => ({ soon: new Set<string>() }))]);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
-  // The unit this browser holds with the cart's checkout it last opened is its own (the cookie it was given then):
+  // The unit this browser holds with the cart's checkout it last opened is its own (the signed cookie it was given then):
   // a buyer back from Stripe is not told it is sold out. Paying again closes that checkout before holding anew.
-  const mine = request.cookies.get(CART_HOLD_COOKIE)?.value ?? "";
-  const hold = /^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(mine) ? mine : undefined;
-  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p, Date.now(), hold).catch(() => undefined)] as const)));
+  const hold = heldCheckout(store, request.cookies.get(CART_HOLD_COOKIE)?.value) ?? undefined;
+  // Only shown: Stripe is never asked here (lib/stock.ts, shownOnly), so the open cart never waits on it. A hold that ran
+  // out and is not settled yet is counted as used, and its product said not available right now, never sold out; the
+  // store's and the product's pages settle it, and the checkout does under its locks.
+  const checks: StripeChecks = shownOnly();
+  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockReading(store, p, Date.now(), { mine: hold, checks }).catch(() => undefined)] as const)));
   const selling = canSell(store);
   const sw = shippingWords(store.language);
   const items = ids.flatMap((id) => {
@@ -77,8 +80,10 @@ export async function GET(request: NextRequest) {
     // A product the creator ships: its own line about when it ships, as its page says it (lib/shipping.ts).
     const shipped = activeShipping(product);
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
-    const soldOut = left.get(id) === 0;
-    const unknown = left.has(id) && left.get(id) === undefined;
+    // Sold out only when every unit counted as used is known to be; one counted so only because Stripe was not asked is unknown.
+    const reading = left.get(id);
+    const soldOut = reading !== undefined && reading !== null && reading.left === 0 && reading.unchecked === 0;
+    const unknown = left.has(id) && (reading === undefined || (reading !== null && reading.left === 0 && reading.unchecked > 0));
     return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
   });
   // What ships, as the checkout will ask Stripe for it (lib/cart-shipping.ts), from what can be paid for.
@@ -191,8 +196,8 @@ async function bundleSwap(
     if (product.stock === null) break;
     if (reads >= MAX_SUGGEST) return null;
     reads += 1;
-    // Unknown is offered, as the store page does; the cart's own read refuses it if it is added.
-    if ((await stockLeft(store, product).catch(() => undefined)) !== 0) break;
+    // Only shown, so Stripe is not asked (shownOnly). Unknown is offered, as the store page does; the cart's own read refuses it if it is added.
+    if ((await stockLeft(store, product, Date.now(), { checks: shownOnly() }).catch(() => undefined)) !== 0) break;
     offers.splice(offers.indexOf(product), 1);
     swap = null;
   }
@@ -257,7 +262,7 @@ async function suggestions(
     if (product.stock !== null) {
       if (stockReads >= MAX_SUGGEST) continue;
       stockReads += 1;
-      if ((await stockLeft(store, product).catch(() => undefined)) === 0) continue;
+      if ((await stockLeft(store, product, Date.now(), { checks: shownOnly() }).catch(() => undefined)) === 0) continue;
     }
     out.push({
       id: want.id,
@@ -335,7 +340,8 @@ export async function POST(request: NextRequest) {
     const offerFrom = await cartOfferOwner(store, products).catch(() => null);
     const upsell = offerFrom ? newUpsellKey() : null;
     // A buyer who went back from Stripe's page hands back the units that checkout held before holding them again (lib/stock.ts).
-    const previous = request.cookies.get(CART_HOLD_COOKIE)?.value ?? "";
+    // Only a checkout named by the signed cookie this route gave (heldCheckout), so nobody can close another person's.
+    const previous = heldCheckout(store, request.cookies.get(CART_HOLD_COOKIE)?.value);
     if (previous) await releaseCartStockHolds(store, products, previous).catch(() => {});
     // One unit of each limited product held for this checkout, or nothing opened (lib/stock.ts, withCartStockHolds).
     const holding = await withCartStockHolds(store, products, async (held) => createCartCheckout(store, products, linkOrigin(request, store), {
@@ -351,15 +357,21 @@ export async function POST(request: NextRequest) {
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,
     }));
     // Sold out since the cart was opened: back to it, which says which; busy or unreadable: nothing was charged, try again.
-    if (!holding.ok) return away(`/@${store.handle}?cart=${holding.reason === "soldout" ? "changed" : "error"}#cart`);
+    if (!holding.ok) {
+      const back = away(`/@${store.handle}?cart=${holding.reason === "soldout" ? "changed" : "error"}#cart`);
+      // Sold out: the old checkout holds nothing of this cart any more (paid, or let go), so its cookie goes too.
+      if (holding.reason === "soldout" && previous) back.headers.append("Set-Cookie", `${CART_HOLD_COOKIE}=; Path=/api/store/cart; Max-Age=0; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
+      return back;
+    }
     const opened = holding.value;
     if (reminding) await keepAssistReminder({ store, session: opened.id, email: remindEmail, version: remindVersion });
     for (const product of products) after(() => countHit(request, store, { kind: "checkout", id: product.id }));
     const headers = new Headers({ Location: opened.url, "Cache-Control": "no-store" });
     // The secret only the browser that pays holds: without it no offer can be answered.
     if (upsell) headers.append("Set-Cookie", `${UPSELL_COOKIE}=${upsell.secret}; Path=/; Max-Age=7200; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
-    if (products.some((product) => product.stock !== null)) {
-      headers.append("Set-Cookie", `${CART_HOLD_COOKIE}=${opened.id}; Path=/api/store/cart; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
+    const signed = products.some((product) => product.stock !== null) ? holdCookieValue(store, opened.id) : null;
+    if (signed) {
+      headers.append("Set-Cookie", `${CART_HOLD_COOKIE}=${signed}; Path=/api/store/cart; Max-Age=${HOLD_SECONDS}; HttpOnly; SameSite=Lax${origin.startsWith("https://") ? "; Secure" : ""}`);
     }
     return new Response(null, { status: 303, headers });
   } catch (error) {

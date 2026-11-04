@@ -53,6 +53,8 @@ export function stepWhat(step: MapStep): string {
       return "Wait";
     case "assign":
       return `Make ${action.assignee} responsible for their deal`;
+    case "rotate":
+      return "Give their deal to whoever on your team has the fewest open deals";
     case "next":
       return `Set the next action on their deal: “${action.text}”, ${action.days === 0 ? "due the day it runs" : `due in ${action.days} ${action.days === 1 ? "day" : "days"}`}`;
   }

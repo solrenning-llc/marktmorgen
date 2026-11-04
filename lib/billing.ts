@@ -1451,7 +1451,7 @@ function searchDataRecord(value: unknown, label: string): Record<string, unknown
   for (const key of Reflect.ownKeys(value)) {
     if (typeof key !== "string") throw new Error(`Subscription search ${label} is unknown`);
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor || !("value" in descriptor)) throw new Error(`Subscription search ${label} is unknown`);
+    if (!descriptor || !Object.hasOwn(descriptor, "value")) throw new Error(`Subscription search ${label} is unknown`);
     copy[key] = descriptor.value;
   }
   return copy;
@@ -1522,7 +1522,7 @@ function searchMember(value: unknown, handles: Set<string>, ownership: SearchOwn
       throw new Error("Subscription search member items are unknown");
     }
     const slot = Object.getOwnPropertyDescriptor(items.data, "0");
-    if (!slot || !("value" in slot)) throw new Error("Subscription search member item is unknown");
+    if (!slot || !Object.hasOwn(slot, "value")) throw new Error("Subscription search member item is unknown");
     const item = searchDataRecord(slot.value, "member item");
     const price = searchDataRecord(item.price, "member price");
     const recurring = searchDataRecord(price.recurring, "member recurrence");
@@ -1606,15 +1606,15 @@ export async function findStoreSubscriptions(
   const data = Object.getOwnPropertyDescriptor(page, "data");
   const more = Object.getOwnPropertyDescriptor(page, "has_more");
   const cursor = Object.getOwnPropertyDescriptor(page, "next_page");
-  if (!data || !("value" in data) || !Array.isArray(data.value) ||
-      !more || !("value" in more) || more.value !== false ||
-      cursor && (!("value" in cursor) || cursor.value !== null && cursor.value !== undefined) ||
+  if (!data || !Object.hasOwn(data, "value") || !Array.isArray(data.value) ||
+      !more || !Object.hasOwn(more, "value") || more.value !== false ||
+      cursor && (!Object.hasOwn(cursor, "value") || cursor.value !== null && cursor.value !== undefined) ||
       data.value.length > SEARCH_LIMIT) throw new Error("Subscription search page is incomplete");
   const entries: SearchMember[] = [];
   const coveredHandles = new Set(handles);
   for (let index = 0; index < data.value.length; index++) {
     const entry = Object.getOwnPropertyDescriptor(data.value, String(index));
-    if (!entry || !("value" in entry)) throw new Error("Subscription search member is unknown");
+    if (!entry || !Object.hasOwn(entry, "value")) throw new Error("Subscription search member is unknown");
     const member = searchMember(entry.value, coveredHandles, ownership);
     if (member) entries.push(member);
   }

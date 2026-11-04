@@ -373,6 +373,24 @@ test('source phase is checked again after price, metadata and stale-price waits'
  }finally{globalThis.fetch=old;Date.now=oldNow;}
 });
 
+test('subscription search rejects accessor completeness even when descriptor prototypes carry a value',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:[]} as Store;
+ let getters=0,reads=0,writes=0;
+ const page=Object.defineProperty({data:[]},'has_more',{get(){getters++;return false;}});
+ const prior=Object.getOwnPropertyDescriptor(Object.prototype,'value');
+ globalThis.fetch=async(_input,init)=>{reads++;if(init?.method!=='GET')writes++;return {ok:true,json:async()=>page} as Response;};
+ try{
+  Object.defineProperty(Object.prototype,'value',{value:false,configurable:true});
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search page is incomplete/);
+  assert.equal(getters,0);assert.equal(reads,1);assert.equal(writes,0);
+ }finally{
+  delete (Object.prototype as {value?:unknown}).value;
+  if(prior)Object.defineProperty(Object.prototype,'value',prior);
+  globalThis.fetch=old;
+ }
+});
+
 test('subscription search requires a complete bounded page before treating it as empty',async()=>{
  const old=globalThis.fetch;
  const owner={...store,previousHandles:[],releasedHandles:[]} as Store;

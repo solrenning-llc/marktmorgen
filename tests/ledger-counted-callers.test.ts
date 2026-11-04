@@ -6,7 +6,7 @@
  *   - the email composer's count and a narrowed email written down (the
  *     buyers, lib/segments.ts buyerLedger, through createBroadcast's count);
  *     its send started in the same request takes that narrowing as read and
- *     counted, and a scheduled one holds its later reading's worst case when
+ *     counted, and a scheduled one holds its later readings' worst case when
  *     it is accepted (refused at once, nothing written, without room), so the
  *     scheduled job draws from that hold and never refuses it (C3-80 (d));
  *   - telling a product's buyers of an update (every paid sale,
@@ -18,7 +18,7 @@
  * says how many this needs and how many are left.
  */
 import { readFileSync } from "node:fs";
-import { EXTRA_READS, NOTE_ROOM, advanceBroadcast, cancelBroadcast, createBroadcast, readsSpentNote } from "@/lib/broadcasts";
+import { EXTRA_READS, NOTE_ROOM, READS_HELD, advanceBroadcast, cancelBroadcast, createBroadcast, readsSpentNote } from "@/lib/broadcasts";
 import { dataKey } from "@/lib/store-data";
 import { upsertContact } from "@/lib/contacts";
 import { ROOM } from "./data-room";
@@ -114,6 +114,7 @@ async function main(): Promise<void> {
   const dueNow = async (id: string) => redisPipeline([["SET", `nl:mail:bc:${id}`, JSON.stringify({ ...(await recordOf(id)), sendAt: Math.floor(Date.now() / 1000) - 5 })]]);
   await copy();
   const worst = await ledgerReadingUnits(shop);
+  const hold = READS_HELD * worst;
   is("its reading's worst case, as kept now: the copy by size, and Stripe's pages should the copy be gone", worst, ledgerUnits(Buffer.byteLength(String((await redisPipeline([["GET", ledgerKey]]))[0]))) + BUYER_LEDGER_UNITS);
   await redisPipeline([["SET", studioKey()!, String(allowanceFor(shop, "studio") - 3)]]);
   const beforeRefused = written();
@@ -124,21 +125,21 @@ async function main(): Promise<void> {
     (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)),
   );
   is("without room for it, scheduling is refused at once: nothing written, nothing taken", [notHeld, written(), await used()], ["not counted", beforeRefused, allowanceFor(shop, "studio") - 3]);
-  is("with the sentence of how many it needs and how many are left", tooFew.said.message.startsWith(`This needs ${worst} of your studio requests, and only 3 are left.`), true);
+  is("with the sentence of how many it needs and how many are left", tooFew.said.message.startsWith(`This needs ${hold} of your studio requests, and only 3 are left.`), true);
   await redisPipeline([["SET", studioKey()!, "0"]]);
   const held = await createBroadcast(shop, later, countLedger(shop).count);
   if (!held.ok) throw new Error(`not written: ${held.reason}`);
-  is("with room, it holds exactly that worst case, on the record too", [await used(), held.broadcast.reserve, (await recordOf(held.broadcast.id)).reserve], [worst, worst, worst]);
+  is("with room, it holds exactly that worst case for its first reading and its one reading again (READS_HELD), on the record too", [await used(), held.broadcast.reserve, (await recordOf(held.broadcast.id)).reserve], [hold, hold, hold]);
   const startsNow = await createBroadcast(shop, { ...narrowed, sendAt: undefined }, countLedger(shop).count);
   if (!startsNow.ok) throw new Error(`not written: ${startsNow.reason}`);
-  is("one that starts in the same request holds nothing: it lists from the narrowing just read", [startsNow.broadcast.reserve, await used()], [undefined, worst]);
+  is("one that starts in the same request holds nothing: it lists from the narrowing just read", [startsNow.broadcast.reserve, await used()], [undefined, hold]);
   await dueNow(held.broadcast.id);
   // Its copy gone and no request left: the reading goes to Stripe, drawing what was held.
   await redisPipeline([["DEL", ledgerKey], ["SET", studioKey()!, String(allowanceFor(shop, "studio"))]]);
   stripeCalls = 0;
   const went = await advanceBroadcast(held.broadcast.id, storeForHandle, Date.now() + 5_000);
   is("due, its copy gone and no studio request left, the scheduled job still reads and lists it: never waiting", [went?.status !== "waiting", went?.listed, stripeCalls > 0], [true, true, true]);
-  is("drawing what was held, never counting again", [await used(), went?.reserve, (await recordOf(held.broadcast.id)).reserve], [allowanceFor(shop, "studio"), worst - BUYER_LEDGER_UNITS, worst - BUYER_LEDGER_UNITS]);
+  is("drawing what was held, never counting again", [await used(), went?.reserve, (await recordOf(held.broadcast.id)).reserve], [allowanceFor(shop, "studio"), hold - BUYER_LEDGER_UNITS, hold - BUYER_LEDGER_UNITS]);
 
   await copy();
   await redisPipeline([["SET", studioKey()!, "0"]]);
@@ -148,7 +149,7 @@ async function main(): Promise<void> {
   const usedBefore = await used();
   stripeCalls = 0;
   const fromCopy = await advanceBroadcast(less.broadcast.id, storeForHandle, Date.now() + 5_000);
-  is("reading less than held (its copy still kept): Stripe not read, nothing counted, the rest stays on the record, not given back", [fromCopy?.listed, stripeCalls, (await used()) - usedBefore, (await recordOf(less.broadcast.id)).reserve], [true, 0, 0, worst - ledgerUnits(Buffer.byteLength(String((await redisPipeline([["GET", ledgerKey]]))[0])))]);
+  is("reading less than held (its copy still kept): Stripe not read, nothing counted, the rest stays on the record, not given back", [fromCopy?.listed, stripeCalls, (await used()) - usedBefore, (await recordOf(less.broadcast.id)).reserve], [true, 0, 0, hold - ledgerUnits(Buffer.byteLength(String((await redisPipeline([["GET", ledgerKey]]))[0])))]);
 
   // An email written down before anything was held (or with nothing to count it): its reading needs more than it holds.
   await copy();
@@ -160,7 +161,7 @@ async function main(): Promise<void> {
   const unheld = await advanceBroadcast(older.broadcast.id, storeForHandle, Date.now() + 5_000);
   is("needing more than it holds with no request left, it is still read and listed, never waiting, and nothing more is counted", [older.broadcast.reserve, unheld?.status !== "waiting", unheld?.listed, stripeCalls > 0, await used()], [undefined, true, true, true, allowanceFor(shop, "studio")]);
 
-  part("A list that cannot be made for another reason is read again at most EXTRA_READS times, then the email stops, failed, saying why");
+  part("A list that cannot be made for another reason is read again at most EXTRA_READS times, held when it was accepted, then the email stops, failed, saying why");
   const realPipeline = redis.pipeline.bind(redis);
   let ledgerReads = 0;
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -175,18 +176,20 @@ async function main(): Promise<void> {
     return seen;
   };
   const dataFull = "Your store's data room is full, so the list of who it goes to could not be made. Nothing was sent.";
-  for (const [kind, hold] of [["holding its reading", true], ["written down before anything was held", false]] as const) {
+  for (const [kind, holds] of [["holding its readings", true], ["written down before anything was held", false]] as const) {
     await copy();
     await redisPipeline([["SET", studioKey()!, "0"]]);
-    const full = await createBroadcast(shop, later, hold ? countLedger(shop).count : undefined);
+    const full = await createBroadcast(shop, later, holds ? countLedger(shop).count : undefined);
     if (!full.ok) throw new Error(`not written: ${full.reason}`);
     await dueNow(full.broadcast.id);
     await redisPipeline([["HSET", roomKey, "#", 10 ** 12]]);
     ledgerReads = 0;
-    const statuses = await rounds(full.broadcast.id, 5);
+    const before = await used();
+    const statuses = await rounds(full.broadcast.id, 3);
     const end = await recordOf(full.broadcast.id);
-    const allowed = (hold ? 1 : 0) + EXTRA_READS;
-    is(`an email ${kind}, its data room full for 5 rounds: read ${allowed} times at the most (${EXTRA_READS} again), waiting with the data room's note until then`, [ledgerReads, end.reads, statuses.slice(0, allowed), statuses.slice(allowed)], [allowed, allowed, Array(allowed).fill("waiting"), Array(5 - allowed).fill("failed")]);
+    const allowed = holds ? READS_HELD : EXTRA_READS;
+    is(`an email ${kind}, its data room full for 3 rounds: read ${allowed} times at the most, waiting with the data room's note until then, then failed`, [ledgerReads, end.reads, statuses.slice(0, allowed), statuses.slice(allowed)], [allowed, allowed, Array(allowed).fill("waiting"), Array(3 - allowed).fill("failed")]);
+    is("every reading drawn from what was held, nothing counted in the studio's requests", [(await used()) - before, holds ? end.reserve >= 0 : end.reserve === undefined], [0, true]);
     is("then it stops, failed, with why it waited, out of the queue: never dropped without a word", [end.status, end.note, end.note.length <= NOTE_ROOM, (await redisPipeline([["SISMEMBER", "nl:mail:queue", full.broadcast.id]]))[0]], ["failed", `${dataFull} It was tried as many times as it can be, so it stopped. To send it, write it again.`, true, 0]);
     await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
   }
@@ -197,10 +200,10 @@ async function main(): Promise<void> {
   await dueNow(freed.broadcast.id);
   await redisPipeline([["HSET", roomKey, "#", 10 ** 12]]);
   ledgerReads = 0;
-  const whileFull = await rounds(freed.broadcast.id, 2);
+  const whileFull = await rounds(freed.broadcast.id, 1);
   await redisPipeline([["HSET", roomKey, "#", Number(roomUsed ?? 0)]]);
   const once = await advanceBroadcast(freed.broadcast.id, storeForHandle, Date.now() + 5_000);
-  is("made room within its readings, its list is made at the next round and it goes on (here to the sender's own wait)", [whileFull, once?.listed, once?.total, once?.status !== "failed" && !once?.note.startsWith(dataFull), ledgerReads], [["waiting", "waiting"], true, 1, true, 3]);
+  is("made room within its readings, its list is made at the next round and it goes on (here to the sender's own wait)", [whileFull, once?.listed, once?.total, once?.status !== "failed" && !once?.note.startsWith(dataFull), ledgerReads], [["waiting"], true, 1, true, READS_HELD]);
   redis.pipeline = realPipeline;
   is("the note without a retry sentence of its own keeps its words; an empty one says the list could not be made", [readsSpentNote("The recipient list could not be prepared. Nothing was sent. It will be checked again automatically."), readsSpentNote("")], ["The recipient list could not be prepared. Nothing was sent. It was tried as many times as it can be, so it stopped. To send it, write it again.", "The list of who it goes to could not be made. Nothing was sent. It was tried as many times as it can be, so it stopped. To send it, write it again."]);
 
@@ -210,7 +213,7 @@ async function main(): Promise<void> {
   const callOff = await createBroadcast(shop, later, countLedger(shop).count);
   if (!callOff.ok) throw new Error(`not written: ${callOff.reason}`);
   const heldOff = await used();
-  is("canceled while scheduled: canceled, out of the queue, its hold kept on the record, nothing given back", [await cancelBroadcast(shop, callOff.broadcast.id), (await recordOf(callOff.broadcast.id)).status, (await recordOf(callOff.broadcast.id)).reserve, (await redisPipeline([["SISMEMBER", "nl:mail:queue", callOff.broadcast.id]]))[0], await used()], [true, "cancelled", worst, 0, heldOff]);
+  is("canceled while scheduled: canceled, out of the queue, its hold kept on the record, nothing given back", [await cancelBroadcast(shop, callOff.broadcast.id), (await recordOf(callOff.broadcast.id)).status, (await recordOf(callOff.broadcast.id)).reserve, (await redisPipeline([["SISMEMBER", "nl:mail:queue", callOff.broadcast.id]]))[0], await used()], [true, "cancelled", hold, 0, heldOff]);
   const waitOff = await createBroadcast(shop, later, countLedger(shop).count);
   if (!waitOff.ok) throw new Error(`not written: ${waitOff.reason}`);
   const offKey = `nl:mail:bc:${waitOff.broadcast.id}`;
@@ -248,7 +251,7 @@ async function main(): Promise<void> {
   is("asking the numbers checks the month's AI jobs, then counts their reading as their page does, then reads them", [at("aiLeft(store)") > 0, at("aiLeft(store)") < at("countUnits(store, STUDIO_PAGE_UNITS - 1)"), at("countUnits(store, STUDIO_PAGE_UNITS - 1)") < at("readNumbers(store)")], [true, true, true]);
   is("with the shared sentence when the count gave none", ask.includes("message: (counted && !counted.ok && counted.message) || NOT_COUNTED }"), true);
   const composer = flat("components/email-studio.tsx");
-  is("scheduling a narrowed email says, before it is confirmed, that it sets aside studio requests now and that canceling does not give them back; a refusal is shown as an alert", [composer.includes('" Scheduling it sets aside, now, the studio requests needed to find these buyers when it goes out. If too few are left, it is not scheduled, and you see how many it needs. Canceling does not give them back."'), composer.includes('<p className="notice notice-error mt-3" role="alert">{error}</p>')], [true, true]);
+  is("scheduling a narrowed email says, before it is confirmed, that it sets aside studio requests now and that canceling does not give them back; a refusal is shown as an alert", [composer.includes('" Scheduling it sets aside, now, the studio requests needed to find these buyers when it goes out, and to find them once more if it has to wait. If too few are left, it is not scheduled, and you see how many it needs. Canceling does not give them back."'), composer.includes('<p className="notice notice-error mt-3" role="alert">{error}</p>')], [true, true]);
   is("the composer shows the sentence, on the count as on a send, and takes the count's away when the next count goes through", [composer.includes('a.error === "studio_used" && typeof a.message === "string" && a.message ? a.message'), composer.includes('} else if (a.error === "stripe" || a.error === "studio_used") {'), composer.includes("if (shown !== null) setError((current) => (current === shown ? null : current));")], [true, true, true]);
   is("so do the update box and the numbers question", [flat("components/product-update-box.tsx").includes('data.error === "studio_used" && typeof data.message === "string" && data.message ? data.message'), flat("components/numbers-ask.tsx").includes('else if (data.error === "studio_used" && typeof data.message === "string" && data.message) setError(data.message);')], [true, true]);
 

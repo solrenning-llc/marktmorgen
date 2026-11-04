@@ -9,14 +9,19 @@
  *   nl:crm:pipes:<statsId>           the pipelines and their stages (JSON, lib/crm-rules.ts);
  *                                    absent until the creator first changes one, and then it wins
  *   nl:crm:deals:<statsId>           hash  deal id -> deal (JSON)
+ *   nl:crm:tasks:<statsId>           hash  person -> their tasks (JSON, lib/person-tasks.ts), gone with the person
+ *   nl:crm:tasklock:<statsId>        one change of the store's tasks at a time (lib/redis-lock.ts), ten seconds at the most
  *
  * A value is kept under the person's key, never the address (as a note
  * about them is), one hash a field, so the list's file reads each field once
  * however long the list is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
+import { type DueTask, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
   type CrmField,
   CRM_ID,
@@ -64,6 +69,20 @@ const valuesKey = (statsId: string, field: string) => `nl:crm:v:${statsId}:${fie
 const stagesKey = (statsId: string) => `nl:crm:stages:${statsId}`;
 const dealsKey = (statsId: string) => `nl:crm:deals:${statsId}`;
 const pipesKey = (statsId: string) => `nl:crm:pipes:${statsId}`;
+const tasksKey = (statsId: string) => `nl:crm:tasks:${statsId}`;
+const TASKS_SLOT = "crm:tasks";
+/**
+ * One change of a store's tasks at a time: each one reads a person's list,
+ * changes it and writes it back whole, so two at once (two quick clicks, two
+ * teammates) would each write what they read and one change would be lost.
+ * The whole store, not one person, so the store's cap is counted exactly too.
+ */
+const tasksLockKey = (statsId: string) => `nl:crm:tasklock:${statsId}`;
+const TASKS_LOCK_SECONDS = 10;
+/** How long a change waits for the one before it, before it is refused (LockBusyError). */
+export const TASKS_LOCK_WAIT_MS = 2_000;
+/** How long deleting a person waits for a change of their tasks, before it reports failure. */
+const TASKS_FORGET_WAIT_MS = 5_000;
 const PERSON = /^[0-9a-f]{32}$/;
 /** Where people's field values are counted in the store's data room (lib/store-data.ts). */
 const VALUES_SLOT = "crm:v";
@@ -340,9 +359,16 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
   } catch { return unavailable; }
 }
 
-/** Capacity and save share one Redis operation, including alongside form conversions. */
-export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v1
-if redis.call("HEXISTS", KEYS[1], ARGV[1]) == 0 and redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
+/**
+ * Capacity and save share one Redis operation, including alongside form
+ * conversions. An edit (ARGV[4] "edit") writes only a deal that is still
+ * there: one deleted since it was read (by its person's deletion, or by
+ * someone else) answers 2 and is never written back.
+ */
+export const SAVE_CRM_DEAL = `-- marktmorgen:crm-deal-save:v2
+local there = redis.call("HEXISTS", KEYS[1], ARGV[1])
+if there == 0 and ARGV[4] == "edit" then return 2 end
+if there == 0 and redis.call("HLEN", KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
 redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
 return 1`;
 
@@ -353,9 +379,13 @@ export const dealBytes = (deal: Deal) => dataBytes([deal.id, JSON.stringify(deal
 /**
  * Saves a deal. False when the store already has as many as it may and this
  * one is new. Its room in the store's data room is taken first: DataRoomError
- * when it does not fit, and nothing is written.
+ * when it does not fit, and nothing is written. With `edit`, the deal is
+ * written only if it is still there: "gone" when it was deleted since it was
+ * read, with its room given back, so a deleted person's deal never comes back.
  */
-export async function writeDeal(statsId: string, deal: Deal, room: DataStore): Promise<boolean> {
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore): Promise<boolean>;
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit: "edit"): Promise<boolean | "gone">;
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, edit?: "edit"): Promise<boolean | "gone"> {
   let preflight: unknown;
   try {
     preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)]]);
@@ -364,11 +394,11 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore): P
   if (preflight[0] === 0 && preflight[1] >= MAX_DEALS) return false;
   await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
   try {
-    const saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, JSON.stringify(deal), MAX_DEALS]]);
-    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1)) throw new CrmDealWriteUnconfirmed();
-    // Full after all: a new deal's room goes back.
-    if (saved[0] === 0) await giveData(room, [{ slot: dealSlot(deal.id), bytes: 0, set: true }]);
-    return saved[0] === 1;
+    const saved = await redisPipeline([["EVAL", SAVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, JSON.stringify(deal), MAX_DEALS, edit ?? ""]]);
+    if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 0 && saved[0] !== 1 && !(edit && saved[0] === 2))) throw new CrmDealWriteUnconfirmed();
+    // Full after all, or deleted since it was read: the deal's room goes back.
+    if (saved[0] !== 1) await giveData(room, [{ slot: dealSlot(deal.id), bytes: 0, set: true }]);
+    return saved[0] === 2 ? "gone" : saved[0] === 1;
   } catch { throw new CrmDealWriteUnconfirmed(); }
 }
 
@@ -389,19 +419,35 @@ export async function dropDeal(statsId: string, id: string, room: DataStore): Pr
   return removed[0] === 1;
 }
 
-/** Everything kept here for a store that is being deleted. */
+/**
+ * Everything kept here for a store that is being deleted: its fields,
+ * pipelines, deals and values, and then its tasks about people (639
+ * [GL7](6)). The tasks go at once, with the rest, and again under the
+ * tasks' lock, so a change read before cannot write them back after; a lock
+ * still taken after the wait throws (LockBusyError), with everything already
+ * deleted once. A change that reaches the lock after the store is gone finds
+ * no store and writes nothing (changePersonTasks).
+ */
 export async function forgetCrm(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   const fields = await readFields(statsId);
-  await redisPipeline([["DEL", fieldsKey(statsId), stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))]]);
+  await redisPipeline([["DEL", fieldsKey(statsId), stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))]]);
+  await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]]));
 }
 
+/** One person's value of a field deleted, answered with what it was (null when there was none). */
+const TAKE_CRM_VALUE = `-- marktmorgen:crm-value-take:v1
+local value = redis.call("HGET", KEYS[1], ARGV[1])
+if value then redis.call("HDEL", KEYS[1], ARGV[1]) end
+return value`;
+
 /**
- * Deletes one person from the store's fields and deals (lib/person-erasure.ts):
- * every value kept under their key, and every deal with them, by the address
- * a deal names. Answers how many records went.
+ * Deletes one person from the store's fields, deals and tasks
+ * (lib/person-erasure.ts): every value kept under their key, every deal with
+ * them, by the address a deal names, and the team's tasks about them; the
+ * room all of these took goes back to `room` when it is given. Answers how many records went.
  */
-export async function forgetCrmPerson(statsId: string | null, person: string, email: string): Promise<number> {
+export async function forgetCrmPerson(statsId: string | null, person: string, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
   const fields = await readFields(statsId);
   const address = email.trim().toLowerCase();
@@ -413,11 +459,115 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     const deal = json(value) as { email?: unknown } | null;
     return typeof deal?.email === "string" && deal.email.trim().toLowerCase() === address;
   }).map(([id]) => id);
-  const commands: (string | number)[][] = fields.map((f) => ["HDEL", valuesKey(statsId, f.id), person]);
-  if (theirs.length) commands.push(["HDEL", dealsKey(statsId), ...theirs]);
-  if (!commands.length) return 0;
-  const replies = await redisPipeline(commands);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  // Each value taken out in one script that answers what it deleted, each deal
+  // deleted on its own: what goes back to the store's data room is exactly
+  // what was removed, even with a change of the same value at the same time.
+  const commands: (string | number)[][] = [
+    ...fields.map((f) => ["EVAL", TAKE_CRM_VALUE, 1, valuesKey(statsId, f.id), person]),
+    ...theirs.map((id) => ["HDEL", dealsKey(statsId), id]),
+  ];
+  const replies = commands.length ? await redisPipeline(commands) : [];
+  let records = 0;
+  let valuesFreed = 0;
+  fields.forEach((_, i) => {
+    const taken = replies[i];
+    if (typeof taken !== "string") return;
+    records += 1;
+    if (taken) valuesFreed += dataBytes([person, taken], 1);
+  });
+  const dealsGone = theirs.filter((_, i) => replies[fields.length + i] === 1);
+  records += dealsGone.length;
+  if (room && (valuesFreed > 0 || dealsGone.length)) {
+    await giveData(room, [
+      ...(valuesFreed > 0 ? [{ slot: VALUES_SLOT, bytes: valuesFreed }] : []),
+      ...dealsGone.map((id) => ({ slot: dealSlot(id), bytes: 0, set: true })),
+    ]);
+  }
+  // Their tasks (639 [GL7](6)) go with them, under the tasks' lock, so a
+  // change read before the deletion cannot write them back after it; their
+  // values and deals above never wait on it. A lock still taken after the
+  // wait throws (LockBusyError): the deletion fails and says so, never skips
+  // them.
+  records += await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, async () => {
+    // One pipeline: what is given back is what the deletion removed.
+    const [before, gone] = await redisPipeline([["HGET", tasksKey(statsId), person], ["HDEL", tasksKey(statsId), person]]);
+    const freed = taskWeight(person, before);
+    if (gone === 1 && freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
+    return gone === 1 ? 1 : 0;
+  });
+  return records;
+}
+
+/** What one person's tasks take in the store's data room, as kept. */
+const taskWeight = (person: string, value: unknown) => (typeof value === "string" && value ? dataBytes([person, value], 1) : 0);
+
+function tasksOf(raw: unknown): PersonTask[] {
+  if (typeof raw !== "string" || !raw) return [];
+  return parseTasks(json(raw));
+}
+
+/** One person's tasks, open and done, in the order they were written (639 [GL7](6)). */
+export async function readPersonTasks(statsId: string | null, person: string): Promise<PersonTask[]> {
+  if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
+  const [raw] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
+  return tasksOf(raw);
+}
+
+/** Everyone's tasks, by person: what the agenda groups (lib/person-tasks.ts, tasksDue). At most MAX_STORE_TASKS. */
+export async function readAllTasks(statsId: string | null): Promise<DueTask[]> {
+  if (!statsId || !isRedisConfigured()) return [];
+  const [raw] = await redisPipeline([["HGETALL", tasksKey(statsId)]]);
+  const pairs: [string, unknown][] = [];
+  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs.push([String(raw[i]), raw[i + 1]]);
+  else if (raw && typeof raw === "object") pairs.push(...Object.entries(raw as Record<string, unknown>));
+  const out: DueTask[] = [];
+  for (const [person, value] of pairs) {
+    if (!PERSON.test(person)) continue;
+    for (const task of tasksOf(value)) if (out.length < MAX_STORE_TASKS) out.push({ person, task });
+  }
+  return out;
+}
+
+/**
+ * Changes one person's tasks: `change` gets their tasks and answers the new
+ * list or a refusal. A list that grows past MAX_STORE_TASKS across the store
+ * is refused ("store_full"). Room in the store's data room is taken before
+ * writing (DataRoomError when it does not fit); a shorter list gives it back.
+ * The read, the change, the room and the write happen under the store's
+ * tasks lock, so each real change is kept and counted exactly once; a change
+ * that cannot take it within TASKS_LOCK_WAIT_MS throws LockBusyError, with
+ * nothing written or counted.
+ */
+export async function changePersonTasks(statsId: string, person: string, room: DataStore, change: (tasks: PersonTask[]) => TaskResult): Promise<TaskResult> {
+  if (!PERSON.test(person)) return { ok: false, error: "unknown" };
+  return withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, async (held) => {
+    // A change that waited while the store was deleted writes nothing back:
+    // its tasks are gone with it (forgetCrm). One EXISTS of the store's id
+    // key; a store whose id is not of today's form (none is made any more)
+    // relies on forgetCrm's second deletion under this lock instead.
+    if (room.sid && STORE_ID_PATTERN.test(room.sid) && !(await storeIdExists(room.sid))) return { ok: false, error: "unknown" };
+    const [before] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
+    const tasks = tasksOf(before);
+    const result = change(tasks);
+    if (!result.ok) return result;
+    if (result.tasks.length > tasks.length && (await readAllTasks(statsId)).length + result.tasks.length - tasks.length > MAX_STORE_TASKS) return { ok: false, error: "store_full" };
+    const value = result.tasks.length ? JSON.stringify(result.tasks) : "";
+    const grown = taskWeight(person, value) - taskWeight(person, before);
+    // A lock that ran out meanwhile (a stalled request) may have let another
+    // change in: what was read may be stale, so nothing is counted or written.
+    if (!(await holdLock(held))) throw new LockBusyError();
+    // Room is taken before a write that grows, and given back only after a
+    // write that shrinks is confirmed: one that may not have landed keeps it.
+    if (grown > 0) await needData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
+    try {
+      const response = await redisPipeline([value ? ["HSET", tasksKey(statsId), person, value] : ["HDEL", tasksKey(statsId), person]]);
+      if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 0 && response[0] !== 1)) throw new CrmValueWriteUnconfirmed();
+    } catch {
+      throw new CrmValueWriteUnconfirmed();
+    }
+    if (grown < 0) await giveData(room, [{ slot: TASKS_SLOT, bytes: -grown }]);
+    return result;
+  });
 }
 
 /** How many deals the store keeps: what deleting a person reads (lib/person-erasure.ts). */

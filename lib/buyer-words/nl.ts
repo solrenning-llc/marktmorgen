@@ -301,4 +301,9 @@ export const nl: BuyerWords = {
   cardTestMode: "Testmodus: er wordt geen echte kaart belast.",
   cardCheckout: "Veilig betalen via Stripe, in een nieuw tabblad.",
   cardOpens: (store) => `Opent in de winkel van ${store}, in een nieuw tabblad.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} of meer`,
+  plusTax: "+ belasting, indien van toepassing",
+  salePriceUntil: (price, when) => `Actieprijs: ${price}, tot ${when}`,
 };

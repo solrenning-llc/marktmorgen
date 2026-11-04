@@ -331,4 +331,9 @@ export const en = {
   cardTestMode: "Test mode: no real card is charged.",
   cardCheckout: "Secure checkout by Stripe, in a new tab.",
   cardOpens: (store: string) => `Opens on ${store}'s store, in a new tab.`,
+
+  // ---- Email cards (lib/mail-product-price.ts) -------------------------------------------
+  orMore: (price: string) => `${price} or more`,
+  plusTax: "+ tax where it applies",
+  salePriceUntil: (price: string, when: string) => `${price} sale price, until ${when}`,
 };

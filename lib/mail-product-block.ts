@@ -12,18 +12,25 @@
  *     the creator can read, and every way of making one writes the same.
  *   - The pictures, names and prices are never typed: they are read from the
  *     store when the email is drawn, as the products are then, and only for
- *     products of this store on sale (not a draft, not removed). One that is
- *     not leaves the block by itself and the creator is told which; a block
- *     left with none stops the email (blockProblems), never sent empty.
+ *     products of this store a buyer can get now (productsBuyableNow in
+ *     lib/mail-product-sellable.ts: published, not coming soon, not sold out,
+ *     on a store that can sell or give it, a bundle with enough to hand
+ *     over). One that is not leaves the block by itself and the creator is
+ *     told which; a block left with none stops the email (blockProblems),
+ *     never sent empty.
  *   - A line that starts like one but is not a block (inside a paragraph, an
  *     id that is not one, more than the most) stops the email too, saying
  *     why, so a reader never gets it as raw text.
  *   - Each card: the product's picture (only one kept by the store's own
- *     image service; none otherwise), its name as a heading, its price as
- *     the store shows it, and a button to its page whose words name it, in
- *     the store's language, on the store's own button colours (their pair
- *     keeps 7:1). No pixel, discount, countdown, stock count or rating.
+ *     image service; none otherwise), its name as a heading, its price
+ *     written from the facts the server read (mailPriceLabel in
+ *     lib/mail-product-price.ts, never free text), and a button to its page
+ *     whose words name it, in the store's language, on the store's own
+ *     button colours (their pair keeps 7:1). No pixel, countdown, stock
+ *     count or rating; a sale price only for a store sale running now, with
+ *     the day it ends.
  */
+import { type PriceFacts, mailPriceLabel } from "@/lib/mail-product-price";
 
 export const PRODUCTS_PREFIX = "@products";
 export const MAX_MAIL_PRODUCTS = 4;
@@ -36,8 +43,8 @@ const STARTS = /^@products?\b/i;
 export type MailProduct = {
   id: string;
   title: string;
-  /** The price as the store shows it, in its language ("$29", "Free"). */
-  price: string;
+  /** What decides its price, read from the store by the server (mailPriceFacts); written by mailPriceLabel. */
+  facts: PriceFacts;
   /** Its picture from the store's image service, or null. */
   picture: { url: string; alt: string } | null;
   /** Its page, an https address. */
@@ -69,8 +76,8 @@ export type BlockProblem = { why: "malformed" } | { why: "empty"; ids: string[] 
 
 /**
  * What stops an email for its products, or null: a line that starts like a
- * block and is not one, or a block none of whose products is on sale here
- * now (`onSale`).
+ * block and is not one, or a block none of whose products a buyer can get
+ * here now (`onSale`, from productsBuyableNow).
  */
 export function blockProblems(body: string, onSale: ReadonlySet<string>): BlockProblem | null {
   for (const paragraph of paragraphs(body)) {
@@ -81,7 +88,7 @@ export function blockProblems(body: string, onSale: ReadonlySet<string>): BlockP
   return null;
 }
 
-/** The products of a block that leave it now, to tell the creator; the email still goes with the rest. */
+/** The products of a block that leave it now (not in `onSale`, from productsBuyableNow), to tell the creator; the email still goes with the rest. */
 export function leavingProducts(body: string, onSale: ReadonlySet<string>): string[] {
   return [...new Set(productBlocksIn(body).flat().filter((id) => !onSale.has(id)))];
 }
@@ -118,7 +125,10 @@ export type CardStyle = {
   images: string;
   /** The email's tag on a link, as for every other link. */
   goesTo?: (href: string) => string;
-};
+} & CardPrice;
+
+/** What writes a card's price: the store's language and currency, and when the email is drawn, in seconds. */
+export type CardPrice = { store: { language?: unknown; currency: string }; now: number };
 
 const DEFAULT_BUTTON = { fill: "#4c1d95", on: "#ffffff" };
 
@@ -137,13 +147,13 @@ export function productCardHtml(product: MailProduct, style: CardStyle): string 
     `<div style="margin:0 0 24px;padding:16px;border:1px solid #e7e5e4;border-radius:16px">` +
     picture +
     `<${h} style="margin:0 0 4px;font-size:18px;line-height:1.3;font-weight:700;color:#1c1917">${escape(product.title)}</${h}>` +
-    `<p style="margin:0 0 12px;color:#1c1917">${escape(product.price)}</p>` +
+    `<p style="margin:0 0 12px;color:#1c1917">${escape(mailPriceLabel(style.store, product.facts, style.now))}</p>` +
     `<p style="margin:0"><a href="${href}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:${pair.fill};color:${pair.on};font-weight:700;text-decoration:none">${escape(style.see(product.title))}</a></p>` +
     `</div>`
   );
 }
 
 /** A card in the plain-text email: its name, its price and its page. */
-export function productCardText(product: MailProduct): string {
-  return `${product.title} (${product.price}): ${product.href}`;
+export function productCardText(product: MailProduct, price: CardPrice): string {
+  return `${product.title} (${mailPriceLabel(price.store, product.facts, price.now)}): ${product.href}`;
 }

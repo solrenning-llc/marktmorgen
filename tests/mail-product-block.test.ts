@@ -3,8 +3,9 @@
  * 2026): the block's line, the checks before sending and the card, on
  * synthetic products only.
  */
-import { MAX_MAIL_PRODUCTS, PRODUCTS_PREFIX, type CardStyle, type MailProduct, blockProblems, blockWords, leavingProducts, productBlocksIn, productCardHtml, productCardText, productsLine, readProductsLine } from "@/lib/mail-product-block";
+import { MAX_MAIL_PRODUCTS, PRODUCTS_PREFIX, type CardPrice, type CardStyle, type MailProduct, blockProblems, blockWords, leavingProducts, productBlocksIn, productCardHtml, productCardText, productsLine, readProductsLine } from "@/lib/mail-product-block";
 import { parseMailBlocks } from "@/lib/mail-body";
+import { MAIL_SALE_MARGIN_SECONDS, type PriceFacts } from "@/lib/mail-product-price";
 import { contrast, lookColours } from "@/lib/store-look";
 import { done, is, part } from "./check";
 
@@ -15,8 +16,11 @@ const C = "legacy_id-1";
 const D = "0a1b2c3d4e";
 const E = "5f6e7d8c9b";
 const IMAGES = "https://marktmorgen.com";
-const guide: MailProduct = { id: A, title: "Sourdough & Co guide", price: "$29", picture: { url: `${IMAGES}/api/image/${"a".repeat(24)}/${"b".repeat(32)}.jpg`, alt: "The guide's cover" }, href: "https://marktmorgen.com/@ana/p/guide" };
-const style: CardStyle = { button: { fill: "#4c1d95", on: "#ffffff" }, see: (t) => `See ${t}`, level: 3, images: IMAGES, goesTo: (href) => `${href}?ref=mail` };
+const NOW = 1_800_000_000;
+const facts: PriceFacts = { free: false, priceCents: 2900, fromCents: 2900, optionCount: 0, interval: null, pwyw: false, sale: null, taxOnTop: false };
+const guide: MailProduct = { id: A, title: "Sourdough & Co guide", facts, picture: { url: `${IMAGES}/api/image/${"a".repeat(24)}/${"b".repeat(32)}.jpg`, alt: "The guide's cover" }, href: "https://marktmorgen.com/@ana/p/guide" };
+const price: CardPrice = { store: { language: "en", currency: "usd" }, now: NOW };
+const style: CardStyle = { button: { fill: "#4c1d95", on: "#ffffff" }, see: (t) => `See ${t}`, level: 3, images: IMAGES, goesTo: (href) => `${href}?ref=mail`, ...price };
 
 part("The block's line");
 is("a paragraph of its own: the prefix and 1 to 4 ids, as the store makes them", [productsLine([A, C]), readProductsLine(`  ${productsLine([A, C])}  `), readProductsLine(productsLine([A, B, C, D]))], [`@products ${A} ${C}`, [A, C], [A, B, C, D]]);
@@ -63,12 +67,23 @@ is("the button's words in the store's language", productCardHtml(guide, { ...sty
 is("the link carries the email's tag", html.includes(`href="${guide.href}?ref=mail"`), true);
 is("a picture only from the store's own image service", [productCardHtml({ ...guide, picture: { url: "https://tracker.example/p.gif", alt: "" } }, style).includes("<img"), productCardHtml({ ...guide, picture: null }, style).includes("<img")], [false, false]);
 is("a page that is not an https address: no card", [productCardHtml({ ...guide, href: "javascript:alert(1)" }, style), productCardHtml({ ...guide, href: "http://x.example" }, style)], ["", ""]);
-is("everything escaped", productCardHtml({ ...guide, title: "<script>\"x\"</script>", price: "\"$1\"", picture: { url: guide.picture!.url, alt: "\" onerror=\"x" } }, style).match(/<script|onerror="x/g), null);
+is("everything escaped", productCardHtml({ ...guide, title: "<script>\"x\"</script>", picture: { url: guide.picture!.url, alt: "\" onerror=\"x" } }, style).match(/<script|onerror="x/g), null);
 const night = lookColours({ theme: "night", accent: "#4c1d95" } as Parameters<typeof lookColours>[0]);
 const nightCard = productCardHtml(guide, { ...style, button: { fill: night.accent, on: night.onAccent } });
 is("the store's own button pair, which keeps 7:1, even on the Night theme", [nightCard.includes(`background:${night.accent};color:${night.onAccent}`), contrast(night.accent, night.onAccent) >= 7], [true, true]);
 is("colours that cannot be read: the site's own pair", productCardHtml(guide, { ...style, button: { fill: "red", on: "#fff" } }).includes("background:#4c1d95;color:#ffffff"), true);
 is("no pixel, discount, countdown, stock or rating", /width="1"|height="1"|discount|ends|left in stock|stars?|rating|% off/i.test(html), false);
-is("in plain text: name, price and page", productCardText(guide), `Sourdough & Co guide ($29): ${guide.href}`);
+is("in plain text: name, price and page", productCardText(guide, price), `Sourdough & Co guide ($29): ${guide.href}`);
+
+part("The card's price: written from the store's facts, never typed");
+const priced = (f: Partial<PriceFacts>, store = price.store) => {
+  const html = productCardHtml({ ...guide, facts: { ...facts, ...f } }, { ...style, store });
+  return html.match(/<p style="margin:0 0 12px;color:#1c1917">([^<]*)<\/p>/)?.[1];
+};
+is("free, one price, a membership, options, pay what you want", [priced({ free: true }), priced({}), priced({ interval: "month", priceCents: 900, fromCents: 900 }), priced({ optionCount: 3, fromCents: 1500 }), priced({ pwyw: true, priceCents: 500 })], ["Free", "$29", "$9 a month", "from $15", "$5 or more"]);
+is("tax on top is said; free stays free", [priced({ taxOnTop: true }), priced({ free: true, taxOnTop: true })], ["$29 + tax where it applies", "Free"]);
+is("a sale with more than a day to go: its price and end; within a day: the regular price", [priced({ sale: { percent: 20, ends: NOW + 2 * MAIL_SALE_MARGIN_SECONDS } })?.startsWith("$23.20 sale price, until "), priced({ sale: { percent: 20, ends: NOW + MAIL_SALE_MARGIN_SECONDS } })], [true, "$29"]);
+is("in the store's language", priced({ free: true }, { language: "fr", currency: "eur" }), "Gratuit");
+is("the plain text says the same price", productCardText({ ...guide, facts: { ...facts, taxOnTop: true } }, price), `Sourdough & Co guide ($29 + tax where it applies): ${guide.href}`);
 
 done();

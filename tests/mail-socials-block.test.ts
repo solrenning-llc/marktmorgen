@@ -14,6 +14,15 @@ is("a paragraph of its own", [isSocialsLine(SOCIALS_LINE), isSocialsLine(`  ${SO
 part("Before it goes");
 is("refused with no profiles kept, said in plain words", [socialsProblem(`Hi\n\n${SOCIALS_LINE}`, []), socialsProblem(`Hi\n\n${SOCIALS_LINE}`, kept), socialsProblem("Hi", [])], ["Your store has no profiles to show yet. Add them under your store's name in the studio, or take the profiles out of the email.", null, null]);
 
+const NONE = "Your store has no profiles to show yet. Add them under your store's name in the studio, or take the profiles out of the email.";
+const MALFORMED = "A line starting with @socials must be a paragraph of its own, written @socials. Add the profiles from the editor, or take the line out.";
+is("refused when no kept profile could be linked", socialsProblem(`Hi\n\n${SOCIALS_LINE}`, [{ network: "website", url: "javascript:alert(1)" } as Social, { network: "x", url: "http://x.com/a" } as Social]), NONE);
+is("one linkable profile is enough", socialsProblem(`Hi\n\n${SOCIALS_LINE}`, [{ network: "x", url: "http://x.com/a" } as Social, kept[0]]), null);
+is("a line that starts like the row and is not it stops the email", [`@Socials`, `@SOCIALS`, `@social`, `Hi\n${SOCIALS_LINE}`, `${SOCIALS_LINE}\nmore`, `${SOCIALS_LINE} please`].map((body) => socialsProblem(body, kept)), Array(6).fill(MALFORMED));
+is("@socials in the middle of a sentence is just text", socialsProblem(`Follow ${SOCIALS_LINE} here`, kept), null);
+is("a malformed line is refused even with no profiles", socialsProblem("@Socials", []), MALFORMED);
+is("the sentences stay short", [NONE, MALFORMED].flatMap((t) => t.split(/(?<=\.) /)).every((sentence) => sentence.split(/\s+/).length < 21), true);
+
 part("The row");
 const html = socialsHtml(kept, (href) => `${href}?ref=mail`);
 is("the profiles as the store keeps them, in its order", [...html.matchAll(/>([A-Za-z]+)<\/a>/g)].map((m) => m[1]), ["Instagram", "Email", "Website"]);

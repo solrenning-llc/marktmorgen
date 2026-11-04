@@ -37,6 +37,7 @@ let reads = 0;
 const lookedUp = new Set<string>();
 let refundsList: Record<string, unknown>[] = [];
 let eventsOn = true;
+let eventsDown = false;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.pathname === "/v1/checkout/sessions" && url.searchParams.get("payment_intent")) lookedUp.add(String(url.searchParams.get("payment_intent")));
@@ -46,6 +47,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     return new Response(JSON.stringify({ object: "list", data: refundsList.filter((r) => Number(r.created) >= gte), has_more: false }));
   }
   if (url.pathname !== "/v1/events") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
+  if (url.pathname === "/v1/events" && eventsDown) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
   if (!eventsOn || url.searchParams.get("type") !== "charge.dispute.closed") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   reads += 1;
   const after = url.searchParams.get("starting_after");
@@ -144,6 +146,8 @@ async function main(): Promise<void> {
   await revokeRefunded(keysStore, Date.now() - 1);
   const [kept, ttl] = await redis.pipeline([["GET", keysPlace], ["TTL", keysPlace]]);
   is("an unsure run keeps the place and renews its time", [Number(kept), Number(ttl) > 86_400], [NOW, true]);
+  const [keysSeenTtl] = await redis.pipeline([["TTL", `nl:keys:${keysStore.statsId}:refunds:seen`]]);
+  is("and the refunds already read live at least as long, so none is taken for new and revoked again", Number(keysSeenTtl) >= Number(ttl), true);
   const noPayCalls = "d".repeat(16);
   const noPayStore = { statsId: "n".repeat(32), callsId: noPayCalls, stripeAccountId: ACCOUNT, handle: "cursor-nopay", previousHandles: [] } as unknown as Store;
   await redis.pipeline([["ZADD", MEET_STORES, Date.now() + 86_400_000, `${noPayCalls}|cursor-nopay`]]);
@@ -161,6 +165,21 @@ async function main(): Promise<void> {
   }
   is("and its place moves past the newest closing", Number((await redis.pipeline([["GET", callsPlace]]))[0]) >= NOW, true);
   events[7].data.object.payment_intent = `pi_Cursor${String(7).padStart(6, "0")}`;
+
+  part("The review and call jobs keep their place and the refunds they read, also when unsure (review of #2158)");
+  for (const [label, key, seen, run] of [
+    ["review", placeKey, `nl:rev:refunds:seen:${statsId}`, () => markRefundedReviews(shop, Date.now() + 60_000)],
+    ["call", callsPlace, `nl:meet:rf:${noPayCalls}:seen`, () => syncMeetings(async (handle) => (handle === "cursor-nopay" ? noPayStore : null), Date.now() + 60_000, "https://marktmorgen.com")],
+  ] as const) {
+    // The closing events cannot be read, so the run ends unsure.
+    const [before] = await redis.pipeline([["GET", key]]);
+    await redis.pipeline([["SADD", seen, "re_KeptForTheTest"], ["EXPIRE", key, 1_000], ["EXPIRE", seen, 1_000]]);
+    eventsDown = true;
+    await run();
+    eventsDown = false;
+    const [after, placeTtl, seenTtl] = await redis.pipeline([["GET", key], ["TTL", key], ["TTL", seen]]);
+    is(`the ${label} job, unsure: the same place, its time renewed, and the read refunds as long`, [after, Number(placeTtl) > 86_400, Number(seenTtl) >= Number(placeTtl)], [before, true, true]);
+  }
 
   part("A first run that could not look up every refund keeps its window (review of #2158)");
   // The call job asks about at most REFUND_LOOKUPS payments a run. A store with no place yet had its place moved past

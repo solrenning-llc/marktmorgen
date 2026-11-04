@@ -254,10 +254,14 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     if (!(await confirmLostRead(lostRead, seenKey(callsId)))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
-  // Every run writes the place: moved forward only past what was read to the end, with lookups left and inside its
-  // time, otherwise the one it started from, its time renewed, as the license keys do. A first run that could not look
-  // up every refund no longer moves past the ones it left (review of #2158).
+  // Every run that ends writes the place: moved forward only past what was read to the end, with lookups left and
+  // inside its time, otherwise the one it started from, its time renewed, and the set of refunds already read lives at
+  // least as long, as the license keys do. A first run that could not look up every refund no longer moves past the
+  // ones it left (reviews of #2158). A run that throws writes nothing.
   const done = complete && !unsure && lookups > 0 && Date.now() < deadline;
-  await redisPipeline([["SET", anchorKey(callsId), String(done ? Math.max(newest, anchor) : anchor), "EX", REFUND_KEEP_SECONDS * 2]]);
+  await redisPipeline([
+    ["SET", anchorKey(callsId), String(done ? Math.max(newest, anchor) : anchor), "EX", REFUND_KEEP_SECONDS * 2],
+    ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS * 2 + 86_400],
+  ]);
   return handled;
 }

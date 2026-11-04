@@ -345,10 +345,14 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
     if (!(await confirmLostRead(lostRead, seenKey(statsId)))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
-  // Every run writes the place: moved forward only past what was read to the end, otherwise the one it started from,
-  // its time renewed (reviews of #2158), as the license keys do.
+  // Every run that ends writes the place: moved forward only past what was read to the end, otherwise the one it
+  // started from, its time renewed, and the set of refunds already read lives at least as long (reviews of #2158), as
+  // the license keys do. A run that throws writes nothing.
   const done = complete && !unsure && Date.now() < deadline;
-  await redisPipeline([["SET", anchorKey(statsId), String(done ? Math.max(newest, anchor) : anchor), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  await redisPipeline([
+    ["SET", anchorKey(statsId), String(done ? Math.max(newest, anchor) : anchor), "EX", REFUND_LOOKBACK_SECONDS * 2],
+    ["EXPIRE", seenKey(statsId), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
+  ]);
   return marked;
 }
 

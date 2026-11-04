@@ -150,6 +150,8 @@ R² 0.635 (adjusted 0.552), main; 0.678 (adjusted 0.620), robustness. Each step 
 
 Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
+The exhaustive search checks each price with `unitUnder` and asks for the same 5¢ of safety over the spend floor's room as the program (since 4 November 2026), so the two compare the same thing.
+
 | Scenario | Alternative | Store | Studio | Scale | Each plan keeps 60% (checked) | Same as the exhaustive search |
 | --- | --- | --- | --- | --- | --- | --- |
 | ε = -0.5 | A | $129 | $889 | $1,989 | yes (61.75% / 61.87%; 61.97% / 61.81%; 62.00% / 61.79%) | yes |

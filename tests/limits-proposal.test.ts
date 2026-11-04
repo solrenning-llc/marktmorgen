@@ -10,7 +10,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PLANS_ON_SALE } from "@/lib/opening";
+import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
+import { allUnits, evaluate, roomKept } from "./margin-alignment-table";
 import { ASSISTANT_INPUT_BYTES } from "@/lib/store-assistant-rules";
 import { CENTS_PER_MINUTE, MIN_CENTS } from "@/lib/auto-captions-rules";
 import { ORDER, assistantAt, assistantInputCap, captionsMinimumFor, captionsOptions, captionsPrice, captionsTodayAnyMinimum, captionsWorstBps, figures, perMinuteHolds, proposals, renderLimitsProposal } from "./limits-proposal-table";
@@ -24,12 +25,21 @@ test("the document is what the numbers render today (run node scripts/limits-pro
   assert.match(read(DOC).slice(HISTORICAL_MARGIN_NOTICE.length), /^# Limits proposal, 18 October 2026 — a PROPOSAL, nothing here is in force/);
 });
 
-test("every proposed figure is a cut, never a raise, and at the price list of 18 October 2026 no cut is proposed", () => {
+test("every proposed figure is a cut, never a raise, and at today's figures every plan makes net profit > 0 with the spend floor's room, monthly and yearly", () => {
+  // Until 4 November 2026 this asked every plan to keep 60% at today's
+  // figures, the floor of 18 October 2026. Under the MR rule (owner, 27
+  // October 2026) 60% is the monthly company report's goal, not a per-unit
+  // gate: each plan, alone at full use, makes a profit with the spend floor's
+  // room (owner's decision C2-68, 4 November 2026; 465 [MR2]). The cuts this
+  // document lists are what 60% would take, shown, never applied.
+  const units = allUnits(PLANS_ON_SALE, ASSISTANT_ON_SALE);
   for (const p of proposals()) {
     const today = figures(p.tier);
     for (const id of ORDER) p.proposed[id].forEach((n, i) => assert.ok(n <= today[id][i], `${p.tier} ${p.cycle} ${id}: ${n} above today's ${today[id][i]}`));
-    // The owner chose prices over cuts (11:21): every plan keeps 60% at today's figures, so nothing is cut.
-    assert.ok(p.feasible && p.cut.length === 0 && p.todayNetBps >= 6_000, `${p.tier} ${p.cycle} keeps ${p.todayNetBps} and would cut ${p.cut.join(", ")}`);
+    const unit = units.find((u) => u.id.startsWith(`${p.tier}-${p.cycle}-`));
+    assert.ok(unit, `${p.tier} ${p.cycle} is a unit`);
+    const withRoom = evaluate({ ...unit, usageCents: unit.usageCents + roomKept(unit) });
+    assert.ok(withRoom.netCents > 0, `${p.tier} ${p.cycle}: ${withRoom.netCents} cents net with ${roomKept(unit)} cents of room`);
   }
 });
 

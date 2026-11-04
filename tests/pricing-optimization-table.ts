@@ -323,12 +323,23 @@ export type MilpSolution = { scenario: string; alternative: Alternative; status:
 export type MilpOutput = { solver: string; solutions: MilpSolution[] };
 export const milpOutput = (): MilpOutput => readJson<MilpOutput>(OUTPUT_FILE);
 
-/** The exhaustive search over the same grid: the best price at the alternative's lowest shares (the program's optimum when no ordering binds), checked by the repository's code. */
+/**
+ * Whether a price keeps the room the program asks for: the spend floor's room
+ * and SAFETY_CENTS more, on both intervals, as the program's room per price
+ * deducts (milpInput). The exhaustive search uses it, so that it and the
+ * program compare the same thing (owner's decision C2-68, 4 November 2026:
+ * until then the search used `keeps` alone, and a price inside the 5¢ band
+ * made the two disagree).
+ */
+export function keepsWithSafety(tier: Tier, monthCents: number, shares: Shares): boolean {
+  return (["month", "year"] as const).every((c) => { const u = unitAt(tier, c, monthCents, shares); return u.meetsFloor && u.usageRoomCents - u.usageCents >= PLAN_ROOM[c] + SAFETY_CENTS; });
+}
+/** The exhaustive search over the same grid: the best price at the alternative's lowest shares (the program's optimum when no ordering binds), checked by the repository's code with the program's own safety. */
 export function exhaustive(tier: Tier, alt: Alternative, e: number): { monthCents: number; shares: Shares; profit: number } | null {
   const lowest = alt === "A" ? ones() : printedShares(tier, Object.fromEntries(ORDER.map((id) => [id, ALTERNATIVES[alt]])) as Shares);
   let best: { monthCents: number; shares: Shares; profit: number } | null = null;
   for (const monthCents of grid(tier)) {
-    if (!keeps(tier, monthCents, lowest)) continue;
+    if (!keepsWithSafety(tier, monthCents, lowest)) continue;
     const pr = profit(tier, monthCents, lowest, e);
     if (!best || pr > best.profit) best = { monthCents, shares: lowest, profit: pr };
   }
@@ -585,6 +596,8 @@ export function renderPricingOptimization(): string {
   push("**Alternatives.** **A**: no #553 figure is cut (the owner's rule). **C**: each figure may be cut to a tenth of #553's (the proposal's floor), shown apart so the owner sees what a cut is worth under each scenario. **B** (superiority, below) is not a scenario of the program: it is the price at which each plan would be at least the best competitor in its band on every metered figure.");
   push("");
   push(`Solver: ${solutions.solver}.`);
+  push("");
+  push(`The exhaustive search checks each price with \`unitUnder\` and asks for the same ${SAFETY_CENTS}¢ of safety over the spend floor's room as the program (since 4 November 2026), so the two compare the same thing.`);
   push("");
   push("| Scenario | Alternative | Store | Studio | Scale | Each plan keeps 60% (checked) | Same as the exhaustive search |");
   push("| --- | --- | --- | --- | --- | --- | --- |");

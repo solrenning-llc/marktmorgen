@@ -1,6 +1,7 @@
 /** Selected physical price projection only. Not catalog ownership, admission,
  * a shipping/total proof, a funded source or permission to create payment. */
 import type {ProductOption} from '@/lib/product-option';
+import {shipmentMailPolicy} from '@/lib/shipment-mail-outbox';
 function own(value:unknown):Record<string,unknown>|null{
  try{
   if(!value||typeof value!=='object'||Array.isArray(value)||![Object.prototype,null].includes(Object.getPrototypeOf(value)))return null;
@@ -47,4 +48,13 @@ export function physicalOptionBodyMatches(value:unknown,maximumBytes:unknown):bo
  return Object.entries(expected).every(([key,val])=>form.get(key)===val)&&
   !entries.some(([key])=>/^line_items\[(?!0\])/.test(key)||/^(discounts|custom_fields|optional_items|subscription_data)\[/.test(key))&&
   !['gift','group','people','preorder','upsell_key','bundle'].some(key=>form.has(`metadata[${key}]`));
+}
+
+
+/** Isolated structural coverage test only. A caller still owes authenticated
+ * source ownership, complete cohort checks, shipping/paid reconciliation and
+ * real reviewed funding. This function neither creates nor authorizes them. */
+export function physicalOptionCovered(value:unknown,policy:unknown,now=Date.now()):boolean{
+ const p=shipmentMailPolicy(policy,now);
+ return Boolean(p?.coveredOrigins?.includes('physical-option-confirmation')&&physicalOptionBodyMatches(value,p.maxPayloadBytes));
 }

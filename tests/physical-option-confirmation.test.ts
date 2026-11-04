@@ -1,7 +1,9 @@
 /** Recovery of the pure selection slice only; no paid73h/source/worker proof. */
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {selectedPhysicalOption,physicalOptionBodyMatches} from '@/lib/physical-option-confirmation';
+import {selectedPhysicalOption,physicalOptionBodyMatches,physicalOptionCovered} from '@/lib/physical-option-confirmation';
+import {shipmentPolicy} from './shipment-mail-outbox-fixture';
+import {CURRENT_SHIPMENT_MAIL_POLICY} from '@/lib/shipment-mail-outbox';
 const option=()=>({id:'large_print',label:'Large print',priceCents:6500,file:null,link:null,details:['Printed edition'],best:false});
 const select=(o:unknown)=>selectedPhysicalOption({options:[o]},'large_print');
 test('captures only the selected physical identity and makes a detached description copy',()=>{
@@ -88,4 +90,36 @@ test('descriptor-backed snapshot and store fields are refused without running ge
  let reads=0;const f=original();const store=Object.defineProperty({...f.snapshot.store},'currency',{get(){reads++;throw Error('no');}});
  assert.equal(physicalOptionBodyMatches({...f.value(),snapshot:{...f.snapshot,store}},60000),false);
  const v=Object.defineProperty(f.value(),'body',{get(){reads++;throw Error('no');}});assert.equal(physicalOptionBodyMatches(v,60000),false);assert.equal(reads,0);
+});
+
+
+test('express option coverage requires the same quantitative review and original selected body',()=>{
+ const f=original(),now=Date.now();
+ for(const coveredOrigins of [['physical-option-confirmation'],['single-digital-confirmation','physical-option-confirmation']]){
+  const p={...shipmentPolicy(now),coveredOrigins};assert.equal(physicalOptionCovered(f.value(),p,now),true);
+  const changed=original();changed.body.set('line_items[0][price_data][unit_amount]','3500');assert.equal(physicalOptionCovered(changed.value(),p,now),false);
+ }
+ const p={...shipmentPolicy(now),coveredOrigins:['physical-option-confirmation']};
+ assert.equal(physicalOptionCovered(original(0).value(),p,now),true,'selected zero remains a structural match, not proof of paid total');
+ assert.equal(physicalOptionCovered(f.value(),{...p,admissionsUntil:now},now),true,'the existing admission deadline is inclusive');
+ assert.equal(CURRENT_SHIPMENT_MAIL_POLICY,null);assert.equal(physicalOptionCovered(f.value(),CURRENT_SHIPMENT_MAIL_POLICY,now),false);
+});
+test('generic physical or digital review cannot inherit express option permission',()=>{
+ const f=original(),now=Date.now();
+ for(const coveredOrigins of [undefined,[],['course-confirmation'],['single-digital-confirmation'],['single-digital-access-renewal'],['unknown'],['physical-option-confirmation','physical-option-confirmation']])
+  assert.equal(physicalOptionCovered(f.value(),{...shipmentPolicy(now),coveredOrigins},now),false);
+});
+test('unfunded, expired, unknown and too-small quantitative envelopes refuse even with the option recipe',()=>{
+ const f=original(),now=Date.now(),p={...shipmentPolicy(now),coveredOrigins:['physical-option-confirmation']};
+ for(const patch of [{ongoingStorageFunded:false},{admissionsUntil:now-1},{storeBytes:0},{globalBytes:0},{maxPayloadBytes:1},{unexpected:true}])
+  assert.equal(physicalOptionCovered(f.value(),{...p,...patch},now),false);
+ for(const candidate of [null,{},Object.create(p)])assert.equal(physicalOptionCovered(f.value(),candidate,now),false);
+ assert.equal(physicalOptionCovered({...f.value(),snapshot:{}},p,now),false);
+});
+test('coverage inspection neither executes policy getters nor modifies the original policy/body',()=>{
+ const f=original(),now=Date.now(),p={...shipmentPolicy(now),coveredOrigins:['physical-option-confirmation']};
+ let reads=0;const executable=Object.defineProperty({...p},'coveredOrigins',{get(){reads++;throw Error('no');}});
+ assert.equal(physicalOptionCovered(f.value(),executable,now),false);assert.equal(reads,0);
+ const encoded=JSON.stringify(p),body=f.body.toString();Object.freeze(p.coveredOrigins);Object.freeze(p);
+ assert.equal(physicalOptionCovered(f.value(),p,now),true);assert.equal(JSON.stringify(p),encoded);assert.equal(f.body.toString(),body);
 });

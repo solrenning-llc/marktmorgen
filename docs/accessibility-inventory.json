@@ -1056,6 +1056,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/labels/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/labels",
+      "parameters": []
+    },
+    {
       "source": "app/studio/meetings/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/meetings",
@@ -1238,6 +1244,7 @@
     "components/blog-body.tsx",
     "components/blog-browser.tsx",
     "components/blog-editor.tsx",
+    "components/bulk-labels.tsx",
     "components/bundle-delivery.tsx",
     "components/bundle-editor.tsx",
     "components/bundle-toggle.tsx",
@@ -1275,6 +1282,7 @@
     "components/countdown.tsx",
     "components/course-access-check.tsx",
     "components/course-comments-studio.tsx",
+    "components/course-day-preview.tsx",
     "components/course-editor.tsx",
     "components/course-outline.tsx",
     "components/course-template-picker.tsx",
@@ -1674,6 +1682,7 @@
     "app/api/store/community/rsvp/route.ts",
     "app/api/store/community/upload/route.ts",
     "app/api/store/contact-box/route.ts",
+    "app/api/store/contact-labels/route.ts",
     "app/api/store/contact/route.ts",
     "app/api/store/course/certificate/route.ts",
     "app/api/store/course/comment/route.ts",
@@ -1947,6 +1956,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 133
+    "pageTemplates": 134
   }
 }

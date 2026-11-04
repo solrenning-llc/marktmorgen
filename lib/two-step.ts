@@ -141,13 +141,27 @@ function newCodes(): string[] {
   });
 }
 
-/** A short plain notice to the account's address when its second step changes or is used. */
-async function tell(email: string, subject: string, line: string): Promise<void> {
+/**
+ * A short plain notice to the account's address when its second step changes
+ * or is used. `backup`: the confirmed recovery address, told the same (in
+ * `backupLine`'s words when they differ), for what happens on the path that
+ * assumes somebody else may hold the sign-in inbox (MM-SA-19). Never twice to
+ * one inbox.
+ */
+async function tell(email: string, subject: string, line: string, backup = "", backupLine = line): Promise<void> {
   if (!isSenderConfigured()) return;
+  const address = normaliseEmail(email);
+  await notice(address, subject, line);
+  if (backup && normaliseEmail(backup) !== address) {
+    await notice(normaliseEmail(backup), subject, `This is the recovery address for the Marktmorgen account ${address}, so you get this notice too.\n\n${backupLine}`);
+  }
+}
+
+async function notice(to: string, subject: string, line: string): Promise<void> {
   const when = new Date().toISOString().replace("T", " ").slice(0, 16);
   await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
-    to: normaliseEmail(email),
+    to,
     replyTo: "support@marktmorgen.com",
     subject,
     text: [
@@ -174,6 +188,12 @@ export type TwoStepStatus = { on: boolean; since: number; codesLeft: number; res
 /** The account's recovery address (lib/recovery-address.ts); a record from before kept its own. */
 async function backupOf(email: string, record: TwoStep): Promise<string> {
   return (await recoveryAddress(email)) || record.backup;
+}
+
+/** The same for an address, read whether or not two-step login is on: what lib/passkeys.ts tells as well. */
+export async function recoveryAddressOf(email: string): Promise<string> {
+  const record = await read(email);
+  return record ? backupOf(email, record) : recoveryAddress(email);
 }
 
 export async function twoStepStatus(email: string): Promise<TwoStepStatus> {
@@ -298,7 +318,8 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   const email = held?.email ?? null;
   const record = email ? await read(email) : null;
   if (!email || !record) return null;
-  const through = held?.viaRecovery ? "a login link sent to your recovery address" : "a login link sent to this address";
+  const through = (to: "sign-in" | "recovery") =>
+    held?.viaRecovery ? "a login link sent to your recovery address" : to === "sign-in" ? "a login link sent to this address" : "a login link sent to the sign-in address";
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
   if (Number(removed) !== 1) return null;
@@ -308,14 +329,18 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   const session = await openLockedSession(email, until, now);
   // The same day for a later login through the recovery address, which then opens everything once it has passed.
   await alignRecoveryLock(email, until, now);
-  await tell(
-    email,
-    first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",
-    `Somebody who opened ${through} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, ${LOCKED_LIST} are locked for them; after that, two-step login turns off.
+  const opened = (to: "sign-in" | "recovery") => `Somebody who opened ${through(to)} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, ${LOCKED_LIST} are locked for them; after that, two-step login turns off.
 
 If that was you, keep working: everything else is open.
 
-If it was not you, somebody can read your email: log in with your app's code or a passkey, or open your studio in a browser that is still logged in and press Cancel. That logs them out and keeps two-step login on. Then change your email password.`,
+If it was not you, somebody can read your email: log in with your app's code or a passkey, or open your studio in a browser that is still logged in and press Cancel. That logs them out and keeps two-step login on. Then change your email password.`;
+  // Told to the recovery address too: this path assumes somebody else may hold the sign-in inbox (MM-SA-19).
+  await tell(
+    email,
+    first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",
+    opened("sign-in"),
+    await backupOf(email, record),
+    opened("recovery"),
   );
   return { session, email, until };
 }
@@ -375,8 +400,10 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
 export async function resetIfDue(email: string, now = Date.now()): Promise<boolean> {
   const record = await read(email);
   if (!record || record.reset === 0 || now < record.reset) return false;
+  // Read before the record goes: an account from before kept its recovery address on it.
+  const backup = await backupOf(email, record);
   await redisPipeline([["DEL", recordKey(email), lockedSetKey(email)]]);
-  await tell(email, "Two-step login is off for your Marktmorgen account", `Two-step login was turned off ${RESET_DAYS} days after you got in without it, and nothing in your studio is locked any more. You can turn it on again in your studio, with a new app setup and new recovery codes.`);
+  await tell(email, "Two-step login is off for your Marktmorgen account", `Two-step login was turned off ${RESET_DAYS} days after you got in without it, and nothing in your studio is locked any more. You can turn it on again in your studio, with a new app setup and new recovery codes.`, backup);
   return true;
 }
 

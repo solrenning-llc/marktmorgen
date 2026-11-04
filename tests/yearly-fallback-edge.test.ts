@@ -40,9 +40,12 @@ type State = {
   month: { status: string } | null;
   schedule: string | null;
   method: string;
+  /** The membership's own metadata, and what waits on a pending update until it applies. */
+  meta: Record<string, string>;
+  pendingMeta: Record<string, string>;
 };
 let st: State;
-const fresh = (): State => ({ interval: "year", pendingUpdate: false, year: { status: "open", auto_advance: true, amount_paid: 0 }, month: null, schedule: null, method: "card" });
+const fresh = (): State => ({ interval: "year", pendingUpdate: false, year: { status: "open", auto_advance: true, amount_paid: 0 }, month: null, schedule: null, method: "card", meta: {}, pendingMeta: {} });
 /** How the next subscription update answers: "paid" applies it; others as named. */
 let updateMode: "paid" | "declined" | "declined-paid-latest" | "declined-unexpanded" | "declined-latest-is-year" | "applied-open" | "timeout" | "timeout-applied" | "500" | "400" | "409" | "429" | "price-inactive" = "paid";
 let failInvoiceReadAt = -1; // 1-based count of GET /invoices/YEAR to answer 500
@@ -63,8 +66,8 @@ const subJson = () => ({
   cancel_at: null,
   cancel_at_period_end: false,
   schedule: st.schedule,
-  metadata: { store: "harbor", product },
-  pending_update: st.pendingUpdate ? { expires_at: 1 } : null,
+  metadata: { store: "harbor", product, ...st.meta },
+  pending_update: st.pendingUpdate ? { expires_at: 1, metadata: st.pendingMeta } : null,
   items: {
     data: [
       st.interval === "year"
@@ -98,9 +101,17 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json(yearJson());
   }
   if (method === "POST" && path === `/subscriptions/${SUB}`) {
+    const metadata = Object.fromEntries([...body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v]));
+    // As Stripe (changelog 2026-05-27.dahlia, pending-subscription-update-metadata): metadata on a change made only if
+    // paid is refused before that version; from it, kept on the pending update and merged only once the change applies.
+    if (Object.keys(metadata).length && body.get("payment_behavior") === "pending_if_incomplete" && (headers.get("Stripe-Version") ?? "").slice(0, 10) < "2026-05-27") {
+      return err(400, "invalid_request_error", "parameter_unknown");
+    }
+    const applied = () => Object.assign(st.meta, metadata);
     const mode = updateMode;
     if (mode === "timeout") throw new TypeError("fetch failed");
     if (mode === "timeout-applied") {
+      applied();
       st.interval = "month";
       st.month = { status: "paid" };
       throw new TypeError("fetch failed");
@@ -112,25 +123,40 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (mode === "429") return err(429, "invalid_request_error", "lock_timeout");
     if (mode.startsWith("declined")) {
       st.pendingUpdate = true;
+      st.pendingMeta = metadata;
       st.month = { status: mode === "declined-paid-latest" ? "paid" : "open" };
       const latest =
         mode === "declined-unexpanded" ? MONTH : mode === "declined-latest-is-year" ? { id: YEAR, status: "open" } : { id: MONTH, status: st.month.status, amount_paid: 0, currency: "usd" };
       return json({ ...subJson(), latest_invoice: latest });
     }
     if (mode === "applied-open") {
+      applied();
       st.interval = "month";
       st.month = { status: "open" };
       return json({ ...subJson(), latest_invoice: { id: MONTH, status: "open", amount_paid: 0, currency: "usd" } });
     }
+    applied();
     st.interval = "month";
     st.pendingUpdate = false;
     st.month = { status: "paid" };
     return json({ ...subJson(), latest_invoice: { id: MONTH, status: "paid", amount_paid: 2000, currency: "usd" } });
   }
+  if (method === "POST" && path === `/invoices/${MONTH}/pay`) {
+    // The member pays the month's invoice later: the pending update applies, and its metadata with it.
+    st.month = { status: "paid" };
+    if (st.pendingUpdate) {
+      Object.assign(st.meta, st.pendingMeta);
+      st.pendingMeta = {};
+      st.pendingUpdate = false;
+      st.interval = "month";
+    }
+    return json({ id: MONTH, status: "paid" });
+  }
   if (method === "POST" && path === `/invoices/${MONTH}/void`) {
     if (monthVoidFails) return err(500, "api_error");
     if (st.month) st.month.status = "void";
     st.pendingUpdate = false;
+    st.pendingMeta = {};
     return json({ id: MONTH, status: "void" });
   }
   if (method === "POST" && path === `/invoices/${YEAR}/void`) {
@@ -146,6 +172,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return json({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
+/** The moves asked of Stripe, never the record written after one. */
+const moves = () => calls.filter((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}` && c.body.has("items[0][price]"));
 const posts = () => calls.filter((c) => c.method === "POST" && c.path !== "/prices").map((c) => `${c.path}${c.body.get("auto_advance") ? `:auto_advance=${c.body.get("auto_advance")}` : ""}`);
 const members = async (key: string) => ((await redisPipeline([["SMEMBERS", key]]))[0] as string[]) ?? [];
 const reason = (r: Awaited<ReturnType<typeof moveToMonthly>>) => (r.ok ? (r.paid ? "moved-paid" : "moved-unpaid") : r.reason);
@@ -183,12 +211,13 @@ async function main(): Promise<void> {
   part("Move: cases that already hold");
   await reset();
   is("paid: moved, year voided, never both", [reason(await move()), st.year.status, st.month?.status, doubleCharged()], ["moved-paid", "void", "paid", false]);
-  is("double click AFTER a paid move: refused (sub is monthly now), nothing charged again", [reason(await move()), calls.filter((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}`).length], ["fallback", 1]);
+  is("…and the membership now says monthly to everything that reads metadata.every", [st.meta.every, st.meta.monthly_from, st.meta.monthly_replaced], ["month", "year", YEAR]);
+  is("double click AFTER a paid move: refused (sub is monthly now), nothing charged again", [reason(await move()), moves().length], ["fallback", 1]);
 
   await reset();
   const [a, b] = await Promise.all([move(), move()]);
   is("two clicks at the same instant: one moves, the other waits for the lock then reads monthly", [reason(a), reason(b)].sort(), ["fallback", "moved-paid"]);
-  is("…and Stripe is asked to move exactly once", calls.filter((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}`).length, 1);
+  is("…and Stripe is asked to move exactly once", moves().length, 1);
 
   await reset();
   updateMode = "declined";
@@ -203,7 +232,7 @@ async function main(): Promise<void> {
   const t1 = await move();
   updateMode = "paid";
   const t2 = await move();
-  is("timeout where Stripe DID apply the move: unknown, then the replayed click is refused, no second month", [reason(t1), reason(t2), calls.filter((c) => c.method === "POST" && c.path === `/subscriptions/${SUB}`).length], ["unknown", "fallback", 1]);
+  is("timeout where Stripe DID apply the move: unknown, then the replayed click is refused, no second month", [reason(t1), reason(t2), moves().length], ["unknown", "fallback", 1]);
 
   for (const code of ["429", "400"] as const) {
     await reset();
@@ -226,6 +255,38 @@ async function main(): Promise<void> {
   await reset();
   await move();
   is("every Stripe call pinned to the version", calls.filter((c) => c.path !== "/prices").every((c) => c.version === FALLBACK_STRIPE_VERSION), true);
+
+  // L. Third review: the membership's record travels in the move itself, kept pending until the month is paid.
+  await reset();
+  is(
+    "L. every move carries the record, at the pinned version (2026-05-27.dahlia or later, which takes it)",
+    [reason(await move()), moves().map((c) => [c.body.get("metadata[every]"), c.version])],
+    ["moved-paid", [["month", FALLBACK_STRIPE_VERSION]]],
+  );
+  await reset();
+  updateMode = "applied-open";
+  await move();
+  is("L'. applied with the month not paid yet: the record applied with it", st.meta.every, "month");
+  await reset();
+  updateMode = "declined";
+  monthVoidFails = true;
+  const pending = await move();
+  const record = (m: Record<string, unknown>) => [m.every, m.monthly_from, m.monthly_replaced];
+  is(
+    "L''. the month's payment still processing: the membership keeps its yearly price and none of the record, which waits only on the pending update",
+    [reason(pending), subJson().items.data[0].price.recurring.interval, record(subJson().metadata), record(subJson().pending_update?.metadata ?? {})],
+    ["unknown", "year", [undefined, undefined, undefined], ["month", "year", YEAR]],
+  );
+  await fetch(`https://api.stripe.com/v1/invoices/${MONTH}/pay`, { method: "POST" });
+  is(
+    "L'''. once the month is paid and the move applies: interval month and the record merged, monthly_replaced the yearly invoice, nothing pending",
+    [subJson().items.data[0].price.recurring.interval, record(subJson().metadata), subJson().pending_update],
+    ["month", ["month", "year", YEAR], null],
+  );
+  await reset();
+  updateMode = "declined";
+  await move();
+  is("L''''. declined and the month voided: the record never reaches the membership", [st.meta.every, st.pendingUpdate], [undefined, false]);
 
   // ===================== suspected bugs =====================================
   part("Move: found by the review (each failed before its fix)");

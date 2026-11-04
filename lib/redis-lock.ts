@@ -41,6 +41,8 @@ export type Held = { key: string; token: string; ttlSeconds: number };
 export class LockBusyError extends Error {
   constructor(message = "busy") {
     super(message);
+    // Named, so a caller that tells it by its name (lib/paypal-payouts.ts) or a log line knows it; prefer instanceof.
+    this.name = "LockBusyError";
   }
 }
 

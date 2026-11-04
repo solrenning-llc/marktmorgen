@@ -33,6 +33,7 @@
   --sand-deep: #e4e0d6;
   --line: #e2ded4;
   --line-strong: #cbc5b8;
+  --line-off: #857f70;   /* an off control's dashed edge: 3.38:1 on sand, 3.99:1 on white */
   --ink: #111827;        /* 16.3:1 on ivory */
   --ink-soft: #343d4a;   /* 10.08:1 on ivory */
   --ink-mute: #394150;   /*  9.42:1 on ivory; 7.34:1 on lilac-deep */
@@ -723,11 +724,49 @@ html {
   opacity: 0.75;
   transform: none;
 }
-.btn:disabled,
-.btn[aria-disabled="true"] {
+.btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
+}
+/*
+ * Off, but still holding focus (AX274, AAA review of the deals board,
+ * 4 Nov 2026).
+ *
+ * A control that cannot be used now keeps its place in the tab order
+ * (aria-disabled), so it can be holding the keyboard focus. Fading the whole
+ * element would fade its focus ring too (to about 2.6:1). So it is never
+ * faded: a dashed border on the sand surface says "off" without colour alone,
+ * its words stay above 9:1 (--ink-soft on --sand), and the ring outside it
+ * keeps its full colour. The dashed edge (--line-off) is light, at 3:1 or
+ * more, so an off button never looks louder than the ones that work. Hover
+ * does not light it up.
+ */
+.btn[aria-disabled="true"],
+.btn[aria-disabled="true"]:hover {
+  opacity: 1;
+  cursor: not-allowed;
+  transform: none;
+  background-color: var(--sand);
+  color: var(--ink-soft);
+  border: 1px dashed var(--line-off);
+  box-shadow: none;
+}
+/* On the dark surfaces, the same signs in their own tokens: transparent, words in --on-dark-2, a dashed --on-dark-3 edge. */
+:is(.on-dark, .surface-night, .surface-daybreak, .surface-navy, .surface-signature) .btn[aria-disabled="true"],
+:is(.on-dark, .surface-night, .surface-daybreak, .surface-navy, .surface-signature) .btn[aria-disabled="true"]:hover {
+  background-color: transparent;
+  color: var(--on-dark-2);
+  border-color: var(--on-dark-3);
+}
+@media (forced-colors: active) {
+  /* The system's colour for an unavailable control, and the dashed border still says "off". */
+  .btn[aria-disabled="true"],
+  .btn[aria-disabled="true"]:hover {
+    color: GrayText;
+    border-style: dashed;
+    border-color: GrayText;
+  }
 }
 /*
  * 40px was below both platforms' guidance. 44 is Apple's number and the
@@ -1364,6 +1403,24 @@ a.chip {
   outline: none;
   border-color: var(--violet);
   box-shadow: 0 0 0 4px rgba(73, 70, 166, 0.16);
+}
+/*
+ * A field that cannot be changed now (a change is being saved): the same
+ * dashed border and sand surface as an off button, never faded, so its words
+ * and its focus ring keep their contrast (AAA review of the deals board).
+ */
+.field[aria-disabled="true"] {
+  background-color: var(--sand);
+  border-style: dashed;
+  border-color: var(--line-off);
+  cursor: not-allowed;
+}
+@media (forced-colors: active) {
+  .field[aria-disabled="true"] {
+    color: GrayText;
+    border-style: dashed;
+    border-color: GrayText;
+  }
 }
 .field[aria-invalid="true"] {
   border-color: var(--danger);

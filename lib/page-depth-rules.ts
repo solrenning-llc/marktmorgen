@@ -1,5 +1,8 @@
 /** How far a page is read, the figures (lib/page-depth.ts). Pure. */
 
+/** The time ranges' own record beside the blocks' (639 [GL7](25)): six fields at most, with their key. */
+const TIME_RECORD_BYTES_BESIDE = 6 * 96 + 128;
+
 /**
  * The most fields one page's record may have (since 18 October 2026): a
  * field is a block, with the answer and the video step a visitor sent, and
@@ -14,14 +17,15 @@ export const DEPTH_FIELDS_MAX = 120;
  * product is made, and for as long as the store is once it is deleted,
  * because a page already drawn can still send its reading (lib/store.ts).
  */
-export const DEPTH_RECORD_BYTES = (DEPTH_FIELDS_MAX + 1) * 96 + 128;
+export const DEPTH_RECORD_BYTES = (DEPTH_FIELDS_MAX + 1) * 96 + 128 + TIME_RECORD_BYTES_BESIDE;
 
 /**
  * How long a measured visitor stayed on a sales page (639 [GL7](25)): the
  * seconds the page was open in front of them before they left or switched
- * away, counted in one of these ranges, never as a number of its own, so the
- * record holds at most TIME_RANGES.length more fields. No cookie and nothing
- * about the visitor: only which range.
+ * away, counted in one of these ranges, never as a number of its own, in a
+ * record of its own beside the blocks' (so it can never push a block into the
+ * overflow field, nor be counted as a visitor), at most TIME_RANGES.length
+ * fields. No cookie and nothing about the visitor: only which range.
  */
 export const TIME_RANGES = [
   { field: "@t0", upTo: 10, words: "Under 10 seconds" },

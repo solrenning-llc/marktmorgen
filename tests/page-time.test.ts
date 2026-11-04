@@ -35,9 +35,19 @@ async function main(): Promise<void> {
   await countDepth(STATS, "prod01", "not a block", "", "", 20);
   is("a reading with no real block counts no stay either", (await readDepth(STATS, "prod01")).time, { "@t2": 1, "@t0": 1 });
 
+  part("A full blocks' record");
+  redis.clear();
+  // 120 fields already, the most a page's record keeps (DEPTH_FIELDS_MAX).
+  const full = "b".repeat(32);
+  for (let i = 0; i < 120; i += 1) await countDepth(full, "prod02", `blk${String(i).padStart(3, "0")}`);
+  await countDepth(full, "prod02", "blk000", "", "", 42);
+  const fullRead = await readDepth(full, "prod02");
+  is("a stay never pushes anything into the overflow: no visitor counted twice", [fullRead.visitors, fullRead.stopped["~"]], [121, undefined]);
+  is("and the stay is still counted, in its own record", fullRead.time, { "@t2": 1 });
+
   part("Sent, received, shown");
   const page = readFileSync("components/page-depth.tsx", "utf8");
-  is("the page sends the seconds it was open in front of them", page.includes("const shownAt = performance.now();") && page.includes("s: Math.round((performance.now() - shownAt) / 1000)"), true);
+  is("the page sends only the seconds it was visible, added up", page.includes('let visibleSince: number | null = document.visibilityState === "visible" ? performance.now() : null;') && page.includes("seenMs += performance.now() - visibleSince;") && page.includes("s: seenSeconds()"), true);
   is("the route passes them on, in the same count", readFileSync("app/api/store/read/route.ts", "utf8").includes('text("v", 20), body.s)'), true);
   is("the studio route says them, test or not", readFileSync("app/api/store/depth/route.ts", "utf8").includes("time: timeShares(depth.time)"), true);
   const few = renderToStaticMarkup(createElement(PageTime, { ranges: timeShares({ "@t0": 3 }), least: 20 }));

@@ -17,12 +17,14 @@
  *   nl:depth:<statsId>:<productId>   hash: <blockId> (stopped there); _n (visitors) until 11 October 2026
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { cappedCount } from "@/lib/capped-count";
+import { cappedCount, cappedCountCommand } from "@/lib/capped-count";
 import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES, TIME_RANGES, timeField } from "@/lib/page-depth-rules";
 import { BLOCK_ID_PATTERN } from "@/lib/sales-page";
 import { type WhyNot, isWhyNot } from "@/lib/why-not-rules";
 
 const key = (statsId: string, productId: string) => `nl:depth:${statsId}:${productId}`;
+/** How long measured visitors stayed, by range (639 [GL7](25)), beside the blocks' record. */
+const timeKey = (statsId: string, productId: string) => `nl:depth:${statsId}:${productId}:t`;
 const KEEP_SECONDS = 400 * 86_400;
 
 export { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES };
@@ -60,10 +62,21 @@ export async function countDepth(statsId: string | null, productId: string, bloc
   const field = depthField(blockId, whyNot, video);
   if (!statsId || !isRedisConfigured() || !field) return;
   const k = key(statsId, productId);
-  // How long they stayed, in its range (639 [GL7](25)), counted in the same command.
+  // How long they stayed, in its range (639 [GL7](25)): counted in the same command, in a record of its own,
+  // so a full blocks' record can never push it, or a block, into the overflow field.
   const time = timeField(seconds);
   try {
-    const [count] = await cappedCount(k, DEPTH_FIELDS_MAX, time ? [{ field, by: 1 }, { field: time, by: 1 }] : [{ field, by: 1 }]);
+    if (time) {
+      const tk = timeKey(statsId, productId);
+      const [reply] = await redisPipeline([cappedCountCommand([{ key: k, most: DEPTH_FIELDS_MAX }, { key: tk, most: TIME_RANGES.length }], [{ hash: 0, field, by: 1 }, { hash: 1, field: time, by: 1 }])]);
+      const [count, timeCount] = Array.isArray(reply) ? reply.map((v) => Number(v) || 0) : [0, 0];
+      const expiries: (string | number)[][] = [];
+      if (count === 1) expiries.push(["EXPIRE", k, KEEP_SECONDS]);
+      if (timeCount === 1) expiries.push(["EXPIRE", tk, KEEP_SECONDS]);
+      if (expiries.length) await redisPipeline(expiries);
+      return;
+    }
+    const [count] = await cappedCount(k, DEPTH_FIELDS_MAX, [{ field, by: 1 }]);
     if (count === 1) await redisPipeline([["EXPIRE", k, KEEP_SECONDS]]);
   } catch {
     // A measure that fails is a visitor not counted, nothing more.
@@ -87,7 +100,7 @@ export async function readDepth(
   productId: string,
 ): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach>; time: Record<string, number> }> {
   if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {}, time: {} };
-  const [raw] = await redisPipeline([["HGETALL", key(statsId, productId)]]);
+  const [raw, rawTime] = await redisPipeline([["HGETALL", key(statsId, productId)], ["HGETALL", timeKey(statsId, productId)]]);
   const pairs: Record<string, string> = {};
   if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs[String(raw[i])] = String(raw[i + 1]);
   else if (raw && typeof raw === "object") Object.assign(pairs, raw);
@@ -96,14 +109,15 @@ export async function readDepth(
   const videos: Record<string, VideoReach> = {};
   const time: Record<string, number> = {};
   const timeFields = new Set<string>(TIME_RANGES.map((range) => range.field));
+  const timePairs: Record<string, string> = {};
+  if (Array.isArray(rawTime)) for (let i = 0; i + 1 < rawTime.length; i += 2) timePairs[String(rawTime[i])] = String(rawTime[i + 1]);
+  else if (rawTime && typeof rawTime === "object") Object.assign(timePairs, rawTime);
+  for (const [field, value] of Object.entries(timePairs)) if (timeFields.has(field) && Number(value) > 0) time[field] = Number(value);
   let visitors = 0;
   for (const [field, value] of Object.entries(pairs)) {
     if (field === "_n" || !(Number(value) > 0)) continue;
-    // How long they stayed is counted beside the block, never as a visitor of its own.
-    if (timeFields.has(field)) {
-      time[field] = Number(value);
-      continue;
-    }
+    // A time field left in the blocks' record by an earlier build is never a visitor of its own.
+    if (timeFields.has(field)) continue;
     const n = Number(value);
     const [head, video] = field.split("!");
     const [block, answer] = head.split("?");

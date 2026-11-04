@@ -55,8 +55,11 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
     if (blocks.length === 0 || typeof IntersectionObserver === "undefined") return;
     let furthest = -1;
     let sent = false;
-    // When the page was drawn, for how long it stayed open in front of them (639 [GL7](25)): a range is counted, never who.
-    const shownAt = performance.now();
+    // How long the page was open in front of them (639 [GL7](25)): only the time it was visible, added up,
+    // so a tab opened in the background is not counted while it waited. A range is counted, never who.
+    let seenMs = 0;
+    let visibleSince: number | null = document.visibilityState === "visible" ? performance.now() : null;
+    const seenSeconds = () => Math.round((seenMs + (visibleSince === null ? 0 : performance.now() - visibleSince)) / 1000);
     let started = false;
     let sawBuy = false;
     // The video played: its block, and how far into it, the furthest reached.
@@ -169,11 +172,19 @@ export function PageDepth({ token, product, ask = null }: { token: string; produ
         b: blocks[furthest].dataset.block ?? "",
         ...(answer.current ? { w: answer.current } : {}),
         ...(videoBlock && videoAt ? { v: `${videoBlock}.${videoAt}` } : {}),
-        s: Math.round((performance.now() - shownAt) / 1000),
+        s: seenSeconds(),
       });
     };
     const hidden = () => {
-      if (document.visibilityState === "hidden") send();
+      if (document.visibilityState === "visible") {
+        if (visibleSince === null) visibleSince = performance.now();
+        return;
+      }
+      if (visibleSince !== null) {
+        seenMs += performance.now() - visibleSince;
+        visibleSince = null;
+      }
+      send();
     };
     document.addEventListener("visibilitychange", hidden);
     window.addEventListener("pagehide", send);

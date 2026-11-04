@@ -40,7 +40,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
       // Who deleted their details from the store is not named, though Stripe keeps the booking (review of #2111).
       const calls = store.stripeAccountId ? await withoutErasedBookers(store, await paidCalls(store)) : [];
       const listings = await readKind(store, "call");
-      return bookedCalendar(store, calls, Date.now(), listings, await slotRooms(store, calls, listings));
+      const ics = bookedCalendar(store, calls, Date.now(), listings, await slotRooms(store, calls, listings));
+      // Who the file may name, checked again where its copy is kept: a deletion meanwhile is not undone by it.
+      return { ics, listId: store.listId, named: calls.map((c) => c.email).filter((e): e is string => Boolean(e)) };
     });
     // The store was deleted or closed: its copy, which names its buyers, is never answered again.
     if (answer.state === "gone") return missing();

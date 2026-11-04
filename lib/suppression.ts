@@ -27,7 +27,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
 type Command = (string | number)[];
 
-const suppressedKey = (listId: string) => `nl:erased:${listId}`;
+/** The store's hash of deleted people's prints, for a script that checks them where it writes (lib/store-readings.ts, lib/calendar-sync.ts). */
+export const suppressedKey = (listId: string) => `nl:erased:${listId}`;
 
 /** The fingerprint of one address for one store. */
 export function suppressionPrint(listId: string, email: string): string {

@@ -402,15 +402,37 @@ export class MemoryRedis {
           }
           return 1;
         }
-        // lib/calendar-sync.ts, KEEP_COPY: the feed's copy written only while the store's calendar settings exist.
-        if (key.startsWith("-- marktmorgen:calendar-copy:v1\n") && args[0] === "2" && args.length === 5) {
-          const [, settings, copy, value, seconds] = args;
+        // lib/calendar-sync.ts, KEEP_COPY: the feed's copy written only while the store's calendar settings exist, and
+        // only when nobody it names was deleted from the store (their prints in KEYS[3]); one was: the copy goes, 2.
+        if (key.startsWith("-- marktmorgen:calendar-copy:v2\n") && args[0] === "3" && args.length >= 6) {
+          const [, settings, copy, erased, value, seconds, ...prints] = args;
           this.live(settings);
           this.scriptCalls += 1;
           if (!this.data.has(settings)) return 0;
+          if (prints.length) {
+            this.scriptCalls += 1;
+            const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+            if (found.some((one) => one !== null)) {
+              this.scriptCalls += 1;
+              this.run(["DEL", copy]);
+              return 2;
+            }
+          }
           this.scriptCalls += 1;
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
+        }
+        // lib/store-readings.ts, READING_COPY: a reading kept only when nobody it names was deleted from the store;
+        // the places of those who were answered, and the copy gone.
+        if (key.startsWith("-- marktmorgen:reading-copy:v1\n") && args[0] === "2" && args.length >= 6) {
+          const [, copy, erased, value, seconds, ...prints] = args;
+          this.scriptCalls += 1;
+          const found = this.run(["HMGET", erased, ...prints]) as unknown[];
+          const gone = found.flatMap((one, i) => (one !== null ? [i + 1] : []));
+          this.scriptCalls += 1;
+          if (gone.length) this.run(["DEL", copy]);
+          else this.run(["SET", copy, value, "EX", seconds]);
+          return gone;
         }
         if (key.startsWith("-- marktmorgen:form-save:v1\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];

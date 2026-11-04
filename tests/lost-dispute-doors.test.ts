@@ -265,7 +265,7 @@ async function main(): Promise<void> {
   // A feed is answered only while the store's calendar settings exist (lib/calendar-sync.ts, KEEP_COPY; inbox C4-48):
   // the store subscribed, as a creator does from the studio.
   await ensureFeedToken(store);
-  const fed = await bookedCalendarFeed({ statsId: store.statsId!, handle: "kilnworks", callsId: plainId }, async () => "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n");
+  const fed = await bookedCalendarFeed({ statsId: store.statsId!, handle: "kilnworks", callsId: plainId }, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", listId: null, named: [] }));
   const [listedAt] = await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]);
   is("its feed made, the store's refunds are read for two days", [fed.state, Number(listedAt) > Date.now() + 86_400_000], ["made", true]);
   await syncMeetings(plainFor, Date.now() + 10_000, "https://marktmorgen.com");
@@ -273,7 +273,7 @@ async function main(): Promise<void> {
   const [changed, credits] = await redis.pipeline([["GET", bookingsChangedKey(plainId)], ["GET", bookingCreditsKey(plainId, today)]]);
   is("a call refunded in full tells the store's calendar feed its bookings changed, one making", [Number(changed) > 0, Number(credits)], [true, 1]);
   await redis.pipeline([["ZADD", MEET_STORES, Date.now() + 30 * 86_400_000, `${plainId}|kilnworks`]]);
-  await bookedCalendarFeed({ statsId: store.statsId!, handle: "kilnworks", callsId: plainId }, async () => "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", Date.now() + 1);
+  await bookedCalendarFeed({ statsId: store.statsId!, handle: "kilnworks", callsId: plainId }, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", listId: null, named: [] }), Date.now() + 1);
   const [kept] = await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]);
   is("a meeting further ahead keeps its later score: the feed never lowers it", Number(kept) > Date.now() + 29 * 86_400_000, true);
   closings = [];

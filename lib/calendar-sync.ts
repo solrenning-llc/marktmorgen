@@ -42,7 +42,7 @@ import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { suppressedAmong } from "@/lib/suppression";
+import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
 import { type Interval, looksLikeCalendar, parseIcs } from "@/lib/ics-parse";
@@ -659,13 +659,34 @@ async function giveCounted(key: string, seconds: number): Promise<void> {
 }
 
 /**
- * The copy written only while the store's calendar settings exist, in one step:
- * EXISTS, then SET with its expiry (lib/redis-memory.ts runs it the same way).
+ * The copy written only while the store's calendar settings exist (KEYS[1];
+ * else 0) and nobody it names was deleted from the store (their prints,
+ * ARGV[3..], in KEYS[3], nl:erased; one found: the copy goes, 2), in one step
+ * with the write: SET with its expiry (KEYS[2]; 1). A person's erasure writes
+ * their print and then deletes the copy, so a file made before it and kept
+ * after it would name them again (review of #2111). lib/redis-memory.ts runs
+ * it the same way. Billed 1 + EXISTS + HMGET + SET or DEL (lib/read-ceilings.ts).
  */
-export const KEEP_COPY = `-- marktmorgen:calendar-copy:v1
+export const KEEP_COPY = `-- marktmorgen:calendar-copy:v2
 if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end
+if #ARGV > 2 then
+  local found = redis.call("HMGET", KEYS[3], unpack(ARGV, 3))
+  for i = 1, #found do
+    if found[i] then
+      redis.call("DEL", KEYS[2])
+      return 2
+    end
+  end
+end
 redis.call("SET", KEYS[2], ARGV[1], "EX", ARGV[2])
 return 1`;
+
+/**
+ * A feed's file as `make` gives it: the file, the store's list (where its
+ * deleted people's prints are) and the address of everyone the file may name,
+ * checked again where the copy is written (KEEP_COPY).
+ */
+export type MadeFeed = { ics: string; listId: string | null; named: string[] };
 
 /** Thrown by a feed's `make` when the store behind its token is not the one that kept it. */
 export class FeedGone extends Error {}
@@ -765,7 +786,7 @@ export async function forgetStoreCalendar(statsId: string | null | undefined): P
   await redisPipeline([["DEL", cfgKey(statsId), outKey(statsId), ...calendarKeys(parsed)]]);
 }
 
-export async function bookedCalendarFeed(owner: { statsId: string; handle: string; callsId?: string | null; token?: string }, make: () => Promise<string>, now = Date.now()): Promise<FeedAnswer> {
+export async function bookedCalendarFeed(owner: { statsId: string; handle: string; callsId?: string | null; token?: string }, make: () => Promise<MadeFeed>, now = Date.now()): Promise<FeedAnswer> {
   if (!(await withinPace(owner.statsId, now, owner.token))) return { state: "paced" };
   const day = new Date(now).toISOString().slice(0, 10);
   let raw: unknown[];
@@ -825,9 +846,9 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     : null;
   // Refused by a making that ran at the same moment: the try stays counted, so its commands are priced.
   if (!taken) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
-  let ics: string;
+  let made: MadeFeed;
   try {
-    ics = await make();
+    made = await make();
   } catch (error) {
     // The handle leads to another store now: the old copy goes, a tombstone answers 404 from now on.
     if (error instanceof FeedGone) {
@@ -841,6 +862,7 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     if (copy) return { state: "copy", ics: copy.ics };
     throw error;
   }
+  const { ics } = made;
   const file = JSON.stringify({ at: now, ics, ref, sid: owner.statsId });
   if (Buffer.byteLength(file, "utf8") > CALENDAR_FILE_MAX_BYTES) {
     console.error("a booking calendar file is larger than its ceiling, so it is neither kept nor sent", owner.statsId);
@@ -849,9 +871,15 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // Kept only while the store's settings are still there: a deletion that ran while this was being made
   // (forgetStoreCalendar) is not undone by a copy written after it, with its buyers' names; and what was made is
   // not answered either (inbox C4-48, medium 1). When the step cannot be run, the old copy is answered if there is
-  // one, otherwise nothing: the app asks again.
-  const [written] = await redisPipeline([["EVAL", KEEP_COPY, 2, cfgKey(owner.statsId), outKey(owner.statsId), file, CALENDAR_COPY_SECONDS]]).catch(() => [null]);
+  // one, otherwise nothing: the app asks again. Nor is a file kept or answered that names someone deleted from the
+  // store since `make` looked (review of #2111): their prints are checked in the same step (2), the old copy goes
+  // with it, and nothing is answered; the next making leaves them out. The making stays counted.
+  const listId = made.listId;
+  const prints = listId ? [...new Set(made.named)].map((email) => suppressionPrint(listId, email)) : [];
+  const erased = listId ? suppressedKey(listId) : "nl:none";
+  const [written] = await redisPipeline([["EVAL", KEEP_COPY, 3, cfgKey(owner.statsId), outKey(owner.statsId), erased, file, CALENDAR_COPY_SECONDS, ...prints]]).catch(() => [null]);
   if (Number(written) === 0) return { state: "gone" };
+  if (Number(written) === 2) return { state: "none" };
   if (Number(written) !== 1) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
   // A store whose feed is read has its refunds read by the five-minute job, meeting rooms or not, so a call refunded
   // or cancelled marks its bookings changed and the feed is made again at the app's next check (inbox C4-33, M3):

@@ -31,7 +31,7 @@ import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { keyFor } from "@/lib/stripe-account";
-import { suppressedAmong } from "@/lib/suppression";
+import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import type { Store } from "@/lib/store";
 import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { type Numbers, membershipNumbers } from "@/lib/membership-numbers";
@@ -164,6 +164,41 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
 export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean };
 
 /**
+ * The copy kept only when nobody it names was deleted from the store, in one
+ * step with the write (review of #2111): a person's erasure writes their print
+ * (lib/suppression.ts) and then deletes the copy, so a reading begun before it
+ * and kept after it would name them again. KEYS[1] the copy, KEYS[2] the
+ * store's prints (nl:erased); ARGV[1] the copy, ARGV[2] its seconds, ARGV[3..]
+ * the prints of who it names. One HMGET; any found: the copy goes (an older
+ * one may name them too) and their places (1 for ARGV[3]) are answered;
+ * otherwise SET, and an empty list. Billed 1 + 2 (lib/read-ceilings.ts,
+ * SALES_READ_SHAPE); lib/redis-memory.ts runs it the same way.
+ */
+export const READING_COPY = `-- marktmorgen:reading-copy:v1
+local found = redis.call("HMGET", KEYS[2], unpack(ARGV, 3))
+local gone = {}
+for i = 1, #found do
+  if found[i] then gone[#gone + 1] = i end
+end
+if #gone > 0 then
+  redis.call("DEL", KEYS[1])
+  return gone
+end
+redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+return gone`;
+
+/**
+ * Who a reading names by their address, for keeping it (READING_COPY): the
+ * store's list (where its deleted people's prints are), the addresses in a
+ * value, and the value without some of them.
+ */
+export type ReadingGuard<T> = {
+  listId: string | null | undefined;
+  names: (value: T) => string[];
+  without: (value: T, gone: Set<string>) => T;
+};
+
+/**
  * A reading of `kind`, kept: the one kept when it is fresh (unless `fresh`
  * asks to read again); otherwise, when the day's budget allows, `read` again
  * and kept; otherwise the last one kept, `stale`. With none kept: null when
@@ -171,9 +206,10 @@ export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean }
  * A reading that fails after calling a supplier is counted (what it spent
  * was spent; inbox C4-53): the last one kept is shown, stale and `failed`, or
  * ReadingFailed is thrown when there is none. One that stopped before calling
- * anyone (NotRead) gives its unit back.
+ * anyone (NotRead) gives its unit back. With a `guard` naming people, it is
+ * kept by READING_COPY, never over someone deleted since `read` looked.
  */
-export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false): Promise<Kept<T> | null> {
+export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
   let kept: Kept<T> | null = null;
@@ -204,10 +240,25 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     throw new ReadingFailed();
   }
   const text = JSON.stringify({ at: now, value });
-  if (value !== null && value !== undefined && Buffer.byteLength(text, "utf8") <= READING_COPY_MAX_BYTES) {
+  if (value === null || value === undefined || Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) return { value, at: now, stale: false };
+  const names = guard?.listId ? [...new Set(guard.names(value))] : [];
+  if (!guard?.listId || !names.length) {
     await redisPipeline([["SET", key, text, "EX", READING_KEEP_SECONDS]]).catch(() => {});
+    return { value, at: now, stale: false };
   }
-  return { value, at: now, stale: false };
+  // Kept only when nobody it names was deleted meanwhile, checked where it is written (READING_COPY). Someone was:
+  // shown without them and not kept; the next reading is made again without them. The step could not be run:
+  // nothing kept, since its check could not be made, and shown as read (its read left the deleted out already).
+  const listId = guard.listId;
+  try {
+    const [reply] = await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]);
+    if (!Array.isArray(reply)) return { value, at: now, stale: false };
+    if (!reply.length) return { value, at: now, stale: false };
+    const gone = new Set(reply.map((i) => names[Number(i) - 1]).filter((e): e is string => typeof e === "string"));
+    return { value: guard.without(value, gone), at: now, stale: false };
+  } catch {
+    return { value, at: now, stale: false };
+  }
 }
 
 /** The store's visits, kept (lib/stats.ts, readStats). */
@@ -225,7 +276,12 @@ export async function keptSales(store: Store, now = Date.now(), fresh = false): 
     // Selling not configured on our side: nothing is called, so the reading's unit is given back (inbox C4-53).
     if (store.stripeAccountId && !keyFor(store.stripeAccountId)) throw new NotRead("selling is not configured");
     return withoutErasedBuyers(store, await readSales(store, now));
-  }, now, fresh);
+  }, now, fresh, {
+    // Checked again where the copy is written: an erasure between that look and the write is not undone by it (review of #2111).
+    listId: store.listId,
+    names: (sales) => sales?.buyers?.top.map((b) => b.email) ?? [],
+    without: (sales, gone) => (sales?.buyers ? { ...sales, buyers: { ...sales.buyers, top: sales.buyers.top.filter((b) => !gone.has(b.email)) } } : sales),
+  });
   if (!kept) throw new ReadingsUsed();
   return kept;
 }

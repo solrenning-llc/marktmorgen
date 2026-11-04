@@ -32,8 +32,9 @@ import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
   CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
-  CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
+  CALENDAR_REFUSED_SHAPE, ERASED_LOOKUP_BYTES, KEPT_READINGS_SHAPE, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
+import { TOP_BUYERS } from "@/lib/stats";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading } from "@/lib/store-readings";
 import { GB, STORAGE_PER_GB, providerFeeUsd, worstCost } from "./plan-cost-model";
@@ -118,7 +119,7 @@ async function main(): Promise<void> {
     const slide = { ...owner, statsId: "slidestore" };
     redis.run(["SET", `nl:store:handle:${slide.handle}`, OWNER]);
     const t = Date.UTC(2031, 0, 5, 10, 50);
-    const quick = async () => "BEGIN:VCALENDAR\r\nEND:VCALENDAR";
+    const quick = async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] });
     const states: string[] = [];
     for (let i = 0; i < CALENDAR_POLLS_PER_HOUR + 1; i += 1) states.push((await bookedCalendarFeed(slide, quick, t + i * 60_000)).state);
     is(`within sixty minutes, the ${CALENDAR_POLLS_PER_HOUR + 1}th is refused`, states[CALENDAR_POLLS_PER_HOUR], "paced");
@@ -133,7 +134,7 @@ async function main(): Promise<void> {
   const make = async () => {
     makings += 1;
     if (stripeDown) throw new Error("Stripe did not answer");
-    return `BEGIN:VCALENDAR\r\nX-MADE:${makings}\r\nEND:VCALENDAR`;
+    return { ics: `BEGIN:VCALENDAR\r\nX-MADE:${makings}\r\nEND:VCALENDAR`, listId: null, named: [] };
   };
   // The day's own makings, spent on two refreshes with nothing booked.
   redis.run(["DEL", `nl:cal:out:${owner.statsId}`]);
@@ -206,7 +207,7 @@ async function main(): Promise<void> {
   redis.run(["DEL", `nl:cal:out:${owner.statsId}`]);
   await bookedCalendarFeed(owner, make, later + 7_200_000);
   is("a count found without an expiry gets one back", Number(redis.run(["TTL", buildsKey])) > 0, true);
-  const huge = async () => `BEGIN:VCALENDAR\r\n${"X".repeat(CALENDAR_FILE_MAX_BYTES)}\r\nEND:VCALENDAR`;
+  const huge = async () => ({ ics: `BEGIN:VCALENDAR\r\n${"X".repeat(CALENDAR_FILE_MAX_BYTES)}\r\nEND:VCALENDAR`, listId: null, named: [] });
   redis.run(["DEL", `nl:cal:out:${owner.statsId}`]);
   const oversized = await bookedCalendarFeed(owner, huge, later + 30 * 3_600_000);
   is("a file past its ceiling is neither kept nor sent", [oversized.state, redis.run(["GET", `nl:cal:out:${owner.statsId}`])], ["none", null]);
@@ -223,7 +224,7 @@ async function main(): Promise<void> {
     // Later than any answer above, and from an hour with nothing in it yet.
     const at = Date.UTC(2033, 0, 9, 10, 0);
     redis.run(["DEL", `nl:cal:pace:${owner.statsId}`, `nl:cal:refused:${owner.statsId}`]);
-    const quick = async () => "BEGIN:VCALENDAR\r\nEND:VCALENDAR";
+    const quick = async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] });
     url = (await calendarView(await load())).subscribeUrl ?? "";
     token = url.slice(url.lastIndexOf("/") + 1).replace(/\.ics$/, "");
     const asked = { ...owner, token };
@@ -260,6 +261,7 @@ async function main(): Promise<void> {
   const ics = bookedCalendar({ name: "Feeder", handle: "feeder", catalog: { items: [], head: [], inline: [] } } as unknown as Store, many as never, now, []);
   is("the file holds at most CALENDAR_MAX_EVENTS events, the soonest", [ics.split("BEGIN:VEVENT").length - 1, ics.includes("b0@example.com"), ics.includes(`b${CALENDAR_MAX_EVENTS}@example.com`)], [CALENDAR_MAX_EVENTS, true, false]);
   is("the build's Stripe pages are lib/calls.ts's own", read("lib/calls.ts").includes(`const MAX_PAGES = ${CALENDAR_STRIPE_PAGES};`), true);
+  is("the biggest buyers' prints looked up are lib/stats.ts's TOP_BUYERS", ERASED_LOOKUP_BYTES >= TOP_BUYERS * (64 + 64), true);
 
   part("A real making, measured, within its count (M1, light d)");
   {
@@ -383,7 +385,7 @@ async function main(): Promise<void> {
     const asRoute = async () => {
       const behind = await storeForHandle(feedOwner.handle);
       if (!behind || behind.statsId !== feedOwner.statsId) throw new FeedGone();
-      return "BEGIN:VCALENDAR\r\nX-WHO:first\r\nEND:VCALENDAR";
+      return { ics: "BEGIN:VCALENDAR\r\nX-WHO:first\r\nEND:VCALENDAR", listId: null, named: [] };
     };
     const t0 = Date.UTC(2032, 2, 1, 0, 30);
     is("the first store's copy is made", (await bookedCalendarFeed(feedOwner, asRoute, t0)).state, "made");
@@ -417,7 +419,7 @@ async function main(): Promise<void> {
     const thirdMake = async () => {
       const behind = await storeForHandle(thirdOwner.handle);
       if (!behind || behind.statsId !== thirdOwner.statsId) throw new FeedGone();
-      return "BEGIN:VCALENDAR\r\nEND:VCALENDAR";
+      return { ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] };
     };
     const renamed = await renameHandle("third@example.com", "renamedto");
     is("renamed", renamed.ok, true);
@@ -442,7 +444,7 @@ async function main(): Promise<void> {
     const racing = await bookedCalendarFeed(thirdOwner, async () => {
       // The store is deleted from the studio while its file is being made.
       await forgetStoreCalendar(thirdOwner.statsId);
-      return "BEGIN:VCALENDAR\r\nX-WHO:raced\r\nEND:VCALENDAR";
+      return { ics: "BEGIN:VCALENDAR\r\nX-WHO:raced\r\nEND:VCALENDAR", listId: null, named: [] };
     }, third0 + 2 * 86_400_000);
     // Inbox C4-48, medium 1: the deletion won the race, so what was made is not answered either, and no copy is written.
     is("the file made is neither answered nor kept: the feed is gone", [racing.state, "ics" in racing, redis.run(["GET", copyKey])], ["gone", false, null]);
@@ -459,7 +461,7 @@ async function main(): Promise<void> {
     const extraUrl = (await newFeedToken(extraStore)).subscribeUrl ?? "";
     const extraToken = extraUrl.slice(extraUrl.lastIndexOf("/") + 1).replace(/\.ics$/, "");
     const extraOwner = (await storeIdForToken(extraToken))!;
-    await bookedCalendarFeed(extraOwner, async () => "BEGIN:VCALENDAR\r\nEND:VCALENDAR", Date.UTC(2032, 5, 1, 0, 30));
+    await bookedCalendarFeed(extraOwner, async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] }), Date.UTC(2032, 5, 1, 0, 30));
     const before = ["cfg", "out"].map((k) => redis.run(["GET", `nl:cal:${k}:${extraOwner.statsId}`]) !== null);
     const cookie = `${SESSION_COOKIE}=${await openSession(OWNS)}`;
     const form = new FormData();

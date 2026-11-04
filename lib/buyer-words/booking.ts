@@ -242,6 +242,7 @@ const en = {
   /** Choosing one of a call's lengths, each with its price (lib/call-lengths.ts). */
   lengthPick: "How long would you like?",
   lengthChosen: (what: string) => `Showing times for ${what}.`,
+  backToCard: (title: string) => `Back to ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutes, ${price}`,
   withHost: (name: string) => `With ${name}`,
   /** The creator's cancellation deadline (lib/call-setup.ts, cancelHours), said before paying and in the confirmation. */
@@ -451,6 +452,7 @@ const es: BookingWords = {
   hostShow: "Ver sus horarios",
   lengthPick: "¿Cuánto tiempo quieres?",
   lengthChosen: (what: string) => `Horarios para ${what}.`,
+  backToCard: (title: string) => `Volver a ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
@@ -657,6 +659,7 @@ const fr: BookingWords = {
   hostShow: "Voir ses horaires",
   lengthPick: `Quelle durée souhaitez-vous${S}?`,
   lengthChosen: (what: string) => `Horaires pour ${what}.`,
+  backToCard: (title: string) => `Retour à ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutes à ${price}`,
   withHost: (name) => `Avec ${name}`,
   cancelPolicy: (hours, store) =>
@@ -859,6 +862,7 @@ const de: BookingWords = {
   hostShow: "Zeiten anzeigen",
   lengthPick: "Wie lange möchten Sie buchen?",
   lengthChosen: (what: string) => `Zeiten für ${what}.`,
+  backToCard: (title: string) => `Zurück zu ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} Minuten, ${price}`,
   withHost: (name) => `Bei ${name}`,
   cancelPolicy: (hours, store) =>
@@ -1063,6 +1067,7 @@ const it: BookingWords = {
   hostShow: "Mostra i suoi orari",
   lengthPick: "Quale durata preferisci?",
   lengthChosen: (what: string) => `Orari per ${what}.`,
+  backToCard: (title: string) => `Torna a ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minuti, ${price}`,
   withHost: (name) => `Con ${name}`,
   cancelPolicy: (hours, store) =>
@@ -1266,6 +1271,7 @@ const nl: BookingWords = {
   hostShow: "Toon de tijden",
   lengthPick: "Hoe lang wil je boeken?",
   lengthChosen: (what: string) => `Tijden voor ${what}.`,
+  backToCard: (title: string) => `Terug naar ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minuten, ${price}`,
   withHost: (name) => `Bij ${name}`,
   cancelPolicy: (hours, store) =>
@@ -1470,6 +1476,7 @@ const pt: BookingWords = {
   hostShow: "Ver os horários",
   lengthPick: "Que duração prefere?",
   lengthChosen: (what: string) => `Horários para ${what}.`,
+  backToCard: (title: string) => `Voltar a ${title}`,
   lengthOption: (minutes: number, price: string) => `${minutes} minutos, ${price}`,
   withHost: (name) => `Com ${name}`,
   cancelPolicy: (hours, store) =>

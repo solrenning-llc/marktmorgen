@@ -111,7 +111,7 @@ import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
 import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE, STORE_READING_SHAPES } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
-import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
+import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY } from "@/lib/store-readings";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -748,19 +748,22 @@ export const COST_LINES: CostLine[] = [
     id: "store-readings",
     feature: "A store's readings of its own numbers (visits, sales, memberships) and a product update's search for its buyers, from its counts and its Stripe account, kept for the pages that show them (C4-4; owner's decision of 4 November 2026, inbox C4-18)",
     monthlyUsd: (tier) =>
-      // The heavy readings (sales, a product update's search) at the dearest heavy shape, the rest at the dearest light one.
-      DAY_WINDOWS * (HEAVY_READINGS_PER_DAY * Math.max(readShapeCost(SALES_READ_SHAPE), readShapeCost(STORE_READING_SHAPES[3]))
-        + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * Math.max(readShapeCost(STATS_READ_SHAPE), readShapeCost(MEMBERS_READ_SHAPE)))
+      // The heavy readings (sales) at their shape, the rest at the dearest light one, and a product update's searches
+      // from their own count (inbox C4-33 (4)).
+      DAY_WINDOWS * (HEAVY_READINGS_PER_DAY * readShapeCost(SALES_READ_SHAPE)
+        + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * Math.max(readShapeCost(STATS_READ_SHAPE), readShapeCost(MEMBERS_READ_SHAPE))
+        + UPDATE_SEARCHES_PER_DAY * readShapeCost(STORE_READING_SHAPES[3]))
       + (STORE_ALLOWANCES[tier].studio / STUDIO_PAGE_UNITS) * readShapeCost(KEPT_READINGS_SHAPE)
       + READING_KINDS.length * READING_COPY_MAX_BYTES * DB_BYTE_MONTH * (READING_KEEP_SECONDS / (30 * 86_400)),
     sources: [
-      { file: "lib/store-readings.ts", names: ["STORE_READINGS_PER_DAY", "HEAVY_READINGS_PER_DAY", "READING_FRESH_SECONDS", "READING_KEEP_SECONDS", "READING_COPY_MAX_BYTES", "takeStoreReading", "keptReading", "READING_KINDS"] },
-      { file: "app/studio/page.tsx", names: ["keptStats(current)", "keptSales(current)"] },
+      { file: "lib/store-reading-rules.ts", names: ["STORE_READINGS_PER_DAY", "HEAVY_READINGS_PER_DAY", "UPDATE_SEARCHES_PER_DAY", "READING_FRESH_SECONDS"] },
+      { file: "lib/store-readings.ts", names: ["READING_KEEP_SECONDS", "READING_COPY_MAX_BYTES", "takeStoreReading", "takeUpdateSearch", "readingsLeft", "keptReading", "READING_KINDS"] },
+      { file: "app/studio/page.tsx", names: ["keptStats(current, undefined, freshNumbers)", "keptSales(current, undefined, freshNumbers)", "readingsLeft(current)"] },
       { file: "app/studio/totals/page.tsx", names: ["keptNumbers(store)", "keptMembers(store)"] },
-      { file: "lib/product-updates.ts", names: ["takeStoreReading(store, Date.now(), true)"] },
+      { file: "lib/product-updates.ts", names: ["takeUpdateSearch(store, Date.now())"] },
       { file: "lib/read-ceilings.ts", names: ["STATS_READ_SHAPE", "SALES_READ_SHAPE", "MEMBERS_READ_SHAPE", "STORE_READING_SHAPES", "KEPT_READINGS_SHAPE", "UPDATE_READ_SHAPE"] },
     ],
-    basis: "Every reading of every UTC day of the window at the dearest kind (a store's visits, its sales from Stripe, its memberships, or a product update's search of every paid sale: STORE_READING_SHAPES), STORE_READINGS_PER_DAY a day, each counted before it is read; what a studio page reads of the kept readings (up to three, READING_COPY_MAX_BYTES each) for every page the studio figure allows; and the readings kept a day. The page itself is the studio's STUDIO_PAGE_UNITS, as the Terms say.",
+    basis: "Every reading of every UTC day of the window, each counted before it is read: HEAVY_READINGS_PER_DAY of the store's sales from Stripe and PayPal, the rest of STORE_READINGS_PER_DAY at the dearer of its visits and its memberships, and UPDATE_SEARCHES_PER_DAY product update searches of every paid sale from their own count (STORE_READING_SHAPES); what a studio page reads of the kept readings (up to three, READING_COPY_MAX_BYTES each) and of the day's counts (two) for every page the studio figure allows; and the readings kept a day. The page itself is the studio's STUDIO_PAGE_UNITS, as the Terms say.",
   },
   {
     id: "calendar-feed",

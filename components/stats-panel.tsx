@@ -49,6 +49,7 @@ import type { AutoMark, MarkKind } from "@/lib/auto-marks";
 import { useStudioStore } from "@/components/studio-store-pin";
 import { WeeklyAiToggle } from "@/components/weekly-ai-toggle";
 import { AttributionTable } from "@/components/attribution-table";
+import { LocalClock, UtcAndLocal } from "@/components/local-clock";
 
 /**
  * The store's funnel for the range: people, then the ones who started a
@@ -373,6 +374,48 @@ function RightNow({ currency }: { currency: string }) {
 const MARK_COLORS: Record<MarkKind, string> = { email: "bg-sky-brand", product: "bg-mint-deep", sale: "bg-coral" };
 
 /** A store's visits, checkouts and sales, for the last week, month, quarter or all time. */
+/** When a store's numbers were read, as the studio's page says it (app/studio/page.tsx). */
+export type NumbersReading = {
+  /** When the oldest of the numbers shown was read, in milliseconds; null when none was. */
+  at: number | null;
+  /** The day still has a reading to read them again. */
+  canRefresh: boolean;
+  /** The studio's page with the numbers read again. */
+  refreshHref: string;
+  /** When the day's readings come back: the next 00:00 UTC. */
+  backAt: number;
+  /** None of the sales kept and none may be read today. */
+  salesUsed: boolean;
+};
+
+/**
+ * The time the numbers shown were read, on the creator's own clock, and either
+ * a way to read them again or when they will be (inbox C4-33 (2), (3)). A kept
+ * reading is shown as it is: never called incomplete, never "no numbers".
+ */
+export function ReadingLine({ reading }: { reading: NumbersReading }) {
+  return (
+    <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-soft" data-numbers-reading>
+      {reading.at !== null ? (
+        <span>
+          Updated at <LocalClock ms={reading.at} />.
+        </span>
+      ) : null}
+      {reading.salesUsed ? <span>Your sales could not be read again today.</span> : null}
+      {reading.canRefresh ? (
+        <a href={reading.refreshHref} className="link inline-flex min-h-11 items-center font-semibold">
+          Update now
+        </a>
+      ) : (
+        <span>
+          {"Today's readings are used. Your numbers update again at "}
+          <UtcAndLocal ms={reading.backAt} />.
+        </span>
+      )}
+    </p>
+  );
+}
+
 export function StatsPanel({
   data,
   canExport = true,
@@ -395,8 +438,11 @@ export function StatsPanel({
   canConnectMeta = false,
   pin = "",
   beside = null,
+  reading = null,
 }: {
   data: StatsData;
+  /** When the numbers shown were read, and whether they may be read again today (lib/store-readings.ts; inbox C4-33). */
+  reading?: NumbersReading | null;
   canExport?: boolean;
   notes?: StatsNote[];
   spends?: AdSpend[];
@@ -609,6 +655,8 @@ export function StatsPanel({
           </button>
         </div>
       </div>
+
+      {reading ? <ReadingLine reading={reading} /> : null}
 
       {pickDates ? <CustomRange today={data.days[data.days.length - 1]?.date ?? new Date().toISOString().slice(0, 10)} currency={data.currency ?? "usd"} /> : null}
 

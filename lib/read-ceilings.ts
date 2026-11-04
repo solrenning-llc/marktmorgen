@@ -195,26 +195,38 @@ export const TOTALS_STORE_SHAPE: ReadShape = {
  * One of a store's readings of the day (lib/store-readings.ts), the dearest
  * kind: its visits (readStats and readLife), its sales (readSales) or its
  * memberships, as TOTALS_STORE_SHAPE counts each, or a product update's
- * search for its buyers (UPDATE_READ_SHAPE); with the day's count (SET NX,
- * INCRBY, EXPIRE NX and, when refused, DECRBY: 4) and the reading kept (SET:
- * at most READING_COPY_MAX_BYTES). Priced, every reading of every day, in
- * the store-readings line (tests/plan-cost-registry.ts).
+ * search for its buyers (UPDATE_READ_SHAPE); with the copy kept looked at
+ * first (GET), the day's count (SET NX, INCRBY, EXPIRE NX: 3, and for a heavy
+ * one its own SET NX and INCRBY: 5) and the reading kept (SET: at most
+ * READING_COPY_MAX_BYTES); a product update's search has its own count (SET
+ * NX, INCRBY, EXPIRE NX: 3) and keeps nothing. A refused count's DECRBY is in
+ * KEPT_READINGS_SHAPE, where nothing is read. Priced, every reading of every
+ * day, in the store-readings line (tests/plan-cost-registry.ts).
  */
+/** The commands a reading takes beside what it reads (above): GET, the count, SET. */
+export const READING_COUNT_COMMANDS = { light: 1 + 3 + 1, heavy: 1 + 5 + 1, update: 3 } as const;
 export const STATS_READ_SHAPE: ReadShape = {
-  seconds: 1, cpu: 0.5, commands: (3 * STATS_DAYS + 6) + 4 + 4 + 1, outBytes: 0, stripePages: 0,
+  seconds: 1, cpu: 0.5, commands: (3 * STATS_DAYS + 6) + 4 + READING_COUNT_COMMANDS.light, outBytes: 0, stripePages: 0,
   dbBytes: STATS_DAYS * DAY_FIELDS_MAX * STATS_FIELD_BYTES + STATS_DAYS * 64 + STATS_DAYS * 2 * 32 + LIFE_WRITE_MAX * STATS_FIELD_BYTES + READING_COPY_MAX_BYTES,
 };
 export const SALES_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + 4 + 1, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
+  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
   dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES,
 };
 export const MEMBERS_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 0.5, commands: 2 + 4 + 1, outBytes: 0, stripePages: 2 * 20,
+  seconds: 2, cpu: 0.5, commands: 2 + READING_COUNT_COMMANDS.light, outBytes: 0, stripePages: 2 * 20,
   dbBytes: 2 * 65_536 + READING_COPY_MAX_BYTES,
 };
-export const STORE_READING_SHAPES: readonly ReadShape[] = [STATS_READ_SHAPE, SALES_READ_SHAPE, MEMBERS_READ_SHAPE, { ...UPDATE_READ_SHAPE, commands: UPDATE_READ_SHAPE.commands + 4 }];
-/** What a studio page that shows the numbers reads of the kept readings, besides its own: up to three (GET each). */
-export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands: 3, dbBytes: 3 * READING_COPY_MAX_BYTES, outBytes: 0, stripePages: 0 };
+export const STORE_READING_SHAPES: readonly ReadShape[] = [STATS_READ_SHAPE, SALES_READ_SHAPE, MEMBERS_READ_SHAPE, { ...UPDATE_READ_SHAPE, commands: UPDATE_READ_SHAPE.commands + READING_COUNT_COMMANDS.update }];
+/**
+ * What a page that shows the numbers takes when it reads nothing (the studio's
+ * home, a store's line in the totals): up to three kept readings (GET each);
+ * for each, when it is no longer fresh and the day's count refuses it, that
+ * count and its DECRBY (a light one 3 + 1, a heavy one 5 + 2: two light, one
+ * heavy); and the day's two counts, to offer "Update now" only while one is
+ * left (lib/store-readings.ts, readingsLeft).
+ */
+export const KEPT_READINGS_SHAPE: ReadShape = { seconds: 0, cpu: 0.05, commands: 3 + 2 * (3 + 1) + (5 + 2) + 2, dbBytes: 3 * READING_COPY_MAX_BYTES + 2 * 32, outBytes: 0, stripePages: 0 };
 
 /**
  * Not one of these four reads, said so it is not taken for zero: the first

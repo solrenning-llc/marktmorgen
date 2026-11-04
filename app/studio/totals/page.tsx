@@ -7,7 +7,8 @@ import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { can } from "@/lib/team-roles";
-import { keptMembers, keptNumbers } from "@/lib/store-readings";
+import { ReadingsUsed, keptMembers, keptNumbers, readingsBackAt } from "@/lib/store-readings";
+import { UtcAndLocal } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
 import { LEFT_WORDS, type Money, type StoreFigures, type StoreRead, TOTAL_WINDOWS, sumStores } from "@/lib/account-totals";
 import type { Store } from "@/lib/store";
@@ -43,6 +44,8 @@ async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean
     const [data, club] = await Promise.all([keptNumbers(store), keptMembers(store).catch(() => null)]);
     return { state: "ok", data, members: club ? { currency: club.currency, paying: club.paying, trialing: club.trialing, mrr: club.mrr } : null };
   } catch (error) {
+    // Said as what it is: read as often as the day allows, never as an error or as no numbers (inbox C4-33).
+    if (error instanceof ReadingsUsed) return { state: "used" };
     console.error("reading one store's numbers for the totals failed", error);
     return { state: "error" };
   }
@@ -157,7 +160,16 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
                       {f.read.state === "ok" && f.read.data ? (
                         <span className="tabular-nums text-ink-soft">{`${count(f.read.data.totals.d30.sales)} sales, ${formatMoney(f.read.data.totals.d30.cents, f.read.data.currency)} in the last 30 days`}</span>
                       ) : (
-                        <span className="text-ink-soft">{LEFT_WORDS[f.read.state === "ok" ? "no_numbers" : f.read.state]}</span>
+                        <span className="text-ink-soft">
+                          {f.read.state === "used" ? (
+                            <>
+                              {LEFT_WORDS.used.replace(/ 00:00 UTC$/, " ")}
+                              <UtcAndLocal ms={readingsBackAt()} />
+                            </>
+                          ) : (
+                            LEFT_WORDS[f.read.state === "ok" ? "no_numbers" : f.read.state]
+                          )}
+                        </span>
                       )}
                     </li>
                   ))}

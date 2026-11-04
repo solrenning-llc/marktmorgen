@@ -21,24 +21,24 @@
  *
  *   nl:reading:<kind>:<statsId>       { at, value }, a day
  *   nl:reading:day:<statsId>:<day>    the day's readings, two days
+ *   nl:reading:day:<statsId>:<day>:heavy   of them, the heavy ones
+ *   nl:reading:update:<statsId>:<day> a product update's searches, two days
+ *
+ * A reading kept is shown as it is, with the time it was read, never as an
+ * incomplete one (inbox C4-33): the page says when it was read, offers to
+ * read again while the day has a reading left, and once they are used says
+ * when they come back, at 00:00 UTC.
  */
+import { nextUtcMidnight } from "@/lib/local-clock";
+import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
 import { type SalesStats, type Stats, type StatsData, readSales, readStats, readsSales, studioStats } from "@/lib/stats";
 import { type Numbers, membershipNumbers } from "@/lib/membership-numbers";
 
-/** Readings a store may take in a UTC day, every page and kind together. */
-export const STORE_READINGS_PER_DAY = 8;
-/**
- * Of them, the heavy ones: its sales (every PayPal sale and refund record read,
- * lib/read-ceilings.ts SALES_READ_SHAPE) and a product update's search for its
- * buyers (UPDATE_READ_SHAPE). The rest of the day's readings are light, so the
- * day's worst stays inside the first-payment refund the owner funds
- * (tests/plan-margin.test.ts, US$ 65; inbox C4-18).
- */
-export const HEAVY_READINGS_PER_DAY = 3;
-/** How long a reading is shown as it is before it is read again. */
-export const READING_FRESH_SECONDS = 600;
+// The day's figures live in lib/store-reading-rules.ts, which the help reads without the database.
+export { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY };
+
 /** How long the last reading is kept to show when the day's readings are used. */
 export const READING_KEEP_SECONDS = 86_400;
 /** The largest reading kept, in bytes; one larger is read each time, from the budget. */
@@ -49,6 +49,64 @@ export const READING_KINDS: readonly ReadingKind[] = ["stats", "sales", "members
 
 const copyKey = (kind: ReadingKind, statsId: string) => `nl:reading:${kind}:${statsId}`;
 const dayKey = (statsId: string, day: string) => `nl:reading:day:${statsId}:${day}`;
+const updateKey = (statsId: string, day: string) => `nl:reading:update:${statsId}:${day}`;
+const utcDay = (now: number) => new Date(now).toISOString().slice(0, 10);
+
+/** When the day's readings come back: the next 00:00 UTC, in milliseconds. */
+export function readingsBackAt(now = Date.now()): number {
+  return nextUtcMidnight(now);
+}
+
+/** Taken when none kept may be shown and none may be read today: said as such, never as no numbers. */
+export class ReadingsUsed extends Error {
+  constructor() {
+    super("the store's readings are used for today");
+    this.name = "ReadingsUsed";
+  }
+}
+
+/**
+ * Whether the day still has a reading, and a heavy one, left: two GET, for a
+ * page that offers to read again. Unknown is none, so nothing is offered that
+ * would be refused.
+ */
+export async function readingsLeft(store: Pick<Store, "statsId">, now = Date.now()): Promise<{ any: boolean; heavy: boolean }> {
+  if (!store.statsId || !isRedisConfigured()) return { any: false, heavy: false };
+  const key = dayKey(store.statsId, utcDay(now));
+  try {
+    const [raw, rawHeavy] = await redisPipeline([["GET", key], ["GET", `${key}:heavy`]]);
+    const n = raw === null ? 0 : Number(raw);
+    const h = rawHeavy === null ? 0 : Number(rawHeavy);
+    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(h)) return { any: false, heavy: false };
+    return { any: n < STORE_READINGS_PER_DAY, heavy: n < STORE_READINGS_PER_DAY && h < HEAVY_READINGS_PER_DAY };
+  } catch {
+    return { any: false, heavy: false };
+  }
+}
+
+/**
+ * One of a product update's searches of the day, from its own count (SET NX,
+ * INCRBY, EXPIRE NX; DECRBY when past it). A count that cannot be made is a
+ * refusal.
+ */
+export async function takeUpdateSearch(store: Pick<Store, "statsId">, now = Date.now()): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured()) return false;
+  const key = updateKey(store.statsId, utcDay(now));
+  try {
+    const [, raw] = await redisPipeline([
+      ["SET", key, "0", "NX", "EX", 2 * 86_400],
+      ["INCRBY", key, 1],
+      ["EXPIRE", key, 2 * 86_400, "NX"],
+    ]);
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n < 1) return false;
+    if (n <= UPDATE_SEARCHES_PER_DAY) return true;
+    await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * One of the store's readings of the day, taken whole or not at all: SET NX
@@ -57,7 +115,7 @@ const dayKey = (statsId: string, day: string) => `nl:reading:day:${statsId}:${da
  */
 export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date.now(), heavy = false): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
-  const key = dayKey(store.statsId, new Date(now).toISOString().slice(0, 10));
+  const key = dayKey(store.statsId, utcDay(now));
   const heavyKey = `${key}:heavy`;
   try {
     const [, raw, , , rawHeavy] = await redisPipeline([
@@ -80,12 +138,14 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
 export type Kept<T> = { value: T; at: number; stale: boolean };
 
 /**
- * A reading of `kind`, kept: the one kept when it is fresh; otherwise, when
- * the day's budget allows, `read` again and kept; otherwise the last one kept,
- * `stale`; null when there is none and none may be read. A reading that
- * fails leaves the last one kept, stale, or throws when there is none.
+ * A reading of `kind`, kept: the one kept when it is fresh (unless `fresh`
+ * asks to read again); otherwise, when the day's budget allows, `read` again
+ * and kept; otherwise the last one kept, `stale`. With none kept: null when
+ * the store has no counts at all, ReadingsUsed when none may be read today.
+ * A reading that fails leaves the last one kept, stale, or throws when there
+ * is none.
  */
-export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now()): Promise<Kept<T> | null> {
+export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
   let kept: Kept<T> | null = null;
@@ -98,8 +158,11 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
   } catch {
     kept = null;
   }
-  if (kept && now - kept.at < READING_FRESH_SECONDS * 1000) return kept;
-  if (!(await takeStoreReading(store, now, kind === "sales"))) return kept ? { ...kept, stale: true } : null;
+  if (kept && !fresh && now - kept.at < READING_FRESH_SECONDS * 1000) return kept;
+  if (!(await takeStoreReading(store, now, kind === "sales"))) {
+    if (kept) return { ...kept, stale: true };
+    throw new ReadingsUsed();
+  }
   let value: T;
   try {
     value = await read();
@@ -115,17 +178,19 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
 }
 
 /** The store's visits, kept (lib/stats.ts, readStats). */
-export async function keptStats(store: Store, now = Date.now()): Promise<Kept<Stats | null> | null> {
-  return keptReading(store, "stats", () => readStats(store, now), now);
+export async function keptStats(store: Store, now = Date.now(), fresh = false): Promise<Kept<Stats | null> | null> {
+  return keptReading(store, "stats", () => readStats(store, now), now, fresh);
 }
 
-/** The store's sales, kept (lib/stats.ts, readSales); a reading kept from earlier than fresh is marked not read in full. */
-export async function keptSales(store: Store, now = Date.now()): Promise<SalesStats | null> {
-  const kept = await keptReading(store, "sales", () => readSales(store, now), now);
-  // None kept and none may be read today: said as a reading that failed, never as no sales.
-  if (!kept) throw new Error("the store's readings of its sales are used for today");
-  if (!kept.value) return null;
-  return kept.stale ? { ...kept.value, partial: true } : kept.value;
+/**
+ * The store's sales, kept (lib/stats.ts, readSales), as they were read: a
+ * reading kept from earlier is shown whole with its time (`at`), never marked
+ * incomplete for being kept (inbox C4-33 (2)).
+ */
+export async function keptSales(store: Store, now = Date.now(), fresh = false): Promise<Kept<SalesStats | null>> {
+  const kept = await keptReading(store, "sales", () => readSales(store, now), now, fresh);
+  if (!kept) throw new ReadingsUsed();
+  return kept;
 }
 
 /** The store's memberships, kept (lib/membership-numbers.ts). */
@@ -142,7 +207,7 @@ export async function keptNumbers(store: Store, now = Date.now()): Promise<Stats
   if (!stats) return null;
   if (!readsSales(store)) return studioStats(store, stats, null, "none", []);
   try {
-    const sales = await keptSales(store, now);
+    const sales = (await keptSales(store, now)).value;
     return studioStats(store, stats, sales, sales ? "ok" : "error", []);
   } catch (error) {
     console.error("reading sales for a summary failed", error);

@@ -31,10 +31,14 @@ import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import {
   CALENDAR_BUILD_PER_BOOKING, CALENDAR_BUILD_SHAPE, CALENDAR_POLL_SHAPE, CALENDAR_STRIPE_PAGES, LIFE_FILL_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE,
-  STORE_READING_SHAPES, calendarBuildCommands,
+  KEPT_READINGS_SHAPE, READING_COUNT_COMMANDS, STORE_READING_SHAPES, calendarBuildCommands,
 } from "@/lib/read-ceilings";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
-import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, keptNumbers, takeStoreReading } from "@/lib/store-readings";
+import { HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY, UPDATE_SEARCHES_PER_DAY, ReadingsUsed, keptNumbers, readingsLeft, takeStoreReading, takeUpdateSearch } from "@/lib/store-readings";
+import { GB, STORAGE_PER_GB, providerFeeUsd, worstCost } from "./plan-cost-model";
+import { PRICES_WITHOUT_COMMISSION } from "@/lib/plan";
+import { paidStorageBytes } from "@/lib/storage-rules";
+import { CLOSING_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { claimHandle, createStore, ensureStatsId, renameHandle, setStripeAccount, setSubscription, storeForEmail, storeForHandle, storeForId, type Store } from "@/lib/store";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -232,10 +236,22 @@ async function main(): Promise<void> {
   is("the feed is a cost line of its own, every making (its own and its credits) and answer of the month at its worst", feedMonth >= 32 * (CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY) * readShapeCost(CALENDAR_BUILD_SHAPE) + 31 * 24 * CALENDAR_POLLS_PER_HOUR * readShapeCost(CALENDAR_POLL_SHAPE), true);
   const readings = COST_LINES.find((l) => l.id === "store-readings");
   const readingsMonth = readings ? readings.monthlyUsd("creator") : 0;
-  const heavyWorst = Math.max(readShapeCost(SALES_READ_SHAPE), readShapeCost(STORE_READING_SHAPES[3]));
+  const heavyWorst = readShapeCost(SALES_READ_SHAPE);
+  const updateWorst = readShapeCost(STORE_READING_SHAPES[3]);
   const lightWorst = Math.max(readShapeCost(STATS_READ_SHAPE), readShapeCost(MEMBERS_READ_SHAPE));
-  is("every light shape is lighter than the heavy ones it is counted apart from", lightWorst <= heavyWorst && STORE_READING_SHAPES.length === 4, true);
-  is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy or light)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst), true);
+  is("every light shape is lighter than the heavy ones it is counted apart from", lightWorst <= heavyWorst && lightWorst <= updateWorst && STORE_READING_SHAPES.length === 4, true);
+  is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light, product update searches)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst + UPDATE_SEARCHES_PER_DAY * updateWorst), true);
+  {
+    // Inbox C4-33 (1): the day's heavy readings are the most the margin allows, with the room that exists: the first
+    // payment refunded in full (tests/plan-margin.test.ts, under US$ 65, a ceiling the owner keeps) stays under it,
+    // and one more heavy reading a day would pass it. Computed as that test computes it.
+    const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
+    const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
+    const oneMore = 32 * (heavyWorst - lightWorst);
+    is("the first year given back stays under US$ 65 with the day's heavy readings", year < 65, true);
+    is("and one more heavy reading a day would pass it: the figure is the most the margin allows", year + oneMore >= 65, true);
+    is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
+  }
   {
     // The day's heavy readings stop at their own figure; light ones go on to the day's whole figure.
     const probe = { statsId: "h".repeat(32) };
@@ -245,6 +261,20 @@ async function main(): Promise<void> {
     const light: boolean[] = [];
     for (let i = 0; i < STORE_READINGS_PER_DAY; i += 1) light.push(await takeStoreReading(probe, at));
     is("heavy readings stop at HEAVY_READINGS_PER_DAY, and a refused one is not counted", [heavy.filter(Boolean).length, light.filter(Boolean).length], [HEAVY_READINGS_PER_DAY, STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY]);
+    // C4-33 (b): the count's commands measured, against what the shapes price.
+    const fresh = { statsId: "m".repeat(32) };
+    const day = Date.parse("2031-02-04T10:00:00Z");
+    const lightTaken = await counted(() => takeStoreReading(fresh, day));
+    const heavyTaken = await counted(() => takeStoreReading(fresh, day, true));
+    redis.run(["SET", `nl:reading:day:${fresh.statsId}:2031-02-04`, String(STORE_READINGS_PER_DAY), "EX", 86_400]);
+    const lightRefused = await counted(() => takeStoreReading(fresh, day));
+    const heavyRefused = await counted(() => takeStoreReading(fresh, day, true));
+    const updateTaken = await counted(() => takeUpdateSearch(fresh, day));
+    const updateRefused = await counted(() => takeUpdateSearch(fresh, day));
+    is("a reading's count, measured: light 3, heavy 5, a product update's search 3, as READING_COUNT_COMMANDS less its GET and SET", [lightTaken.commands, heavyTaken.commands, updateTaken.commands, lightTaken.value && heavyTaken.value && updateTaken.value], [READING_COUNT_COMMANDS.light - 2, READING_COUNT_COMMANDS.heavy - 2, READING_COUNT_COMMANDS.update, true]);
+    is("refused, with its DECRBY: light 4, heavy 7, a search 4, inside what KEPT_READINGS_SHAPE prices for a page that reads nothing", [lightRefused.commands, heavyRefused.commands, updateRefused.commands, lightRefused.value || heavyRefused.value || updateRefused.value, 3 + 2 * lightRefused.commands + heavyRefused.commands + 2 <= KEPT_READINGS_SHAPE.commands], [4, 7, 4, false, true]);
+    const left = await counted(() => readingsLeft(fresh, day));
+    is("what is left of the day: two GET, and none left once used", [left.commands, left.value], [2, { any: false, heavy: false }]);
   }
   is("a store in its trial or past its plan keeps both, priced for it (M2)", nonPayingWorst() >= feedMonth + readingsMonth, true);
   console.log(`  calendar feed: a making $${readShapeCost(CALENDAR_BUILD_SHAPE).toFixed(6)}, an answer $${readShapeCost(CALENDAR_POLL_SHAPE).toFixed(6)}, the month $${feedMonth.toFixed(4)}`);
@@ -271,8 +301,10 @@ async function main(): Promise<void> {
   const studioBefore = await studioLeft();
   redis.run(["SET", `nl:reading:day:${owner.statsId}:${new Date().toISOString().slice(0, 10)}`, String(STORE_READINGS_PER_DAY), "EX", 86_400]);
   redis.run(["DEL", `nl:reading:stats:${owner.statsId}`, `nl:reading:sales:${owner.statsId}`]);
-  const spent = await keptNumbers(await load());
-  is("the day's readings used and nothing kept: nothing read, and no studio request taken for it", [spent, studioBefore - (await studioLeft())], [null, 1]);
+  const spent = await keptNumbers(await load()).then(() => "read", (error: unknown) => (error instanceof ReadingsUsed ? "used" : String(error)));
+  is("the day's readings used and nothing kept: nothing read, said as used (never as no numbers), and no studio request taken for it", [spent, studioBefore - (await studioLeft())], ["used", 1]);
+  const totals0 = () => read("app/studio/totals/page.tsx");
+  is("the totals say a store so left out comes back at 00:00 UTC, on the reader's clock too (C4-33 (3))", totals0().includes('if (error instanceof ReadingsUsed) return { state: "used" };') && totals0().includes("<UtcAndLocal ms={readingsBackAt()} />"), true);
   const totals = read("app/studio/totals/page.tsx");
   is("the page takes a page of each other store's studio and nothing more", [totals.includes("countStudio(store, null, STUDIO_PAGE_UNITS)"), totals.includes("keptNumbers(store)"), totals.includes("TOTALS_STORE_UNITS")], [true, true, false]);
 

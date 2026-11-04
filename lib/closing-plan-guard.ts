@@ -118,14 +118,29 @@ export type ClosingTimes = { since: number; ended: number };
 export async function plansByCustomer(store: Store): Promise<Record<string, unknown>[]> {
   const customer = store.stripeCustomerId;
   if (!customer || !CUSTOMER_PATTERN.test(customer) || !isBillingConfigured()) return [];
+  const observedStore = { ...store, previousHandles: [...store.previousHandles], releasedHandles: [...store.releasedHandles], stripeCustomerId: customer };
   const query = new URLSearchParams({ customer, status: "all", limit: "100" });
   query.append("expand[]", "data.customer");
   const page = await onPlatform("GET", `/subscriptions?${query}`);
-  const handles = saleHandles(store);
-  return (Array.isArray(page.data) ? (page.data as Record<string, unknown>[]) : [])
+  // The independent fallback may save a store and activate a funded plan.
+  // It needs the same full-page proof as the two-read recovery path.
+  const data = Object.getOwnPropertyDescriptor(page, "data");
+  const more = Object.getOwnPropertyDescriptor(page, "has_more");
+  const cursor = Object.getOwnPropertyDescriptor(page, "next_page");
+  if (!data || !Object.hasOwn(data, "value") || !Array.isArray(data.value) || data.value.length > 100 ||
+      !more || !Object.hasOwn(more, "value") || more.value !== false ||
+      cursor && (!Object.hasOwn(cursor, "value") || cursor.value !== null && cursor.value !== undefined)) throw new Error("Subscription customer page is incomplete");
+  const rows: Record<string, unknown>[] = [];
+  for (let index = 0; index < data.value.length; index++) {
+    const entry = Object.getOwnPropertyDescriptor(data.value, String(index));
+    if (!entry || !Object.hasOwn(entry, "value")) throw new Error("Subscription customer page is incomplete");
+    rows.push(entry.value);
+  }
+  const handles = saleHandles(observedStore);
+  return rows
     .filter((row) => {
       const meta = row.metadata as Record<string, string> | null | undefined;
-      return typeof row.id === "string" && SUBSCRIPTION_PATTERN.test(row.id) && typeof meta?.store === "string" && handles.has(meta.store) && ownedBy(store, row);
+      return typeof row.id === "string" && SUBSCRIPTION_PATTERN.test(row.id) && typeof meta?.store === "string" && handles.has(meta.store) && ownedBy(observedStore, row);
     })
     .sort((a, b) => (Number(b.created) || 0) - (Number(a.created) || 0));
 }
@@ -190,7 +205,7 @@ export type Refused = "no" | "returned" | "returned-early" | "returning";
  * when everything is done, "returning" when a step is left for a later run.
  * The caller must never write it down as the store's plan unless "no".
  */
-export async function refusePlanIfClosing(input: { store: Store | null; handle: string; subscriptionId: string; customerId: string }): Promise<Refused> {
+export async function refusePlanIfClosing(input: { store: Store | null; handle: string; subscriptionId: string; customerId: string; onStopped?: () => void }): Promise<Refused> {
   if (!SUBSCRIPTION_PATTERN.test(input.subscriptionId)) return "no";
   const times = input.store ? await closingSince(input.store) : await shutOf(input.handle);
   if (times === null) return "no";
@@ -206,9 +221,11 @@ export async function refusePlanIfClosing(input: { store: Store | null; handle: 
   };
   // In line first: whatever fails after this is tried again by the closing job.
   await redisPipeline([["HSETNX", UNDO_KEY, input.subscriptionId, JSON.stringify(entry)]]);
-  if (!(await settleOne(input.subscriptionId))) return "returning";
+  if (!(await settleOne(input.subscriptionId, false, input.onStopped))) return "returning";
   const [raw] = await redisPipeline([["HGET", UNDO_KEY, input.subscriptionId]]);
-  return readUndo(raw)?.e ? "returned-early" : "returned";
+  const settled = readUndo(raw);
+  if (!settled || typeof settled.done !== "number" || !Number.isFinite(settled.done) || settled.done <= 0) return "returning";
+  return settled.e ? "returned-early" : "returned";
 }
 
 /**
@@ -361,7 +378,7 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
  * looks again at one settled already: a refund the bank sent back since is
  * made again, and it goes back in line if that cannot be done now.
  */
-export async function settleOne(id: string, recheck = false): Promise<boolean> {
+export async function settleOne(id: string, recheck = false, onStopped?: () => void): Promise<boolean> {
   const [raw] = await redisPipeline([["HGET", UNDO_KEY, id]]);
   const entry = readUndo(raw);
   if (!entry) {
@@ -380,6 +397,10 @@ export async function settleOne(id: string, recheck = false): Promise<boolean> {
   try {
     const plan = await endIt(id);
     if (!plan.ended) return keep("Stripe did not end it");
+    // The independent queue was read above and holds every field the retry
+    // needs. Its confirmed cancellation can release file retention even if
+    // refunding or telling the creator still needs a later worker pass.
+    onStopped?.();
     // A plan started after the store's last one ended is a plan for a closing store: every payment of it is given
     // back, whatever minute it was paid (one paid just before the day began and found only after it, too). The
     // store's own plan from before that end gives back only what it was paid since the closing day began.

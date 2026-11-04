@@ -6,12 +6,14 @@
  * the first goes out the order waits on the list for its reminder's day, or
  * leaves it; the first email says the reminder will come and the reminder
  * says it is the last, in every language; the studio and the route offer
- * and hold the same bounds. The rest of the job (refund, stop, list, already
+ * and hold the same bounds. The reminder counts its days from when the first
+ * actually went out, so a first held back never brings it closer than the
+ * first email promises. The rest of the job (refund, stop, list, already
  * reviewed, allowance) is the same code as the first email's.
  */
 import { readFileSync } from "node:fs";
 import { MAX_AGAIN_DAYS, MIN_AGAIN_DAYS, againDueAt, dueAt, parseReviewAsk, readAgain } from "@/lib/review-ask";
-import { afterSent, askStage, requestText } from "@/lib/review-requests";
+import { LATE_SECONDS, afterSent, askDueAt, askStage, firstSentAt, requestText } from "@/lib/review-requests";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { claimHandle, setReviewAsk, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -38,19 +40,40 @@ async function main(): Promise<void> {
   is("asked, no reminder: nothing", askStage("sent", 0), null);
   is("reminded already: nothing, ever", askStage("again", 5), null);
   is("being sent this moment: nothing", askStage("sending", 5), null);
+  is("asked, with the time kept: the reminder", [askStage("sent:1800604800", 5), askStage("sent:1800604800", 0)], ["again", null]);
+  is("the first's time read from its mark; none for an old or odd one", [firstSentAt("sent:1800604800"), firstSentAt("sent"), firstSentAt("sent:"), firstSentAt("sent:12x"), firstSentAt(null)], [1_800_604_800, 0, 0, 0, 0]);
   is("the reminder's day: the first's day plus its days", againDueAt(1_800_000_000, 7, 5), dueAt(1_800_000_000, 7) + 5 * DAY);
 
   part("What is written once a batch went out");
   const first = { reference: "cs_test_aaaaaaaaaaaa", member: "m1", paidAt: 1_800_000_000, stage: "first" as const };
   const again = { reference: "cs_test_bbbbbbbbbbbb", member: "m2", paidAt: 1_800_000_000, stage: "again" as const };
-  const withReminder = afterSent([first, again], { days: 7, again: 5 });
-  is("the first is marked sent; the reminder, again", withReminder.filter((c) => c[0] === "SET").map((c) => c[2]), ["sent", "again"]);
+  const onTime = dueAt(first.paidAt, 7);
+  const withReminder = afterSent([first, again], { days: 7, again: 5 }, onTime);
+  is("the first is marked sent, with its time; the reminder, again", withReminder.filter((c) => c[0] === "SET").map((c) => c[2]), [`sent:${onTime}`, "again"]);
   is("the first waits on the list for its reminder's day", withReminder.find((c) => c[0] === "ZADD"), ["ZADD", "nl:rev:ask:due", "XX", againDueAt(first.paidAt, 7, 5), "m1"]);
   is("nothing leaves the list then", withReminder.some((c) => c[0] === "ZREM"), false);
-  const without = afterSent([first], { days: 7 });
+  const without = afterSent([first], { days: 7 }, onTime);
   is("no reminder: the first leaves the list", without.find((c) => c[0] === "ZREM"), ["ZREM", "nl:rev:ask:due", "m1"]);
   is("…and nothing is put back", without.some((c) => c[0] === "ZADD"), false);
-  is("only reminders: nothing to take off (already taken when claimed)", afterSent([again], { days: 7, again: 5 }).some((c) => c[0] === "ZREM" || c[0] === "ZADD"), false);
+  is("only reminders: nothing to take off (already taken when claimed)", afterSent([again], { days: 7, again: 5 }, onTime).some((c) => c[0] === "ZREM" || c[0] === "ZADD"), false);
+
+  part("A first held back does not bring the reminder closer");
+  // The first was due on day 7 but went out on day 10 (the plan, Stripe, the
+  // allowance or the sender held it). It promised a reminder 5 days from then.
+  const heldUntil = first.paidAt + 10 * DAY;
+  const held = afterSent([first], { days: 7, again: 5 }, heldUntil);
+  const reminderAt = Number(held.find((c) => c[0] === "ZADD")?.[3]);
+  is("the reminder is put 5 days after the first went out, not 2", (reminderAt - heldUntil) / DAY, 5);
+  const heldMark = String(held.find((c) => c[0] === "SET")?.[2]);
+  is("and the job reads the same day back from the mark", askDueAt("again", heldMark, first.paidAt, { days: 7, again: 5 }), heldUntil + 5 * DAY);
+  is("so a run on day 12 waits instead of sending", askDueAt("again", heldMark, first.paidAt, { days: 7, again: 5 }) > first.paidAt + 12 * DAY, true);
+  is("a run soon after that day is not late, so it is not dropped", heldUntil + 5 * DAY + DAY - askDueAt("again", heldMark, first.paidAt, { days: 7, again: 5 }) <= LATE_SECONDS, true);
+  is("a first sent on time: the reminder on its usual day", askDueAt("again", `sent:${onTime}`, first.paidAt, { days: 7, again: 5 }), againDueAt(first.paidAt, 7, 5));
+  is("a mark kept before the time was: the usual day", askDueAt("again", "sent", first.paidAt, { days: 7, again: 5 }), againDueAt(first.paidAt, 7, 5));
+  is("a creator who makes the reminder later moves it", askDueAt("again", `sent:${onTime}`, first.paidAt, { days: 7, again: 9 }), againDueAt(first.paidAt, 7, 9));
+  is("the first's own day is unchanged", askDueAt("first", null, first.paidAt, { days: 7, again: 5 }), dueAt(first.paidAt, 7));
+  const job = readFileSync("lib/review-requests.ts", "utf8");
+  is("the job uses that day, and keeps the time it sent", job.includes("const due = askDueAt(stage, mark, entry.paidAt, store.reviewAsk);") && job.includes("store.reviewAsk, nowSeconds));"), true);
 
   part("The words");
   const store = (await storeForEmail(owner)) as Store;

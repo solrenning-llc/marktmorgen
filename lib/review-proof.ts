@@ -345,8 +345,11 @@ export async function markRefundedReviews(store: Store, deadline: number): Promi
     if (!(await confirmLostRead(lostRead, seenKey(statsId)))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
-  if (complete && !unsure && Date.now() < deadline) {
-    await redisPipeline([["SET", anchorKey(statsId), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  // A store with no anchor yet keeps the one it started from, so the next run reads the same window and the lost
+  // disputes' kept place still counts (review of #2158), as the calls job does.
+  if ((complete && !unsure && Date.now() < deadline) || !(Number(anchorRaw) > 0)) {
+    const place = complete && !unsure && Date.now() < deadline ? Math.max(newest, anchor) : anchor;
+    await redisPipeline([["SET", anchorKey(statsId), String(place), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   }
   return marked;
 }

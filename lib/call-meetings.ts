@@ -208,7 +208,17 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         continue;
       }
       const intent = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      if (!INTENT.test(intent) || lookups <= 0) continue;
+      if (!INTENT.test(intent)) {
+        // No payment to look up (a charge made without one): no booking can be told from it, so it is read, and a
+        // lost dispute like it never holds the place back (review of #2158).
+        await redisPipeline([
+          ["SADD", seenKey(callsId), id],
+          ["EXPIRE", seenKey(callsId), REFUND_KEEP_SECONDS],
+        ]);
+        newest = Math.max(newest, created);
+        continue;
+      }
+      if (lookups <= 0) continue;
       lookups -= 1;
       const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
       const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];

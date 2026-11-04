@@ -11,6 +11,8 @@ import { LOST_DISPUTE_PAGES, lostCursorKey, lostDisputesSince } from "@/lib/refu
 import { markRefundedReviews } from "@/lib/review-proof";
 import { syncMeetings } from "@/lib/call-meetings";
 import { MEET_STORES } from "@/lib/meet-links";
+import { revokeRefunded } from "@/lib/licence-keys";
+import { KIND } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -18,6 +20,10 @@ import { done, is, part } from "./check";
 process.env.STRIPE_SECRET_KEY = "sk_test_lost_dispute_cursor_only";
 const ACCOUNT = "acct_1TestCursor0001";
 const NOW = Math.floor(Date.now() / 1000);
+// The jobs read the clock: runs five minutes apart, as the schedule makes them.
+const realNow = Date.now;
+let shift = 0;
+Date.now = () => realNow() + shift;
 const TOTAL = 100 * LOST_DISPUTE_PAGES + 200;
 // Newest first, as Stripe lists them.
 const events = Array.from({ length: TOTAL }, (_, i) => ({
@@ -75,9 +81,11 @@ async function main(): Promise<void> {
   const shop = { statsId, stripeAccountId: ACCOUNT, handle: "cursor-shop" } as unknown as Store;
   const placeKey = `nl:rev:refunds:since:${statsId}`;
   await markRefundedReviews(shop, Date.now() + 60_000);
-  is("its first run is not complete, so its place does not move yet", (await redis.pipeline([["GET", placeKey]]))[0], null);
+  const started = Number((await redis.pipeline([["GET", placeKey]]))[0]);
+  is("its first run is not complete, so it keeps only the window it started from (review of #2158)", started > 0 && started <= NOW - 29 * 86_400, true);
+  shift += 5 * 60_000;
   await markRefundedReviews(shop, Date.now() + 60_000);
-  is("its next run reaches the end and moves its place past the newest closing", Number((await redis.pipeline([["GET", placeKey]]))[0]), NOW);
+  is("its next run, five minutes later, reads on in that window, reaches the end and moves its place past the newest closing", Number((await redis.pipeline([["GET", placeKey]]))[0]), NOW);
 
   part("A dispute that closes while a sweep goes on over several runs (review of #2158, inbox C4-24)");
   // A run that went on from a kept place reads only older pages: its job may not move past the newest closing the
@@ -110,6 +118,38 @@ async function main(): Promise<void> {
     await syncMeetings(async (handle) => (handle === "cursor-calls" ? callStore : null), Date.now() + 60_000, "https://marktmorgen.com");
   }
   is("every lost dispute's payment is looked up, across as many runs as it takes", lookedUp.size, TOTAL);
+
+  part("A lost dispute with no payment to look up (review of #2158)");
+  // A charge made without a payment intent (the older Charges API, on the creator's own account) closes a dispute
+  // Stripe lists like any other. Left unread, it failed every run's confirmation: the place was never kept, the
+  // rows past the first pages never read, and the job's place never moved.
+  events[7].data.object.payment_intent = null as unknown as string;
+  const keysStore = { statsId: "k".repeat(32), stripeAccountId: ACCOUNT, handle: "cursor-keys", previousHandles: [], catalog: { items: [{ id: "keyproduct", kind: KIND.paid | KIND.keys }] } } as unknown as Store;
+  const keysPlace = `nl:keys:${keysStore.statsId}:refunds:since`;
+  lookedUp.clear();
+  for (let run = 0; run < 4 * TOTAL && Number((await redis.pipeline([["GET", keysPlace]]))[0]) !== NOW; run += 1) {
+    shift += 5 * 60_000;
+    await revokeRefunded(keysStore, Date.now() + 60_000);
+  }
+  is("the license key job looks up every other lost dispute's payment", lookedUp.size, TOTAL - 1);
+  is("and its place moves past the newest closing", Number((await redis.pipeline([["GET", keysPlace]]))[0]), NOW);
+  const noPayCalls = "d".repeat(16);
+  const noPayStore = { statsId: "n".repeat(32), callsId: noPayCalls, stripeAccountId: ACCOUNT, handle: "cursor-nopay", previousHandles: [] } as unknown as Store;
+  await redis.pipeline([["ZADD", MEET_STORES, Date.now() + 86_400_000, `${noPayCalls}|cursor-nopay`]]);
+  lookedUp.clear();
+  for (let run = 0; run < 2 * TOTAL && lookedUp.size < TOTAL - 1; run += 1) {
+    shift += 5 * 60_000;
+    await syncMeetings(async (handle) => (handle === "cursor-nopay" ? noPayStore : null), Date.now() + 60_000, "https://marktmorgen.com");
+  }
+  is("the call job looks up every other one too", lookedUp.size, TOTAL - 1);
+  // The run of the last lookup may stop mid-sweep; the next ones read on from the kept place to the end.
+  const callsPlace = `nl:meet:rf:${noPayCalls}:since`;
+  for (let run = 0; run < LOST_DISPUTE_PAGES && Number((await redis.pipeline([["GET", callsPlace]]))[0]) < NOW; run += 1) {
+    shift += 5 * 60_000;
+    await syncMeetings(async (handle) => (handle === "cursor-nopay" ? noPayStore : null), Date.now() + 60_000, "https://marktmorgen.com");
+  }
+  is("and its place moves past the newest closing", Number((await redis.pipeline([["GET", callsPlace]]))[0]) >= NOW, true);
+  events[7].data.object.payment_intent = `pi_Cursor${String(7).padStart(6, "0")}`;
 
   part("A place of another window is never followed");
   await (await lostDisputesSince(ACCOUNT, since, Number.POSITIVE_INFINITY, LOST_DISPUTE_PAGES, key)).commit();

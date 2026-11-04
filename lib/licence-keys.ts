@@ -565,7 +565,17 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         continue;
       }
       const intent = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      if (!INTENT_PATTERN.test(intent) || lookups <= 0) continue;
+      if (!INTENT_PATTERN.test(intent)) {
+        // No payment to look up (a charge made without one): no sale of this store can be told from it, so it is
+        // read, and a lost dispute like it never holds the place back (review of #2158).
+        await redisPipeline([
+          ["SADD", refundSeenKey(store), id],
+          ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS + 86_400],
+        ]);
+        newest = Math.max(newest, created);
+        continue;
+      }
+      if (lookups <= 0) continue;
       lookups -= 1;
 
       // Which sale that payment was: a checkout of this store, or an offer.
@@ -638,8 +648,11 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     if (!(await confirmLostRead(lostRead, refundSeenKey(store)))) unsure = true;
     else if (lostRead.complete) newest = lostRead.resumed ? lostRead.newest : Math.max(newest, lostRead.newest);
   }
-  if (complete && !unsure && lookups > 0 && Date.now() < deadline) {
-    await redisPipeline([["SET", refundAnchorKey(store), String(Math.max(newest, anchor)), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
+  // A store with no anchor yet keeps the one it started from, so the next run reads the same window and the lost
+  // disputes' kept place still counts (review of #2158), as the calls job does.
+  if ((complete && !unsure && lookups > 0 && Date.now() < deadline) || !(Number(anchorRaw) > 0)) {
+    const place = complete && !unsure && lookups > 0 && Date.now() < deadline ? Math.max(newest, anchor) : anchor;
+    await redisPipeline([["SET", refundAnchorKey(store), String(place), "EX", REFUND_LOOKBACK_SECONDS * 2]]);
   }
   return revoked;
 }

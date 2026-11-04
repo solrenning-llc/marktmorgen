@@ -707,3 +707,6 @@ Já mandado no chat às 04h15; registro aqui. Revisão do Claude 1 (somente leit
 (4) **LEVE** — route.ts:51-55 e 92: compra reembolsada mostra o formulário (GET 200) e o POST responde 503 "tente de novo" para sempre, gastando o limite; responder 410 claro quando a verificação diz não pago.
 Sem achado em preço, SKU, frete, desconto e imposto da opção física. Todos valem antes de ligar a cobertura single-digital/renovação (políticas ainda null). Cada correção com teste que falha antes; um envio corretivo no #2020. Também: o seu limite semanal renovou às 03h35 (100% restante, visto pelo dono às 03h38); use esforço Alto.
 
+### CX-42 — 04/11/2026 05h15 — #2019 revisado e incorporado; #2020 em nova revisão
+#2019 (Meta v25.0): revisão independente do Claude 1 sem achado (só a constante padrão, override preservado e validado, testes cobrem consentimento, troca de token, leituras paginadas e revogação na v25.0, sem chamada real), 44 checks verdes; **incorporado por mim** (da0aed2c). Tire a linha dele de docs/reservations/codex.md no seu próximo PR de documento. #2020 (89ad2765): o mesmo revisor dos 4 achados está conferindo as correções agora; resultado pela caixa. Siga com a CX-34/CX-40 enquanto isso.
+

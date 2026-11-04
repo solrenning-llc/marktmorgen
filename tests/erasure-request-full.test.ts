@@ -108,11 +108,23 @@ async function main(): Promise<void> {
   await fill(first);
   const usedBefore = [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")];
   const from = sent.length;
-  is("the link is sent", await requestErasureLink({ email: TESS, ip: "203.0.113.20", origin: "https://marktmorgen.com" }), "sent");
-  await settled();
-  const link = sent.slice(from).find((m) => m.to === TESS);
-  is("to the address, naming both stores", [Boolean(link), link?.text.includes(one.name), link?.text.includes(two.name)], [true, true, true]);
-  is("taken from the second store's share, nothing more from the first", [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")], [usedBefore[0], usedBefore[1] + 1]);
+  // Real asynchronous work must finish even when the Redis stand-in takes 5 ms.
+  const originalPipeline = redis.pipeline;
+  const pipelineDescriptor = Object.getOwnPropertyDescriptor(redis, "pipeline");
+  redis.pipeline = async (commands) => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return originalPipeline.call(redis, commands);
+  };
+  try {
+    is("the link is sent", await requestErasureLink({ email: TESS, ip: "203.0.113.20", origin: "https://marktmorgen.com" }), "sent");
+    await settled();
+    const link = sent.slice(from).find((m) => m.to === TESS);
+    is("to the address, naming both stores", [Boolean(link), link?.text.includes(one.name), link?.text.includes(two.name)], [true, true, true]);
+    is("taken from the second store's share, nothing more from the first", [await allowanceUsed(first, "transactional"), await allowanceUsed(second, "transactional")], [usedBefore[0], usedBefore[1] + 1]);
+  } finally {
+    if (pipelineDescriptor) Object.defineProperty(redis, "pipeline", pipelineDescriptor);
+    else Reflect.deleteProperty(redis, "pipeline");
+  }
 
   part("(b) Asked for every store, no store has room: the same answer as an unknown address");
   await fill(second);

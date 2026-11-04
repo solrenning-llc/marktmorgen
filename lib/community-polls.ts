@@ -40,6 +40,7 @@ import { redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { cleanLine } from "@/lib/community-text";
+import { TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 
 const base = (id: string) => `nl:cm:${id}`;
 const votesKey = (id: string, post: string) => `${base(id)}:pv:${post}`;
@@ -142,15 +143,20 @@ export async function vote(
   // a new one takes room first (DataRoomError when it does not fit), one taken back gives it.
   const weight = (list: string[]) => (list.length ? dataBytes([list.join(",")], 1) : 0);
   const grown = weight(picked) - weight(before);
-  if (grown > 0) await needData(room, [{ slot: `cm:p:${post}`, bytes: grown }]);
+  // A first vote also writes its entry in the member's trace (lib/community.ts, traceKey); taking every pick back removes it.
+  const traceIn = picked.length > 0 && before.length === 0;
+  const traceOut = picked.length === 0 && before.length > 0;
+  if (grown > 0 || traceIn) await needData(room, [...(grown > 0 ? [{ slot: `cm:p:${post}`, bytes: grown }] : []), ...(traceIn ? [TRACE_ENTRY] : [])]);
   await redisPipeline([
     ...gone.map((one) => ["HINCRBY", tallyKey(id, post), one, -1]),
     ...added.map((one) => ["HINCRBY", tallyKey(id, post), one, 1]),
     picked.length
       ? ["HSET", votesKey(id, post), who, picked.join(",")]
       : ["HDEL", votesKey(id, post), who],
+    ...(traceIn ? [["SADD", traceKey(id, who), `v:${post}`]] : []),
+    ...(traceOut ? [["SREM", traceKey(id, who), `v:${post}`]] : []),
   ]);
-  if (grown < 0) await giveData(room, [{ slot: `cm:p:${post}`, bytes: -grown }]);
+  if (grown < 0 || traceOut) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(traceOut ? [TRACE_ENTRY] : [])]);
   return true;
 }
 
@@ -228,4 +234,19 @@ export function pollWhen(poll: Poll, at = Math.floor(Date.now() / 1000)): string
   if (left < 86_400) return `Closes in ${Math.round(left / 3600)} hours`;
   const days = Math.round(left / 86_400);
   return `Closes in ${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/** One member's votes in the polls on these posts, for the copy of their data (619 [SZ3]): the options they picked, by post. Only reads. */
+export async function votesOf(id: string, who: string, postIds: string[]): Promise<{ post: string; picked: string[] }[]> {
+  if (!postIds.length) return [];
+  const out: { post: string; picked: string[] }[] = [];
+  for (let i = 0; i < postIds.length; i += 500) {
+    const batch = postIds.slice(i, i + 500);
+    const replies = await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who]));
+    batch.forEach((post, k) => {
+      const raw = replies[k];
+      if (typeof raw === "string" && raw) out.push({ post, picked: raw.split(",").filter(Boolean) });
+    });
+  }
+  return out;
 }

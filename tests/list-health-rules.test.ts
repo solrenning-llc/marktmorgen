@@ -44,7 +44,13 @@ function main(): void {
   is("2,000 sent: 40 bounces (2% beats the floor of 25); 7,500 sent: 6 reports", [roomBeforePause(h(2000)).bounces, roomBeforePause(h(7500)).complaints], [40, 6]);
   is("already at a line: 0", roomBeforePause(h(1000, 30, 6)), { bounces: 0, complaints: 0 });
   is("never negative", roomBeforePause(h(1000, 900, 900)), { bounces: 0, complaints: 0 });
-  is("floor out of reach at this many sent: null (20 sent cannot hold 25 bounces)", roomBeforePause(h(20, 3, 1)), { bounces: null, complaints: 4 });
+  is("a floor above what was sent is still reachable: late bounces count (20 sent, 3 bounced: 22 more)", roomBeforePause(h(20, 3, 1)), { bounces: 22, complaints: 4 });
+  // A spam report or a bounce can arrive days after its email, and counting starts again after a pause: counts over what was sent are real.
+  const late = roomBeforePause(h(3, 0, 4));
+  is("more reports than emails sent: the room is still said", late.complaints !== null && late.bounces !== null, true);
+  is("and that many more reports pauses, one fewer does not", [overTheLine(h(3, 0, 4 + (late.complaints ?? 0)))?.reason ?? null, (late.complaints ?? 0) > 0 ? overTheLine(h(3, 0, 3 + (late.complaints ?? 0))) : null], ["complaints", null]);
+  const both = roomBeforePause(h(20, 24, 4));
+  is("bounces over what was sent: both measures said, none dropped", [both.bounces, both.complaints].every((n) => n !== null), true);
   const none = { bounces: null, complaints: null };
   is(
     "nothing sent or unreadable counts: null both",
@@ -55,10 +61,10 @@ function main(): void {
   part("Room line");
   is("a distance, both measures", roomLine(roomBeforePause(h(1000, 4))), "At this many emails, 21 more bounces or 5 more spam reports would pause it.");
   is("a distance, singular", roomLine({ bounces: 1, complaints: 1 }), "At this many emails, 1 more bounce or 1 more spam report would pause it.");
-  is("a distance, only the measure that can be reached", roomLine(roomBeforePause(h(20, 3, 1))), "At this many emails, 4 more spam reports would pause it.");
+  is("a distance, a measure far from its line still said", roomLine(roomBeforePause(h(20, 3, 1))), "At this many emails, 22 more bounces or 4 more spam reports would pause it.");
   is("thousands written as thousands", roomLine({ bounces: 1200, complaints: null }), "At this many emails, 1,200 more bounces would pause it.");
-  is("at the line: the next one pauses", roomLine(roomBeforePause(h(1000, 30))), "It is at the level that pauses: the next bounce or spam report we hear about pauses email to your list.");
-  is("nothing to say when neither line can be reached", [roomLine(roomBeforePause(h(0))), roomLine(roomBeforePause(h(3, 1, 1)))], ["", ""]);
+  is("at the line: already paused, never 'the next one'", roomLine(roomBeforePause(h(1000, 30))), "Email to your list has reached the level that pauses it.");
+  is("nothing to say when nothing was sent", roomLine(roomBeforePause(h(0))), "");
 
   part("Terms");
   is("bounce (hard and soft), spam complaint, delivered and the honest sentence", Object.keys(TERMS), ["bounce", "spamComplaint", "delivered", "spamUnknown"]);

@@ -46,16 +46,19 @@ export type Room = { bounces: number | null; complaints: number | null };
  * number already sent in these seven days, would pause the store's list
  * email: the next one past this many is counted (lib/mail-health.ts,
  * heardFromSender) and the pause follows at once. 0 when a count is already
- * at its line. Null for a measure that cannot reach its line at this many
- * sent (nothing sent, or fewer sent than the floor needs), or for counts that
- * cannot be read. Each address counts once a week, so these are more
- * addresses, not more emails to the same ones. More sending moves both.
+ * at its line (the pause has then already been taken). Null only when
+ * nothing was sent in these days or the counts cannot be read. The counts
+ * are not held under what was sent: a bounce or a spam report can arrive
+ * days after its email, and counting starts again after a pause, so a few
+ * emails can already carry more of either than were sent in the window, and
+ * the line stays reachable. Each address counts once a week, so these are
+ * more addresses, not more emails to the same ones. More sending moves both.
  */
 export function roomBeforePause(last7: Health | null | undefined): Room {
   if (!readable(last7) || last7.sent <= 0) return { bounces: null, complaints: null };
   const one = (count: number, floor: number, rate: number): number | null => {
     const need = lineAt(last7.sent, floor, rate);
-    return need > last7.sent ? null : Math.max(0, need - count);
+    return Math.max(0, need - count);
   };
   return { bounces: one(last7.bounced, BOUNCE_FLOOR, BOUNCE_RATE), complaints: one(last7.complained, COMPLAINT_FLOOR, COMPLAINT_RATE) };
 }
@@ -73,16 +76,17 @@ export function roomLine(room: Room): string {
   if (room.bounces !== null) parts.push(plural(room.bounces, "more bounce", "more bounces"));
   if (room.complaints !== null) parts.push(plural(room.complaints, "more spam report", "more spam reports"));
   if (!parts.length) return "";
-  if (room.bounces === 0 || room.complaints === 0) return "It is at the level that pauses: the next bounce or spam report we hear about pauses email to your list.";
+  // At 0 the count that reached the line has already paused the list's email (lib/mail-health.ts): say that, never "the next one".
+  if (room.bounces === 0 || room.complaints === 0) return "Email to your list has reached the level that pauses it.";
   return `At this many emails, ${parts.join(" or ")} would pause it.`;
 }
 
 /** The words the email screen explains in place (AX274, 3.1.3). One sentence each. */
 export const TERMS = {
   bounce:
-    "A bounce is an email the receiving server sent back: a hard bounce (bounced for good) means the address does not exist or will never take email, so your store stops writing to it; a soft bounce is a problem that may pass, like a full mailbox or a server that was down.",
+    "A bounce is an email the receiving server sent back: a hard bounce (bounced for good) means the address does not exist or will never take email, so your store stops sending email to your list to it; a soft bounce is a problem that may pass, like a full mailbox or a server that was down.",
   spamComplaint:
-    "A spam complaint means the person who got your email marked it as spam in their email app and their email provider told us, so that person is taken off your list.",
+    "A spam complaint means the person who got an email to your list marked it as spam in their email app and their email provider told us, so that person is taken off your list.",
   delivered:
     "Delivered means the receiving email server accepted the email; it does not tell us whether the email was put in the inbox, the spam folder or another tab.",
   spamUnknown:

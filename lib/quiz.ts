@@ -28,6 +28,7 @@
  * Pure rules at the top, storage at the bottom.
  */
 import { reserveQuizSubmission } from "@/lib/quiz-usage";
+import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rules";
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
@@ -71,7 +72,20 @@ export type Quiz = {
   /** Whether the lessons after this one stay shut until it is passed. */
   required: boolean;
   questions: Question[];
+  /** Questions each try draws from the bank (630 [HN6](7)); absent or 0 is every question. */
+  draw?: number;
+  /** Whether each try shows its questions in an order of its own. */
+  shuffle?: boolean;
+  /** Minutes a student waits after a try before the next; absent is none. */
+  waitMinutes?: number;
 };
+
+/** The bank's three settings as kept: only what is set, within bounds. */
+function bankOf(value: Record<string, unknown>, total: number): Pick<Quiz, "draw" | "shuffle" | "waitMinutes"> {
+  const draw = wholeIn(value.draw, 1, Math.max(1, total - 1));
+  const wait = wholeIn(value.waitMinutes, 1, MAX_WAIT_MINUTES);
+  return { ...(draw !== null ? { draw } : {}), ...(value.shuffle === true ? { shuffle: true } : {}), ...(wait !== null ? { waitMinutes: wait } : {}) };
+}
 
 /** The part of a quiz the lesson carries, so the outline needs no second read. */
 export type QuizSetup = {
@@ -154,6 +168,7 @@ export function parseQuiz(raw: unknown): Quiz | null {
       attempts,
       required: value.required === true,
       questions,
+      ...bankOf(value, questions.length),
     };
   } catch {
     return null;
@@ -216,7 +231,7 @@ export function readQuiz(raw: unknown, existing: Quiz | null = null): { ok: true
       explanation: cleanParagraph(entry.explanation, MAX_EXPLANATION_LENGTH),
     });
   }
-  return { ok: true, quiz: { passPercent, attempts, required: value.required === true, questions,
+  return { ok: true, quiz: { passPercent, attempts, required: value.required === true, questions, ...bankOf(value, questions.length),
     ...(!existing || existing.usagePolicy === QUIZ_USAGE_POLICY ? { usagePolicy: QUIZ_USAGE_POLICY } : {}),
   } };
 }
@@ -270,6 +285,48 @@ export function gradeQuiz(quiz: Quiz, answers: Answers): Grade {
 /** Tries left, or null when there is no limit. */
 export function triesLeft(quiz: Pick<Quiz, "attempts">, used: number): number | null {
   return quiz.attempts === 0 ? null : Math.max(0, quiz.attempts - used);
+}
+
+/**
+ * The quiz as one try of one student shows it (630 [HN6](7)): the questions
+ * the bank draws for that try, in the quiz's order or shuffled. `attempt`
+ * counts from 1. Without a draw or a shuffle it is the whole quiz.
+ */
+export function quizForTry(quiz: Quiz, courseId: string, lessonId: string, who: string, attempt: number): Quiz {
+  if (!quiz.draw && !quiz.shuffle) return quiz;
+  const picks = drawn(quiz.questions.length, quiz.draw ?? 0, quiz.shuffle === true, trySeed(courseId, lessonId, who, attempt));
+  return { ...quiz, questions: picks.map((i) => quiz.questions[i]) };
+}
+
+/** How many questions one try shows. */
+export function questionsPerTry(quiz: Pick<Quiz, "questions" | "draw">): number {
+  const total = quiz.questions.length;
+  return quiz.draw && quiz.draw < total ? quiz.draw : total;
+}
+
+/** Seconds this student still waits before the next try; 0 when they may try now. */
+export function quizWait(quiz: Pick<Quiz, "waitMinutes">, attempt: Pick<Attempt, "last"> | null, now: number): number {
+  return waitLeft(quiz.waitMinutes ?? 0, attempt?.last ? attempt.last.at * 1000 : null, now);
+}
+
+/**
+ * What a student's lesson shows: the next try's questions while they may try
+ * now; otherwise (passed, out of tries, or waiting) the last try's, so a wait
+ * never shows the next questions early. `wait` is the seconds left.
+ */
+export function studentQuiz(quiz: Quiz, courseId: string, lessonId: string, who: string, attempt: Attempt, now: number = Date.now()): { quiz: Quiz; wait: number } {
+  const open = !attempt.passed && triesLeft(quiz, attempt.used) !== 0;
+  const wait = open ? quizWait(quiz, attempt, now) : 0;
+  const next = open && wait === 0;
+  return { quiz: quizForTry(quiz, courseId, lessonId, who, next ? attempt.used + 1 : Math.max(1, attempt.used)), wait };
+}
+
+/** Whether the questions a student answered are the ones their try draws, in any order. */
+function sameQuestions(shown: string[] | null, quiz: Quiz): boolean {
+  if (!shown) return false;
+  const want = quiz.questions.map((q) => q.id).sort();
+  const got = [...new Set(shown)].sort();
+  return want.length === got.length && want.every((id, i) => id === got[i]);
 }
 
 /**
@@ -381,7 +438,7 @@ export async function attemptOf(courseId: string, lessonId: string, who: string)
 
 export type SubmitResult =
   | { ok: true; grade: Grade; attempt: Attempt }
-  | { ok: false; reason: "no_tries" | "passed" | "usage_limit" | "unavailable" };
+  | { ok: false; reason: "no_tries" | "passed" | "usage_limit" | "unavailable" | "wait" | "stale" };
 
 /**
  * Marks a try and keeps it.
@@ -390,6 +447,14 @@ export type SubmitResult =
  * two answers sent at the same moment from two tabs both count, so a limit
  * of three tries is three and never four. A student who has passed is not
  * marked again, so a pass can never be undone by a worse try afterward.
+ *
+ * With a question bank (630 [HN6](7)) the try is marked on the questions it
+ * draws, worked out again here from the student and the try's number, never
+ * taken from the form. `shown` is the question ids the page showed: when the
+ * quiz draws and they are not this try's (another tab tried first, or the
+ * creator changed the questions), nothing is counted ("stale"). A try before
+ * the creator's wait is over is refused ("wait"). Two answers sent at the very
+ * same moment both pass the wait; each still counts as a try.
  */
 export async function submitQuiz(
   courseId: string,
@@ -402,15 +467,21 @@ export async function submitQuiz(
   window: string | null | undefined,
   /** The store whose data room the try takes from (DataRoomError when it does not fit). */
   room: DataStore,
+  /** The question ids the page showed; needed when the quiz draws from a bank. */
+  shown: string[] | null = null,
 ): Promise<SubmitResult> {
   const before = await attemptOf(courseId, lessonId, who);
   if (before.passed) return { ok: false, reason: "passed" };
   if (quiz.attempts > 0 && before.used >= quiz.attempts) return { ok: false, reason: "no_tries" };
+  if (quizWait(quiz, before, Date.now()) > 0) return { ok: false, reason: "wait" };
+  const asked = quizForTry(quiz, courseId, lessonId, who, before.used + 1);
+  if (quiz.draw && !sameQuestions(shown, asked)) return { ok: false, reason: "stale" };
+  const mine: Answers = Object.fromEntries(asked.questions.map((q) => [q.id, answers[q.id] ?? []]));
   // What the try leaves takes room first, at the most it can weigh: its
   // answers and marks rewritten over the last, its count the first time, and
   // its pass. Nothing is counted against the store's quizzes without it.
   const last = await redisPipeline([["GET", resultKey(courseId, lessonId, who)]]);
-  const draft = JSON.stringify({ used: 9_999, last: { answers, grade: gradeQuiz(quiz, answers), at: Math.floor(Date.now() / 1000) }, best: 100, passed: true });
+  const draft = JSON.stringify({ used: 9_999, last: { answers: mine, grade: gradeQuiz(asked, mine), at: Math.floor(Date.now() / 1000) }, best: 100, passed: true });
   const grown = dataBytes([draft], 1) - kept(last[0]) + (before.used ? 0 : dataBytes(["9999"], 1)) + dataBytes([lessonId], 1);
   if (grown > 0) await needData(room, [{ slot: TRIES_SLOT(courseId), bytes: grown }]);
   if (quiz.usagePolicy === QUIZ_USAGE_POLICY) {
@@ -424,10 +495,10 @@ export async function submitQuiz(
     await redisPipeline([["DECR", triesKey(courseId, lessonId, who)]]);
     return { ok: false, reason: "no_tries" };
   }
-  const grade = gradeQuiz(quiz, answers);
+  const grade = gradeQuiz(asked, mine);
   const attempt: Attempt = {
     used,
-    last: { answers, grade, at: Math.floor(Date.now() / 1000) },
+    last: { answers: mine, grade, at: Math.floor(Date.now() / 1000) },
     best: Math.max(before.best, grade.percent),
     passed: grade.passed,
   };

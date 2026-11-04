@@ -107,10 +107,11 @@ const NEED_WORDS: Record<string, RegExp> = { billing: /\byour plan\b/, payments:
 is("the note names every permission a locked session is held back from", LOCKED_NEEDS.map((need) => [need, NEED_WORDS[need]?.test(note) ?? false]), LOCKED_NEEDS.map((need) => [need, true]));
 is("every studio permission is either held back (and named) or open, as the note's last sentence says, and the held-back ones are real permissions", [[...ROLE_PERMISSIONS.owner].every((p) => LOCKED_NEEDS.includes(p) ? NEED_WORDS[p] !== undefined : true), LOCKED_NEEDS.every((need) => ROLE_PERMISSIONS.owner.has(need as never)), /^Everything else in your studio is open to it\.$/.test(LOCKED_NOTE[LOCKED_NOTE.length - 1])], [true, true, true]);
 is("the note says that deleting for good waits too, as lib/two-step.ts LOCKED_ACTIONS holds it within the open permissions", [/\bdelete anything for good\b/.test(note), Object.values(LOCKED_ACTIONS).every((actions) => actions.length > 0)], [true, true]);
+is("and names the other actions LOCKED_ACTIONS holds that are not deleting: a new file or picture over an old one, events canceled or moved, a purchase email sent again", [/\bput a new file or picture over an old one\b/.test(note) && LOCKED_ACTIONS.products.includes("replace") && LOCKED_ACTIONS.page.includes("replace"), /\bcancel, delete or move an event\b/.test(note) && ["cancel", "delete", "move"].every((a) => LOCKED_ACTIONS.events.includes(a)), /\bsend a purchase email again\b/.test(note) && LOCKED_ACTIONS.orders.includes("resend")], [true, true, true]);
 // The account's own actions that refuse a locked session by themselves, each read in its route and named in the note.
 const ACCOUNT_LOCKS: Record<string, RegExp> = {
   "app/api/auth/signout-all/route.ts": /"Sign out everywhere"/,
-  "app/api/auth/passkey/route.ts": /\badd a passkey\b/,
+  "app/api/auth/passkey/route.ts": /\badd or remove a passkey\b/,
   "app/api/auth/two-step/route.ts": /\bchange two-step login\b/,
   "app/api/auth/recovery-address/route.ts": /\bchange your recovery address\b/,
   "app/api/store/address/route.ts": /\byour sign-in address\b/,

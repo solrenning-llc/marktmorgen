@@ -1,5 +1,27 @@
 @import "tailwindcss";
 
+/* page-sm: — from a small tablet's width up, for what a store page's blocks
+   draw (375 [TB1]). Inside a page's .sp-body the page's own width decides (a
+   container query), so the studio's Phone preview draws what a phone draws
+   even when the studio is open on a computer; the line is Tailwind's sm:
+   (40rem of window) less the live page column's side padding (px-4, 1rem a
+   side), so the live page changes at the same window width as with sm:.
+   Anywhere else (a blog post's blocks, the reviews page) the window decides,
+   exactly as sm: did. :where() keeps each rule's weight that of sm:.
+   tests/preview-breakpoints.test.ts holds it. */
+@custom-variant page-sm {
+  @media (min-width: 40rem) {
+    &:where(:not(.sp-body *)) {
+      @slot;
+    }
+  }
+  @container (min-width: 38rem) {
+    :where(.sp-body) & {
+      @slot;
+    }
+  }
+}
+
 /* =====================================================================
    Marktmorgen design system
    One set of tokens for every page. Colour is used on purpose: one deep
@@ -33,6 +55,7 @@
   --sand-deep: #e4e0d6;
   --line: #e2ded4;
   --line-strong: #cbc5b8;
+  --line-off: #857f70;   /* an off control's dashed edge: 3.38:1 on sand, 3.99:1 on white */
   --ink: #111827;        /* 16.3:1 on ivory */
   --ink-soft: #343d4a;   /* 10.08:1 on ivory */
   --ink-mute: #394150;   /*  9.42:1 on ivory; 7.34:1 on lilac-deep */
@@ -723,11 +746,49 @@ html {
   opacity: 0.75;
   transform: none;
 }
-.btn:disabled,
-.btn[aria-disabled="true"] {
+.btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
+}
+/*
+ * Off, but still holding focus (AX274, AAA review of the deals board,
+ * 4 Nov 2026).
+ *
+ * A control that cannot be used now keeps its place in the tab order
+ * (aria-disabled), so it can be holding the keyboard focus. Fading the whole
+ * element would fade its focus ring too (to about 2.6:1). So it is never
+ * faded: a dashed border on the sand surface says "off" without colour alone,
+ * its words stay above 9:1 (--ink-soft on --sand), and the ring outside it
+ * keeps its full colour. The dashed edge (--line-off) is light, at 3:1 or
+ * more, so an off button never looks louder than the ones that work. Hover
+ * does not light it up.
+ */
+.btn[aria-disabled="true"],
+.btn[aria-disabled="true"]:hover {
+  opacity: 1;
+  cursor: not-allowed;
+  transform: none;
+  background-color: var(--sand);
+  color: var(--ink-soft);
+  border: 1px dashed var(--line-off);
+  box-shadow: none;
+}
+/* On the dark surfaces, the same signs in their own tokens: transparent, words in --on-dark-2, a dashed --on-dark-3 edge. */
+:is(.on-dark, .surface-night, .surface-daybreak, .surface-navy, .surface-signature) .btn[aria-disabled="true"],
+:is(.on-dark, .surface-night, .surface-daybreak, .surface-navy, .surface-signature) .btn[aria-disabled="true"]:hover {
+  background-color: transparent;
+  color: var(--on-dark-2);
+  border-color: var(--on-dark-3);
+}
+@media (forced-colors: active) {
+  /* The system's colour for an unavailable control, and the dashed border still says "off". */
+  .btn[aria-disabled="true"],
+  .btn[aria-disabled="true"]:hover {
+    color: GrayText;
+    border-style: dashed;
+    border-color: GrayText;
+  }
 }
 /*
  * 40px was below both platforms' guidance. 44 is Apple's number and the
@@ -750,7 +811,20 @@ html {
    than the room it has breaks onto a second line instead. Buttons that fit
    are unchanged, because text only wraps when it has to. */
 @media (max-width: 479px) {
-  .btn {
+  .btn:where(:not(.sp-body *)) {
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.25;
+    padding-block: 0.55rem;
+  }
+}
+/* Inside a store page's .sp-body the page's width decides instead, so the
+   studio's Phone preview draws it as a phone does: the window's line less the
+   page column's side padding (px-4, 16px a side), the same window width on
+   the live page (tests/preview-breakpoints.test.ts). */
+@container (max-width: 447px) {
+  :where(.sp-body) .btn {
     max-width: 100%;
     white-space: normal;
     text-align: center;
@@ -1364,6 +1438,24 @@ a.chip {
   outline: none;
   border-color: var(--violet);
   box-shadow: 0 0 0 4px rgba(73, 70, 166, 0.16);
+}
+/*
+ * A field that cannot be changed now (a change is being saved): the same
+ * dashed border and sand surface as an off button, never faded, so its words
+ * and its focus ring keep their contrast (AAA review of the deals board).
+ */
+.field[aria-disabled="true"] {
+  background-color: var(--sand);
+  border-style: dashed;
+  border-color: var(--line-off);
+  cursor: not-allowed;
+}
+@media (forced-colors: active) {
+  .field[aria-disabled="true"] {
+    color: GrayText;
+    border-style: dashed;
+    border-color: GrayText;
+  }
 }
 .field[aria-invalid="true"] {
   border-color: var(--danger);
@@ -2116,10 +2208,22 @@ a.chip {
   grid-template-columns: 1fr;
 }
 @media (min-width: 640px) {
-  .st-compare-2 {
+  .st-compare-2:where(:not(.sp-body *)) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .st-compare-3 {
+  .st-compare-3:where(:not(.sp-body *)) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+/* Inside a store page's .sp-body the page's width decides instead, so the
+   studio's Phone preview draws it as a phone does: the window's line less the
+   page column's side padding (px-4, 16px a side), the same window width on
+   the live page (tests/preview-breakpoints.test.ts). */
+@container (min-width: 608px) {
+  :where(.sp-body) .st-compare-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  :where(.sp-body) .st-compare-3 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -2971,7 +3075,18 @@ a.sp-product:focus-visible {
   border: 1px solid var(--st-line);
 }
 @media (min-width: 640px) {
-  .sp-bio {
+  .sp-bio:where(:not(.sp-body *)) {
+    flex-direction: row;
+    align-items: flex-start;
+    padding: 2rem;
+  }
+}
+/* Inside a store page's .sp-body the page's width decides instead, so the
+   studio's Phone preview draws it as a phone does: the window's line less the
+   page column's side padding (px-4, 16px a side), the same window width on
+   the live page (tests/preview-breakpoints.test.ts). */
+@container (min-width: 608px) {
+  :where(.sp-body) .sp-bio {
     flex-direction: row;
     align-items: flex-start;
     padding: 2rem;
@@ -3544,7 +3659,18 @@ a.rv-line:hover {
   border: 1px solid var(--st-line);
 }
 @media (min-width: 640px) {
-  .rv-summary {
+  .rv-summary:where(:not(.sp-body *)) {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 2.5rem;
+    align-items: center;
+  }
+}
+/* Inside a store page's .sp-body the page's width decides instead, so the
+   studio's Phone preview draws it as a phone does: the window's line less the
+   page column's side padding (px-4, 16px a side), the same window width on
+   the live page (tests/preview-breakpoints.test.ts). */
+@container (min-width: 608px) {
+  :where(.sp-body) .rv-summary {
     grid-template-columns: auto minmax(0, 1fr);
     gap: 2.5rem;
     align-items: center;

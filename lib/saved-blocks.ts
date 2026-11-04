@@ -9,6 +9,7 @@
  * holds:
  *
  *   - A hero or the reviews: a page has one of each, at their own places.
+ *   - A row of columns, whose parts may be pictures (see NOT_IN_SECTIONS).
  *   - A picture. A picture belongs to the one page that shows it and is
  *     deleted with it (lib/sales-page-store.ts), so a section keeps the block
  *     and the creator adds that page's pictures to it.
@@ -24,6 +25,7 @@ import {
   SAVED_BLOCK_ID,
   newBlockId,
   parsePage,
+  picturesOf,
   type BlockKind,
   type PageBlock,
   type SalesPage,
@@ -34,8 +36,15 @@ export const MAX_SECTION_BLOCKS = 8;
 export const MAX_SECTION_NAME = 60;
 export const MAX_SECTION_BYTES = 40_000;
 
-/** The kinds a section never holds. */
-export const NOT_IN_SECTIONS: readonly BlockKind[] = ["hero", "reviews"];
+/**
+ * The kinds a section never holds. A row of columns (375 [TB1]) may hold
+ * pictures among its parts, which a section never keeps (sectionBlocks), so
+ * it stays on the page it was made on.
+ */
+export const NOT_IN_SECTIONS: readonly BlockKind[] = ["hero", "reviews", "row"];
+
+/** Whether a block may go into a section: the one rule the studio offers by and every function here keeps. */
+export const savable = (block: Pick<PageBlock, "kind">): boolean => !NOT_IN_SECTIONS.includes(block.kind);
 
 export type SavedSection = {
   id: string;
@@ -58,10 +67,15 @@ const oneLine = (value: unknown, max: number) =>
         .slice(0, max)
     : "";
 
-/** Blocks as a section keeps them: fresh ids, no section mark, no pictures. Returns how many pictures were left out. */
+/**
+ * Blocks as a section keeps them: fresh ids, no section mark, no pictures, and
+ * no kind a section never holds (a row is left out, its pictures counted).
+ * Returns how many pictures were left out.
+ */
 export function sectionBlocks(blocks: readonly PageBlock[]): { blocks: PageBlock[]; picturesLeft: number } {
   let picturesLeft = 0;
-  const out = blocks.map((original) => {
+  for (const block of blocks) if (!savable(block)) picturesLeft += picturesOf(block).length;
+  const out = blocks.filter(savable).map((original) => {
     const block = { ...original, id: newBlockId() } as PageBlock;
     delete block.saved;
     if (block.kind === "pictures") {
@@ -91,7 +105,7 @@ export function readSectionInput(rawName: unknown, rawBlocks: unknown): { ok: tr
   if (rawBlocks.length > MAX_SECTION_BLOCKS) return { ok: false, error: "too_many" };
   for (const raw of rawBlocks) {
     const kind = raw && typeof raw === "object" ? (raw as { kind?: unknown }).kind : null;
-    if (typeof kind !== "string" || (NOT_IN_SECTIONS as readonly string[]).includes(kind)) return { ok: false, error: "kind" };
+    if (typeof kind !== "string" || !savable({ kind: kind as BlockKind })) return { ok: false, error: "kind" };
   }
   // Read by the page's own rules, with pictures out first so none is counted.
   const stripped = rawBlocks.map((raw) => {
@@ -119,20 +133,24 @@ export function parseSection(raw: unknown): SavedSection | null {
   const id = typeof value.id === "string" && SAVED_BLOCK_ID.test(value.id) ? value.id : "";
   const name = oneLine(value.name, MAX_SECTION_NAME);
   if (!id || !name || !Array.isArray(value.blocks)) return null;
-  const blocks = parsePage({ blocks: value.blocks.slice(0, MAX_SECTION_BLOCKS) }).blocks.filter((block) => !NOT_IN_SECTIONS.includes(block.kind));
+  const blocks = parsePage({ blocks: value.blocks.slice(0, MAX_SECTION_BLOCKS) }).blocks.filter(savable);
   if (!blocks.length) return null;
   const updatedAt = typeof value.updatedAt === "number" && Number.isInteger(value.updatedAt) && value.updatedAt > 0 ? value.updatedAt : 0;
   return { id, name, blocks: sectionBlocks(blocks).blocks, updatedAt };
 }
 
-/** Whether a page may hold every block of a section: on a store's own page its kinds, on a product's page anything but a form. */
+/**
+ * Whether a page may hold every block of a section: on a store's own page its
+ * kinds, on a product's page anything but a form; never one holding a kind a
+ * section never holds, whatever the page allows.
+ */
 export function fitsPage(section: Pick<SavedSection, "blocks">, allowed: readonly BlockKind[]): boolean {
-  return section.blocks.every((block) => allowed.includes(block.kind));
+  return section.blocks.every((block) => savable(block) && allowed.includes(block.kind));
 }
 
-/** A section's blocks as they go onto a page: fresh ids, each marked as the section's. */
+/** A section's blocks as they go onto a page: fresh ids, each marked as the section's; a kind a section never holds is left out. */
 export function blocksForPage(section: Pick<SavedSection, "id" | "blocks">): PageBlock[] {
-  return section.blocks.map((block) => ({ ...block, id: newBlockId(), saved: section.id }) as PageBlock);
+  return section.blocks.filter(savable).map((block) => ({ ...block, id: newBlockId(), saved: section.id }) as PageBlock);
 }
 
 /** The ids of the sections a page's blocks came from. */
@@ -147,7 +165,8 @@ export function updateProblem(page: SalesPage, sectionId: string): "pictures" | 
   const mine = page.blocks.filter((block) => block.saved === sectionId);
   if (!mine.length) return "gone";
   if (page.test || page.variant) return "test";
-  if (mine.some((block) => (block.kind === "pictures" && block.items.length > 0) || (block.kind === "feature" && block.picture))) return "pictures";
+  // A block's own pictures by the page's reading (picturesOf), a row's among them.
+  if (mine.some((block) => picturesOf(block).length > 0)) return "pictures";
   return null;
 }
 

@@ -782,10 +782,10 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // for FEED_REFUNDS_SECONDS after each making, which a feed that is read makes at least every CALENDAR_REFRESH_SECONDS.
   // Never lowered: a meeting further ahead keeps the score its booking gave (lib/meet-links.ts).
   if (owner.callsId) {
-    const member = `${owner.callsId}|${owner.handle}`;
+    const storeEntry = `${owner.callsId}|${owner.handle}`;
     const until = now + FEED_REFUNDS_SECONDS * 1000;
-    await redisPipeline([["ZSCORE", MEET_STORES, member]])
-      .then(([score]) => (Number(score) >= until ? undefined : redisPipeline([["ZADD", MEET_STORES, until, member]])))
+    await redisPipeline([["ZSCORE", MEET_STORES, storeEntry]])
+      .then(([score]) => (Number(score) >= until ? undefined : redisPipeline([["ZADD", MEET_STORES, until, storeEntry]])))
       .catch(() => {});
   }
   return { state: "made", ics };

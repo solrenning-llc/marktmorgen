@@ -82,7 +82,6 @@ import { forgetWelcomePerson } from "@/lib/welcome-offer-send";
 import { forgetWinbackPerson } from "@/lib/winback-send";
 import { forgetRecoveryPerson } from "@/lib/checkout-recovery";
 import { forgetAssistReminderPerson } from "@/lib/assistant-reminder";
-import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetInvitesPerson } from "@/lib/move-members";
 import { forgetInboxPerson } from "@/lib/inbox";
 import { forgetDiscordPerson } from "@/lib/discord-access";
@@ -159,7 +158,6 @@ export const ERASERS: Eraser[] = [
   { module: "lib/winback-send.ts", run: (s) => forgetWinbackPerson(s.statsId, s.productIds, s.email) },
   { module: "lib/checkout-recovery.ts", run: (s) => forgetRecoveryPerson(s.statsId, s.productIds, s.email) },
   { module: "lib/assistant-reminder.ts", run: (s) => forgetAssistReminderPerson(s.statsId, s.email) },
-  { module: "lib/store-readings.ts", run: (s) => forgetReadingsPerson(s.statsId) },
   { module: "lib/move-members.ts", run: (s) => forgetInvitesPerson(s.store, s.productIds, s.email) },
   { module: "lib/inbox.ts", run: (s) => forgetInboxPerson(s.statsId, s.email) },
   {

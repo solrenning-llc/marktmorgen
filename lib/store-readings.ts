@@ -226,7 +226,12 @@ export async function forgetStoreReadings(statsId: string | null | undefined): P
   await redisPipeline([["DEL", ...READING_KINDS.map((kind) => copyKey(kind, statsId))]]);
 }
 
-/** A person's erasure: the store's kept sales reading goes; returns how many copies went. */
+/**
+ * A person's erasure: the store's kept sales reading goes; returns how many
+ * copies went. Not yet one of lib/person-erasure.ts's steps: each step needs
+ * its line in lib/person-data.ts, another agent's file today (inbox C4-33,
+ * light d); until then the copy names a buyer at most READING_KEEP_SECONDS.
+ */
 export async function forgetReadingsPerson(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId)]]);

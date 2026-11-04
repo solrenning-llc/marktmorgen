@@ -13,7 +13,8 @@ import { startUpdate } from "@/lib/product-updates";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { takeAllowance } from "@/lib/store-allowance";
-import { STORE_READINGS_PER_DAY } from "@/lib/store-readings";
+import { UPDATE_SEARCHES_PER_DAY } from "@/lib/store-readings";
+import { readFileSync } from "node:fs";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -43,22 +44,25 @@ async function main(): Promise<void> {
   const load = async () => (await storeForEmail(OWNER))!;
   const nobody = (await readListing(await load(), made.product.id))!;
 
-  part("Every reading of the sales is paid for before it starts, from the store's own readings");
+  part("Every search of the sales is paid for before it starts, from a count of its own, never the studio's readings (inbox C4-33 (4))");
   const left = async () => {
     const taken = await takeAllowance(await load(), "studio", 1);
     return taken.ok ? taken.left : -1;
   };
-  const dayKey = `nl:reading:day:${(await load()).statsId}:${new Date().toISOString().slice(0, 10)}`;
+  const today = new Date().toISOString().slice(0, 10);
+  const dayKey = `nl:reading:update:${(await load()).statsId}:${today}`;
+  const studioKey = `nl:reading:day:${(await load()).statsId}:${today}`;
   const start = await left();
   const readsBefore = stripeReads;
-  is("a reading that finds nobody takes one of the day's readings, and no studio request", [await startUpdate(await load(), nobody, "").then((r) => (r.ok ? "started" : r.reason)), Number(redis.run(["GET", dayKey])), start - (await left())], ["none", 1, 1]);
+  is("a search that finds nobody takes one of the day's searches, none of the studio's readings, and no studio request", [await startUpdate(await load(), nobody, "").then((r) => (r.ok ? "started" : r.reason)), Number(redis.run(["GET", dayKey])), redis.run(["GET", studioKey]), start - (await left())], ["none", 1, null, 1]);
   is("and reads Stripe", stripeReads > readsBefore, true);
-  // The day's readings used.
-  redis.run(["SET", dayKey, String(STORE_READINGS_PER_DAY), "EX", 86_400]);
+  // The day's searches used.
+  redis.run(["SET", dayKey, String(UPDATE_SEARCHES_PER_DAY), "EX", 86_400]);
   const readsSpent = stripeReads;
   const studioSpent = await left();
   const refused = await startUpdate(await load(), nobody, "");
-  is("past the day's readings it is refused, in the store's words", [refused.ok ? "started" : refused.reason, !refused.ok && refused.reason === "used" && refused.message.includes("today")], ["used", true]);
+  is("past the day's searches it is refused, in the store's words, with when they come back", [refused.ok ? "started" : refused.reason, !refused.ok && refused.reason === "used" && refused.message.includes("today") && refused.message.includes("00:00 UTC")], ["used", true]);
+  is("the box says that time on the creator's own clock too", readFileSync("components/product-update-box.tsx", "utf8").includes('data.message.replace("00:00 UTC", utcAndLocal(nextUtcMidnight(Date.now()), browserZone()))'), true);
   is("and reads nothing, and takes no studio request", [stripeReads - readsSpent, studioSpent - (await left())], [0, 1]);
 
   done();

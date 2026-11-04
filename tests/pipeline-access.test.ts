@@ -75,6 +75,7 @@ async function main(): Promise<void> {
   is("on none, the first pipeline's old stage route is refused too", (await post("sam", { action: "stages", stages: DEFAULT_STAGES })).status, 403);
   is("while the pipeline they may still change stays theirs", (await deal("sam", "wnew01", workshopDeal)).status, 200);
   is("removing a pipeline into one they cannot change is refused", (await post("sam", { action: "unpipeline", id: "wkshp1", moveTo: "lead00" })).status, 403);
+  is("nor are a removed stage's deals sent into one they cannot change", (await post("sam", { action: "pipeline", pipeline: { ...workshops, stages: workshops.stages.filter((st) => st.id !== "wnew01") }, moves: { wnew01: "lead00" } })).status, 403);
 
   const [key] = (await redis.keys()).filter((k: string) => k.startsWith("nl:crm:pacc:"));
   await redisPipeline([["HSET", key, "sam@example.com", "{not json"]]);

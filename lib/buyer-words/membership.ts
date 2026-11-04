@@ -229,6 +229,9 @@ const en = {
   membershipLabel: "Membership",
   endedBody: (title: string) =>
     `Your membership for ${title} is no longer running, so what it gave you access to is closed now. Renew it and everything opens again right away.`,
+  /** The same without the promise that renewing opens it again: said when the price the offer named is gone. */
+  endedClosed: (title: string) =>
+    `Your membership for ${title} is no longer running, so what it gave you access to is closed now.`,
   endedGone: (store: string) => `This membership is no longer running, and ${store} no longer lists it.`,
   comeBackOffer: "Your come-back offer",
   /** "25% off your first payment", "25% off your first 3 payments". */
@@ -582,6 +585,8 @@ const es: MembershipWords = {
   membershipLabel: "Membresía",
   endedBody: (title) =>
     `Tu membresía de ${title} ya no está activa, así que aquello a lo que te daba acceso está cerrado ahora. Renuévala y todo se vuelve a abrir al instante.`,
+  endedClosed: (title) =>
+    `Tu membresía de ${title} ya no está activa, así que aquello a lo que te daba acceso está cerrado ahora.`,
   endedGone: (store) => `Esta membresía ya no está activa, y ${store} ya no la ofrece.`,
   comeBackOffer: "Tu oferta para volver",
   offerWords: (percent, months) =>
@@ -930,6 +935,8 @@ const fr: MembershipWords = {
   membershipLabel: "Abonnement",
   endedBody: (title) =>
     `Votre abonnement à ${title} n'est plus actif, donc ce à quoi il vous donnait accès est désormais fermé. Renouvelez-le et tout se rouvre immédiatement.`,
+  endedClosed: (title) =>
+    `Votre abonnement à ${title} n'est plus actif, donc ce à quoi il vous donnait accès est désormais fermé.`,
   endedGone: (store) => `Cet abonnement n'est plus actif, et ${store} ne le propose plus.`,
   comeBackOffer: "Votre offre de retour",
   offerWords: (percent, months) =>
@@ -1285,6 +1292,8 @@ const de: MembershipWords = {
   membershipLabel: "Mitgliedschaft",
   endedBody: (title) =>
     `Ihre Mitgliedschaft für ${title} läuft nicht mehr, daher ist das, wozu sie Ihnen Zugang gab, jetzt geschlossen. Erneuern Sie sie, und alles öffnet sich sofort wieder.`,
+  endedClosed: (title) =>
+    `Ihre Mitgliedschaft für ${title} läuft nicht mehr, daher ist das, wozu sie Ihnen Zugang gab, jetzt geschlossen.`,
   endedGone: (store) => `Diese Mitgliedschaft läuft nicht mehr, und ${store} bietet sie nicht mehr an.`,
   comeBackOffer: "Ihr Rückkehrangebot",
   offerWords: (percent, months) =>
@@ -1637,6 +1646,8 @@ const it: MembershipWords = {
   membershipLabel: "Abbonamento",
   endedBody: (title) =>
     `Il tuo abbonamento a ${title} non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso. Rinnovalo e tutto si riapre subito.`,
+  endedClosed: (title) =>
+    `Il tuo abbonamento a ${title} non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso.`,
   endedGone: (store) => `Questo abbonamento non è più attivo, e ${store} non lo offre più.`,
   comeBackOffer: "La tua offerta per tornare",
   offerWords: (percent, months) =>
@@ -1982,6 +1993,8 @@ const nl: MembershipWords = {
   membershipLabel: "Lidmaatschap",
   endedBody: (title) =>
     `Je lidmaatschap voor ${title} loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten. Verleng het en alles gaat meteen weer open.`,
+  endedClosed: (title) =>
+    `Je lidmaatschap voor ${title} loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten.`,
   endedGone: (store) => `Dit lidmaatschap loopt niet meer, en ${store} biedt het niet meer aan.`,
   comeBackOffer: "Je aanbod om terug te komen",
   offerWords: (percent, months) =>
@@ -2325,6 +2338,8 @@ const pt: MembershipWords = {
   membershipLabel: "Subscrição",
   endedBody: (title) =>
     `A sua subscrição de ${title} já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado. Renove-a e tudo volta a abrir de imediato.`,
+  endedClosed: (title) =>
+    `A sua subscrição de ${title} já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado.`,
   endedGone: (store) => `Esta subscrição já não está ativa, e ${store} já não a disponibiliza.`,
   comeBackOffer: "A sua oferta de regresso",
   offerWords: (percent, months) =>

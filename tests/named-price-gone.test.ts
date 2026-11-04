@@ -159,6 +159,7 @@ async function main(): Promise<void> {
     const renewed = await page(RenewPage, "pricegone", id, { back: basicOffer });
     is(`${language}: the come-back page says the price is no longer offered, with no offer button`, [renewed.includes(escaped(w.offerNotices.price)), renewed.includes(escaped(w.comeBackWith))], [true, false]);
     is(`${language}: with a link to the product's page that says what it is for`, renewed.includes(escaped(w.seePrices("The Inner Circle"))), true);
+    is(`${language}: and no promise that renewing here opens it again`, [renewed.includes(escaped(w.endedClosed("The Inner Circle"))), renewed.includes(escaped(w.endedBody("The Inner Circle")))], [true, false]);
   }
   part("A draft");
   await setLanguage(OWNER, "en");

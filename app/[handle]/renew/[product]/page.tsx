@@ -104,7 +104,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
             {m.endedTitle}
           </h1>
           <p className="st-muted mt-4 text-lg leading-relaxed">
-            {product ? m.endedBody(product.title) : m.endedGone(store.name)}
+            {product ? (priceGone ? m.endedClosed(product.title) : m.endedBody(product.title)) : m.endedGone(store.name)}
           </p>
 
           {back && (!offer || said || priceGone) ? (

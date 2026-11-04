@@ -50,3 +50,19 @@ export function browserFrames(): Frames {
     cancel: (handle) => window.cancelAnimationFrame(handle),
   };
 }
+
+/** What groupEntry reads of a field: a radio button's type, group name and whether it is checked. */
+export type GroupMember = { type?: string; name?: string; checked?: boolean };
+
+/**
+ * Where the focus goes when it is sent to `first`: a radio button that is not
+ * checked hands it to the checked one of its group (`checkedOf`), as a
+ * keyboard entering the group would (roving focus). Seen in a browser: after
+ * a Columns block was added, the focus was on "One column" while "Two columns"
+ * was checked, so a Space changed the new row. Anything else, a lone radio
+ * button or a group with none checked keeps `first`.
+ */
+export function groupEntry<T extends GroupMember>(first: T, checkedOf: (name: string) => T | null | undefined): T {
+  if (first.type !== "radio" || first.checked || !first.name) return first;
+  return checkedOf(first.name) ?? first;
+}

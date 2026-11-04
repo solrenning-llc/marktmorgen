@@ -24,7 +24,7 @@ import { PageCoach } from "@/components/page-coach";
 import { PageStylePicker } from "@/components/page-style-picker";
 import { BlockPicker } from "@/components/block-picker";
 import { addedSaying, chosenSaying, insertAt, insertionPlaces, offeredKinds, placeWords } from "@/lib/block-insert";
-import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
+import { browserFrames, focusWhenDrawn, groupEntry } from "@/lib/focus-when-drawn";
 import { SharePanel } from "@/components/share-panel";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { BlockRewrite } from "@/components/block-rewrite";
@@ -120,6 +120,7 @@ import { blockWords } from "@/lib/buyer-words/blocks";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { PreviewFrame, ScreenSwitch, usePreviewScreen } from "@/components/preview-frame";
+import { SidePanelSwitch, useSidePanel } from "@/components/side-panel-switch";
 import { COMPUTER_BODY_MAX, type PreviewScreen, screenFor } from "@/lib/preview-screen";
 import {
   ROW_EDIT_WHY,
@@ -376,6 +377,8 @@ export function PageEditor({
   // Whether the screen is wide enough to draw the page beside its blocks; only
   // then is the second drawing made at all, so a narrow screen holds one.
   const [sideBySide, setSideBySide] = useState(false);
+  // There, the side menu of blocks to add and the page share one column, switched at its top (lib/side-panel.ts).
+  const [sidePanel, chooseSidePanel, showSidePanel] = useSidePanel();
   const beside = useRef<HTMLElement>(null);
   // The block being edited, outlined in the page beside it.
   useEffect(() => {
@@ -598,10 +601,21 @@ export function PageEditor({
       const panel = document.getElementById(`panel-${id}`);
       if (!panel) return null;
       const first = panel.querySelector<HTMLElement>("input:not([disabled]):not([type=hidden]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])");
+      // A group of radio buttons is entered at the one checked (a row's "Two columns"), never at one a Space would check.
+      if (first instanceof HTMLInputElement) {
+        return groupEntry(first, (name) => panel.querySelector<HTMLInputElement>(`input[type=radio][name="${CSS.escape(name)}"]:checked:not([disabled])`));
+      }
       return first ?? document.querySelector<HTMLElement>(`#row-${CSS.escape(id)} button[aria-expanded]`);
     }, browserFrames());
   }, [open, drafts]);
-  useEffect(() => () => stopFocusNew.current?.(), []);
+  const stopFocusMenu = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      stopFocusNew.current?.();
+      stopFocusMenu.current?.();
+    },
+    [],
+  );
 
   /** "Add here" at a place: the card chosen goes there, or the place waits for a card (in the side menu, or the gallery opened here). */
   function addHere(at: number) {
@@ -611,8 +625,11 @@ export function PageEditor({
     }
     setPicking(at);
     if (sideBySide) {
+      // The column beside the blocks may be showing the page: it shows the menu instead, and its search takes the focus once drawn.
+      showSidePanel("add");
       setSaid(`Choose a block to add ${placeWords(at, drafts.length)}.`);
-      document.getElementById("menu-block-find")?.focus();
+      stopFocusMenu.current?.();
+      stopFocusMenu.current = focusWhenDrawn(() => document.getElementById("menu-block-find"), browserFrames());
     }
   }
 
@@ -1978,9 +1995,10 @@ export function PageEditor({
           {pagePreview(fullScreen)}
         </div>
       ) : (
-        // On a wide screen the page is drawn beside the blocks as they are edited.
-        // Between them, the side menu of blocks to add (375 [TB1]); on a narrow screen the gallery opens where a place is pressed.
-        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_15rem_24.5rem] items-start gap-5" : ""}>
+        // On a wide screen the page is drawn beside the blocks as they are edited, in one column it shares with
+        // the side menu of blocks to add, switched at its top (375 [TB1]; two columns of their own left the
+        // blocks 182 pixels at 1280, lib/side-panel.ts); on a narrow screen the gallery opens where a place is pressed.
+        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_24.5rem] items-start gap-5" : ""}>
         <div className="min-w-0">
           {drafts.length === 0 ? (
             <div className="mt-6 rounded-2xl bg-paper p-5 ring-1 ring-line sm:p-6">
@@ -2485,7 +2503,10 @@ export function PageEditor({
           </details>
         </div>
         {sideBySide ? (
-        <aside aria-label="Blocks to add" className="sticky top-24 mt-6 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl">
+        <div className="sticky top-24 mt-6 flex max-h-[calc(100vh-7rem)] flex-col gap-3">
+        <SidePanelSwitch value={sidePanel} onChange={chooseSidePanel} controls="side-panel" />
+        {sidePanel === "add" ? (
+        <aside id="side-panel" aria-label="Blocks to add" className="min-h-0 overflow-y-auto rounded-2xl">
           <BlockPicker
             layout="menu"
             icons={KIND_ICONS}
@@ -2515,12 +2536,12 @@ export function PageEditor({
             }
           />
         </aside>
-        ) : null}
-        {sideBySide ? (
+        ) : (
         <aside
+          id="side-panel"
           ref={beside}
           aria-label="The page as visitors see it"
-          className="sp-beside sticky top-24 mt-6 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl [scrollbar-gutter:stable]"
+          className="sp-beside min-h-0 overflow-y-auto rounded-2xl [scrollbar-gutter:stable]"
           onClick={(event) => {
             // A press on a part of the page opens its block for editing, beside it.
             const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-block]") : null;
@@ -2539,6 +2560,8 @@ export function PageEditor({
           </p>
           {pagePreview(screen)}
         </aside>
+        )}
+        </div>
         ) : null}
         </div>
       )}

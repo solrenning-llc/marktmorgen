@@ -122,7 +122,21 @@ async function main(): Promise<void> {
   is("and from the side menu", editor.includes("add(kind, picking, true);") && editor.includes("add(armed, at, true);"), true);
   is("the focus waits for the panel to be drawn, frame by frame, instead of being dropped", editor.includes("stopFocusNew.current = focusWhenDrawn(() => {") && editor.includes("if (!panel) return null;"), true);
   is("the status region says where it went", editor.includes("setSaid(addedSaying(kindLabel(kind), result.at));") && editor.includes('<p role="status" aria-atomic="true" className="sr-only">\n        {said}'), true);
-  is("the side menu stands only beside the page on a wide screen", editor.includes('{sideBySide ? (\n        <aside aria-label="Blocks to add"'), true);
+  is(
+    "the side menu stands only on a wide screen, in the column it shares with the page (tests/side-panel.test.ts)",
+    editor.includes('{sideBySide ? (\n        <div className="sticky top-24') && editor.includes('{sidePanel === "add" ? (\n        <aside id="side-panel" aria-label="Blocks to add"'),
+    true,
+  );
+  is(
+    "an Add here pressed while the page is shown there shows the menu, and its search takes the focus once drawn",
+    editor.includes('showSidePanel("add");') && editor.includes('stopFocusMenu.current = focusWhenDrawn(() => document.getElementById("menu-block-find"), browserFrames());') && !editor.includes('document.getElementById("menu-block-find")?.focus();'),
+    true,
+  );
+  is(
+    "a new block's radio buttons are entered at the one checked, never at one a Space would check (a new row: Two columns)",
+    editor.includes("return groupEntry(first, (name) => panel.querySelector<HTMLInputElement>(`input[type=radio][name=\"${CSS.escape(name)}\"]:checked:not([disabled])`));"),
+    true,
+  );
   is("the side menu is the same picker", editor.includes('layout="menu"'), true);
   is("saved sections lead the side menu, and stay under the blocks on a narrow screen", editor.includes("{savedSections}") && editor.includes("{sideBySide ? null : savedSections}"), true);
   is("closing goes back to the place it was opened from", editor.includes("document.querySelector<HTMLElement>(`[data-place=\"${at}\"]`)?.focus();"), true);

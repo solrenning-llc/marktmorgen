@@ -8,7 +8,7 @@ import { readPipelineAccess } from "@/lib/pipeline-access";
 import { dealEnteredStage } from "@/lib/deal-stage-trigger";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dropDeal, readDeal, readFields, readPipelines, readStages, setValue, writeDeal, writeFields, writeStages } from "@/lib/crm";
+import { CrmDealConflict, CrmSchemaConflict, CrmValueWriteUnconfirmed, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, savePipelineChange, CrmDealReadUnavailable, CrmDealWriteUnconfirmed, dropDeal, readDeal, readDealRecord, readFields, readPipelines, readStages, setValue, writeDeal, writeFields, writeStages } from "@/lib/crm";
 
 /** Ten fields of ten choices, a pipeline with its stages and moves, or a deal with its note, as JSON. */
 const MAX_BODY_BYTES = 20_000;
@@ -72,6 +72,8 @@ export async function POST(request: NextRequest) {
       if (restricted) {
         const pipelines = await readPipelines(statsId);
         const sent = body.pipeline && typeof body.pipeline === "object" ? (body.pipeline as { id?: unknown }).id : undefined;
+        // Removing one that is not there is refused as access, as one they may not change is: the answer never tells which ids exist.
+        if (removing && !pipelines.some((p) => p.id === id)) return noAccess();
         const changing = removing ? id : typeof sent === "string" && pipelines.some((p) => p.id === sent) ? sent : null;
         // A new pipeline is anyone's to add; one that exists, and where a removed one's deals go, need edit.
         if (changing !== null && !mayEdit(changing)) return noAccess();
@@ -84,17 +86,21 @@ export async function POST(request: NextRequest) {
         const sentStages = body.pipeline && typeof body.pipeline === "object" && Array.isArray((body.pipeline as { stages?: unknown }).stages) ? ((body.pipeline as { stages: { id?: unknown }[] }).stages.map((st) => st?.id).filter((v): v is string => typeof v === "string")) : [];
         if (targets.some((stage) => !sentStages.includes(stage) && !mayEdit(pipelineOfStage(pipelines, stage)))) return noAccess();
       }
-      const result = await savePipelineChange(statsId, removing ? { remove: id } : { pipeline: body.pipeline }, moves, pipelineLimit(store), store, (pipelineId) => mayEdit(pipelineId));
+      const result = await savePipelineChange(statsId, removing ? { remove: id } : { pipeline: body.pipeline }, moves, pipelineLimit(store), store, (pipelineId) => mayEdit(pipelineId), (pipelineId) => accessOf(guarded.role, access, pipelineId) !== "none");
       // Someone restricted gets back only the pipelines they may see, never the names and stages of the others.
       const shown = restricted ? visiblePipelines(result.ok ? result.pipelines : [], guarded.role, access).map((p) => ({ id: p.id, name: p.name, stages: p.stages })) : result.ok ? result.pipelines : [];
+      if (!result.ok && result.error === "unknown" && restricted) return noAccess();
       return result.ok ? Response.json({ ok: true, pipelines: shown, moved: Object.keys(result.moves).length }) : refuse(result.error, result.error === "unknown" ? 404 : 400);
     }
     const stages = await readStages(statsId);
     if (body.action === "deal") {
       const raw = body.deal && typeof body.deal === "object" ? (body.deal as Record<string, unknown>) : {};
       const asked = typeof raw.id === "string" && DEAL_ID.test(raw.id) ? raw.id : "";
-      const existing = asked ? await readDeal(statsId, asked, stages) : null;
-      if (asked && !existing) return refuse("unknown", 404);
+      // The record as read here: the change is written only over it, never over one changed since (crm_conflict).
+      const read = asked ? await readDealRecord(statsId, asked, stages) : null;
+      const existing = read?.deal ?? null;
+      // A deal that is not there is, for someone whose access is limited, refused as one they may not change.
+      if (asked && !existing) return restricted ? noAccess() : refuse("unknown", 404);
       if (restricted) {
         const pipelines = await readPipelines(statsId);
         const target = typeof raw.stage === "string" ? raw.stage : (existing?.stage ?? "");
@@ -117,7 +123,7 @@ export async function POST(request: NextRequest) {
       const now = Math.floor(Date.now() / 1000);
       const deal = parseDeal({ ...existing, ...raw, ...follow.value, formResponseRef: existing?.formResponseRef, id: existing?.id ?? newCrmId(10), createdAt: existing?.createdAt ?? now, updatedAt: now }, stages);
       if (!deal) return refuse(typeof raw.title === "string" && raw.title.trim() ? "stage" : "title");
-      if (!(await writeDeal(statsId, deal, store))) return refuse("full");
+      if (!(await writeDeal(statsId, deal, store, read?.raw))) return refuse("full");
       // Saved first: the workflow its stage starts never holds up, or undoes, the deal itself.
       const workflows = await dealEnteredStage(store, deal, existing);
       return Response.json({ ok: true, deal, workflows });
@@ -139,6 +145,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof CrmSchemaReadUnavailable) return refuse("crm_schema_read_unavailable", 503);
     if (error instanceof CrmSchemaWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
     if (error instanceof CrmSchemaConflict) return refuse("crm_conflict", 409);
+    if (error instanceof CrmDealConflict) return refuse("deal_conflict", 409);
     if (error instanceof CrmDealReadUnavailable) return refuse("crm_deal_read_unavailable", 503);
     if (error instanceof CrmDealWriteUnconfirmed) return refuse("crm_write_unconfirmed", 502);
     console.error("saving a store's fields or deals failed", error);

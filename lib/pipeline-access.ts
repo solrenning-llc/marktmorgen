@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { type AccessMap, type PipelineAccess, parseAccessMap } from "@/lib/pipeline-access-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { DataRoomError, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
 const accessKey = (statsId: string) => `nl:crm:pacc:${statsId}`;
@@ -121,15 +121,25 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
     if (deleted === 1) await giveData(store, [{ slot: ACCESS_SLOT, bytes: weight(old) }]);
     return;
   }
-  // A record moved, not a new one: it is counted as written (noteData never refuses), so a full data room
-  // never leaves a teammate off the store when they change their sign-in. The old field gives its room back
-  // when it is forgotten. Only a write that cannot be confirmed throws. A field the new address already had (read
-  // under the team's lock, as every write to it is) is written over, so only the difference is counted.
+  // A record moved, not a new one. Its room is taken BEFORE it is written, so a write that lands is never left
+  // uncounted; a full data room still never leaves a teammate off the store when they change their sign-in (it
+  // is then counted as it is, noteData never refusing), but a room that cannot be counted refuses the copy, and
+  // the caller keeps the membership on the old address. A field the new address already had (read under the
+  // team's lock, as every write to it is) is written over, so only the difference is counted. A write that
+  // cannot be confirmed keeps the room taken (too much counted, never too little) and throws; room is given
+  // back only once a smaller record is confirmed written.
+  const grown = weight(String(raw)) - weight(old);
+  if (grown > 0) {
+    try {
+      await needData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
+    } catch (error) {
+      if (!(error instanceof DataRoomError)) throw error;
+      await noteData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
+    }
+  }
   const [written] = await redisPipeline([["HSET", accessKey(statsId), after, String(raw)]]);
   if (written !== 0 && written !== 1) throw new Error("copying a teammate's pipeline access could not be confirmed");
-  const grown = weight(String(raw)) - weight(old);
-  if (grown > 0) await noteData(store, [{ slot: ACCESS_SLOT, bytes: grown }]);
-  else if (grown < 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: -grown }]);
+  if (grown < 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: -grown }]);
 }
 
 /** A teammate who left: their restrictions go with them, and the room they took is given back. */

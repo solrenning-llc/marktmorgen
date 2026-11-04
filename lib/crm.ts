@@ -54,6 +54,10 @@ export class CrmSchemaReadUnavailable extends Error {
 export class CrmSchemaWriteUnconfirmed extends Error {
   constructor() { super("CRM configuration change could not be confirmed"); this.name = "CrmSchemaWriteUnconfirmed"; }
 }
+/** Somebody else changed (or removed) the deal between this change's read and its write: nothing was written. */
+export class CrmDealConflict extends Error {
+  constructor() { super("CRM deal changed meanwhile"); this.name = "CrmDealConflict"; }
+}
 /** Somebody else changed the pipelines between this change's read and its write: nothing was written. */
 export class CrmSchemaConflict extends Error {
   constructor() { super("CRM configuration changed meanwhile"); this.name = "CrmSchemaConflict"; }
@@ -155,12 +159,18 @@ export async function allValues(statsId: string | null, fields: CrmField[]): Pro
 export async function readPipelines(statsId: string | null): Promise<Pipeline[]> {
   if (!statsId || !isRedisConfigured()) return [firstPipeline(DEFAULT_STAGES)];
   const [pipes, legacy] = await redisPipeline([["GET", pipesKey(statsId)], ["GET", stagesKey(statsId)]]);
-  return parsePipelines(json(pipes)) ?? [firstPipeline(parseStages(json(legacy)) ?? DEFAULT_STAGES)];
+  return parsePipelines(json(pipes), true) ?? [firstPipeline(parseStages(json(legacy)) ?? DEFAULT_STAGES)];
 }
 
 /** Every stage of every pipeline, in order: what a deal's stage is read against. */
 export async function readStages(statsId: string | null): Promise<Stage[]> {
   return allStages(await readPipelines(statsId));
+}
+
+/** The pipelines as saved, for a change made from them (639 [GL7](7), a teammate's access): CrmSchemaReadUnavailable when the record cannot be read, never the defaults in its place. */
+export async function readPipelinesExact(statsId: string | null): Promise<Pipeline[]> {
+  if (!statsId || !isRedisConfigured()) return [firstPipeline(DEFAULT_STAGES)];
+  return (await pipelineSnapshot(statsId)).pipelines;
 }
 
 /** The pipelines exactly as saved, for a change: an unreadable or malformed record never stands in for the defaults. */
@@ -171,7 +181,7 @@ async function pipelineSnapshot(statsId: string): Promise<{ raw: string; pipelin
     const [pipes, legacy] = response;
     if (pipes !== null) {
       if (typeof pipes !== "string") throw new CrmSchemaReadUnavailable();
-      const pipelines = parsePipelines(json(pipes));
+      const pipelines = parsePipelines(json(pipes), true);
       if (!pipelines) throw new CrmSchemaReadUnavailable();
       return { raw: pipes, pipelines };
     }
@@ -245,12 +255,12 @@ async function writePipelines(statsId: string, snapshotRaw: string, pipelines: P
  * `moves` says. A refusal writes nothing. Moves made here start no
  * workflow: a stage removed is not a deal entering a stage.
  */
-export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore, mayEdit: (pipelineId: string) => boolean = () => true): Promise<PipelineChange> {
+export async function savePipelineChange(statsId: string, change: { pipeline?: unknown; remove?: string }, moves: unknown, limit: number, room: DataStore, mayEdit: (pipelineId: string) => boolean = () => true, sees: (pipelineId: string) => boolean = () => true): Promise<PipelineChange> {
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
   const counts = new Map<string, number>();
   for (const d of deals) counts.set(String(d.record.stage), (counts.get(String(d.record.stage)) ?? 0) + 1);
-  const result = changePipeline(current, change, moves, counts, limit);
+  const result = changePipeline(current, change, moves, counts, limit, sees);
   if (!result.ok) return result;
   const kept = new Set(allStages(result.pipelines).map((s) => s.id));
   const fallback = result.pipelines[0].stages.find((s) => s.kind === "open")!.id;
@@ -287,7 +297,7 @@ export async function writeStages(statsId: string, stages: Stage[], room: DataSt
   const deals = await dealSnapshot(statsId);
   const { raw, pipelines: current } = await pipelineSnapshot(statsId);
   if (firstId !== undefined && current[0].id !== firstId) throw new CrmSchemaConflict();
-  const next = parsePipelines([{ ...current[0], stages }, ...current.slice(1)]);
+  const next = parsePipelines([{ ...current[0], stages }, ...current.slice(1)], true);
   if (!next) throw new CrmSchemaReadUnavailable();
   const kept = new Set(allStages(next).map(s => s.id));
   // Preserve every saved field; moving stages must not normalize away unrelated data.
@@ -319,7 +329,7 @@ export async function readOpportunityReview(statsId: string | null): Promise<Opp
     let pipelines: Pipeline[] | null = null;
     if (replies[2] !== null) {
       if (typeof replies[2] !== "string") return unavailable;
-      pipelines = parsePipelines(json(replies[2]));
+      pipelines = parsePipelines(json(replies[2]), true);
       if (!pipelines) return unavailable;
       stages = allStages(pipelines);
     } else if (replies[0] === null) stages = DEFAULT_STAGES;
@@ -364,7 +374,8 @@ export const dealBytes = (deal: Deal) => dataBytes([deal.id, JSON.stringify(deal
  * one is new. Its room in the store's data room is taken first: DataRoomError
  * when it does not fit, and nothing is written.
  */
-export async function writeDeal(statsId: string, deal: Deal, room: DataStore): Promise<boolean> {
+export async function writeDeal(statsId: string, deal: Deal, room: DataStore, expected?: string): Promise<boolean> {
+  if (expected !== undefined) return replaceDeal(statsId, deal, room, expected);
   let preflight: unknown;
   try {
     preflight = await redisPipeline([["HEXISTS", dealsKey(statsId), deal.id], ["HLEN", dealsKey(statsId)]]);
@@ -381,10 +392,36 @@ export async function writeDeal(statsId: string, deal: Deal, room: DataStore): P
   } catch { throw new CrmDealWriteUnconfirmed(); }
 }
 
+/**
+ * A deal saved over the exact record read when the change was checked
+ * (MOVE_CRM_DEAL): one changed or removed since is never written over, and
+ * CrmDealConflict says so. Its room is taken first, and set back to what is
+ * saved when nothing was written.
+ */
+async function replaceDeal(statsId: string, deal: Deal, room: DataStore, expected: string): Promise<boolean> {
+  await needData(room, [{ slot: dealSlot(deal.id), bytes: dealBytes(deal), set: true }]);
+  let saved: unknown;
+  try {
+    saved = await redisPipeline([["EVAL", MOVE_CRM_DEAL, 1, dealsKey(statsId), deal.id, expected, JSON.stringify(deal)]]);
+  } catch { throw new CrmDealWriteUnconfirmed(); }
+  if (!Array.isArray(saved) || saved.length !== 1 || (saved[0] !== 1 && saved[0] !== 0 && saved[0] !== -1)) throw new CrmDealWriteUnconfirmed();
+  if (saved[0] === 1) return true;
+  // Nothing was written: the room is what the record now saved weighs.
+  const [now] = await redisPipeline([["HGET", dealsKey(statsId), deal.id]]).catch(() => [null]);
+  await giveData(room, [{ slot: dealSlot(deal.id), bytes: typeof now === "string" ? dataBytes([deal.id, now], 1) : 0, set: true }]);
+  throw new CrmDealConflict();
+}
+
 export async function readDeal(statsId: string, id: string, stages: readonly Stage[]): Promise<Deal | null> {
+  return (await readDealRecord(statsId, id, stages))?.deal ?? null;
+}
+
+/** A deal and its record exactly as saved, so a change checked against it is written only over that record (writeDeal `expected`). */
+export async function readDealRecord(statsId: string, id: string, stages: readonly Stage[]): Promise<{ deal: Deal; raw: string } | null> {
   if (!DEAL_ID.test(id)) return null;
   const [raw] = await redisPipeline([["HGET", dealsKey(statsId), id]]);
-  return parseDeal(json(raw), stages);
+  const deal = parseDeal(json(raw), stages);
+  return deal && typeof raw === "string" ? { deal, raw } : null;
 }
 
 export async function dropDeal(statsId: string, id: string, room: DataStore): Promise<boolean> {

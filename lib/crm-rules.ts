@@ -362,14 +362,20 @@ export function parsePipeline(raw: unknown): Pipeline | null {
   return { id, name, stages };
 }
 
-/** A store's pipelines as stored or sent: each valid, at most MAX_PIPELINES, no id twice, no stage id in two. Null when any is not. */
-export function parsePipelines(raw: unknown): Pipeline[] | null {
+/**
+ * A store's pipelines as stored or sent: each valid, at most MAX_PIPELINES,
+ * no id twice, no stage id in two, no name twice. Null when any is not.
+ * `sameNames` reads a record as stored, where two pipelines may share a
+ * name: a teammate who cannot see a pipeline may give theirs the same name
+ * (changePipeline), so a hidden pipeline's name is never told by a refusal.
+ */
+export function parsePipelines(raw: unknown, sameNames = false): Pipeline[] | null {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_PIPELINES) return null;
   const out: Pipeline[] = [];
   const stageIds = new Set<string>();
   for (const entry of raw) {
     const pipeline = parsePipeline(entry);
-    if (!pipeline || out.some((p) => p.id === pipeline.id || p.name.toLowerCase() === pipeline.name.toLowerCase())) return null;
+    if (!pipeline || out.some((p) => p.id === pipeline.id || (!sameNames && p.name.toLowerCase() === pipeline.name.toLowerCase()))) return null;
     for (const stage of pipeline.stages) {
       if (stageIds.has(stage.id)) return null;
       stageIds.add(stage.id);
@@ -450,7 +456,10 @@ export type PipelineChange = { ok: true; pipelines: Pipeline[]; moves: Record<st
  * deals go to; a stage that goes with deals in it and no such choice is
  * refused ("moves"), so a deal is never deleted or moved where the creator
  * did not say; for a pipeline removed, `moves` may be one stage for all of
- * its deals. `counts` is how many deals each stage holds now.
+ * its deals. `counts` is how many deals each stage holds now. The name saved
+ * must differ from every other pipeline's that the saver sees (`sees`, 639
+ * [GL7](7)); one they may not see never refuses it, so a refusal never tells
+ * them a hidden pipeline's name.
  */
 export function changePipeline(
   current: readonly Pipeline[],
@@ -458,8 +467,10 @@ export function changePipeline(
   moves: unknown,
   counts: ReadonlyMap<string, number>,
   limit: number,
+  sees: (pipelineId: string) => boolean = () => true,
 ): PipelineChange {
   let next: Pipeline[];
+  let saved: Pipeline | null = null;
   if (change.remove !== undefined) {
     if (!current.some((p) => p.id === change.remove)) return { ok: false, error: "unknown" };
     if (current.length < 2) return { ok: false, error: "pipeline_last" };
@@ -471,9 +482,12 @@ export function changePipeline(
     // A new pipeline counts against the plan's number; an existing one may always be edited.
     if (at < 0 && current.length >= Math.min(limit, MAX_PIPELINES)) return { ok: false, error: "pipeline_limit" };
     next = at < 0 ? [...current, pipeline] : current.map((p, i) => (i === at ? pipeline : p));
+    saved = pipeline;
   }
-  const checked = parsePipelines(next);
+  const checked = parsePipelines(next, true);
   if (!checked) return { ok: false, error: "pipelines" };
+  const named = saved;
+  if (named && checked.some((p) => p.id !== named.id && sees(p.id) && p.name.toLowerCase() === named.name.toLowerCase())) return { ok: false, error: "pipelines" };
   const kept = new Set(allStages(checked).map((s) => s.id));
   // One stage for every deal that has to move (a pipeline removed), or a stage for each stage removed.
   const asked = moves && typeof moves === "object" && !Array.isArray(moves) ? (moves as Record<string, unknown>) : {};

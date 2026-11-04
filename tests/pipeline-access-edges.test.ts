@@ -147,6 +147,62 @@ async function main(): Promise<void> {
   const existingAt = formCode.indexOf('state: "existing", deal: existing');
   is("is shown only to someone who may see its pipeline", existingAt > 0 && formCode.lastIndexOf('accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) === "none"', existingAt) > 0, true);
 
+  part("Round 4: a hidden pipeline's name is never told by a refusal");
+  // Sam: no access to Coaching; Workshops as kept from above.
+  await writePipelineAccess(statsId, "sam@example.com", { coach1: "none" }, store);
+  const third = (id: string, name: string, p: string) => ({ id, name, stages: [{ id: `${p}new1`, name: "New", kind: "open" }, { id: `${p}won1`, name: "Won", kind: "won" }, { id: `${p}lst1`, name: "Lost", kind: "lost" }] });
+  const sameAsHidden = await crm("sam@example.com", { action: "pipeline", pipeline: third("sams01", "coaching", "sa"), moves: {} });
+  const unused = await crm("sam@example.com", { action: "pipeline", pipeline: third("sams02", "Brand deals", "sb"), moves: {} });
+  is("a name a hidden pipeline has answers as a name nobody has", [sameAsHidden.status, unused.status, sameAsHidden.body.pipelines?.map((p) => p.id).includes("coach1")], [200, 200, false]);
+  is("both are kept, told apart by their ids, and the store still reads", (await readPipelines(statsId)).filter((p) => p.name.toLowerCase() === "coaching").map((p) => p.id), ["coach1", "sams01"]);
+  is("a name a pipeline they see has is still refused", (await crm("sam@example.com", { action: "pipeline", pipeline: { ...third("sams02", "WORKSHOPS", "sb") }, moves: {} })).body.error, "pipelines");
+  is("and for the owner, who sees every pipeline, a name twice is still refused", (await crm(owner, { action: "pipeline", pipeline: { ...coaching, name: "Brand Deals" }, moves: {} })).body.error, "pipelines");
+
+  part("Round 4: an id that is not there answers as one they may not change");
+  is("a deal, and a pipeline to remove, that are not there", [(await crm("sam@example.com", { action: "deal", deal: { id: "zzzzzzzzzz", title: "T", email: "", cents: 1, stage: "wnew01", note: "" } })).status, (await crm("sam@example.com", { action: "unpipeline", id: "zzzz99", moveTo: "" })).status, (await crm("sam@example.com", { action: "unpipeline", id: "coach1", moveTo: "" })).status], [403, 403, 403]);
+  is("the owner is still told it is gone", (await crm(owner, { action: "deal", deal: { id: "zzzzzzzzzz", title: "T", email: "", cents: 1, stage: "wnew01", note: "" } })).status, 404);
+
+  part("Round 4: a deal changed between the check and the write is never written over");
+  await writePipelineAccess(statsId, "sam@example.com", { coach1: "none" }, store);
+  const mine = (await crm(owner, { action: "deal", deal: { title: "Mine", email: "", cents: 1, stage: "wnew01", note: "" } })).body.deal!.id;
+  const moved = JSON.stringify({ ...JSON.parse(String((await redisPipeline([["HGET", dealsKey, mine]]))[0])), stage: "cnew01" });
+  const real = redis.pipeline.bind(redis);
+  let raced = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The owner moves the deal into Coaching, which Sam may not see, just before Sam's change is written.
+    if (!raced && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:crm-deal-") && c[4] === mine)) {
+      raced = true;
+      await real([["HSET", dealsKey, mine, moved]]);
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const late = await crm("sam@example.com", { action: "deal", deal: { id: mine, title: "Renamed by Sam", email: "", cents: 1, stage: "wnew01", note: "" } });
+  redis.pipeline = real;
+  is("refused as changed meanwhile, and the owner's move stays", [late.status, late.body.error, (await redisPipeline([["HGET", dealsKey, mine]]))[0] === moved], [409, "deal_conflict", true]);
+  is("a change with nothing in between still saves", (await crm(owner, { action: "deal", deal: { id: mine, title: "Again", email: "", cents: 1, stage: "cnew01", note: "" } })).status, 200);
+
+  part("Round 4: a pipelines record that cannot be read changes no access");
+  await writePipelineAccess(statsId, "sam@example.com", { coach1: "none", wkshp1: "view" }, store);
+  const pipesKey = `nl:crm:pipes:${statsId}`;
+  const goodPipes = (await redisPipeline([["GET", pipesKey]]))[0];
+  await redisPipeline([["SET", pipesKey, "{broken"]]);
+  const unread = await pacc({ email: "sam@example.com", choices: { sales0: "view" } });
+  await redisPipeline([["SET", pipesKey, String(goodPipes)]]);
+  is("refused, and every restriction kept", [unread.status, unread.body.error, await readPipelineAccess(statsId, "sam@example.com")], [503, "unavailable", { coach1: "none", wkshp1: "view" }]);
+  const pageCode = readFileSync("app/studio/team/page.tsx", "utf8");
+  is("the team page reads the pipelines the same way", pageCode.includes("readPipelinesExact(store.statsId).catch(() => null)"), true);
+
+  part("Round 4: a copied record's room is taken before it is written");
+  await redisPipeline([["HSET", `nl:crm:pacc:${statsId}`, "una@example.com", JSON.stringify({ coach1: "none" })], ["HDEL", `nl:crm:pacc:${statsId}`, "uli@example.com"]]);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:"))) throw new Error("data room unavailable");
+    return real(commands);
+  }) as typeof redis.pipeline;
+  let refused = false;
+  await copyPipelineAccess(store, "una@example.com", "uli@example.com").catch(() => { refused = true; });
+  redis.pipeline = real;
+  is("a room that cannot be counted refuses the copy, and nothing is written uncounted", [refused, (await redisPipeline([["HGET", `nl:crm:pacc:${statsId}`, "uli@example.com"]]))[0]], [true, null]);
+
   done();
 }
 

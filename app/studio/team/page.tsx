@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { PipelineAccessEditor } from "@/components/pipeline-access-editor";
-import { readPipelines } from "@/lib/crm";
+import { readPipelinesExact } from "@/lib/crm";
 import { readAllPipelineAccess } from "@/lib/pipeline-access";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -44,7 +44,8 @@ export default async function StudioTeamPage({
   const [team, log, pipelines, access] = await Promise.all([
     readTeam(store.sid),
     readLog(store.sid),
-    readPipelines(store.statsId).catch(() => null),
+    // A pipelines record that cannot be read shows the notice, never the default pipeline in its place.
+    readPipelinesExact(store.statsId).catch(() => null),
     readAllPipelineAccess(store.statsId).catch(() => null),
   ]);
   // Only a role that opens Deals and is not Admin can be restricted (639 [GL7](7)): the owner and Admins always see and change every pipeline, and a role without Deals (Editor) sees none.

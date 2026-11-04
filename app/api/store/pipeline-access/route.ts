@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { readPipelines } from "@/lib/crm";
+import { CrmSchemaReadUnavailable, readPipelinesExact } from "@/lib/crm";
 import { normaliseEmail } from "@/lib/auth";
 import { CRM_ID } from "@/lib/crm-rules";
 import { PipelineAccessBusyError, PipelineAccessChangedError, setPipelineChoices } from "@/lib/pipeline-access";
@@ -58,7 +58,9 @@ export async function POST(request: NextRequest) {
     // Read the teammate and write their access with the team's lock held, so a sign-in moving at the same
     // moment (moveMemberships, under the same lock) never leaves the new address without the change.
     const done = await withTeamLocked(store.sid, async () => {
-      const [team, pipelines] = await Promise.all([readTeam(store.sid), readPipelines(statsId)]);
+      // The pipelines exactly as saved: a record that cannot be read refuses (503), never the default pipeline in
+      // its place, which would drop the restrictions on every other one.
+      const [team, pipelines] = await Promise.all([readTeam(store.sid), readPipelinesExact(statsId)]);
       const member = team.members.find((m) => m.email === email);
       if (!member) {
         if (team.invites.some((i) => i.email === email)) return { ok: false as const, refused: refusal("invited", "This person has not joined your team yet. You can choose their access once they accept the invitation.") };
@@ -90,6 +92,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof LockBusyError) return refusal("busy", "Someone else is changing your team right now. Try again in a moment.", 409);
     if (error instanceof PipelineAccessBusyError) return refusal("busy", error.message, 409);
     if (error instanceof PipelineAccessChangedError) return refusal("changed", error.message, 409);
+    if (error instanceof CrmSchemaReadUnavailable) return refusal("unavailable", "Your pipelines could not be read just now, so nothing was changed. Try again in a moment.", 503);
     console.error("saving pipeline access failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

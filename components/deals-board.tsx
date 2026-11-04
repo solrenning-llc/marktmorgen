@@ -53,6 +53,7 @@ const MESSAGES: Record<string, string> = {
   pipeline_last: "A store keeps at least one pipeline.",
   moves: "Choose where the deals of each stage you remove go.",
   crm_conflict: "Somebody else changed your pipelines a moment ago, so nothing was saved. Reload the page and make your change again.",
+  deal_conflict: "Somebody else changed this deal a moment ago, so nothing was saved. Reload the page and make your change again.",
   // A refused change by access (639 [GL7](7)): nothing was saved, and the board stays usable.
   pipeline_access: PIPELINE_ACCESS_REFUSAL,
   server_error: "The change could not be confirmed. Check the saved CRM data before trying again.",

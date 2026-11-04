@@ -1,3 +1,4 @@
+import { MAX_STEP_NEXT_ACTION, MAX_STEP_NEXT_DAYS } from "@/lib/flow-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Flow } from "@/lib/flows";
 import { FLOW_TRIGGERS } from "@/lib/flow-rules";
@@ -17,7 +18,8 @@ function action(value: unknown): boolean {
   if (value.do === "deal") return strings(value, ["stage", "title"]);
   if (value.do === "note") return strings(value, ["text"]);
   if (value.do === "assign") return strings(value, ["assignee"]);
-  return value.do === "webhook" || value.do === "notify" || value.do === "wait";
+  if (value.do === "next") return strings(value, ["text"]) && (value.text as string).length <= MAX_STEP_NEXT_ACTION && Number.isSafeInteger(value.days) && (value.days as number) >= 0 && (value.days as number) <= MAX_STEP_NEXT_DAYS;
+  return value.do === "webhook" || value.do === "notify" || value.do === "wait" || value.do === "rotate";
 }
 /** Structural validation only: business/reference problems remain editable diagnostics. */
 export function parseFlowList(raw: unknown): Flow[] | null {

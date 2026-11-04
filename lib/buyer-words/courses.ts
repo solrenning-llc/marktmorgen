@@ -23,6 +23,8 @@ const en = {
   // ---- The tab's title ----------------------------------------------------------
   metaCourse: "Course — Marktmorgen",
   metaLesson: "Lesson — Marktmorgen",
+  /** The name a screen reader gives a block of code in a lesson (components/lesson-text.tsx). */
+  codeBlock: "Code",
   metaPodcast: "Your private podcast — Marktmorgen",
   metaCertNotFound: "Certificate not found — Marktmorgen",
   metaCert: (name: string, title: string) => `${name}: ${title} — certificate of completion`,
@@ -192,6 +194,15 @@ const en = {
   checkAgain: "Check my answers again",
   check: "Check my answers",
   triesLeft: (left: number) => `${left} ${plural(left, "try", "tries")} left`,
+  /** A stretch of time in minutes, said in hours when it is whole hours. */
+  span: (minutes: number) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "hour", "hours")}` : `${minutes} ${plural(minutes, "minute", "minutes")}`,
+  /** The creator's view of a question bank (630 [HN6](7)); `span` is said by `span`. */
+  bankDraw: (draw: number, total: number) => `Each try shows ${draw} of these ${total} questions, picked for each student.`,
+  bankShuffle: "Each try shows its questions in an order of its own.",
+  bankWait: (span: string) => `Students wait ${span} between tries.`,
+  waitAgain: (span: string) => `You can try again in ${span}. Come back to this page then.`,
+  staleTry: "Your questions changed since you opened this page, so nothing was checked and no try was used. Here are your questions now.",
 
   // ---- A lesson's comments ------------------------------------------------------------
   commentNotices: {
@@ -241,6 +252,10 @@ const en = {
   sampleTitle: "A sample",
   sampleBody:
     "This is what a student who finishes the course gets, with the name they type. Theirs has an address of its own that anyone can open to check it.",
+  /** A certificate that stays valid for a time (639 [GL7](32)). */
+  validUntil: (date: string) => `Valid until ${date}.`,
+  expiredOn: (date: string) => `This certificate expired on ${date}.`,
+  expiredBody: (creator: string) => `It certified the course until that day. To renew it, ask ${creator}.`,
   withdrawnOn: (date: string) => `This certificate was withdrawn on ${date}.`,
   withdrawnBody: (creator: string) =>
     `${creator} withdrew it, so it no longer certifies anything. If it is yours, the course page lets you issue it again.`,
@@ -324,6 +339,7 @@ export type CoursesWords = typeof en;
 const es: CoursesWords = {
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Lección — Marktmorgen",
+  codeBlock: "Código",
   metaPodcast: "Tu pódcast privado — Marktmorgen",
   metaCertNotFound: "Certificado no encontrado — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — certificado de finalización`,
@@ -481,6 +497,13 @@ const es: CoursesWords = {
   checkAgain: "Volver a comprobar mis respuestas",
   check: "Comprobar mis respuestas",
   triesLeft: (left) => `${plural(left, "Queda", "Quedan")} ${left} ${plural(left, "intento", "intentos")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "hora", "horas")}` : `${minutes} ${plural(minutes, "minuto", "minutos")}`,
+  bankDraw: (draw, total) => `Cada intento muestra ${draw} de estas ${total} preguntas, elegidas para cada estudiante.`,
+  bankShuffle: "Cada intento muestra sus preguntas en un orden propio.",
+  bankWait: (span) => `Los estudiantes esperan ${span} entre intentos.`,
+  waitAgain: (span) => `Puedes volver a intentarlo dentro de ${span}. Vuelve a esta página entonces.`,
+  staleTry: "Tus preguntas cambiaron desde que abriste esta página, así que no se comprobó nada y no se usó ningún intento. Estas son tus preguntas ahora.",
 
   commentNotices: {
     posted: "Publicado.",
@@ -527,6 +550,9 @@ const es: CoursesWords = {
   sampleTitle: "Un ejemplo",
   sampleBody:
     "Esto es lo que recibe un estudiante que termina el curso, con el nombre que escriba. El suyo tiene su propia dirección, que cualquiera puede abrir para comprobarlo.",
+  validUntil: (date) => `Válido hasta el ${date}.`,
+  expiredOn: (date) => `Este certificado venció el ${date}.`,
+  expiredBody: (creator) => `Certificó el curso hasta ese día. Para renovarlo, pregunta a ${creator}.`,
   withdrawnOn: (date) => `Este certificado se retiró el ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} lo retiró, así que ya no certifica nada. Si es tuyo, desde la página del curso puedes volver a emitirlo.`,
@@ -605,6 +631,7 @@ const frPlural = (n: number, one: string, many: string) => (n < 2 ? one : many);
 const fr: CoursesWords = {
   metaCourse: "Formation — Marktmorgen",
   metaLesson: "Leçon — Marktmorgen",
+  codeBlock: "Code",
   metaPodcast: "Votre podcast privé — Marktmorgen",
   metaCertNotFound: "Certificat introuvable — Marktmorgen",
   metaCert: (name, title) => `${name}${S}: ${title} — certificat de fin de formation`,
@@ -763,6 +790,13 @@ const fr: CoursesWords = {
   checkAgain: "Vérifier à nouveau mes réponses",
   check: "Vérifier mes réponses",
   triesLeft: (left) => `${left}${S}${frPlural(left, "tentative restante", "tentatives restantes")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60}${S}${frPlural(minutes / 60, "heure", "heures")}` : `${minutes}${S}${frPlural(minutes, "minute", "minutes")}`,
+  bankDraw: (draw, total) => `Chaque tentative montre ${draw} de ces ${total}${S}questions, choisies pour chaque participant.`,
+  bankShuffle: "Chaque tentative montre ses questions dans un ordre qui lui est propre.",
+  bankWait: (span) => `Les participants attendent ${span} entre deux tentatives.`,
+  waitAgain: (span) => `Vous pourrez réessayer dans ${span}. Revenez sur cette page à ce moment-là.`,
+  staleTry: `Vos questions ont changé depuis l'ouverture de cette page${S}: rien n'a été vérifié et aucune tentative n'a été utilisée. Voici vos questions maintenant.`,
 
   commentNotices: {
     posted: "Publié.",
@@ -808,6 +842,9 @@ const fr: CoursesWords = {
   sampleTitle: "Un exemple",
   sampleBody:
     "Voici ce que reçoit un participant qui termine la formation, avec le nom qu'il saisit. Le sien a sa propre adresse, que n'importe qui peut ouvrir pour le vérifier.",
+  validUntil: (date) => `Valable jusqu'au ${date}.`,
+  expiredOn: (date) => `Ce certificat a expiré le ${date}.`,
+  expiredBody: (creator) => `Il a certifié la formation jusqu'à ce jour. Pour le renouveler, adressez-vous à ${creator}.`,
   withdrawnOn: (date) => `Ce certificat a été retiré le ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'a retiré, il ne certifie donc plus rien. S'il est à vous, la page de la formation vous permet de le délivrer à nouveau.`,
@@ -880,6 +917,7 @@ const fr: CoursesWords = {
 const de: CoursesWords = {
   metaCourse: "Kurs — Marktmorgen",
   metaLesson: "Lektion — Marktmorgen",
+  codeBlock: "Code",
   metaPodcast: "Ihr privater Podcast — Marktmorgen",
   metaCertNotFound: "Zertifikat nicht gefunden — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — Abschlusszertifikat`,
@@ -1039,6 +1077,13 @@ const de: CoursesWords = {
   checkAgain: "Meine Antworten erneut prüfen",
   check: "Meine Antworten prüfen",
   triesLeft: (left) => `Noch ${left} ${plural(left, "Versuch", "Versuche")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "Stunde", "Stunden")}` : `${minutes} ${plural(minutes, "Minute", "Minuten")}`,
+  bankDraw: (draw, total) => `Jeder Versuch zeigt ${draw} dieser ${total} Fragen, für jede Person eigens ausgewählt.`,
+  bankShuffle: "Jeder Versuch zeigt seine Fragen in einer eigenen Reihenfolge.",
+  bankWait: (span) => `Zwischen zwei Versuchen warten Teilnehmende ${span}.`,
+  waitAgain: (span) => `Sie können es in ${span} erneut versuchen. Kommen Sie dann auf diese Seite zurück.`,
+  staleTry: "Ihre Fragen haben sich geändert, seit Sie diese Seite geöffnet haben. Deshalb wurde nichts geprüft und kein Versuch verbraucht. Hier sind Ihre Fragen jetzt.",
 
   commentNotices: {
     posted: "Veröffentlicht.",
@@ -1085,6 +1130,9 @@ const de: CoursesWords = {
   sampleTitle: "Ein Muster",
   sampleBody:
     "So sieht das Zertifikat aus, das Teilnehmende erhalten, wenn sie den Kurs abschließen, mit dem Namen, den sie eingeben. Ihres hat eine eigene Adresse, die jeder öffnen kann, um es zu prüfen.",
+  validUntil: (date) => `Gültig bis ${date}.`,
+  expiredOn: (date) => `Dieses Zertifikat ist am ${date} abgelaufen.`,
+  expiredBody: (creator) => `Es hat den Kurs bis zu diesem Tag bestätigt. Für eine Erneuerung wende dich an ${creator}.`,
   withdrawnOn: (date) => `Dieses Zertifikat wurde am ${date} zurückgezogen.`,
   withdrawnBody: (creator) =>
     `${creator} hat es zurückgezogen, es bescheinigt also nichts mehr. Wenn es Ihres ist, können Sie es auf der Kursseite erneut ausstellen.`,
@@ -1160,6 +1208,7 @@ const de: CoursesWords = {
 const it: CoursesWords = {
   metaCourse: "Corso — Marktmorgen",
   metaLesson: "Lezione — Marktmorgen",
+  codeBlock: "Codice",
   metaPodcast: "Il tuo podcast privato — Marktmorgen",
   metaCertNotFound: "Attestato non trovato — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — attestato di completamento`,
@@ -1317,6 +1366,13 @@ const it: CoursesWords = {
   checkAgain: "Controlla di nuovo le mie risposte",
   check: "Controlla le mie risposte",
   triesLeft: (left) => `${plural(left, "Resta", "Restano")} ${left} ${plural(left, "tentativo", "tentativi")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "ora", "ore")}` : `${minutes} ${plural(minutes, "minuto", "minuti")}`,
+  bankDraw: (draw, total) => `Ogni tentativo mostra ${draw} di queste ${total} domande, scelte per ogni studente.`,
+  bankShuffle: "Ogni tentativo mostra le sue domande in un ordine tutto suo.",
+  bankWait: (span) => `Gli studenti aspettano ${span} tra un tentativo e l'altro.`,
+  waitAgain: (span) => `Puoi riprovare tra ${span}. Torna su questa pagina allora.`,
+  staleTry: "Le tue domande sono cambiate da quando hai aperto questa pagina, quindi non è stato controllato nulla e non hai usato nessun tentativo. Ecco le tue domande adesso.",
 
   commentNotices: {
     posted: "Pubblicato.",
@@ -1363,6 +1419,9 @@ const it: CoursesWords = {
   sampleTitle: "Un esempio",
   sampleBody:
     "Questo è ciò che riceve uno studente che completa il corso, con il nome che scrive. Il suo ha un indirizzo proprio che chiunque può aprire per verificarlo.",
+  validUntil: (date) => `Valido fino al ${date}.`,
+  expiredOn: (date) => `Questo attestato è scaduto il ${date}.`,
+  expiredBody: (creator) => `Ha attestato il corso fino a quel giorno. Per rinnovarlo, chiedi a ${creator}.`,
   withdrawnOn: (date) => `Questo attestato è stato revocato il ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'ha revocato, quindi non attesta più nulla. Se è tuo, dalla pagina del corso puoi farlo rilasciare di nuovo.`,
@@ -1438,6 +1497,7 @@ const it: CoursesWords = {
 const nl: CoursesWords = {
   metaCourse: "Cursus — Marktmorgen",
   metaLesson: "Les — Marktmorgen",
+  codeBlock: "Code",
   metaPodcast: "Je privépodcast — Marktmorgen",
   metaCertNotFound: "Certificaat niet gevonden — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — certificaat van voltooiing`,
@@ -1596,6 +1656,13 @@ const nl: CoursesWords = {
   checkAgain: "Controleer mijn antwoorden opnieuw",
   check: "Controleer mijn antwoorden",
   triesLeft: (left) => `Nog ${left} ${plural(left, "poging", "pogingen")} over`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "uur", "uur")}` : `${minutes} ${plural(minutes, "minuut", "minuten")}`,
+  bankDraw: (draw, total) => `Elke poging toont ${draw} van deze ${total} vragen, voor elke cursist apart gekozen.`,
+  bankShuffle: "Elke poging toont de vragen in een eigen volgorde.",
+  bankWait: (span) => `Cursisten wachten ${span} tussen twee pogingen.`,
+  waitAgain: (span) => `Je kunt het over ${span} opnieuw proberen. Kom dan terug naar deze pagina.`,
+  staleTry: "Je vragen zijn veranderd sinds je deze pagina opende, dus er is niets gecontroleerd en geen poging gebruikt. Dit zijn nu je vragen.",
 
   commentNotices: {
     posted: "Geplaatst.",
@@ -1642,6 +1709,9 @@ const nl: CoursesWords = {
   sampleTitle: "Een voorbeeld",
   sampleBody:
     "Dit krijgt een cursist die de cursus afrondt, met de naam die hij of zij invult. Dat certificaat heeft een eigen adres dat iedereen kan openen om het te controleren.",
+  validUntil: (date) => `Geldig tot ${date}.`,
+  expiredOn: (date) => `Dit certificaat is verlopen op ${date}.`,
+  expiredBody: (creator) => `Het certificeerde de cursus tot die dag. Vraag ${creator} om het te vernieuwen.`,
   withdrawnOn: (date) => `Dit certificaat is ingetrokken op ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} heeft het ingetrokken, dus het bevestigt niets meer. Is het van jou, dan kun je het via de cursuspagina opnieuw laten uitreiken.`,
@@ -1717,6 +1787,7 @@ const nl: CoursesWords = {
 const pt: CoursesWords = {
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Aula — Marktmorgen",
+  codeBlock: "Código",
   metaPodcast: "O seu podcast privado — Marktmorgen",
   metaCertNotFound: "Certificado não encontrado — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — certificado de conclusão`,
@@ -1875,6 +1946,13 @@ const pt: CoursesWords = {
   checkAgain: "Verificar de novo as minhas respostas",
   check: "Verificar as minhas respostas",
   triesLeft: (left) => `${plural(left, "Resta", "Restam")} ${left} ${plural(left, "tentativa", "tentativas")}`,
+  span: (minutes) =>
+    minutes % 60 === 0 ? `${minutes / 60} ${plural(minutes / 60, "hora", "horas")}` : `${minutes} ${plural(minutes, "minuto", "minutos")}`,
+  bankDraw: (draw, total) => `Cada tentativa mostra ${draw} destas ${total} perguntas, escolhidas para cada aluno.`,
+  bankShuffle: "Cada tentativa mostra as perguntas numa ordem própria.",
+  bankWait: (span) => `Os alunos esperam ${span} entre tentativas.`,
+  waitAgain: (span) => `Pode tentar novamente dentro de ${span}. Volte a esta página nessa altura.`,
+  staleTry: "As suas perguntas mudaram desde que abriu esta página, por isso nada foi verificado e nenhuma tentativa foi usada. Estas são agora as suas perguntas.",
 
   commentNotices: {
     posted: "Publicado.",
@@ -1921,6 +1999,9 @@ const pt: CoursesWords = {
   sampleTitle: "Um exemplo",
   sampleBody:
     "É isto que recebe um aluno que conclui o curso, com o nome que introduzir. O dele tem um endereço próprio que qualquer pessoa pode abrir para o verificar.",
+  validUntil: (date) => `Válido até ${date}.`,
+  expiredOn: (date) => `Este certificado caducou a ${date}.`,
+  expiredBody: (creator) => `Certificou o curso até esse dia. Para o renovar, contacte ${creator}.`,
   withdrawnOn: (date) => `Este certificado foi retirado a ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} retirou-o, por isso já não certifica nada. Se for seu, pode voltar a emiti-lo na página do curso.`,

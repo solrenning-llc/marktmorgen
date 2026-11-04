@@ -336,6 +336,14 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: true, course: result.course });
       }
 
+      // How long certificates issued from now on stay valid (639 [GL7](32)): 1 to 120 months, or for good.
+      if (action === "cert-months") {
+        const result = editCourse(course, { op: "certificate-months", months: body.months ?? null });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
       if (action === "withdraw") {
         const certificate = text(body.certificate, 20);
         if (!CERT_ID_PATTERN.test(certificate)) return Response.json({ ok: false, error: "unknown" }, { status: 400 });

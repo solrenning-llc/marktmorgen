@@ -23,6 +23,8 @@ const en = {
   // ---- The tab's title ----------------------------------------------------------
   metaCourse: "Course — Marktmorgen",
   metaLesson: "Lesson — Marktmorgen",
+  /** The name a screen reader gives a block of code in a lesson (components/lesson-text.tsx). */
+  codeBlock: "Code",
   metaPodcast: "Your private podcast — Marktmorgen",
   metaCertNotFound: "Certificate not found — Marktmorgen",
   metaCert: (name: string, title: string) => `${name}: ${title} — certificate of completion`,
@@ -324,6 +326,7 @@ export type CoursesWords = typeof en;
 const es: CoursesWords = {
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Lección — Marktmorgen",
+  codeBlock: "Código",
   metaPodcast: "Tu pódcast privado — Marktmorgen",
   metaCertNotFound: "Certificado no encontrado — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — certificado de finalización`,
@@ -605,6 +608,7 @@ const frPlural = (n: number, one: string, many: string) => (n < 2 ? one : many);
 const fr: CoursesWords = {
   metaCourse: "Formation — Marktmorgen",
   metaLesson: "Leçon — Marktmorgen",
+  codeBlock: "Code",
   metaPodcast: "Votre podcast privé — Marktmorgen",
   metaCertNotFound: "Certificat introuvable — Marktmorgen",
   metaCert: (name, title) => `${name}${S}: ${title} — certificat de fin de formation`,
@@ -880,6 +884,7 @@ const fr: CoursesWords = {
 const de: CoursesWords = {
   metaCourse: "Kurs — Marktmorgen",
   metaLesson: "Lektion — Marktmorgen",
+  codeBlock: "Code",
   metaPodcast: "Ihr privater Podcast — Marktmorgen",
   metaCertNotFound: "Zertifikat nicht gefunden — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — Abschlusszertifikat`,
@@ -1160,6 +1165,7 @@ const de: CoursesWords = {
 const it: CoursesWords = {
   metaCourse: "Corso — Marktmorgen",
   metaLesson: "Lezione — Marktmorgen",
+  codeBlock: "Codice",
   metaPodcast: "Il tuo podcast privato — Marktmorgen",
   metaCertNotFound: "Attestato non trovato — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — attestato di completamento`,
@@ -1438,6 +1444,7 @@ const it: CoursesWords = {
 const nl: CoursesWords = {
   metaCourse: "Cursus — Marktmorgen",
   metaLesson: "Les — Marktmorgen",
+  codeBlock: "Code",
   metaPodcast: "Je privépodcast — Marktmorgen",
   metaCertNotFound: "Certificaat niet gevonden — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — certificaat van voltooiing`,
@@ -1717,6 +1724,7 @@ const nl: CoursesWords = {
 const pt: CoursesWords = {
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Aula — Marktmorgen",
+  codeBlock: "Código",
   metaPodcast: "O seu podcast privado — Marktmorgen",
   metaCertNotFound: "Certificado não encontrado — Marktmorgen",
   metaCert: (name, title) => `${name}: ${title} — certificado de conclusão`,

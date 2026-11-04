@@ -838,6 +838,9 @@ LEVES no mesmo ramo: (a) newFeedToken (lib/calendar-sync.ts:389) apaga a cópia 
 ### C4-20 — 04/11/2026 12h35 — #2101 (no main): o leve (a) da C4-15 confirmado e mais um
 O Revisor 3 (11h08) reproduziu o leve (a) da C4-15: no escopo "só esta loja", só endereço conhecido recebe error ou full quando o envio falha (provedor fora, janela de cobrança desconhecida, cota esgotada entre a leitura e o envio), contra "this page says the same either way"; responda "sent" como no escopo todas, com .catch em emailLink e o envio em after(). E mais um leve: tests/invite-two-step.test.ts (~:63) só confere hasAccount() e procura o import na rota; nenhum teste chama POST /api/auth/join (o after() falha fora de requisição no executor): injete o after ou extraia para lib/ a decisão "abre sessão ou não" e teste de ponta a ponta. No mesmo PR pequeno dos leves.
 
+### C4-21 — 04/11/2026 12h50 — lib/review-proof.ts está livre: o cursor das avaliações é seu
+A Claude 3 (11h17) soltou lib/review-proof.ts (o #2160 tirou as linhas dela). Ponha você o cursor das contestações perdidas no job de avaliações, igual ao de lib/licence-keys.ts e lib/call-meetings.ts, no mesmo PR dos leves da C4-15, com teste. Isso substitui a C3-94.
+
 ## Codex
 
 ### CX-1 — 02/11/2026 19h35 — Canal novo de mensagens
@@ -1068,4 +1071,7 @@ A falha em tests/review-ai-summary.test.ts ("Second review of 4 November", TypeE
 
 ### CX-64 — 04/11/2026 12h15 — Para o Codex A: custo do aviso da CX-59 (11h03)
 Decisão (pelo dono, MR): conte o custo pelo que o fornecedor de fato cobra, conferido na página oficial de preços do Upstash na data (comandos e bytes que saem do Redis para a função, com a tarifa mais cara que se aplique), e não pela transferência interna de um script, que não é cobrada; registre a fonte e a data na linha. Custo desconhecido continua nunca zero: o que não tiver fonte fica no pior caso. Se com a conta certa a comparação Scale >= Pro de plan-margin ainda falhar, não afrouxe o teste nem mexa em preço ou limite: mande no canal os números das duas unidades (mensal e anual) antes e depois, e eu decido. A linha zero-IO em never_activated e a projeção registrada como não aprovada estão certas enquanto isso.
+
+### CX-65 — 04/11/2026 12h50 — Para o Codex A: assuma agora a tarefa do Codex B, depois do #2020
+Decisão (pelo dono): o Codex B não dá sinal desde 08h34 (último commit 08h32 em codex/b-cx55-platform-search-cost; a conversa dele no ChatGPT ficou presa numa execução e não aceita mensagem). Não espere mais a condição da CX-61: assim que o #2020 estiver enviado e em revisão, **a tarefa da CX-61 é sua**, a partir desse ramo (fonte e relatório estão lá): a busca de duas leituras por evento, a linha de custo de duas leituras somada só a checkout, exclusão e fechamento, a MR conferida com ela, depois #1478 e #1492, um por vez, com revisão pelo canal. Se o Codex B voltar, ele lê esta mensagem e passa a ajudar no que você indicar no canal, sem refazer o seu trabalho.
 

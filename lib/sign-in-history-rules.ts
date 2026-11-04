@@ -39,7 +39,7 @@
  * What the unit that writes and shows it must do:
  *   - Key: one sorted set per person, named from a hash of the NORMALISED
  *     sign-in email, exactly as the remembered browsers are
- *     (lib/auth.ts devicesKey: `nl:auth:devices:` + sha256Hex of a prefix and
+ *     (lib/auth.ts devicesKey: the devices prefix + sha256Hex of a prefix and
  *     normaliseEmail(email), cut to 40 hex), with its own prefix and its own
  *     hash input; never the email in clear in a key or a member.
  *   - Read the place headers only on the hosting that sets them
@@ -85,7 +85,7 @@
  *     keeps, which applies the same age and count limits again, so nothing
  *     older than SIGN_IN_DAYS is shown even if a write was missed.
  *   - Delete it with the account, where the remembered browsers
- *     (nl:auth:devices:) are; put it in the creator's own export; say it in
+ *     (lib/auth.ts devicesKey) are; put it in the creator's own export; say it in
  *     the privacy policy (lib/person-data.ts).
  *   - Not show it in a locked session (lib/two-step.ts LOCKED_NEEDS), which
  *     may be somebody who got into the sign-in or the recovery inbox.
